@@ -1,18 +1,42 @@
 import type { Idea, Project, Settings, Ambition } from "@vibeforge/shared";
 import { extJson } from "./util.ts";
 
-/* ---------------- diversity engine ---------------- */
-const LENSES = ["developer tool", "productivity & workflow app", "data dashboard / analytics", "notes & knowledge base (PKM)",
-  "project & task planner", "creative / design tool", "writing & editing tool", "learning / study app", "budgeting & finance tool",
-  "diagramming / whiteboard", "code playground / sandbox", "media organizer", "scheduling / calendar tool", "form / survey builder",
-  "habit & health tracker", "research & reading tool", "music / audio workstation", "monitoring / status board", "CRM / contacts manager"];
-const AUDIENCES = ["indie developers", "writers & researchers", "designers", "data analysts", "students", "small teams",
-  "freelancers", "musicians", "traders & investors", "language learners", "tabletop game masters", "open-source maintainers",
-  "content creators", "teachers", "product managers", "scientists", "job seekers", "home cooks", "DJs", "podcasters"];
-const QUALITIES = ["keyboard-first and fast", "works fully offline with local data", "handles large datasets smoothly",
-  "dense, pro-grade UI", "opinionated — does one job extremely well", "imports/exports real file formats",
-  "powerful yet learnable in a minute", "delightful, polished interactions", "real-time feel from local state"];
-const pick = <T,>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
+/* ---------------- spark vocabulary ----------------
+ * Random real-world "worlds" and life-frictions used purely as ENTROPY to break
+ * the model's habit of collapsing onto the same handful of default ideas. These
+ * are deliberately NOT app categories — they seed a free-roaming brainstorm; they
+ * do not dictate the product. Used only on the offline (no web search) path. */
+const SPARKS = [
+  // unexpected hobbies / niches / trades
+  "beekeeping", "urban foraging", "home coffee roasting", "sourdough & fermentation",
+  "aquascaping", "model railways", "amateur (ham) radio", "vintage synth repair",
+  "competitive bouldering", "freediving", "tide pooling", "birdwatching",
+  "geocaching", "thrifting & reselling", "drone racing", "calligraphy & hand-lettering",
+  "bookbinding", "allotment & community gardening", "mushroom foraging", "astrophotography",
+  "vinyl record collecting", "tabletop wargaming", "long-distance thru-hiking", "sea kayaking",
+  "dog agility training", "backyard chickens", "home cheesemaking", "perfumery & scent blending",
+  "metal detecting", "amateur astronomy", "classic car restoration", "quilting & textile craft",
+  "competitive debate", "urban sketching", "rock & mineral collecting", "home brewing & kombucha",
+  "orienteering", "miniature painting", "open-mic stand-up comedy", "community theatre",
+  "genealogy & family history", "stamp & coin collecting", "wild swimming", "bushcraft & knife sharpening",
+  "street-food vending", "busking & street performance", "herbalism & apothecary", "vintage watch servicing",
+  "paragliding", "seed saving & heirloom plants", "competitive jigsaw puzzling", "sport lock-picking",
+  // real-life frictions, not hobbies
+  "renting & moving to a new city", "caring for an aging parent", "managing a chronic condition",
+  "freelance feast-or-famine cashflow", "co-parenting logistics", "planning a low-budget wedding",
+  "running a small Etsy/maker shop", "shared-house chores & bills", "job hunting after a layoff",
+  "settling an estate after a death", "training for a first marathon", "learning an instrument as an adult",
+];
+
+/** A few DISTINCT random real-world sparks — the entropy source for the offline path. */
+export function randomSparks(n: number): string[] {
+  const pool = [...SPARKS];
+  const out: string[] = [];
+  for (let i = 0; i < n && pool.length; i++) {
+    out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  return out;
+}
 
 const DEPTH_DESC: Record<string, string> = {
   S: "a sharp, single-purpose utility — one job done extremely well, ~1 main view. Still a real, polished app, just tightly scoped.",
@@ -22,8 +46,43 @@ const DEPTH_DESC: Record<string, string> = {
 
 export interface Prompt { system: string; user: string }
 
-/* ---------------- ideation ---------------- */
-export function buildIdeationPrompt(settings: Settings, avoidTitles: string[]): Prompt {
+/* ---------------- brainstorm (offline novelty engine) ----------------
+ * One cheap call where the MODEL itself generates a spread of distinct angles,
+ * nudged outward by a few random real-world sparks. Its output seeds ideation,
+ * so novelty emerges from the model — the sparks are only there to scatter the
+ * starting point. Runs only when live web search is off. */
+export function buildBrainstormPrompt(settings: Settings, sparks: string[], avoidTitles: string[]): Prompt {
+  const count = settings.batch;
+  const system = [
+    "You are a relentlessly original product scout for VIBE FORGE.",
+    "Your job: surface surprising, specific problems worth building a web app around — especially in corners of life most app makers overlook. Concrete and unexpected beats safe and generic.",
+  ].join("\n");
+  const user = [
+    `Brainstorm ${count} DISTINCT angles for genuinely useful, novel web apps.`,
+    `Each angle = a specific person or situation + a real friction or unmet need they have. Keep the ${count} angles far apart from one another — different worlds, different problems, not variations on a theme.`,
+    sparks.length
+      ? "A few random real-world worlds to spark from — riff on them, wander to neighbours, or leap somewhere else entirely; do NOT feel confined to them, and do NOT just bolt a generic tracker onto each:\n" + sparks.map((s) => "  • " + s).join("\n")
+      : "",
+    settings.steer ? `\nHuman steering to honor: ${settings.steer}` : "",
+    avoidTitles.length ? "\nStay well away from anything resembling these existing concepts:\n" + avoidTitles.map((t) => "  – " + t).join("\n") : "",
+    "",
+    `Respond with ONLY a JSON array of ${count} short strings — one angle per string, one sentence each. No prose, no code fences.`,
+  ].join("\n");
+  return { system, user };
+}
+
+export function parseAngles(text: string): string[] {
+  try {
+    return extJson<unknown[]>(text, "[").map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+/* ---------------- ideation ----------------
+ * `seeds` are the model-brainstormed angles (offline path). When grounding is on
+ * they're ignored — the live web discovery block drives novelty instead. */
+export function buildIdeationPrompt(settings: Settings, avoidTitles: string[], seeds: string[] = []): Prompt {
   const count = settings.batch;
   const grounded = !!settings.grounding?.ideation;
   const system = [
@@ -45,10 +104,14 @@ export function buildIdeationPrompt(settings: Settings, avoidTitles: string[]): 
     "Turn those real signals into apps that fill a concrete gap. Each pitch should reflect the actual unmet need you found. Favor fresh, of-the-moment concepts over timeless clichés, and prefer underserved niches over crowded categories.",
   ];
 
-  const seedList = Array.from({ length: Math.min(count, 4) }, () => `a ${pick(LENSES)} for ${pick(AUDIENCES)} — ${pick(QUALITIES)}`);
-  const seeds = [
-    "Creative seeds for variety this batch (interpret loosely; do NOT name them literally):",
-    ...seedList.map((s) => "  • " + s),
+  // Offline path: build from the model's brainstormed angles (preferred); if none were
+  // supplied, fall back to raw random sparks. Either way the app concept is free to emerge.
+  const seedSource = seeds.length ? seeds : randomSparks(Math.min(count, 4));
+  const seedBlock = [
+    seeds.length
+      ? "Build one app idea from EACH of these angles, in order — keep them as distinct from each other as they are here:"
+      : "Random real-world sparks for this batch — riff on them and let the actual app concept emerge; do NOT name them literally or just bolt a generic tracker onto each:",
+    ...seedSource.map((s) => "  • " + s),
   ];
 
   const user = [
@@ -59,7 +122,7 @@ export function buildIdeationPrompt(settings: Settings, avoidTitles: string[]): 
       ? `\nDEPTH — make ALL ${count} ideas at this scope: ${DEPTH_DESC[settings.depth]} Set every idea's "ambition" to "${settings.depth}".`
       : "",
     "",
-    ...(grounded ? discovery : seeds),
+    ...(grounded ? discovery : seedBlock),
     settings.steer ? `\nHuman steering to honor: ${settings.steer}` : "",
     avoidTitles.length
       ? "\nAVOID — do NOT repeat or closely resemble any of these existing concepts. Pick genuinely different problems and categories:\n" + avoidTitles.map((t) => "  – " + t).join("\n")

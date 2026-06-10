@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { defaultSettings, PROVIDERS } from "@vibeforge/shared";
 import type { Project, Settings, Depth } from "@vibeforge/shared";
 import { runStep } from "./lib/engine.ts";
-import { buildIdeationPrompt, buildSpecPrompt, buildRefinePrompt, parseIdeas } from "./lib/pipeline.ts";
+import { buildIdeationPrompt, buildBrainstormPrompt, buildSpecPrompt, buildRefinePrompt, parseIdeas, parseAngles, randomSparks } from "./lib/pipeline.ts";
 import { uid, slugify } from "./lib/util.ts";
 
 export interface Toast { id: string; kind: string; title: string; body?: string }
@@ -102,7 +102,24 @@ export const useStore = create<State>()(
           set({ generating: true });
           try {
             const settings = get().settings;
-            const prompt = buildIdeationPrompt(settings, get().ledgerTitles.slice(-120));
+            const avoid = get().ledgerTitles.slice(-120);
+
+            // Offline path (no web search): let the model brainstorm distinct angles first,
+            // seeded by a few random real-world sparks, then ideate from those. The web path
+            // already draws novelty from live search, so it skips this extra call.
+            let seeds: string[] = [];
+            if (!settings.grounding.ideation) {
+              const sparks = randomSparks(Math.min(settings.batch, 4));
+              try {
+                const bp = buildBrainstormPrompt(settings, sparks, avoid);
+                const br = await runStep(settings, "ideation", { ...bp, maxTokens: 700, temperature: 1, search: false });
+                seeds = parseAngles(br.text);
+              } catch {
+                seeds = sparks; // brainstorm failed — fall back to the raw sparks
+              }
+            }
+
+            const prompt = buildIdeationPrompt(settings, avoid, seeds);
             const r = await runStep(settings, "ideation", {
               ...prompt, maxTokens: 2000, temperature: 1, search: settings.grounding.ideation,
             });
