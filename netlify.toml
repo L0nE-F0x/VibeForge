@@ -1,0 +1,19 @@
+[build]
+  command = "npm run build"
+  publish = "web/dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Belt-and-braces route to the relay (the function also declares path = "/api/complete").
+[[redirects]]
+  from = "/api/complete"
+  to = "/.netlify/functions/complete"
+  status = 200
+
+# SPA fallback — must stay last.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

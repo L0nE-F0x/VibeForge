@@ -1,0 +1,16 @@
+{
+  "name": "vibe-forge",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vibe Forge — AI app-idea & spec studio. Generate grounded app ideas and build-ready specs for your coding assistant (BYOK).",
+  "workspaces": [
+    "shared",
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @vibeforge/web",
+    "build": "npm run build -w @vibeforge/web",
+    "preview": "npm run preview -w @vibeforge/web"
+  }
+}
