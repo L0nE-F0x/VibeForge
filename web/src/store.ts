@@ -103,12 +103,16 @@ export const useStore = create<State>()(
           try {
             const settings = get().settings;
             const avoid = get().ledgerTitles.slice(-120);
+            // Games are a different KIND of batch: the spark-brainstorm pass is
+            // app-oriented, so game batches skip it — buildIdeationPrompt's game branch
+            // drives novelty (with its own web-discovery block when grounding is on).
+            const isGame = settings.depth === "game";
 
             // Offline path (no web search): let the model brainstorm distinct angles first,
             // seeded by a few random real-world sparks, then ideate from those. The web path
             // already draws novelty from live search, so it skips this extra call.
             let seeds: string[] = [];
-            if (!settings.grounding.ideation) {
+            if (!isGame && !settings.grounding.ideation) {
               const sparks = randomSparks(Math.min(settings.batch, 4));
               try {
                 const bp = buildBrainstormPrompt(settings, sparks, avoid);
@@ -132,6 +136,7 @@ export const useStore = create<State>()(
                 ...it,
                 id: uid(),
                 slug: uniqueSlug(it.title),
+                kind: isGame ? "game" : "app",
                 status: "idea",
                 spec: "",
                 sources: r.citations.slice(0, 8),
@@ -258,7 +263,7 @@ export const useStore = create<State>()(
         const raw = (saved ?? {}) as Partial<State>;
         const projects = (raw.projects || [])
           .filter((p) => (p.providerUsed as string) !== "demo") // drop old demo-generated ideas
-          .map((p) => (p.status === "specing" ? { ...p, status: p.spec ? "spec" : "idea", statusMsg: "" } : p));
+          .map((p) => (p.status === "specing" ? { ...p, status: p.spec ? ("spec" as const) : ("idea" as const), statusMsg: "" } : p));
         const selectedId = projects.some((p) => p.id === raw.selectedId) ? raw.selectedId! : null;
         return {
           ...current,

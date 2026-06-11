@@ -33,7 +33,7 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
 
       <select
         className="topselect"
-        title="Scope / ambition of each generated batch"
+        title="Scope or type of each generated batch"
         value={settings.depth}
         onChange={(e) => setDepth(e.target.value as Depth)}
       >

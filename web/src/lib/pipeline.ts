@@ -83,6 +83,7 @@ export function parseAngles(text: string): string[] {
  * `seeds` are the model-brainstormed angles (offline path). When grounding is on
  * they're ignored — the live web discovery block drives novelty instead. */
 export function buildIdeationPrompt(settings: Settings, avoidTitles: string[], seeds: string[] = []): Prompt {
+  if (settings.depth === "game") return buildGameIdeationPrompt(settings, avoidTitles);
   const count = settings.batch;
   const grounded = !!settings.grounding?.ideation;
   const system = [
@@ -148,8 +149,52 @@ export function parseIdeas(text: string): Idea[] {
   return out;
 }
 
+/* ---------------- games ----------------
+ * "Games" depth is a different KIND of batch, not a scope: graphics-rich browser
+ * games on a real-time WebGL stack, steered hard toward Three.js + custom GLSL
+ * shaders so the resulting specs put rendering front and centre. The app-oriented
+ * spark brainstorm is skipped; with grounding ON, a game-specific discovery block
+ * researches the live web-game scene instead. */
+export function buildGameIdeationPrompt(settings: Settings, avoidTitles: string[]): Prompt {
+  const count = settings.batch;
+  const grounded = !!settings.grounding?.ideation;
+  const system = [
+    "You are the Creative Director of VIBE FORGE GAMES, a studio that ships original, visually striking games that run in the browser on modern real-time graphics tech.",
+    "Invent games a skilled developer can build with an AI coding assistant on a Three.js / WebGL (or WebGPU) stack: real-time 3D or shader-driven 2D with a genuine core gameplay loop — not screensavers, particle toys, or static generative art.",
+    "Graphics are the point: every concept must put GPU-driven visuals front and centre — custom GLSL shaders, lighting, post-processing, particles — used in service of actual gameplay.",
+    "Each idea must be (1) a genuinely DISTINCT game — a different genre and core mechanic from the others and from everything on the AVOID list, (2) replayable and fun, not a 30-second tech demo, (3) buildable in a focused session by a strong coding agent.",
+  ].join("\n");
+
+  // Grounded game batches RESEARCH the live web-game scene first — fresh techniques,
+  // jam winners, what players are asking for — instead of inventing in a vacuum.
+  const discovery = [
+    "RESEARCH FIRST — you have a live web_search tool. Actually run several searches before you invent anything.",
+    "Hunt for what's exciting or newly possible in browser games right now, for example:",
+    "  • Fresh graphics techniques — recent Three.js releases and examples, TSL/WebGPU demos, Shadertoy trends, standout WebGL showcases (Awwwards, Codrops) worth building a game around.",
+    "  • What indie web games are landing — js13kGames / Ludum Dare / itch.io browser-game winners and their mechanics; what players praise or wish existed in r/WebGames, r/threejs, r/incremental_games.",
+    "  • New capabilities — WebGPU adoption, browser APIs (gamepad, WebXR, audio), or model abilities that make a previously-hard game newly buildable.",
+    "Turn those real signals into original games — don't clone what you find; build on the technique or fill the gap. Each pitch should reflect the actual signal that inspired it.",
+  ];
+
+  const user = [
+    `Generate ${count} browser game ideas as a JSON array. Each item:`,
+    '{ "title": string (<=4 words), "pitch": string (2-3 sentences: who it\'s for, the core gameplay loop, and what makes it visually striking), "tags": string[] (2-4, include the key graphics tech, e.g. "three.js", "GLSL", "WebGL"), "lens": string (game genre, e.g. "arcade", "puzzle", "roguelite", "rhythm", "tower defense"), "ambition": "S" | "M" | "L" (S=tight one-screen game, M=several systems & screens, L=substantial game with progression) }',
+    "Respond with ONLY the JSON array. No prose, no code fences.",
+    "",
+    ...(grounded ? discovery : []),
+    "Make every game lean hard on real-time graphics — shader-driven visuals, 3D scenes, dynamic lighting or post-processing — built on Three.js (optionally react-three-fiber + drei), GLSL, and where useful a physics lib (Rapier / cannon-es) and the Web Audio API. Avoid plain DOM / 2D-canvas games with no GPU graphics.",
+    "Spread the batch across different genres and mechanics — keep the games far apart from one another.",
+    settings.steer ? `\nHuman steering to honor: ${settings.steer}` : "",
+    avoidTitles.length
+      ? "\nAVOID — do NOT repeat or closely resemble any of these existing concepts. Pick genuinely different genres and mechanics:\n" + avoidTitles.map((t) => "  – " + t).join("\n")
+      : "",
+  ].join("\n");
+  return { system, user };
+}
+
 /* ---------------- spec ---------------- */
 export function buildSpecPrompt(p: Project): Prompt {
+  if (p.kind === "game") return buildGameSpecPrompt(p);
   const scope = ({
     S: "a sharp, single-purpose tool (tightly scoped, ~1 main view)",
     M: "a multi-feature app (several views, a real data model)",
@@ -174,6 +219,40 @@ export function buildSpecPrompt(p: Project): Prompt {
     "## UX & Visual Direction  (layout, navigation, palette, typography, density, motion, empty/loading states)",
     "## Getting Started  (how to scaffold and run: commands, suggested npm scripts)",
     "## Acceptance Criteria  (a checklist proving the key features actually work)",
+    "No preamble.",
+  ].join("\n");
+  return { system, user };
+}
+
+/* ---------------- game spec ----------------
+ * Same contract as buildSpecPrompt, but the stack defaults to Three.js/WebGL and a
+ * dedicated "Rendering & Visual FX" section makes the shader work the centerpiece. */
+export function buildGameSpecPrompt(p: Project): Prompt {
+  const scope = ({
+    S: "a tight, one-screen game (a single core loop, highly polished)",
+    M: "a game with several systems and screens (a real loop plus progression and UI)",
+    L: "an ambitious game (multiple mechanics, progression, and a rich world)",
+  } as Record<string, string>)[p.ambition] || "a focused but polished browser game";
+  const system = [
+    "You are the Lead Game Engineer at VIBE FORGE GAMES. Turn a game concept into a precise, build-ready spec the user will hand to their AI coding assistant (Claude Code, Cursor, Codex…).",
+    "The spec must let a strong coding agent build the complete game in one focused session with no further questions: name the engine, libraries, architecture, game state, and the full mechanic & rendering set. Be concrete and decisive — make the technical, gameplay, and visual calls yourself.",
+    "Default to a modern real-time browser stack: Vite + TypeScript + Three.js (use react-three-fiber + drei when React fits), custom GLSL shaders, post-processing (the `postprocessing` lib / EffectComposer), a physics lib (Rapier or cannon-es) when the game needs it, and the Web Audio API for sound. Target a smooth 60fps game loop.",
+  ].join("\n");
+  const user = [
+    `Game — Title: ${p.title} | Pitch: ${p.pitch} | Genre: ${p.lens || "—"} | Tags: ${(p.tags || []).join(", ")}`,
+    `Target scope: ${scope}.`,
+    "",
+    "Write the spec in Markdown with exactly these sections, ambitious yet implementable in one focused pass:",
+    `# ${p.title}`,
+    "## Concept & Core Loop  (the fantasy, moment-to-moment gameplay, win/lose, why it's fun)",
+    "## Gameplay & Mechanics  (controls, systems, rules, difficulty/balancing, scoring/progression)",
+    "## Tech Stack  (engine & renderer: Three.js / react-three-fiber; shaders: GLSL; physics; audio; state; build)",
+    "## Rendering & Visual FX  (the centerpiece: custom shaders, materials, lighting, particles, post-processing, the overall look)",
+    "## Architecture & File Structure  (scenes, the game loop, systems/entities and their responsibilities)",
+    "## Game State & Data  (entities & shapes, run/save persistence, seed/sample content)",
+    "## Audio & Game Feel  (sound design, camera, juice/feedback, haptics where relevant)",
+    "## Getting Started  (how to scaffold and run: commands, suggested npm scripts)",
+    "## Acceptance Criteria  (a checklist proving the game runs smoothly and the core loop, shaders, and controls actually work)",
     "No preamble.",
   ].join("\n");
   return { system, user };

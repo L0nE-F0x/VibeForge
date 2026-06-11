@@ -54,5 +54,6 @@ function deploys with it.
   the `/api/complete` + SPA-fallback redirects), so a git-connected Netlify deploy works with no
   extra setup.
 
-Providers, batch size, depth dial (focused tool → ambitious product), creative steering, and
-live-search grounding are all configured in Settings.
+Providers, batch size, depth dial (focused tool → ambitious product, plus a **Games** mode that
+generates graphics-rich browser games built on Three.js/WebGL with custom GLSL shaders), creative
+steering, and live-search grounding are all configured in Settings.

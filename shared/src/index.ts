@@ -15,13 +15,14 @@ export type ProviderId =
 export type Transport = "proxy" | "direct";
 
 export type Ambition = "S" | "M" | "L";
-export type Depth = "S" | "M" | "L" | "mixed";
+export type Depth = "S" | "M" | "L" | "mixed" | "game";
 
 export const DEPTHS: { id: Depth; label: string; hint: string }[] = [
   { id: "mixed", label: "Mixed", hint: "let the model vary the scope" },
   { id: "S", label: "Focused tool", hint: "sharp, single-purpose utility" },
   { id: "M", label: "Real app", hint: "multi-feature, multiple views" },
   { id: "L", label: "Ambitious", hint: "deep, serious product" },
+  { id: "game", label: "Games", hint: "graphics-rich browser games — Three.js, WebGL & custom shaders" },
 ];
 
 export interface ModelInfo {
@@ -130,6 +131,8 @@ export interface Idea {
   tags: string[];
   lens: string;
   ambition: Ambition;
+  /** Set to "game" when generated in Games depth — drives a game-flavored spec (Three.js/WebGL/shaders). */
+  kind?: "app" | "game";
 }
 
 export interface Project extends Idea {
