@@ -1,8 +1,9 @@
 # Vibe Forge
 
 An **AI app-idea & spec studio**. Generate grounded, genuinely useful app ideas, turn the one you
-like into a build-ready spec, then copy or export it (`.md`) straight into your coding assistant —
-Claude Code, Cursor, Codex, anything.
+like into a build-ready spec, then hand it to your coding assistant — copy the spec, copy a
+ready-to-run **kickoff prompt**, or download it as `.md`. Works with Claude Code, Cursor, Codex,
+anything.
 
 **Bring your own key.** Pick your preferred model and paste your API key; it's stored only in your
 browser. Cloud providers (Anthropic incl. **Fable 5**, OpenAI, Google, xAI, OpenRouter) relay
@@ -22,18 +23,22 @@ npm run dev        # → http://localhost:5173
 ```
 
 Open Settings, choose your provider + paste a key, then **Generate ideas**.
+On Windows you can instead double-click **`Start Vibe Forge.cmd`** to launch the dev server.
 Installable as a desktop PWA from the browser's address bar.
 
-## Deploy to Netlify (drag & drop — no CLI)
+## Deploy to Netlify
 
-A ready-to-deploy zip is produced at **`Desktop/VibeForge-netlify.zip`** (regenerate with the steps
-below). On [app.netlify.com](https://app.netlify.com): **Add new site → Deploy manually**, then drag
-the **zip** onto the drop zone. That's it — the static site goes live and the relay function
-(`/api/complete`) deploys with it. No environment variables needed (keys are per-user, in-browser).
+The repo ships a `netlify.toml`, so the simplest path is to **connect the Git repo** on
+[app.netlify.com](https://app.netlify.com) (**Add new site → Import an existing project**). Netlify
+reads the config, runs `npm run build`, publishes `web/dist`, bundles the relay function, and wires
+up `/api/complete` plus the SPA fallback. **No environment variables needed** — keys are per-user,
+in the browser.
 
-To rebuild the deploy zip yourself: `npm run build` (→ `web/dist`), then bundle
-`netlify/functions/complete.mts` to a self-contained `.mjs`, and zip `web/dist/*` + `netlify/` +
-`_redirects` so those files sit at the **root** of the archive.
+**Prefer no CLI and no Git?** Build locally with `npm run build` (→ `web/dist`), bundle
+`netlify/functions/complete.mts` to a self-contained `.mjs`, then zip `web/dist/*` + `netlify/` +
+`netlify.toml` so those files sit at the **root** of the archive. On Netlify choose **Add new site
+→ Deploy manually** and drag the zip onto the drop zone — the static site goes live and the relay
+function deploys with it.
 
 ## Architecture
 
@@ -45,6 +50,9 @@ To rebuild the deploy zip yourself: `npm run build` (→ `web/dist`), then bundl
 - **`netlify/functions/complete.mts`** — the cloud-provider relay. It only forwards to a fixed
   allow-list of known provider hosts (no open proxy), passing your key through per-request without
   storing or logging it.
+- **`netlify.toml`** — build + routing config (build command, publish dir, function bundler, and
+  the `/api/complete` + SPA-fallback redirects), so a git-connected Netlify deploy works with no
+  extra setup.
 
-Providers, depth dial (focused tool → ambitious product), creative steering, and live-search
-grounding are all configured in Settings.
+Providers, batch size, depth dial (focused tool → ambitious product), creative steering, and
+live-search grounding are all configured in Settings.

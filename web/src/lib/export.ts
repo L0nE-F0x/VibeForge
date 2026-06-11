@@ -7,7 +7,7 @@ export function specMarkdown(p: Project): string {
     p.spec.trim(),
     "",
     "---",
-    `*Build spec for **${p.title}** — generated with [Vibe Forge](https://github.com/) on ${date}.*`,
+    `*Build spec for **${p.title}** — generated with [Vibe Forge](https://github.com/L0nE-F0x/VibeForge) on ${date}.*`,
     "",
   ].join("\n");
 }
