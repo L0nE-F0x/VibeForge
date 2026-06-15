@@ -31,8 +31,23 @@ function devApi(): Plugin {
   };
 }
 
+/** Bakes the live site origin into index.html's social/canonical tags.
+ *  On Netlify, $URL is the site's primary address (custom domain included);
+ *  otherwise we fall back to the production domain. OG/Twitter crawlers
+ *  require absolute URLs, so this keeps them correct on any deploy. */
+function ogMeta(): Plugin {
+  const FALLBACK = "https://vibeforgeapp.netlify.app";
+  const origin = (process.env.URL || process.env.DEPLOY_PRIME_URL || FALLBACK).replace(/\/+$/, "");
+  return {
+    name: "vibeforge-og-meta",
+    transformIndexHtml(html) {
+      return html.replaceAll("__SITE_ORIGIN__", origin);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), devApi()],
+  plugins: [react(), devApi(), ogMeta()],
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: [

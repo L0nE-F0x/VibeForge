@@ -40,6 +40,20 @@ in the browser.
 → Deploy manually** and drag the zip onto the drop zone — the static site goes live and the relay
 function deploys with it.
 
+## Social preview
+
+Links unfurl with a branded Open Graph / Twitter card on X, Discord, Slack, iMessage, LinkedIn, etc.
+The card image lives at `web/public/og.png` (2400×1260) and is generated from `tools/og-image.html`:
+
+```bash
+npm run og        # re-renders web/public/og.png with headless Chrome/Edge
+```
+
+The absolute URLs in the share tags are baked into `index.html` at build time — on Netlify from the
+live site `$URL` (custom domains included), otherwise from the fallback domain in `web/vite.config.ts`.
+Edit `tools/og-image.html` and re-run `npm run og` to change the card; tweak the meta copy in
+`web/index.html`.
+
 ## Architecture
 
 - **`web/`** — Vite + React + TypeScript SPA (the studio). State + your keys persist in

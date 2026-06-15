@@ -1,0 +1,162 @@
+<!doctype html>
+<!--
+  Vibe Forge OG / social-share card — source template.
+  Renders at exactly 1200×630 (the Open Graph / Twitter "summary_large_image" canvas).
+  Regenerate web/public/og.png from this file:  npm run og   (see package.json / tools/render-og.mjs)
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0e0f13;
+        --ink: #eceef3;
+        --ink-2: #aeb4c0;
+        --ink-3: #7b8290;
+        --acc: #e08a3c;
+        --acc-hi: #f0a45c;
+        --acc-soft: rgba(224, 138, 60, 0.12);
+        --acc-line: rgba(224, 138, 60, 0.32);
+        --line-2: #2e323d;
+        --surface: #16181f;
+        --sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+        --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 1200px; height: 630px; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        padding: 72px 80px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      /* copper glows, echoing the landing hero */
+      .glow {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(820px 440px at 22% -12%, rgba(224, 138, 60, 0.20), transparent 60%),
+          radial-gradient(620px 420px at 108% 118%, rgba(224, 138, 60, 0.12), transparent 60%);
+      }
+      /* inner hairline frame */
+      .frame {
+        position: absolute;
+        inset: 18px;
+        border: 1px solid var(--line-2);
+        border-radius: 24px;
+        pointer-events: none;
+      }
+
+      .brand { position: relative; display: flex; align-items: center; gap: 18px; }
+      .anvil {
+        width: 68px; height: 68px; border-radius: 18px;
+        display: grid; place-items: center;
+        background: var(--acc-soft); border: 1px solid var(--acc-line);
+      }
+      .wordmark .bt { font-size: 27px; font-weight: 700; letter-spacing: 0.2px; line-height: 1.05; }
+      .wordmark .sub {
+        display: block; margin-top: 5px;
+        font-size: 13px; letter-spacing: 4px; text-transform: uppercase;
+        color: var(--ink-3); font-weight: 600;
+      }
+
+      .eyebrow {
+        position: relative; align-self: flex-start;
+        display: inline-flex; align-items: center; gap: 9px;
+        margin-top: 64px;
+        font-size: 18px; font-weight: 600; color: var(--acc-hi);
+        background: var(--acc-soft); border: 1px solid var(--acc-line);
+        border-radius: 999px; padding: 9px 18px;
+      }
+
+      h1 {
+        position: relative;
+        margin-top: 28px;
+        font-size: 76px; line-height: 1.04; font-weight: 800; letter-spacing: -2.2px;
+        background: linear-gradient(180deg, #ffffff, #c4c9d3);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        max-width: 980px;
+      }
+      .sub-copy {
+        position: relative; margin-top: 26px;
+        font-size: 24px; line-height: 1.5; color: var(--ink-2); max-width: 880px; font-weight: 400;
+      }
+      .sub-copy b { color: var(--ink); font-weight: 600; }
+
+      .foot {
+        position: relative; margin-top: auto;
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      }
+      .foot .lbl {
+        font-size: 14px; text-transform: uppercase; letter-spacing: 1.4px;
+        color: var(--ink-3); font-weight: 600; margin-right: 4px;
+      }
+      .chip {
+        font-size: 17px; font-weight: 600; color: var(--ink-2);
+        background: var(--surface); border: 1px solid var(--line-2);
+        border-radius: 9px; padding: 7px 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="glow"></div>
+      <div class="frame"></div>
+
+      <div class="brand">
+        <div class="anvil">
+          <svg width="38" height="38" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#f6b56e" />
+                <stop offset="100%" stop-color="#cf7a2e" />
+              </linearGradient>
+            </defs>
+            <path d="M12 2C9.5 5 7 7.5 7 12a5 5 0 0 0 10 0c0-2-1-3.5-2-5 0 1.5-.7 2.3-1.5 2.5C13.8 7 13 4 12 2Z" fill="url(#flame)" />
+          </svg>
+        </div>
+        <div class="wordmark">
+          <span class="bt">Vibe Forge</span>
+          <span class="sub">App Idea &amp; Spec Studio</span>
+        </div>
+      </div>
+
+      <span class="eyebrow">✦ Bring your own model · ideas → specs</span>
+
+      <h1>From a spark of an idea to a build-ready spec.</h1>
+
+      <p class="sub-copy">
+        Invent <b>genuinely useful app ideas</b> with your favourite AI model, then forge the
+        complete build spec — ready to hand to Claude Code, Cursor, or any coding assistant.
+      </p>
+
+      <div class="foot">
+        <span class="lbl">Works with</span>
+        <span class="chip">Claude</span>
+        <span class="chip">GPT</span>
+        <span class="chip">Gemini</span>
+        <span class="chip">Grok</span>
+        <span class="chip">OpenRouter</span>
+        <span class="chip">Ollama</span>
+        <span class="chip">LM Studio</span>
+      </div>
+    </div>
+  </body>
+</html>

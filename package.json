@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "npm run dev -w @vibeforge/web",
     "build": "npm run build -w @vibeforge/web",
-    "preview": "npm run preview -w @vibeforge/web"
+    "preview": "npm run preview -w @vibeforge/web",
+    "og": "node tools/render-og.mjs"
   }
 }
