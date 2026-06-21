@@ -21,11 +21,14 @@ async function errText(res: Response, label: string): Promise<string> {
 
 /* ---------------- Anthropic ---------------- */
 async function anthropic(req: CompleteRequest): Promise<CompleteResponse> {
-  const { apiKey, model, system, user, maxTokens = 4096, temperature = 1, search } = req;
+  const { apiKey, model, system, user, maxTokens = 4096, search } = req;
+  // NOTE: `temperature` is intentionally omitted. Current Anthropic models
+  // (Opus 4.7+, Fable 5) reject it with a 400 ("temperature is deprecated for
+  // this model"); older models simply use their default when it's absent. The
+  // other providers below still pass it through.
   const body: any = {
     model,
     max_tokens: maxTokens,
-    temperature,
     system,
     messages: [{ role: "user", content: user }],
   };
