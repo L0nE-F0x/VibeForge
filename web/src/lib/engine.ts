@@ -42,7 +42,10 @@ export async function runStep(settings: Settings, step: "ideation" | "spec", inp
   }
 
   const exec = async (r: CompleteRequest): Promise<CompleteResponse> => {
-    if (info.transport === "direct") return complete(r); // browser → local endpoint
+    // Direct from the browser for local endpoints AND for cloud providers that
+    // support CORS (browserDirect) — the latter bypasses the relay's serverless
+    // gateway timeout on long generations.
+    if (info.transport === "direct" || info.browserDirect) return complete(r);
     const res = await fetch("/api/complete", {
       method: "POST",
       headers: { "content-type": "application/json" },

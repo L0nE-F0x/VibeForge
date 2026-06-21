@@ -36,6 +36,10 @@ export interface ProviderInfo {
   /** Short name for pills/chips. */
   short: string;
   transport: Transport;
+  /** Cloud provider that supports CORS, so the browser can call it directly and
+   *  skip the relay. Avoids the serverless gateway timeout on long generations
+   *  (grounded specs, thinking models). Key requirement + UI stay "cloud". */
+  browserDirect?: boolean;
   /** Seed models — shown as suggestions; the model field always accepts any id. */
   models: ModelInfo[];
   /** No API key required. */
@@ -51,7 +55,7 @@ export interface ProviderInfo {
 
 export const PROVIDERS: ProviderInfo[] = [
   {
-    id: "anthropic", label: "Anthropic (Claude)", short: "Claude", transport: "proxy", grounding: true,
+    id: "anthropic", label: "Anthropic (Claude)", short: "Claude", transport: "proxy", grounding: true, browserDirect: true,
     models: [
       { id: "claude-fable-5", label: "Fable 5" },
       { id: "claude-opus-4-8", label: "Opus 4.8" },

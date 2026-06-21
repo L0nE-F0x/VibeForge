@@ -40,6 +40,9 @@ async function anthropic(req: CompleteRequest): Promise<CompleteResponse> {
       "content-type": "application/json",
       "x-api-key": apiKey || "",
       "anthropic-version": "2023-06-01",
+      // Allow the call to run from the browser (BYOK key is already client-side),
+      // so we can skip the relay and its serverless timeout. Ignored server-side.
+      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify(body),
   });
