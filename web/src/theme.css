@@ -330,15 +330,11 @@ select.in{cursor:pointer}
   background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-3);padding:16px 20px;
   transition:border-color .15s,transform .15s,background .15s}
 .lp-radar-item:hover{border-color:var(--line-3);transform:translateY(-2px);background:var(--surface-2)}
-.lp-radar-item.rumored{border-style:dashed}
-.lp-radar-item.suspended{opacity:.82}
 .lp-badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:650;letter-spacing:.7px;
   text-transform:uppercase;padding:4px 10px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface-2)}
 .lp-badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
-.lp-badge.live{color:var(--good);border-color:rgba(92,186,134,.34);background:var(--good-soft)}
-.lp-badge.preview{color:var(--acc-hi);border-color:var(--acc-line);background:var(--acc-soft)}
-.lp-badge.rumored{color:var(--ink-3)}
-.lp-badge.suspended{color:var(--bad);border-color:rgba(224,106,106,.32);background:var(--bad-soft)}
+.lp-badge.new{color:var(--good);border-color:rgba(92,186,134,.34);background:var(--good-soft)}
+.lp-badge.recent{color:var(--ink-3)}
 .lp-radar-main{min-width:0}
 .lp-radar-main h3{margin:0 0 5px;font-size:14.5px;font-weight:600;color:var(--ink);
   display:flex;align-items:center;gap:9px;flex-wrap:wrap}

@@ -36,7 +36,6 @@ const ICONS: Record<string, string[]> = {
   layers: ["M12 2 2 7l10 5 10-5-10-5Z", "M2 17l10 5 10-5", "M2 12l10 5 10-5"],
   "arrow-right": ["M5 12h14", "M13 6l6 6-6 6"],
   clock: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 7v5l3 2"],
-  radar: ["M19.07 4.93a10 10 0 1 0 .01 14.14", "M15.54 8.46a5 5 0 1 0 .01 7.07", "M12 12 16.5 7.5", "M12 12h.01"],
 };
 
 export function Icon({
