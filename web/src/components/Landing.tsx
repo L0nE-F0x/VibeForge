@@ -4,7 +4,7 @@ import { Icon } from "./Icon.tsx";
 const STEPS = [
   {
     icon: "key", title: "Bring your model",
-    body: "Pick any provider and paste your key — Claude (incl. Fable 5), GPT, Gemini, Grok, OpenRouter, or a local model via Ollama / LM Studio. Your key never leaves your browser.",
+    body: "Pick any provider and paste your key — Claude (incl. Opus 4.8), GPT, Gemini, Grok, OpenRouter, or a local model via Ollama / LM Studio. Your key never leaves your browser.",
   },
   {
     icon: "sparkles", title: "Generate grounded ideas",

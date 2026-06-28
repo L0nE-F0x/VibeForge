@@ -6,7 +6,7 @@ ready-to-run **kickoff prompt**, or download it as `.md`. Works with Claude Code
 anything.
 
 **Bring your own key.** Pick your preferred model and paste your API key; it's stored only in your
-browser. Cloud providers (Anthropic incl. **Fable 5**, OpenAI, Google, xAI, OpenRouter) relay
+browser. Cloud providers (Anthropic incl. **Opus 4.8**, OpenAI, Google, xAI, OpenRouter) relay
 through a tiny serverless function so CORS is never an issue; **local models** (Ollama, LM Studio)
 and any OpenAI-compatible endpoint are called directly from the browser.
 

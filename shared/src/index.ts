@@ -57,7 +57,6 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: "anthropic", label: "Anthropic (Claude)", short: "Claude", transport: "proxy", grounding: true, browserDirect: true,
     models: [
-      { id: "claude-fable-5", label: "Fable 5" },
       { id: "claude-opus-4-8", label: "Opus 4.8" },
       { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
       { id: "claude-haiku-4-5", label: "Haiku 4.5" },
@@ -67,6 +66,7 @@ export const PROVIDERS: ProviderInfo[] = [
     id: "openai", label: "OpenAI (GPT)", short: "GPT", transport: "proxy", grounding: true,
     models: [
       { id: "gpt-5.5", label: "GPT-5.5" },
+      { id: "gpt-5.5-pro", label: "GPT-5.5 Pro" },
       { id: "gpt-5.4-mini", label: "GPT-5.4 mini" },
       { id: "gpt-5.4-nano", label: "GPT-5.4 nano" },
     ],
@@ -91,11 +91,11 @@ export const PROVIDERS: ProviderInfo[] = [
     id: "openrouter", label: "OpenRouter (open-weight catalog)", short: "OpenRouter", transport: "proxy", grounding: true,
     hint: "One key, hundreds of models — any openrouter.ai model id works here.",
     models: [
-      { id: "qwen/qwen3-coder", label: "Qwen3 Coder" },
       { id: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
-      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
-      { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
+      { id: "z-ai/glm-5.2", label: "GLM 5.2" },
+      { id: "qwen/qwen3-coder", label: "Qwen3 Coder" },
       { id: "moonshotai/kimi-k2", label: "Kimi K2" },
+      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
     ],
   },
   {
