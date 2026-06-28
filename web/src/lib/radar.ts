@@ -15,7 +15,7 @@ export interface RadarItem {
 
 const FEED = "https://openrouter.ai/api/v1/models";
 const CACHE_KEY = "vibeforge.radar.v2";
-const CACHE_MS = 6 * 60 * 60 * 1000; // 6h
+const CACHE_MS = 24 * 60 * 60 * 1000; // 24h
 const MAX = 6;
 
 /** Shown until/unless the live feed loads — real recent launches, mid-2026. */
