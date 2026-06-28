@@ -20,6 +20,33 @@ const STEPS = [
   },
 ];
 
+// Hand-curated model radar — edit this array to keep the landing page fresh.
+// status drives the badge colour: preview (amber) · live (green) · rumored (neutral) · suspended (red).
+type RadarStatus = "preview" | "live" | "rumored" | "suspended";
+const RADAR: { model: string; provider: string; status: RadarStatus; eta: string; note: string; href: string }[] = [
+  {
+    model: "GPT-5.6 — Sol · Terra · Luna", provider: "OpenAI", status: "preview", eta: "GA in weeks",
+    note: "OpenAI's next generation: flagship Sol, balanced Terra, and fast Luna. In limited preview today — broad API access is expected in the coming weeks.",
+    href: "https://openai.com/index/previewing-gpt-5-6-sol/",
+  },
+  {
+    model: "GLM 5.2", provider: "Zhipu · OpenRouter", status: "live", eta: "Live now",
+    note: "A new open-weight frontier model that's strong on long-horizon coding and planning — already selectable in Vibe Forge through OpenRouter.",
+    href: "https://openrouter.ai/blog/insights/the-open-weight-models-that-matter-june-2026/",
+  },
+  {
+    model: "Grok 5", provider: "xAI", status: "rumored", eta: "Q3 2026",
+    note: "Reportedly training on the Colossus 2 supercomputer toward a ~10-trillion-parameter target. Public beta expected mid-2026, with API access likely in Q3.",
+    href: "https://x.ai/news",
+  },
+  {
+    model: "Fable 5 · Mythos 5", provider: "Anthropic", status: "suspended", eta: "Suspended",
+    note: "Anthropic's Mythos-class flagships, offline since June 12 under a US export-control directive. Anthropic says it's working to restore access.",
+    href: "https://www.anthropic.com/news/fable-mythos-access",
+  },
+];
+const STATUS_LABEL: Record<RadarStatus, string> = { preview: "Preview", live: "Live", rumored: "Rumored", suspended: "Suspended" };
+
 const FEATURES = [
   { icon: "layers", title: "Bring your own key", body: "Every major provider plus local & open-weight models. No lock-in, no markup — you pay your provider directly." },
   { icon: "lock", title: "Private by design", body: "Keys and ideas live only in your browser. Nothing is stored or logged on a server." },
@@ -92,6 +119,32 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="lp-section" id="radar">
+        <div className="lp-h2">
+          <span className="lp-kicker">Model radar</span>
+          <h2>On the radar</h2>
+          <p className="lp-h2-sub">
+            New and upcoming models we're tracking — so you always know what you'll be able to forge with next.
+          </p>
+        </div>
+        <div className="lp-radar">
+          {RADAR.map((r) => (
+            <div className={`lp-radar-item ${r.status}`} key={r.model}>
+              <div className="lp-radar-badge">
+                <span className={`lp-badge ${r.status}`}>{STATUS_LABEL[r.status]}</span>
+              </div>
+              <div className="lp-radar-main">
+                <h3>{r.model} <span className="lp-radar-prov">{r.provider}</span></h3>
+                <p>{r.note}</p>
+                <a href={r.href} target="_blank" rel="noreferrer">Source <Icon name="external-link" size={11} /></a>
+              </div>
+              <div className="lp-radar-eta"><Icon name="clock" size={12} /> {r.eta}</div>
+            </div>
+          ))}
+        </div>
+        <p className="lp-radar-foot">Curated by hand · last updated June 2026</p>
       </section>
 
       <section className="lp-final">
