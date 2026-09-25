@@ -407,70 +407,58 @@ async function setupStars() {
 }
 
 // ------------------------------------------------------------------ circuit backdrop
-// Traces fall from a glowing core above the headline, like the Apex Forge wallpaper.
+// Traces fall from a glowing core that hangs just below the top bar, like the Apex Forge
+// wallpaper. Drawn in real pixels for the current window so the core never slips under the bar.
 
-function setupCircuit() {
-  const svg = $("#circuit");
-  if (!svg) return;
+function drawCircuit(svg) {
+  const box = svg.getBoundingClientRect();
+  const width = Math.round(box.width) || window.innerWidth;
+  const height = Math.round(box.height) || window.innerHeight;
+  const bar = $(".bar")?.getBoundingClientRect();
+  const ns = "http://www.w3.org/2000/svg";
   let seed = 7;
   const random = () => {
     seed = (seed * 16807) % 2147483647;
     return (seed - 1) / 2147483646;
   };
-  const ns = "http://www.w3.org/2000/svg";
-  const coreX = 800;
-  const coreY = 70;
-  const parts = [];
-  const core = document.createElementNS(ns, "rect");
-  core.setAttribute("x", String(coreX - 70));
-  core.setAttribute("y", String(coreY - 34));
-  core.setAttribute("width", "140");
-  core.setAttribute("height", "68");
-  core.setAttribute("rx", "10");
-  core.setAttribute("class", "core");
-  parts.push(core);
-  const mark = document.createElementNS(ns, "use");
-  mark.setAttribute("href", "#i-logo");
-  mark.setAttribute("x", String(coreX - 18));
-  mark.setAttribute("y", String(coreY - 16));
-  mark.setAttribute("width", "36");
-  mark.setAttribute("height", "36");
-  mark.setAttribute("class", "core-mark");
-  parts.push(mark);
+  const make = (tag, attrs) => {
+    const node = document.createElementNS(ns, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    return node;
+  };
 
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  const coreW = 128;
+  const coreH = 58;
+  const coreX = width / 2;
+  const coreTop = Math.round((bar?.bottom ?? 48) + 18);
+  const parts = [
+    make("rect", { x: coreX - coreW / 2, y: coreTop, width: coreW, height: coreH, rx: 12, class: "core" }),
+    make("use", { href: "#i-logo", x: coreX - 17, y: coreTop + coreH / 2 - 17, width: 34, height: 34, class: "core-mark" }),
+  ];
+
+  const spread = Math.min(1.25, Math.max(0.35, width / 1600));
+  const drop = Math.max(0.7, height / 900);
   for (let index = 0; index < 34; index += 1) {
     const side = index % 2 === 0 ? -1 : 1;
-    let x = coreX + side * (20 + random() * 50);
-    let y = coreY + 34;
+    let x = coreX + side * (10 + random() * (coreW / 2 - 16));
+    let y = coreTop + coreH;
     let d = `M${x.toFixed(0)} ${y}`;
-    const reach = 120 + random() * 700;
+    const reach = (120 + random() * 700) * spread;
     const steps = 3 + Math.floor(random() * 4);
     for (let step = 0; step < steps; step += 1) {
-      y += 40 + random() * 150;
+      y += (40 + random() * 150) * drop;
       d += ` V${y.toFixed(0)}`;
-      x += side * (30 + random() * (reach / steps));
-      y += 20 + random() * 30;
+      x += side * (30 + random() * (reach / steps)) * spread;
+      y += (20 + random() * 30) * drop;
       d += ` L${x.toFixed(0)} ${y.toFixed(0)}`;
     }
-    y += 60 + random() * 200;
+    y += (60 + random() * 200) * drop;
     d += ` V${y.toFixed(0)}`;
-
-    const trace = document.createElementNS(ns, "path");
-    trace.setAttribute("d", d);
-    trace.setAttribute("class", "trace");
-    parts.push(trace);
-
-    const node = document.createElementNS(ns, "circle");
-    node.setAttribute("cx", x.toFixed(0));
-    node.setAttribute("cy", y.toFixed(0));
-    node.setAttribute("r", "2.6");
-    node.setAttribute("class", "node");
-    parts.push(node);
-
+    parts.push(make("path", { d, class: "trace" }));
+    parts.push(make("circle", { cx: x.toFixed(0), cy: y.toFixed(0), r: 2.6, class: "node" }));
     if (!reduceMotion && random() > 0.3) {
-      const pulse = document.createElementNS(ns, "path");
-      pulse.setAttribute("d", d);
-      pulse.setAttribute("class", "pulse");
+      const pulse = make("path", { d, class: "pulse" });
       pulse.dataset.speed = (0.16 + random() * 0.14).toFixed(3);
       pulse.dataset.dash = (40 + random() * 60).toFixed(0);
       pulse.dataset.offset = random().toFixed(3);
@@ -478,6 +466,7 @@ function setupCircuit() {
     }
   }
   svg.replaceChildren(...parts);
+
   // Each pulse runs the real length of its trace, then waits a beat before the next one.
   for (const pulse of svg.querySelectorAll(".pulse")) {
     const length = pulse.getTotalLength();
@@ -489,6 +478,23 @@ function setupCircuit() {
     pulse.style.setProperty("--dur", `${duration.toFixed(2)}s`);
     pulse.style.setProperty("--delay", `${(-Number(pulse.dataset.offset) * duration).toFixed(2)}s`);
   }
+}
+
+function setupCircuit() {
+  const svg = $("#circuit");
+  if (!svg) return;
+  drawCircuit(svg);
+  // Redraw when the width changes; phones resize the height as the address bar slides.
+  let lastWidth = window.innerWidth;
+  let timer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (window.innerWidth === lastWidth) return;
+      lastWidth = window.innerWidth;
+      drawCircuit(svg);
+    }, 150);
+  });
 }
 
 // ------------------------------------------------------------------ go
