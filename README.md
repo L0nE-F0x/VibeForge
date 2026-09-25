@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <a href="https://vibeforgeapp.netlify.app"><strong>vibeforgeapp.netlify.app</strong></a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-ff6b35?style=flat-square"></a>
   <img alt="Linux only" src="https://img.shields.io/badge/platform-Omarchy%20%C2%B7%20Arch%20%C2%B7%20Hyprland-fca311?style=flat-square">
   <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-34d399?style=flat-square">
@@ -24,7 +28,7 @@ VibeForge never calls a model API and never holds a key. Every engine is a CLI y
 On Omarchy (or any Arch + Hyprland setup):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/L0nE-F0x/VibeForge/main/scripts/install.sh | bash
+curl -fsSL https://vibeforgeapp.netlify.app/install | bash
 ```
 
 Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Run the same command again to update; add `--uninstall` to remove the launcher (your data stays).
