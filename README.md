@@ -112,7 +112,7 @@ npm test            # unit tests + the real PTY host driven with /bin/bash (neve
 npm run typecheck
 ```
 
-The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
+The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
 
 ---
 

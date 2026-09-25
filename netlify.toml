@@ -1,0 +1,38 @@
+# The website lives in site/ and is plain HTML, CSS and JS: no build step.
+# Setting the base to site/ also keeps Netlify from installing the Electron app's
+# dependencies (there is no package.json in site/).
+[build]
+  base = "site"
+  publish = "."
+  command = "echo 'static site, nothing to build'"
+
+# `curl -fsSL https://<this site>/install | bash` serves the installer from the repo.
+[[redirects]]
+  from = "/install"
+  to = "https://raw.githubusercontent.com/L0nE-F0x/VibeForge/main/scripts/install.sh"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
+
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
