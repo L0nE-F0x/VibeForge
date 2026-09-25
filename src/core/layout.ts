@@ -1,45 +1,28 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { seedEngines } from "./store.js";
-import type { Settings } from "./types.js";
 
-export function defaultRoots(): { configRoot: string; dataRoot: string } {
+export interface Roots {
+  configRoot: string;
+  dataRoot: string;
+}
+
+export function defaultRoots(env: NodeJS.ProcessEnv = process.env): Roots {
   const home = os.homedir();
+  const configHome = env.XDG_CONFIG_HOME || path.join(home, ".config");
+  const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
   return {
-    configRoot: process.env.FORGEDESK_CONFIG || path.join(home, ".config", "forgedesk"),
-    dataRoot: process.env.FORGEDESK_DATA || path.join(home, ".local", "share", "forgedesk"),
+    configRoot: env.VIBEFORGE_CONFIG || path.join(configHome, "vibeforge"),
+    dataRoot: env.VIBEFORGE_DATA || path.join(dataHome, "vibeforge"),
   };
 }
 
+/** Create every directory the app owns. Seed files are written by the store on first read. */
 export function ensureLayout(configRoot: string, dataRoot: string): void {
-  fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
-  fs.mkdirSync(path.join(configRoot, "skills"), { recursive: true });
-  fs.mkdirSync(path.join(configRoot, "routines"), { recursive: true });
-  fs.mkdirSync(path.join(configRoot, "tasks"), { recursive: true });
-  fs.mkdirSync(path.join(dataRoot, "runs"), { recursive: true });
-  fs.mkdirSync(path.join(dataRoot, "scratch"), { recursive: true });
-  const enginesPath = path.join(configRoot, "engines.json");
-  if (!fs.existsSync(enginesPath)) {
-    fs.writeFileSync(enginesPath, JSON.stringify({ engines: seedEngines() }, null, 2));
+  for (const dir of ["agents", "skills", "routines", "tasks", "layouts"]) {
+    fs.mkdirSync(path.join(configRoot, dir), { recursive: true });
   }
-  const settingsPath = path.join(configRoot, "settings.json");
-  if (!fs.existsSync(settingsPath)) {
-    const settings: Settings = {
-      defaultEngine: "grok",
-      defaultShell: process.env.SHELL || "/bin/bash",
-      notify: true,
-    };
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  }
-  const workspacesPath = path.join(configRoot, "workspaces.json");
-  if (!fs.existsSync(workspacesPath)) {
-    fs.writeFileSync(
-      workspacesPath,
-      JSON.stringify({ workspaces: [], lastWorkspaceId: null }, null, 2),
-    );
+  for (const dir of ["runs", "scratch"]) {
+    fs.mkdirSync(path.join(dataRoot, dir), { recursive: true });
   }
 }
-
-export const MEMORY_STARTER =
-  "<!-- Preferences, decisions, constraints, and lessons that should still matter next week. Dated bullets. Not secrets. Not this run's instructions. -->\n";

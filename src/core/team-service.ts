@@ -1,52 +1,74 @@
 import fs from "node:fs";
 import path from "node:path";
-import { withAvailability } from "./engines.js";
+import { planLaunch, resumeArgsFromTranscript, withAvailability } from "./engines.js";
+import { isDirectory, readText, writeFileAtomic } from "./fsx.js";
+import { diffSince, summarizeSnapshot } from "./vcs.js";
 import { isPathInside } from "./places.js";
-import { buildPreamble, buildStandalonePreamble } from "./preamble.js";
-import { decideRoutineTick, decideRunNow, isScheduleValid, nextFireTimes, type TickDecision } from "./routines.js";
-import { createRunFiles, markStopRequested, readRun } from "./runs.js";
+import { buildPreamble, plainPrompt, taskPrompt } from "./preamble.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, nextFireTimes, type TickDecision } from "./routines.js";
+import { allocateRunDir, readRunFiles, RUN_FILES, type RunFiles } from "./runs.js";
 import { slugify } from "./slug.js";
-import { Store } from "./store.js";
-import { assignTask, createTask, markStopped, requestExecute, syncTaskWithRun } from "./tasks.js";
+import { Store, type RunQuery } from "./store.js";
+import { createTask, markStopped, requestExecute, syncTaskWithRun, type ExecuteBlocker } from "./tasks.js";
 import type {
   Agent,
   ChatRecord,
+  Engine,
   EngineRow,
+  LayoutNode,
+  LiveSession,
   Routine,
   RunMeta,
   RunOrigin,
   Schedule,
+  Settings,
   Skill,
   Task,
   TaskStatus,
+  Topic,
   Workspace,
 } from "./types.js";
+import {
+  addWorkspaceRecord,
+  removeWorkspaceRecord,
+  selectWorkspaceRecord,
+  updateWorkspaceRecord,
+  type WorkspaceFile,
+} from "./workspaces.js";
 
-export interface PtySpawnRequest {
+// ------------------------------------------------------------------ host contract
+
+export interface SpawnRequest {
   cwd: string;
   argv: string[];
-  runDir: string;
-  initialInput: string;
-  runId: string;
+  /** Run directory the PTY host writes scrollback, the final screen, and a text transcript into. */
+  runDir: string | null;
+  /** Pasted once the CLI has drawn its UI and gone quiet. */
+  pasteInput: string | null;
+  cols?: number;
+  rows?: number;
 }
 
-export interface TeamHost {
-  spawnPty(request: PtySpawnRequest): Promise<{ ptyId: string }>;
-  writePty(ptyId: string, data: string): void;
-  killPty(ptyId: string): void;
-  isPtyAlive(ptyId: string): boolean;
+export interface DeskHost {
+  spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number }>;
+  /** Paste text into a live session and press Enter. */
+  send(ptyId: string, text: string): Promise<void>;
+  kill(ptyId: string): Promise<void>;
   resolveBin(bin: string): string | null;
-  notify(title: string, body: string): void;
-  snapshotGit(cwd: string, timeoutMs?: number): Promise<string>;
+  notify(note: { title: string; body: string; runId: string }): void;
+  snapshotGit(cwd: string, startHead: string | null): Promise<string>;
+  gitHead(cwd: string): Promise<string | null>;
 }
 
-export interface TeamServiceOptions {
+export interface DeskOptions {
   configRoot: string;
   dataRoot: string;
   appStartedAt: Date;
   now: () => Date;
-  host: TeamHost;
+  host: DeskHost;
 }
+
+// ------------------------------------------------------------------ inputs and views
 
 export interface AgentInput {
   id?: string;
@@ -56,6 +78,13 @@ export interface AgentInput {
   places: string[];
   skills?: string[];
   allowRoutines?: boolean;
+}
+
+export interface SkillInput {
+  id?: string;
+  name: string;
+  description?: string;
+  body?: string;
 }
 
 export interface RoutineInput {
@@ -68,13 +97,6 @@ export interface RoutineInput {
   notify?: boolean;
 }
 
-export interface SkillInput {
-  id?: string;
-  name: string;
-  description?: string;
-  body?: string;
-}
-
 export interface TaskInput {
   id?: string;
   title: string;
@@ -83,50 +105,111 @@ export interface TaskInput {
   workspaceId?: string | null;
 }
 
-export interface SendResult {
-  ok: boolean;
-  startedNew?: boolean;
-  chatId?: string;
-  runId?: string | null;
-  ptyId?: string | null;
-  reason?: string;
-  message?: string;
+export interface TermSize {
+  cols?: number;
+  rows?: number;
 }
 
-export interface RoutineListItem extends Routine {
+export interface RunView extends RunMeta {
+  live: boolean;
+  ptyId: string | null;
+}
+
+export interface RoutineView extends Routine {
+  agentName: string | null;
   issues: string[];
   stillRunning: boolean;
+  description: string;
+  nextFires: string[];
+  lastRun: RunView | null;
+}
+
+export interface TaskView extends Task {
+  lastRun: RunView | null;
+  blocker: ExecuteBlocker | "engine-missing" | null;
+}
+
+export interface ChatView extends ChatRecord {
+  live: boolean;
+  ptyId: string | null;
+  lastRun: RunView | null;
+}
+
+export interface RunBundle {
+  run: RunView;
+  files: RunFiles;
+}
+
+export interface Launched {
+  runId: string;
+  ptyId: string;
+}
+
+export interface SendResult extends Launched {
+  chatId: string;
+  /** True when the send started a new process instead of typing into a live one. */
+  started: boolean;
+  note: string | null;
+}
+
+export interface SchedulePreview {
+  valid: boolean;
+  description: string;
+  next: string[];
 }
 
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
+const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat"];
+
+export const BLOCKER_TEXT: Record<ExecuteBlocker | "engine-missing", string> = {
+  "missing-agent": "Assign an agent first.",
+  "missing-workspace": "Pick a workspace first.",
+  "outside-places": "That workspace is not one of the agent's allowed folders.",
+  "engine-missing": "The agent's engine is not on PATH.",
+};
 
 function normalizePlaces(places: readonly string[]): string[] {
   const out: string[] = [];
   for (const place of places) {
-    if (typeof place !== "string" || place.trim().length === 0) continue;
+    if (typeof place !== "string" || !place.trim()) continue;
     const resolved = path.resolve(place.trim());
     if (!out.includes(resolved)) out.push(resolved);
   }
   return out;
 }
 
-function withNewline(text: string): string {
-  return text.endsWith("\n") ? text : `${text}\n`;
+function titleFromPrompt(text: string): string {
+  const line = text.trim().split("\n").find((item) => item.trim()) ?? "Chat";
+  const clean = line.replace(/\s+/g, " ").trim();
+  return clean.length > 48 ? `${clean.slice(0, 47).trimEnd()}…` : clean;
 }
 
-export class TeamService {
-  private readonly options: TeamServiceOptions;
-  private readonly store: Store;
-  private readonly ptyByRun = new Map<string, string>();
-  private readonly runByPty = new Map<string, string>();
+const DEFAULT_CHAT_TITLE = "New chat";
 
-  constructor(options: TeamServiceOptions) {
+// ------------------------------------------------------------------ service
+
+export class TeamService {
+  private readonly options: DeskOptions;
+  readonly store: Store;
+  private readonly live = new Map<string, LiveSession>();
+  private readonly ptyByRun = new Map<string, string>();
+  private readonly listeners = new Set<(topics: Topic[]) => void>();
+  private readonly exitWaiters = new Map<string, Array<() => void>>();
+  private readonly finishing = new Set<Promise<void>>();
+  private pending = new Set<Topic>();
+  private flushQueued = false;
+  private readonly settled: Promise<void>;
+
+  constructor(options: DeskOptions) {
     this.options = options;
     this.store = new Store(options.configRoot, options.dataRoot);
+    // Anything still "running" in the index belongs to a process that died with the last app session.
+    const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
+    this.settled = this.settleOrphans(orphans);
   }
 
-  static create(options: TeamServiceOptions): TeamService {
-    return new TeamService(options);
+  whenSettled(): Promise<void> {
+    return this.settled;
   }
 
   now(): Date {
@@ -137,181 +220,331 @@ export class TeamService {
     this.store.close();
   }
 
+  // ---------------------------------------------------------------- events
+
+  onChange(listener: (topics: Topic[]) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  emit(...topics: Topic[]): void {
+    for (const topic of topics) this.pending.add(topic);
+    if (this.flushQueued) return;
+    this.flushQueued = true;
+    queueMicrotask(() => {
+      this.flushQueued = false;
+      const batch = [...this.pending];
+      this.pending = new Set();
+      if (batch.length === 0) return;
+      for (const listener of this.listeners) {
+        try {
+          listener(batch);
+        } catch {
+          /* a listener failing must not break the service */
+        }
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- settings & engines
+
+  getSettings(): Settings {
+    return this.store.readSettings();
+  }
+
+  saveSettings(patch: Partial<Settings>): Settings {
+    const next = { ...this.store.readSettings(), ...patch };
+    this.store.writeSettings(next);
+    this.emit("settings");
+    return this.store.readSettings();
+  }
+
+  listEngines(): Engine[] {
+    return withAvailability(this.store.readEngineRows(), (bin) => this.options.host.resolveBin(bin));
+  }
+
+  saveEngines(rows: EngineRow[]): Engine[] {
+    this.store.writeEngineRows(rows);
+    this.emit("engines", "agents", "routines", "tasks");
+    return this.listEngines();
+  }
+
+  private resolveEngine(engineId: string): { row: EngineRow; binPath: string } | null {
+    const row = this.store.readEngineRows().find((engine) => engine.id === engineId);
+    if (!row) return null;
+    const binPath = this.options.host.resolveBin(row.bin);
+    return binPath ? { row, binPath } : null;
+  }
+
+  private requireEngine(engineId: string): { row: EngineRow; binPath: string } {
+    const engine = this.resolveEngine(engineId);
+    if (engine) return engine;
+    const row = this.store.readEngineRows().find((item) => item.id === engineId);
+    throw new Error(row ? `${row.label} (${row.bin}) is not on PATH.` : `There is no engine called "${engineId}".`);
+  }
+
+  // ---------------------------------------------------------------- workspaces & layouts
+
+  listWorkspaces(): WorkspaceFile {
+    return this.store.readWorkspaces();
+  }
+
+  addWorkspace(folder: string): WorkspaceFile {
+    if (!isDirectory(folder)) throw new Error("Choose a folder that exists.");
+    const next = addWorkspaceRecord(this.store.readWorkspaces(), folder);
+    this.store.writeWorkspaces(next);
+    this.emit("workspaces");
+    return next;
+  }
+
+  async removeWorkspace(id: string): Promise<WorkspaceFile> {
+    for (const session of [...this.live.values()]) {
+      if (session.workspaceId === id && session.origin === "code") await this.killPty(session.ptyId);
+      else if (session.kind === "shell" && session.workspaceId === id) await this.killPty(session.ptyId);
+    }
+    const next = removeWorkspaceRecord(this.store.readWorkspaces(), id);
+    this.store.writeWorkspaces(next);
+    this.store.writeLayout(id, null);
+    this.emit("workspaces", "tasks");
+    return next;
+  }
+
+  selectWorkspace(id: string): void {
+    this.store.writeWorkspaces(selectWorkspaceRecord(this.store.readWorkspaces(), id));
+  }
+
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
+    const clean: { name?: string; dockUrl?: string } = {};
+    if (typeof patch.name === "string" && patch.name.trim()) clean.name = patch.name.trim();
+    if (typeof patch.dockUrl === "string") {
+      const url = patch.dockUrl.trim();
+      if (url && !/^https?:\/\//i.test(url)) throw new Error("Enter a full URL, starting with http:// or https://");
+      clean.dockUrl = url;
+    }
+    const next = updateWorkspaceRecord(this.store.readWorkspaces(), id, clean);
+    this.store.writeWorkspaces(next);
+    this.emit("workspaces");
+    return next;
+  }
+
+  getLayout(workspaceId: string): LayoutNode | null {
+    return this.store.readLayout(workspaceId);
+  }
+
+  saveLayout(workspaceId: string, layout: LayoutNode | null): void {
+    this.store.writeLayout(workspaceId, layout);
+  }
+
+  private workspaceById(id: string | null | undefined): Workspace | null {
+    if (!id) return null;
+    return this.store.readWorkspaces().workspaces.find((item) => item.id === id) ?? null;
+  }
+
+  // ---------------------------------------------------------------- agents
+
   listAgents(): Agent[] {
     return this.store.listAgents();
   }
 
-  async saveAgent(input: AgentInput): Promise<Agent> {
+  getAgent(id: string): Agent | null {
+    return this.store.getAgent(id);
+  }
+
+  saveAgent(input: AgentInput): Agent {
     const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Name is required");
-    if (!input.brief?.trim()) throw new Error("Brief is required");
+    if (!name) throw new Error("Give the agent a name.");
+    if (!input.brief?.trim()) throw new Error("Write a brief for the agent.");
     const engineId = input.engine?.trim() ?? "";
-    if (!engineId) throw new Error("Engine is required");
-    const row = this.store.readEngines().find((engine) => engine.id === engineId);
-    if (!row) throw new Error("Engine is missing");
-    const resolved = this.options.host.resolveBin(row.bin);
-    if (typeof resolved !== "string" || resolved.length === 0) throw new Error("Engine is not on PATH");
+    if (!engineId) throw new Error("Pick an engine.");
+    const existing = input.id ? this.store.getAgent(input.id) : null;
+    if (input.id && !existing) throw new Error("That agent no longer exists.");
+    if (!existing || existing.engine !== engineId) this.requireEngine(engineId);
     const places = normalizePlaces(input.places ?? []);
-    if (places.length === 0) throw new Error("Add an existing directory");
+    if (places.length === 0) throw new Error("Add at least one allowed folder.");
     for (const place of places) {
-      if (!this.existingDir(place)) throw new Error(`Directory is missing: ${place}`);
+      if (existing?.places.includes(place)) continue;
+      if (!isDirectory(place)) throw new Error(`This folder does not exist: ${place}`);
     }
     const now = this.now().toISOString();
-    const existing = input.id ? this.store.getAgent(input.id) : null;
-    const id =
-      existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "agents"), name, "");
     const agent: Agent = {
-      id,
+      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "agents"), name, ""),
       name,
       engine: engineId,
-      brief: input.brief,
+      brief: input.brief.trimEnd(),
       memoryFile: "memory.md",
       places,
-      skills: input.skills ? [...input.skills] : (existing?.skills ?? []),
-      allowRoutines:
-        typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
+      skills: input.skills ? input.skills.filter((id) => this.store.getSkill(id)) : (existing?.skills ?? []),
+      allowRoutines: typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
     this.store.writeAgent(agent);
+    this.emit("agents", "routines", "tasks");
     return agent;
   }
 
-  async deleteAgent(id: string, confirmName: string): Promise<void> {
+  deleteAgent(id: string, confirmName: string): void {
     const agent = this.store.getAgent(id);
-    if (!agent) throw new Error("Agent is missing");
-    if (confirmName !== agent.name) throw new Error("Type the agent name to delete it");
+    if (!agent) throw new Error("That agent no longer exists.");
+    if (confirmName.trim() !== agent.name) throw new Error("Type the agent's name exactly to delete it.");
     this.store.deleteAgent(id);
+    this.emit("agents", "routines", "tasks", "chats");
   }
 
-  async readMemory(agentId: string): Promise<string> {
-    if (!this.store.getAgent(agentId)) throw new Error("Agent is missing");
+  readMemory(agentId: string): string {
+    if (!this.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
     return this.store.readMemory(agentId);
   }
 
-  async writeMemory(agentId: string, text: string): Promise<void> {
-    if (!this.store.getAgent(agentId)) throw new Error("Agent is missing");
+  writeMemory(agentId: string, text: string): void {
+    if (!this.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
     this.store.writeMemory(agentId, text);
+    this.emit("agents");
   }
+
+  // ---------------------------------------------------------------- skills
 
   listSkills(): Skill[] {
     return this.store.listSkills();
   }
 
-  async saveSkill(input: SkillInput): Promise<Skill> {
+  saveSkill(input: SkillInput): Skill {
     const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Name is required");
+    if (!name) throw new Error("Give the skill a name.");
     const existing = input.id ? this.store.getSkill(input.id) : null;
-    const id = existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "skills"), name, "");
     const skill: Skill = {
-      id,
+      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "skills"), name, ""),
       name,
-      description: input.description ?? existing?.description ?? "",
+      description: (input.description ?? existing?.description ?? "").trim(),
       body: input.body ?? existing?.body ?? "",
     };
     this.store.writeSkill(skill);
+    this.emit("skills");
     return skill;
   }
 
-  async deleteSkill(id: string): Promise<void> {
+  deleteSkill(id: string): void {
     this.store.deleteSkill(id);
+    this.setSkillAgents(id, []);
+    this.emit("skills", "agents");
+  }
+
+  setSkillAgents(skillId: string, agentIds: string[]): void {
     const now = this.now().toISOString();
     for (const agent of this.store.listAgents()) {
-      if (!agent.skills.includes(id)) continue;
-      this.store.writeAgent({
-        ...agent,
-        skills: agent.skills.filter((skillId) => skillId !== id),
-        updatedAt: now,
-      });
+      const has = agent.skills.includes(skillId);
+      const want = agentIds.includes(agent.id);
+      if (has === want) continue;
+      const skills = want ? [...agent.skills, skillId] : agent.skills.filter((id) => id !== skillId);
+      this.store.writeAgent({ ...agent, skills, updatedAt: now });
     }
+    this.emit("agents", "skills");
   }
 
-  listRoutines(): RoutineListItem[] {
-    return this.store.listRoutines().map((routine) => ({
-      ...routine,
-      issues: this.routineIssues(routine),
-      stillRunning: this.routineStillRunning(routine.id),
-    }));
+  // ---------------------------------------------------------------- routines
+
+  listRoutines(): RoutineView[] {
+    const now = this.now();
+    return this.store.listRoutines().map((routine) => {
+      const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
+      const last = this.store.queryRuns({ routineId: routine.id, limit: 1 })[0] ?? null;
+      return {
+        ...routine,
+        agentName: agent?.name ?? null,
+        issues: this.routineIssues(routine, agent),
+        stillRunning: this.routineStillRunning(routine.id),
+        description: describeSchedule(routine.schedule),
+        nextFires: routine.enabled ? nextFireTimes(routine.schedule, now, 3).map((date) => date.toISOString()) : [],
+        lastRun: last ? this.view(last) : null,
+      };
+    });
   }
 
-  async saveRoutine(input: RoutineInput): Promise<Routine> {
+  previewSchedule(schedule: Schedule): SchedulePreview {
+    const valid = isScheduleValid(schedule);
+    return {
+      valid,
+      description: describeSchedule(schedule),
+      next: valid ? nextFireTimes(schedule, this.now(), 3).map((date) => date.toISOString()) : [],
+    };
+  }
+
+  saveRoutine(input: RoutineInput): Routine {
     const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Name is required");
-    if (!input.agentId?.trim()) throw new Error("Agent is required");
-    if (!isScheduleValid(input.schedule)) throw new Error("Schedule is not valid");
+    if (!name) throw new Error("Give the routine a name.");
+    if (!input.agentId?.trim() || !this.store.getAgent(input.agentId)) throw new Error("Pick an agent for the routine.");
+    const schedule: Schedule =
+      input.schedule?.kind === "cron"
+        ? { kind: "cron", expr: input.schedule.expr.trim().replace(/\s+/g, " ") }
+        : { kind: "every", minutes: Math.round(Number(input.schedule?.minutes)) };
+    if (!isScheduleValid(schedule)) {
+      throw new Error(schedule.kind === "cron" ? "That cron expression is not valid (five fields, local time)." : "Intervals must be at least 5 minutes.");
+    }
+    if (!input.prompt?.trim()) throw new Error("Write the routine's prompt.");
     const existing = input.id ? this.store.getRoutine(input.id) : null;
-    const id =
-      existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "routines"), name, ".yaml");
     const routine: Routine = {
-      id,
+      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "routines"), name, ".yaml"),
       name,
       agentId: input.agentId,
       enabled: typeof input.enabled === "boolean" ? input.enabled : (existing?.enabled ?? true),
-      schedule: input.schedule,
-      prompt: input.prompt ?? "",
+      schedule,
+      prompt: input.prompt.trimEnd(),
       notify: typeof input.notify === "boolean" ? input.notify : (existing?.notify ?? true),
       lastFiredAt: existing?.lastFiredAt ?? null,
       lastMissedAt: existing?.lastMissedAt ?? null,
     };
+    // A new or rescheduled routine starts counting from now, not from a slot in the past.
+    const scheduleChanged = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(schedule);
+    if (scheduleChanged) {
+      routine.lastFiredAt = this.now().toISOString();
+      routine.lastMissedAt = null;
+    }
     this.store.writeRoutine(routine);
+    this.emit("routines");
     return routine;
   }
 
-  async deleteRoutine(id: string): Promise<void> {
+  deleteRoutine(id: string): void {
     this.store.deleteRoutine(id);
+    this.emit("routines");
   }
 
-  async setRoutineEnabled(id: string, enabled: boolean): Promise<Routine> {
+  setRoutineEnabled(id: string, enabled: boolean): Routine {
     const routine = this.store.getRoutine(id);
-    if (!routine) throw new Error("Routine is missing");
-    const next = { ...routine, enabled };
+    if (!routine) throw new Error("That routine no longer exists.");
+    // Resuming does not replay the slots that passed while it was paused.
+    const next = { ...routine, enabled, ...(enabled && !routine.enabled ? { lastFiredAt: this.now().toISOString() } : {}) };
     this.store.writeRoutine(next);
+    this.emit("routines");
     return next;
   }
 
-  previewRoutine(schedule: Schedule, count = 3): string[] {
-    return nextFireTimes(schedule, this.now(), count).map((date) => date.toISOString());
-  }
-
-  async runRoutineNow(id: string): Promise<SendResult> {
+  async runRoutineNow(id: string, size: TermSize = {}): Promise<Launched> {
+    await this.settled;
     const routine = this.store.getRoutine(id);
-    if (!routine) return { ok: false, reason: "missing-routine" };
+    if (!routine) throw new Error("That routine no longer exists.");
     const agent = this.store.getAgent(routine.agentId);
-    if (!agent) return { ok: false, reason: "missing-agent" };
+    if (!agent) throw new Error("The routine's agent no longer exists.");
     const engine = this.resolveEngine(agent.engine);
     const decision = decideRunNow({
       allowRoutines: agent.allowRoutines,
       engineAvailable: Boolean(engine),
       previousStillRunning: this.routineStillRunning(routine.id),
     });
-    if (!decision.ok) return { ok: false, reason: decision.reason };
-    if (!engine) return { ok: false, reason: "engine-missing" };
-    const cwd = this.firstPlace(agent.places);
-    if (!cwd) return { ok: false, reason: "missing-place" };
-    const lastFiredAt = routine.lastFiredAt;
-    const chat = this.createChat({ title: routine.name, agentId: agent.id, engine: agent.engine, cwd });
-    const launched = await this.launch({
-      origin: "routine",
-      engineId: agent.engine,
-      binPath: engine.binPath,
-      args: engine.row.args,
-      cwd,
-      prompt: routine.prompt,
-      preamble: this.preambleFor(agent, routine.prompt),
-      slug: routine.id,
-      agentId: agent.id,
-      routineId: routine.id,
-      taskId: null,
-      chatId: chat.id,
-    });
-    const current = this.store.getRoutine(routine.id);
-    if (current && current.lastFiredAt !== lastFiredAt) {
-      this.store.writeRoutine({ ...current, lastFiredAt });
+    if (!decision.ok) {
+      throw new Error(
+        decision.reason === "disallowed"
+          ? `${agent.name} does not allow routines. Turn it on in the agent's settings.`
+          : decision.reason === "engine-missing"
+            ? this.engineMissingText(agent.engine)
+            : "The previous run of this routine is still going.",
+      );
     }
-    return { ok: true, startedNew: false, chatId: chat.id, runId: launched.meta.id, ptyId: launched.ptyId };
+    return this.launchRoutine(routine, agent, size);
   }
 
   async tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision }>> {
+    await this.settled;
     const results: Array<{ routineId: string; decision: TickDecision }> = [];
     for (const routine of this.store.listRoutines()) {
       const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
@@ -328,467 +561,604 @@ export class TeamService {
       });
       results.push({ routineId: routine.id, decision });
       if (decision.action === "miss") {
-        const current = this.store.getRoutine(routine.id) ?? routine;
-        this.store.writeRoutine({ ...current, lastMissedAt: decision.scheduledAt });
-      } else if (decision.action === "fire") {
-        await this.fireRoutine(routine, decision.scheduledAt);
+        if (routine.lastMissedAt !== decision.scheduledAt) {
+          this.store.writeRoutine({ ...routine, lastMissedAt: decision.scheduledAt, lastFiredAt: decision.scheduledAt });
+          this.emit("routines");
+        }
+      } else if (decision.action === "fire" && agent) {
+        // Consume the slot first so a failed start never hot-loops on every tick.
+        this.store.writeRoutine({ ...routine, lastFiredAt: decision.scheduledAt });
+        try {
+          await this.launchRoutine(routine, agent, {});
+        } catch {
+          /* the failed run is recorded in the run index */
+        }
+        this.emit("routines");
       }
     }
-    this.sweep();
     return results;
   }
 
-  listTasks(): Task[] {
-    return this.store.listTasks();
+  private async launchRoutine(routine: Routine, agent: Agent, size: TermSize): Promise<Launched> {
+    const cwd = this.firstPlace(agent.places);
+    if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
+    const engine = this.requireEngine(agent.engine);
+    return this.launch({
+      origin: "routine",
+      title: `${agent.name} · ${routine.name}`,
+      engine,
+      cwd,
+      prompt: routine.prompt,
+      promptText: this.preambleFor(agent, routine.prompt),
+      agentId: agent.id,
+      routineId: routine.id,
+      ...size,
+    });
   }
 
-  async saveTask(input: TaskInput): Promise<Task> {
-    const title = input.title?.trim() ?? "";
-    if (!title) throw new Error("Title is required");
-    if (input.id) {
-      const existing = this.store.getTask(input.id);
-      if (existing) {
-        const next: Task = {
-          ...existing,
-          title: input.title,
-          body: input.body === undefined ? existing.body : input.body,
-          agentId: input.agentId === undefined ? existing.agentId : input.agentId,
-          workspaceId: input.workspaceId === undefined ? existing.workspaceId : input.workspaceId,
-        };
-        this.store.writeTask(next);
-        return next;
-      }
+  private routineStillRunning(routineId: string): boolean {
+    for (const session of this.live.values()) {
+      if (!session.runId) continue;
+      const run = this.store.getRun(session.runId);
+      if (run?.routineId === routineId) return true;
     }
-    const task = createTask({
-      title: input.title,
-      body: input.body,
-      agentId: input.agentId,
-      workspaceId: input.workspaceId,
-    });
-    this.store.writeTask(task);
-    return task;
+    return false;
   }
 
-  async assignTask(taskId: string, agentId: string, workspaceId: string): Promise<Task> {
-    const task = this.store.getTask(taskId);
-    if (!task) throw new Error("Task is missing");
-    const next = assignTask(task, agentId, workspaceId);
-    this.store.writeTask(next);
-    return next;
+  private routineIssues(routine: Routine, agent: Agent | null): string[] {
+    if (!agent) return ["The agent for this routine is gone."];
+    const issues: string[] = [];
+    if (!agent.allowRoutines) issues.push(`${agent.name} does not allow routines.`);
+    if (!this.resolveEngine(agent.engine)) issues.push(this.engineMissingText(agent.engine));
+    if (!this.firstPlace(agent.places)) issues.push("None of the agent's allowed folders exist.");
+    if (!isScheduleValid(routine.schedule)) issues.push("The schedule is not valid.");
+    return issues;
   }
 
-  assign(taskId: string, agentId: string, workspaceId: string): Promise<Task> {
-    return this.assignTask(taskId, agentId, workspaceId);
+  private engineMissingText(engineId: string): string {
+    const row = this.store.readEngineRows().find((item) => item.id === engineId);
+    return row ? `${row.label} (${row.bin}) is not on PATH.` : `The engine "${engineId}" is not configured.`;
   }
 
-  async executeTask(taskId: string): Promise<SendResult & { task?: Task }> {
-    const task = this.store.getTask(taskId);
-    if (!task) return { ok: false, reason: "missing-task" };
-    if (task.status === "running") return { ok: false, reason: "still-running" };
+  // ---------------------------------------------------------------- tasks
+
+  listTasks(): TaskView[] {
+    return this.store.listTasks().map((task) => this.taskView(task));
+  }
+
+  private taskView(task: Task): TaskView {
+    const lastId = task.runIds[task.runIds.length - 1];
+    const last = lastId ? this.store.getRun(lastId) : null;
+    return { ...task, lastRun: last ? this.view(last) : null, blocker: this.taskBlocker(task) };
+  }
+
+  private taskBlocker(task: Task): TaskView["blocker"] {
     const agent = task.agentId ? this.store.getAgent(task.agentId) : null;
-    const workspace = task.workspaceId
-      ? (this.store.listWorkspaces().find((item) => item.id === task.workspaceId) ?? null)
-      : null;
-    if (!workspace) return { ok: false, reason: "missing-workspace" };
+    const workspace = this.workspaceById(task.workspaceId);
     const decision = requestExecute(task, {
-      workspacePath: workspace.path,
-      agentPlaces: agent?.places ?? [],
       hasAgent: Boolean(agent),
+      workspacePath: workspace?.path ?? "",
+      agentPlaces: agent?.places ?? [],
     });
-    if (!decision.ok) return { ok: false, reason: decision.reason };
-    const engine = agent ? this.resolveEngine(agent.engine) : null;
-    if (!agent || !engine) return { ok: false, reason: "engine-missing" };
+    if (!decision.ok) return decision.reason;
+    if (agent && !this.resolveEngine(agent.engine)) return "engine-missing";
+    return null;
+  }
+
+  saveTask(input: TaskInput): TaskView {
+    const title = input.title?.trim() ?? "";
+    if (!title) throw new Error("Give the task a title.");
+    const now = this.now();
+    const existing = input.id ? this.store.getTask(input.id) : null;
+    const task: Task = existing
+      ? {
+          ...existing,
+          title,
+          body: input.body ?? existing.body,
+          agentId: input.agentId === undefined ? existing.agentId : input.agentId || null,
+          workspaceId: input.workspaceId === undefined ? existing.workspaceId : input.workspaceId || null,
+          updatedAt: now.toISOString(),
+        }
+      : createTask({ title, body: input.body, agentId: input.agentId || null, workspaceId: input.workspaceId || null, now });
+    this.store.writeTask(task);
+    this.emit("tasks");
+    return this.taskView(task);
+  }
+
+  async deleteTask(id: string): Promise<void> {
+    const task = this.store.getTask(id);
+    if (!task) return;
+    if (task.status === "running") await this.stopTask(id);
+    this.store.deleteTask(id);
+    this.emit("tasks");
+  }
+
+  async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
+    const task = this.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
+    if (task.status === "running" && this.taskLive(task)) throw new Error("This task is already running.");
+    const blocker = this.taskBlocker(task);
+    if (blocker) throw new Error(BLOCKER_TEXT[blocker]);
+    const agent = this.store.getAgent(task.agentId!)!;
+    const workspace = this.workspaceById(task.workspaceId)!;
+    const engine = this.requireEngine(agent.engine);
+    const prompt = taskPrompt(task.title, task.body);
+    const previous = task.runIds[task.runIds.length - 1] ? this.store.getRun(task.runIds[task.runIds.length - 1]) : null;
+    const resume = continueSession ? this.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
+    const canContinue = resume.native;
+    const prior = continueSession && previous && !canContinue ? this.transcriptPath(previous) : null;
     const launched = await this.launch({
       origin: "task",
-      engineId: agent.engine,
-      binPath: engine.binPath,
-      args: engine.row.args,
+      title: task.title,
+      engine,
       cwd: workspace.path,
-      prompt: task.body,
-      preamble: this.preambleFor(agent, task.body),
-      slug: task.id,
+      prompt,
+      promptText: canContinue ? null : this.preambleFor(agent, prompt, prior),
+      continueSession: canContinue,
+      resumeArgs: resume.resumeArgs,
       agentId: agent.id,
-      routineId: null,
       taskId: task.id,
-      chatId: null,
+      workspaceId: workspace.id,
+      continuedFrom: continueSession && previous ? previous.id : null,
+      ...size,
     });
-    const next: Task = { ...decision.task, runIds: [...task.runIds, launched.meta.id] };
-    this.store.writeTask(next);
-    return { ok: true, task: next, runId: launched.meta.id, ptyId: launched.ptyId, chatId: undefined };
+    const current = this.store.getTask(id) ?? task;
+    this.store.writeTask({
+      ...current,
+      status: "running",
+      runIds: [...current.runIds, launched.runId],
+      updatedAt: this.now().toISOString(),
+    });
+    this.emit("tasks");
+    return launched;
   }
 
-  async stopTask(taskId: string): Promise<Task> {
-    const task = this.store.getTask(taskId);
-    if (!task) throw new Error("Task is missing");
+  async stopTask(id: string): Promise<TaskView> {
+    const task = this.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
     const runId = task.runIds[task.runIds.length - 1];
-    if (runId) {
-      const run = this.store.getRun(runId);
-      if (run?.dir) {
-        const stopped = markStopRequested(run.dir, this.now());
-        if (stopped) this.store.upsertRun(stopped);
-      }
-      const ptyId = this.ptyByRun.get(runId);
-      if (ptyId) this.options.host.killPty(ptyId);
-    }
-    const next = markStopped(task);
+    if (runId) await this.stopRun(runId);
+    const next = { ...markStopped(this.store.getTask(id) ?? task), updatedAt: this.now().toISOString() };
     this.store.writeTask(next);
-    return next;
+    this.emit("tasks");
+    return this.taskView(next);
   }
 
-  async setTaskStatus(taskId: string, status: TaskStatus): Promise<Task> {
-    const task = this.store.getTask(taskId);
-    if (!task) throw new Error("Task is missing");
-    const next = { ...task, status };
+  setTaskStatus(id: string, status: TaskStatus): TaskView {
+    const task = this.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
+    if (status === "running") throw new Error("Use Execute to run a task.");
+    if (task.status === "running" && this.taskLive(task)) throw new Error("Stop the task before moving it.");
+    const next = { ...task, status, updatedAt: this.now().toISOString() };
     this.store.writeTask(next);
-    return next;
+    this.emit("tasks");
+    return this.taskView(next);
   }
 
-  listChats(): ChatRecord[] {
-    return this.store.listChats();
+  private taskLive(task: Task): boolean {
+    const runId = task.runIds[task.runIds.length - 1];
+    return Boolean(runId && this.ptyByRun.has(runId));
   }
 
-  async startAgentChat(agentId: string): Promise<ChatRecord> {
-    const agent = this.store.getAgent(agentId);
-    if (!agent) throw new Error("Agent is missing");
-    const cwd = this.firstPlace(agent.places);
-    if (!cwd) throw new Error("Directory is missing");
-    return this.createChat({ title: "New chat", agentId: agent.id, engine: agent.engine, cwd });
+  // ---------------------------------------------------------------- chats
+
+  listChats(filter: { agentId?: string | null } = {}): ChatView[] {
+    return this.store
+      .listChats()
+      .filter((chat) => (filter.agentId === undefined ? true : chat.agentId === filter.agentId))
+      .map((chat) => this.chatView(chat));
   }
 
-  async sendAgentChat(agentId: string, chatId: string, text: string): Promise<SendResult> {
-    if (!text.trim()) return { ok: false, reason: "empty" };
-    const agent = this.store.getAgent(agentId);
-    if (!agent) return { ok: false, reason: "missing-agent" };
-    const chat = this.store.getChat(chatId);
-    if (!chat || chat.agentId !== agentId) return { ok: false, reason: "missing-chat" };
-    if (chat.ptyId && this.options.host.isPtyAlive(chat.ptyId)) {
-      this.options.host.writePty(chat.ptyId, withNewline(text));
-      return { ok: true, startedNew: false, chatId: chat.id, runId: chat.runId, ptyId: chat.ptyId };
-    }
-    if (chat.runId || chat.ptyId) {
-      const fresh = await this.startAgentChat(agentId);
-      const started = await this.beginAgentRun(agent, fresh, text);
-      if (!started.ok) return started;
-      return { ...started, startedNew: true, message: "That session ended. This is a new chat." };
-    }
-    return this.beginAgentRun(agent, chat, text);
+  private chatView(chat: ChatRecord): ChatView {
+    const lastId = chat.runIds[chat.runIds.length - 1];
+    const last = lastId ? this.store.getRun(lastId) : null;
+    const ptyId = lastId ? (this.ptyByRun.get(lastId) ?? null) : null;
+    return { ...chat, live: Boolean(ptyId), ptyId, lastRun: last ? this.view(last) : null };
   }
 
-  async startChat(engineId: string): Promise<ChatRecord> {
-    const engine = this.resolveEngine(engineId);
-    if (!engine) throw new Error("Engine is not on PATH");
-    const id = this.uniqueChatId("chat");
-    const cwd = path.join(this.options.dataRoot, "scratch", id);
-    fs.mkdirSync(cwd, { recursive: true });
+  createChat(input: { agentId?: string | null; engine?: string }): ChatView {
     const now = this.now().toISOString();
+    if (input.agentId) {
+      const agent = this.store.getAgent(input.agentId);
+      if (!agent) throw new Error("That agent no longer exists.");
+      const cwd = this.firstPlace(agent.places);
+      if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
+      const chat: ChatRecord = {
+        id: this.uniqueChatId(`${agent.id}-chat`),
+        title: DEFAULT_CHAT_TITLE,
+        agentId: agent.id,
+        engine: agent.engine,
+        cwd,
+        runIds: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.store.writeChat(chat);
+      this.emit("chats");
+      return this.chatView(chat);
+    }
+    const engineId = input.engine?.trim() || this.store.readSettings().defaultEngine;
+    this.requireEngine(engineId);
+    const id = this.uniqueChatId("chat");
     const chat: ChatRecord = {
       id,
-      title: "New chat",
+      title: DEFAULT_CHAT_TITLE,
       agentId: null,
       engine: engineId,
-      cwd,
-      runId: null,
-      ptyId: null,
+      cwd: path.join(this.options.dataRoot, "scratch", id),
+      runIds: [],
       createdAt: now,
       updatedAt: now,
     };
     this.store.writeChat(chat);
-    return chat;
+    this.emit("chats");
+    return this.chatView(chat);
   }
 
-  async renameChat(chatId: string, title: string): Promise<ChatRecord> {
-    const chat = this.store.getChat(chatId);
-    if (!chat) throw new Error("Chat is missing");
+  renameChat(id: string, title: string): ChatView {
+    const chat = this.store.getChat(id);
+    if (!chat) throw new Error("That chat no longer exists.");
     const next = { ...chat, title: title.trim() || chat.title, updatedAt: this.now().toISOString() };
     this.store.writeChat(next);
-    return next;
+    this.emit("chats");
+    return this.chatView(next);
   }
 
-  async deleteChat(chatId: string): Promise<void> {
-    const chat = this.store.getChat(chatId);
+  setChatEngine(id: string, engineId: string): ChatView {
+    const chat = this.store.getChat(id);
+    if (!chat) throw new Error("That chat no longer exists.");
+    if (chat.agentId) throw new Error("An agent chat uses the agent's engine.");
+    this.requireEngine(engineId);
+    const next = { ...chat, engine: engineId, updatedAt: this.now().toISOString() };
+    this.store.writeChat(next);
+    this.emit("chats");
+    return this.chatView(next);
+  }
+
+  async deleteChat(id: string): Promise<void> {
+    const chat = this.store.getChat(id);
     if (!chat) return;
+    for (const runId of chat.runIds) {
+      const ptyId = this.ptyByRun.get(runId);
+      if (!ptyId) continue;
+      const exited = this.waitForExit(ptyId, 6000);
+      await this.stopRun(runId);
+      await exited;
+    }
     const scratchRoot = path.join(this.options.dataRoot, "scratch");
-    if (chat.cwd && isPathInside(scratchRoot, chat.cwd)) {
+    if (!chat.agentId && chat.cwd && isPathInside(scratchRoot, chat.cwd) && path.resolve(chat.cwd) !== path.resolve(scratchRoot)) {
       fs.rmSync(chat.cwd, { recursive: true, force: true });
     }
-    for (const run of this.store.listRuns()) {
-      if (run.chatId !== chatId || !run.dir) continue;
-      fs.rmSync(path.join(run.dir, "scrollback.txt"), { force: true });
+    for (const runId of chat.runIds) {
+      const run = this.store.getRun(runId);
+      if (!run) continue;
+      this.store.deleteRunFile(run, "scrollback");
+      this.store.deleteRunFile(run, "screen");
+      this.store.deleteRunFile(run, "transcript");
     }
-    if (chat.ptyId) this.options.host.killPty(chat.ptyId);
-    this.store.deleteChat(chatId);
+    this.store.deleteChat(id);
+    this.emit("chats", "runs");
   }
 
-  async sendChat(chatId: string, text: string): Promise<SendResult> {
-    if (!text.trim()) return { ok: false, reason: "empty" };
-    const chat = this.store.getChat(chatId);
-    if (!chat || chat.agentId) return { ok: false, reason: "missing-chat" };
-    if (chat.ptyId && this.options.host.isPtyAlive(chat.ptyId)) {
-      this.options.host.writePty(chat.ptyId, withNewline(text));
-      return { ok: true, startedNew: false, chatId: chat.id, runId: chat.runId, ptyId: chat.ptyId };
+  /**
+   * Send text to a chat. A live session gets it pasted in; an empty chat starts the engine with it;
+   * an ended chat continues the engine's session and pastes the text once it is ready.
+   */
+  async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
+    if (!text.trim()) throw new Error("Type something to send.");
+    await this.settled;
+    let chat = this.store.getChat(id);
+    if (!chat) throw new Error("That chat no longer exists.");
+    if (chat.title === DEFAULT_CHAT_TITLE) {
+      chat = { ...chat, title: titleFromPrompt(text) };
+      this.store.writeChat(chat);
     }
-    if (chat.runId || chat.ptyId) {
-      const fresh = await this.startChat(chat.engine);
-      fresh.title = chat.title;
-      this.store.writeChat(fresh);
-      const started = await this.beginStandaloneRun(fresh, text);
-      if (!started.ok) return started;
-      return { ...started, startedNew: true, message: "That session ended. This is a new chat." };
+    const lastId = chat.runIds[chat.runIds.length - 1];
+    const livePty = lastId ? this.ptyByRun.get(lastId) : undefined;
+    if (lastId && livePty) {
+      await this.options.host.send(livePty, text);
+      this.store.writeChat({ ...chat, updatedAt: this.now().toISOString() });
+      this.emit("chats");
+      return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
     }
-    return this.beginStandaloneRun(chat, text);
+    if (!lastId) {
+      const launched = await this.startChatRun(chat, { prompt: text, continueSession: false, size });
+      return { ...launched, chatId: chat.id, started: true, note: null };
+    }
+    const launched = await this.startChatRun(chat, { prompt: text, continueSession: true, size });
+    return { ...launched, chatId: chat.id, started: true, note: "The last session had ended, so VibeForge picked it up again." };
   }
 
-  listEngines(): Array<EngineRow & { available: boolean }> {
-    return withAvailability(this.store.readEngines(), (bin) => this.options.host.resolveBin(bin));
+  /** Reopen the engine's latest session for this chat, with no new prompt. */
+  async continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
+    const chat = this.store.getChat(id);
+    if (!chat) throw new Error("That chat no longer exists.");
+    const lastId = chat.runIds[chat.runIds.length - 1];
+    const livePty = lastId ? this.ptyByRun.get(lastId) : undefined;
+    if (lastId && livePty) return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
+    const launched = await this.startChatRun(chat, { prompt: null, continueSession: Boolean(lastId), size });
+    return { ...launched, chatId: chat.id, started: true, note: null };
   }
 
-  listWorkspaces(): Workspace[] {
-    return this.store.listWorkspaces();
+  async stopChat(id: string): Promise<void> {
+    const chat = this.store.getChat(id);
+    const lastId = chat?.runIds[chat.runIds.length - 1];
+    if (lastId) await this.stopRun(lastId);
   }
 
-  listRuns(): Array<RunMeta & { ptyId: string | null }> {
-    return this.store.listRuns().map((run) => ({ ...run, ptyId: this.ptyByRun.get(run.id) ?? null }));
-  }
-
-  listInboxRuns(now: Date = this.now()): RunMeta[] {
-    const cutoff = now.getTime() - TWO_DAYS_MS;
-    return this.store.listRuns().filter((run) => {
-      if (run.status !== "exited" && run.status !== "stopped") return false;
-      if (run.openedAt) return false;
-      const started = Date.parse(run.startedAt);
-      return !Number.isNaN(started) && started >= cutoff;
+  private async startChatRun(
+    chat: ChatRecord,
+    opts: { prompt: string | null; continueSession: boolean; size: TermSize },
+  ): Promise<Launched> {
+    const agent = chat.agentId ? this.store.getAgent(chat.agentId) : null;
+    if (chat.agentId && !agent) throw new Error("This chat's agent no longer exists.");
+    const engine = this.requireEngine(agent ? agent.engine : chat.engine);
+    const previous = opts.continueSession ? this.store.getRun(chat.runIds[chat.runIds.length - 1] ?? "") : null;
+    const resume = this.resumePlan(engine.row, previous);
+    const nativeContinue = resume.native;
+    const prior = previous && !nativeContinue ? this.transcriptPath(previous) : null;
+    let cwd = chat.cwd;
+    if (agent) cwd = isDirectory(chat.cwd) && agent.places.some((place) => isPathInside(place, chat.cwd)) ? chat.cwd : (this.firstPlace(agent.places) ?? "");
+    if (!cwd) throw new Error("The chat's folder is gone.");
+    if (!agent) fs.mkdirSync(cwd, { recursive: true });
+    let promptText: string | null = null;
+    let pasteAfterContinue: string | null = null;
+    if (nativeContinue) {
+      pasteAfterContinue = opts.prompt;
+    } else if (agent) {
+      const fallback = previous ? "Continue where the previous attempt stopped." : "Read this, then wait for my first instruction.";
+      promptText = this.preambleFor(agent, opts.prompt ?? fallback, prior);
+    } else if (opts.prompt || prior) {
+      promptText = plainPrompt(opts.prompt ?? "Continue where we left off.", prior);
+    }
+    return this.launch({
+      origin: agent ? "agent-chat" : "chat",
+      title: agent ? `${agent.name} · ${chat.title}` : chat.title,
+      engine,
+      cwd,
+      prompt: opts.prompt ?? "",
+      promptText,
+      pasteAfter: pasteAfterContinue,
+      continueSession: nativeContinue,
+      resumeArgs: resume.resumeArgs,
+      agentId: agent?.id ?? null,
+      chatId: chat.id,
+      continuedFrom: previous?.id ?? null,
+      ...opts.size,
     });
   }
 
-  async getRun(runId: string): Promise<{
-    meta: RunMeta;
-    preamble: string;
-    scrollback: string;
-    git: string;
-    ptyId: string | null;
-  }> {
-    const meta = this.store.getRun(runId);
-    if (!meta) throw new Error("Run is missing");
-    const files =
-      meta.dir && fs.existsSync(path.join(meta.dir, "meta.json"))
-        ? readRun(meta.dir)
-        : { meta, preamble: "", scrollback: "", git: "" };
-    return { ...files, git: files.git ?? "", ptyId: this.ptyByRun.get(runId) ?? null };
+  private uniqueChatId(base: string): string {
+    const taken = new Set(this.store.listChats().map((chat) => chat.id));
+    const root = slugify(base, 40);
+    if (!taken.has(root)) return root;
+    let count = 2;
+    while (taken.has(`${root}-${count}`)) count += 1;
+    return `${root}-${count}`;
   }
 
-  async markRunOpened(runId: string): Promise<void> {
-    const run = this.store.getRun(runId);
-    if (!run) throw new Error("Run is missing");
-    this.store.upsertRun({ ...run, openedAt: this.now().toISOString() });
+  // ---------------------------------------------------------------- code mode
+
+  async startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
+    const workspace = this.workspaceById(opts.workspaceId);
+    const cwd = workspace?.path ?? opts.cwd ?? "";
+    if (!isDirectory(cwd)) throw new Error("That folder does not exist any more.");
+    const shell = this.store.readSettings().defaultShell || process.env.SHELL || "/bin/bash";
+    const spawned = await this.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: null, cols: opts.cols, rows: opts.rows });
+    this.live.set(spawned.ptyId, {
+      ptyId: spawned.ptyId,
+      runId: null,
+      kind: "shell",
+      title: path.basename(shell),
+      cwd,
+      pid: spawned.pid,
+      startedAt: this.now().toISOString(),
+      origin: null,
+      agentId: null,
+      chatId: null,
+      taskId: null,
+      workspaceId: workspace?.id ?? null,
+    });
+    this.emit("live");
+    return { ptyId: spawned.ptyId };
+  }
+
+  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
+    const workspace = this.workspaceById(opts.workspaceId);
+    if (!workspace) throw new Error("Open a workspace first.");
+    if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
+    const engine = this.requireEngine(opts.engineId);
+    const prompt = opts.prompt?.trim() ?? "";
+    const previous = opts.continueSession
+      ? (this.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
+      : null;
+    const resume = opts.continueSession ? this.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
+    return this.launch({
+      origin: "code",
+      title: `${engine.row.label} · ${workspace.name}`,
+      engine,
+      cwd: workspace.path,
+      prompt,
+      promptText: prompt || null,
+      continueSession: Boolean(opts.continueSession && (resume.resumeArgs || engine.row.continueArgs?.length)),
+      resumeArgs: resume.resumeArgs,
+      workspaceId: workspace.id,
+      continuedFrom: previous?.id ?? null,
+      cols: opts.cols,
+      rows: opts.rows,
+    });
+  }
+
+  // ---------------------------------------------------------------- runs
+
+  private view(run: RunMeta): RunView {
+    const ptyId = this.ptyByRun.get(run.id) ?? null;
+    return { ...run, live: Boolean(ptyId), ptyId };
+  }
+
+  listRuns(query: RunQuery = {}): RunView[] {
+    return this.store.queryRuns(query).map((run) => this.view(run));
+  }
+
+  inbox(now: Date = this.now()): RunView[] {
+    return this.listRuns({
+      status: ["exited", "stopped", "failed"],
+      unopened: true,
+      origin: REVIEW_ORIGINS,
+      since: new Date(now.getTime() - TWO_DAYS_MS).toISOString(),
+    });
+  }
+
+  getRun(id: string): RunBundle {
+    const run = this.store.getRun(id);
+    if (!run) throw new Error("That run no longer exists.");
+    const files: RunFiles = run.dir && isDirectory(run.dir)
+      ? readRunFiles(run.dir)
+      : { preamble: "", screen: "", scrollback: "", transcript: "", git: "" };
+    return { run: this.view(run), files };
+  }
+
+  markRunOpened(id: string, opened = true): void {
+    const run = this.store.getRun(id);
+    if (!run) return;
+    if (opened && (run.openedAt || run.status === "running")) return;
+    this.store.saveRun({ ...run, openedAt: opened ? this.now().toISOString() : null });
+    this.emit("runs");
+  }
+
+  markAllOpened(): void {
+    const now = this.now().toISOString();
+    for (const run of this.inbox()) this.store.saveRun({ ...run, openedAt: now });
+    this.emit("runs");
+  }
+
+  async stopRun(id: string): Promise<void> {
+    const run = this.store.getRun(id);
+    if (!run || run.status !== "running") return;
+    const ptyId = this.ptyByRun.get(id);
+    this.store.saveRun({ ...run, stopRequested: true });
+    if (ptyId) {
+      await this.options.host.kill(ptyId);
+      return;
+    }
+    await this.finishRun(run.id, { exitCode: null, signal: null, status: "stopped" });
+  }
+
+  /** Start the next attempt of a finished run, in the same place it belongs to. */
+  async continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+    const run = this.store.getRun(id);
+    if (!run) throw new Error("That run no longer exists.");
+    const livePty = this.ptyByRun.get(id);
+    if (livePty) return { runId: id, ptyId: livePty, chatId: run.chatId, taskId: run.taskId };
+    if (run.chatId && this.store.getChat(run.chatId)) {
+      const result = await this.continueChat(run.chatId, size);
+      return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
+    }
+    if (run.taskId && this.store.getTask(run.taskId)) {
+      const launched = await this.executeTask(run.taskId, size, true);
+      return { ...launched, chatId: null, taskId: run.taskId };
+    }
+    const engine = this.requireEngine(run.engine);
+    const resume = this.resumePlan(engine.row, run);
+    const nativeContinue = resume.native;
+    const agent = run.agentId ? this.store.getAgent(run.agentId) : null;
+    const prior = nativeContinue ? null : this.transcriptPath(run);
+    const followUp = "Continue where the previous attempt stopped.";
+    const launched = await this.launch({
+      origin: run.origin,
+      title: run.title,
+      engine,
+      cwd: run.cwd,
+      prompt: run.prompt,
+      promptText: nativeContinue ? null : agent ? this.preambleFor(agent, run.prompt || followUp, prior) : plainPrompt(run.prompt || followUp, prior),
+      continueSession: nativeContinue,
+      resumeArgs: resume.resumeArgs,
+      agentId: run.agentId,
+      routineId: run.routineId,
+      workspaceId: run.workspaceId,
+      continuedFrom: run.id,
+      ...size,
+    });
+    return { ...launched, chatId: null, taskId: null };
+  }
+
+  async runDiff(id: string): Promise<string> {
+    const run = this.store.getRun(id);
+    if (!run) throw new Error("That run no longer exists.");
+    return diffSince(run.cwd, run.gitStart);
+  }
+
+  /**
+   * How to pick a finished session back up with the same engine: its exact session id when the
+   * CLI printed one, the engine's continue flag otherwise, or not at all.
+   */
+  private resumePlan(row: EngineRow, previous: RunMeta | null): { native: boolean; resumeArgs: string[] | null } {
+    // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
+    if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
+    if (previous.dir) {
+      const resumeArgs = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
+      if (resumeArgs) return { native: true, resumeArgs };
+    }
+    return { native: Boolean(row.continueArgs?.length), resumeArgs: null };
+  }
+
+  private transcriptPath(run: RunMeta): string | null {
+    if (!run.dir) return null;
+    for (const file of [RUN_FILES.transcript, RUN_FILES.scrollback]) {
+      const full = path.join(run.dir, file);
+      try {
+        if (fs.statSync(full).size > 0) return full;
+      } catch {
+        /* try the next file */
+      }
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------- live sessions
+
+  listLive(): LiveSession[] {
+    return [...this.live.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   }
 
   liveCount(): number {
-    let count = 0;
-    for (const ptyId of this.ptyByRun.values()) {
-      if (this.options.host.isPtyAlive(ptyId)) count += 1;
-    }
-    return count;
+    return this.live.size;
   }
 
-  async notePtyExit(ptyId: string, _exitCode?: number | null): Promise<void> {
-    const runId = this.runByPty.get(ptyId);
-    if (!runId) return;
-    const run = this.store.getRun(runId);
-    if (!run) return;
-    if (run.status === "running") {
-      const ended: RunMeta = { ...run, status: "exited", endedAt: this.now().toISOString() };
-      this.store.upsertRun(ended);
+  /** Close a terminal. A run is stopped (and keeps its transcript); a shell just ends. */
+  async killPty(ptyId: string): Promise<void> {
+    const session = this.live.get(ptyId);
+    if (session?.runId) {
+      await this.stopRun(session.runId);
+      return;
     }
-    if (run.dir && !fs.existsSync(path.join(run.dir, "git.txt"))) {
-      let git = "not a git repo\n";
-      try {
-        git = await this.options.host.snapshotGit(run.cwd);
-      } catch {
-        git = "not a git repo\n";
-      }
-      if (!git.endsWith("\n")) git += "\n";
-      fs.writeFileSync(path.join(run.dir, "git.txt"), git);
-    }
-    this.sweep();
+    await this.options.host.kill(ptyId);
   }
 
-  sweep(): void {
-    for (const task of this.store.listTasks()) {
-      if (task.status !== "running") continue;
-      const runId = task.runIds[task.runIds.length - 1];
-      if (!runId) continue;
-      const run = this.store.getRun(runId);
-      if (!run) continue;
-      const status = syncTaskWithRun(task, run.status);
-      if (status !== task.status) this.store.writeTask({ ...task, status });
-    }
-    const routines = new Map(this.store.listRoutines().map((routine) => [routine.id, routine]));
-    const agents = new Map(this.store.listAgents().map((agent) => [agent.id, agent]));
-    for (const run of this.store.listRuns()) {
-      if (run.origin !== "routine") continue;
-      if (run.status !== "exited" && run.status !== "stopped") continue;
-      if (run.notifiedAt || !run.routineId) continue;
-      const routine = routines.get(run.routineId);
-      if (!routine?.notify) continue;
-      const agentName = (run.agentId && agents.get(run.agentId)?.name) || "Agent";
-      try {
-        this.options.host.notify(`${agentName}: ${routine.name}`, `${agentName} · ${routine.name} ${run.status}`);
-      } catch {
-        continue;
-      }
-      this.store.upsertRun({ ...run, notifiedAt: this.now().toISOString() });
-    }
+  isLive(ptyId: string): boolean {
+    return this.live.has(ptyId);
   }
 
-  private async fireRoutine(routine: Routine, scheduledAt: string): Promise<void> {
-    const agent = this.store.getAgent(routine.agentId);
-    const engine = agent ? this.resolveEngine(agent.engine) : null;
-    const cwd = agent ? this.firstPlace(agent.places) : null;
-    if (!agent || !engine || !cwd) return;
-    const chat = this.createChat({ title: routine.name, agentId: agent.id, engine: agent.engine, cwd });
-    try {
-      await this.launch({
-        origin: "routine",
-        engineId: agent.engine,
-        binPath: engine.binPath,
-        args: engine.row.args,
-        cwd,
-        prompt: routine.prompt,
-        preamble: this.preambleFor(agent, routine.prompt),
-        slug: routine.id,
-        agentId: agent.id,
-        routineId: routine.id,
-        taskId: null,
-        chatId: chat.id,
+  /** Resolves once the PTY has exited and its run is finished, or after the timeout. */
+  waitForExit(ptyId: string, timeoutMs: number): Promise<void> {
+    if (!this.live.has(ptyId)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      const list = this.exitWaiters.get(ptyId) ?? [];
+      list.push(() => {
+        clearTimeout(timer);
+        resolve();
       });
-    } catch {
-      // The slot was attempted. Consume it so a failed start does not hot-loop.
-    }
-    const current = this.store.getRoutine(routine.id) ?? routine;
-    this.store.writeRoutine({ ...current, lastFiredAt: scheduledAt });
-  }
-
-  private async beginAgentRun(agent: Agent, chat: ChatRecord, text: string): Promise<SendResult> {
-    const engine = this.resolveEngine(agent.engine);
-    if (!engine) return { ok: false, reason: "engine-missing" };
-    const cwd = this.existingDir(chat.cwd) ?? this.firstPlace(agent.places);
-    if (!cwd) return { ok: false, reason: "missing-place" };
-    const launched = await this.launch({
-      origin: "agent-chat",
-      engineId: agent.engine,
-      binPath: engine.binPath,
-      args: engine.row.args,
-      cwd,
-      prompt: text,
-      preamble: this.preambleFor(agent, text),
-      slug: chat.id,
-      agentId: agent.id,
-      routineId: null,
-      taskId: null,
-      chatId: chat.id,
+      this.exitWaiters.set(ptyId, list);
     });
-    return {
-      ok: true,
-      startedNew: false,
-      chatId: chat.id,
-      runId: launched.meta.id,
-      ptyId: launched.ptyId,
-    };
   }
 
-  private async beginStandaloneRun(chat: ChatRecord, text: string): Promise<SendResult> {
-    const engine = this.resolveEngine(chat.engine);
-    if (!engine) return { ok: false, reason: "engine-missing" };
-    fs.mkdirSync(chat.cwd, { recursive: true });
-    const launched = await this.launch({
-      origin: "chat",
-      engineId: chat.engine,
-      binPath: engine.binPath,
-      args: engine.row.args,
-      cwd: chat.cwd,
-      prompt: text,
-      preamble: buildStandalonePreamble(text),
-      slug: chat.id,
-      agentId: null,
-      routineId: null,
-      taskId: null,
-      chatId: chat.id,
-    });
-    return { ok: true, startedNew: false, chatId: chat.id, runId: launched.meta.id, ptyId: launched.ptyId };
-  }
+  // ---------------------------------------------------------------- launching
 
-  private async launch(input: {
-    origin: RunOrigin;
-    engineId: string;
-    binPath: string;
-    args: string[];
-    cwd: string;
-    prompt: string;
-    preamble: string;
-    slug: string;
-    agentId: string | null;
-    routineId: string | null;
-    taskId: string | null;
-    chatId: string | null;
-  }): Promise<{ meta: RunMeta; ptyId: string }> {
-    const startedAt = this.now().toISOString();
-    const preamble = withNewline(input.preamble);
-    const created = createRunFiles({
-      dataRoot: this.options.dataRoot,
-      slug: input.slug,
-      preamble,
-      meta: {
-        origin: input.origin,
-        agentId: input.agentId,
-        routineId: input.routineId,
-        taskId: input.taskId,
-        chatId: input.chatId,
-        engine: input.engineId,
-        cwd: input.cwd,
-        prompt: input.prompt,
-        startedAt,
-        endedAt: null,
-        status: "running",
-        openedAt: null,
-        notifiedAt: null,
-      },
-    });
-    this.store.upsertRun(created.meta);
-    try {
-      const spawned = await this.options.host.spawnPty({
-        cwd: input.cwd,
-        argv: [input.binPath, ...input.args],
-        runDir: created.dir,
-        initialInput: preamble,
-        runId: created.id,
-      });
-      this.ptyByRun.set(created.id, spawned.ptyId);
-      this.runByPty.set(spawned.ptyId, created.id);
-      if (input.chatId) {
-        const chat = this.store.getChat(input.chatId);
-        if (chat) {
-          this.store.writeChat({
-            ...chat,
-            runId: created.id,
-            ptyId: spawned.ptyId,
-            cwd: input.cwd,
-            updatedAt: startedAt,
-          });
-        }
-      }
-      return { meta: created.meta, ptyId: spawned.ptyId };
-    } catch (error) {
-      this.store.upsertRun({ ...created.meta, status: "failed", endedAt: this.now().toISOString() });
-      throw error;
-    }
-  }
-
-  private preambleFor(agent: Agent, prompt: string): string {
+  private preambleFor(agent: Agent, prompt: string, priorTranscript: string | null = null): string {
     const skills = agent.skills.flatMap((id) => {
-      const raw = this.store.readSkillRaw(id);
-      if (raw === null) return [];
       const skill = this.store.getSkill(id);
-      return [{ name: skill?.name ?? id, body: raw }];
+      return skill ? [{ name: skill.name, body: skill.body }] : [];
     });
     return buildPreamble({
       agentName: agent.name,
@@ -797,83 +1167,278 @@ export class TeamService {
       memory: this.store.readMemory(agent.id),
       skills,
       prompt,
+      priorTranscript,
     });
   }
 
-  private createChat(input: { title: string; agentId: string | null; engine: string; cwd: string }): ChatRecord {
-    const now = this.now().toISOString();
-    const chat: ChatRecord = {
-      id: this.uniqueChatId(input.title),
-      title: input.title,
-      agentId: input.agentId,
-      engine: input.engine,
-      cwd: input.cwd,
-      runId: null,
-      ptyId: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.store.writeChat(chat);
-    return chat;
-  }
-
-  private uniqueChatId(base: string): string {
-    const taken = new Set(this.store.listChats().map((chat) => chat.id));
-    const root = slugify(base);
-    if (!taken.has(root)) return root;
-    let count = 2;
-    while (taken.has(`${root}-${count}`)) count += 1;
-    return `${root}-${count}`;
-  }
-
-  private resolveEngine(engineId: string): { row: EngineRow; binPath: string } | null {
-    const row = this.store.readEngines().find((engine) => engine.id === engineId);
-    if (!row) return null;
-    const binPath = this.options.host.resolveBin(row.bin);
-    if (typeof binPath !== "string" || binPath.length === 0) return null;
-    return { row, binPath };
-  }
-
-  private existingDir(place: string): string | null {
+  private async launch(input: {
+    origin: RunOrigin;
+    title: string;
+    engine: { row: EngineRow; binPath: string };
+    cwd: string;
+    /** What the human asked for, kept for the record. */
+    prompt: string;
+    /** What reaches the CLI as its first message: a preamble, the plain prompt, or nothing. */
+    promptText: string | null;
+    /** Text pasted after a continued session loads. */
+    pasteAfter?: string | null;
+    continueSession?: boolean;
+    /** The exact session to reopen, read from the previous run's transcript. */
+    resumeArgs?: string[] | null;
+    agentId?: string | null;
+    routineId?: string | null;
+    taskId?: string | null;
+    chatId?: string | null;
+    workspaceId?: string | null;
+    continuedFrom?: string | null;
+    cols?: number;
+    rows?: number;
+  }): Promise<Launched> {
+    const started = this.now();
+    const { id, dir } = allocateRunDir(this.options.dataRoot, started, input.title);
+    const preamblePath = path.join(dir, RUN_FILES.preamble);
+    writeFileAtomic(preamblePath, input.promptText ?? "");
+    const plan = planLaunch(input.engine.row, input.engine.binPath, {
+      prompt: input.promptText,
+      continueSession: input.continueSession,
+      resumeArgs: input.resumeArgs,
+      promptFile: preamblePath,
+    });
+    const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
+    let gitStart: string | null = null;
     try {
-      const resolved = path.resolve(place);
-      return fs.statSync(resolved).isDirectory() ? resolved : null;
+      gitStart = await this.options.host.gitHead(input.cwd);
     } catch {
-      return null;
+      gitStart = null;
+    }
+    const meta: RunMeta = {
+      id,
+      origin: input.origin,
+      title: input.title,
+      agentId: input.agentId ?? null,
+      routineId: input.routineId ?? null,
+      taskId: input.taskId ?? null,
+      chatId: input.chatId ?? null,
+      workspaceId: input.workspaceId ?? null,
+      engine: input.engine.row.id,
+      argv: plan.argv.map((arg) => (input.promptText && arg.includes(input.promptText) ? "{prompt}" : arg)),
+      cwd: input.cwd,
+      prompt: input.prompt,
+      startedAt: started.toISOString(),
+      endedAt: null,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      stopRequested: false,
+      openedAt: null,
+      notifiedAt: null,
+      dir,
+      error: null,
+      changes: null,
+      gitStart,
+      continuedFrom: input.continuedFrom ?? null,
+    };
+    this.store.saveRun(meta);
+    let spawned: { ptyId: string; pid: number };
+    try {
+      spawned = await this.options.host.spawn({
+        cwd: input.cwd,
+        argv: plan.argv,
+        runDir: dir,
+        pasteInput,
+        cols: input.cols,
+        rows: input.rows,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
+      this.emit("runs");
+      throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
+    }
+    this.ptyByRun.set(id, spawned.ptyId);
+    this.live.set(spawned.ptyId, {
+      ptyId: spawned.ptyId,
+      runId: id,
+      kind: "run",
+      title: input.title,
+      cwd: input.cwd,
+      pid: spawned.pid,
+      startedAt: meta.startedAt,
+      origin: input.origin,
+      agentId: meta.agentId,
+      chatId: meta.chatId,
+      taskId: meta.taskId,
+      workspaceId: meta.workspaceId,
+    });
+    if (input.chatId) {
+      const chat = this.store.getChat(input.chatId);
+      if (chat) {
+        this.store.writeChat({ ...chat, runIds: [...chat.runIds, id], cwd: input.cwd, updatedAt: meta.startedAt });
+      }
+    }
+    this.emit("runs", "live", "chats", "routines", "tasks");
+    return { runId: id, ptyId: spawned.ptyId };
+  }
+
+  // ---------------------------------------------------------------- exits
+
+  async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
+    const session = this.live.get(ptyId);
+    this.live.delete(ptyId);
+    try {
+      if (!session?.runId) {
+        this.emit("live");
+        return;
+      }
+      this.ptyByRun.delete(session.runId);
+      const run = this.store.getRun(session.runId);
+      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited" });
+      this.finishing.add(done);
+      try {
+        await done;
+      } finally {
+        this.finishing.delete(done);
+      }
+    } finally {
+      const waiters = this.exitWaiters.get(ptyId) ?? [];
+      this.exitWaiters.delete(ptyId);
+      for (const wake of waiters) wake();
     }
   }
+
+  private async finishRun(
+    runId: string,
+    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped" },
+  ): Promise<void> {
+    const run = this.store.getRun(runId);
+    if (!run) return;
+    let git = "";
+    try {
+      git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
+    } catch {
+      git = "not a git repo\n";
+    }
+    if (run.dir && isDirectory(run.dir)) {
+      try {
+        writeFileAtomic(path.join(run.dir, RUN_FILES.git), git.endsWith("\n") ? git : `${git}\n`);
+      } catch {
+        /* the run folder can vanish if the human deletes it */
+      }
+    }
+    const latest = this.store.getRun(runId) ?? run;
+    const finished = this.store.saveRun({
+      ...latest,
+      status: latest.stopRequested ? "stopped" : outcome.status,
+      exitCode: outcome.exitCode,
+      signal: outcome.signal,
+      endedAt: this.now().toISOString(),
+      changes: summarizeSnapshot(git),
+    });
+    if (finished.taskId) {
+      const task = this.store.getTask(finished.taskId);
+      if (task && task.runIds[task.runIds.length - 1] === finished.id) {
+        const status = syncTaskWithRun(task, finished.status);
+        if (status !== task.status) this.store.writeTask({ ...task, status, updatedAt: this.now().toISOString() });
+      }
+    }
+    this.notifyFinished(finished);
+    this.emit("runs", "live", "tasks", "chats", "routines");
+  }
+
+  private notifyFinished(run: RunMeta): void {
+    if (run.notifiedAt) return;
+    if (run.origin !== "routine" && run.origin !== "task") return;
+    const settings = this.store.readSettings();
+    if (!settings.notify) return;
+    if (run.origin === "routine") {
+      const routine = run.routineId ? this.store.getRoutine(run.routineId) : null;
+      if (routine && !routine.notify) return;
+    }
+    const outcome =
+      run.status === "stopped"
+        ? "stopped"
+        : run.exitCode && run.exitCode !== 0
+          ? `exited with code ${run.exitCode}`
+          : "finished";
+    try {
+      this.options.host.notify({
+        title: run.title,
+        body: [outcome, run.changes].filter(Boolean).join(" · "),
+        runId: run.id,
+      });
+    } catch {
+      return;
+    }
+    this.store.saveRun({ ...run, notifiedAt: this.now().toISOString() });
+  }
+
+  private async settleOrphans(orphans: RunMeta[]): Promise<void> {
+    for (const run of orphans) {
+      const hasGit = run.dir ? fs.existsSync(path.join(run.dir, RUN_FILES.git)) : true;
+      let changes = run.changes;
+      if (!hasGit && run.cwd && run.dir && isDirectory(run.dir)) {
+        let git = "not a git repo\n";
+        try {
+          git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
+        } catch {
+          git = "not a git repo\n";
+        }
+        try {
+          writeFileAtomic(path.join(run.dir, RUN_FILES.git), git);
+        } catch {
+          /* the folder can disappear */
+        }
+        changes = summarizeSnapshot(git);
+      }
+      this.store.saveRun({
+        ...run,
+        status: "stopped",
+        endedAt: run.endedAt ?? this.now().toISOString(),
+        error: run.error ?? "VibeForge closed while this run was going.",
+        changes,
+      });
+      if (run.taskId) {
+        const task = this.store.getTask(run.taskId);
+        if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });
+      }
+    }
+    if (orphans.length) this.emit("runs", "tasks");
+  }
+
+  /** Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped". */
+  prepareShutdown(): void {
+    for (const session of this.live.values()) {
+      if (!session.runId) continue;
+      const run = this.store.getRun(session.runId);
+      if (run && run.status === "running" && !run.stopRequested) this.store.saveRun({ ...run, stopRequested: true });
+    }
+  }
+
+  /** Resolves when every exit already reported has finished writing its run. */
+  async whenIdle(): Promise<void> {
+    while (this.finishing.size) await Promise.allSettled([...this.finishing]);
+  }
+
+  /** Last step before quitting: anything the PTY host never reported is recorded as stopped now. */
+  shutdown(): string[] {
+    const ended = this.now().toISOString();
+    for (const session of this.live.values()) {
+      if (!session.runId) continue;
+      const run = this.store.getRun(session.runId);
+      if (!run || run.status !== "running") continue;
+      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit." });
+      if (run.taskId) {
+        const task = this.store.getTask(run.taskId);
+        if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });
+      }
+    }
+    return [...this.live.keys()];
+  }
+
+  // ---------------------------------------------------------------- helpers
 
   private firstPlace(places: readonly string[]): string | null {
-    for (const place of places) {
-      const dir = this.existingDir(place);
-      if (dir) return dir;
-    }
+    for (const place of places) if (isDirectory(place)) return path.resolve(place);
     return null;
   }
-
-  private routineStillRunning(routineId: string): boolean {
-    for (const run of this.store.listRuns()) {
-      if (run.routineId !== routineId || run.status !== "running") continue;
-      const ptyId = this.ptyByRun.get(run.id);
-      if (!ptyId || this.options.host.isPtyAlive(ptyId)) return true;
-    }
-    return false;
-  }
-
-  private routineIssues(routine: Routine): string[] {
-    const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
-    if (!agent) return ["Missing agent"];
-    const issues: string[] = [];
-    if (agent.allowRoutines === false) issues.push("Agent disallows routines");
-    const engine = this.resolveEngine(agent.engine);
-    if (!engine) issues.push("Engine is not on PATH");
-    if (agent.places.length === 0 || agent.places.some((place) => !this.existingDir(place))) {
-      issues.push("Allowed folder is missing");
-    }
-    return issues;
-  }
-}
-
-export function createTeamService(options: TeamServiceOptions): TeamService {
-  return new TeamService(options);
 }

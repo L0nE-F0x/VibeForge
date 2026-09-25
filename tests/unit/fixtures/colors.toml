@@ -1,0 +1,33 @@
+# Apex Forge, as Omarchy ships it in colors.toml
+mode = "dark"
+
+accent = "#FF6B35"
+selection = "#232326"
+muted = "#71717a"
+
+background = "#09090b"
+dark_background = "#0c0c0e"
+darker_background = "#050506"
+lighter_background = "#151518"
+
+foreground = "#ffffff"
+dark_foreground = "#71717a"
+light_foreground = "#a1a1aa"
+bright_foreground = "#ffffff"
+
+hyprland_active_border = "rgba(ff6b35ee) rgba(fca311ee) 45deg"
+
+red = "#FF4D6D"
+yellow = "#FCA311"
+orange = "#FF6B35"
+green = "#34d399"
+cyan = "#22d3ee"
+blue = "#38bdf8"
+magenta = "#7c3aed"
+
+bright_red = "#ff7a93"
+bright_yellow = "#fcbb00"
+bright_green = "#6ee7b7"
+bright_cyan = "#67e8f9"
+bright_blue = "#7dd3fc"
+bright_magenta = "#a78bfa"

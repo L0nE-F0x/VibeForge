@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Open the built VibeForge window. The app launcher entry runs this.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
+export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
+
+fail() {
+  echo "VibeForge: $1" >&2
+  command -v notify-send >/dev/null 2>&1 && notify-send -a VibeForge "VibeForge can't start" "$1" || true
+  exit 1
+}
+
+[[ -x "$ROOT/node_modules/electron/dist/electron" ]] || fail "Electron is missing. In $ROOT run: npm install"
+[[ -f "$ROOT/dist/index.html" && -f "$ROOT/dist-electron/main.js" ]] || fail "The app is not built. In $ROOT run: npm run build"
+command -v node >/dev/null 2>&1 || fail "node is not on PATH; the terminal host needs it."
+
+cd "$ROOT"
+exec "$ROOT/node_modules/electron/dist/electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"

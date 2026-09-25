@@ -1,7 +1,9 @@
 import { CronExpressionParser } from "cron-parser";
+import cronstrue from "cronstrue";
+import type { Schedule } from "./types.js";
 
 export const TICK_MS = 30_000;
-import type { Schedule } from "./types.js";
+export const MIN_INTERVAL_MINUTES = 5;
 
 export type TickSkipReason =
   | "invalid-schedule"
@@ -37,25 +39,21 @@ export interface RunNowInput {
   previousStillRunning: boolean;
 }
 
-interface CronPoint {
-  toDate?: () => Date;
-  getTime: () => number;
-}
-
-function cronToDate(value: CronPoint): Date {
-  const date = typeof value.toDate === "function" ? value.toDate() : new Date(value.getTime());
-  return new Date(date.getTime());
-}
-
 export function isScheduleValid(schedule: Schedule | null | undefined): boolean {
   if (!schedule) return false;
   if (schedule.kind === "every") {
-    return typeof schedule.minutes === "number" && Number.isFinite(schedule.minutes) && schedule.minutes >= 5;
+    return (
+      typeof schedule.minutes === "number" &&
+      Number.isInteger(schedule.minutes) &&
+      schedule.minutes >= MIN_INTERVAL_MINUTES &&
+      schedule.minutes <= 7 * 24 * 60
+    );
   }
   if (schedule.kind === "cron") {
-    if (typeof schedule.expr !== "string" || schedule.expr.trim().length === 0) return false;
+    const expr = typeof schedule.expr === "string" ? schedule.expr.trim() : "";
+    if (expr.split(/\s+/).length !== 5) return false;
     try {
-      CronExpressionParser.parse(schedule.expr);
+      CronExpressionParser.parse(expr);
       return true;
     } catch {
       return false;
@@ -64,20 +62,27 @@ export function isScheduleValid(schedule: Schedule | null | undefined): boolean 
   return false;
 }
 
+/** Interval slots line up with local midnight, so "every 60 minutes" fires on the hour. */
+function localOffsetMs(at: number): number {
+  return -new Date(at).getTimezoneOffset() * 60_000;
+}
+
+function intervalSlot(at: number, minutes: number): number {
+  const interval = minutes * 60_000;
+  const offset = localOffsetMs(at);
+  return Math.floor((at + offset) / interval) * interval - offset;
+}
+
 export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
   if (!isScheduleValid(schedule)) return null;
-  if (schedule.kind === "every") {
-    const intervalMs = schedule.minutes * 60_000;
-    return new Date(Math.floor(now.getTime() / intervalMs) * intervalMs);
-  }
+  if (schedule.kind === "every") return new Date(intervalSlot(now.getTime(), schedule.minutes));
   try {
-    // cron-parser's prev() skips a fire that lands exactly on currentDate.
-    const prev = cronToDate(CronExpressionParser.parse(schedule.expr, { currentDate: now }).prev());
-    const upcoming = cronToDate(
-      CronExpressionParser.parse(schedule.expr, { currentDate: new Date(now.getTime() - 1) }).next(),
-    );
-    const candidates = [prev, upcoming].filter((date) => date.getTime() <= now.getTime());
-    if (candidates.length === 0) return null;
+    // cron-parser's prev() skips a fire that lands exactly on currentDate, so check both sides.
+    const prev = CronExpressionParser.parse(schedule.expr, { currentDate: now }).prev().toDate();
+    const onTheDot = CronExpressionParser.parse(schedule.expr, { currentDate: new Date(now.getTime() - 1) })
+      .next()
+      .toDate();
+    const candidates = [prev, onTheDot].filter((date) => date.getTime() <= now.getTime());
     candidates.sort((a, b) => b.getTime() - a.getTime());
     return candidates[0] ?? null;
   } catch {
@@ -88,28 +93,38 @@ export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
 export function nextFireTimes(schedule: Schedule, from: Date, count = 3): Date[] {
   if (count <= 0 || !isScheduleValid(schedule)) return [];
   if (schedule.kind === "every") {
-    const intervalMs = schedule.minutes * 60_000;
-    let cursor = Math.floor(from.getTime() / intervalMs) * intervalMs;
-    if (cursor <= from.getTime()) cursor += intervalMs;
+    const interval = schedule.minutes * 60_000;
+    let cursor = intervalSlot(from.getTime(), schedule.minutes);
+    if (cursor <= from.getTime()) cursor += interval;
     const fires: Date[] = [];
     for (let index = 0; index < count; index += 1) {
       fires.push(new Date(cursor));
-      cursor += intervalMs;
+      cursor += interval;
     }
     return fires;
   }
   try {
     const expression = CronExpressionParser.parse(schedule.expr, { currentDate: from });
     const fires: Date[] = [];
-    let guard = 0;
-    while (fires.length < count && guard < count + 8) {
-      guard += 1;
-      const next = cronToDate(expression.next());
-      if (next.getTime() > from.getTime()) fires.push(next);
-    }
+    while (fires.length < count) fires.push(expression.next().toDate());
     return fires;
   } catch {
     return [];
+  }
+}
+
+export function describeSchedule(schedule: Schedule): string {
+  if (!isScheduleValid(schedule)) return "Not a valid schedule";
+  if (schedule.kind === "every") {
+    const minutes = schedule.minutes;
+    if (minutes % 1440 === 0) return minutes === 1440 ? "Every day" : `Every ${minutes / 1440} days`;
+    if (minutes % 60 === 0) return minutes === 60 ? "Every hour" : `Every ${minutes / 60} hours`;
+    return `Every ${minutes} minutes`;
+  }
+  try {
+    return cronstrue.toString(schedule.expr, { use24HourTimeFormat: true, verbose: false });
+  } catch {
+    return schedule.expr;
   }
 }
 

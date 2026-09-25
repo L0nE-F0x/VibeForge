@@ -1,68 +1,49 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isPathInside } from "./places.js";
 
 export interface FileNode {
   name: string;
   path: string;
   kind: "file" | "dir" | "link";
-  children?: FileNode[];
+  /** Folders that are usually noise (dependencies, build output) are listed but dimmed. */
+  quiet?: boolean;
 }
 
-const SKIP = new Set(["node_modules", ".git", "dist", "dist-electron", ".vite"]);
+const HIDDEN = new Set([".git"]);
+const QUIET = new Set(["node_modules", "dist", "dist-electron", "build", ".next", ".nuxt", "target", ".venv", "venv", "__pycache__", ".cache", ".turbo", ".vite", "coverage"]);
+const LIMIT = 500;
 
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+export { shellQuote } from "../shared/text.js";
 
-export function listTree(root: string, depth = 6): FileNode[] {
-  if (!fs.existsSync(root)) return [];
-  let realRoot = root;
-  try {
-    realRoot = fs.realpathSync(root);
-  } catch {
-    return [];
-  }
-  return walk(root, realRoot, depth);
-}
-
-function walk(dir: string, realRoot: string, depth: number): FileNode[] {
+/** One level of a folder, directories first. The tree loads lazily as folders open. */
+export function listDir(dir: string): FileNode[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
     return [];
   }
-  entries.sort((a, b) => {
-    if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
   const nodes: FileNode[] = [];
   for (const entry of entries) {
-    if (nodes.length >= 200) break;
-    if (SKIP.has(entry.name)) continue;
+    if (HIDDEN.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isSymbolicLink()) {
-      nodes.push({ name: entry.name, path: full, kind: "link" });
-      continue;
-    }
-    if (entry.isDirectory()) {
-      let real = full;
+    let kind: FileNode["kind"] = entry.isDirectory() ? "dir" : entry.isSymbolicLink() ? "link" : "file";
+    if (kind === "link") {
       try {
-        real = fs.realpathSync(full);
+        if (fs.statSync(full).isDirectory()) kind = "dir";
       } catch {
-        continue;
+        /* dangling link stays a link */
       }
-      if (!isPathInside(realRoot, real)) continue;
-      nodes.push({
-        name: entry.name,
-        path: full,
-        kind: "dir",
-        children: depth > 1 ? walk(full, realRoot, depth - 1) : [],
-      });
-      continue;
     }
-    if (entry.isFile()) nodes.push({ name: entry.name, path: full, kind: "file" });
+    if (kind === "file" && !entry.isFile() && !entry.isSymbolicLink()) continue;
+    nodes.push({ name: entry.name, path: full, kind, quiet: QUIET.has(entry.name) || undefined });
   }
-  return nodes;
+  nodes.sort((a, b) => {
+    const aDir = a.kind === "dir" ? 0 : 1;
+    const bDir = b.kind === "dir" ? 0 : 1;
+    if (aDir !== bDir) return aDir - bDir;
+    if (Boolean(a.quiet) !== Boolean(b.quiet)) return a.quiet ? 1 : -1;
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  });
+  return nodes.slice(0, LIMIT);
 }

@@ -12,9 +12,11 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["node", "vite/client"]
   },
-  "include": ["src", "electron", "tests"]
+  "include": ["src/core", "src/shared", "src/ui", "electron", "tests"]
 }

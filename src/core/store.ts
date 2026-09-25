@@ -2,70 +2,110 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse, stringify } from "yaml";
+import { normalizeEngineRows, seedEngines } from "./engines.js";
+import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
+import { ensureLayout } from "./layout.js";
+import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from "./runs.js";
 import { isSafeId, slugify } from "./slug.js";
+import { TASK_STATUSES } from "./tasks.js";
+import type { WorkspaceFile } from "./workspaces.js";
 import type {
   Agent,
   ChatRecord,
   EngineRow,
+  LayoutNode,
   Routine,
   RunMeta,
   RunOrigin,
   RunStatus,
+  Schedule,
+  Settings,
   Skill,
   Task,
   TaskStatus,
   Workspace,
-  Schedule,
 } from "./types.js";
 
-export const MEMORY_NOTE =
-  "<!-- Preferences, decisions, constraints, and lessons. Dated bullets. -->\n";
+export const MEMORY_STARTER =
+  "<!-- Preferences, decisions, constraints, and lessons that should still matter next week. Dated bullets. No secrets. VibeForge adds this file to every run of this agent. -->\n";
+
+const SCHEMA_VERSION = 3;
 
 const RUN_COLUMNS = [
   "id",
   "origin",
+  "title",
   "agentId",
   "routineId",
   "taskId",
   "chatId",
+  "workspaceId",
   "engine",
+  "argv",
   "cwd",
   "prompt",
   "startedAt",
   "endedAt",
   "status",
+  "exitCode",
+  "signal",
+  "stopRequested",
   "openedAt",
-  "dir",
   "notifiedAt",
+  "dir",
+  "error",
+  "changes",
+  "gitStart",
+  "continuedFrom",
 ] as const;
 
-function asString(value: unknown, fallback = ""): string {
+export interface RunQuery {
+  origin?: RunOrigin | RunOrigin[];
+  agentId?: string;
+  routineId?: string;
+  taskId?: string;
+  chatId?: string;
+  workspaceId?: string;
+  status?: RunStatus | RunStatus[];
+  unopened?: boolean;
+  since?: string;
+  search?: string;
+  limit?: number;
+}
+
+export function defaultSettings(): Settings {
+  return {
+    defaultEngine: "claude",
+    defaultShell: process.env.SHELL || "/bin/bash",
+    notify: true,
+    terminalFontSize: 13,
+    terminalFontFamily: "JetBrainsMono Nerd Font",
+    theme: "omarchy",
+  };
+}
+
+function str(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-function asNullable(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? value : null;
+function strOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
-function asBool(value: unknown, fallback: boolean): boolean {
+function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function asStringList(value: unknown): string[] {
+function strList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.length > 0);
 }
 
-function asSchedule(value: unknown): Schedule {
+function schedule(value: unknown): Schedule {
   if (value && typeof value === "object") {
     const record = value as { kind?: unknown; expr?: unknown; minutes?: unknown };
-    if (record.kind === "cron") return { kind: "cron", expr: asString(record.expr) };
-    if (record.kind === "every") {
-      const minutes = typeof record.minutes === "number" ? record.minutes : Number(record.minutes);
-      return { kind: "every", minutes };
-    }
+    if (record.kind === "cron") return { kind: "cron", expr: str(record.expr).trim() };
+    if (record.kind === "every") return { kind: "every", minutes: Number(record.minutes) };
   }
   return { kind: "every", minutes: 0 };
 }
@@ -75,137 +115,140 @@ function yamlText(value: unknown): string {
 }
 
 function readYaml(file: string): unknown {
-  return parse(fs.readFileSync(file, "utf8"));
-}
-
-export function seedEngines(): EngineRow[] {
-  return [
-    { id: "grok", label: "Grok Build", bin: "grok", args: [] },
-    { id: "claude", label: "Claude Code", bin: "claude", args: [] },
-    { id: "codex", label: "Codex", bin: "codex", args: [] },
-    { id: "cursor-agent", label: "Cursor Agent", bin: "cursor-agent", args: [] },
-    { id: "gemini", label: "Gemini CLI", bin: "gemini", args: [] },
-    { id: "copilot", label: "Copilot", bin: "copilot", args: [] },
-    { id: "opencode", label: "OpenCode", bin: "opencode", args: [] },
-  ];
+  try {
+    return parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 function normalizeAgent(id: string, value: unknown): Agent | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as Partial<Agent>;
+  const record = value as Record<string, unknown>;
   return {
     id,
-    name: asString(record.name),
-    engine: asString(record.engine),
-    brief: asString(record.brief),
-    memoryFile: asString(record.memoryFile, "memory.md") || "memory.md",
-    places: asStringList(record.places),
-    skills: asStringList(record.skills),
-    allowRoutines: asBool(record.allowRoutines, true),
-    createdAt: asString(record.createdAt),
-    updatedAt: asString(record.updatedAt),
+    name: str(record.name) || id,
+    engine: str(record.engine),
+    brief: str(record.brief),
+    memoryFile: "memory.md",
+    places: strList(record.places),
+    skills: strList(record.skills),
+    allowRoutines: bool(record.allowRoutines, true),
+    createdAt: str(record.createdAt),
+    updatedAt: str(record.updatedAt),
   };
 }
 
-function normalizeSkill(id: string, text: string): Skill {
+export function parseSkill(id: string, text: string): Skill {
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { id, name: id, description: "", body: text.replace(/^\n/, "") };
-  const front = parse(match[1]) as { name?: unknown; description?: unknown } | null;
-  const body = match[2].replace(/^\n/, "");
+  if (!match) return { id, name: id, description: "", body: text.trim() };
+  let front: { name?: unknown; description?: unknown } | null;
+  try {
+    front = parse(match[1]) as { name?: unknown; description?: unknown } | null;
+  } catch {
+    front = null;
+  }
   return {
     id,
-    name: asString(front?.name, id) || id,
-    description: asString(front?.description),
-    body,
+    name: str(front?.name, id) || id,
+    description: str(front?.description),
+    body: match[2].replace(/^\s*\n/, "").trimEnd(),
   };
 }
 
-function skillDocument(skill: Skill): string {
+export function skillDocument(skill: Skill): string {
   const front = yamlText({ name: skill.name, description: skill.description }).trimEnd();
-  const body = skill.body.replace(/^\n+/, "").trimEnd();
-  return `---\n${front}\n---\n\n${body}\n`;
+  return `---\n${front}\n---\n\n${skill.body.trim()}\n`;
 }
 
 function normalizeRoutine(id: string, value: unknown): Routine | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as Partial<Routine>;
+  const record = value as Record<string, unknown>;
   return {
     id,
-    name: asString(record.name),
-    agentId: asString(record.agentId),
-    enabled: asBool(record.enabled, true),
-    schedule: asSchedule(record.schedule),
-    prompt: asString(record.prompt),
-    notify: asBool(record.notify, true),
-    lastFiredAt: asNullable(record.lastFiredAt),
-    lastMissedAt: asNullable(record.lastMissedAt),
+    name: str(record.name) || id,
+    agentId: str(record.agentId),
+    enabled: bool(record.enabled, true),
+    schedule: schedule(record.schedule),
+    prompt: str(record.prompt),
+    notify: bool(record.notify, true),
+    lastFiredAt: strOrNull(record.lastFiredAt),
+    lastMissedAt: strOrNull(record.lastMissedAt),
   };
 }
 
 function normalizeTask(id: string, value: unknown): Task | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as Partial<Task>;
-  const status = asString(record.status, "todo");
-  const allowed: TaskStatus[] = ["todo", "running", "review", "done"];
+  const record = value as Record<string, unknown>;
+  const status = str(record.status, "todo") as TaskStatus;
   return {
     id,
-    title: asString(record.title),
-    body: asString(record.body),
-    status: allowed.includes(status as TaskStatus) ? (status as TaskStatus) : "todo",
-    agentId: asNullable(record.agentId),
-    workspaceId: asNullable(record.workspaceId),
-    runIds: asStringList(record.runIds),
+    title: str(record.title) || id,
+    body: str(record.body),
+    status: TASK_STATUSES.includes(status) ? status : "todo",
+    agentId: strOrNull(record.agentId),
+    workspaceId: strOrNull(record.workspaceId),
+    runIds: strList(record.runIds),
+    createdAt: str(record.createdAt),
+    updatedAt: str(record.updatedAt),
   };
 }
 
 function normalizeChat(value: unknown): ChatRecord | null {
   if (!value || typeof value !== "object") return null;
-  const record = value as Partial<ChatRecord>;
-  const id = asString(record.id);
+  const record = value as Record<string, unknown>;
+  const id = str(record.id);
   if (!isSafeId(id)) return null;
+  const runIds = strList(record.runIds);
+  const legacy = strOrNull(record.runId);
+  if (legacy && !runIds.includes(legacy)) runIds.push(legacy);
   return {
     id,
-    title: asString(record.title, "Chat") || "Chat",
-    agentId: asNullable(record.agentId),
-    engine: asString(record.engine),
-    cwd: asString(record.cwd),
-    runId: asNullable(record.runId),
-    ptyId: asNullable(record.ptyId),
-    createdAt: asString(record.createdAt),
-    updatedAt: asString(record.updatedAt),
+    title: str(record.title) || "Chat",
+    agentId: strOrNull(record.agentId),
+    engine: str(record.engine),
+    cwd: str(record.cwd),
+    runIds,
+    createdAt: str(record.createdAt),
+    updatedAt: str(record.updatedAt),
   };
 }
 
-function isWorkspace(value: unknown): value is Workspace {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Partial<Workspace>;
-  return typeof record.id === "string" && typeof record.path === "string" && record.path.length > 0;
+function normalizeWorkspace(value: unknown): Workspace | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const id = str(record.id);
+  const folder = str(record.path);
+  if (!isSafeId(id) || !folder) return null;
+  return { id, name: str(record.name) || path.basename(folder) || id, path: folder, dockUrl: str(record.dockUrl) };
 }
 
-const ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];
-const STATUSES: RunStatus[] = ["running", "exited", "stopped", "failed"];
+function isLayoutNode(value: unknown, depth = 0): value is LayoutNode {
+  if (!value || typeof value !== "object" || depth > 12) return false;
+  const node = value as Record<string, unknown>;
+  if (node.kind === "pane") {
+    const launch = node.launch as Record<string, unknown> | undefined;
+    return typeof node.id === "string" && !!launch && (launch.type === "shell" || (launch.type === "engine" && typeof launch.engineId === "string"));
+  }
+  if (node.kind === "split") {
+    return (
+      (node.dir === "row" || node.dir === "col") &&
+      typeof node.ratio === "number" &&
+      isLayoutNode(node.a, depth + 1) &&
+      isLayoutNode(node.b, depth + 1)
+    );
+  }
+  return false;
+}
 
-function normalizeRun(value: Partial<RunMeta> | null | undefined): RunMeta | null {
-  if (!value || typeof value.id !== "string" || !value.id) return null;
-  const origin = ORIGINS.includes(value.origin as RunOrigin) ? (value.origin as RunOrigin) : "chat";
-  const status = STATUSES.includes(value.status as RunStatus) ? (value.status as RunStatus) : "running";
-  return {
-    id: value.id,
-    origin,
-    agentId: asNullable(value.agentId),
-    routineId: asNullable(value.routineId),
-    taskId: asNullable(value.taskId),
-    chatId: asNullable(value.chatId),
-    engine: asString(value.engine),
-    cwd: asString(value.cwd),
-    prompt: asString(value.prompt),
-    startedAt: asString(value.startedAt),
-    endedAt: asNullable(value.endedAt),
-    status,
-    openedAt: asNullable(value.openedAt),
-    dir: asString(value.dir),
-    notifiedAt: asNullable(value.notifiedAt),
-  };
+function toRow(meta: RunMeta): Array<string | number | null> {
+  return RUN_COLUMNS.map((column) => {
+    const value = meta[column];
+    if (column === "argv") return JSON.stringify(value);
+    if (column === "stopRequested") return value ? 1 : 0;
+    if (value === undefined) return null;
+    return value as string | number | null;
+  });
 }
 
 export class Store {
@@ -216,35 +259,190 @@ export class Store {
   constructor(configRoot: string, dataRoot: string) {
     this.configRoot = configRoot;
     this.dataRoot = dataRoot;
-    fs.mkdirSync(path.join(configRoot, "agents"), { recursive: true });
-    fs.mkdirSync(path.join(configRoot, "skills"), { recursive: true });
-    fs.mkdirSync(path.join(configRoot, "routines"), { recursive: true });
-    fs.mkdirSync(path.join(configRoot, "tasks"), { recursive: true });
-    fs.mkdirSync(path.join(dataRoot, "runs"), { recursive: true });
-    fs.mkdirSync(path.join(dataRoot, "scratch"), { recursive: true });
+    ensureLayout(configRoot, dataRoot);
     this.db = new DatabaseSync(path.join(dataRoot, "index.sqlite"));
-    this.db.exec(`CREATE TABLE IF NOT EXISTS runs (
-      id TEXT PRIMARY KEY,
-      origin TEXT,
-      agentId TEXT,
-      routineId TEXT,
-      taskId TEXT,
-      chatId TEXT,
-      engine TEXT,
-      cwd TEXT,
-      prompt TEXT,
-      startedAt TEXT,
-      endedAt TEXT,
-      status TEXT,
-      openedAt TEXT,
-      dir TEXT,
-      notifiedAt TEXT
-    )`);
+    this.migrate();
   }
 
   close(): void {
     this.db.close();
   }
+
+  // ---------------------------------------------------------------- run index
+
+  private migrate(): void {
+    const version = (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+    if (version !== SCHEMA_VERSION) {
+      this.db.exec("DROP TABLE IF EXISTS runs");
+      this.db.exec(`CREATE TABLE runs (
+        id TEXT PRIMARY KEY, origin TEXT, title TEXT, agentId TEXT, routineId TEXT, taskId TEXT, chatId TEXT,
+        workspaceId TEXT, engine TEXT, argv TEXT, cwd TEXT, prompt TEXT, startedAt TEXT, endedAt TEXT, status TEXT,
+        exitCode INTEGER, signal INTEGER, stopRequested INTEGER, openedAt TEXT, notifiedAt TEXT, dir TEXT,
+        error TEXT, changes TEXT, gitStart TEXT, continuedFrom TEXT
+      )`);
+      this.db.exec("CREATE INDEX runs_started ON runs(startedAt DESC)");
+      this.db.exec("CREATE INDEX runs_status ON runs(status)");
+      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    }
+    this.reindex();
+  }
+
+  /** Pick up run folders the index does not know about (a crash, or a copied data dir). */
+  reindex(): number {
+    const known = new Set((this.db.prepare("SELECT id FROM runs").all() as Array<{ id: string }>).map((row) => row.id));
+    let added = 0;
+    for (const dir of listRunDirs(this.dataRoot)) {
+      if (known.has(path.basename(dir))) continue;
+      const meta = readRunMeta(dir);
+      if (!meta) continue;
+      meta.dir = dir;
+      this.indexRun(meta);
+      added += 1;
+    }
+    return added;
+  }
+
+  private indexRun(meta: RunMeta): void {
+    this.db
+      .prepare(
+        `INSERT INTO runs (${RUN_COLUMNS.join(", ")}) VALUES (${RUN_COLUMNS.map(() => "?").join(", ")})
+         ON CONFLICT(id) DO UPDATE SET ${RUN_COLUMNS.filter((column) => column !== "id")
+           .map((column) => `${column} = excluded.${column}`)
+           .join(", ")}`,
+      )
+      .run(...toRow(meta));
+  }
+
+  /** The only way run state changes: meta.json and the index move together. */
+  saveRun(meta: RunMeta): RunMeta {
+    const normalized = normalizeRun(meta);
+    if (!normalized) throw new Error("Run is not valid");
+    writeRunMeta(normalized);
+    this.indexRun(normalized);
+    return normalized;
+  }
+
+  getRun(id: string): RunMeta | null {
+    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
+    return row ? normalizeRun(row) : null;
+  }
+
+  queryRuns(query: RunQuery = {}): RunMeta[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    const oneOrMany = (column: string, value: string | string[] | undefined) => {
+      if (value === undefined) return;
+      const list = Array.isArray(value) ? value : [value];
+      if (list.length === 0) return;
+      where.push(`${column} IN (${list.map(() => "?").join(", ")})`);
+      params.push(...list);
+    };
+    oneOrMany("origin", query.origin);
+    oneOrMany("status", query.status);
+    for (const column of ["agentId", "routineId", "taskId", "chatId", "workspaceId"] as const) {
+      const value = query[column];
+      if (value) {
+        where.push(`${column} = ?`);
+        params.push(value);
+      }
+    }
+    if (query.unopened) where.push("openedAt IS NULL");
+    if (query.since) {
+      where.push("startedAt >= ?");
+      params.push(query.since);
+    }
+    if (query.search?.trim()) {
+      where.push("(title LIKE ? OR prompt LIKE ? OR cwd LIKE ?)");
+      const like = `%${query.search.trim()}%`;
+      params.push(like, like, like);
+    }
+    const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
+    const sql = `SELECT * FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY startedAt DESC LIMIT ${limit}`;
+    return (this.db.prepare(sql).all(...params) as unknown[])
+      .map((row) => normalizeRun(row))
+      .filter((run): run is RunMeta => run !== null);
+  }
+
+  deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
+    if (!run.dir) return;
+    fs.rmSync(path.join(run.dir, RUN_FILES[file]), { force: true });
+  }
+
+  // ---------------------------------------------------------------- settings & engines
+
+  readSettings(): Settings {
+    const file = path.join(this.configRoot, "settings.json");
+    const defaults = defaultSettings();
+    const raw = readJson<Partial<Settings> | null>(file, null);
+    if (!raw) {
+      writeJson(file, defaults);
+      return defaults;
+    }
+    return {
+      defaultEngine: str(raw.defaultEngine) || defaults.defaultEngine,
+      defaultShell: str(raw.defaultShell) || defaults.defaultShell,
+      notify: bool(raw.notify, defaults.notify),
+      terminalFontSize:
+        typeof raw.terminalFontSize === "number" && raw.terminalFontSize >= 8 && raw.terminalFontSize <= 32
+          ? raw.terminalFontSize
+          : defaults.terminalFontSize,
+      terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
+      theme: raw.theme === "builtin" ? "builtin" : "omarchy",
+    };
+  }
+
+  writeSettings(settings: Settings): void {
+    writeJson(path.join(this.configRoot, "settings.json"), settings);
+  }
+
+  readEngineRows(): EngineRow[] {
+    const file = path.join(this.configRoot, "engines.json");
+    if (!fs.existsSync(file)) {
+      const seeded = seedEngines();
+      writeJson(file, { engines: seeded });
+      return seeded;
+    }
+    return normalizeEngineRows(readJson<unknown>(file, { engines: [] }));
+  }
+
+  writeEngineRows(rows: EngineRow[]): void {
+    writeJson(path.join(this.configRoot, "engines.json"), { engines: normalizeEngineRows(rows) });
+  }
+
+  // ---------------------------------------------------------------- workspaces & layouts
+
+  readWorkspaces(): WorkspaceFile {
+    const raw = readJson<unknown>(path.join(this.configRoot, "workspaces.json"), null);
+    const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
+    const workspaces = Array.isArray(list)
+      ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
+      : [];
+    const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
+    return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+  }
+
+  writeWorkspaces(file: WorkspaceFile): void {
+    writeJson(path.join(this.configRoot, "workspaces.json"), file);
+  }
+
+  readLayout(workspaceId: string): LayoutNode | null {
+    if (!isSafeId(workspaceId)) return null;
+    const raw = readJson<unknown>(path.join(this.configRoot, "layouts", `${workspaceId}.json`), null);
+    return isLayoutNode(raw) ? raw : null;
+  }
+
+  writeLayout(workspaceId: string, layout: LayoutNode | null): void {
+    if (!isSafeId(workspaceId)) return;
+    const file = path.join(this.configRoot, "layouts", `${workspaceId}.json`);
+    if (!layout) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    if (!isLayoutNode(layout)) throw new Error("Layout is not valid");
+    writeJson(file, layout);
+  }
+
+  // ---------------------------------------------------------------- agents
 
   uniqueId(dir: string, base: string, extension: string): string {
     const root = slugify(base);
@@ -257,44 +455,44 @@ export class Store {
 
   listAgents(): Agent[] {
     const root = path.join(this.configRoot, "agents");
-    if (!fs.existsSync(root)) return [];
-    const agents: Agent[] = [];
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const agent = this.getAgent(entry.name);
-      if (agent) agents.push(agent);
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      return [];
     }
-    return agents.sort((a, b) => a.name.localeCompare(b.name));
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => this.getAgent(entry.name))
+      .filter((agent): agent is Agent => agent !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   getAgent(id: string): Agent | null {
     if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "agents", id, "agent.yaml");
-    if (!fs.existsSync(file)) return null;
-    return normalizeAgent(id, readYaml(file));
+    return normalizeAgent(id, readYaml(path.join(this.configRoot, "agents", id, "agent.yaml")));
   }
 
   writeAgent(agent: Agent): void {
     const dir = path.join(this.configRoot, "agents", agent.id);
     fs.mkdirSync(dir, { recursive: true });
     const memoryPath = path.join(dir, "memory.md");
-    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_NOTE);
-    const stored: Agent = { ...agent, memoryFile: "memory.md" };
-    fs.writeFileSync(path.join(dir, "agent.yaml"), yamlText(stored));
+    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
+    writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
   }
 
   readMemory(agentId: string): string {
     if (!isSafeId(agentId)) return "";
-    const file = path.join(this.configRoot, "agents", agentId, "memory.md");
-    if (!fs.existsSync(file)) return "";
-    return fs.readFileSync(file, "utf8");
+    try {
+      return fs.readFileSync(path.join(this.configRoot, "agents", agentId, "memory.md"), "utf8");
+    } catch {
+      return "";
+    }
   }
 
   writeMemory(agentId: string, text: string): void {
     if (!isSafeId(agentId)) throw new Error("Agent is missing");
-    const dir = path.join(this.configRoot, "agents", agentId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "memory.md"), text);
+    writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
   }
 
   deleteAgent(id: string): void {
@@ -302,35 +500,39 @@ export class Store {
     fs.rmSync(path.join(this.configRoot, "agents", id), { recursive: true, force: true });
   }
 
+  // ---------------------------------------------------------------- skills
+
   listSkills(): Skill[] {
     const root = path.join(this.configRoot, "skills");
-    if (!fs.existsSync(root)) return [];
-    const skills: Skill[] = [];
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const skill = this.getSkill(entry.name);
-      if (skill) skills.push(skill);
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      return [];
     }
-    return skills.sort((a, b) => a.name.localeCompare(b.name));
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => this.getSkill(entry.name))
+      .filter((skill): skill is Skill => skill !== null)
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   getSkill(id: string): Skill | null {
     const raw = this.readSkillRaw(id);
-    if (raw === null) return null;
-    return normalizeSkill(id, raw);
+    return raw === null ? null : parseSkill(id, raw);
   }
 
   readSkillRaw(id: string): string | null {
     if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "skills", id, "SKILL.md");
-    if (!fs.existsSync(file)) return null;
-    return fs.readFileSync(file, "utf8");
+    try {
+      return fs.readFileSync(path.join(this.configRoot, "skills", id, "SKILL.md"), "utf8");
+    } catch {
+      return null;
+    }
   }
 
   writeSkill(skill: Skill): void {
-    const dir = path.join(this.configRoot, "skills", skill.id);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "SKILL.md"), skillDocument(skill));
+    writeFileAtomic(path.join(this.configRoot, "skills", skill.id, "SKILL.md"), skillDocument(skill));
   }
 
   deleteSkill(id: string): void {
@@ -338,29 +540,19 @@ export class Store {
     fs.rmSync(path.join(this.configRoot, "skills", id), { recursive: true, force: true });
   }
 
+  // ---------------------------------------------------------------- routines
+
   listRoutines(): Routine[] {
-    const root = path.join(this.configRoot, "routines");
-    if (!fs.existsSync(root)) return [];
-    const routines: Routine[] = [];
-    for (const entry of fs.readdirSync(root)) {
-      if (!entry.endsWith(".yaml")) continue;
-      const routine = this.getRoutine(entry.slice(0, -5));
-      if (routine) routines.push(routine);
-    }
-    return routines.sort((a, b) => a.name.localeCompare(b.name));
+    return this.listYaml("routines", (id, value) => normalizeRoutine(id, value)).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   getRoutine(id: string): Routine | null {
     if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "routines", `${id}.yaml`);
-    if (!fs.existsSync(file)) return null;
-    return normalizeRoutine(id, readYaml(file));
+    return normalizeRoutine(id, readYaml(path.join(this.configRoot, "routines", `${id}.yaml`)));
   }
 
   writeRoutine(routine: Routine): void {
-    const file = path.join(this.configRoot, "routines", `${routine.id}.yaml`);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, yamlText(routine));
+    writeFileAtomic(path.join(this.configRoot, "routines", `${routine.id}.yaml`), yamlText(routine));
   }
 
   deleteRoutine(id: string): void {
@@ -368,29 +560,21 @@ export class Store {
     fs.rmSync(path.join(this.configRoot, "routines", `${id}.yaml`), { force: true });
   }
 
+  // ---------------------------------------------------------------- tasks
+
   listTasks(): Task[] {
-    const root = path.join(this.configRoot, "tasks");
-    if (!fs.existsSync(root)) return [];
-    const tasks: Task[] = [];
-    for (const entry of fs.readdirSync(root)) {
-      if (!entry.endsWith(".yaml")) continue;
-      const task = this.getTask(entry.slice(0, -5));
-      if (task) tasks.push(task);
-    }
-    return tasks.sort((a, b) => a.title.localeCompare(b.title));
+    return this.listYaml("tasks", (id, value) => normalizeTask(id, value)).sort((a, b) =>
+      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+    );
   }
 
   getTask(id: string): Task | null {
     if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "tasks", `${id}.yaml`);
-    if (!fs.existsSync(file)) return null;
-    return normalizeTask(id, readYaml(file));
+    return normalizeTask(id, readYaml(path.join(this.configRoot, "tasks", `${id}.yaml`)));
   }
 
   writeTask(task: Task): void {
-    const file = path.join(this.configRoot, "tasks", `${task.id}.yaml`);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, yamlText(task));
+    writeFileAtomic(path.join(this.configRoot, "tasks", `${task.id}.yaml`), yamlText(task));
   }
 
   deleteTask(id: string): void {
@@ -398,21 +582,38 @@ export class Store {
     fs.rmSync(path.join(this.configRoot, "tasks", `${id}.yaml`), { force: true });
   }
 
+  private listYaml<T>(folder: string, normalize: (id: string, value: unknown) => T | null): T[] {
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(path.join(this.configRoot, folder));
+    } catch {
+      return [];
+    }
+    const items: T[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".yaml")) continue;
+      const id = entry.slice(0, -5);
+      if (!isSafeId(id)) continue;
+      const item = normalize(id, readYaml(path.join(this.configRoot, folder, entry)));
+      if (item) items.push(item);
+    }
+    return items;
+  }
+
+  // ---------------------------------------------------------------- chats
+
   private chatFile(): string {
     return path.join(this.dataRoot, "chats.json");
   }
 
   listChats(): ChatRecord[] {
-    const file = this.chatFile();
-    if (!fs.existsSync(file)) return [];
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { chats?: unknown } | unknown[];
-      const list = Array.isArray(parsed) ? parsed : parsed.chats;
-      if (!Array.isArray(list)) return [];
-      return list.map((item) => normalizeChat(item)).filter((item): item is ChatRecord => item !== null);
-    } catch {
-      return [];
-    }
+    const raw = readJson<unknown>(this.chatFile(), null);
+    const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
+    if (!Array.isArray(list)) return [];
+    return list
+      .map(normalizeChat)
+      .filter((chat): chat is ChatRecord => chat !== null)
+      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
   }
 
   getChat(id: string): ChatRecord | null {
@@ -422,153 +623,10 @@ export class Store {
   writeChat(chat: ChatRecord): void {
     const chats = this.listChats().filter((item) => item.id !== chat.id);
     chats.push(chat);
-    chats.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    fs.writeFileSync(this.chatFile(), `${JSON.stringify({ chats }, null, 2)}\n`);
+    writeJson(this.chatFile(), { chats });
   }
 
   deleteChat(id: string): void {
-    const chats = this.listChats().filter((chat) => chat.id !== id);
-    fs.writeFileSync(this.chatFile(), `${JSON.stringify({ chats }, null, 2)}\n`);
-  }
-
-  listWorkspaces(): Workspace[] {
-    const file = path.join(this.configRoot, "workspaces.json");
-    if (!fs.existsSync(file)) return [];
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { workspaces?: unknown } | unknown[];
-      const list = Array.isArray(parsed) ? parsed : parsed.workspaces;
-      if (!Array.isArray(list)) return [];
-      return list.filter(isWorkspace).map((workspace) => ({
-        id: workspace.id,
-        name: typeof workspace.name === "string" && workspace.name ? workspace.name : workspace.id,
-        path: workspace.path,
-      }));
-    } catch {
-      return [];
-    }
-  }
-
-  readEngines(): EngineRow[] {
-    const file = path.join(this.configRoot, "engines.json");
-    if (!fs.existsSync(file)) return seedEngines();
-    try {
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { engines?: unknown };
-      if (!Array.isArray(parsed.engines)) return [];
-      return parsed.engines
-        .filter((item): item is { id: string; label?: string; bin?: string; args?: unknown } => {
-          return Boolean(item) && typeof item === "object" && typeof (item as { id?: string }).id === "string";
-        })
-        .map((item) => ({
-          id: item.id,
-          label: typeof item.label === "string" && item.label ? item.label : item.id,
-          bin: typeof item.bin === "string" && item.bin ? item.bin : item.id,
-          args: Array.isArray(item.args) ? item.args.filter((arg): arg is string => typeof arg === "string") : [],
-        }));
-    } catch {
-      return [];
-    }
-  }
-
-  upsertRun(meta: RunMeta): void {
-    const normalized = normalizeRun(meta);
-    if (!normalized) return;
-    if (normalized.dir) {
-      fs.mkdirSync(normalized.dir, { recursive: true });
-      fs.writeFileSync(path.join(normalized.dir, "meta.json"), `${JSON.stringify(normalized, null, 2)}\n`);
-    }
-    const statement = this.db.prepare(
-      `INSERT INTO runs (${RUN_COLUMNS.join(", ")})
-       VALUES (${RUN_COLUMNS.map(() => "?").join(", ")})
-       ON CONFLICT(id) DO UPDATE SET
-         origin = excluded.origin,
-         agentId = excluded.agentId,
-         routineId = excluded.routineId,
-         taskId = excluded.taskId,
-         chatId = excluded.chatId,
-         engine = excluded.engine,
-         cwd = excluded.cwd,
-         prompt = excluded.prompt,
-         startedAt = excluded.startedAt,
-         endedAt = excluded.endedAt,
-         status = excluded.status,
-         openedAt = excluded.openedAt,
-         dir = excluded.dir,
-         notifiedAt = excluded.notifiedAt`,
-    );
-    statement.run(
-      normalized.id,
-      normalized.origin,
-      normalized.agentId,
-      normalized.routineId,
-      normalized.taskId,
-      normalized.chatId,
-      normalized.engine,
-      normalized.cwd,
-      normalized.prompt,
-      normalized.startedAt,
-      normalized.endedAt,
-      normalized.status,
-      normalized.openedAt,
-      normalized.dir,
-      normalized.notifiedAt,
-    );
-  }
-
-  getRun(id: string): RunMeta | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunMeta | undefined;
-    if (!row) return this.readRunDir(id);
-    return this.overlayRun(row) ?? normalizeRun(row);
-  }
-
-  listRuns(): RunMeta[] {
-    const byId = new Map<string, RunMeta>();
-    for (const run of this.scanRunFiles()) byId.set(run.id, run);
-    const rows = this.db.prepare("SELECT * FROM runs").all() as unknown as RunMeta[];
-    for (const row of rows) {
-      const run = this.overlayRun(row) ?? normalizeRun(row);
-      if (run) byId.set(run.id, run);
-    }
-    return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  }
-
-  private readRunDir(id: string): RunMeta | null {
-    if (!isSafeId(id)) return null;
-    const metaPath = path.join(this.dataRoot, "runs", id, "meta.json");
-    if (!fs.existsSync(metaPath)) return null;
-    try {
-      return normalizeRun(JSON.parse(fs.readFileSync(metaPath, "utf8")) as RunMeta);
-    } catch {
-      return null;
-    }
-  }
-
-  private overlayRun(row: RunMeta): RunMeta | null {
-    const base = normalizeRun(row);
-    if (!base?.dir) return base;
-    const metaPath = path.join(base.dir, "meta.json");
-    if (!fs.existsSync(metaPath)) return base;
-    try {
-      return normalizeRun(JSON.parse(fs.readFileSync(metaPath, "utf8")) as RunMeta) ?? base;
-    } catch {
-      return base;
-    }
-  }
-
-  private scanRunFiles(): RunMeta[] {
-    const root = path.join(this.dataRoot, "runs");
-    if (!fs.existsSync(root)) return [];
-    const runs: RunMeta[] = [];
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const metaPath = path.join(root, entry.name, "meta.json");
-      if (!fs.existsSync(metaPath)) continue;
-      try {
-        const run = normalizeRun(JSON.parse(fs.readFileSync(metaPath, "utf8")) as RunMeta);
-        if (run) runs.push(run);
-      } catch {
-        continue;
-      }
-    }
-    return runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    writeJson(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
   }
 }

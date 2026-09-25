@@ -10,34 +10,49 @@ export interface PreambleInput {
   memory: string;
   skills: readonly PreambleSkill[];
   prompt: string;
-  priorTranscript?: string;
+  /** A previous attempt's transcript, for engines that cannot reopen their own session. */
+  priorTranscript?: string | null;
+}
+
+/** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
+export function memoryForPrompt(memory: string): string {
+  return memory.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trim();
 }
 
 export function buildPreamble(input: PreambleInput): string {
-  void input.priorTranscript;
   const parts: string[] = [
-    "# ForgeDesk run",
+    "# VibeForge run",
     `Agent: ${input.agentName}`,
-    "Allowed folders:",
+    "Allowed folders (work only inside these):",
     ...input.places.map((place) => `- ${place}`),
     "",
-    input.brief.trimEnd(),
+    "## Brief",
+    input.brief.trim(),
   ];
-  if (input.memory.trim()) {
-    parts.push("", input.memory.trimEnd());
-  }
+  const memory = memoryForPrompt(input.memory);
+  if (memory) parts.push("", "## Memory", memory);
   for (const skill of input.skills) {
     if (!skill.body.trim()) continue;
-    parts.push("", skill.body.trimEnd());
+    parts.push("", `## Skill: ${skill.name}`, skill.body.trim());
   }
-  parts.push("", "# This run", input.prompt);
-  return parts.join("\n");
+  if (input.priorTranscript) {
+    parts.push(
+      "",
+      "## Previous attempt",
+      `This continues an earlier attempt. Its transcript is at ${input.priorTranscript}. Read it before you start.`,
+    );
+  }
+  parts.push("", "# This run", input.prompt.trim());
+  return `${parts.join("\n")}\n`;
 }
 
-export function buildStandalonePreamble(prompt: string): string {
-  return `# ForgeDesk run\n# This run\n${prompt}`;
+export function taskPrompt(title: string, body: string): string {
+  const detail = body.trim();
+  return detail ? `Task: ${title.trim()}\n\n${detail}` : `Task: ${title.trim()}`;
 }
 
-export function codePreamble(workspacePath: string, prompt: string): string {
-  return `# ForgeDesk run\nWorkspace: ${workspacePath}\n\n# This run\n${prompt.trimEnd()}\n`;
+/** Chat and plain Code launches send what the human typed and nothing else. */
+export function plainPrompt(prompt: string, priorTranscript?: string | null): string {
+  if (!priorTranscript) return prompt.trim();
+  return `This continues an earlier session. Its transcript is at ${priorTranscript}.\n\n${prompt.trim()}`;
 }

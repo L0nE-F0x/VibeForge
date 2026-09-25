@@ -1,120 +1,202 @@
+// The contract between the renderer and the main process. The renderer calls
+// `call("agents.list")`; the main process implements every key of DeskMethods.
 import type { FileNode } from "../core/files.js";
-import type { Schedule } from "../core/types.js";
-import type { Agent, ChatRecord, EngineRow, Routine, Settings, Task, TaskStatus, Workspace } from "../core/types.js";
+import type { RunQuery } from "../core/store.js";
+import type {
+  AgentInput,
+  ChatView,
+  Launched,
+  RoutineInput,
+  RoutineView,
+  RunBundle,
+  RunView,
+  SchedulePreview,
+  SendResult,
+  SkillInput,
+  TaskInput,
+  TaskView,
+  TermSize,
+} from "../core/team-service.js";
+import type { Palette } from "../core/theme.js";
+import type {
+  Agent,
+  Engine,
+  EngineRow,
+  LayoutNode,
+  LiveSession,
+  Routine,
+  Schedule,
+  Settings,
+  Skill,
+  TaskStatus,
+  Topic,
+} from "../core/types.js";
+import type { WorkspaceFile } from "../core/workspaces.js";
 
-export type { Settings, Workspace };
-import type { RunMetaFile } from "../core/runfiles.js";
+export type {
+  Agent,
+  AgentInput,
+  ChatView,
+  Engine,
+  EngineRow,
+  FileNode,
+  LayoutNode,
+  Launched,
+  LiveSession,
+  Palette,
+  Routine,
+  RoutineInput,
+  RoutineView,
+  RunBundle,
+  RunQuery,
+  RunView,
+  Schedule,
+  SchedulePreview,
+  SendResult,
+  Settings,
+  Skill,
+  SkillInput,
+  TaskInput,
+  TaskStatus,
+  TaskView,
+  TermSize,
+  Topic,
+  WorkspaceFile,
+};
+export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
 
-export interface Engine extends EngineRow {
-  available: boolean;
+export interface AppInfo {
+  version: string;
+  configRoot: string;
+  dataRoot: string;
+  home: string;
+  hostRunning: boolean;
 }
 
-export interface AgentDraft {
-  id?: string;
-  name: string;
-  brief: string;
-  engine: string;
-  places: string[];
-  skills?: string[];
-  allowRoutines?: boolean;
+export interface PtySnapshot {
+  ansi: string;
+  seq: number;
+  cols: number;
+  rows: number;
+  alive: boolean;
 }
 
-export interface RoutineDraft {
-  id?: string;
-  name: string;
-  agentId: string;
-  enabled?: boolean;
-  schedule: Schedule;
-  prompt: string;
-  notify?: boolean;
+export interface DockBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
-export interface RoutineRow extends Routine {
-  issues: string[];
-  stillRunning: boolean;
-}
-
-export interface TaskDraft {
-  id?: string;
+export interface DockState {
+  url: string;
   title: string;
-  body?: string;
-  agentId?: string | null;
-  workspaceId?: string | null;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
 }
 
-export interface SkillDraft {
-  id?: string;
-  name: string;
-  description: string;
-  body: string;
+export interface DeskMethods {
+  "app.info": () => AppInfo;
+  "app.palette": () => Palette;
+  "app.openPath": (target: string) => void;
+  "app.openExternal": (url: string) => void;
+  "app.pickFolder": (title?: string) => string | null;
+  "app.pathExists": (target: string) => boolean;
+  "app.toggleDevTools": () => void;
+
+  "settings.get": () => Settings;
+  "settings.save": (patch: Partial<Settings>) => Settings;
+  "engines.list": () => Engine[];
+  "engines.recheck": () => Engine[];
+  "engines.save": (rows: EngineRow[]) => Engine[];
+
+  "workspaces.list": () => WorkspaceFile;
+  "workspaces.add": (folder: string) => WorkspaceFile;
+  "workspaces.remove": (id: string) => WorkspaceFile;
+  "workspaces.select": (id: string) => void;
+  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
+  "layouts.get": (workspaceId: string) => LayoutNode | null;
+  "layouts.save": (workspaceId: string, layout: LayoutNode | null) => void;
+  "files.list": (dir: string) => FileNode[];
+
+  "agents.list": () => Agent[];
+  "agents.save": (input: AgentInput) => Agent;
+  "agents.delete": (id: string, confirmName: string) => void;
+  "agents.readMemory": (id: string) => string;
+  "agents.writeMemory": (id: string, text: string) => void;
+
+  "skills.list": () => Skill[];
+  "skills.save": (input: SkillInput) => Skill;
+  "skills.delete": (id: string) => void;
+  "skills.setAgents": (skillId: string, agentIds: string[]) => void;
+
+  "routines.list": () => RoutineView[];
+  "routines.save": (input: RoutineInput) => Routine;
+  "routines.delete": (id: string) => void;
+  "routines.setEnabled": (id: string, enabled: boolean) => Routine;
+  "routines.runNow": (id: string, size?: TermSize) => Launched;
+  "routines.preview": (schedule: Schedule) => SchedulePreview;
+
+  "tasks.list": () => TaskView[];
+  "tasks.save": (input: TaskInput) => TaskView;
+  "tasks.delete": (id: string) => void;
+  "tasks.execute": (id: string, size?: TermSize) => Launched;
+  "tasks.continue": (id: string, size?: TermSize) => Launched;
+  "tasks.stop": (id: string) => TaskView;
+  "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
+
+  "chats.list": (filter?: { agentId?: string | null }) => ChatView[];
+  "chats.create": (input: { agentId?: string | null; engine?: string }) => ChatView;
+  "chats.rename": (id: string, title: string) => ChatView;
+  "chats.setEngine": (id: string, engine: string) => ChatView;
+  "chats.delete": (id: string) => void;
+  "chats.send": (id: string, text: string, size?: TermSize) => SendResult;
+  "chats.continue": (id: string, size?: TermSize) => SendResult;
+  "chats.stop": (id: string) => void;
+
+  "code.shell": (opts: { workspaceId?: string; cwd?: string } & TermSize) => { ptyId: string };
+  "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
+
+  "runs.list": (query?: RunQuery) => RunView[];
+  "runs.inbox": () => RunView[];
+  "runs.get": (id: string) => RunBundle;
+  "runs.markOpened": (id: string, opened?: boolean) => void;
+  "runs.markAllOpened": () => void;
+  "runs.stop": (id: string) => void;
+  "runs.continue": (id: string, size?: TermSize) => Launched & { chatId: string | null; taskId: string | null };
+  "runs.diff": (id: string) => string;
+
+  "live.list": () => LiveSession[];
+
+  "pty.write": (ptyId: string, data: string) => void;
+  "pty.send": (ptyId: string, text: string) => void;
+  "pty.resize": (ptyId: string, cols: number, rows: number) => void;
+  "pty.snapshot": (ptyId: string) => PtySnapshot;
+  "pty.kill": (ptyId: string) => void;
+
+  "dock.show": (bounds: DockBounds, url: string) => void;
+  "dock.hide": () => void;
+  "dock.command": (command: "back" | "forward" | "reload" | "stop" | "devtools") => void;
 }
 
-export interface RunBundle {
-  meta: RunMetaFile;
-  preamble: string;
-  scrollback: string;
-  git: string;
-  ptyId?: string | null;
+export interface DeskEvents {
+  changed: Topic[];
+  "pty-data": { ptyId: string; data: string; first: number; seq: number };
+  "pty-exit": { ptyId: string; exitCode: number | null; signal: number | null };
+  palette: Palette;
+  dock: DockState;
+  "open-run": { runId: string };
+  "host-crash": string;
 }
 
-export interface ForgeApi {
-  paths(): Promise<{ configRoot: string; dataRoot: string }>;
-  listWorkspaces(): Promise<{ workspaces: Workspace[]; lastWorkspaceId: string | null }>;
-  addWorkspace(folderPath: string): Promise<{ workspaces: Workspace[]; lastWorkspaceId: string | null }>;
-  removeWorkspace(id: string): Promise<{ workspaces: Workspace[]; lastWorkspaceId: string | null }>;
-  selectWorkspace(id: string): Promise<void>;
-  pickDirectory(): Promise<string | null>;
-  pathExists(folderPath: string): Promise<boolean>;
-  listEngines(): Promise<Engine[]>;
-  recheckEngines(): Promise<Engine[]>;
-  saveEngines(engines: EngineRow[]): Promise<Engine[]>;
-  ptySnapshot(ptyId: string): Promise<{ text: string; seq: number; alive: boolean }>;
-  createPty(opts: { cwd: string; argv?: string[]; cols?: number; rows?: number }): Promise<{ ptyId: string }>;
-  writePty(ptyId: string, data: string): Promise<void>;
-  resizePty(ptyId: string, cols: number, rows: number): Promise<void>;
-  killPty(ptyId: string): Promise<void>;
-  listPtys(): Promise<{ ptyId: string; cwd: string; pid: number }[]>;
-  onPtyData(cb: (event: { ptyId: string; data: string; seq: number }) => void): () => void;
-  onPtyExit(cb: (event: { ptyId: string; exitCode: number | null; status: string }) => void): () => void;
-  onDockFail(cb: (event: { description: string; url: string }) => void): () => void;
-  startShell(opts: { workspaceId: string }): Promise<{ ptyId: string }>;
-  startCodeSession(opts: { workspaceId: string; engineId: string; prompt?: string }): Promise<{ ptyId: string; runId?: string }>;
-  listTree(root: string): Promise<FileNode[]>;
-  openPath(folderPath: string): Promise<void>;
-  getDockUrl(workspaceId: string): Promise<string>;
-  setDockUrl(workspaceId: string, url: string): Promise<void>;
-  setDockBounds(bounds: { x: number; y: number; width: number; height: number; visible: boolean; url?: string }): Promise<void>;
-  getSettings(): Promise<Settings>;
-  saveSettings(settings: Settings): Promise<Settings>;
-  liveCount(): Promise<number>;
-  listAgents(): Promise<Agent[]>;
-  saveAgent(draft: AgentDraft): Promise<Agent>;
-  deleteAgent(id: string, confirmName: string): Promise<void>;
-  readMemory(id: string): Promise<string>;
-  writeMemory(id: string, text: string): Promise<void>;
-  listSkills(): Promise<{ id: string; name: string; description: string; body: string }[]>;
-  saveSkill(draft: SkillDraft): Promise<{ id: string; name: string; description: string; body: string }>;
-  deleteSkill(id: string): Promise<void>;
-  listRoutines(): Promise<RoutineRow[]>;
-  saveRoutine(draft: RoutineDraft): Promise<Routine>;
-  deleteRoutine(id: string): Promise<void>;
-  runRoutineNow(id: string): Promise<{ ok: boolean; reason?: string; runId?: string; ptyId?: string; message?: string }>;
-  setRoutineEnabled(id: string, enabled: boolean): Promise<Routine>;
-  previewRoutine(schedule: Schedule): Promise<string[]>;
-  listRuns(): Promise<RunMetaFile[]>;
-  getRun(id: string): Promise<RunBundle | null>;
-  markRunOpened(id: string): Promise<void>;
-  listInbox(): Promise<RunMetaFile[]>;
-  startAgentChat(agentId: string): Promise<ChatRecord>;
-  sendAgentChat(agentId: string, chatId: string, text: string): Promise<{ ok: boolean; reason?: string; chatId?: string; runId?: string | null; ptyId?: string | null; startedNew?: boolean; message?: string }>;
-  listTasks(): Promise<Task[]>;
-  saveTask(draft: TaskDraft): Promise<Task>;
-  executeTask(id: string): Promise<{ ok: boolean; reason?: string; runId?: string; ptyId?: string }>;
-  stopTask(id: string): Promise<void>;
-  setTaskStatus(id: string, status: TaskStatus): Promise<Task>;
-  listChats(): Promise<ChatRecord[]>;
-  startChat(engineId: string): Promise<ChatRecord>;
-  renameChat(id: string, name: string): Promise<ChatRecord>;
-  deleteChat(id: string): Promise<void>;
-  sendChat(chatId: string, text: string): Promise<{ ok: boolean; reason?: string; chatId?: string; runId?: string | null; ptyId?: string | null; startedNew?: boolean; message?: string }>;
+export type Method = keyof DeskMethods;
+export type MethodArgs<K extends Method> = Parameters<DeskMethods[K]>;
+export type MethodResult<K extends Method> = Awaited<ReturnType<DeskMethods[K]>>;
+
+export interface VibeForgeBridge {
+  call(method: string, ...args: unknown[]): Promise<unknown>;
+  on(event: string, listener: (payload: unknown) => void): () => void;
+  pathForFile(file: File): string;
 }

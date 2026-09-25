@@ -2,13 +2,10 @@ import path from "node:path";
 
 // path.relative treats "/tmp/proj-other" as outside "/tmp/proj"; a string prefix would not.
 export function isPathInside(parent: string, child: string): boolean {
-  const base = path.resolve(parent);
-  const target = path.resolve(child);
-  if (base === target) return true;
-  const relative = path.relative(base, target);
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
   if (relative === "") return true;
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return false;
-  return true;
+  if (path.isAbsolute(relative)) return false;
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`);
 }
 
 export function cwdAllowed(cwd: string, places: readonly string[]): boolean {
