@@ -963,6 +963,28 @@ export class TeamService {
     return { ptyId: spawned.ptyId };
   }
 
+  /** A one-off command in a terminal (the self-update), listed with the live sessions. */
+  async startCommand(opts: { command: string; title: string; cwd: string } & TermSize): Promise<{ ptyId: string }> {
+    if (!isDirectory(opts.cwd)) throw new Error("That folder does not exist any more.");
+    const spawned = await this.options.host.spawn({ cwd: opts.cwd, argv: ["/bin/bash", "-c", opts.command], runDir: null, pasteInput: null, cols: opts.cols, rows: opts.rows });
+    this.live.set(spawned.ptyId, {
+      ptyId: spawned.ptyId,
+      runId: null,
+      kind: "shell",
+      title: opts.title,
+      cwd: opts.cwd,
+      pid: spawned.pid,
+      startedAt: this.now().toISOString(),
+      origin: null,
+      agentId: null,
+      chatId: null,
+      taskId: null,
+      workspaceId: null,
+    });
+    this.emit("live");
+    return { ptyId: spawned.ptyId };
+  }
+
   async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
     const workspace = this.workspaceById(opts.workspaceId);
     if (!workspace) throw new Error("Open a workspace first.");

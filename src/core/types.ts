@@ -111,6 +111,10 @@ export interface Settings {
   theme: "omarchy" | "builtin";
   /** The welcome tour has been finished or skipped; it opens by itself until then. */
   tourDone: boolean;
+  /** Ask GitHub for the newest release at start and every few hours. */
+  checkUpdates: boolean;
+  /** "system" follows the desktop's language; otherwise a code such as "de". */
+  language: string;
 }
 
 export interface Workspace {
@@ -162,4 +166,5 @@ export type Topic =
   | "workspaces"
   | "engines"
   | "settings"
-  | "live";
+  | "live"
+  | "updates";

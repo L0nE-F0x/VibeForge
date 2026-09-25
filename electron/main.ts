@@ -2,24 +2,34 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { gitHead, snapshotGit } from "../src/core/vcs.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
+import { describeError, LogFile } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService, type DeskHost } from "../src/core/team-service.js";
 import { resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
 import type { Topic } from "../src/core/types.js";
+import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
+import { Updater } from "./updater.js";
 
 const APP_ID = "dev.vibeforge.app";
 const REPO_URL = "https://github.com/L0nE-F0x/VibeForge";
 const roots = defaultRoots();
 ensureLayout(roots.configRoot, roots.dataRoot);
+const log = new LogFile(path.join(roots.dataRoot, "logs", "vibeforge.log"));
+
+process.on("uncaughtException", (error) => {
+  console.error(error);
+  log.error(`Uncaught error in the main process: ${describeError(error)}`);
+});
+process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in the main process: ${describeError(reason)}`));
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
@@ -41,6 +51,12 @@ function appRoot(): string {
 function iconPath(): string {
   return path.join(appRoot(), "resources", "icon.png");
 }
+
+const install = installKind(appRoot(), {
+  installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
+  marked: fs.existsSync(path.join(appRoot(), INSTALLER_MARK)),
+  checkout: fs.existsSync(path.join(appRoot(), ".git")),
+});
 
 /** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
 function osDescription(): string {
@@ -102,7 +118,18 @@ function notify(note: { title: string; body: string; runId: string }): void {
 }
 
 const host: DeskHost = {
-  spawn: (request) => supervisor.spawn(request),
+  spawn: async (request) => {
+    // The program's name only: the rest of the command line can hold a prompt.
+    const program = path.basename(request.argv[0] ?? "?");
+    try {
+      const spawned = await supervisor.spawn(request);
+      log.info(`Terminal ${spawned.ptyId} started: ${program} in ${request.cwd}`);
+      return spawned;
+    } catch (error) {
+      log.error(`Could not start ${program} in ${request.cwd}: ${describeError(error)}`);
+      throw error;
+    }
+  },
   send: (ptyId, text) => supervisor.send(ptyId, text),
   kill: (ptyId) => supervisor.kill(ptyId),
   resolveBin: (bin) => whichBin(bin),
@@ -112,6 +139,16 @@ const host: DeskHost = {
 };
 
 const dock = new Dock(() => win, (state) => send("dock", state));
+
+const updater = new Updater({
+  current: app.getVersion(),
+  install,
+  command: updateCommand(install, appRoot(), process.env.VIBEFORGE_UPDATE_COMMAND),
+  url: process.env.VIBEFORGE_UPDATE_URL || RELEASES_URL,
+  log,
+  enabled: () => service?.getSettings().checkUpdates ?? false,
+  changed: () => send("changed", ["updates"]),
+});
 
 function refreshPalette(): void {
   if (!service) return;
@@ -138,6 +175,9 @@ function handlers(): Handlers {
       node: process.versions.node,
       os: osDescription(),
       repo: REPO_URL,
+      appPath: appRoot(),
+      install,
+      logFile: log.file,
     }),
     "app.palette": () => palette,
     "app.openPath": (target) => openPath(target),
@@ -151,6 +191,24 @@ function handlers(): Handlers {
     },
     "app.pathExists": (target) => fs.existsSync(target),
     "app.toggleDevTools": () => win?.webContents.toggleDevTools(),
+    "app.restart": () => {
+      // The renderer has already asked about running terminals; quitting stops them like any quit.
+      log.info("Restarting");
+      app.relaunch();
+      quitting = true;
+      app.quit();
+    },
+    "app.copyText": (text) => clipboard.writeText(text),
+    "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
+
+    "updates.get": () => updater.get(),
+    "updates.check": () => updater.check(),
+    "updates.run": (size) => {
+      const command = updater.get().command;
+      if (!command) throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
+      log.info(`Update started: ${command}`);
+      return s().startCommand({ command, title: "VibeForge update", cwd: os.homedir(), ...size });
+    },
 
     "settings.get": () => s().getSettings(),
     "settings.save": (patch) => {
@@ -233,6 +291,7 @@ function handlers(): Handlers {
 
     "dock.show": (bounds, url) => dock.show(bounds, url),
     "dock.hide": () => dock.hide(),
+    "dock.capture": () => dock.capture(),
     "dock.command": (command) => dock.command(command),
   };
 }
@@ -243,7 +302,13 @@ function registerIpc(): void {
     if (!win || event.sender !== win.webContents) throw new Error("Not allowed.");
     const handler = table[method];
     if (!handler) throw new Error(`Unknown call ${method}`);
-    return handler(...args);
+    try {
+      return await handler(...args);
+    } catch (error) {
+      // What the person saw as an error toast, kept for bug reports.
+      log.warn(`${method} failed: ${describeError(error).split("\n")[0]}`);
+      throw error;
+    }
   });
 }
 
@@ -344,6 +409,10 @@ async function createWindow(): Promise<void> {
     dock.dispose();
     win = null;
   });
+  win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
+  win.webContents.on("console-message", (event) => {
+    if (event.level === "error") log.warn(`Page error: ${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
+  });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) await win.loadURL(devUrl);
   else await win.loadFile(path.join(appRoot(), "dist", "index.html"));
@@ -355,16 +424,19 @@ async function startHost(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
+    log.error(`The terminal host did not start: ${message}`);
     send("host-crash", message);
   }
 }
 
 supervisor.onData.add((event) => send("pty-data", event));
 supervisor.onExit.add((event) => {
+  log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
   send("pty-exit", event);
   void service?.onPtyExit(event.ptyId, event.exitCode, event.signal);
 });
 supervisor.onCrash.add((message) => {
+  log.error(`The terminal host stopped: ${message}`);
   send("host-crash", message);
   // Every terminal died with the host. Record them, then bring the host back.
   for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
@@ -389,6 +461,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", focusWindow);
 
   app.whenReady().then(async () => {
+    log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${appRoot()}`);
     Menu.setApplicationMenu(null);
     const shellPath = await loadShellPath();
     if (shellPath) process.env.PATH = mergePath(shellPath, process.env.PATH);
@@ -408,12 +481,18 @@ if (!app.requestSingleInstanceLock()) {
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig();
     win?.on("focus", refreshPalette);
-    const tick = () => void service?.tick().catch((error: unknown) => console.error(error));
+    const tick = () =>
+      void service?.tick().catch((error: unknown) => {
+        console.error(error);
+        log.error(`Routine scheduler: ${describeError(error)}`);
+      });
     const first = setTimeout(tick, 3000);
     const timer = setInterval(tick, TICK_MS);
+    updater.start();
     app.once("will-quit", () => {
       clearTimeout(first);
       clearInterval(timer);
+      updater.stop();
       stopThemeWatch();
       stopConfigWatch();
     });

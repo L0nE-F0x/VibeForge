@@ -6,6 +6,7 @@ import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
+import { useT } from "../i18n/index.js";
 
 const TEMPLATE = `## When
 Use this when …
@@ -21,6 +22,7 @@ Use this when …
 `;
 
 export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }> }) {
+  const t = useT();
   const { go } = useNav();
   const skills = useSkills();
   const list = skills.data ?? [];
@@ -35,17 +37,17 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
     <div className="view split-list">
       <SidePanel
         id="skills"
-        title="Skills"
+        title={t("skills.title")}
         actions={
           <>
             <Button size="sm" icon={Plus} onClick={() => go({ view: "skills", skillId: "new" })}>
-              New
+              {t("common.new")}
             </Button>
           </>
         }
         strip={
           <>
-            <StripItem label="New skill" onClick={() => go({ view: "skills", skillId: "new" })}>
+            <StripItem label={t("skills.new")} onClick={() => go({ view: "skills", skillId: "new" })}>
               <Plus size={16} />
             </StripItem>
             {list.map((skill) => (
@@ -74,14 +76,14 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
       ) : (
         <Empty
           icon={Sparkles}
-          title="Procedures your agents can reuse"
+          title={t("skills.empty.title")}
           actions={
             <Button variant="primary" icon={Plus} onClick={() => go({ view: "skills", skillId: "new" })}>
-              Write a skill
+              {t("skills.write")}
             </Button>
           }
         >
-          A skill says when it applies, the steps, how to verify, and when to stop and ask. Install it on any agent; editing it changes their next run.
+          {t("skills.empty.body")}
         </Empty>
       )}
     </div>
@@ -89,6 +91,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
 }
 
 function SkillEditor({ skill }: { skill: Skill | null }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
@@ -127,8 +130,8 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
     <div className="main">
       <div className="page-head">
         <Sparkles size={17} className="accent-text" />
-        <h1 className="grow truncate">{skill ? skill.name : "New skill"}</h1>
-        {skill && <Button size="sm" variant="ghost" icon={Trash2} busy={removing} onClick={() => void remove()} title="Delete skill" />}
+        <h1 className="grow truncate">{skill ? skill.name : t("skills.new")}</h1>
+        {skill && <Button size="sm" variant="ghost" icon={Trash2} busy={removing} onClick={() => void remove()} title={t("skills.delete")} />}
         <Button variant="primary" icon={Save} busy={saving} disabled={!dirty || !name.trim()} onClick={() => void save()}>
           {skill ? "Save" : "Create skill"}
         </Button>

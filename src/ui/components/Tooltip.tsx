@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { placeTip, type Box, type Side } from "../floating.js";
+import { useDockArea, useLayer } from "../state.js";
 
 // One tooltip for the whole app. Any element with `data-tip` gets it; `data-tip-kbd` adds
-// keycaps ("Ctrl+1") and `data-tip-side` picks a side (top, bottom, left, right).
-
-type Side = "top" | "bottom" | "left" | "right";
+// keycaps ("Ctrl+1") and `data-tip-side` picks a side (top, bottom, left, right). It keeps
+// clear of the browser dock, which is drawn above the page.
 
 interface Tip {
   text: string;
@@ -34,7 +35,10 @@ function describe(element: HTMLElement): Tip {
 
 export function TooltipLayer() {
   const [tip, setTip] = useState<Tip | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  // A new tip renders off-screen first, so it is measured at its natural width.
+  const [placed, setPlaced] = useState<{ tip: Tip; box: Box } | null>(null);
+  const box = placed && placed.tip === tip ? placed.box : null;
+  const dock = useDockArea();
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
   const lastHidden = useRef(0);
@@ -94,35 +98,19 @@ export function TooltipLayer() {
 
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!tip || !node) {
-      setPos(null);
-      return;
-    }
-    const gap = 8;
+    if (!tip || !node) return;
     const { width, height } = node.getBoundingClientRect();
-    const { rect } = tip;
-    const place = (side: Side) => {
-      if (side === "right") return { left: rect.right + gap, top: rect.top + rect.height / 2 - height / 2 };
-      if (side === "left") return { left: rect.left - gap - width, top: rect.top + rect.height / 2 - height / 2 };
-      if (side === "top") return { left: rect.left + rect.width / 2 - width / 2, top: rect.top - gap - height };
-      return { left: rect.left + rect.width / 2 - width / 2, top: rect.bottom + gap };
-    };
-    const fits = (spot: { left: number; top: number }) =>
-      spot.left >= 4 && spot.top >= 4 && spot.left + width <= window.innerWidth - 4 && spot.top + height <= window.innerHeight - 4;
-    const opposite: Record<Side, Side> = { top: "bottom", bottom: "top", left: "right", right: "left" };
-    let spot = place(tip.side);
-    if (!fits(spot)) {
-      const flipped = place(opposite[tip.side]);
-      if (fits(flipped)) spot = flipped;
-    }
-    spot.left = Math.min(Math.max(4, spot.left), window.innerWidth - width - 4);
-    spot.top = Math.min(Math.max(4, spot.top), window.innerHeight - height - 4);
-    setPos(spot);
-  }, [tip]);
+    const spot = placeTip(tip.rect, { width, height }, tip.side, { width: window.innerWidth, height: window.innerHeight }, dock);
+    setPlaced({ tip, box: { left: spot.left, top: spot.top, right: spot.left + width, bottom: spot.top + height } });
+  }, [tip, dock]);
+
+  // Placement keeps clear of the dock whenever there is room; when there isn't, the dock
+  // sees this box land on it and steps aside.
+  useLayer(box);
 
   if (!tip) return null;
   return createPortal(
-    <div ref={ref} className="tooltip" role="tooltip" style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}>
+    <div ref={ref} className="tooltip" role="tooltip" style={box ? { left: box.left, top: box.top } : { left: -9999, top: -9999 }}>
       <span>{tip.text}</span>
       {tip.kbd.length > 0 && (
         <span className="tooltip-keys">

@@ -15,7 +15,9 @@ import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
 import { initials, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
-import { useConfirmState, useOverlay, useToast } from "../state.js";
+import { sameBox, toastRight, type Box } from "../floating.js";
+import { useT } from "../i18n/index.js";
+import { useConfirmState, useDockArea, useLayer, useOverlay, useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -291,6 +293,7 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
 }) {
+  const t = useT();
   useOverlay(true);
   useEscape(onClose);
   return createPortal(
@@ -299,7 +302,7 @@ export function Modal({
         <div className="modal-head">
           {Icon && <Icon size={18} className="accent-text" />}
           <h2 className="grow">{title}</h2>
-          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title="Close (Esc)" />
+          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -329,15 +332,17 @@ export interface MenuItem {
   hint?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
+  /** Stands out in the accent colour, for the one thing worth noticing (an available update). */
+  accent?: boolean;
   disabled?: boolean;
 }
 
 /** A small floating menu anchored to an element. */
 export function Popover({ anchor, onClose, children, align = "start" }: { anchor: HTMLElement; onClose: () => void; children: ReactNode; align?: "start" | "end" }) {
-  useOverlay(true);
   useEscape(onClose);
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<Box | null>(null);
+  useLayer(pos);
   useLayoutEffect(() => {
     const rect = anchor.getBoundingClientRect();
     const node = ref.current;
@@ -352,7 +357,7 @@ export function Popover({ anchor, onClose, children, align = "start" }: { anchor
       left = rect.right + 8;
       top = Math.min(rect.top, window.innerHeight - height - 8);
     }
-    setPos({ top, left });
+    setPos({ left, top, right: left + width, bottom: top + height });
   }, [anchor, align]);
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -360,7 +365,12 @@ export function Popover({ anchor, onClose, children, align = "start" }: { anchor
       onClose();
     };
     window.addEventListener("mousedown", handler);
-    return () => window.removeEventListener("mousedown", handler);
+    // A click in the browser dock or in another window never reaches this page; it blurs it.
+    window.addEventListener("blur", onClose);
+    return () => {
+      window.removeEventListener("mousedown", handler);
+      window.removeEventListener("blur", onClose);
+    };
   }, [anchor, onClose]);
   return createPortal(
     <div ref={ref} className="popover" style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}>
@@ -381,7 +391,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
             key={index}
             type="button"
             role="menuitem"
-            className="menu-item"
+            className={cx("menu-item", item.accent && "accent")}
             disabled={item.disabled}
             style={item.danger ? { color: "var(--red)" } : undefined}
             onClick={() => {
@@ -416,10 +426,31 @@ export function MenuButton({ items, children, ...button }: Omit<ButtonProps, "on
   );
 }
 
+const TOAST_EDGE = 16;
+
 export function Toasts() {
+  const t = useT();
   const { toasts, dismiss } = useToast();
+  const dock = useDockArea();
+  const ref = useRef<HTMLDivElement>(null);
+  // The stack sits bottom right, or just left of the browser dock when it would land on it.
+  const [place, setPlace] = useState<{ right: number; box: Box | null }>({ right: TOAST_EDGE, box: null });
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node || toasts.length === 0) {
+      setPlace((prev) => (prev.box ? { right: TOAST_EDGE, box: null } : prev));
+      return;
+    }
+    const view = { width: window.innerWidth, height: window.innerHeight };
+    const stack = { width: node.offsetWidth, height: node.offsetHeight };
+    const right = toastRight(stack, view, dock, TOAST_EDGE);
+    const box = { left: view.width - right - stack.width, top: view.height - TOAST_EDGE - stack.height, right: view.width - right, bottom: view.height - TOAST_EDGE };
+    setPlace((prev) => (prev.right === right && sameBox(prev.box, box) ? prev : { right, box }));
+  }, [toasts, dock]);
+  // With no room beside the dock, the stack lands on it and the dock steps aside.
+  useLayer(place.box);
   return createPortal(
-    <div className="toasts" aria-live="polite">
+    <div ref={ref} className="toasts" aria-live="polite" style={place.right !== TOAST_EDGE ? { right: place.right } : undefined}>
       {toasts.map((toast) => {
         const Icon = toast.kind === "error" ? XCircle : toast.kind === "success" ? CheckCircle2 : Info;
         return (
@@ -429,7 +460,7 @@ export function Toasts() {
               <div className="toast-title">{toast.title}</div>
               {toast.body && <div className="toast-body selectable">{toast.body}</div>}
             </div>
-            <Button variant="ghost" size="sm" icon={X} onClick={() => dismiss(toast.id)} title="Dismiss" />
+            <Button variant="ghost" size="sm" icon={X} onClick={() => dismiss(toast.id)} title={t("common.dismiss")} />
           </div>
         );
       })}
@@ -439,6 +470,7 @@ export function Toasts() {
 }
 
 export function ConfirmDialog() {
+  const t = useT();
   const { request, settle } = useConfirmState();
   const [typed, setTyped] = useState("");
   useEffect(() => setTyped(""), [request]);
@@ -452,10 +484,10 @@ export function ConfirmDialog() {
       footer={
         <>
           <Button variant="ghost" onClick={() => settle(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant={request.danger ? "danger" : "primary"} disabled={blocked} onClick={() => settle(true)} autoFocus={!request.typeToConfirm}>
-            {request.confirm ?? "Continue"}
+            {request.confirm ?? t("common.continue")}
           </Button>
         </>
       }

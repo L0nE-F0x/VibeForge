@@ -20,7 +20,9 @@ import { call, errorText, on } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Spinner } from "../components/ui.js";
-import { useOverlayOpen, useToast } from "../state.js";
+import { boxOf } from "../floating.js";
+import { useT } from "../i18n/index.js";
+import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
 
 // ------------------------------------------------------------------ split layout
 
@@ -48,6 +50,7 @@ function SplitNode({
   onRatio: (path: string, ratio: number) => void;
   renderPane: (pane: Extract<LayoutNode, { kind: "pane" }>) => ReactNode;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   if (node.kind === "pane") return <>{renderPane(node)}</>;
@@ -77,7 +80,7 @@ function SplitNode({
         className={`divider${dragging ? " dragging" : ""}`}
         onPointerDown={start}
         onDoubleClick={() => onRatio(path, 0.5)}
-        {...tipProps("Drag to resize · double-click to even out")}
+        {...tipProps(t("split.resize"))}
       />
       <div className="split-cell" style={{ flex: `${1 - node.ratio} 1 0` }}>
         <SplitNode node={node.b} path={`${path}b`} onRatio={onRatio} renderPane={renderPane} />
@@ -99,6 +102,7 @@ function TreeLevel({
   onInsert: (path: string) => void;
   refreshKey: number;
 }) {
+  const t = useT();
   const [nodes, setNodes] = useState<FileNode[] | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -131,7 +135,7 @@ function TreeLevel({
               }}
               onClick={() => (isDir ? setOpen((prev) => ({ ...prev, [node.path]: !expanded })) : onInsert(node.path))}
               onDoubleClick={() => !isDir && void call("app.openPath", node.path)}
-              {...tipProps(isDir ? node.name : `${node.name}: click to insert its path into the focused terminal, double-click to open it`, { side: "left" })}
+              {...tipProps(isDir ? node.name : t("files.insertOpen", { name: node.name }), { side: "left" })}
             >
               {isDir ? (
                 expanded ? <ChevronDown size={12} className="faint" /> : <ChevronRight size={12} className="faint" />
@@ -151,7 +155,7 @@ function TreeLevel({
                   role="button"
                   tabIndex={-1}
                   className="btn ghost sm icon"
-                  {...tipProps("Insert the path", { side: "top" })}
+                  {...tipProps(t("files.insert"), { side: "top" })}
                   onClick={(event) => {
                     event.stopPropagation();
                     onInsert(node.path);
@@ -163,7 +167,7 @@ function TreeLevel({
                   role="button"
                   tabIndex={-1}
                   className="btn ghost sm icon"
-                  {...tipProps("Open with the default app", { side: "top" })}
+                  {...tipProps(t("files.open"), { side: "top" })}
                   onClick={(event) => {
                     event.stopPropagation();
                     void call("app.openPath", node.path);
@@ -182,6 +186,7 @@ function TreeLevel({
 }
 
 export function FilesPanel({ root, onInsert }: { root: string; onInsert: (path: string) => void }) {
+  const t = useT();
   const [refreshKey, setRefreshKey] = useState(0);
   return (
     <>
@@ -189,8 +194,8 @@ export function FilesPanel({ root, onInsert }: { root: string; onInsert: (path: 
         <span className="faint truncate grow mono" style={{ fontSize: "var(--fs-xs)" }} {...tipProps(root)}>
           {root}
         </span>
-        <Button size="sm" variant="ghost" icon={RefreshCw} title="Refresh" onClick={() => setRefreshKey((key) => key + 1)} />
-        <Button size="sm" variant="ghost" icon={FolderOpen} title="Open in the file manager" onClick={() => void call("app.openPath", root)} />
+        <Button size="sm" variant="ghost" icon={RefreshCw} title={t("common.refresh")} onClick={() => setRefreshKey((key) => key + 1)} />
+        <Button size="sm" variant="ghost" icon={FolderOpen} title={t("common.openFileManager")} onClick={() => void call("app.openPath", root)} />
       </div>
       <div className="tree">
         <TreeLevel key={root} dir={root} depth={0} onInsert={onInsert} refreshKey={refreshKey} />
@@ -201,27 +206,47 @@ export function FilesPanel({ root, onInsert }: { root: string; onInsert: (path: 
 
 // ------------------------------------------------------------------ browser dock
 
+/** Resolves once the page has painted what was just rendered (or after a short wait if frames stall). */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(resolve, 80);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        window.clearTimeout(timer);
+        resolve();
+      }),
+    );
+  });
+}
+
 export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: string) => void; visible: boolean }) {
+  const t = useT();
   const { fail } = useToast();
   const viewRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(url);
   const [state, setState] = useState<DockState | null>(null);
-  const overlay = useOverlayOpen();
-  // The page is a native view drawn above the app; step aside for overlays and our own error card.
-  const show = visible && !overlay && Boolean(url) && !state?.error;
+  // The page is a native view drawn above the app. Our own cards (no URL, a load error) take its
+  // place; while a menu or dialog lands on it, a still of the page stands in so they can show.
+  const live = visible && Boolean(url) && !state?.error;
+  const covered = useDockCovered();
+  const [still, setStill] = useState<string | null>(null);
 
   useEffect(() => setDraft(url), [url]);
   useEffect(() => on("dock", setState), []);
 
   const place = useCallback(() => {
     const node = viewRef.current;
-    if (!node || !show) {
+    if (!node || !live) {
+      setDockArea(null);
       void call("dock.hide").catch(() => undefined);
       return;
     }
     const rect = node.getBoundingClientRect();
-    void call("dock.show", { x: rect.left, y: rect.top, width: rect.width, height: rect.height }, url).catch(() => undefined);
-  }, [show, url]);
+    setDockArea(boxOf(rect));
+    // While covered, the view stays hidden behind its still and comes back at the latest size.
+    // Ask the registry, not `covered`: publishing the area can itself make the dock covered.
+    if (!dockCovered()) void call("dock.show", { x: rect.left, y: rect.top, width: rect.width, height: rect.height }, url).catch(() => undefined);
+  }, [live, covered, url]);
 
   useEffect(() => {
     place();
@@ -236,7 +261,50 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
     };
   }, [place]);
 
-  useEffect(() => () => void call("dock.hide").catch(() => undefined), []);
+  // Something landed on the page: capture it, paint the still in its place, then hide the view.
+  useEffect(() => {
+    if (!live || !covered) return;
+    let cancelled = false;
+    void (async () => {
+      const src = await call("dock.capture").catch(() => null);
+      if (cancelled) return;
+      if (src) {
+        // Wait for load, not decode(): decode() settles with the next frame, and frames can stall.
+        const loaded = await new Promise<boolean>((resolve) => {
+          const image = new Image();
+          image.onload = () => resolve(true);
+          image.onerror = () => resolve(false);
+          image.src = src;
+        });
+        if (cancelled) return;
+        if (loaded) {
+          setStill(src);
+          await nextPaint();
+          if (cancelled) return;
+        }
+      }
+      // Without a still (the page never painted), the panel's own background shows instead.
+      void call("dock.hide").catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [live, covered]);
+
+  // Once the view is back, give it time to repaint over the still before dropping the still.
+  useEffect(() => {
+    if (!still || (live && covered)) return;
+    const timer = window.setTimeout(() => setStill(null), 250);
+    return () => window.clearTimeout(timer);
+  }, [still, live, covered]);
+
+  useEffect(
+    () => () => {
+      setDockArea(null);
+      void call("dock.hide").catch(() => undefined);
+    },
+    [],
+  );
 
   const commit = () => {
     let next = draft.trim();
@@ -250,21 +318,21 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
     } else void call("dock.command", "reload");
   };
 
-  const loading = Boolean(state?.loading) && show;
+  const loading = Boolean(state?.loading) && live;
   const error = visible && url ? state?.error : null;
 
   return (
     <>
       <div className="dock-bar">
-        <Button size="sm" variant="ghost" icon={ArrowLeft} disabled={!state?.canGoBack} onClick={() => void call("dock.command", "back")} title="Back" />
-        <Button size="sm" variant="ghost" icon={ArrowRight} disabled={!state?.canGoForward} onClick={() => void call("dock.command", "forward")} title="Forward" />
+        <Button size="sm" variant="ghost" icon={ArrowLeft} disabled={!state?.canGoBack} onClick={() => void call("dock.command", "back")} title={t("common.back")} />
+        <Button size="sm" variant="ghost" icon={ArrowRight} disabled={!state?.canGoForward} onClick={() => void call("dock.command", "forward")} title={t("dock.forward")} />
         <Button
           size="sm"
           variant="ghost"
           icon={loading ? Square : RefreshCw}
           disabled={!url}
           onClick={() => void call("dock.command", loading ? "stop" : "reload")}
-          title={loading ? "Stop" : "Reload"}
+          title={loading ? t("dock.stop") : t("dock.reload")}
         />
         <Input
           value={draft}
@@ -273,24 +341,25 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
           onKeyDown={(event) => event.key === "Enter" && commit()}
           onBlur={() => draft.trim() !== url && commit()}
         />
-        <Button size="sm" variant="ghost" icon={ExternalLink} disabled={!url} onClick={() => void call("app.openExternal", state?.url || url)} title="Open in your browser" />
-        <Button size="sm" variant="ghost" icon={Wrench} disabled={!url} onClick={() => void call("dock.command", "devtools")} title="Developer tools for this page" />
+        <Button size="sm" variant="ghost" icon={ExternalLink} disabled={!url} onClick={() => void call("app.openExternal", state?.url || url)} title={t("dock.openBrowser")} />
+        <Button size="sm" variant="ghost" icon={Wrench} disabled={!url} onClick={() => void call("dock.command", "devtools")} title={t("dock.devtools")} />
       </div>
       <div ref={viewRef} className="dock-view">
+        {still && live && <img className="dock-still" src={still} alt="" decoding="sync" draggable={false} />}
         {!url && (
           <div className="dock-message">
             <Globe size={26} className="accent-text" />
-            <strong style={{ color: "var(--fg)" }}>Preview a local server</strong>
-            <span>Type the URL your dev server prints, like http://127.0.0.1:5173. Each workspace remembers its own.</span>
+            <strong style={{ color: "var(--fg)" }}>{t("dock.empty.title")}</strong>
+            <span>{t("dock.empty.body")}</span>
           </div>
         )}
         {error && (
           <div className="dock-message" style={{ background: "var(--bg-deep)", zIndex: 1 }}>
             <Globe size={26} style={{ color: "var(--red)" }} />
-            <strong style={{ color: "var(--fg)" }}>This page did not load</strong>
+            <strong style={{ color: "var(--fg)" }}>{t("dock.error.title")}</strong>
             <span className="mono selectable" style={{ fontSize: "var(--fs-sm)" }}>{errorText(error)}</span>
             <Button size="sm" icon={RefreshCw} onClick={() => void call("dock.command", "reload")}>
-              Try again
+              {t("common.tryAgain")}
             </Button>
           </div>
         )}

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # VibeForge installer for Omarchy (and other Arch + Hyprland setups).
 #
-#   curl -fsSL https://raw.githubusercontent.com/L0nE-F0x/VibeForge/main/scripts/install.sh | bash
+#   curl -fsSL https://vibe-forge.net/install | bash
 #
-# Clones VibeForge into ~/.local/share/vibeforge-app, builds it, and adds a `vibeforge`
-# command plus an app-launcher entry. Run it again to update. `--uninstall` removes the
-# command and launcher entry but keeps your agents, routines and runs.
+# Clones VibeForge into ~/.local/share/vibeforge-app, checks out the newest release, builds it,
+# and adds a `vibeforge` command plus an app-launcher entry. Run it again (or use Update in the
+# app) to update. VIBEFORGE_BRANCH=main follows a branch instead of releases. `--uninstall`
+# removes the command and launcher entry but keeps your agents, routines and runs.
 set -euo pipefail
 
 REPO="${VIBEFORGE_REPO:-https://github.com/L0nE-F0x/VibeForge.git}"
-BRANCH="${VIBEFORGE_BRANCH:-main}"
+BRANCH="${VIBEFORGE_BRANCH:-}"
 DEST="${VIBEFORGE_HOME:-$HOME/.local/share/vibeforge-app}"
 BIN_DIR="$HOME/.local/bin"
 APPS_DIR="$HOME/.local/share/applications"
@@ -71,18 +72,29 @@ command -v npm >/dev/null 2>&1 || die "npm is missing next to node."
 
 if [[ -d "$DEST/.git" ]]; then
   step "Updating $DEST"
-  git -C "$DEST" fetch --quiet origin "$BRANCH"
-  git -C "$DEST" checkout --quiet "$BRANCH"
-  git -C "$DEST" reset --quiet --hard "origin/$BRANCH"
+  git -C "$DEST" fetch --quiet --tags --force origin
 elif [[ -e "$DEST" ]]; then
   die "$DEST exists but is not a VibeForge checkout. Move it aside or set VIBEFORGE_HOME."
 else
   step "Cloning VibeForge into $DEST"
   mkdir -p "$(dirname "$DEST")"
-  git clone --quiet --branch "$BRANCH" "$REPO" "$DEST"
+  git clone --quiet "$REPO" "$DEST"
 fi
 
+# The newest release, or a branch when one was asked for (main until the first release exists).
+if [[ -n "$BRANCH" ]]; then
+  git -C "$DEST" fetch --quiet origin "$BRANCH"
+  target="origin/$BRANCH"
+else
+  target=$(git -C "$DEST" tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+  target="${target:-origin/main}"
+fi
+git -C "$DEST" checkout --quiet --force --detach "$target"
+# Lets the app know this copy is the installer's, so its Update button runs this script.
+touch "$DEST/.vibeforge-installer"
+
 cd "$DEST"
+version=$(node -p 'require("./package.json").version')
 step "Installing dependencies (Electron and the terminal engine; the first run takes a minute)"
 npm ci --no-audit --no-fund --loglevel=error
 [[ -x node_modules/electron/dist/electron ]] || die "Electron's binary did not install. Run: cd \"$DEST\" && node scripts/ensure-electron.cjs"
@@ -122,7 +134,7 @@ for cli in claude codex grok cursor-agent gemini opencode copilot crush kimi; do
   command -v "$cli" >/dev/null 2>&1 && found+=("$cli")
 done
 
-printf '\n%s✓ VibeForge is installed.%s\n' "$ember" "$reset"
+printf '\n%s✓ VibeForge %s is installed.%s\n' "$ember" "$version" "$reset"
 note "Open it from the app launcher (Super + Space), or run: vibeforge"
 if ((${#found[@]})); then
   note "CLIs found on PATH: ${found[*]}"

@@ -1,13 +1,16 @@
-import { Bell, Bug, Check, Compass, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Trash2, X } from "lucide-react";
+import { Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
-import { call, useAppInfo, useEngines, useSettings } from "../api.js";
-import { environmentText, issueUrl, SHOW_SHORTCUTS_EVENT } from "../components/Help.js";
+import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
+import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnostics } from "../components/Help.js";
+import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
+import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { usePalette } from "../theme.js";
 import { useAction, useToast } from "../state.js";
+import { useT } from "../i18n/index.js";
 
 function toRow(engine: Engine | EngineRow): EngineRow {
   const row: EngineRow = { id: engine.id, label: engine.label, bin: engine.bin, args: engine.args };
@@ -80,6 +83,7 @@ function EngineEditor({ engine, onSave, onCancel, isNew }: { engine: EngineRow; 
 }
 
 export function SettingsView() {
+  const t = useT();
   const { push } = useToast();
   const settings = useSettings();
   const engines = useEngines();
@@ -90,6 +94,8 @@ export function SettingsView() {
   const [editing, setEditing] = useState<string | null>(null);
   const current = settings.data;
   const rows = engines.data ?? [];
+  const update = useUpdate().data;
+  const copyDiagnostics = useCopyDiagnostics();
 
   useEffect(() => {
     if (!current) return;
@@ -114,15 +120,25 @@ export function SettingsView() {
     <div className="main">
       <div className="page-head">
         <SettingsIcon size={17} className="accent-text" />
-        <h1 className="grow">Settings</h1>
+        <h1 className="grow">{t("settings.title")}</h1>
         <span className="sub">Saved to {info?.configRoot ?? "…"}</span>
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 14, maxWidth: 940 }}>
           <div className="section-title">
-            <PaletteIcon size={13} /> Appearance
+            <PaletteIcon size={13} /> {t("settings.appearance")}
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
+            <Field label={t("settings.language")} hint={t("settings.languageHint")}>
+              <Select value={current.language} onChange={(event) => void patch({ language: event.target.value })} style={{ maxWidth: 320 }}>
+                <option value="system">{t("settings.languageSystem", { name: systemLanguageName() })}</option>
+                {LANGUAGES.map((language) => (
+                  <option key={language.code} value={language.code}>
+                    {language.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Field label="Colours" hint={current.theme === "omarchy" ? `Following Omarchy: ${palette?.source === "omarchy" ? palette.name : "no theme found, using Apex Forge"}. Switching themes restyles VibeForge live.` : "The built-in Apex Forge palette."}>
               <Segmented
                 value={current.theme}
@@ -139,16 +155,16 @@ export function SettingsView() {
               </Field>
               <Field label="Terminal font size">
                 <div className="hstack">
-                  <Button icon={Minus} tip="Smaller terminal text" disabled={current.terminalFontSize <= 8} onClick={() => void patch({ terminalFontSize: current.terminalFontSize - 1 })} />
+                  <Button icon={Minus} tip={t("settings.smaller")} disabled={current.terminalFontSize <= 8} onClick={() => void patch({ terminalFontSize: current.terminalFontSize - 1 })} />
                   <strong style={{ width: 36, textAlign: "center" }}>{current.terminalFontSize}px</strong>
-                  <Button icon={Plus} tip="Larger terminal text" disabled={current.terminalFontSize >= 32} onClick={() => void patch({ terminalFontSize: current.terminalFontSize + 1 })} />
+                  <Button icon={Plus} tip={t("settings.larger")} disabled={current.terminalFontSize >= 32} onClick={() => void patch({ terminalFontSize: current.terminalFontSize + 1 })} />
                 </div>
               </Field>
             </div>
           </div>
 
           <div className="section-title">
-            <SquareTerminal size={13} /> Defaults
+            <SquareTerminal size={13} /> {t("settings.defaults")}
           </div>
           <div className="card form-grid">
             <Field label="Default engine" hint="Preselected for new agents, chats and Code launches.">
@@ -167,7 +183,7 @@ export function SettingsView() {
           </div>
 
           <div className="section-title">
-            <Bell size={13} /> Notifications
+            <Bell size={13} /> {t("settings.notifications")}
           </div>
           <div className="card hstack">
             <span className="grow">
@@ -179,7 +195,7 @@ export function SettingsView() {
           </div>
 
           <div className="section-title">
-            <SquareTerminal size={13} /> Engines
+            <SquareTerminal size={13} /> {t("settings.engines")}
             <span className="count">
               {available.length}/{rows.length}
             </span>
@@ -233,19 +249,19 @@ export function SettingsView() {
                       {engine.promptArgs?.length ? ` ${joinArgs(engine.promptArgs)}` : ""}
                     </span>
                   </span>
-                  <Chip tone={engine.promptArgs?.length ? "ok" : "warn"} title={engine.promptArgs?.length ? "The first message goes on the command line." : "The first message is pasted once the CLI is ready."}>
+                  <Chip tone={engine.promptArgs?.length ? "ok" : "warn"} title={engine.promptArgs?.length ? t("settings.promptArg") : t("settings.promptPaste")}>
                     {engine.promptArgs?.length ? "prompt as argument" : "prompt pasted"}
                   </Chip>
                   {engine.continueArgs?.length ? <Chip title={joinArgs(engine.continueArgs)}>continue</Chip> : null}
-                  <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(engine.id)} title="Edit" />
-                  <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void saveEngines(rows.filter((item) => item.id !== engine.id).map(toRow))} title="Remove" />
+                  <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(engine.id)} title={t("common.edit")} />
+                  <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void saveEngines(rows.filter((item) => item.id !== engine.id).map(toRow))} title={t("common.remove")} />
                 </div>
               ),
             )}
           </div>
 
           <div className="section-title">
-            <FolderOpen size={13} /> Files
+            <FolderOpen size={13} /> {t("settings.files")}
           </div>
           <div className="card vstack" style={{ gap: 8 }}>
             {[
@@ -275,30 +291,69 @@ export function SettingsView() {
           </div>
 
           <div className="section-title">
-            <LifeBuoy size={13} /> Help
+            <Download size={13} /> {t("updates.title")}
+          </div>
+          <div className="card vstack" style={{ gap: 12 }}>
+            <Field hint={t("updates.autoHint")}>
+              <Toggle checked={current.checkUpdates} onChange={(checkUpdates) => void patch({ checkUpdates })} label={t("updates.auto")} />
+            </Field>
+            {update && (
+              <div className="hstack wrap" style={{ gap: 8 }}>
+                <span className="vstack grow" style={{ gap: 2 }}>
+                  <span style={update.available ? { color: "var(--accent)" } : update.error ? { color: "var(--red)" } : undefined}>
+                    {updateStatus(update, t)} <span className="faint">{checkedAt(update, t)}</span>
+                  </span>
+                  <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
+                    {installText(update, info?.appPath ?? "", t)}
+                  </span>
+                </span>
+                <Button icon={RefreshCw} busy={update.checking} onClick={() => void call("updates.check")}>
+                  {t("updates.checkNow")}
+                </Button>
+                {update.available && (
+                  <Button variant="primary" icon={Download} onClick={showUpdate}>
+                    {t("updates.see")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="section-title">
+            <LifeBuoy size={13} /> {t("settings.help")}
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
             <div className="hstack wrap" style={{ gap: 8 }}>
-              <Button icon={Compass} onClick={startTour} tip="Walk through every view again">
-                Replay the tour
+              <Button icon={Compass} onClick={startTour} tip={t("settings.replayTourTip")}>
+                {t("settings.replayTour")}
               </Button>
-              <Button icon={Keyboard} kbd="Ctrl+Shift+/" tip="Every shortcut on one sheet" onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>
-                Keyboard shortcuts
+              <Button icon={Keyboard} kbd="Ctrl+Shift+/" tip={t("settings.shortcutsTip")} onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>
+                {t("help.shortcuts")}
               </Button>
               <span className="grow" />
-              <Button icon={Lightbulb} tip="Opens a GitHub issue form" onClick={() => void call("app.openExternal", issueUrl("feature", info, rows))}>
-                Suggest a feature
+              <Button icon={Lightbulb} tip={t("settings.featureTip")} onClick={() => void call("app.openExternal", issueUrl("feature", info, rows))}>
+                {t("help.feature")}
               </Button>
-              <Button icon={Bug} tip="Opens a GitHub issue form with your versions filled in" onClick={() => void call("app.openExternal", issueUrl("bug", info, rows))}>
-                Report a bug
+              <Button icon={Bug} tip={t("settings.bugTip")} onClick={() => void call("app.openExternal", issueUrl("bug", info, rows))}>
+                {t("help.bug")}
               </Button>
             </div>
-            <Field label="About this install" hint="Bug reports include these lines. Nothing is sent from the app: reports open in your browser for you to read first.">
+            <Field label={t("settings.aboutInstall")} hint={t("settings.aboutInstallHint")}>
               <pre className="about-env selectable">{environmentText(info, rows)}</pre>
+            </Field>
+            <Field label={t("diagnostics.title")} hint={t("diagnostics.hint")}>
+              <div className="hstack wrap" style={{ gap: 8 }}>
+                <Button icon={Stethoscope} onClick={() => void copyDiagnostics()}>
+                  {t("diagnostics.copy")}
+                </Button>
+                <Button icon={FolderOpen} disabled={!info?.logFile} onClick={() => info && void call("app.openPath", info.logFile.replace(/\/[^/]+$/, ""))}>
+                  {t("diagnostics.openLog")}
+                </Button>
+              </div>
             </Field>
           </div>
           <div className="faint" style={{ fontSize: "var(--fs-sm)", marginTop: 6 }}>
-            <Save size={11} /> VibeForge {info?.version ?? ""} · no accounts, no telemetry.
+            <Save size={11} /> {t("settings.footer", { version: info?.version ?? "" })} · <Credit />
           </div>
         </div>
       </div>

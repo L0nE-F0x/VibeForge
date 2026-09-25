@@ -225,6 +225,7 @@ export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => 
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live"], () => call("live.list"));
 export const useAppInfo = () => useQuery("app-info", [], () => call("app.info"));
+export const useUpdate = () => useQuery("updates", ["updates"], () => call("updates.get"));
 export const useChats = (agentId: string | null | undefined) =>
   useQuery(`chats:${agentId === undefined ? "*" : (agentId ?? "none")}`, ["chats", "runs", "live"], () =>
     call("chats.list", agentId === undefined ? {} : { agentId }),

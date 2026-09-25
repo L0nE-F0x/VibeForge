@@ -23,6 +23,7 @@ import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
+import { useT } from "../i18n/index.js";
 
 const BRIEF_PLACEHOLDER = `What do you own?
 What context matters?
@@ -63,6 +64,7 @@ export function EngineSelect({ engines, value, onChange, allowMissing }: { engin
 // ------------------------------------------------------------------ view
 
 export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }> }) {
+  const t = useT();
   const { go } = useNav();
   const agents = useAgents();
   const chats = useChats(undefined).data ?? [];
@@ -80,15 +82,15 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
     <div className="view split-list">
       <SidePanel
         id="agents"
-        title="Agents"
+        title={t("agents.title")}
         actions={
-          <Button size="sm" icon={Plus} onClick={() => setCreating(true)} tip="Create a new agent">
-            New
+          <Button size="sm" icon={Plus} onClick={() => setCreating(true)} tip={t("agents.newTip")}>
+            {t("common.new")}
           </Button>
         }
         strip={
           <>
-            <StripItem label="New agent" onClick={() => setCreating(true)}>
+            <StripItem label={t("agents.empty.action")} onClick={() => setCreating(true)}>
               <Plus size={16} />
             </StripItem>
             {list.map((agent) => (
@@ -128,7 +130,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                   </span>
                 </span>
                 {unread > 0 && <Chip tone="accent">{unread}</Chip>}
-                {live && <StatusDot status="running" title="A chat is live" />}
+                {live && <StatusDot status="running" title={t("agents.chatLive")} />}
               </button>
             );
           })}
@@ -139,14 +141,14 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
       ) : (
         <Empty
           icon={Bot}
-          title="Agents are teammates, not engines"
+          title={t("agents.empty.title")}
           actions={
             <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>
-              New agent
+              {t("agents.empty.action")}
             </Button>
           }
         >
-          Give one a name, a brief, and the folders it may work in. It keeps its memory and skills when you switch it from Claude to Codex to Grok.
+          {t("agents.empty.body")}
         </Empty>
       )}
       {creating && (
@@ -165,6 +167,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
 // ------------------------------------------------------------------ create
 
 function FolderList({ places, onRemove, home }: { places: string[]; onRemove?: (place: string) => void; home: string }) {
+  const t = useT();
   const exists = useQuery(`exists:${places.join("|")}`, [], async () => Promise.all(places.map((place) => call("app.pathExists", place))));
   return (
     <div className="vstack" style={{ gap: 6 }}>
@@ -173,8 +176,8 @@ function FolderList({ places, onRemove, home }: { places: string[]; onRemove?: (
           <FolderOpen size={14} className={exists.data?.[index] === false ? undefined : "accent-text"} style={exists.data?.[index] === false ? { color: "var(--red)" } : undefined} />
           <span className="mono truncate grow">{tildify(place, home)}</span>
           {exists.data?.[index] === false && <Chip tone="bad">missing</Chip>}
-          <Button size="sm" variant="ghost" icon={FolderOpen} title="Open" onClick={() => void call("app.openPath", place)} />
-          {onRemove && <Button size="sm" variant="ghost" icon={X} title="Remove" onClick={() => onRemove(place)} />}
+          <Button size="sm" variant="ghost" icon={FolderOpen} title={t("common.open")} onClick={() => void call("app.openPath", place)} />
+          {onRemove && <Button size="sm" variant="ghost" icon={X} title={t("common.remove")} onClick={() => onRemove(place)} />}
         </div>
       ))}
     </div>
@@ -311,6 +314,7 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
 }
 
 function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; chatId?: string }) {
+  const t = useT();
   const { go } = useNav();
   const confirm = useConfirm();
   const chat = chats.find((item) => item.id === chatId) ?? null;
@@ -330,14 +334,14 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       <SidePanel
         id="agent-chats"
-        title="Chats"
+        title={t("agents.chats")}
         primary={false}
         defaultWidth={240}
         min={180}
         max={420}
         strip={
           <>
-            <StripItem label="New chat" selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+            <StripItem label={t("agents.newChat")} selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
               <MessageSquarePlus size={16} />
             </StripItem>
             {chats.slice(0, 12).map((item) => (
@@ -364,7 +368,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
                 </span>
               </span>
               <span className="row-actions">
-                <Button size="sm" variant="ghost" icon={Trash2} title="Delete chat" onClick={(event) => { event.stopPropagation(); void remove(item); }} />
+                <Button size="sm" variant="ghost" icon={Trash2} title={t("agents.deleteChat")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
               </span>
             </div>
           ))}
@@ -375,11 +379,11 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         chat={chat}
         create={() => call("chats.create", { agentId: agent.id })}
         onCreated={(created) => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: created.id })}
-        placeholder={`What should ${agent.name} do?`}
+        placeholder={t("agents.placeholder", { name: agent.name })}
         empty={{
           icon: Bot,
-          title: `Start a chat with ${agent.name}`,
-          body: "Your first message starts the engine with the agent's brief, memory and skills. After that it is a real terminal: talk to it here or type in it directly.",
+          title: t("agents.chatEmpty.title", { name: agent.name }),
+          body: t("agents.chatEmpty.body"),
         }}
       />
     </div>
@@ -448,6 +452,7 @@ function MemoryTab({ agent }: { agent: Agent }) {
 }
 
 function SkillsTab({ agent }: { agent: Agent }) {
+  const t = useT();
   const { go } = useNav();
   const skills = useSkills().data ?? [];
   const [toggle] = useAction(async (skillId: string, on: boolean) => {
@@ -459,8 +464,8 @@ function SkillsTab({ agent }: { agent: Agent }) {
       <div className="vstack page-narrow" style={{ gap: 8 }}>
         <Notice icon={Sparkles}>Installed skills are added to every run of this agent. Editing a skill changes the next run of every agent that has it.</Notice>
         {skills.length === 0 && (
-          <Empty icon={Sparkles} title="No skills yet" actions={<Button icon={Plus} onClick={() => go({ view: "skills" })}>Write a skill</Button>}>
-            A skill is a reusable procedure: when it applies, the steps, how to verify, when to stop.
+          <Empty icon={Sparkles} title={t("agents.noSkills.title")} actions={<Button icon={Plus} onClick={() => go({ view: "skills" })}>{t("skills.write")}</Button>}>
+            {t("agents.noSkills.body")}
           </Empty>
         )}
         {skills.map((skill) => (

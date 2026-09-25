@@ -6,6 +6,7 @@ import { call, pathForFile, useAppInfo, useQuery, useSettings } from "../api.js"
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
 import { Button, Empty, Kbd, StatusChip, TimeAgo } from "./ui.js";
+import { useT } from "../i18n/index.js";
 
 // ------------------------------------------------------------------ composer
 
@@ -28,6 +29,7 @@ export function Composer({
   autoFocus?: boolean;
   sendLabel?: string;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -102,7 +104,7 @@ export function Composer({
             }
           }}
         />
-        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={`${sendLabel} (Enter)`}>
+        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel })}>
           {sendLabel}
         </Button>
       </div>
@@ -143,6 +145,7 @@ export function SessionPane({
   placeholder: string;
   active?: boolean;
 }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const home = useAppInfo().data?.home ?? "";
@@ -228,11 +231,11 @@ export function SessionPane({
         </Empty>
       )}
       <Composer
-        placeholder={livePty ? "Message the running session…" : placeholder}
+        placeholder={livePty ? t("session.messagePlaceholder") : placeholder}
         onSend={async (text) => Boolean(await send(text))}
         busy={sending}
         autoFocus={!livePty}
-        sendLabel={livePty ? "Send" : last ? "Continue" : "Start"}
+        sendLabel={livePty ? t("common.send") : last ? t("common.continue") : t("common.start")}
         hint={
           livePty ? (
             <span className="hstack">

@@ -26,6 +26,7 @@ import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../componen
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Empty, Input, MenuButton, Select, type MenuItem } from "../components/ui.js";
+import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
@@ -74,6 +75,7 @@ function writeLocal(key: string, value: unknown): void {
 }
 
 export function CodeView({ active, route }: { active: boolean; route: Extract<Route, { view: "code" }> | null }) {
+  const t = useT();
   const { go } = useNav();
   const { push, fail } = useToast();
   const confirm = useConfirm();
@@ -85,7 +87,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const workspaces = useMemo(() => file.data?.workspaces ?? [], [file.data]);
 
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [layouts, setLayouts] = useState<Record<string, LayoutNode>>({});
+  // Per workspace: its pane tree, null once every pane has been closed, missing until loaded.
+  const [layouts, setLayouts] = useState<Record<string, LayoutNode | null>>({});
   const [runtime, setRuntime] = useState<Record<string, Runtime>>({});
   const [focus, setFocus] = useState<Record<string, string>>({});
   const [side, setSide] = useState(() => readLocal<{ open: boolean; tab: "files" | "browser"; width: number }>("vf.code.side", { open: true, tab: "files", width: 320 }));
@@ -148,7 +151,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
   }, []);
 
-  const updateLayout = useCallback((workspaceId: string, next: LayoutNode) => {
+  const updateLayout = useCallback((workspaceId: string, next: LayoutNode | null) => {
     setLayouts((prev) => ({ ...prev, [workspaceId]: next }));
     void call("layouts.save", workspaceId, next).catch(() => undefined);
   }, []);
@@ -158,8 +161,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       if (starting.current.has(pane.id)) return;
       starting.current.add(pane.id);
       patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
-      // Measure after React has laid the new pane out.
-      await new Promise((resolve) => requestAnimationFrame(resolve));
+      // Measure after React has laid the new pane out. A window on a hidden workspace gets no
+      // frames, so don't wait on one forever.
+      await new Promise((resolve) => {
+        requestAnimationFrame(resolve);
+        setTimeout(resolve, 100);
+      });
       const size = estimateTermSize(document.querySelector<HTMLElement>(`[data-pane="${pane.id}"]`), fontSizeRef.current, 34);
       try {
         if (pane.launch.type === "shell") {
@@ -178,7 +185,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
       } catch (error) {
         patchRuntime(pane.id, { state: "idle" });
-        fail(error, "Could not start the terminal");
+        fail(error, t("code.startFailed"));
       } finally {
         starting.current.delete(pane.id);
       }
@@ -188,12 +195,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   // Load (or create) the current workspace's layout, then bring its shells back.
   useEffect(() => {
-    if (!opened || !current || layoutsRef.current[current.id]) return;
+    if (!opened || !current || current.id in layoutsRef.current) return;
     let cancelled = false;
     void call("layouts.get", current.id)
       .catch(() => null)
       .then((saved) => {
-        if (cancelled || layoutsRef.current[current.id]) return;
+        if (cancelled || current.id in layoutsRef.current) return;
         const layout = saved ?? shellPane();
         setLayouts((prev) => ({ ...prev, [current.id]: layout }));
         const panes = panesOf(layout);
@@ -209,8 +216,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   useEffect(() => {
     if (!route?.ptyId || !current) return;
     const layout = layouts[current.id];
-    if (!layout) return;
-    const owner = panesOf(layout).find((pane) => runtime[pane.id]?.ptyId === route.ptyId);
+    if (layout === undefined) return;
+    const owner = (layout ? panesOf(layout) : []).find((pane) => runtime[pane.id]?.ptyId === route.ptyId);
     if (owner) {
       setFocus((prev) => ({ ...prev, [current.id]: owner.id }));
       terminals.current.get(owner.id)?.focus();
@@ -228,12 +235,23 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }
 
   function adopt(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch) {
-    const layout = layoutsRef.current[workspace.id] ?? shellPane();
+    const layout = layoutsRef.current[workspace.id];
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
-    const target = focus[workspace.id] ?? panesOf(layout)[0].id;
-    updateLayout(workspace.id, replacePane(layout, target, { kind: "split", dir: "row", ratio: 0.5, a: panesOf(layout).find((item) => item.id === target) ?? layout, b: pane }));
+    if (!layout) updateLayout(workspace.id, pane);
+    else {
+      const target = focus[workspace.id] ?? panesOf(layout)[0].id;
+      updateLayout(workspace.id, replacePane(layout, target, { kind: "split", dir: "row", ratio: 0.5, a: panesOf(layout).find((item) => item.id === target) ?? layout, b: pane }));
+    }
     patchRuntime(pane.id, { ptyId, runId, state: "live" });
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
+  }
+
+  /** The first pane of a workspace whose panes were all closed. */
+  function openFirst(workspace: Workspace, launch: PaneLaunch, opts: { prompt?: string } = {}) {
+    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
+    updateLayout(workspace.id, pane);
+    setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
+    void startPane(workspace, pane, opts);
   }
 
   function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch, opts: { prompt?: string } = {}) {
@@ -251,16 +269,17 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     const state = runtime[pane.id];
     if (state?.state === "live" && state.ptyId) {
       const ok = await confirm({
-        title: "Close this terminal?",
-        body: state.runId ? "The process is stopped. Its run keeps the transcript and a git snapshot." : "The shell and anything running in it are stopped.",
-        confirm: "Close terminal",
+        title: t("code.close.title"),
+        body: state.runId ? t("code.close.bodyRun") : t("code.close.bodyShell"),
+        confirm: t("code.close.confirm"),
       });
       if (!ok) return;
       void call("pty.kill", state.ptyId).catch(() => undefined);
     }
     const layout = layoutsRef.current[workspace.id];
     if (!layout) return;
-    const next = removePane(layout, pane.id) ?? shellPane();
+    // Closing the last pane leaves the workspace empty; it does not start a new shell in its place.
+    const next = removePane(layout, pane.id);
     updateLayout(workspace.id, next);
     setRuntime((prev) => {
       const copy = { ...prev };
@@ -268,10 +287,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       return copy;
     });
     terminals.current.delete(pane.id);
-    const remaining = panesOf(next);
-    setFocus((prev) => ({ ...prev, [workspace.id]: remaining[remaining.length - 1].id }));
+    const remaining = next ? panesOf(next) : [];
+    setFocus((prev) => {
+      const copy = { ...prev };
+      if (remaining.length) copy[workspace.id] = remaining[remaining.length - 1].id;
+      else delete copy[workspace.id];
+      return copy;
+    });
     setZoomed((prev) => (prev[workspace.id] === pane.id ? { ...prev, [workspace.id]: null } : prev));
-    if (next.kind === "pane" && !runtime[next.id] && next.launch.type === "shell") void startPane(workspace, next);
   }
 
   function launchHere(workspace: Workspace, pane: PaneNode, launch: PaneLaunch, opts: { continueSession?: boolean; prompt?: string } = {}) {
@@ -285,8 +308,13 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   async function launchFromBar() {
     if (!current || !engineId) return;
     const layout = layouts[current.id];
-    if (!layout) return;
     const text = prompt.trim();
+    if (layout === null) {
+      setPrompt("");
+      openFirst(current, { type: "engine", engineId }, { prompt: text || undefined });
+      return;
+    }
+    if (!layout) return;
     const focusedId = focus[current.id] ?? panesOf(layout)[0].id;
     const focused = panesOf(layout).find((pane) => pane.id === focusedId) ?? panesOf(layout)[0];
     const state = runtime[focused.id]?.state ?? "idle";
@@ -303,7 +331,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     const paneId = focus[current.id];
     const handle = paneId ? terminals.current.get(paneId) : undefined;
     if (!handle) {
-      push("info", "Focus a terminal first", "Click a terminal, then click a file to insert its path.");
+      push("info", t("code.focusFirst"), t("code.focusFirstBody"));
       return;
     }
     handle.paste(`${shellQuote(target)} `);
@@ -312,26 +340,21 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   // ---------------------------------------------------------------- workspaces
 
   const [addWorkspace] = useAction(async () => {
-    const folder = await call("app.pickFolder", "Open a project folder");
+    const folder = await call("app.pickFolder", t("code.empty.action"));
     if (!folder) return;
     const next = await call("workspaces.add", folder);
     if (next.lastWorkspaceId) {
       setCurrentId(next.lastWorkspaceId);
       void call("workspaces.select", next.lastWorkspaceId);
     }
-  }, "Could not add the workspace");
+  }, t("code.addFailed"));
 
   const [removeWorkspace] = useAction(async (workspace: Workspace) => {
     const running = live.filter((session) => session.workspaceId === workspace.id).length;
     const ok = await confirm({
-      title: `Remove ${workspace.name} from VibeForge?`,
-      body: (
-        <>
-          The folder stays on disk. {running ? `${running} terminal${running === 1 ? "" : "s"} running here will be stopped. ` : ""}Tasks that point at it will
-          need a new workspace.
-        </>
-      ),
-      confirm: "Remove workspace",
+      title: t("code.removeTitle", { name: workspace.name }),
+      body: [t("code.removeBody"), running ? t.count("code.removeRunning", running) : ""].filter(Boolean).join(" "),
+      confirm: t("code.removeConfirm"),
       danger: true,
     });
     if (!ok) return;
@@ -342,16 +365,16 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       return copy;
     });
     if (currentId === workspace.id) setCurrentId(null);
-  }, "Could not remove the workspace");
+  }, t("code.removeFailed"));
 
   const [renameWorkspace] = useAction(async (workspace: Workspace, name: string) => {
     if (name.trim() && name.trim() !== workspace.name) await call("workspaces.update", workspace.id, { name: name.trim() });
     setRenaming(null);
-  }, "Could not rename");
+  }, t("code.renameFailed"));
 
   const [setDockUrl] = useAction(async (url: string) => {
     if (current) await call("workspaces.update", current.id, { dockUrl: url });
-  }, "Could not set the URL");
+  }, t("code.urlFailed"));
 
   function select(workspace: Workspace) {
     setCurrentId(workspace.id);
@@ -390,16 +413,16 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       <div className="code-view">
         <SidePanel
           id="workspaces"
-          title="Workspaces"
+          title={t("code.workspaces")}
           defaultWidth={250}
           actions={
-            <Button size="sm" icon={FolderPlus} onClick={() => void addWorkspace()} tip="Open a project folder as a workspace">
-              Add
+            <Button size="sm" icon={FolderPlus} onClick={() => void addWorkspace()} tip={t("code.addTip")}>
+              {t("code.add")}
             </Button>
           }
           strip={
             <>
-              <StripItem label="Add a workspace" onClick={() => void addWorkspace()}>
+              <StripItem label={t("code.addStrip")} onClick={() => void addWorkspace()}>
                 <FolderPlus size={16} />
               </StripItem>
               {workspaces.map((workspace) => (
@@ -447,7 +470,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
                 </span>
                 {liveCount(workspace.id) > 0 && (
-                  <span className="ws-live" {...tipProps(`${liveCount(workspace.id)} terminal${liveCount(workspace.id) === 1 ? "" : "s"} running`)}>
+                  <span className="ws-live" {...tipProps(t.count("code.running", liveCount(workspace.id)))}>
                     {liveCount(workspace.id)}
                   </span>
                 )}
@@ -456,12 +479,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                     size="sm"
                     variant="ghost"
                     icon={MoreHorizontal}
-                    title="Workspace actions"
+                    title={t("code.workspaceActions")}
                     items={[
-                      { label: "Open folder", icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
-                      { label: "Rename", icon: Pencil, onSelect: () => setRenaming(workspace.id) },
+                      { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
+                      { label: t("common.rename"), icon: Pencil, onSelect: () => setRenaming(workspace.id) },
                       "sep",
-                      { label: "Remove from VibeForge", icon: Trash2, danger: true, onSelect: () => void removeWorkspace(workspace) },
+                      { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void removeWorkspace(workspace) },
                     ]}
                   />
                 </span>
@@ -473,15 +496,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         {!current ? (
           <Empty
             icon={SquareTerminal}
-            title="A folder, then real terminals"
+            title={t("code.empty.title")}
             actions={
               <Button variant="primary" icon={FolderPlus} onClick={() => void addWorkspace()}>
-                Open a project folder
+                {t("code.empty.action")}
               </Button>
             }
           >
-            Code mode runs your shells and CLIs side by side in a project, with its files and a browser for the dev server next to them. Layouts are remembered
-            per workspace.
+            {t("code.empty.body")}
           </Empty>
         ) : (
           <div className="code-main">
@@ -490,7 +512,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                 <strong className="truncate" style={{ fontSize: "var(--fs-md)" }}>
                   {current.name}
                 </strong>
-                <button type="button" className="faint mono truncate" style={{ fontSize: "var(--fs-xs)", textAlign: "left" }} onClick={() => void call("app.openPath", current.path)} {...tipProps("Open in the file manager")}>
+                <button type="button" className="faint mono truncate" style={{ fontSize: "var(--fs-xs)", textAlign: "left" }} onClick={() => void call("app.openPath", current.path)} {...tipProps(t("common.openFileManager"))}>
                   {tildify(current.path, home)}
                 </button>
               </div>
@@ -499,9 +521,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   key={engine.id}
                   size="sm"
                   icon={Play}
-                  tip={`Open ${engine.label} in the focused pane, or beside it if it's busy`}
+                  tip={t("code.openEngine", { engine: engine.label })}
                   onClick={() => {
                     const layout = layouts[current.id];
+                    if (layout === null) openFirst(current, { type: "engine", engineId: engine.id });
                     if (!layout) return;
                     const target = focus[current.id] ?? panesOf(layout)[0].id;
                     const pane = panesOf(layout).find((item) => item.id === target);
@@ -516,37 +539,68 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               <Button
                 size="sm"
                 icon={Columns2}
-                tip="Split the focused pane with a shell on the right"
+                tip={t("code.splitRight")}
                 onClick={() => {
                   const layout = layouts[current.id];
-                  if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "row", { type: "shell" });
+                  if (layout === null) openFirst(current, { type: "shell" });
+                  else if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "row", { type: "shell" });
                 }}
               />
               <Button
                 size="sm"
                 icon={Rows2}
-                tip="Split the focused pane with a shell below"
+                tip={t("code.splitDown")}
                 onClick={() => {
                   const layout = layouts[current.id];
-                  if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "col", { type: "shell" });
+                  if (layout === null) openFirst(current, { type: "shell" });
+                  else if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "col", { type: "shell" });
                 }}
               />
-              <Button size="sm" icon={PanelRight} pressed={side.open && side.tab === "files"} tip="Files: click one to insert its path" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "files"), tab: "files" }))} />
-              <Button size="sm" icon={Globe} pressed={side.open && side.tab === "browser"} tip="Browser dock for your dev server" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "browser"), tab: "browser" }))} />
+              <Button size="sm" icon={PanelRight} pressed={side.open && side.tab === "files"} tip={t("code.filesTip")} onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "files"), tab: "files" }))} />
+              <Button size="sm" icon={Globe} pressed={side.open && side.tab === "browser"} tip={t("code.browserTip")} onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "browser"), tab: "browser" }))} />
             </div>
 
             <div className="code-work">
               {workspaces.map((workspace) => {
                 const layout = layouts[workspace.id];
-                if (!layout) return null;
                 const visible = workspace.id === current.id;
+                if (layout === null && visible) {
+                  return (
+                    <div key={workspace.id} className="canvas">
+                      <Empty
+                        icon={SquareTerminal}
+                        title={t("code.noPanes.title")}
+                        actions={
+                          <>
+                            <Button variant="primary" icon={TerminalSquare} onClick={() => openFirst(workspace, { type: "shell" })}>
+                              {t("common.shell")}
+                            </Button>
+                            {quick.map((engine) => (
+                              <Button key={engine.id} icon={Play} onClick={() => openFirst(workspace, { type: "engine", engineId: engine.id })}>
+                                {engine.label}
+                              </Button>
+                            ))}
+                          </>
+                        }
+                      >
+                        {t("code.noPanes.body")}
+                      </Empty>
+                    </div>
+                  );
+                }
+                if (!layout) return null;
                 const paneCount = panesOf(layout).length;
                 const zoomedPane = zoomed[workspace.id] && panesOf(layout).some((pane) => pane.id === zoomed[workspace.id]) ? zoomed[workspace.id] : null;
                 return (
                   <div key={workspace.id} className={`canvas${zoomedPane ? " has-zoom" : ""}`} style={visible ? undefined : { display: "none" }}>
                     <SplitView
                       node={layout}
-                      onRatio={(path, ratio) => setLayouts((prev) => ({ ...prev, [workspace.id]: setRatioAt(prev[workspace.id], path, ratio) }))}
+                      onRatio={(path, ratio) =>
+                        setLayouts((prev) => {
+                          const node = prev[workspace.id];
+                          return node ? { ...prev, [workspace.id]: setRatioAt(node, path, ratio) } : prev;
+                        })
+                      }
                       renderPane={(pane) => (
                         <PaneView
                           key={pane.id}
@@ -587,13 +641,13 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   <div className="side-resize" onPointerDown={startSideResize} />
                   <div className="side-tabs">
                     <Button size="sm" variant="ghost" icon={PanelRight} pressed={side.tab === "files"} onClick={() => setSide((prev) => ({ ...prev, tab: "files" }))}>
-                      Files
+                      {t("code.files")}
                     </Button>
                     <Button size="sm" variant="ghost" icon={Globe} pressed={side.tab === "browser"} onClick={() => setSide((prev) => ({ ...prev, tab: "browser" }))}>
-                      Browser
+                      {t("code.browser")}
                     </Button>
                     <span className="grow" />
-                    <Button size="sm" variant="ghost" icon={X} tip="Hide the side panel" onClick={() => setSide((prev) => ({ ...prev, open: false }))} />
+                    <Button size="sm" variant="ghost" icon={X} tip={t("code.hideSide")} onClick={() => setSide((prev) => ({ ...prev, open: false }))} />
                   </div>
                   {side.tab === "files" ? (
                     <FilesPanel root={current.path} onInsert={insertPath} />
@@ -607,7 +661,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
             <div className="launch-bar">
               <div style={{ width: 170, flex: "none" }}>
                 <Select value={engineId} onChange={(event) => setEngineId(event.target.value)} disabled={!available.length}>
-                  {available.length === 0 && <option value="">No CLIs on PATH</option>}
+                  {available.length === 0 && <option value="">{t("code.noClis")}</option>}
                   {available.map((engine) => (
                     <option key={engine.id} value={engine.id}>
                       {engine.label}
@@ -617,14 +671,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               </div>
               <Input
                 value={prompt}
-                placeholder={`Ask ${engineLabel(engineId)} to do something in ${current.name} — or leave empty to just open it`}
+                placeholder={t("code.launchPlaceholder", { engine: engineLabel(engineId), workspace: current.name })}
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") void launchFromBar();
                 }}
               />
               <Button variant="primary" icon={Rocket} disabled={!engineId} onClick={() => void launchFromBar()}>
-                Launch
+                {t("code.launch")}
               </Button>
             </div>
           </div>
@@ -673,13 +727,14 @@ function PaneView({
   zoomed: boolean;
   onZoom: () => void;
 }) {
+  const t = useT();
   const state = runtime?.state ?? "idle";
   const [zone, setZone] = useState<DropZone | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
-  const title = pane.launch.type === "shell" ? "Shell" : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
+  const title = pane.launch.type === "shell" ? t("common.shell") : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   const available = engines.filter((item) => item.available);
   const launchItems: MenuItem[] = [
-    { label: "Shell", icon: TerminalSquare, onSelect: () => onStart({ type: "shell" }) },
+    { label: t("common.shell"), icon: TerminalSquare, onSelect: () => onStart({ type: "shell" }) },
     ...available.map((item) => ({ label: item.label, icon: Play, onSelect: () => onStart({ type: "engine", engineId: item.id }) })),
   ];
 
@@ -700,31 +755,31 @@ function PaneView({
         }}
       >
         {canMove && (
-          <span className="pane-grip" {...tipProps("Drag onto another pane: the middle swaps them, an edge docks it there")}>
+          <span className="pane-grip" {...tipProps(t("pane.drag"))}>
             <GripVertical size={13} />
           </span>
         )}
         {state === "live" ? (
-          <span className="dot running" {...tipProps("Running")} />
+          <span className="dot running" {...tipProps(t("pane.running"))} />
         ) : state === "exited" ? (
-          <span className="dot stopped" {...tipProps("Exited")} />
+          <span className="dot stopped" {...tipProps(t("pane.exited"))} />
         ) : (
-          <span className="dot" {...tipProps("Nothing running")} />
+          <span className="dot" {...tipProps(t("pane.idle"))} />
         )}
         <span className="pane-title truncate">{title}</span>
         {runtime?.runId && (
-          <button type="button" className="pane-run-link" onClick={onReview} {...tipProps("Open this run: transcript and diff")}>
+          <button type="button" className="pane-run-link" onClick={onReview} {...tipProps(t("pane.openRun"))}>
             run
           </button>
         )}
-        {zoomed && <span className="chip accent">Maximized</span>}
+        {zoomed && <span className="chip accent">{t("pane.maximized")}</span>}
         <span className="grow" />
         <div className="pane-actions">
-          <MenuButton size="sm" variant="ghost" icon={Play} tip="Start a shell or a CLI in this pane" items={launchItems} />
-          <Button size="sm" variant="ghost" icon={Columns2} tip="Split right with a shell" onClick={() => onSplit("row")} />
-          <Button size="sm" variant="ghost" icon={Rows2} tip="Split down with a shell" onClick={() => onSplit("col")} />
-          <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? "Restore the layout" : "Maximize this pane"} kbd="Ctrl+Shift+M" onClick={onZoom} />
-          <Button size="sm" variant="ghost" icon={X} tip="Close this pane" onClick={onClose} />
+          <MenuButton size="sm" variant="ghost" icon={Play} tip={t("pane.start")} items={launchItems} />
+          <Button size="sm" variant="ghost" icon={Columns2} tip={t("pane.splitRight")} onClick={() => onSplit("row")} />
+          <Button size="sm" variant="ghost" icon={Rows2} tip={t("pane.splitDown")} onClick={() => onSplit("col")} />
+          <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />
+          <Button size="sm" variant="ghost" icon={X} tip={t("pane.close")} onClick={onClose} />
         </div>
       </div>
       {dragging && dragging !== pane.id && (
@@ -750,7 +805,7 @@ function PaneView({
         >
           {zone && (
             <div className={`drop-zone zone-${zone}`}>
-              <span>{zone === "center" ? "Swap" : `Dock ${zone}`}</span>
+              <span>{zone === "center" ? t("pane.swap") : t(`pane.dock.${zone}`)}</span>
             </div>
           )}
         </div>
@@ -764,7 +819,7 @@ function PaneView({
             active={active}
             autoFocus={focused}
             onFocus={onFocus}
-            onExit={(info) => onExit(info.signal ? `stopped (signal ${info.signal})` : `exited with code ${info.exitCode ?? "?"}`)}
+            onExit={(info) => onExit(info.signal ? t("pane.exitSignal", { signal: info.signal }) : t("pane.exitCode", { code: info.exitCode ?? "?" }))}
           />
           {state === "exited" && (
             <div className="pane-exit">
@@ -773,14 +828,14 @@ function PaneView({
               </span>
               {pane.launch.type === "engine" && engine?.continueArgs?.length ? (
                 <Button size="sm" icon={RotateCcw} onClick={() => onStart(pane.launch, true)}>
-                  Continue
+                  {t("common.continue")}
                 </Button>
               ) : null}
               <Button size="sm" icon={Play} onClick={() => onStart(pane.launch)}>
-                Restart
+                {t("common.restart")}
               </Button>
               <Button size="sm" variant="ghost" icon={X} onClick={onClose}>
-                Close
+                {t("common.close")}
               </Button>
             </div>
           )}
@@ -789,34 +844,34 @@ function PaneView({
         <div className="pane-idle">
           {state === "starting" ? (
             <span className="hstack">
-              <span className="spinner" /> Starting {title}…
+              <span className="spinner" /> {t("pane.starting", { title })}
             </span>
           ) : pane.launch.type === "engine" ? (
             <>
               <span>
-                {title} was open here last time.
-                {engine && !engine.available ? " It is not on PATH right now." : ""}
+                {t("pane.lastTime", { title })}
+                {engine && !engine.available ? ` ${t("pane.notOnPath")}` : ""}
               </span>
               <div className="launchers">
                 {engine?.continueArgs?.length ? (
                   <Button variant="primary" icon={RotateCcw} disabled={!engine?.available} onClick={() => onStart(pane.launch, true)}>
-                    Continue its session
+                    {t("pane.continueSession")}
                   </Button>
                 ) : null}
                 <Button icon={Play} disabled={!engine?.available} onClick={() => onStart(pane.launch)}>
-                  Start {title}
+                  {t("pane.startEngine", { title })}
                 </Button>
                 <Button icon={TerminalSquare} onClick={() => onStart({ type: "shell" })}>
-                  Shell instead
+                  {t("pane.shellInstead")}
                 </Button>
               </div>
             </>
           ) : (
             <>
-              <span>Nothing running in this pane.</span>
+              <span>{t("pane.nothing")}</span>
               <div className="launchers">
                 <Button variant="primary" icon={TerminalSquare} onClick={() => onStart({ type: "shell" })}>
-                  Shell
+                  {t("common.shell")}
                 </Button>
                 {available.slice(0, 5).map((item) => (
                   <Button key={item.id} icon={Play} onClick={() => onStart({ type: "engine", engineId: item.id })}>

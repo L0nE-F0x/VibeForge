@@ -34,14 +34,15 @@ body:
         - Routines
         - Skills
         - Runs
-        - Settings or theme
+        - Settings, theme or language
+        - Updates
         - Installer or startup
         - Something else
   - type: input
     id: version
     attributes:
       label: VibeForge version
-      placeholder: "0.2.0"
+      placeholder: "0.3.0"
     validations:
       required: true
   - type: textarea
@@ -49,6 +50,12 @@ body:
     attributes:
       label: Environment
       description: Your system, and which coding CLIs are installed.
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: In VibeForge, **Help → Copy diagnostics**, then paste here. It holds your versions, a few settings and the end of VibeForge's own log (no prompts or terminal output). Read it and remove anything private first.
       render: text
   - type: textarea
     id: logs

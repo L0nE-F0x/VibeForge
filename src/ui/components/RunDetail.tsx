@@ -20,6 +20,7 @@ import { call, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { Button, Chip, Empty, Notice, Spinner, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { useT } from "../i18n/index.js";
 
 export const ORIGIN_LABEL: Record<RunView["origin"], string> = {
   "agent-chat": "Agent chat",
@@ -90,6 +91,7 @@ function ChangesTab({ run, snapshot }: { run: RunView; snapshot: string }) {
 }
 
 export function RunDetail({ runId, embedded }: { runId: string; embedded?: boolean }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const now = useNow(1000);
@@ -116,7 +118,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
   }, "Could not continue");
   const [stop, stopping] = useAction(async () => run && call("runs.stop", run.id), "Could not stop the run");
 
-  if (bundle.error) return <Empty icon={ScrollText} title="Run not found">{bundle.error}</Empty>;
+  if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
     return (
       <div className="empty">
@@ -148,7 +150,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
             Open in {place.view === "agents" ? "agent" : place.view === "chat" ? "chat" : place.view === "tasks" ? "task" : "workspace"}
           </Button>
         )}
-        <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", run.cwd)} title="Open the folder" />
+        <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", run.cwd)} title={t("runs.openFolder")} />
         {run.status === "running" ? (
           <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
             Stop
@@ -159,7 +161,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
               size="sm"
               icon={run.openedAt ? ListRestart : CheckCheck}
               onClick={() => void call("runs.markOpened", run.id, !run.openedAt)}
-              title={run.openedAt ? "Put it back in Needs review" : "Mark as reviewed"}
+              title={run.openedAt ? t("runs.unreview") : t("runs.markReviewed")}
             >
               {run.openedAt ? "Unreview" : "Reviewed"}
             </Button>

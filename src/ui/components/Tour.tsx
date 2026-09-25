@@ -16,9 +16,11 @@ import {
   SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useEngines } from "../api.js";
+import { useT, type Key } from "../i18n/index.js";
+import { Rich } from "../i18n/Rich.js";
 import { useNav, useOverlay, type Route } from "../state.js";
 import { Button, Logo, cx } from "./ui.js";
 
@@ -44,125 +46,125 @@ interface Step {
   optional?: boolean;
   side?: Side;
   icon: LucideIcon;
-  title: string;
-  body: ReactNode;
-  keys?: Array<[string, string]>;
+  title?: Key;
+  body?: Key;
+  keys?: Array<[string, Key]>;
 }
 
 const LIST_PANEL = ".view.split-list > .list-panel";
 
 const STEPS: Step[] = [
-  { id: "welcome", icon: Compass, title: "", body: null },
+  { id: "welcome", icon: Compass },
   {
     id: "rail",
+    title: "tour.rail.title",
+    body: "tour.rail.body",
     target: [".rail"],
     side: "right",
     icon: Compass,
-    title: "Everything is one click away",
-    body: "The rail holds every view. Badges count runs and tasks waiting for your review. Hover over anything in VibeForge to see what it does.",
     keys: [
-      ["Ctrl+1…8", "Switch views"],
-      ["Alt+←", "Go back"],
+      ["Ctrl+1…8", "shortcuts.switchViews"],
+      ["Alt+←", "shortcuts.back"],
     ],
   },
   {
     id: "home",
+    title: "tour.home.title",
+    body: "tour.home.body",
     route: { view: "home" },
     target: [".home-page", ".stage"],
     side: "right",
     icon: House,
-    title: "Home: what needs you",
-    body: "What's running right now, what has finished and needs a review, and which routines run next.",
   },
   {
     id: "workspaces",
+    title: "tour.workspaces.title",
+    body: "tour.workspaces.body",
     route: { view: "code" },
     target: [".code-view > .list-panel"],
     side: "right",
     icon: SquareTerminal,
-    title: "Code: a workspace per project",
-    body: "Add a project folder here. Each workspace keeps its own terminals, layout and browser dock. Switching between them never stops anything.",
   },
   {
     id: "panes",
+    title: "tour.panes.title",
+    body: "tour.panes.body",
     route: { view: "code" },
     target: [".code-view .code-work", ".code-view .empty"],
     side: "left",
     icon: Move,
-    title: "Arrange your terminals",
-    body: "Split a pane to the right or below, then drag the gaps to resize. To move a pane, drag its title bar onto another pane to swap them or dock it on a side. Double-click a title bar to maximize the pane.",
     keys: [
-      ["Ctrl+Shift+M", "Maximize the focused pane"],
-      ["Ctrl+Shift+C", "Copy"],
-      ["Ctrl+Shift+V", "Paste"],
+      ["Ctrl+Shift+M", "shortcuts.maximize"],
+      ["Ctrl+Shift+C", "shortcuts.copy"],
+      ["Ctrl+Shift+V", "shortcuts.paste"],
     ],
   },
   {
     id: "launch",
+    title: "tour.launch.title",
+    body: "tour.launch.body",
     route: { view: "code" },
     target: [".code-view .launch-bar"],
     optional: true,
     side: "top",
     icon: Rocket,
-    title: "Hand a CLI a job",
-    body: "Pick an engine, describe the job and press Enter. It opens in a new pane, and the run is recorded so you can review the diff later.",
   },
   {
     id: "agents",
+    title: "tour.agents.title",
+    body: "tour.agents.body",
     route: { view: "agents" },
     target: [LIST_PANEL],
     side: "right",
     icon: Bot,
-    title: "Agents: teammates who remember",
-    body: "An agent has a name, an engine, a brief, memory, skills and the folders it may work in. Its chats are real terminals. You can switch it from Claude to Codex or Grok and it keeps everything else.",
   },
   {
     id: "chat",
+    title: "tour.chat.title",
+    body: "tour.chat.body",
     route: { view: "chat" },
     target: [LIST_PANEL],
     side: "right",
     icon: MessagesSquare,
-    title: "Chat: quick questions",
-    body: "Throwaway conversations with any CLI in an empty scratch folder, for when you don't need a project.",
   },
   {
     id: "tasks",
+    title: "tour.tasks.title",
+    body: "tour.tasks.body",
     route: { view: "tasks" },
     target: [".board", ".stage"],
     side: "bottom",
     icon: KanbanSquare,
-    title: "Tasks and Routines",
-    body: "Write a task and assign it to an agent. Nothing starts until you press Execute. Finished work lands in Review with its diff. Routines start agents on a schedule while VibeForge is open.",
   },
   {
     id: "runs",
+    title: "tour.runs.title",
+    body: "tour.runs.body",
     route: { view: "runs" },
     target: [LIST_PANEL],
     side: "right",
     icon: History,
-    title: "Runs: every session, kept",
-    body: "Every process VibeForge starts leaves behind its final screen, a transcript and the git diff since it began. Continue reopens the exact session.",
   },
   {
     id: "room",
+    title: "tour.room.title",
+    body: "tour.room.body",
     route: { view: "runs" },
     target: [`${LIST_PANEL} > .list-head`],
     side: "right",
     icon: PanelLeftClose,
-    title: "Make room",
-    body: "Drag the edge of any side panel to resize it, or collapse it to a slim strip. VibeForge remembers your layout.",
-    keys: [["Ctrl+Shift+B", "Collapse or expand the side panel"]],
+    keys: [["Ctrl+Shift+B", "shortcuts.panel"]],
   },
   {
     id: "help",
+    title: "tour.help.title",
+    body: "tour.help.body",
     target: ['[data-tour="help"]'],
     side: "right",
     icon: LifeBuoy,
-    title: "Help is always here",
-    body: "Replay this tour, look up shortcuts, or send a bug report or an idea straight to GitHub.",
-    keys: [["Ctrl+Shift+/", "Keyboard shortcuts"]],
+    keys: [["Ctrl+Shift+/", "help.shortcuts"]],
   },
-  { id: "done", icon: Rocket, title: "", body: null },
+  { id: "done", icon: Rocket },
 ];
 
 const PAD = 8;
@@ -225,6 +227,7 @@ function placeCard(hole: Rect, side: Side, card: { width: number; height: number
 }
 
 export function Tour({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const { route, go } = useNav();
   const [index, setIndex] = useState(0);
   // The spotlight keeps its last rect between steps so it can glide to the next target;
@@ -316,7 +319,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
   const stepNo = index;
 
   return createPortal(
-    <div className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label="Welcome tour">
+    <div className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label={t("tour.label")}>
       <div
         className={cx("tour-hole", (centered || missing || !hole) && "is-empty")}
         style={hole && !centered && !missing ? { top: hole.top, left: hole.left, width: hole.width, height: hole.height } : undefined}
@@ -349,15 +352,13 @@ export function Tour({ onClose }: { onClose: () => void }) {
             <span className="tour-icon">
               <step.icon size={16} />
             </span>
-            <span className="tour-count">
-              {stepNo} of {tourSteps}
-            </span>
+            <span className="tour-count">{t("tour.count", { step: stepNo, total: tourSteps })}</span>
             <button type="button" className="tour-skip" onClick={onClose}>
-              Skip tour
+              {t("tour.skip")}
             </button>
           </div>
-          <h3>{step.title}</h3>
-          <p>{step.body}</p>
+          <h3>{step.title && t(step.title)}</h3>
+          <p>{step.body && t(step.body)}</p>
           {step.keys && (
             <div className="tour-keys">
               {step.keys.map(([keys, text]) => (
@@ -367,7 +368,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
                       <kbd key={key}>{key}</kbd>
                     ))}
                   </span>
-                  <span>{text}</span>
+                  <span>{t(text)}</span>
                 </div>
               ))}
             </div>
@@ -378,9 +379,9 @@ export function Tour({ onClose }: { onClose: () => void }) {
                 <span key={item.id} className={cx(dot + 1 === index && "on", dot + 1 < index && "done")} />
               ))}
             </div>
-            <Button size="sm" variant="ghost" icon={ArrowLeft} tip="Back" kbd="←" onClick={() => move(-1)} />
+            <Button size="sm" variant="ghost" icon={ArrowLeft} tip={t("common.back")} kbd="←" onClick={() => move(-1)} />
             <Button size="sm" variant="primary" onClick={() => move(1)}>
-              Next <ArrowRight size={14} />
+              {t("common.next")} <ArrowRight size={14} />
             </Button>
           </div>
         </div>
@@ -391,6 +392,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
 }
 
 function Welcome({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
+  const t = useT();
   const engines = useEngines().data ?? [];
   const found = engines.filter((engine) => engine.available);
   return (
@@ -398,34 +400,34 @@ function Welcome({ onStart, onSkip }: { onStart: () => void; onSkip: () => void 
       <div className="tour-logo">
         <Logo size={44} />
       </div>
-      <h2>Welcome to VibeForge</h2>
-      <p className="tour-lead">Your coding CLIs in one desk. This one-minute tour shows you where everything is.</p>
+      <h2>{t("tour.welcome.title")}</h2>
+      <p className="tour-lead">{t("tour.welcome.lead")}</p>
       <div className="tour-points">
         <div>
           <SquareTerminal size={16} />
           <span>
-            <strong>Real terminals.</strong> Claude Code, Codex, Grok and any other CLI, side by side.
+            <Rich text={t("tour.welcome.terminals")} />
           </span>
         </div>
         <div>
           <Bot size={16} />
           <span>
-            <strong>A team, not a tab.</strong> Agents with memory, tasks with a review step, and runs you can reopen.
+            <Rich text={t("tour.welcome.team")} />
           </span>
         </div>
         <div>
           <Palette size={16} />
           <span>
-            <strong>Your Omarchy theme.</strong> The colors follow your theme, even when you switch it.
+            <Rich text={t("tour.welcome.theme")} />
           </span>
         </div>
       </div>
       <div className="tour-engines">
         {engines.length === 0 ? (
-          <span className="faint">Looking for coding CLIs on your PATH…</span>
+          <span className="faint">{t("tour.welcome.looking")}</span>
         ) : found.length ? (
           <>
-            <span className="faint">Found on your PATH</span>
+            <span className="faint">{t("tour.welcome.found")}</span>
             {found.map((engine) => (
               <span key={engine.id} className="chip ok">
                 {engine.label}
@@ -433,54 +435,48 @@ function Welcome({ onStart, onSkip }: { onStart: () => void; onSkip: () => void 
             ))}
           </>
         ) : (
-          <span className="faint">No coding CLIs were found on your PATH yet. Install one, such as Claude Code or Codex, or add your own in Settings.</span>
+          <span className="faint">{t("tour.welcome.none")}</span>
         )}
       </div>
       <div className="tour-actions">
         <Button variant="ghost" onClick={onSkip}>
-          Skip for now
+          {t("tour.welcome.later")}
         </Button>
         <Button variant="primary" icon={Compass} onClick={onStart}>
-          Show me around
+          {t("tour.welcome.start")}
         </Button>
       </div>
       <p className="tour-note">
-        Use <kbd>←</kbd> <kbd>→</kbd> to move and <kbd>Esc</kbd> to leave. You can replay the tour from Help in the rail.
+        <Rich text={t("tour.welcome.note")} />
       </p>
     </div>
   );
 }
 
 function Done({ onBack, onFinish, onCode }: { onBack: () => void; onFinish: () => void; onCode: () => void }) {
+  const t = useT();
   return (
     <div className="tour-card tour-hero">
       <div className="tour-logo">
         <Logo size={44} />
       </div>
-      <h2>You're ready</h2>
-      <p className="tour-lead">A good first ten minutes:</p>
+      <h2>{t("tour.done.title")}</h2>
+      <p className="tour-lead">{t("tour.done.lead")}</p>
       <ol className="tour-steps">
-        <li>
-          <strong>Open a project folder</strong> in Code.
-        </li>
-        <li>
-          <strong>Launch a CLI</strong> from the bar at the bottom and give it a small job.
-        </li>
-        <li>
-          When it's done, <strong>review the run</strong>: its final screen, transcript and diff.
-        </li>
-        <li>
-          <strong>Create an agent</strong> when you want a teammate who remembers.
-        </li>
+        {(["tour.done.step1", "tour.done.step2", "tour.done.step3", "tour.done.step4"] as const).map((key) => (
+          <li key={key}>
+            <Rich text={t(key)} />
+          </li>
+        ))}
       </ol>
       <div className="tour-actions">
         <Button variant="ghost" icon={ArrowLeft} onClick={onBack}>
-          Back
+          {t("common.back")}
         </Button>
         <span className="grow" />
-        <Button onClick={onFinish}>Finish</Button>
+        <Button onClick={onFinish}>{t("tour.done.finish")}</Button>
         <Button variant="primary" icon={FolderPlus} onClick={onCode}>
-          Go to Code
+          {t("tour.done.code")}
         </Button>
       </div>
     </div>

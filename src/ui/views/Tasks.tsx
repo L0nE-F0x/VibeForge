@@ -7,6 +7,7 @@ import { Button, Chip, Field, Input, Notice, Select, Sheet, StatusChip, TextArea
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
+import { useT } from "../i18n/index.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: string }> = [
   { status: "todo", label: "To do" },
@@ -23,6 +24,7 @@ const BLOCKERS: Record<NonNullable<TaskView["blocker"]>, string> = {
 };
 
 export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> }) {
+  const t = useT();
   const { go } = useNav();
   const { fail } = useToast();
   const tasks = useTasks();
@@ -76,7 +78,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
                 {column.label}
                 <span className="faint">{items.length}</span>
                 <span className="grow" />
-                {column.status === "todo" && <Button size="sm" variant="ghost" icon={Plus} title="New task" onClick={() => setCreating(true)} />}
+                {column.status === "todo" && <Button size="sm" variant="ghost" icon={Plus} title={t("tasks.new")} onClick={() => setCreating(true)} />}
               </div>
               <div className="column-body">
                 {items.length === 0 && (
@@ -140,6 +142,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
 }
 
 function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClose: () => void; onCreated: (task: TaskView) => void }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
@@ -204,10 +207,10 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     <Sheet onClose={onClose} width={live ? 1100 : 780}>
       <div className="page-head">
         <KanbanSquare size={17} className="accent-text" />
-        <h1 className="grow truncate">{task ? task.title : "New task"}</h1>
+        <h1 className="grow truncate">{task ? task.title : t("tasks.new")}</h1>
         {task?.lastRun && task.status !== "running" && <StatusChip status={task.lastRun.status} exitCode={task.lastRun.exitCode} />}
         {task && <Chip tone={task.status === "done" ? "ok" : task.status === "review" ? "warn" : task.status === "running" ? "accent" : undefined}>{COLUMNS.find((column) => column.status === task.status)?.label}</Chip>}
-        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title="Close (Esc)" />
+        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
       </div>
       {live && (
         <div style={{ height: "46vh", display: "flex", flexDirection: "column", borderBottom: "1px solid var(--line)" }}>
@@ -222,7 +225,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             </Button>
           )}
           {task && task.lastRun && !live && task.status !== "todo" && (
-            <Button icon={RotateCcw} busy={continuing} onClick={() => void cont()} title="Reopen the engine's latest session in the workspace">
+            <Button icon={RotateCcw} busy={continuing} onClick={() => void cont()} title={t("tasks.reopen")}>
               Continue
             </Button>
           )}
@@ -245,7 +248,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
           <Button icon={Save} busy={saving} disabled={!dirty || !title.trim()} onClick={() => void save()}>
             {task ? "Save" : "Create task"}
           </Button>
-          {task && <Button variant="danger" icon={Trash2} onClick={() => void remove()} title="Delete task" />}
+          {task && <Button variant="danger" icon={Trash2} onClick={() => void remove()} title={t("tasks.delete")} />}
         </div>
         {task?.blocker && !live && task.status !== "running" && (
           <Notice tone="warn">

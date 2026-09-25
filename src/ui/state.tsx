@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { RunView } from "../shared/api.js";
 import { errorText } from "./api.js";
+import { covers, sameBox, type Box, type Layer } from "./floating.js";
 
 // ------------------------------------------------------------------ routes
 
@@ -59,33 +60,63 @@ export function routeForRun(run: Pick<RunView, "id" | "origin" | "agentId" | "ch
   return { view: "runs", runId: run.id };
 }
 
-// ------------------------------------------------------------------ overlays
-// The browser dock is a native view drawn above the page; it hides while anything floats.
+// ------------------------------------------------------------------ floating layers
+// The browser dock is a native view that Electron draws above the whole page. Tooltips and
+// toasts keep clear of the area it publishes. Menus, dialogs and the tour register the space
+// they take, and while one of them lands on the dock, the dock shows a still of its page instead.
 
-let overlayCount = 0;
-const overlayListeners = new Set<() => void>();
+let dockArea: Box | null = null;
+const layers = new Map<symbol, Layer>();
+const layerListeners = new Set<() => void>();
 
-function setOverlays(delta: number): void {
-  overlayCount = Math.max(0, overlayCount + delta);
-  for (const listener of overlayListeners) listener();
+function layersChanged(): void {
+  for (const listener of layerListeners) listener();
 }
 
+function subscribeLayers(listener: () => void): () => void {
+  layerListeners.add(listener);
+  return () => layerListeners.delete(listener);
+}
+
+/** The dock says where its live page is, or null while it has none on screen. */
+export function setDockArea(area: Box | null): void {
+  if (sameBox(dockArea, area)) return;
+  dockArea = area;
+  layersChanged();
+}
+
+/** Where the dock's page is, for floating things that keep clear of it. */
+export function useDockArea(): Box | null {
+  return useSyncExternalStore(subscribeLayers, () => dockArea);
+}
+
+/** Whether a registered layer lands on the dock right now. */
+export function dockCovered(): boolean {
+  return covers(layers.values(), dockArea);
+}
+
+/** True while a registered layer lands on the dock. */
+export function useDockCovered(): boolean {
+  return useSyncExternalStore(subscribeLayers, dockCovered);
+}
+
+/** Register the space a floating layer takes; null while it takes none. Pass a stable value. */
+export function useLayer(layer: Layer | null): void {
+  const id = useRef(Symbol("layer")).current;
+  useLayoutEffect(() => {
+    if (!layer) return;
+    layers.set(id, layer);
+    layersChanged();
+    return () => {
+      layers.delete(id);
+      layersChanged();
+    };
+  }, [id, layer]);
+}
+
+/** A dialog, sheet or tour: its scrim covers the whole window while it is open. */
 export function useOverlay(open: boolean): void {
-  useEffect(() => {
-    if (!open) return;
-    setOverlays(1);
-    return () => setOverlays(-1);
-  }, [open]);
-}
-
-export function useOverlayOpen(): boolean {
-  return useSyncExternalStore(
-    (notify) => {
-      overlayListeners.add(notify);
-      return () => overlayListeners.delete(notify);
-    },
-    () => overlayCount > 0,
-  );
+  useLayer(open ? "window" : null);
 }
 
 // ------------------------------------------------------------------ toasts

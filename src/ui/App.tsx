@@ -15,12 +15,14 @@ import {
 } from "lucide-react";
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks } from "./api.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate } from "./api.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
+import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { Button, ConfirmDialog, Empty, Logo, Popover, Toasts } from "./components/ui.js";
+import { applyLanguageSetting, t as translateNow, useT, type Key } from "./i18n/index.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
 import { AgentsView } from "./views/Agents.js";
 import { ChatView } from "./views/Chat.js";
@@ -32,27 +34,16 @@ import { SettingsView } from "./views/Settings.js";
 import { SkillsView } from "./views/Skills.js";
 import { TasksView } from "./views/Tasks.js";
 
-const VIEWS: Array<{ view: Exclude<ViewName, "settings">; label: string; icon: LucideIcon }> = [
-  { view: "home", label: "Home", icon: House },
-  { view: "agents", label: "Agents", icon: Bot },
-  { view: "code", label: "Code", icon: SquareTerminal },
-  { view: "chat", label: "Chat", icon: MessagesSquare },
-  { view: "tasks", label: "Tasks", icon: KanbanSquare },
-  { view: "routines", label: "Routines", icon: CalendarClock },
-  { view: "skills", label: "Skills", icon: Sparkles },
-  { view: "runs", label: "Runs", icon: History },
+const VIEWS: Array<{ view: Exclude<ViewName, "settings">; label: Key; tip: Key; icon: LucideIcon }> = [
+  { view: "home", label: "rail.home", tip: "rail.tip.home", icon: House },
+  { view: "agents", label: "rail.agents", tip: "rail.tip.agents", icon: Bot },
+  { view: "code", label: "rail.code", tip: "rail.tip.code", icon: SquareTerminal },
+  { view: "chat", label: "rail.chat", tip: "rail.tip.chat", icon: MessagesSquare },
+  { view: "tasks", label: "rail.tasks", tip: "rail.tip.tasks", icon: KanbanSquare },
+  { view: "routines", label: "rail.routines", tip: "rail.tip.routines", icon: CalendarClock },
+  { view: "skills", label: "rail.skills", tip: "rail.tip.skills", icon: Sparkles },
+  { view: "runs", label: "rail.runs", tip: "rail.tip.runs", icon: History },
 ];
-
-const RAIL_TIPS: Record<Exclude<ViewName, "settings">, string> = {
-  home: "Home: what's live, what needs review, what's next",
-  agents: "Agents: teammates with a brief, memory and skills",
-  code: "Code: project workspaces with tiled terminals",
-  chat: "Chat: quick conversations in a scratch folder",
-  tasks: "Tasks: a board of work for your agents",
-  routines: "Routines: agent runs on a schedule",
-  skills: "Skills: reusable procedures for agents",
-  runs: "Runs: every session with its screen, transcript and diff",
-};
 
 export function App() {
   return (
@@ -131,9 +122,13 @@ function Shell() {
 /** The welcome tour (first launch, or replayed from Help) and the shortcut sheet. */
 function Guides() {
   const settings = useSettings().data;
+  const appPath = useAppInfo().data?.appPath ?? "";
   const [tour, setTour] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
+  const [update, setUpdate] = useState(false);
   const autoOpened = useRef(false);
+
+  useEffect(() => applyLanguageSetting(settings?.language ?? "system"), [settings?.language]);
 
   useEffect(() => {
     if (!settings || autoOpened.current) return;
@@ -147,11 +142,14 @@ function Guides() {
       setTour(true);
     };
     const keys = () => setShortcuts((open) => !open);
+    const showUpdate = () => setUpdate(true);
     window.addEventListener(START_TOUR_EVENT, start);
     window.addEventListener(SHOW_SHORTCUTS_EVENT, keys);
+    window.addEventListener(SHOW_UPDATE_EVENT, showUpdate);
     return () => {
       window.removeEventListener(START_TOUR_EVENT, start);
       window.removeEventListener(SHOW_SHORTCUTS_EVENT, keys);
+      window.removeEventListener(SHOW_UPDATE_EVENT, showUpdate);
     };
   }, []);
 
@@ -165,12 +163,16 @@ function Guides() {
     <>
       {tour && <Tour onClose={closeTour} />}
       {shortcuts && !tour && <ShortcutsModal onClose={closeShortcuts} />}
+      {update && !tour && <UpdateSheet appPath={appPath} onClose={() => setUpdate(false)} />}
     </>
   );
 }
 
 function Rail() {
+  const t = useT();
   const { route, go } = useNav();
+  const update = useUpdate().data;
+  const waiting = update?.available && update.latest ? update.latest.version : null;
   const inbox = useInbox().data ?? [];
   const tasks = useTasks().data ?? [];
   const live = useLive().data ?? [];
@@ -197,12 +199,12 @@ function Rail() {
             type="button"
             className="rail-btn"
             aria-current={route.view === item.view ? "page" : undefined}
-            aria-label={item.label}
-            {...tipProps(RAIL_TIPS[item.view], { kbd: `Ctrl+${index + 1}`, side: "right" })}
+            aria-label={t(item.label)}
+            {...tipProps(t(item.tip), { kbd: `Ctrl+${index + 1}`, side: "right" })}
             onClick={() => go({ view: item.view } as Route)}
           >
             <item.icon size={19} strokeWidth={1.9} />
-            <span>{item.label}</span>
+            <span>{t(item.label)}</span>
             {count > 0 && <span className="rail-badge">{count > 99 ? "99+" : count}</span>}
           </button>
         );
@@ -212,32 +214,33 @@ function Rail() {
           type="button"
           className="rail-btn"
           aria-pressed={Boolean(liveAnchor)}
-          {...tipProps(live.length ? "Running terminals: jump to one" : "Nothing is running", { side: "right" })}
+          {...tipProps(live.length ? t("rail.tip.liveSome") : t("rail.tip.liveNone"), { side: "right" })}
           onClick={(event) => setLiveAnchor(liveAnchor ? null : event.currentTarget)}
         >
           <Activity size={19} strokeWidth={1.9} className={live.length ? "accent-text" : undefined} />
-          <span className={live.length ? "live-pulse" : undefined}>{live.length ? `${live.length} live` : "Idle"}</span>
+          <span className={live.length ? "live-pulse" : undefined}>{live.length ? t.count("rail.live", live.length) : t("rail.idle")}</span>
         </button>
         <button
           type="button"
           className="rail-btn"
           data-tour="help"
           aria-pressed={Boolean(helpAnchor)}
-          {...tipProps("Tour, shortcuts, bug reports and ideas", { side: "right" })}
+          {...tipProps(waiting ? t("rail.tip.helpUpdate", { version: waiting }) : t("rail.tip.help"), { side: "right" })}
           onClick={(event) => setHelpAnchor(helpAnchor ? null : event.currentTarget)}
         >
           <CircleHelp size={19} strokeWidth={1.9} />
-          <span>Help</span>
+          <span>{t("rail.help")}</span>
+          {waiting && <span className="rail-dot" />}
         </button>
         <button
           type="button"
           className="rail-btn"
           aria-current={route.view === "settings" ? "page" : undefined}
-          {...tipProps("Engines, terminal font, theme and notifications", { kbd: "Ctrl+,", side: "right" })}
+          {...tipProps(t("rail.tip.settings"), { kbd: "Ctrl+,", side: "right" })}
           onClick={() => go({ view: "settings" })}
         >
           <SettingsIcon size={19} strokeWidth={1.9} />
-          <span>Settings</span>
+          <span>{t("rail.settings")}</span>
         </button>
       </div>
       {liveAnchor && <LivePopover anchor={liveAnchor} onClose={() => setLiveAnchor(null)} />}
@@ -247,6 +250,7 @@ function Rail() {
 }
 
 function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => void }) {
+  const t = useT();
   const { go } = useNav();
   const live = useLive().data ?? [];
   const home = useAppInfo().data?.home ?? "";
@@ -254,9 +258,9 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   return (
     <Popover anchor={anchor} onClose={onClose}>
       <div className="list-label" style={{ paddingTop: 6 }}>
-        Running terminals
+        {t("live.title")}
       </div>
-      {live.length === 0 && <div className="faint" style={{ padding: "6px 9px 10px" }}>Nothing is running.</div>}
+      {live.length === 0 && <div className="faint" style={{ padding: "6px 9px 10px" }}>{t("live.none")}</div>}
       {live.map((session) => (
         <button
           key={session.ptyId}
@@ -305,10 +309,10 @@ class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | 
       return (
         <Empty
           icon={Activity}
-          title="This view hit a problem"
+          title={translateNow("crash.title")}
           actions={
             <Button variant="primary" onClick={() => this.setState({ error: null })}>
-              Try again
+              {translateNow("common.tryAgain")}
             </Button>
           }
         >

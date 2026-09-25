@@ -1,22 +1,14 @@
 # To do
 
-Picked up after the layout and onboarding pass (2026-09-25).
+Updated after the 0.3.0 pass (2026-09-25): in-app updates, languages, diagnostics and the move to vibe-forge.net are done; see `status.md`.
 
 ## Next up
 
-- [ ] **In-app updates.** Tag versioned GitHub releases. Help shows "Update available" (the check contacts GitHub, so add a setting to turn it off), runs the installer's update in a terminal pane so it's visible, then offers a restart. Consider an AUR package so Omarchy users update with `yay`.
-- [ ] **Multi-language support.** A small `t()` helper with no dependencies, one catalog file per language, and a language picker in Settings that defaults to the system language. Translate the tour, tooltips and empty states first; they hold most of the text.
-- [ ] **Diagnostics.** A local log file, plus "Copy diagnostics" in Help so bug reports can include what went wrong.
-
-## Branding
-
-- [ ] **Possible rebrand.** A VibeForge domain has been hard to find. The candidates are **ApexVibeForge** (domain available) or a new name. Decide before sharing widely, because the name is in:
-  - the app and window class, `package.json`, the launcher, the desktop entry and the installer paths
-  - the config and data folders (`~/.config/vibeforge`, `~/.local/share/vibeforge`), which need a one-time migration
-  - the GitHub repo, `REPO` in `src/ui/components/Help.tsx` and `REPO_URL` in `electron/main.ts`
-  - the website, the Netlify site name, the README, the icons and the issue templates
-- [ ] **"Created by ApexForge" credit.** Add a small, discreet line in the app linking to http://ame-apexforge.org/. Possible spots are the Help menu footer, the bottom of Settings, or under the rail logo. Check whether the site also serves https.
+- [ ] **Make vibe-forge.net the primary domain** in Netlify (Domain management → set as primary), so vibeforgeapp.netlify.app redirects to it. Everything in the repo already points at vibe-forge.net.
+- [ ] **Translate the rest of the UI.** The forms in Agents, Tasks, Routines and Skills, the engine editor, run details, Home, toast messages, and the errors the main process sends (`src/core/team-service.ts`) are still English. Relative times ("5m ago", `src/shared/text.ts`) should use `Intl.RelativeTimeFormat` in the chosen language. Add each key to `src/ui/i18n/en.ts` first; the typecheck then lists every language that needs it.
+- [ ] **An AUR package**, so Omarchy users can update with `yay`. It would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update says to use the package manager.
+- [ ] **Release notes on each tag.** `gh release create vX.Y.Z --notes-file …` after bumping `package.json`; the in-app Update shows those notes.
 
 ## Known rough edges
 
-- Tooltips and popovers can be hidden behind the browser dock, which is a native view drawn above the page.
+- Restart after an update relaunches with the same arguments and environment; worth a real click on an installer copy after the next release.

@@ -7,8 +7,10 @@ import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Empty, Input, Segmented } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
 import { RunRow } from "./Home.js";
+import { useT } from "../i18n/index.js";
 
 export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> }) {
+  const t = useT();
   const { go } = useNav();
   const [filter, setFilter] = useState<RunFilter>(route.filter ?? (route.runId ? "all" : "review"));
   const [search, setSearch] = useState("");
@@ -33,7 +35,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
     <div className="view split-list">
       <SidePanel
         id="runs"
-        title="Runs"
+        title={t("runs.title")}
         actions={
           <>
             <Segmented
@@ -79,9 +81,8 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
       {selected ? (
         <RunDetail key={selected} runId={selected} />
       ) : (
-        <Empty icon={History} title="Every run leaves a record">
-          A run is one process VibeForge started: an agent chat, a routine, a task, or a prompt from Code. Each keeps its prompt, the final screen, a
-          plain-text transcript and a git snapshot of what changed.
+        <Empty icon={History} title={t("runs.empty.title")}>
+          {t("runs.empty.body")}
         </Empty>
       )}
     </div>

@@ -31,6 +31,7 @@ import type {
   TaskStatus,
   Topic,
 } from "../core/types.js";
+import type { InstallKind, Release } from "../core/updates.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 
 export type {
@@ -62,6 +63,8 @@ export type {
   TermSize,
   Topic,
   WorkspaceFile,
+  InstallKind,
+  Release,
 };
 export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
 
@@ -76,6 +79,24 @@ export interface AppInfo {
   node: string;
   os: string;
   repo: string;
+  /** Where the app itself lives, and how it was installed there. */
+  appPath: string;
+  install: InstallKind;
+  /** VibeForge's own log (events and errors; never prompts or terminal output). */
+  logFile: string;
+}
+
+export interface UpdateInfo {
+  current: string;
+  /** The newest published release, or null when none is known (not checked yet, or none published). */
+  latest: Release | null;
+  available: boolean;
+  checking: boolean;
+  checkedAt: string | null;
+  error: string | null;
+  install: InstallKind;
+  /** What "Update now" runs in a terminal; null when this copy updates some other way. */
+  command: string | null;
 }
 
 export interface PtySnapshot {
@@ -110,6 +131,15 @@ export interface DeskMethods {
   "app.pickFolder": (title?: string) => string | null;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
+  "app.restart": () => void;
+  "app.copyText": (text: string) => void;
+  /** The last lines of VibeForge's own log, oldest first. */
+  "app.logTail": (lines: number) => string[];
+
+  "updates.get": () => UpdateInfo;
+  "updates.check": () => UpdateInfo;
+  /** Starts the update command in a terminal. */
+  "updates.run": (size?: TermSize) => { ptyId: string };
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;
@@ -183,6 +213,8 @@ export interface DeskMethods {
 
   "dock.show": (bounds: DockBounds, url: string) => void;
   "dock.hide": () => void;
+  /** The dock's page as a JPEG data URL, or null when it has nothing on screen. */
+  "dock.capture": () => string | null;
   "dock.command": (command: "back" | "forward" | "reload" | "stop" | "devtools") => void;
 }
 

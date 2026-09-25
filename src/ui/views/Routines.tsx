@@ -6,6 +6,7 @@ import { call, useAgents, useRoutines } from "../api.js";
 import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
+import { useT } from "../i18n/index.js";
 
 const PROMPT_PLACEHOLDER = `Look at commits merged in the allowed repo since yesterday.
 Draft release notes grouped by what a person can now do.
@@ -22,6 +23,7 @@ const CRON_PRESETS = [
 const PROMPT_CHECKS = ["The outcome you want", "The source of truth", "The scope", "The output format", "What still needs your approval"];
 
 export function RoutinesView({ route }: { route: Extract<Route, { view: "routines" }> }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
@@ -51,11 +53,11 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
       <div className="page-head">
         <CalendarClock size={17} className="accent-text" />
         <div className="vstack grow" style={{ gap: 0 }}>
-          <h1>Routines</h1>
-          <span className="sub">Each fire opens a fresh run with the agent's brief. They only fire while VibeForge is open; missed slots are not replayed.</span>
+          <h1>{t("rail.routines")}</h1>
+          <span className="sub">{t("routines.sub")}</span>
         </div>
-        <Button variant="primary" icon={Plus} disabled={agents.length === 0} onClick={() => setEditing("new")} title={agents.length ? undefined : "Create an agent first"}>
-          New routine
+        <Button variant="primary" icon={Plus} disabled={agents.length === 0} onClick={() => setEditing("new")} title={agents.length ? undefined : t("routines.needAgent")}>
+          {t("routines.new")}
         </Button>
       </div>
       <div className="page-body">
@@ -63,18 +65,18 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
           {routines.loaded && list.length === 0 && (
             <Empty
               icon={CalendarClock}
-              title="Nothing on the schedule"
+              title={t("routines.empty.title")}
               actions={
                 agents.length ? (
                   <Button variant="primary" icon={Plus} onClick={() => setEditing("new")}>
-                    New routine
+                    {t("routines.new")}
                   </Button>
                 ) : (
-                  <Button onClick={() => go({ view: "agents" })}>Create an agent first</Button>
+                  <Button onClick={() => go({ view: "agents" })}>{t("routines.needAgent")}</Button>
                 )
               }
             >
-              A routine asks an agent to do one self-contained job on a cron schedule or an interval — a morning summary, a nightly dependency check — and leaves the result for you to review.
+              {t("routines.empty.body")}
             </Empty>
           )}
           {list.map((routine) => (
@@ -128,7 +130,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   </span>
                 )}
                 <span className="grow" />
-                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void remove(routine)} title="Delete routine" />
+                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void remove(routine)} title={t("routines.delete")} />
               </div>
             </div>
           ))}
@@ -140,6 +142,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
 }
 
 function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onClose: () => void }) {
+  const t = useT();
   const { push } = useToast();
   const agents = useAgents().data ?? [];
   const [name, setName] = useState(routine?.name ?? "");
@@ -177,7 +180,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
       <div className="page-head">
         <CalendarClock size={17} className="accent-text" />
         <h1 className="grow">{routine ? `Edit ${routine.name}` : "New routine"}</h1>
-        <Button variant="ghost" size="sm" icon={X} tip="Close" kbd="Esc" onClick={onClose} />
+        <Button variant="ghost" size="sm" icon={X} tip={t("common.close")} kbd="Esc" onClick={onClose} />
       </div>
       <div className="page-body vstack" style={{ gap: 16 }}>
         <div className="form-grid">

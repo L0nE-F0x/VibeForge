@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://vibeforgeapp.netlify.app"><strong>vibeforgeapp.netlify.app</strong></a>
+  <a href="https://vibe-forge.net"><strong>vibe-forge.net</strong></a>
 </p>
 
 <p align="center">
@@ -28,12 +28,14 @@ VibeForge never calls a model API and never holds a key. Every engine is a CLI y
 On Omarchy (or any Arch + Hyprland setup):
 
 ```bash
-curl -fsSL https://vibeforgeapp.netlify.app/install | bash
+curl -fsSL https://vibe-forge.net/install | bash
 ```
 
-Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Run the same command again to update; add `--uninstall` to remove the launcher (your data stays).
+Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Add `--uninstall` to remove the launcher (your data stays).
 
-The installer needs `git`, Node 20+ (Omarchy ships mise: `mise use -g node@lts`) and `base-devel` + `python` to build the terminal engine. It clones into `~/.local/share/vibeforge-app` and adds `~/.local/bin/vibeforge` and a desktop entry.
+The installer needs `git`, Node 20+ (Omarchy ships mise: `mise use -g node@lts`) and `base-devel` + `python` to build the terminal engine. It clones into `~/.local/share/vibeforge-app`, checks out the newest [release](https://github.com/L0nE-F0x/VibeForge/releases), and adds `~/.local/bin/vibeforge` and a desktop entry. Set `VIBEFORGE_BRANCH=main` to follow the main branch instead.
+
+**Updating.** VibeForge asks GitHub for the newest release number when it starts and every six hours (nothing else is sent; turn it off in Settings → Updates). When one is out, Help in the rail gets a dot: **Update** shows the release notes, runs the installer in a terminal you can watch, then restarts. Running the install command again does the same.
 
 <details>
 <summary>Build it yourself</summary>
@@ -63,6 +65,8 @@ npm run build       # production build
 | **Runs** | Every process VibeForge started: final screen, transcript, prompt, and the diff since it began. **Continue** reopens the exact session. |
 
 It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes.
+
+It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language unless you pick one in Settings. The tour, menus, tooltips and empty screens are translated so far; some other text is still English. Translations live in `src/ui/i18n/`, one file per language, and the typecheck fails if one is missing a line.
 
 ## Works with
 
@@ -103,13 +107,13 @@ React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (sy
   scratch/<chat>/               Chat mode working folders
 ```
 
-Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`.
+Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
 
 ## Keys
 
 <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
 
-In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
+In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 
 ## Develop
 

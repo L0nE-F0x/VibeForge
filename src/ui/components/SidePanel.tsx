@@ -1,5 +1,6 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useT } from "../i18n/index.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
 
@@ -61,6 +62,7 @@ export function SidePanel({
   primary?: boolean;
   className?: string;
 }) {
+  const t = useT();
   const [state, setState] = useState<PanelState>(() => load(id, { width: defaultWidth, collapsed: false }));
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLElement>(null);
@@ -122,7 +124,7 @@ export function SidePanel({
       {collapsed ? (
         <>
           <div className="list-head strip-head">
-            <Button variant="ghost" size="sm" icon={PanelLeftOpen} tip="Show the panel" kbd={primary ? "Ctrl+Shift+B" : undefined} tipSide="right" onClick={() => update({ collapsed: false })} />
+            <Button variant="ghost" size="sm" icon={PanelLeftOpen} tip={t("panel.show")} kbd={primary ? "Ctrl+Shift+B" : undefined} tipSide="right" onClick={() => update({ collapsed: false })} />
           </div>
           <div className="list-strip">{strip}</div>
         </>
@@ -131,14 +133,14 @@ export function SidePanel({
           <div className="list-head">
             <h2 className="grow truncate">{title}</h2>
             {actions}
-            <Button variant="ghost" size="sm" icon={PanelLeftClose} tip="Collapse the panel" kbd={primary ? "Ctrl+Shift+B" : undefined} onClick={() => update({ collapsed: true })} />
+            <Button variant="ghost" size="sm" icon={PanelLeftClose} tip={t("panel.collapse")} kbd={primary ? "Ctrl+Shift+B" : undefined} onClick={() => update({ collapsed: true })} />
           </div>
           {children}
           <div
             className="panel-resize"
             onPointerDown={startResize}
             onDoubleClick={() => update({ width: defaultWidth })}
-            {...tipProps("Drag to resize · double-click to reset", { side: "right" })}
+            {...tipProps(t("panel.resize"), { side: "right" })}
           />
         </>
       )}

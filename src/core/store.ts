@@ -82,6 +82,8 @@ export function defaultSettings(): Settings {
     terminalFontFamily: "JetBrainsMono Nerd Font",
     theme: "omarchy",
     tourDone: false,
+    checkUpdates: true,
+    language: "system",
   };
 }
 
@@ -390,6 +392,8 @@ export class Store {
       terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
       theme: raw.theme === "builtin" ? "builtin" : "omarchy",
       tourDone: bool(raw.tourDone, defaults.tourDone),
+      checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
+      language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
     };
   }
 

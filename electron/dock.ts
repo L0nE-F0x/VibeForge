@@ -95,6 +95,21 @@ export class Dock {
     this.view?.setVisible(false);
   }
 
+  /**
+   * A still of the page, which the renderer shows while a menu or dialog covers the view. A JPEG
+   * data URL, because the app's Content-Security-Policy allows data: images but not blob: ones.
+   */
+  async capture(): Promise<string | null> {
+    const view = this.view;
+    if (!view || !view.getVisible() || view.webContents.isDestroyed()) return null;
+    try {
+      const image = await view.webContents.capturePage();
+      return image.isEmpty() ? null : `data:image/jpeg;base64,${image.toJPEG(90).toString("base64")}`;
+    } catch {
+      return null;
+    }
+  }
+
   command(command: "back" | "forward" | "reload" | "stop" | "devtools"): void {
     const contents = this.view?.webContents;
     if (!contents) return;

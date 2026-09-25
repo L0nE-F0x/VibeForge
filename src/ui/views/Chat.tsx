@@ -7,8 +7,10 @@ import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Chip, Input, TimeAgo } from "../components/ui.js";
 import { useAction, useConfirm, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
+import { useT } from "../i18n/index.js";
 
 export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> }) {
+  const t = useT();
   const { go } = useNav();
   const confirm = useConfirm();
   const chats = useChats(null).data ?? [];
@@ -57,17 +59,17 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
     <div className="view split-list">
       <SidePanel
         id="chat"
-        title="Chat"
+        title={t("chat.title")}
         actions={
           <>
             <Button size="sm" icon={MessageSquarePlus} onClick={() => go({ view: "chat" })}>
-              New
+              {t("common.new")}
             </Button>
           </>
         }
         strip={
           <>
-            <StripItem label="New chat" selected={!chat} onClick={() => go({ view: "chat" })}>
+            <StripItem label={t("agents.newChat")} selected={!chat} onClick={() => go({ view: "chat" })}>
               <MessageSquarePlus size={16} />
             </StripItem>
             {chats.slice(0, 14).map((item) => (
@@ -98,7 +100,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
                 </span>
               </span>
               <span className="row-actions">
-                <Button size="sm" variant="ghost" icon={Trash2} title="Delete" onClick={(event) => { event.stopPropagation(); void remove(item); }} />
+                <Button size="sm" variant="ghost" icon={Trash2} title={t("common.delete")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
               </span>
             </div>
           ))}
@@ -120,9 +122,9 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
               }}
             />
           ) : (
-            <h1 className="truncate">{chat ? chat.title : "New chat"}</h1>
+            <h1 className="truncate">{chat ? chat.title : t("agents.newChat")}</h1>
           )}
-          {chat && !renaming && <Button size="sm" variant="ghost" icon={Pencil} title="Rename" onClick={() => setRenaming(true)} />}
+          {chat && !renaming && <Button size="sm" variant="ghost" icon={Pencil} title={t("common.rename")} onClick={() => setRenaming(true)} />}
           <span className="grow" />
           {chat?.live ? (
             <Chip tone="accent">{engineLabel(chat.engine)}</Chip>
@@ -131,18 +133,18 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
               <EngineSelect engines={engines} value={chat?.engine ?? engine} onChange={(next) => void switchEngine(next)} allowMissing={chat?.engine} />
             </div>
           )}
-          {chat && <Button size="sm" icon={FolderOpen} title="Open the scratch folder" onClick={() => void call("app.openPath", chat.cwd)} />}
+          {chat && <Button size="sm" icon={FolderOpen} title={t("chat.openScratch")} onClick={() => void call("app.openPath", chat.cwd)} />}
         </div>
         <SessionPane
           key={chat?.id ?? "new"}
           chat={chat}
           create={() => call("chats.create", { engine })}
           onCreated={(created) => go({ view: "chat", chatId: created.id })}
-          placeholder={`Ask ${engineLabel(chat?.engine ?? engine)} anything…`}
+          placeholder={t("chat.placeholder", { engine: engineLabel(chat?.engine ?? engine) })}
           empty={{
             icon: MessagesSquare,
-            title: "A conversation with no project attached",
-            body: "Pick an engine, then ask. The first message opens the CLI in an empty scratch folder; drop files onto the box to hand it paths. Claude Code asks you to trust each new folder once — answer in the terminal.",
+            title: t("chat.empty.title"),
+            body: t("chat.empty.body"),
           }}
         />
       </div>
