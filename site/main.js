@@ -1,5 +1,6 @@
 // VibeForge site. No framework, no tracking. Themes are the palettes VibeForge itself derives
-// from Omarchy's theme files (generated with src/core/theme.ts).
+// from Omarchy's theme files (generated with src/core/theme.ts); press T to flip through them,
+// as on omarchy.org.
 
 const THEMES = [
   {"id": "apex-forge", "name": "Apex Forge", "mode": "dark", "bg": "#09090b", "bgDark": "#0c0c0e", "bgDeep": "#050506", "bgRaised": "#151518", "fg": "#ffffff", "fg2": "#a1a1aa", "fg3": "#71717a", "accent": "#ff6b35", "accent2": "#fca311", "red": "#ff4d6d", "green": "#34d399", "yellow": "#fca311", "blue": "#38bdf8", "cyan": "#22d3ee", "magenta": "#7c3aed"},
@@ -38,14 +39,10 @@ function contrast(a, b) {
   return (light + 0.05) / (dark + 0.05);
 }
 
-/** Text on the accent gradient: the theme's darkest colour or white, whichever reads better on both stops. */
+/** Text on an accent button: the theme's darkest colour or white, whichever reads better on both accents. */
 function onAccent(theme) {
   const score = (text) => Math.min(contrast(text, theme.accent), contrast(text, theme.accent2));
   return score(theme.bgDeep) >= score("#ffffff") ? theme.bgDeep : "#ffffff";
-}
-
-function dots(theme) {
-  return `<span class="dots"><i style="background:${theme.bg}"></i><i style="background:${theme.accent}"></i><i style="background:${theme.accent2}"></i></span>`;
 }
 
 function applyTheme(id, { save = true } = {}) {
@@ -63,21 +60,13 @@ function applyTheme(id, { save = true } = {}) {
   set("--accent", theme.accent);
   set("--accent-2", theme.accent2);
   set("--on-accent", onAccent(theme));
-  for (const key of ["red", "green", "yellow", "blue", "cyan", "magenta"]) set(`--${key}`, theme[key]);
+  set("--green", theme.green);
+  set("--red", theme.red);
   root.dataset.mode = theme.mode;
   $('meta[name="theme-color"]')?.setAttribute("content", theme.bg);
-  for (const label of $$("[data-theme-name]")) label.textContent = theme.name;
-  for (const option of $$("[data-theme-id]")) {
-    const on = option.dataset.themeId === theme.id;
-    if (option.classList.contains("theme-option")) option.setAttribute("aria-checked", String(on));
-    else option.setAttribute("aria-pressed", String(on));
-  }
-  const swatches = $("[data-swatches]");
-  if (swatches) {
-    swatches.innerHTML = [theme.bg, theme.bgRaised, theme.accent, theme.accent2, theme.red, theme.green, theme.cyan, theme.magenta]
-      .map((color) => `<span style="background:${color}" title="${color}"></span>`)
-      .join("");
-  }
+  for (const button of $$("[data-theme-id]")) button.setAttribute("aria-pressed", String(button.dataset.themeId === theme.id));
+  const next = $("[data-theme-next]");
+  if (next) next.title = `Theme: ${theme.name}. Press T for the next one.`;
   if (save) {
     try {
       localStorage.setItem("vibeforge.theme", theme.id);
@@ -87,73 +76,93 @@ function applyTheme(id, { save = true } = {}) {
   }
 }
 
-function buildThemeControls() {
+function nextTheme(step = 1) {
+  const index = THEMES.findIndex((theme) => theme.id === currentTheme);
+  applyTheme(THEMES[(index + step + THEMES.length) % THEMES.length].id);
+}
+
+function setupThemes() {
   const list = $("[data-theme-list]");
-  const pills = $("[data-theme-pills]");
-  for (const theme of THEMES) {
-    const option = document.createElement("button");
-    option.type = "button";
-    option.className = "theme-option";
-    option.setAttribute("role", "menuitemradio");
-    option.dataset.themeId = theme.id;
-    option.innerHTML = `<span>${theme.name}</span>${theme.mode === "light" ? '<span class="mode">light</span>' : ""}${dots(theme)}`;
-    option.addEventListener("click", () => applyTheme(theme.id));
-    list?.append(option);
-
-    const mini = $("[data-mini-swatches]");
-    if (mini) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.dataset.themeId = theme.id;
-      chip.title = theme.name;
-      chip.setAttribute("aria-label", `Use ${theme.name}`);
-      chip.innerHTML = [theme.bg, theme.accent, theme.accent2].map((color) => `<span style="background:${color}"></span>`).join("");
-      chip.addEventListener("click", () => applyTheme(theme.id));
-      mini.append(chip);
-    }
-
-    const pill = document.createElement("button");
-    pill.type = "button";
-    pill.className = "theme-pill";
-    pill.dataset.themeId = theme.id;
-    pill.innerHTML = `${dots(theme)}<span>${theme.name}</span>`;
-    pill.addEventListener("click", () => applyTheme(theme.id));
-    pills?.append(pill);
-  }
-
-  const menu = $("[data-theme-menu]");
-  const button = $("[data-theme-open]");
-  const close = () => {
-    menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
-  };
-  button?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    menu.hidden = !menu.hidden;
-    button.setAttribute("aria-expanded", String(!menu.hidden));
+  THEMES.forEach((theme, index) => {
+    if (!list) return;
+    if (index) list.insertAdjacentHTML("beforeend", '<span class="sep">/</span>');
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.themeId = theme.id;
+    button.textContent = theme.name;
+    button.addEventListener("click", () => applyTheme(theme.id));
+    list.append(button);
   });
-  document.addEventListener("click", (event) => {
-    if (!menu.hidden && !menu.contains(event.target)) close();
-  });
+  $("[data-theme-next]")?.addEventListener("click", () => nextTheme());
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") close();
-    // Omarchy's own theme picker lives on Super+Ctrl+Shift+Space; a plain "t" will do here.
-    if (event.key === "t" && !event.ctrlKey && !event.metaKey && !event.altKey && !/input|textarea/i.test(document.activeElement?.tagName ?? "")) {
-      const index = THEMES.findIndex((theme) => theme.id === currentTheme);
-      applyTheme(THEMES[(index + 1) % THEMES.length].id);
-    }
+    const typing = event.target instanceof HTMLElement && event.target.closest("input, textarea, [contenteditable]");
+    if (typing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === "t") nextTheme(1);
+    else if (event.key === "T") nextTheme(-1);
   });
-
   let saved = null;
   try {
     saved = localStorage.getItem("vibeforge.theme");
   } catch {
-    saved = null;
+    /* private mode */
   }
   applyTheme(saved ?? THEMES[0].id, { save: false });
 }
 
-// ------------------------------------------------------------------ install command
+// ------------------------------------------------------------------ pixel drift
+// Loose squares thickening toward the edges, as around Omarchy's hero. Seeded, so the pattern
+// is the same on every visit; the fill is the theme's accent.
+
+function seeded(seed) {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return ((state >>> 0) % 100000) / 100000;
+  };
+}
+
+function drawDrift(svg) {
+  const cell = 18;
+  const size = 11;
+  const { width, height } = svg.getBoundingClientRect();
+  const cols = Math.ceil(width / cell);
+  const rows = Math.ceil(height / cell);
+  const random = seeded(29);
+  const mode = svg.dataset.drift || "sides";
+  let rects = "";
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const side = Math.min(x, cols - 1 - x) / (cols / 2);
+      const low = y / Math.max(1, rows - 1);
+      // Thick along the edges and the bottom, thinning toward the middle so text stays clear.
+      // The side bands are capped in pixels, so a phone gets a thin fringe rather than a wall.
+      const band = Math.min(mode === "bottom" ? 200 : 260, width * (mode === "bottom" ? 0.14 : 0.18));
+      const sides = Math.max(1 - (Math.min(x, cols - 1 - x) * cell) / band, 0) * 0.85;
+      const floor = mode === "bottom" ? Math.max(0, (low - 0.7) / 0.3) * (0.35 + (1 - side) * 0.65) : low ** 3 * 0.55 * (1 - side * 0.9);
+      const edge = sides + floor;
+      const chance = Math.min(0.8, Math.max(0, edge - 0.18) ** 1.5);
+      const roll = random();
+      const strength = random();
+      if (roll < chance) rects += `<rect x="${x * cell}" y="${y * cell}" width="${size}" height="${size}" opacity="${(0.12 + strength * 0.55).toFixed(2)}"/>`;
+    }
+  }
+  svg.innerHTML = rects;
+}
+
+function setupDrift() {
+  const svgs = $$("[data-drift]");
+  const draw = () => svgs.forEach(drawDrift);
+  draw();
+  let timer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(timer);
+    timer = setTimeout(draw, 150);
+  });
+}
+
+// ------------------------------------------------------------------ install
 
 function installCommand() {
   const { protocol, hostname, origin } = window.location;
@@ -187,163 +196,32 @@ function setupInstall() {
   }
 }
 
-// ------------------------------------------------------------------ the desk demo
+// ------------------------------------------------------------------ see it
 
-const SESSION = [
-  { html: '<span class="dim">~/Projects/frontier-halls</span>' },
-  { type: '<span class="acc">❯</span> claude "# VibeForge run · Agent: Release notes · Allowed folders: ~/Projects/frontier-halls …"' },
-  { html: '<span class="dim">  brief · memory · 2 skills · prompt — handed over as one argument</span>', wait: 700 },
-  { html: "" },
-  { html: '<span class="acc">●</span> Reading the 14 commits merged since yesterday', wait: 900 },
-  { html: '<span class="acc">●</span> Grouping changes by what a player can now do', wait: 900 },
-  { html: '<span class="acc">●</span> Checking every claim against the diff', wait: 1000 },
-  { html: '<span class="acc">●</span> Wrote RELEASE_NOTES.md  <span class="grn">+38</span> <span class="red">−4</span>', wait: 900 },
-  { html: "" },
-  { html: '<span class="grn">✓</span> Draft ready for review. Nothing pushed, tagged or published.', wait: 600 },
-];
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function setupDesk() {
-  const term = $("[data-demo-term]");
-  if (!term) return;
-  const bar = $("[data-demo-sessionbar]");
-  const toast = $("[data-demo-toast]");
-  const badge = $("[data-demo-badge]");
-  const reviewCount = $("[data-demo-review]");
-  const live = $("[data-demo-live]");
-  const newRun = $("[data-demo-newrun]");
-  const windows = $$("[data-win]");
-  const barLive = bar?.innerHTML ?? "";
-  let visible = true;
-  let generation = 0;
-
-  const focus = (index) => windows.forEach((win, i) => win.classList.toggle("is-focused", i === index));
-
-  // Lines are appended, never redrawn, so each fades in once.
-  const addLine = (html) => {
-    const line = document.createElement("div");
-    line.className = "ln";
-    line.innerHTML = html || "&nbsp;";
-    term.append(line);
-    return line;
-  };
-
-  async function play() {
-    const mine = ++generation;
-    const alive = () => mine === generation;
-    focus(0);
-    if (bar) {
-      bar.classList.remove("is-done");
-      bar.innerHTML = barLive;
-    }
-    toast?.classList.remove("is-shown");
-    newRun?.classList.add("is-hidden");
-    if (badge) badge.textContent = "2";
-    if (reviewCount) reviewCount.textContent = "2";
-    if (live) live.textContent = "1 live";
-    term.replaceChildren();
-    await sleep(600);
-    for (const step of SESSION) {
-      if (!alive()) return;
-      if (step.type) {
-        const text = step.type;
-        const prefix = text.slice(0, text.indexOf("</span>") + 7);
-        const body = text.slice(prefix.length);
-        const line = addLine(prefix);
-        for (let index = 0; index <= body.length; index += 2) {
-          if (!alive()) return;
-          line.innerHTML = `${prefix}${body.slice(0, index)}<span class="caret"></span>`;
-          await sleep(16);
-        }
-        line.innerHTML = `${prefix}${body}`;
-      } else {
-        addLine(step.html);
-      }
-      await sleep(step.wait ?? 250);
-    }
-    if (!alive()) return;
-    addLine('<span class="acc">❯</span> <span class="caret"></span>');
-    await sleep(900);
-    if (!alive()) return;
-    if (bar) {
-      bar.classList.add("is-done");
-      bar.innerHTML = '<span class="m-dot is-ok"></span><span>Finished · 1 file changed, 38 insertions(+) · review it in Runs</span><span class="m-ghost-btn"><svg><use href="#i-rotate-ccw"/></svg>Continue</span>';
-    }
-    if (live) live.textContent = "Idle";
-    toast?.classList.add("is-shown");
-    if (newRun) {
-      newRun.classList.remove("is-hidden");
-      newRun.classList.add("is-arriving");
-    }
-    if (reviewCount) reviewCount.textContent = "3";
-    if (badge) {
-      badge.textContent = "3";
-      badge.classList.add("bump");
-      setTimeout(() => badge.classList.remove("bump"), 300);
-    }
-    await sleep(1400);
-    if (!alive()) return;
-    focus(1);
-    await sleep(2600);
-    if (!alive()) return;
-    toast?.classList.remove("is-shown");
-    focus(2);
-    await sleep(2000);
-    if (!alive()) return;
-    focus(0);
-    await sleep(900);
-    if (alive() && visible) void play();
-  }
-
-  if (reduceMotion) {
-    for (const step of SESSION) addLine(step.html ?? step.type);
-    return;
-  }
-
-  const observer = new IntersectionObserver(
-    ([entry]) => {
-      const was = visible;
-      visible = entry.isIntersecting;
-      if (visible && !was) void play();
-      if (!visible) generation += 1;
-    },
-    { threshold: 0.15 },
-  );
-  visible = false;
-  observer.observe($(".desk"));
-}
-
-// ------------------------------------------------------------------ small motions
-
-function setupEngineFlip() {
-  const slot = $("[data-engine-flip]");
-  if (!slot || reduceMotion) return;
-  const names = ["Claude Code", "Codex", "Grok Build", "Gemini CLI", "OpenCode"];
+function setupCarousel() {
+  const root = $("[data-carousel]");
+  if (!root) return;
+  const track = $(".slides", root);
+  const slides = $$(".slide", root);
+  const bar = $("[data-progress]");
   let index = 0;
-  setInterval(() => {
-    index = (index + 1) % names.length;
-    slot.classList.add("out");
-    setTimeout(() => {
-      slot.textContent = names[index];
-      slot.classList.remove("out");
-      slot.classList.add("in");
-      requestAnimationFrame(() => requestAnimationFrame(() => slot.classList.remove("in")));
-    }, 380);
-  }, 2400);
+  const show = (next) => {
+    index = (next + slides.length) % slides.length;
+    track.style.transform = `translateX(${-index * 100}%)`;
+    if (bar) bar.style.transform = `translateX(${index * 100}%)`;
+    slides.forEach((slide, i) => slide.setAttribute("aria-hidden", String(i !== index)));
+  };
+  for (const button of $$("[data-slide]")) button.addEventListener("click", () => show(index + Number(button.dataset.slide)));
+  let startX = null;
+  track.addEventListener("pointerdown", (event) => (startX = event.clientX));
+  track.addEventListener("pointerup", (event) => {
+    if (startX !== null && Math.abs(event.clientX - startX) > 40) show(index + (event.clientX < startX ? 1 : -1));
+    startX = null;
+  });
+  show(0);
 }
 
-function setupGlow() {
-  for (const card of $$("[data-glow]")) {
-    card.addEventListener("pointermove", (event) => {
-      const rect = card.getBoundingClientRect();
-      card.style.setProperty("--mx", `${event.clientX - rect.left}px`);
-      card.style.setProperty("--my", `${event.clientY - rect.top}px`);
-    });
-  }
-}
+// ------------------------------------------------------------------ small things
 
 function setupReveal() {
   const items = $$(".reveal");
@@ -372,27 +250,6 @@ function setupReveal() {
   items.forEach((item) => observer.observe(item));
 }
 
-function setupWaybar() {
-  const links = $$("[data-ws]").filter((link) => link.getAttribute("href").startsWith("#"));
-  const sections = links.map((link) => document.getElementById(link.dataset.ws)).filter(Boolean);
-  const mark = (id) => links.forEach((link) => link.setAttribute("aria-current", String(link.dataset.ws === id)));
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const visibleNow = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-      if (visibleNow) mark(visibleNow.target.id);
-    },
-    { threshold: [0.2, 0.5], rootMargin: "-20% 0px -40% 0px" },
-  );
-  sections.forEach((section) => observer.observe(section));
-
-  const clock = $("[data-clock]");
-  const tick = () => {
-    if (clock) clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  };
-  tick();
-  setInterval(tick, 15_000);
-}
-
 async function setupStars() {
   const label = $("[data-stars]");
   if (!label) return;
@@ -402,109 +259,13 @@ async function setupStars() {
     const { stargazers_count: stars } = await response.json();
     if (typeof stars === "number" && stars > 0) label.textContent = `★ ${stars.toLocaleString()}`;
   } catch {
-    /* offline, rate-limited: the plain label stays */
+    /* offline or rate-limited: the icon alone stays */
   }
 }
 
-// ------------------------------------------------------------------ circuit backdrop
-// Traces fall from a glowing core that hangs just below the top bar, like the Apex Forge
-// wallpaper. Drawn in real pixels for the current window so the core never slips under the bar.
-
-function drawCircuit(svg) {
-  const box = svg.getBoundingClientRect();
-  const width = Math.round(box.width) || window.innerWidth;
-  const height = Math.round(box.height) || window.innerHeight;
-  const bar = $(".bar")?.getBoundingClientRect();
-  const ns = "http://www.w3.org/2000/svg";
-  let seed = 7;
-  const random = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-  const make = (tag, attrs) => {
-    const node = document.createElementNS(ns, tag);
-    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
-    return node;
-  };
-
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  const coreW = 128;
-  const coreH = 58;
-  const coreX = width / 2;
-  const coreTop = Math.round((bar?.bottom ?? 48) + 18);
-  const parts = [
-    make("rect", { x: coreX - coreW / 2, y: coreTop, width: coreW, height: coreH, rx: 12, class: "core" }),
-    make("use", { href: "#i-logo", x: coreX - 17, y: coreTop + coreH / 2 - 17, width: 34, height: 34, class: "core-mark" }),
-  ];
-
-  const spread = Math.min(1.25, Math.max(0.35, width / 1600));
-  const drop = Math.max(0.7, height / 900);
-  for (let index = 0; index < 34; index += 1) {
-    const side = index % 2 === 0 ? -1 : 1;
-    let x = coreX + side * (10 + random() * (coreW / 2 - 16));
-    let y = coreTop + coreH;
-    let d = `M${x.toFixed(0)} ${y}`;
-    const reach = (120 + random() * 700) * spread;
-    const steps = 3 + Math.floor(random() * 4);
-    for (let step = 0; step < steps; step += 1) {
-      y += (40 + random() * 150) * drop;
-      d += ` V${y.toFixed(0)}`;
-      x += side * (30 + random() * (reach / steps)) * spread;
-      y += (20 + random() * 30) * drop;
-      d += ` L${x.toFixed(0)} ${y.toFixed(0)}`;
-    }
-    y += (60 + random() * 200) * drop;
-    d += ` V${y.toFixed(0)}`;
-    parts.push(make("path", { d, class: "trace" }));
-    parts.push(make("circle", { cx: x.toFixed(0), cy: y.toFixed(0), r: 2.6, class: "node" }));
-    if (!reduceMotion && random() > 0.3) {
-      const pulse = make("path", { d, class: "pulse" });
-      pulse.dataset.speed = (0.16 + random() * 0.14).toFixed(3);
-      pulse.dataset.dash = (40 + random() * 60).toFixed(0);
-      pulse.dataset.offset = random().toFixed(3);
-      parts.push(pulse);
-    }
-  }
-  svg.replaceChildren(...parts);
-
-  // Each pulse runs the real length of its trace, then waits a beat before the next one.
-  for (const pulse of svg.querySelectorAll(".pulse")) {
-    const length = pulse.getTotalLength();
-    const dash = Number(pulse.dataset.dash);
-    const period = length + dash + 600;
-    const duration = period / (Number(pulse.dataset.speed) * 1000);
-    pulse.setAttribute("stroke-dasharray", `${dash} ${period - dash}`);
-    pulse.style.setProperty("--travel", `${-period}`);
-    pulse.style.setProperty("--dur", `${duration.toFixed(2)}s`);
-    pulse.style.setProperty("--delay", `${(-Number(pulse.dataset.offset) * duration).toFixed(2)}s`);
-  }
-}
-
-function setupCircuit() {
-  const svg = $("#circuit");
-  if (!svg) return;
-  drawCircuit(svg);
-  // Redraw when the width changes; phones resize the height as the address bar slides.
-  let lastWidth = window.innerWidth;
-  let timer = 0;
-  window.addEventListener("resize", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      if (window.innerWidth === lastWidth) return;
-      lastWidth = window.innerWidth;
-      drawCircuit(svg);
-    }, 150);
-  });
-}
-
-// ------------------------------------------------------------------ go
-
-buildThemeControls();
+setupThemes();
+setupDrift();
 setupInstall();
-setupCircuit();
+setupCarousel();
 setupReveal();
-setupDesk();
-setupEngineFlip();
-setupGlow();
-setupWaybar();
 void setupStars();

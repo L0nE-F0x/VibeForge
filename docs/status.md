@@ -47,6 +47,15 @@ VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name
   - the log recorded the start, the checks, the update and each terminal
 - `npm test`: 68 tests, adding translations, updates and the log.
 
+### 0.4.0: an Omarchy look (the night of 2026-09-25)
+
+- **The whole app, restyled after omarchy.org and the Omarchy desktop.** Square corners, JetBrains Mono for text with Geist for headings and numbers (both bundled), flat surfaces with one-pixel borders, solid accent buttons that warm to the second accent, status dots as pixels, a blinking block cursor for loading. The accent gradient stays only on the edges of floating things, as the Omarchy shell draws them; the four interaction states from Apex Forge are unchanged.
+- **Pixel art from one source**, `src/shared/pixel.ts`: a 7-row pixel font for the VIBEFORGE wordmark, the V-and-spark mark, and seeded pixel fields. Shades come from the theme's accents (`--px-0` … `--px-3`), stepping the other way on light themes. `node scripts/brand.ts` regenerates the app icon, favicon, social image and the website's inline art from it.
+- **Home, rebuilt**: pixel wordmark with pixels drifting in from the edge, a date-and-time line, a status sentence, square actions with their shortcuts, a stat strip in Geist (with a 14-day block chart of runs), numbered setup steps, workspaces to open in one click, and the CLIs set out like `which` output. The review stat names the newest run waiting instead of claiming "Inbox clear".
+- **The website, rebuilt** to match: pixel hero with a release banner, a `which` terminal, a carousel of real screenshots (taken from a demo profile in which no CLI runs), feature triads, the theme list (press T to change theme, as on omarchy.org), install cards, and a new social image.
+- **Fixed on the way:** git snapshots and review diffs no longer fill with colour codes when someone's git config says `color.ui = always` (a demo profile with that setting failed the snapshot test). The file tree shows `~` paths like the rest of the app.
+- Checked: every view and the shortcut sheet under the new styles, in the built app; the Home and Code screens in a populated demo profile; the website at 1440 and 390 px and after a theme switch. `npm test`: 72 tests, adding the pixel art.
+
 ## Not verified yet
 
 - Real runs with Codex, Grok, Cursor Agent, Gemini and OpenCode. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Copilot, Kimi, Crush, Pi and Hermes get the prompt pasted.

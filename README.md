@@ -19,6 +19,10 @@
   <img alt="No telemetry" src="https://img.shields.io/badge/telemetry-none-34d399?style=flat-square">
 </p>
 
+<p align="center">
+  <img src="site/assets/app-home.webp" alt="VibeForge's Home: the pixel wordmark, terminals running, runs to review, a 14-day activity chart and the routines up next." width="100%">
+</p>
+
 ---
 
 VibeForge never calls a model API and never holds a key. Every engine is a CLI you are already signed in to; VibeForge gives them a home. It remembers **who** does the work (agents with a brief, memory and skills), **where** they may work (allowed folders), **when** work starts (routines), and **what to review** when it ends (every run keeps its final screen, a transcript and the git diff since it began). No accounts. No telemetry. Everything on disk is plain YAML and Markdown.
@@ -64,7 +68,7 @@ npm run build       # production build
 | **Skills** | Reusable `SKILL.md` procedures you install on agents. |
 | **Runs** | Every process VibeForge started: final screen, transcript, prompt, and the diff since it began. **Continue** reopens the exact session. |
 
-It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes.
+It looks like the rest of Omarchy: square corners, JetBrains Mono with Geist headings, flat panels, and pixel art in place of glows. It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes, pixel wordmark included.
 
 It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language unless you pick one in Settings. The tour, menus, tooltips and empty screens are translated so far; some other text is still English. Translations live in `src/ui/i18n/`, one file per language, and the typecheck fails if one is missing a line.
 
@@ -122,7 +126,7 @@ npm test            # unit tests + the real PTY host driven with /bin/bash (neve
 npm run typecheck
 ```
 
-The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
+The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
 
 ---
 

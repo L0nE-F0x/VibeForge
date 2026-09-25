@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
+import { mark, shade } from "../../shared/pixel.js";
 import { initials, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
@@ -247,17 +248,14 @@ export function SecretNote() {
   );
 }
 
-export function Logo({ size = 20 }: { size?: number }) {
+/** The VibeForge mark: the pixel V and spark (shared/pixel.ts), shaded in the theme's accents. */
+export function Logo({ size = 22 }: { size?: number }) {
+  const art = mark();
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden>
-      <defs>
-        <linearGradient id="vf-logo" x1="4" y1="28" x2="28" y2="4" gradientUnits="userSpaceOnUse">
-          <stop stopColor="var(--accent)" />
-          <stop offset="1" stopColor="var(--accent-2)" />
-        </linearGradient>
-      </defs>
-      <path d="M5 7.5 L13.2 26 a3 3 0 0 0 5.6 0 L27 7.5" stroke="url(#vf-logo)" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M16 5.5 l1.3 3.2 3.2 1.3 -3.2 1.3 -1.3 3.2 -1.3 -3.2 -3.2 -1.3 3.2 -1.3 z" fill="url(#vf-logo)" />
+    <svg width={size} height={size} viewBox={`0 0 ${art.width} ${art.height}`} shapeRendering="crispEdges" aria-hidden>
+      {art.cells.map((cell) => (
+        <rect key={`${cell.x}.${cell.y}`} x={cell.x} y={cell.y} width={1} height={1} className={`px-s${shade(cell.y, art.height)}`} />
+      ))}
     </svg>
   );
 }

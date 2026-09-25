@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { DockState, FileNode, LayoutNode } from "../../shared/api.js";
-import { call, errorText, on } from "../api.js";
+import { tildify } from "../../shared/text.js";
+import { call, errorText, on, useAppInfo } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Spinner } from "../components/ui.js";
@@ -187,12 +188,13 @@ function TreeLevel({
 
 export function FilesPanel({ root, onInsert }: { root: string; onInsert: (path: string) => void }) {
   const t = useT();
+  const home = useAppInfo().data?.home ?? "";
   const [refreshKey, setRefreshKey] = useState(0);
   return (
     <>
       <div className="dock-bar">
         <span className="faint truncate grow mono" style={{ fontSize: "var(--fs-xs)" }} {...tipProps(root)}>
-          {root}
+          {tildify(root, home)}
         </span>
         <Button size="sm" variant="ghost" icon={RefreshCw} title={t("common.refresh")} onClick={() => setRefreshKey((key) => key + 1)} />
         <Button size="sm" variant="ghost" icon={FolderOpen} title={t("common.openFileManager")} onClick={() => void call("app.openPath", root)} />

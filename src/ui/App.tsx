@@ -189,7 +189,7 @@ function Rail() {
   return (
     <nav className="rail" aria-label="Views">
       <div className="rail-logo" {...tipProps("VibeForge", { side: "right" })}>
-        <Logo size={20} />
+        <Logo size={22} />
       </div>
       {VIEWS.map((item, index) => {
         const count = badge(item.view);
