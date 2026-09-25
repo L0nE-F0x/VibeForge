@@ -11,7 +11,7 @@ import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, mos
 import { allocateRunDir, normalizeRun, runFolderStamp, writeRunMeta } from "../../src/core/runs.js";
 import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
 import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/tasks.js";
-import { BUILTIN_PALETTE, paletteFromFiles, parseFlatToml, toHex } from "../../src/core/theme.js";
+import { BUILTIN_PALETTE, companionColor, contrast, paletteFromFiles, parseFlatToml, readableMuted, toHex } from "../../src/core/theme.js";
 import type { RunMeta } from "../../src/core/types.js";
 import { gitHead, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
@@ -234,10 +234,22 @@ describe("theme", () => {
     expect(palette.terminal.ansi).toHaveLength(16);
   });
 
+  it("pairs an accent with its nearest palette hue and keeps faint text readable", () => {
+    const omarchy = (colors: Record<string, string>) =>
+      paletteFromFiles({ name: "t", colors: Object.entries(colors).map(([key, value]) => `${key} = "${value}"`).join("\n") })!;
+    const tokyo = omarchy({ background: "#1a1b26", foreground: "#a9b1d6", accent: "#7aa2f7", muted: "#414868", red: "#f7768e", yellow: "#e0af68", green: "#9ece6a", cyan: "#449dab", blue: "#7aa2f7", magenta: "#ad8ee6" });
+    expect(tokyo.accent2).toBe("#449dab");
+    expect(contrast(tokyo.muted, tokyo.background)).toBeGreaterThanOrEqual(3.4);
+    const nord = omarchy({ background: "#2e3440", foreground: "#d8dee9", accent: "#81a1c1", red: "#bf616a", yellow: "#ebcb8b", green: "#a3be8c", cyan: "#88c0d0", blue: "#81a1c1", magenta: "#b48ead" });
+    expect(nord.accent2).toBe("#88c0d0");
+    expect(companionColor("#808080", ["#808080"], "#fca311")).toBe("#fca311");
+    expect(readableMuted("#71717a", "#ffffff", "#09090b")).toBe("#71717a");
+  });
+
   it("detects light themes and survives odd colour formats", () => {
     const light = paletteFromFiles({ name: "Paper", colors: 'background = "#fafafa"\nforeground = "#111111"\naccent = "#0055ff"\n' })!;
     expect(light.mode).toBe("light");
-    expect(light.accent2).toBe(BUILTIN_PALETTE.yellow);
+    expect(light.accent2).toBe(BUILTIN_PALETTE.blue);
     expect(paletteFromFiles({ name: "Broken", colors: 'accent = "#fff"' })).toBeNull();
     expect(toHex("rgba(ff6b35ee)")).toBe("#ff6b35");
     expect(toHex("rgb(255, 107, 53)")).toBe("#ff6b35");

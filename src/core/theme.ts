@@ -141,6 +141,66 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+export function contrast(a: string, b: string): number {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+function channels(hex: string): [number, number, number] {
+  return [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16)) as [number, number, number];
+}
+
+export function mixHex(a: string, b: string, amount: number): string {
+  const [x, y] = [channels(a), channels(b)];
+  return `#${x.map((value, index) => Math.round(value + (y[index] - value) * amount).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hueSat(hex: string): { hue: number; sat: number } {
+  const [r, g, b] = channels(hex).map((value) => value / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const light = (max + min) / 2;
+  const sat = delta === 0 ? 0 : delta / (1 - Math.abs(2 * light - 1));
+  let hue = 0;
+  if (delta) {
+    if (max === r) hue = ((g - b) / delta) % 6;
+    else if (max === g) hue = (b - r) / delta + 2;
+    else hue = (r - g) / delta + 4;
+  }
+  return { hue: (hue * 60 + 360) % 360, sat };
+}
+
+/**
+ * The second gradient stop when a theme does not name one: the palette colour whose hue sits
+ * closest to the accent (but is still a different colour), so Tokyo Night runs blue → violet and
+ * Nord runs frost → cyan instead of everything fading into yellow.
+ */
+export function companionColor(accent: string, candidates: string[], fallback: string): string {
+  const base = hueSat(accent);
+  let best: { hex: string; distance: number } | null = null;
+  for (const hex of candidates) {
+    if (!hex || hex.toLowerCase() === accent.toLowerCase()) continue;
+    const { hue, sat } = hueSat(hex);
+    if (sat < 0.25) continue;
+    const distance = Math.min(Math.abs(hue - base.hue), 360 - Math.abs(hue - base.hue));
+    if (distance < 12) continue;
+    if (!best || distance < best.distance) best = { hex, distance };
+  }
+  return best && best.distance <= 110 ? best.hex : fallback;
+}
+
+/** Faint text must stay readable: lift the theme's muted colour toward the foreground if needed. */
+export function readableMuted(muted: string, foreground: string, background: string, minimum = 3.4): string {
+  let amount = 0;
+  let color = muted;
+  while (contrast(color, background) < minimum && amount < 1) {
+    amount = Math.min(1, amount + 0.05);
+    color = mixHex(muted, foreground, amount);
+  }
+  return color;
+}
+
 export function paletteFromFiles(input: { name: string; colors: string; ghostty?: string | null }): Palette | null {
   const colors = parseFlatToml(input.colors);
   const pick = (...keys: string[]): string | null => {
@@ -164,7 +224,7 @@ export function paletteFromFiles(input: { name: string; colors: string; ghostty?
   const blue = pick("blue") ?? base.blue;
   const cyan = pick("cyan") ?? base.cyan;
   const magenta = pick("magenta") ?? base.magenta;
-  const muted = pick("muted", "dark_foreground") ?? base.muted;
+  const muted = readableMuted(pick("muted", "dark_foreground") ?? base.muted, foreground, background);
   const lightForeground = pick("light_foreground") ?? foreground;
   const darkerBackground = pick("darker_background", "dark_background") ?? background;
   const ansi = [
@@ -193,7 +253,7 @@ export function paletteFromFiles(input: { name: string; colors: string; ghostty?
     source: "omarchy",
     mode,
     accent,
-    accent2: secondStop && secondStop !== accent ? secondStop : yellow,
+    accent2: secondStop && secondStop !== accent ? secondStop : companionColor(accent, [magenta, cyan, blue, green, yellow, red], yellow),
     background,
     darkBackground: pick("dark_background") ?? background,
     darkerBackground,
