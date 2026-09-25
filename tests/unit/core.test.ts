@@ -266,6 +266,8 @@ describe("git snapshot", () => {
     expect(await gitHead(dir)).toBeNull();
     const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: dir, stdio: "pipe" });
     git("init", "-q");
+    // Plenty of dotfiles force colour even into pipes; the snapshot must stay plain text.
+    git("config", "color.ui", "always");
     fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
     git("add", "a.txt");
     git("commit", "-qm", "init");

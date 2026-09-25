@@ -8,12 +8,16 @@ interface GitResult {
   missing: boolean;
 }
 
-/** Every git call here is read-only. `--no-optional-locks` keeps status from touching the index while an agent works. */
+/**
+ * Every git call here is read-only. `--no-optional-locks` keeps status from touching the index
+ * while an agent works; `color.ui=never` keeps escape codes out even when someone's git config
+ * says `color.ui = always`.
+ */
 function execGit(args: readonly string[], cwd: string, timeoutMs: number, maxBuffer = 8 * 1024 * 1024): Promise<GitResult> {
   return new Promise((resolve) => {
     execFile(
       "git",
-      ["--no-optional-locks", ...args],
+      ["--no-optional-locks", "-c", "color.ui=never", ...args],
       { cwd, timeout: Math.max(1, timeoutMs), encoding: "utf8", maxBuffer, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
       (error, stdout, stderr) => {
         const err = error as (NodeJS.ErrnoException & { killed?: boolean }) | null;
