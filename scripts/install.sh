@@ -85,6 +85,8 @@ fi
 cd "$DEST"
 step "Installing dependencies (Electron and the terminal engine; the first run takes a minute)"
 npm ci --no-audit --no-fund --loglevel=error
+[[ -x node_modules/electron/dist/electron ]] || die "Electron's binary did not install. Run: cd \"$DEST\" && node scripts/ensure-electron.cjs"
+[[ -f node_modules/node-pty/build/Release/pty.node ]] || die "The terminal engine (node-pty) did not build. Check base-devel and python, then run this again."
 step "Building"
 npm run build --silent >/dev/null
 
