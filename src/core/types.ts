@@ -109,6 +109,8 @@ export interface Settings {
   terminalFontSize: number;
   terminalFontFamily: string;
   theme: "omarchy" | "builtin";
+  /** The welcome tour has been finished or skipped; it opens by itself until then. */
+  tourDone: boolean;
 }
 
 export interface Workspace {

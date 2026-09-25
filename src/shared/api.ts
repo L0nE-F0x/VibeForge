@@ -71,6 +71,11 @@ export interface AppInfo {
   dataRoot: string;
   home: string;
   hostRunning: boolean;
+  electron: string;
+  chrome: string;
+  node: string;
+  os: string;
+  repo: string;
 }
 
 export interface PtySnapshot {

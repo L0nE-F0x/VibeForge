@@ -3,6 +3,9 @@ import {
   FolderOpen,
   FolderPlus,
   Globe,
+  GripVertical,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   PanelRight,
   Pencil,
@@ -20,11 +23,12 @@ import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
+import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { tipProps } from "../components/Tooltip.js";
 import { Button, Empty, Input, MenuButton, Select, type MenuItem } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
-
-type PaneNode = Extract<LayoutNode, { kind: "pane" }>;
 
 interface Runtime {
   ptyId: string | null;
@@ -36,29 +40,20 @@ interface Runtime {
 const newPaneId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const shellPane = (): PaneNode => ({ kind: "pane", id: newPaneId(), launch: { type: "shell" } });
 
-function panesOf(node: LayoutNode): PaneNode[] {
-  return node.kind === "pane" ? [node] : [...panesOf(node.a), ...panesOf(node.b)];
-}
+const PANE_MIME = "application/x-vibeforge-pane";
 
-function replacePane(node: LayoutNode, id: string, next: LayoutNode): LayoutNode {
-  if (node.kind === "pane") return node.id === id ? next : node;
-  return { ...node, a: replacePane(node.a, id, next), b: replacePane(node.b, id, next) };
-}
-
-function removePane(node: LayoutNode, id: string): LayoutNode | null {
-  if (node.kind === "pane") return node.id === id ? null : node;
-  const a = removePane(node.a, id);
-  const b = removePane(node.b, id);
-  if (!a) return b;
-  if (!b) return a;
-  return { ...node, a, b };
-}
-
-function setRatioAt(node: LayoutNode, path: string, ratio: number): LayoutNode {
-  if (node.kind === "pane") return node;
-  if (path === "") return { ...node, ratio };
-  const [head, ...rest] = path;
-  return head === "a" ? { ...node, a: setRatioAt(node.a, rest.join(""), ratio) } : { ...node, b: setRatioAt(node.b, rest.join(""), ratio) };
+function zoneFor(event: React.DragEvent<HTMLElement>): DropZone {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
+  const edges: Array<[DropZone, number]> = [
+    ["left", x],
+    ["right", 1 - x],
+    ["top", y],
+    ["bottom", 1 - y],
+  ];
+  const [zone, distance] = edges.sort((a, b) => a[1] - b[1])[0];
+  return distance < 0.28 ? zone : "center";
 }
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -97,6 +92,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [engineId, setEngineId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState<Record<string, string | null>>({});
+  const [dragPane, setDragPane] = useState<string | null>(null);
   const terminals = useRef(new Map<string, TerminalHandle>());
   const starting = useRef(new Set<string>());
   const layoutsRef = useRef(layouts);
@@ -132,6 +129,18 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }, [available, settings, engineId]);
 
   useEffect(() => writeLocal("vf.code.side", side), [side]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "m") || !currentId) return;
+      event.preventDefault();
+      const paneId = focus[currentId];
+      if (paneId) setZoomed((prev) => ({ ...prev, [currentId]: prev[currentId] === paneId ? null : paneId }));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, currentId, focus]);
 
   // ---------------------------------------------------------------- panes
 
@@ -261,6 +270,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     terminals.current.delete(pane.id);
     const remaining = panesOf(next);
     setFocus((prev) => ({ ...prev, [workspace.id]: remaining[remaining.length - 1].id }));
+    setZoomed((prev) => (prev[workspace.id] === pane.id ? { ...prev, [workspace.id]: null } : prev));
     if (next.kind === "pane" && !runtime[next.id] && next.launch.type === "shell") void startPane(workspace, next);
   }
 
@@ -378,13 +388,34 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <aside className="list-panel">
-          <div className="list-head">
-            <h2 className="grow">Workspaces</h2>
-            <Button size="sm" icon={FolderPlus} onClick={() => void addWorkspace()} title="Open a project folder">
+        <SidePanel
+          id="workspaces"
+          title="Workspaces"
+          defaultWidth={250}
+          actions={
+            <Button size="sm" icon={FolderPlus} onClick={() => void addWorkspace()} tip="Open a project folder as a workspace">
               Add
             </Button>
-          </div>
+          }
+          strip={
+            <>
+              <StripItem label="Add a workspace" onClick={() => void addWorkspace()}>
+                <FolderPlus size={16} />
+              </StripItem>
+              {workspaces.map((workspace) => (
+                <StripItem
+                  key={workspace.id}
+                  label={`${workspace.name} — ${tildify(workspace.path, home)}`}
+                  selected={workspace.id === currentId}
+                  onClick={() => select(workspace)}
+                  badge={liveCount(workspace.id) > 0 ? <span className="strip-count">{liveCount(workspace.id)}</span> : undefined}
+                >
+                  <span className="strip-initials">{workspace.name.slice(0, 2).toUpperCase()}</span>
+                </StripItem>
+              ))}
+            </>
+          }
+        >
           <div className="list-scroll">
             {workspaces.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>Add a project folder to get terminals in it.</div>}
             {workspaces.map((workspace) => (
@@ -415,7 +446,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   )}
                   <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
                 </span>
-                {liveCount(workspace.id) > 0 && <span className="ws-live">{liveCount(workspace.id)}</span>}
+                {liveCount(workspace.id) > 0 && (
+                  <span className="ws-live" {...tipProps(`${liveCount(workspace.id)} terminal${liveCount(workspace.id) === 1 ? "" : "s"} running`)}>
+                    {liveCount(workspace.id)}
+                  </span>
+                )}
                 <span className="row-actions" onClick={(event) => event.stopPropagation()}>
                   <MenuButton
                     size="sm"
@@ -433,7 +468,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               </div>
             ))}
           </div>
-        </aside>
+        </SidePanel>
 
         {!current ? (
           <Empty
@@ -455,7 +490,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                 <strong className="truncate" style={{ fontSize: "var(--fs-md)" }}>
                   {current.name}
                 </strong>
-                <button type="button" className="faint mono truncate" style={{ fontSize: "var(--fs-xs)", textAlign: "left" }} onClick={() => void call("app.openPath", current.path)} title="Open in the file manager">
+                <button type="button" className="faint mono truncate" style={{ fontSize: "var(--fs-xs)", textAlign: "left" }} onClick={() => void call("app.openPath", current.path)} {...tipProps("Open in the file manager")}>
                   {tildify(current.path, home)}
                 </button>
               </div>
@@ -464,7 +499,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   key={engine.id}
                   size="sm"
                   icon={Play}
-                  title={`Open ${engine.label} in a new pane`}
+                  tip={`Open ${engine.label} in the focused pane, or beside it if it's busy`}
                   onClick={() => {
                     const layout = layouts[current.id];
                     if (!layout) return;
@@ -481,7 +516,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               <Button
                 size="sm"
                 icon={Columns2}
-                title="Split right with a shell"
+                tip="Split the focused pane with a shell on the right"
                 onClick={() => {
                   const layout = layouts[current.id];
                   if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "row", { type: "shell" });
@@ -490,14 +525,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               <Button
                 size="sm"
                 icon={Rows2}
-                title="Split down with a shell"
+                tip="Split the focused pane with a shell below"
                 onClick={() => {
                   const layout = layouts[current.id];
                   if (layout) splitPane(current, focus[current.id] ?? panesOf(layout)[0].id, "col", { type: "shell" });
                 }}
               />
-              <Button size="sm" icon={PanelRight} pressed={side.open && side.tab === "files"} title="Files" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "files"), tab: "files" }))} />
-              <Button size="sm" icon={Globe} pressed={side.open && side.tab === "browser"} title="Browser" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "browser"), tab: "browser" }))} />
+              <Button size="sm" icon={PanelRight} pressed={side.open && side.tab === "files"} tip="Files: click one to insert its path" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "files"), tab: "files" }))} />
+              <Button size="sm" icon={Globe} pressed={side.open && side.tab === "browser"} tip="Browser dock for your dev server" onClick={() => setSide((prev) => ({ ...prev, open: !(prev.open && prev.tab === "browser"), tab: "browser" }))} />
             </div>
 
             <div className="code-work">
@@ -505,8 +540,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                 const layout = layouts[workspace.id];
                 if (!layout) return null;
                 const visible = workspace.id === current.id;
+                const paneCount = panesOf(layout).length;
+                const zoomedPane = zoomed[workspace.id] && panesOf(layout).some((pane) => pane.id === zoomed[workspace.id]) ? zoomed[workspace.id] : null;
                 return (
-                  <div key={workspace.id} className="canvas" style={visible ? undefined : { display: "none" }}>
+                  <div key={workspace.id} className={`canvas${zoomedPane ? " has-zoom" : ""}`} style={visible ? undefined : { display: "none" }}>
                     <SplitView
                       node={layout}
                       onRatio={(path, ratio) => setLayouts((prev) => ({ ...prev, [workspace.id]: setRatioAt(prev[workspace.id], path, ratio) }))}
@@ -528,6 +565,17 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                           onSplit={(dir) => splitPane(workspace, pane.id, dir, { type: "shell" })}
                           onClose={() => void closePane(workspace, pane)}
                           onReview={() => runtime[pane.id]?.runId && go({ view: "runs", runId: runtime[pane.id].runId! })}
+                          canMove={paneCount > 1 && !zoomedPane}
+                          dragging={dragPane}
+                          onDragPane={setDragPane}
+                          onDropPane={(sourceId, zone) => {
+                            setDragPane(null);
+                            const latest = layoutsRef.current[workspace.id];
+                            if (latest) updateLayout(workspace.id, movePane(latest, sourceId, pane.id, zone));
+                            setFocus((prev) => ({ ...prev, [workspace.id]: sourceId }));
+                          }}
+                          zoomed={zoomedPane === pane.id}
+                          onZoom={() => setZoomed((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] === pane.id ? null : pane.id }))}
                         />
                       )}
                     />
@@ -545,7 +593,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                       Browser
                     </Button>
                     <span className="grow" />
-                    <Button size="sm" variant="ghost" icon={X} title="Hide" onClick={() => setSide((prev) => ({ ...prev, open: false }))} />
+                    <Button size="sm" variant="ghost" icon={X} tip="Hide the side panel" onClick={() => setSide((prev) => ({ ...prev, open: false }))} />
                   </div>
                   {side.tab === "files" ? (
                     <FilesPanel root={current.path} onInsert={insertPath} />
@@ -599,6 +647,12 @@ function PaneView({
   onSplit,
   onClose,
   onReview,
+  canMove,
+  dragging,
+  onDragPane,
+  onDropPane,
+  zoomed,
+  onZoom,
 }: {
   pane: PaneNode;
   runtime: Runtime | undefined;
@@ -612,8 +666,15 @@ function PaneView({
   onSplit: (dir: "row" | "col") => void;
   onClose: () => void;
   onReview: () => void;
+  canMove: boolean;
+  dragging: string | null;
+  onDragPane: (paneId: string | null) => void;
+  onDropPane: (sourceId: string, zone: DropZone) => void;
+  zoomed: boolean;
+  onZoom: () => void;
 }) {
   const state = runtime?.state ?? "idle";
+  const [zone, setZone] = useState<DropZone | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
   const title = pane.launch.type === "shell" ? "Shell" : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   const available = engines.filter((item) => item.available);
@@ -623,23 +684,77 @@ function PaneView({
   ];
 
   return (
-    <div className={`pane${focused ? " focused" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
-      <div className="pane-head">
-        {state === "live" ? <span className="dot running" /> : state === "exited" ? <span className="dot stopped" /> : <span className="dot" />}
+    <div className={`pane${focused ? " focused" : ""}${zoomed ? " is-zoomed" : ""}${dragging === pane.id ? " is-dragging" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
+      <div
+        className={`pane-head${canMove ? " can-move" : ""}`}
+        draggable={canMove}
+        onDragStart={(event) => {
+          event.dataTransfer.setData(PANE_MIME, pane.id);
+          event.dataTransfer.effectAllowed = "move";
+          onDragPane(pane.id);
+        }}
+        onDragEnd={() => onDragPane(null)}
+        onDoubleClick={(event) => {
+          if ((event.target as HTMLElement).closest("button")) return;
+          onZoom();
+        }}
+      >
+        {canMove && (
+          <span className="pane-grip" {...tipProps("Drag onto another pane: the middle swaps them, an edge docks it there")}>
+            <GripVertical size={13} />
+          </span>
+        )}
+        {state === "live" ? (
+          <span className="dot running" {...tipProps("Running")} />
+        ) : state === "exited" ? (
+          <span className="dot stopped" {...tipProps("Exited")} />
+        ) : (
+          <span className="dot" {...tipProps("Nothing running")} />
+        )}
         <span className="pane-title truncate">{title}</span>
         {runtime?.runId && (
-          <button type="button" className="faint" style={{ fontSize: "var(--fs-xs)" }} onClick={onReview} title="Open this run">
+          <button type="button" className="pane-run-link" onClick={onReview} {...tipProps("Open this run: transcript and diff")}>
             run
           </button>
         )}
+        {zoomed && <span className="chip accent">Maximized</span>}
         <span className="grow" />
         <div className="pane-actions">
-          <MenuButton size="sm" variant="ghost" icon={Play} title="Start something here" items={launchItems} />
-          <Button size="sm" variant="ghost" icon={Columns2} title="Split right" onClick={() => onSplit("row")} />
-          <Button size="sm" variant="ghost" icon={Rows2} title="Split down" onClick={() => onSplit("col")} />
-          <Button size="sm" variant="ghost" icon={X} title="Close" onClick={onClose} />
+          <MenuButton size="sm" variant="ghost" icon={Play} tip="Start a shell or a CLI in this pane" items={launchItems} />
+          <Button size="sm" variant="ghost" icon={Columns2} tip="Split right with a shell" onClick={() => onSplit("row")} />
+          <Button size="sm" variant="ghost" icon={Rows2} tip="Split down with a shell" onClick={() => onSplit("col")} />
+          <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? "Restore the layout" : "Maximize this pane"} kbd="Ctrl+Shift+M" onClick={onZoom} />
+          <Button size="sm" variant="ghost" icon={X} tip="Close this pane" onClick={onClose} />
         </div>
       </div>
+      {dragging && dragging !== pane.id && (
+        <div
+          className="pane-drop"
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes(PANE_MIME)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            const next = zoneFor(event);
+            setZone((prev) => (prev === next ? prev : next));
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) setZone(null);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const source = event.dataTransfer.getData(PANE_MIME);
+            const where = zone ?? "center";
+            setZone(null);
+            if (source) onDropPane(source, where);
+          }}
+        >
+          {zone && (
+            <div className={`drop-zone zone-${zone}`}>
+              <span>{zone === "center" ? "Swap" : `Dock ${zone}`}</span>
+            </div>
+          )}
+        </div>
+      )}
       {runtime?.ptyId && state !== "idle" ? (
         <>
           <LiveTerminal

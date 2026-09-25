@@ -314,6 +314,19 @@ describe("store", () => {
     expect(store.readEngineRows().map((row) => row.id)).toContain("claude");
     expect(fs.existsSync(path.join(store.configRoot, "engines.json"))).toBe(true);
     expect(store.readSettings().theme).toBe("omarchy");
+    expect(store.readSettings().tourDone).toBe(false);
+    store.close();
+  });
+
+  it("keeps the tour finished once it is, and reads older settings files as not toured", () => {
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "settings.json");
+    fs.writeFileSync(file, JSON.stringify({ defaultEngine: "codex", theme: "builtin" }));
+    expect(store.readSettings()).toMatchObject({ defaultEngine: "codex", theme: "builtin", tourDone: false });
+    store.writeSettings({ ...store.readSettings(), tourDone: true });
+    expect(store.readSettings().tourDone).toBe(true);
+    fs.writeFileSync(file, JSON.stringify({ tourDone: "yes" }));
+    expect(store.readSettings().tourDone).toBe(false);
     store.close();
   });
 });

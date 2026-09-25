@@ -1,0 +1,38 @@
+name: Suggest a feature
+description: An idea that would make VibeForge better for you.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The workflow or annoyance behind the idea. This matters more than the solution.
+      placeholder: When I run three agents on the same repo I lose track of…
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you picture it working. Rough is fine.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Home
+        - Agents
+        - Code (terminals, panes, files, browser dock)
+        - Chat
+        - Tasks
+        - Routines
+        - Skills
+        - Runs
+        - Settings or theme
+        - A new CLI to support
+        - Something new
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Sketches, screenshots, or other tools that do it well.

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ChatView as Chat } from "../../shared/api.js";
 import { call, useChats, useEngines, useSettings } from "../api.js";
 import { SessionPane } from "../components/Session.js";
+import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Chip, Input, TimeAgo } from "../components/ui.js";
 import { useAction, useConfirm, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
@@ -54,13 +55,29 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
 
   return (
     <div className="view split-list">
-      <aside className="list-panel">
-        <div className="list-head">
-          <h2 className="grow">Chat</h2>
-          <Button size="sm" icon={MessageSquarePlus} onClick={() => go({ view: "chat" })}>
-            New
-          </Button>
-        </div>
+      <SidePanel
+        id="chat"
+        title="Chat"
+        actions={
+          <>
+            <Button size="sm" icon={MessageSquarePlus} onClick={() => go({ view: "chat" })}>
+              New
+            </Button>
+          </>
+        }
+        strip={
+          <>
+            <StripItem label="New chat" selected={!chat} onClick={() => go({ view: "chat" })}>
+              <MessageSquarePlus size={16} />
+            </StripItem>
+            {chats.slice(0, 14).map((item) => (
+              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "chat", chatId: item.id })}>
+                <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
+              </StripItem>
+            ))}
+          </>
+        }
+      >
         <div className="list-scroll">
           {chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
           {chats.map((item) => (
@@ -86,7 +103,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
             </div>
           ))}
         </div>
-      </aside>
+      </SidePanel>
       <div className="main">
         <div className="page-head">
           <MessagesSquare size={17} className="accent-text" />

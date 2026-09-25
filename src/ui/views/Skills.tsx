@@ -2,6 +2,7 @@ import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
+import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
@@ -32,13 +33,29 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
 
   return (
     <div className="view split-list">
-      <aside className="list-panel">
-        <div className="list-head">
-          <h2 className="grow">Skills</h2>
-          <Button size="sm" icon={Plus} onClick={() => go({ view: "skills", skillId: "new" })}>
-            New
-          </Button>
-        </div>
+      <SidePanel
+        id="skills"
+        title="Skills"
+        actions={
+          <>
+            <Button size="sm" icon={Plus} onClick={() => go({ view: "skills", skillId: "new" })}>
+              New
+            </Button>
+          </>
+        }
+        strip={
+          <>
+            <StripItem label="New skill" onClick={() => go({ view: "skills", skillId: "new" })}>
+              <Plus size={16} />
+            </StripItem>
+            {list.map((skill) => (
+              <StripItem key={skill.id} label={skill.name} selected={skill.id === selected?.id} onClick={() => go({ view: "skills", skillId: skill.id })}>
+                <Sparkles size={15} />
+              </StripItem>
+            ))}
+          </>
+        }
+      >
         <div className="list-scroll">
           {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>No skills yet.</div>}
           {list.map((skill) => (
@@ -51,7 +68,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
             </button>
           ))}
         </div>
-      </aside>
+      </SidePanel>
       {creating || selected ? (
         <SkillEditor key={selected?.id ?? "new"} skill={creating ? null : selected} />
       ) : (

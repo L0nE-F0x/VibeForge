@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { call, useInbox, useQuery } from "../api.js";
 import { RunDetail } from "../components/RunDetail.js";
+import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Empty, Input, Segmented } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
 import { RunRow } from "./Home.js";
@@ -30,19 +31,32 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
 
   return (
     <div className="view split-list">
-      <aside className="list-panel">
-        <div className="list-head">
-          <h2 className="grow">Runs</h2>
-          <Segmented
-            value={filter}
-            onChange={setFilter}
-            options={[
-              { value: "review", label: `Review${inbox.data?.length ? ` ${inbox.data.length}` : ""}` },
-              { value: "live", label: "Live" },
-              { value: "all", label: "All" },
-            ]}
-          />
-        </div>
+      <SidePanel
+        id="runs"
+        title="Runs"
+        actions={
+          <>
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "review", label: `Review${inbox.data?.length ? ` ${inbox.data.length}` : ""}` },
+                { value: "live", label: "Live" },
+                { value: "all", label: "All" },
+              ]}
+            />
+          </>
+        }
+        strip={
+          <>
+            {runs.slice(0, 14).map((run) => (
+              <StripItem key={run.id} label={run.title} selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })}>
+                <span className={`dot ${run.status}`} />
+              </StripItem>
+            ))}
+          </>
+        }
+      >
         {filter === "all" && (
           <div style={{ padding: "8px 8px 0" }}>
             <div className="hstack" style={{ position: "relative" }}>
@@ -61,7 +75,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
             <RunRow key={run.id} run={run} compact selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
           ))}
         </div>
-      </aside>
+      </SidePanel>
       {selected ? (
         <RunDetail key={selected} runId={selected} />
       ) : (

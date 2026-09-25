@@ -1,9 +1,11 @@
-import { Bell, Check, FolderOpen, Keyboard, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Trash2, X } from "lucide-react";
+import { Bell, Bug, Check, Compass, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useSettings } from "../api.js";
-import { Button, Chip, Field, Input, Kbd, Notice, Segmented, Select, Toggle } from "../components/ui.js";
+import { environmentText, issueUrl, SHOW_SHORTCUTS_EVENT } from "../components/Help.js";
+import { startTour } from "../components/Tour.js";
+import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { usePalette } from "../theme.js";
 import { useAction, useToast } from "../state.js";
 
@@ -137,9 +139,9 @@ export function SettingsView() {
               </Field>
               <Field label="Terminal font size">
                 <div className="hstack">
-                  <Button icon={Minus} disabled={current.terminalFontSize <= 8} onClick={() => void patch({ terminalFontSize: current.terminalFontSize - 1 })} />
+                  <Button icon={Minus} tip="Smaller terminal text" disabled={current.terminalFontSize <= 8} onClick={() => void patch({ terminalFontSize: current.terminalFontSize - 1 })} />
                   <strong style={{ width: 36, textAlign: "center" }}>{current.terminalFontSize}px</strong>
-                  <Button icon={Plus} disabled={current.terminalFontSize >= 32} onClick={() => void patch({ terminalFontSize: current.terminalFontSize + 1 })} />
+                  <Button icon={Plus} tip="Larger terminal text" disabled={current.terminalFontSize >= 32} onClick={() => void patch({ terminalFontSize: current.terminalFontSize + 1 })} />
                 </div>
               </Field>
             </div>
@@ -273,33 +275,27 @@ export function SettingsView() {
           </div>
 
           <div className="section-title">
-            <Keyboard size={13} /> Keys
+            <LifeBuoy size={13} /> Help
           </div>
-          <div className="card" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 18px", alignItems: "center" }}>
-            <span>
-              <Kbd>Ctrl</Kbd> + <Kbd>1</Kbd>…<Kbd>8</Kbd>
-            </span>
-            <span className="muted">Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs</span>
-            <span>
-              <Kbd>Ctrl</Kbd> + <Kbd>,</Kbd>
-            </span>
-            <span className="muted">Settings</span>
-            <span>
-              <Kbd>Alt</Kbd> + <Kbd>←</Kbd>
-            </span>
-            <span className="muted">Back</span>
-            <span>
-              <Kbd>Ctrl</Kbd> + <Kbd>Shift</Kbd> + <Kbd>C</Kbd> / <Kbd>V</Kbd>
-            </span>
-            <span className="muted">Copy / paste in a terminal. Plain Ctrl+V goes to the program, like a native terminal.</span>
-            <span>
-              <Kbd>Ctrl</Kbd> + <Kbd>S</Kbd>
-            </span>
-            <span className="muted">Save the open editor</span>
-            <span>
-              <Kbd>Esc</Kbd>
-            </span>
-            <span className="muted">Close a dialog or sheet</span>
+          <div className="card vstack" style={{ gap: 14 }}>
+            <div className="hstack wrap" style={{ gap: 8 }}>
+              <Button icon={Compass} onClick={startTour} tip="Walk through every view again">
+                Replay the tour
+              </Button>
+              <Button icon={Keyboard} kbd="Ctrl+Shift+/" tip="Every shortcut on one sheet" onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>
+                Keyboard shortcuts
+              </Button>
+              <span className="grow" />
+              <Button icon={Lightbulb} tip="Opens a GitHub issue form" onClick={() => void call("app.openExternal", issueUrl("feature", info, rows))}>
+                Suggest a feature
+              </Button>
+              <Button icon={Bug} tip="Opens a GitHub issue form with your versions filled in" onClick={() => void call("app.openExternal", issueUrl("bug", info, rows))}>
+                Report a bug
+              </Button>
+            </div>
+            <Field label="About this install" hint="Bug reports include these lines. Nothing is sent from the app: reports open in your browser for you to read first.">
+              <pre className="about-env selectable">{environmentText(info, rows)}</pre>
+            </Field>
           </div>
           <div className="faint" style={{ fontSize: "var(--fs-sm)", marginTop: 6 }}>
             <Save size={11} /> VibeForge {info?.version ?? ""} · no accounts, no telemetry.

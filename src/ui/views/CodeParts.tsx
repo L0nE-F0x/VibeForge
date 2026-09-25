@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import type { DockState, FileNode, LayoutNode } from "../../shared/api.js";
 import { call, errorText, on } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
+import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Spinner } from "../components/ui.js";
 import { useOverlayOpen, useToast } from "../state.js";
 
@@ -76,7 +77,7 @@ function SplitNode({
         className={`divider${dragging ? " dragging" : ""}`}
         onPointerDown={start}
         onDoubleClick={() => onRatio(path, 0.5)}
-        title="Drag to resize, double-click to even out"
+        {...tipProps("Drag to resize · double-click to even out")}
       />
       <div className="split-cell" style={{ flex: `${1 - node.ratio} 1 0` }}>
         <SplitNode node={node.b} path={`${path}b`} onRatio={onRatio} renderPane={renderPane} />
@@ -130,7 +131,7 @@ function TreeLevel({
               }}
               onClick={() => (isDir ? setOpen((prev) => ({ ...prev, [node.path]: !expanded })) : onInsert(node.path))}
               onDoubleClick={() => !isDir && void call("app.openPath", node.path)}
-              title={isDir ? node.path : `${node.path}\nClick inserts the path into the focused terminal · double-click opens it`}
+              {...tipProps(isDir ? node.name : `${node.name}: click to insert its path into the focused terminal, double-click to open it`, { side: "left" })}
             >
               {isDir ? (
                 expanded ? <ChevronDown size={12} className="faint" /> : <ChevronRight size={12} className="faint" />
@@ -150,7 +151,7 @@ function TreeLevel({
                   role="button"
                   tabIndex={-1}
                   className="btn ghost sm icon"
-                  title="Insert path"
+                  {...tipProps("Insert the path", { side: "top" })}
                   onClick={(event) => {
                     event.stopPropagation();
                     onInsert(node.path);
@@ -162,7 +163,7 @@ function TreeLevel({
                   role="button"
                   tabIndex={-1}
                   className="btn ghost sm icon"
-                  title="Open"
+                  {...tipProps("Open with the default app", { side: "top" })}
                   onClick={(event) => {
                     event.stopPropagation();
                     void call("app.openPath", node.path);
@@ -185,7 +186,7 @@ export function FilesPanel({ root, onInsert }: { root: string; onInsert: (path: 
   return (
     <>
       <div className="dock-bar">
-        <span className="faint truncate grow mono" style={{ fontSize: "var(--fs-xs)" }} title={root}>
+        <span className="faint truncate grow mono" style={{ fontSize: "var(--fs-xs)" }} {...tipProps(root)}>
           {root}
         </span>
         <Button size="sm" variant="ghost" icon={RefreshCw} title="Refresh" onClick={() => setRefreshKey((key) => key + 1)} />

@@ -38,7 +38,7 @@ export function estimateTermSize(element: HTMLElement | null, fontSize: number, 
 function isAppShortcut(event: KeyboardEvent): boolean {
   if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
   if (event.ctrlKey && !event.altKey && event.key === ",") return true;
-  if (event.ctrlKey && event.shiftKey && (event.key === "I" || event.key === "i")) return true;
+  if (event.ctrlKey && event.shiftKey && (/^[ibm]$/i.test(event.key) || event.code === "Slash")) return true;
   return false;
 }
 

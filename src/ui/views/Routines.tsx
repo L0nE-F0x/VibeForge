@@ -177,7 +177,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
       <div className="page-head">
         <CalendarClock size={17} className="accent-text" />
         <h1 className="grow">{routine ? `Edit ${routine.name}` : "New routine"}</h1>
-        <Button variant="ghost" size="sm" icon={X} onClick={onClose} />
+        <Button variant="ghost" size="sm" icon={X} tip="Close" kbd="Esc" onClick={onClose} />
       </div>
       <div className="page-body vstack" style={{ gap: 16 }}>
         <div className="form-grid">

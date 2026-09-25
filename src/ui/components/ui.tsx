@@ -16,6 +16,7 @@ import type { RunStatus } from "../../shared/api.js";
 import { initials, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { useConfirmState, useOverlay, useToast } from "../state.js";
+import { tipProps } from "./Tooltip.js";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -31,14 +32,20 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   icon?: LucideIcon;
   busy?: boolean;
   pressed?: boolean;
+  /** Tooltip text; `title` is treated the same way so every button gets the app's tooltip. */
+  tip?: string;
+  /** Keyboard shortcut shown in the tooltip, e.g. "Ctrl+B". */
+  kbd?: string;
+  tipSide?: "top" | "bottom" | "left" | "right";
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "default", size = "md", icon: Icon, busy, pressed, className, children, disabled, ...rest },
+  { variant = "default", size = "md", icon: Icon, busy, pressed, className, children, disabled, tip, kbd, tipSide, title, ...rest },
   ref,
 ) {
   const iconOnly = !children;
   const iconSize = size === "sm" ? 13 : 15;
+  const label = tip ?? title;
   return (
     <button
       ref={ref}
@@ -46,6 +53,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={cx("btn", variant !== "default" && variant, size !== "md" && size, iconOnly && "icon", className)}
       disabled={disabled || busy}
       aria-pressed={pressed}
+      aria-label={iconOnly ? label : undefined}
+      {...tipProps(label, { kbd, side: tipSide })}
       {...rest}
     >
       {busy ? <Loader2 size={iconSize} className="spin" /> : Icon ? <Icon size={iconSize} strokeWidth={2} /> : null}
@@ -156,7 +165,7 @@ export function Tabs<T extends string>({
 
 export function Chip({ tone, children, title, icon: Icon }: { tone?: "accent" | "ok" | "warn" | "bad" | "info"; children: ReactNode; title?: string; icon?: LucideIcon }) {
   return (
-    <span className={cx("chip", tone)} title={title}>
+    <span className={cx("chip", tone)} {...tipProps(title)}>
       {Icon && <Icon size={11} strokeWidth={2.4} />}
       {children}
     </span>
@@ -164,7 +173,8 @@ export function Chip({ tone, children, title, icon: Icon }: { tone?: "accent" | 
 }
 
 export function StatusDot({ status, title }: { status: RunStatus | "idle" | null | undefined; title?: string }) {
-  return <span className={cx("dot", status ?? "idle")} title={title ?? status ?? undefined} />;
+  const label = title ?? (status && status !== "idle" ? STATUS_TEXT[status] : undefined);
+  return <span className={cx("dot", status ?? "idle")} {...tipProps(label)} />;
 }
 
 export const STATUS_TEXT: Record<RunStatus, string> = {
@@ -220,7 +230,7 @@ export function TimeAgo({ iso, prefix }: { iso: string | null | undefined; prefi
   const now = useNow(20_000);
   if (!iso) return null;
   return (
-    <span title={new Date(iso).toLocaleString()}>
+    <span {...tipProps(new Date(iso).toLocaleString())}>
       {prefix}
       {timeAgo(iso, now)}
     </span>

@@ -55,7 +55,7 @@ npm run build       # production build
 | --- | --- |
 | **Home** | What's live, what finished and needs review, what fires next. |
 | **Agents** | Named teammates with a brief, memory, skills and allowed folders. Chats with an agent are real terminals. Switch its engine from Claude to Codex to Grok and the teammate stays the same. |
-| **Code** | A workspace with tiled terminals (shells and CLIs side by side), a file tree that inserts paths, and a browser dock for your dev server. Layouts are remembered per workspace. |
+| **Code** | A workspace with tiled terminals (shells and CLIs side by side) that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser dock for your dev server. Layouts are remembered per workspace. |
 | **Chat** | Throwaway conversations in an empty scratch folder. |
 | **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. |
 | **Routines** | Cron or interval schedules that open a fresh agent run while VibeForge is open. Missed slots are shown, never replayed. |
@@ -107,7 +107,9 @@ Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`.
 
 ## Keys
 
-<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
+<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
+
+In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 
 ## Develop
 

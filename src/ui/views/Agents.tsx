@@ -19,7 +19,8 @@ import type { Agent, ChatView, Engine } from "../../shared/api.js";
 import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
 import { SessionPane } from "../components/Session.js";
-import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
 
@@ -77,13 +78,33 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
 
   return (
     <div className="view split-list">
-      <aside className="list-panel">
-        <div className="list-head">
-          <h2 className="grow">Agents</h2>
-          <Button size="sm" icon={Plus} onClick={() => setCreating(true)} title="New agent">
+      <SidePanel
+        id="agents"
+        title="Agents"
+        actions={
+          <Button size="sm" icon={Plus} onClick={() => setCreating(true)} tip="Create a new agent">
             New
           </Button>
-        </div>
+        }
+        strip={
+          <>
+            <StripItem label="New agent" onClick={() => setCreating(true)}>
+              <Plus size={16} />
+            </StripItem>
+            {list.map((agent) => (
+              <StripItem
+                key={agent.id}
+                label={agent.name}
+                selected={agent.id === selected?.id}
+                onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
+                badge={chats.some((chat) => chat.agentId === agent.id && chat.live) ? <span className="strip-live" /> : undefined}
+              >
+                <Avatar name={agent.name} />
+              </StripItem>
+            ))}
+          </>
+        }
+      >
         <div className="list-scroll">
           {agents.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>No agents yet.</div>}
           {list.map((agent) => {
@@ -107,12 +128,12 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                   </span>
                 </span>
                 {unread > 0 && <Chip tone="accent">{unread}</Chip>}
-                {live && <span className="dot running" title="A chat is live" />}
+                {live && <StatusDot status="running" title="A chat is live" />}
               </button>
             );
           })}
         </div>
-      </aside>
+      </SidePanel>
       {selected ? (
         <AgentDetail key={selected.id} agent={selected} tab={route.tab ?? "chats"} chatId={route.chatId} />
       ) : (
@@ -307,7 +328,26 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
 
   return (
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-      <div className="list-panel" style={{ width: 230, flex: "none" }}>
+      <SidePanel
+        id="agent-chats"
+        title="Chats"
+        primary={false}
+        defaultWidth={240}
+        min={180}
+        max={420}
+        strip={
+          <>
+            <StripItem label="New chat" selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+              <MessageSquarePlus size={16} />
+            </StripItem>
+            {chats.slice(0, 12).map((item) => (
+              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
+                <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
+              </StripItem>
+            ))}
+          </>
+        }
+      >
         <div className="list-scroll">
           <button type="button" className="row" aria-selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
             <MessageSquarePlus size={15} className="accent-text" />
@@ -329,7 +369,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
             </div>
           ))}
         </div>
-      </div>
+      </SidePanel>
       <SessionPane
         key={chat?.id ?? "new"}
         chat={chat}

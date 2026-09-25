@@ -17,6 +17,7 @@ import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 
 const APP_ID = "dev.vibeforge.app";
+const REPO_URL = "https://github.com/L0nE-F0x/VibeForge";
 const roots = defaultRoots();
 ensureLayout(roots.configRoot, roots.dataRoot);
 
@@ -39,6 +40,26 @@ function appRoot(): string {
 
 function iconPath(): string {
   return path.join(appRoot(), "resources", "icon.png");
+}
+
+/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
+function osDescription(): string {
+  let name = os.type();
+  try {
+    const release = fs.readFileSync("/etc/os-release", "utf8");
+    const pretty = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(release)?.[1];
+    if (pretty) name = pretty;
+  } catch {
+    /* not every system has os-release */
+  }
+  try {
+    // Omarchy ships as a pacman package (omarchy, or omarchy-dev on the edge channel).
+    const entry = fs.readdirSync("/var/lib/pacman/local").find((dir) => /^omarchy(-dev)?-\d/.test(dir));
+    if (entry) name = `Omarchy ${entry.replace(/^omarchy(-dev)?-/, "")}`;
+  } catch {
+    /* not an Arch system */
+  }
+  return `${name} · ${os.type()} ${os.release()}`;
 }
 
 function send<K extends keyof DeskEvents>(event: K, payload: DeskEvents[K]): void {
@@ -112,6 +133,11 @@ function handlers(): Handlers {
       dataRoot: roots.dataRoot,
       home: os.homedir(),
       hostRunning: supervisor.running,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      os: osDescription(),
+      repo: REPO_URL,
     }),
     "app.palette": () => palette,
     "app.openPath": (target) => openPath(target),

@@ -81,6 +81,7 @@ export function defaultSettings(): Settings {
     terminalFontSize: 13,
     terminalFontFamily: "JetBrainsMono Nerd Font",
     theme: "omarchy",
+    tourDone: false,
   };
 }
 
@@ -388,6 +389,7 @@ export class Store {
           : defaults.terminalFontSize,
       terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
       theme: raw.theme === "builtin" ? "builtin" : "omarchy",
+      tourDone: bool(raw.tourDone, defaults.tourDone),
     };
   }
 

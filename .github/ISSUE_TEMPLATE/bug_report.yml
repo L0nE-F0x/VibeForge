@@ -1,0 +1,57 @@
+name: Report a bug
+description: Something in VibeForge doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. **Help → Report a bug** inside VibeForge fills in the version details below for you.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+      placeholder: I split a pane in Code, dragged it onto another, and…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Code
+        2. …
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where in the app?
+      options:
+        - Home
+        - Agents
+        - Code (terminals, panes, files, browser dock)
+        - Chat
+        - Tasks
+        - Routines
+        - Skills
+        - Runs
+        - Settings or theme
+        - Installer or startup
+        - Something else
+  - type: input
+    id: version
+    attributes:
+      label: VibeForge version
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Your system, and which coding CLIs are installed.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything else?
+      description: Screenshots, the output of `vibeforge` started from a terminal, or the transcript of the run. Remove anything private first.

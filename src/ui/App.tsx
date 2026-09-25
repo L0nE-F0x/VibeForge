@@ -2,6 +2,7 @@ import {
   Activity,
   Bot,
   CalendarClock,
+  CircleHelp,
   History,
   House,
   KanbanSquare,
@@ -12,9 +13,13 @@ import {
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
-import { Component, useEffect, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useTasks } from "./api.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks } from "./api.js";
+import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
+import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
+import { TooltipLayer, tipProps } from "./components/Tooltip.js";
+import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { Button, ConfirmDialog, Empty, Logo, Popover, Toasts } from "./components/ui.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
 import { AgentsView } from "./views/Agents.js";
@@ -38,6 +43,17 @@ const VIEWS: Array<{ view: Exclude<ViewName, "settings">; label: string; icon: L
   { view: "runs", label: "Runs", icon: History },
 ];
 
+const RAIL_TIPS: Record<Exclude<ViewName, "settings">, string> = {
+  home: "Home: what's live, what needs review, what's next",
+  agents: "Agents: teammates with a brief, memory and skills",
+  code: "Code: project workspaces with tiled terminals",
+  chat: "Chat: quick conversations in a scratch folder",
+  tasks: "Tasks: a board of work for your agents",
+  routines: "Routines: agent runs on a schedule",
+  skills: "Skills: reusable procedures for agents",
+  runs: "Runs: every session with its screen, transcript and diff",
+};
+
 export function App() {
   return (
     <NavProvider>
@@ -46,6 +62,7 @@ export function App() {
           <Shell />
           <Toasts />
           <ConfirmDialog />
+          <TooltipLayer />
         </ConfirmProvider>
       </ToastProvider>
     </NavProvider>
@@ -67,6 +84,12 @@ function Shell() {
       } else if (event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
         back();
+      } else if (event.ctrlKey && event.shiftKey && event.code === "Slash") {
+        event.preventDefault();
+        window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT));
+      } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        window.dispatchEvent(new Event(TOGGLE_PANEL_EVENT));
       } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "i") {
         event.preventDefault();
         void call("app.toggleDevTools");
@@ -84,6 +107,7 @@ function Shell() {
 
   return (
     <div className="app">
+      <Guides />
       <Rail />
       <main className="stage">
         <CrashBoundary key={route.view}>
@@ -104,6 +128,47 @@ function Shell() {
   );
 }
 
+/** The welcome tour (first launch, or replayed from Help) and the shortcut sheet. */
+function Guides() {
+  const settings = useSettings().data;
+  const [tour, setTour] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  const autoOpened = useRef(false);
+
+  useEffect(() => {
+    if (!settings || autoOpened.current) return;
+    autoOpened.current = true;
+    if (!settings.tourDone) setTour(true);
+  }, [settings]);
+
+  useEffect(() => {
+    const start = () => {
+      setShortcuts(false);
+      setTour(true);
+    };
+    const keys = () => setShortcuts((open) => !open);
+    window.addEventListener(START_TOUR_EVENT, start);
+    window.addEventListener(SHOW_SHORTCUTS_EVENT, keys);
+    return () => {
+      window.removeEventListener(START_TOUR_EVENT, start);
+      window.removeEventListener(SHOW_SHORTCUTS_EVENT, keys);
+    };
+  }, []);
+
+  const closeTour = useCallback(() => {
+    setTour(false);
+    void call("settings.save", { tourDone: true });
+  }, []);
+  const closeShortcuts = useCallback(() => setShortcuts(false), []);
+
+  return (
+    <>
+      {tour && <Tour onClose={closeTour} />}
+      {shortcuts && !tour && <ShortcutsModal onClose={closeShortcuts} />}
+    </>
+  );
+}
+
 function Rail() {
   const { route, go } = useNav();
   const inbox = useInbox().data ?? [];
@@ -111,6 +176,7 @@ function Rail() {
   const live = useLive().data ?? [];
   const review = tasks.filter((task) => task.status === "review").length;
   const [liveAnchor, setLiveAnchor] = useState<HTMLElement | null>(null);
+  const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
 
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
@@ -120,7 +186,7 @@ function Rail() {
 
   return (
     <nav className="rail" aria-label="Views">
-      <div className="rail-logo" title="VibeForge">
+      <div className="rail-logo" {...tipProps("VibeForge", { side: "right" })}>
         <Logo size={20} />
       </div>
       {VIEWS.map((item, index) => {
@@ -131,7 +197,8 @@ function Rail() {
             type="button"
             className="rail-btn"
             aria-current={route.view === item.view ? "page" : undefined}
-            title={`${item.label} (Ctrl+${index + 1})`}
+            aria-label={item.label}
+            {...tipProps(RAIL_TIPS[item.view], { kbd: `Ctrl+${index + 1}`, side: "right" })}
             onClick={() => go({ view: item.view } as Route)}
           >
             <item.icon size={19} strokeWidth={1.9} />
@@ -145,7 +212,7 @@ function Rail() {
           type="button"
           className="rail-btn"
           aria-pressed={Boolean(liveAnchor)}
-          title="Running terminals"
+          {...tipProps(live.length ? "Running terminals: jump to one" : "Nothing is running", { side: "right" })}
           onClick={(event) => setLiveAnchor(liveAnchor ? null : event.currentTarget)}
         >
           <Activity size={19} strokeWidth={1.9} className={live.length ? "accent-text" : undefined} />
@@ -154,8 +221,19 @@ function Rail() {
         <button
           type="button"
           className="rail-btn"
+          data-tour="help"
+          aria-pressed={Boolean(helpAnchor)}
+          {...tipProps("Tour, shortcuts, bug reports and ideas", { side: "right" })}
+          onClick={(event) => setHelpAnchor(helpAnchor ? null : event.currentTarget)}
+        >
+          <CircleHelp size={19} strokeWidth={1.9} />
+          <span>Help</span>
+        </button>
+        <button
+          type="button"
+          className="rail-btn"
           aria-current={route.view === "settings" ? "page" : undefined}
-          title="Settings (Ctrl+,)"
+          {...tipProps("Engines, terminal font, theme and notifications", { kbd: "Ctrl+,", side: "right" })}
           onClick={() => go({ view: "settings" })}
         >
           <SettingsIcon size={19} strokeWidth={1.9} />
@@ -163,6 +241,7 @@ function Rail() {
         </button>
       </div>
       {liveAnchor && <LivePopover anchor={liveAnchor} onClose={() => setLiveAnchor(null)} />}
+      {helpAnchor && <HelpPopover anchor={helpAnchor} onClose={() => setHelpAnchor(null)} />}
     </nav>
   );
 }

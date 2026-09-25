@@ -4,11 +4,19 @@ VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name
 
 ## Verified
 
-- `npm test`: 41 tests. Core rules (places, preamble, engines and prompt delivery, schedules, tasks, theme parsing, git snapshots, the run index), the service end to end against a fake PTY host (chat start/paste/continue, exact resume, routines firing / missed / no overlap / run-now, the task lifecycle, orphaned runs after a crash, shutdown, change events), and the real PTY host with `/bin/bash` (cwd isolation, timed bracketed paste, killing a process group, run files).
+- `npm test`: 41 tests at the time. Core rules (places, preamble, engines and prompt delivery, schedules, tasks, theme parsing, git snapshots, the run index), the service end to end against a fake PTY host (chat start/paste/continue, exact resume, routines firing / missed / no overlap / run-now, the task lifecycle, orphaned runs after a crash, shutdown, change events), and the real PTY host with `/bin/bash` (cwd isolation, timed bracketed paste, killing a process group, run files).
 - `npm run typecheck` and `npm run build` are clean.
 - The built app was driven over the DevTools protocol on a hidden Hyprland workspace with a scratch config: every view renders; Code mode restores its split layout and shells after a restart; agent chat, task execute → review with a git summary and full diff, routine editor preview, browser dock (load and error card), settings, and quitting with live runs (recorded as stopped, files written).
 - **Real Claude Code**: a Chat message arrived intact as the first prompt (`VIBEFORGE-OK`), a follow-up pasted from the composer was submitted (`SECOND-OK`), and **Continue** reopened the same conversation with `claude --resume <id>` read from the transcript.
 - Window class is `vibeforge` under Hyprland; `~/.local/share/applications/vibeforge.desktop` validates.
+
+### Layout and onboarding pass (later the same day)
+
+- Side panels in Agents, Code, Chat, Skills and Runs resize from their edge (double-click resets) and collapse to a strip of avatars or initials with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>; each remembers its width.
+- Code panes move by dragging their title bar onto another pane (the middle swaps, an edge docks) and maximize with a double-click or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>. A moved shell kept its session (checked over CDP).
+- One tooltip layer for the whole app, with keycaps for shortcuts; every icon-only button has a tip.
+- A welcome tour opens on first launch (`tourDone` in settings.json), spotlights each view in turn, and can be replayed from Help in the rail or from Settings. Help also has the shortcut sheet and opens GitHub issue forms (`.github/ISSUE_TEMPLATE`) with the version, OS and installed CLIs filled in.
+- `npm test`: 47 tests, now including the pane tree (`src/ui/pane-layout.ts`) and the tour flag.
 
 ## Not verified yet
 
