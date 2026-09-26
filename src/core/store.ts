@@ -87,6 +87,7 @@ export function defaultSettings(): Settings {
     language: "system",
     voice: { model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" },
     usage: true,
+    planLimits: false,
     activity: "git",
     rail: { order: [], hidden: [] },
   };
@@ -423,6 +424,7 @@ export class Store {
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
       voice: normalizeVoiceSettings(raw.voice, defaults.voice),
       usage: bool(raw.usage, defaults.usage),
+      planLimits: bool(raw.planLimits, defaults.planLimits),
       activity: raw.activity === "off" || raw.activity === "github" ? raw.activity : defaults.activity,
       rail: {
         order: names(raw.rail?.order),

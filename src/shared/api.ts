@@ -34,6 +34,7 @@ import type {
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
 import type { UsageSummary } from "../core/usage.js";
+import type { PlanSummary } from "../core/plans.js";
 import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
@@ -72,9 +73,11 @@ export type {
   InstallKind,
   Release,
   UsageSummary,
+  PlanSummary,
   Activity,
 };
 export type { UsageSource, UsageLimit, Tokens } from "../core/usage.js";
+export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
 export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
 
 export interface AppInfo {
@@ -216,6 +219,11 @@ export interface DeskMethods {
   "app.clipboard": () => { text: string; image: boolean };
   /** Token usage from the CLIs' own logs, or null when Settings turn it off. */
   "usage.summary": () => UsageSummary | null;
+  /**
+   * How much of each coding plan is used: Codex from its logs, and Claude, Grok and Kimi when
+   * Settings allow asking them. Null when there's nothing to show. `fresh` asks again now.
+   */
+  "plans.summary": (fresh?: boolean) => PlanSummary | null;
   /** The contribution graph for Home, or null when Settings turn it off. `fresh` skips the cache. */
   "activity.get": (fresh?: boolean) => Activity | null;
   /** A desktop notification (when Settings allow them) that opens the workspace when clicked. */

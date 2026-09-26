@@ -1,8 +1,8 @@
 import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
-import { compactTokens, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
+import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
 import { useAttention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
@@ -10,7 +10,7 @@ import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { VoiceLayer } from "./voice.js";
-import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Toasts } from "./components/ui.js";
+import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
@@ -173,7 +173,9 @@ function Rail() {
   const live = useLive().data ?? [];
   const attention = useAttention();
   const usage = useUsage().data;
+  const plans = usePlans().data;
   const tokensToday = usageToday(usage).today;
+  const hotPlan = hottestPlan(plans);
   const review = tasks.filter((task) => task.status === "review").length;
   const [liveAnchor, setLiveAnchor] = useState<HTMLElement | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
@@ -222,7 +224,11 @@ function Rail() {
           className="rail-btn"
           aria-pressed={Boolean(liveAnchor)}
           {...tipProps(
-            [live.length ? t("rail.tip.liveSome") : t("rail.tip.liveNone"), usage?.sources.length ? t("rail.tip.usage", { tokens: compactTokens(tokensToday, t.language) }) : ""]
+            [
+              live.length ? t("rail.tip.liveSome") : t("rail.tip.liveNone"),
+              hotPlan ? t("rail.tip.plan", { cli: PLAN_NAMES[hotPlan.id], percent: Math.round(hotPlan.percent ?? 0) }) : "",
+              usage?.sources.length ? t("rail.tip.usage", { tokens: compactTokens(tokensToday, t.language) }) : "",
+            ]
               .filter(Boolean)
               .join(" · "),
             { side: "right" },
@@ -231,7 +237,7 @@ function Rail() {
         >
           <Activity size={19} strokeWidth={1.9} className={live.length ? "accent-text" : undefined} />
           <span className={live.length ? "live-pulse" : undefined}>{live.length ? t.count("rail.live", live.length) : t("rail.idle")}</span>
-          <UsageMeter summary={usage} />
+          <UsageMeter summary={usage} plans={plans} />
         </button>
         <button
           type="button"
@@ -280,6 +286,24 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   const home = useAppInfo().data?.home ?? "";
   const now = useNow(1000);
   const usage = useUsage().data;
+  const plans = usePlans();
+  const networkOn = useSettings().data?.planLimits ?? false;
+  const [tab, setTab] = useState<"limits" | "tokens">(() => (readTab() === "tokens" ? "tokens" : "limits"));
+  const both = Boolean(plans.data && usage?.sources.length);
+  const shown = plans.data && (tab === "limits" || !usage?.sources.length) ? "limits" : usage ? "tokens" : null;
+  const switcher = both ? (
+    <Segmented
+      value={shown ?? "limits"}
+      options={[
+        { value: "limits", label: t("plans.tab.limits") },
+        { value: "tokens", label: t("plans.tab.tokens") },
+      ]}
+      onChange={(next) => {
+        setTab(next);
+        writeTab(next);
+      }}
+    />
+  ) : undefined;
   return (
     <Popover anchor={anchor} onClose={onClose}>
       <div className="list-label" style={{ paddingTop: 6 }}>
@@ -314,9 +338,26 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
           </span>
         </button>
       ))}
-      <UsagePanel summary={usage} />
+      {shown === "limits" && plans.data && <PlanPanel plans={plans.data} switcher={switcher} networkOn={networkOn} onRefresh={plans.refresh} />}
+      {shown === "tokens" && usage && <UsagePanel summary={usage} switcher={switcher} />}
     </Popover>
   );
+}
+
+function readTab(): string | null {
+  try {
+    return localStorage.getItem("vf.usageTab");
+  } catch {
+    return null;
+  }
+}
+
+function writeTab(tab: string): void {
+  try {
+    localStorage.setItem("vf.usageTab", tab);
+  } catch {
+    /* only a preference */
+  }
 }
 
 class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {

@@ -1,6 +1,6 @@
 # To do
 
-Updated when 0.6.0 was cut (2026-09-26): typed CLIs are runs, the "needs you" glow, token usage, the contribution graph and terminal copy/paste are done; see `status.md`.
+Updated for 0.7.0 (2026-09-27): plan limits for Claude, Grok, Kimi and Codex in the rail's usage popover; see `status.md`. Before that, 0.6.0 (2026-09-26): typed CLIs are runs, the "needs you" glow, token usage, the contribution graph and terminal copy/paste.
 
 ## Handoff for Monday (2026-09-28)
 
@@ -25,7 +25,9 @@ Updated when 0.6.0 was cut (2026-09-26): typed CLIs are runs, the "needs you" gl
 - [ ] **Talk-back from a CLI typed into a shell**, for real: type `claude` in a Code terminal, say something, and check the answer is read aloud (the polish pass wired it; only stand-ins have been through it).
 - [ ] **Commands in other languages.** The grammar (src/shared/commands.ts) is English; the wake word works in any language whisper hears.
 
-- [ ] **Usage from more CLIs**: OpenCode keeps a SQLite database now, Copilot, Kimi, Cursor Agent and Crush weren't looked at. Claude Code's plan limits aren't in its logs.
+- [ ] **Gemini plan limits**, when the next Gemini Pro lands: Gemini CLI's `/stats` quota comes from the Code Assist API (`retrieveUserQuota`, per model, with a project from `loadCodeAssist`). Its Google access token lasts an hour and only Gemini CLI renews it, so read-only would show "sign-in expired" unless Gemini CLI ran recently. Work out the request from Gemini CLI's own source before adding it.
+- [ ] **Quota notifications** at 80 / 95 / 100% per window, once per reset, like the Omarchy widget's toasts. Skipped in 0.7.0 so the two don't both fire; would need its own switch.
+- [ ] **Token usage from more CLIs**: Kimi's session logs weren't read (its plan limits are in 0.7.0), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush weren't looked at.
 - [ ] **Translate the rest of the UI.** The forms in Agents, Tasks, Routines and Skills, the engine editor, run details, Home, toast messages, and the errors the main process sends (`src/core/team-service.ts`) are still English. Relative times ("5m ago", `src/shared/text.ts`) should use `Intl.RelativeTimeFormat` in the chosen language. Add each key to `src/ui/i18n/en.ts` first; the typecheck then lists every language that needs it.
 - [ ] **Release notes on each tag.** `gh release create vX.Y.Z --notes-file …` after bumping `package.json`; the in-app Update shows those notes.
 

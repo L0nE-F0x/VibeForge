@@ -267,6 +267,9 @@ export function SettingsView() {
             <Field hint={t("settings.usageHint")}>
               <Toggle checked={current.usage} onChange={(usage) => void patch({ usage })} label={t("settings.usage")} />
             </Field>
+            <Field hint={t("settings.planLimitsHint")}>
+              <Toggle checked={current.planLimits} onChange={(planLimits) => void patch({ planLimits })} label={t("settings.planLimits")} />
+            </Field>
             <Field label={t("settings.activity")} hint={t(`settings.activityHint.${current.activity}`)}>
               <Segmented
                 value={current.activity}

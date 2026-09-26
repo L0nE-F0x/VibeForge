@@ -120,6 +120,11 @@ export interface Settings {
   voice: VoiceSettings;
   /** Add up token usage from the logs the CLIs keep on this machine. Read locally, never sent. */
   usage: boolean;
+  /**
+   * Ask Anthropic, xAI and Moonshot how much of the Claude, Grok and Kimi plans is used, with the
+   * sign-in each CLI saved. Contacts those services, so it starts off.
+   */
+  planLimits: boolean;
   /** The contribution graph on Home: off, your commits in the workspaces, or GitHub through `gh`. */
   activity: "off" | "git" | "github";
   /** The views in the left rail: their order, and which ones are hidden. Unknown names are ignored. */

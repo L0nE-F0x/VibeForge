@@ -14,6 +14,7 @@ import { resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/the
 import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
+import { PlanWatcher } from "../src/core/plans.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
@@ -157,6 +158,14 @@ const host: DeskHost = {
 const dock = new Dock(() => win, (state) => send("dock", state));
 
 const usage = new UsageScanner(os.homedir());
+const plans = new PlanWatcher({ home: os.homedir(), file: path.join(roots.dataRoot, "plans.json"), agent: `VibeForge/${app.getVersion()}` });
+
+async function planSummary(fresh: boolean) {
+  const settings = svc().getSettings();
+  const codex = settings.usage ? ((await usage.scan()).sources.find((source) => source.id === "codex")?.limits ?? []) : [];
+  if (!settings.planLimits && !codex.length) return null;
+  return plans.summary({ network: settings.planLimits, codex, fresh });
+}
 
 // The graph changes slowly: git is read again after 5 minutes, GitHub after 30.
 let activity: { key: string; at: number; value: Promise<Activity> } | null = null;
@@ -262,6 +271,7 @@ function handlers(): Handlers {
     "app.copyText": (text) => clipboard.writeText(text),
     "app.clipboard": () => ({ text: clipboard.readText(), image: clipboard.availableFormats().some((format) => format.startsWith("image/")) }),
     "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
+    "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
       if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId });

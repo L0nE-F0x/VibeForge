@@ -41,6 +41,70 @@ export const MARK = [
   "....###....",
 ];
 
+/**
+ * The coding plans' marks, eleven pixels square and drawn in one colour, for the usage panel:
+ * Grok's slashed circle, Claude's starburst, Kimi's K and a prompt for Codex.
+ */
+export const PLAN_MARKS: Record<string, string[]> = {
+  grok: [
+    "....###...#",
+    "..##...###.",
+    ".#......##.",
+    "#......#..#",
+    "#.....#...#",
+    "#....#....#",
+    "#...#.....#",
+    ".#.#.....#.",
+    "..##...##..",
+    ".#..###....",
+    "#..........",
+  ],
+  claude: [
+    ".....#.....",
+    ".....#.....",
+    "..#..#..#..",
+    "...#.#.#...",
+    "....###....",
+    "##.#####.##",
+    "....###....",
+    "...#.#.#...",
+    "..#..#..#..",
+    ".....#.....",
+    ".....#.....",
+  ],
+  kimi: [
+    "##.......##",
+    "##......##.",
+    "##.....##..",
+    "##....##...",
+    "##...##....",
+    "##..##.....",
+    "##.##......",
+    "##..##.....",
+    "##...##....",
+    "##....##...",
+    "##.....##..",
+  ],
+  codex: [
+    "...........",
+    "##.........",
+    ".##........",
+    "..##.......",
+    "...##......",
+    "....##.....",
+    "...##......",
+    "..##.......",
+    ".##........",
+    "##...######",
+    "...........",
+  ],
+};
+
+export function planMark(id: string): Art | null {
+  const rows = PLAN_MARKS[id];
+  return rows ? { cells: cellsOf(rows), width: rows[0].length, height: rows.length } : null;
+}
+
 function cellsOf(rows: string[], ox = 0, oy = 0): Cell[] {
   const cells: Cell[] = [];
   rows.forEach((row, y) => {

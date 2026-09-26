@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { DeskEvents, Method, MethodArgs, MethodResult, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
+import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
 
 declare global {
   interface Window {
@@ -237,6 +237,23 @@ export function useUsage(): Query<UsageSummary | null> {
     return () => clearInterval(timer);
   }, [reload]);
   return query;
+}
+/**
+ * How much of each coding plan is used, checked every minute and whenever a run ends. The main
+ * process asks the providers at most every few minutes; `refresh` asks them now.
+ */
+export function usePlans(): Query<PlanSummary | null> & { refresh: () => Promise<void> } {
+  const query = useQuery("plans", ["settings", "runs"], () => call("plans.summary"));
+  const { reload } = query;
+  useEffect(() => {
+    const timer = setInterval(() => void reload(), 60_000);
+    return () => clearInterval(timer);
+  }, [reload]);
+  const refresh = useCallback(async () => {
+    await call("plans.summary", true);
+    await reload();
+  }, [reload]);
+  return { ...query, refresh };
 }
 export const useChats = (agentId: string | null | undefined) =>
   useQuery(`chats:${agentId === undefined ? "*" : (agentId ?? "none")}`, ["chats", "runs", "live"], () =>

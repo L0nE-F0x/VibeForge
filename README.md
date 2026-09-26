@@ -68,7 +68,9 @@ npm run build       # production build
 | **Skills** | Reusable `SKILL.md` procedures you install on agents. |
 | **Runs** | Every CLI you typed into a terminal and every process VibeForge started: final screen, transcript, prompt, and the diff since it began. **Continue** reopens the exact session. |
 
-The pulse at the bottom of the rail counts the terminals running and, underneath, today's tokens: click it for each CLI's usage today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI already keep on this machine (and Codex's plan limits, when it records them). Nothing is sent anywhere; Settings → Usage and activity turns it off.
+The pulse at the bottom of the rail counts the terminals running and, underneath, six squares that follow whichever coding plan is closest to its limit. Click it for **plan limits**: each plan's windows (Claude's 5-hour and 7-day, Grok's credits by product, Kimi's weekly and 5-hour, Codex's from its logs) with the time until they reset, the last day as a line, and when you'll run out at the current pace. The **Tokens** tab has each CLI's tokens today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI already keep on this machine; nothing is sent anywhere for those.
+
+Plan limits for Claude, Grok and Kimi are off until you turn them on in Settings → Usage and activity. VibeForge then asks Anthropic, xAI and Moonshot for them, at most every 3 minutes, with the sign-in each CLI already saved on this machine. It reads that sign-in for each request and never renews, rewrites or keeps it; when one has expired, the last numbers stay up until you next open that CLI. Only the percentages are saved (`~/.local/share/vibeforge/plans.json`).
 
 The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
