@@ -376,11 +376,13 @@ function drawCircuit(svg) {
     }
   }
 
-  // Along the bottom, short legs ending in pads, clear of the copy.
+  // Along the bottom, short legs ending in pads, clear of the copy and of the version label.
+  const part = $(".part", forge)?.getBoundingClientRect();
   const feet = Math.max(4, Math.floor((right - left - 60) / 22));
   const first = center - ((feet - 1) * 22) / 2;
   for (let index = 0; index < feet; index += 1) {
     const x = round(first + index * 22);
+    if (part && x > part.left - box.left - 10 && x < part.right - box.left + 10) continue;
     pins.push({ x, y: bottom, dx: 0, dy: 7 });
     if (random() < 0.45) {
       const y = bottom + round(12 + random() * 12);
