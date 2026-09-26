@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=0.7.0" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
@@ -33,6 +33,9 @@
       <symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></symbol>
       <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
       <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+      <symbol id="i-circle-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-settings-2" viewBox="0 0 24 24"><path d="M14 17H5"/><path d="M19 7h-9"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
       <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
       <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
       <symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol>
@@ -145,19 +148,16 @@
                 <span class="m-rail-btn is-on"><svg><use href="#i-bot" /></svg><i>Agents</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-square-terminal" /></svg><i>Code</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-messages-square" /></svg><i>Chat</i></span>
-                <span class="m-rail-btn"><svg><use href="#i-kanban" /></svg><i>Tasks</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-kanban" /></svg><i>Tasks</i><b class="m-badge">1</b></span>
                 <span class="m-rail-btn"><svg><use href="#i-calendar-clock" /></svg><i>Routines</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-sparkles" /></svg><i>Skills</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-history" /></svg><i>Runs</i><b class="m-badge" data-demo-badge>2</b></span>
-                <span class="m-rail-foot"><svg><use href="#i-activity" /></svg><i data-demo-live>1 live</i></span>
+                <span class="m-rail-foot is-live" data-demo-pulse><svg><use href="#i-activity" /></svg><i data-demo-live>1 live</i><span class="m-meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></span>
+                <span class="m-rail-btn m-hide-sm"><svg><use href="#i-circle-help" /></svg><i>Help</i></span>
+                <span class="m-rail-btn m-hide-sm"><svg><use href="#i-settings" /></svg><i>Settings</i></span>
               </nav>
               <aside class="m-list">
                 <div class="m-list-head">Agents <span class="m-chip-btn"><svg><use href="#i-plus" /></svg>New</span></div>
-                <div class="m-row is-on">
-                  <span class="m-avatar">RN</span>
-                  <span class="m-row-text"><b>Release notes</b><i>Claude Code</i></span>
-                  <span class="m-dot is-live"></span>
-                </div>
                 <div class="m-row">
                   <span class="m-avatar">DJ</span>
                   <span class="m-row-text"><b>Dependency janitor</b><i>Codex</i></span>
@@ -167,12 +167,16 @@
                   <span class="m-avatar">DG</span>
                   <span class="m-row-text"><b>Docs gardener</b><i>Grok Build</i></span>
                 </div>
+                <div class="m-row is-on">
+                  <span class="m-avatar">RN</span>
+                  <span class="m-row-text"><b>Release notes</b><i>Claude Code</i></span>
+                  <span class="m-dot is-live"></span>
+                </div>
               </aside>
               <div class="m-main">
                 <div class="m-head">
                   <span class="m-avatar lg">RN</span>
                   <span class="m-head-text"><b>Release notes</b><i>Claude Code · 1 folder · 2 skills</i></span>
-                  <span class="m-primary"><svg><use href="#i-message-square-plus" /></svg>New chat</span>
                 </div>
                 <div class="m-tabs">
                   <span class="is-on"><svg><use href="#i-messages-square" /></svg>Chats</span>
@@ -181,16 +185,41 @@
                   <span><svg><use href="#i-sparkles" /></svg>Skills</span>
                   <span class="m-hide-sm"><svg><use href="#i-folder-open" /></svg>Allowed folders</span>
                   <span class="m-hide-sm"><svg><use href="#i-history" /></svg>Runs</span>
+                  <span class="m-hide-sm"><svg><use href="#i-settings-2" /></svg>Settings</span>
                 </div>
-                <div class="m-term" data-demo-term></div>
-                <div class="m-sessionbar" data-demo-sessionbar>
-                  <span class="m-dot is-live"></span>
-                  <span>Live in <code>~/Projects/frontier-halls</code></span>
-                  <span class="m-ghost-btn"><svg><use href="#i-square" /></svg>Stop</span>
-                </div>
-                <div class="m-composer">
-                  <span>Message the running session…</span>
-                  <span class="m-send"><svg><use href="#i-arrow-up" /></svg>Send</span>
+                <div class="m-body">
+                  <aside class="m-chats">
+                    <div class="m-chats-head">Chats</div>
+                    <div class="m-new-chat"><svg><use href="#i-message-square-plus" /></svg>New chat</div>
+                    <div class="m-chats-label">Recent</div>
+                    <div class="m-chat is-on">
+                      <span class="m-dot is-live" data-demo-chatdot></span>
+                      <span class="m-row-text"><b>Draft release notes for what merged</b><i data-demo-chatwhen>now</i></span>
+                    </div>
+                    <div class="m-chat">
+                      <span class="m-dot is-ok"></span>
+                      <span class="m-row-text"><b>Notes for the 0.3 hotfix</b><i>2 days ago</i></span>
+                    </div>
+                  </aside>
+                  <div class="m-session">
+                    <div class="m-term" data-demo-term></div>
+                    <div class="m-sessionbar" data-demo-sessionbar>
+                      <span class="m-dot is-live"></span>
+                      <span>Live in <code>~/Projects/frontier-halls</code> — type in the terminal, or use the box below.</span>
+                      <span class="m-ghost-btn"><svg><use href="#i-square" /></svg>Stop</span>
+                    </div>
+                    <div class="m-composer">
+                      <div class="m-composer-box">
+                        <span data-demo-placeholder>Message the running session…</span>
+                        <svg class="m-mic"><use href="#i-mic" /></svg>
+                        <span class="m-send"><svg><use href="#i-arrow-up" /></svg><b data-demo-send>Send</b></span>
+                      </div>
+                      <div class="m-composer-hint">
+                        <span><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+                        <span data-demo-hint><svg><use href="#i-square-terminal" /></svg>pasted into the session</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -443,7 +472,7 @@
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
           <h2>Not a mockup. The real desk.</h2>
-          <p>Screenshots of VibeForge 0.4.0 on a working day, in the Apex Forge theme.</p>
+          <p>Screenshots of VibeForge 0.7.0 on a working day, in the Apex Forge theme.</p>
         </div>
         <div class="tour reveal" data-tour>
           <div class="tour-tabs" role="tablist" aria-label="Screenshots">
@@ -453,13 +482,13 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark, three terminals running, three runs to review, a 14-day activity chart, and the routines coming up next." />
+              <img src="assets/app-home.webp?v=0.7.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, three terminals running, three runs to review, a 14-day run chart, workspaces, the routines coming up next and the CLIs on this machine." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp" width="1890" height="1138" alt="Code mode: three tiled terminals in a project with git log, a diffstat and a TypeScript watch that its title bar names, and the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=0.7.0" width="1890" height="1138" alt="Code mode: three tiled terminals in a project with git log, a diffstat and a TypeScript watch that its title bar names, split from the toolbar, with the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp" width="1890" height="1138" alt="The task board with cards in To do, Review and Done, each assigned to an agent and a workspace." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=0.7.0" width="1890" height="1138" alt="The task board with cards in To do, Review and Done, each assigned to an agent and a workspace." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> What's live, what finished and needs a look, and what runs next.</p>
@@ -662,6 +691,6 @@ npm run build && ./scripts/vibeforge</pre>
       </p>
     </footer>
 
-    <script src="main.js" defer></script>
+    <script src="main.js?v=0.7.0" defer></script>
   </body>
 </html>

@@ -465,6 +465,20 @@ function setupDesk() {
   const reviewCount = $("[data-demo-review]");
   const live = $("[data-demo-live]");
   const newRun = $("[data-demo-newrun]");
+  const pulse = $("[data-demo-pulse]");
+  const chatDot = $("[data-demo-chatdot]");
+  const chatWhen = $("[data-demo-chatwhen]");
+  const placeholder = $("[data-demo-placeholder]");
+  const sendLabel = $("[data-demo-send]");
+  const hint = $("[data-demo-hint]");
+  // What the composer says while the session runs, and once it has ended, as in the app.
+  const running = { placeholder: placeholder?.textContent ?? "", send: sendLabel?.textContent ?? "", hint: hint?.innerHTML ?? "" };
+  const ended = { placeholder: "What should Release notes do?", send: "Continue", hint: '<svg><use href="#i-play"/></svg>starts the engine' };
+  const composer = (state) => {
+    if (placeholder) placeholder.textContent = state.placeholder;
+    if (sendLabel) sendLabel.textContent = state.send;
+    if (hint) hint.innerHTML = state.hint;
+  };
   const windows = $$("[data-win]", desk);
   const barLive = bar?.innerHTML ?? "";
   let visible = false;
@@ -495,6 +509,10 @@ function setupDesk() {
     if (badge) badge.textContent = "2";
     if (reviewCount) reviewCount.textContent = "2";
     if (live) live.textContent = "1 live";
+    pulse?.classList.add("is-live");
+    chatDot?.classList.replace("is-ok", "is-live");
+    if (chatWhen) chatWhen.textContent = "now";
+    composer(running);
     term.replaceChildren();
     await sleep(700);
     for (const step of SESSION) {
@@ -521,9 +539,15 @@ function setupDesk() {
     if (!alive()) return;
     if (bar) {
       bar.classList.add("is-done");
-      bar.innerHTML = '<span class="m-dot is-ok"></span><span>Finished · 1 file changed, 38 insertions(+) · review it in Runs</span><span class="m-ghost-btn"><svg><use href="#i-rotate-ccw"/></svg>Continue</span>';
+      bar.innerHTML =
+        '<span class="m-chip">Finished</span><span>Session ended just now · 1 file changed, 38 insertions(+), 4 deletions(-). Sending a message picks it up again.</span>' +
+        '<span class="m-ghost-btn m-hide-sm"><svg><use href="#i-history"/></svg>Review</span><span class="m-primary"><svg><use href="#i-rotate-ccw"/></svg>Continue session</span>';
     }
     if (live) live.textContent = "Idle";
+    pulse?.classList.remove("is-live");
+    chatDot?.classList.replace("is-live", "is-ok");
+    if (chatWhen) chatWhen.textContent = "just now";
+    composer(ended);
     toast?.classList.add("is-shown");
     if (newRun) {
       newRun.classList.remove("is-hidden");

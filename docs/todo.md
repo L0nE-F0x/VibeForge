@@ -14,8 +14,7 @@ Updated for 0.7.0 (2026-09-27): plan limits for Claude, Grok, Kimi and Codex in 
    - `claude --version` leaves no run behind.
 3. **Copy and paste in a real Claude Code session**: select text and press Super+C (and Ctrl+C), paste elsewhere; Super+V / Ctrl+V into Claude's prompt; copy an image (a screenshot) and Ctrl+V it into Claude Code, which should still receive it as an image; Ctrl+C with nothing selected should still interrupt.
 4. **Usage for Codex and Gemini**: run one short session of each and check the rail popover counts it (the readers follow the documented log formats; neither had logs here). Codex's plan limits should show as bars.
-5. **Retake the website's screenshots** (see the recipe in the testing memory): they still show the rocket button and the old Home. Worth showing the contribution graph and the rail's plan limits popover.
-6. Then carry on with the list below.
+5. Then carry on with the list below.
 
 
 ## Next up
