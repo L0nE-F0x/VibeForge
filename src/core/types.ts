@@ -118,6 +118,10 @@ export interface Settings {
   /** "system" follows the desktop's language; otherwise a code such as "de". */
   language: string;
   voice: VoiceSettings;
+  /** Add up token usage from the logs the CLIs keep on this machine. Read locally, never sent. */
+  usage: boolean;
+  /** The contribution graph on Home: off, your commits in the workspaces, or GitHub through `gh`. */
+  activity: "off" | "git" | "github";
   /** The views in the left rail: their order, and which ones are hidden. Unknown names are ignored. */
   rail: { order: string[]; hidden: string[] };
 }
@@ -179,6 +183,8 @@ export interface LiveSession {
   programEngineId?: string | null;
   /** The folder `program` runs in. */
   programCwd?: string | null;
+  /** A coding CLI here is busy (its output keeps coming); false once it has gone quiet. */
+  working?: boolean;
 }
 
 export type Topic =

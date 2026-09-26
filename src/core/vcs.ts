@@ -35,6 +35,23 @@ function execGit(args: readonly string[], cwd: string, timeoutMs: number, maxBuf
 
 export const NOT_A_REPO = "not a git repo";
 
+/**
+ * Your commits in a repository since a date, one entry per commit: its hash and its author date
+ * (YYYY-MM-DD, local). "Yours" means the repository's user.email; without one, every commit counts.
+ */
+export async function commitDays(cwd: string, since: string, timeoutMs = 8000): Promise<Array<{ hash: string; day: string }>> {
+  const email = (await execGit(["config", "user.email"], cwd, timeoutMs)).stdout.trim();
+  const args = ["log", "--all", "--no-merges", `--since=${since}`, "--date=short-local", "--format=%H %ad"];
+  if (email) args.push(`--author=${email}`);
+  const log = await execGit(args, cwd, timeoutMs, 32 * 1024 * 1024);
+  if (log.code !== 0) return [];
+  return log.stdout
+    .split("\n")
+    .map((line) => line.trim().split(" "))
+    .filter((parts) => parts.length === 2 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1]))
+    .map(([hash, day]) => ({ hash, day }));
+}
+
 export async function gitHead(cwd: string, timeoutMs = 3000): Promise<string | null> {
   if (!cwd) return null;
   const result = await execGit(["rev-parse", "--verify", "-q", "HEAD"], cwd, timeoutMs);

@@ -86,6 +86,8 @@ export function defaultSettings(): Settings {
     checkUpdates: true,
     language: "system",
     voice: { model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" },
+    usage: true,
+    activity: "git",
     rail: { order: [], hidden: [] },
   };
 }
@@ -385,6 +387,12 @@ export class Store {
       .filter((run): run is RunMeta => run !== null);
   }
 
+  /** Forget a run entirely: its index row and its folder. */
+  deleteRun(run: RunMeta): void {
+    this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
+    if (run.dir) fs.rmSync(run.dir, { recursive: true, force: true });
+  }
+
   deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
     if (!run.dir) return;
     fs.rmSync(path.join(run.dir, RUN_FILES[file]), { force: true });
@@ -414,6 +422,8 @@ export class Store {
       checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
       voice: normalizeVoiceSettings(raw.voice, defaults.voice),
+      usage: bool(raw.usage, defaults.usage),
+      activity: raw.activity === "off" || raw.activity === "github" ? raw.activity : defaults.activity,
       rail: {
         order: names(raw.rail?.order),
         hidden: names(raw.rail?.hidden),

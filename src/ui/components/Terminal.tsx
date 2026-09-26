@@ -6,6 +6,7 @@ import { Terminal as XTerm, type ITerminalOptions } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type DragEvent } from "react";
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
+import { clipboardKey } from "../terminal-keys.js";
 import { usePalette, xtermTheme } from "../theme.js";
 
 export const PATH_MIME = "application/x-vibeforge-path";
@@ -196,25 +197,24 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     term.attachCustomKeyEventHandler((event) => {
       if (isAppShortcut(event)) return false;
       if (event.type !== "keydown") return true;
-      const key = event.key.toLowerCase();
-      if (event.ctrlKey && event.shiftKey && key === "c") {
+      const action = clipboardKey(event, term.hasSelection());
+      if (!action) return true;
+      event.preventDefault();
+      if (action === "copy") {
         const selection = term.getSelection();
-        if (selection) void navigator.clipboard.writeText(selection);
-        event.preventDefault();
-        return false;
+        if (selection) void call("app.copyText", selection).catch(() => undefined);
+        // Cleared, so the next Ctrl+C interrupts again.
+        term.clearSelection();
+      } else {
+        void call("app.clipboard")
+          .then(({ text, image }) => {
+            if (text) term.paste(text);
+            // Only an image: Claude Code reads it itself when it sees Ctrl+V.
+            else if (image && action === "paste-or-pass") void call("pty.write", ptyId, "\x16");
+          })
+          .catch(() => undefined);
       }
-      if (event.ctrlKey && event.shiftKey && key === "v") {
-        event.preventDefault();
-        void navigator.clipboard.readText().then((text) => text && term.paste(text));
-        return false;
-      }
-      if (event.ctrlKey && !event.shiftKey && !event.altKey && key === "v") {
-        // Like a native terminal: Ctrl+V reaches the program (Claude Code uses it to paste images).
-        event.preventDefault();
-        void call("pty.write", ptyId, "\x16").catch(() => undefined);
-        return false;
-      }
-      return true;
+      return false;
     });
     const input = term.onData((data) => void call("pty.write", ptyId, data).catch(() => undefined));
     const binary = term.onBinary((data) => void call("pty.write", ptyId, data).catch(() => undefined));

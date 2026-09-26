@@ -1,8 +1,8 @@
-import { ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
-import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
+import { call, useActivity, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnostics } from "../components/Help.js";
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
@@ -116,6 +116,28 @@ function RailCard({ rail, onChange }: { rail: Settings["rail"]; onChange: (rail:
   );
 }
 
+/** Whether `gh` answered, as whom, or why not. */
+function GithubStatus() {
+  const t = useT();
+  const query = useActivity();
+  const [refresh, refreshing] = useAction(async () => {
+    await call("activity.get", true);
+    await query.reload();
+  });
+  const activity = query.data;
+  if (!activity || activity.source !== "github") return null;
+  return (
+    <div className="hstack" style={{ gap: 8 }}>
+      <span className="grow" style={activity.error ? { color: "var(--red)" } : undefined}>
+        {activity.error ?? (activity.login ? t("settings.activity.signedIn", { login: activity.login }) : "")}
+      </span>
+      <Button size="sm" icon={RefreshCw} busy={refreshing} onClick={() => void refresh()}>
+        {t("common.refresh")}
+      </Button>
+    </div>
+  );
+}
+
 export function SettingsView() {
   const t = useT();
   const { push } = useToast();
@@ -206,7 +228,7 @@ export function SettingsView() {
             <SquareTerminal size={13} /> {t("settings.defaults")}
           </div>
           <div className="card form-grid">
-            <Field label="Default engine" hint="Preselected for new agents, chats and Code launches.">
+            <Field label="Default engine" hint="Preselected for new agents and chats.">
               <Select value={current.defaultEngine} onChange={(event) => void patch({ defaultEngine: event.target.value })}>
                 {rows.map((engine) => (
                   <option key={engine.id} value={engine.id}>
@@ -231,11 +253,32 @@ export function SettingsView() {
           </div>
           <div className="card hstack">
             <span className="grow">
-              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label="Notify when a routine or task run finishes" />
+              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label="Notify when a routine or task run finishes, or a CLI is waiting while VibeForge is in the background" />
             </span>
             <Button size="sm" onClick={() => new Notification("VibeForge", { body: "Notifications reach your desktop." })}>
               Send a test
             </Button>
+          </div>
+
+          <div className="section-title">
+            <Activity size={13} /> {t("settings.insights")}
+          </div>
+          <div className="card vstack" style={{ gap: 12 }}>
+            <Field hint={t("settings.usageHint")}>
+              <Toggle checked={current.usage} onChange={(usage) => void patch({ usage })} label={t("settings.usage")} />
+            </Field>
+            <Field label={t("settings.activity")} hint={t(`settings.activityHint.${current.activity}`)}>
+              <Segmented
+                value={current.activity}
+                options={[
+                  { value: "off", label: t("settings.activity.off") },
+                  { value: "git", label: t("settings.activity.git") },
+                  { value: "github", label: "GitHub" },
+                ]}
+                onChange={(activity) => void patch({ activity })}
+              />
+            </Field>
+            {current.activity === "github" && <GithubStatus />}
           </div>
 
           <div className="section-title">

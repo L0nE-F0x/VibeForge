@@ -33,6 +33,7 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
   const sent: Array<{ ptyId: string; text: string }> = [];
   const killed: string[] = [];
   const notes: Array<{ title: string; body: string }> = [];
+  const recorded: Array<{ ptyId: string; runDir: string | null }> = [];
   let n = 0;
   let svc: TeamService;
   const host: DeskHost = {
@@ -49,6 +50,9 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
       // A killed process reports its exit a moment later, like the real host.
       setTimeout(() => void svc.onPtyExit(ptyId, 0, 1), 5);
     },
+    async record(ptyId, runDir) {
+      recorded.push({ ptyId, runDir });
+    },
     resolveBin: (bin) => (bin === "argy" || bin === "pasty" ? `/usr/bin/${bin}` : null),
     notify: (note) => notes.push(note),
     snapshotGit: async () => "git status --short\n M a.txt\n\ngit diff --stat\n a.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
@@ -56,7 +60,13 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
   };
   svc = new TeamService({ configRoot, dataRoot, appStartedAt: opts.appStartedAt ?? new Date(9 * INTERVAL), now: () => new Date(), host });
   const exit = (ptyId: string, code = 0) => svc.onPtyExit(ptyId, code, null);
-  return { svc, host, spawns, sent, killed, notes, place, configRoot, dataRoot, exit };
+  return { svc, host, spawns, sent, killed, notes, recorded, place, configRoot, dataRoot, exit };
+}
+
+/** Wait for work the service queues on its own (a shell's program changing). */
+async function until(check: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 200 && !check(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+  expect(check()).toBe(true);
 }
 
 async function agentIn(ctx: ReturnType<typeof setup>, engine = "argy") {
@@ -378,6 +388,74 @@ describe("runs", () => {
     await ctx.exit(sent.ptyId);
     await ctx.svc.whenIdle();
     expect(ctx.svc.getRun(sent.runId).run.status).toBe("stopped");
+    ctx.svc.close();
+  });
+
+  it("records a CLI typed into a workspace shell as a Code run, from start to prompt", async () => {
+    const ctx = setup();
+    const file = ctx.svc.addWorkspace(ctx.place);
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: file.workspaces[0].id });
+    const edited = ctx.host.snapshotGit;
+    ctx.host.snapshotGit = async () => "git status --short\n\n\ngit diff --stat\n";
+    ctx.svc.onPtyProgram(ptyId, ["vim", "notes.md"], ctx.place);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ctx.svc.listRuns()).toEqual([]);
+
+    ctx.svc.onPtyProgram(ptyId, ["/usr/bin/argy", "--model", "big"], ctx.place);
+    await until(() => Boolean(ctx.svc.listLive()[0].runId));
+    const [run] = ctx.svc.listRuns();
+    expect(run).toMatchObject({ origin: "code", engine: "argy", status: "running", live: true, ptyId, workspaceId: file.workspaces[0].id, gitStart: "abc1234" });
+    expect(run.argv).toEqual(["/usr/bin/argy", "--model", "big"]);
+    expect(ctx.recorded).toEqual([{ ptyId, runDir: run.dir }]);
+
+    ctx.host.snapshotGit = edited;
+    ctx.svc.onPtyProgram(ptyId, null);
+    await until(() => ctx.svc.getRun(run.id).run.status === "exited");
+    expect(ctx.recorded.at(-1)).toEqual({ ptyId, runDir: null });
+    expect(ctx.svc.listLive()[0]).toMatchObject({ ptyId, runId: null });
+    expect(ctx.svc.getRun(run.id).run).toMatchObject({ live: false, changes: "1 file changed, 1 insertion(+)" });
+    // It changed something, so it waits for review.
+    expect(ctx.svc.inbox().map((item) => item.id)).toEqual([run.id]);
+    ctx.svc.close();
+  });
+
+  it("forgets a CLI that came and went without changing anything, and finishes one whose shell closed", async () => {
+    const ctx = setup();
+    const file = ctx.svc.addWorkspace(ctx.place);
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: file.workspaces[0].id });
+    // The tree was already dirty before it started; the same snapshot after means it changed nothing.
+    ctx.host.snapshotGit = async () => "git status --short\n M old.txt\n\ngit diff --stat\n old.txt | 2 +-\n";
+    ctx.svc.onPtyProgram(ptyId, ["argy", "--version"], ctx.place);
+    await until(() => Boolean(ctx.svc.listLive()[0].runId));
+    const blip = ctx.svc.listRuns()[0];
+    ctx.svc.onPtyProgram(ptyId, null);
+    await until(() => ctx.svc.listRuns().length === 0);
+    expect(fs.existsSync(blip.dir)).toBe(false);
+
+    ctx.svc.onPtyProgram(ptyId, ["pasty"], ctx.place);
+    await until(() => Boolean(ctx.svc.listLive()[0]?.runId));
+    const run = ctx.svc.listRuns()[0];
+    await ctx.exit(ptyId);
+    expect(ctx.svc.getRun(run.id).run.status).toBe("exited");
+    // Watched as it happened and changed nothing: not for review.
+    expect(ctx.svc.inbox()).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("counts only a coding CLI as working", async () => {
+    const ctx = setup();
+    const file = ctx.svc.addWorkspace(ctx.place);
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: file.workspaces[0].id });
+    ctx.svc.onPtyActivity(ptyId, true);
+    expect(ctx.svc.listLive()[0].working).toBeFalsy();
+    ctx.svc.onPtyProgram(ptyId, ["argy"], ctx.place);
+    ctx.svc.onPtyActivity(ptyId, true);
+    expect(ctx.svc.listLive()[0].working).toBe(true);
+    ctx.svc.onPtyActivity(ptyId, false);
+    expect(ctx.svc.listLive()[0].working).toBe(false);
+    ctx.svc.onPtyActivity(ptyId, true);
+    ctx.svc.onPtyProgram(ptyId, null);
+    expect(ctx.svc.listLive()[0].working).toBe(false);
     ctx.svc.close();
   });
 

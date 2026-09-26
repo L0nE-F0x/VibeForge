@@ -24,6 +24,12 @@ export interface PtyProgram {
   cwd: string | null;
 }
 
+/** A terminal's output started flowing steadily (working) or stopped (quiet). */
+export interface PtyActivity {
+  ptyId: string;
+  working: boolean;
+}
+
 export interface PtySnapshot {
   ansi: string;
   seq: number;
@@ -46,6 +52,7 @@ export class PtySupervisor {
   readonly onData = new Set<(event: PtyData) => void>();
   readonly onExit = new Set<(event: PtyExit) => void>();
   readonly onProgram = new Set<(event: PtyProgram) => void>();
+  readonly onActivity = new Set<(event: PtyActivity) => void>();
   readonly onCrash = new Set<(message: string) => void>();
 
   async start(appRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -123,6 +130,9 @@ export class PtySupervisor {
         cwd: typeof msg.cwd === "string" ? msg.cwd : null,
       };
       for (const handler of this.onProgram) handler(event);
+    } else if (msg.event === "activity") {
+      const event: PtyActivity = { ptyId: String(msg.ptyId), working: msg.working === true };
+      for (const handler of this.onActivity) handler(event);
     }
   }
 
@@ -156,6 +166,11 @@ export class PtySupervisor {
 
   async kill(ptyId: string): Promise<void> {
     await this.request({ op: "kill", ptyId });
+  }
+
+  /** Start recording a shell's terminal into a run folder, or (null) stop and write its files. */
+  async record(ptyId: string, runDir: string | null): Promise<void> {
+    await this.request({ op: "record", ptyId, runDir });
   }
 
   async snapshot(ptyId: string): Promise<PtySnapshot> {

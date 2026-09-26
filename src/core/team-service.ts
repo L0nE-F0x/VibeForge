@@ -55,6 +55,8 @@ export interface DeskHost {
   /** Paste text into a live session and press Enter. */
   send(ptyId: string, text: string): Promise<void>;
   kill(ptyId: string): Promise<void>;
+  /** Record a shell's terminal into a run folder from now on, or (null) stop and write its files. */
+  record(ptyId: string, runDir: string | null): Promise<void>;
   resolveBin(bin: string): string | null;
   notify(note: { title: string; body: string; runId: string }): void;
   snapshotGit(cwd: string, startHead: string | null): Promise<string>;
@@ -162,7 +164,9 @@ export interface SchedulePreview {
 }
 
 const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
-const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat"];
+const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat", "code"];
+/** A CLI typed into a shell that ends this quickly without changing anything (`claude --version`) isn't kept. */
+const BLIP_MS = 5000;
 
 export const BLOCKER_TEXT: Record<ExecuteBlocker | "engine-missing", string> = {
   "missing-agent": "Assign an agent first.",
@@ -199,6 +203,11 @@ export class TeamService {
   private readonly listeners = new Set<(topics: Topic[]) => void>();
   private readonly exitWaiters = new Map<string, Array<() => void>>();
   private readonly finishing = new Set<Promise<void>>();
+  /** Per shell: the latest command line in its foreground, and the queue that records it. */
+  private readonly shellArgv = new Map<string, string[]>();
+  private readonly recordings = new Map<string, Promise<void>>();
+  /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
+  private readonly gitAtStart = new Map<string, string>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   private readonly settled: Promise<void>;
@@ -1083,12 +1092,13 @@ export class TeamService {
   }
 
   inbox(now: Date = this.now()): RunView[] {
+    // A Code session was watched as it happened; it only waits for review when it changed something.
     return this.listRuns({
       status: ["exited", "stopped", "failed"],
       unopened: true,
       origin: REVIEW_ORIGINS,
       since: new Date(now.getTime() - TWO_DAYS_MS).toISOString(),
-    });
+    }).filter((run) => run.origin !== "code" || (run.changes !== null && run.changes !== "No changes"));
   }
 
   getRun(id: string): RunBundle {
@@ -1373,8 +1383,125 @@ export class TeamService {
     const programEngineId = found?.engineId ?? null;
     const programCwd = found ? cwd : null;
     if (session.program === program && session.programEngineId === programEngineId && session.programCwd === programCwd) return;
-    this.live.set(ptyId, { ...session, program, programEngineId, programCwd });
+    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working: programEngineId ? session.working : false });
     this.emit("live");
+    if (argv) this.shellArgv.set(ptyId, argv);
+    if (session.programEngineId !== programEngineId) this.queueRecording(ptyId);
+  }
+
+  /** Only coding CLIs count as working; a dev server's logs are just a shell being busy. */
+  onPtyActivity(ptyId: string, working: boolean): void {
+    const session = this.live.get(ptyId);
+    if (!session || (session.kind === "shell" && !session.programEngineId && working)) return;
+    if (Boolean(session.working) === working) return;
+    this.live.set(ptyId, { ...session, working });
+    this.emit("live");
+  }
+
+  // ---------------------------------------------------------------- runs typed into a shell
+
+  /** Changes of program are handled one at a time per shell, in the order they happened. */
+  private queueRecording(ptyId: string): void {
+    const next = (this.recordings.get(ptyId) ?? Promise.resolve())
+      .then(() => this.syncRecording(ptyId))
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.recordings.get(ptyId) === next) this.recordings.delete(ptyId);
+      });
+    this.recordings.set(ptyId, next);
+  }
+
+  /** A shell in a workspace records a run while a coding CLI holds its foreground. */
+  private async syncRecording(ptyId: string): Promise<void> {
+    await this.settled;
+    const session = this.live.get(ptyId);
+    if (!session || session.kind !== "shell" || !session.workspaceId) return;
+    const want = session.programEngineId ?? null;
+    const current = session.runId ? this.store.getRun(session.runId) : null;
+    if (current?.status === "running" && current.engine === want) return;
+    if (current) await this.endShellRun(ptyId, current.id);
+    if (want) await this.startShellRun(ptyId, want);
+  }
+
+  private async startShellRun(ptyId: string, engineId: string): Promise<void> {
+    const session = this.live.get(ptyId);
+    const row = this.store.readEngineRows().find((item) => item.id === engineId);
+    if (!session || !row) return;
+    const workspace = this.workspaceById(session.workspaceId);
+    const cwd = session.programCwd || session.cwd;
+    const started = this.now();
+    const title = `${row.label} · ${workspace?.name ?? (path.basename(cwd) || cwd)}`;
+    const { id, dir } = allocateRunDir(this.options.dataRoot, started, title);
+    let gitStart: string | null = null;
+    try {
+      gitStart = await this.options.host.gitHead(cwd);
+      this.gitAtStart.set(id, await this.options.host.snapshotGit(cwd, gitStart));
+    } catch {
+      /* not a repo, or git is slow; the run is recorded without */
+    }
+    this.store.saveRun({
+      id,
+      origin: "code",
+      title,
+      agentId: null,
+      routineId: null,
+      taskId: null,
+      chatId: null,
+      workspaceId: session.workspaceId,
+      engine: row.id,
+      argv: this.shellArgv.get(ptyId) ?? [row.bin],
+      cwd,
+      prompt: "",
+      startedAt: started.toISOString(),
+      endedAt: null,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      stopRequested: false,
+      openedAt: null,
+      notifiedAt: null,
+      dir,
+      error: null,
+      changes: null,
+      gitStart,
+      continuedFrom: null,
+    });
+    try {
+      await this.options.host.record(ptyId, dir);
+    } catch {
+      /* the shell ended meanwhile; its exit is handled below */
+    }
+    const latest = this.live.get(ptyId);
+    if (!latest) {
+      // The terminal closed while the run was being set up: record what there is.
+      await this.finishRun(id, { exitCode: null, signal: null, status: "stopped" });
+      return;
+    }
+    this.ptyByRun.set(id, ptyId);
+    this.live.set(ptyId, { ...latest, runId: id });
+    this.emit("runs", "live");
+  }
+
+  private async endShellRun(ptyId: string, runId: string): Promise<void> {
+    try {
+      await this.options.host.record(ptyId, null);
+    } catch {
+      /* already stopped with the terminal */
+    }
+    this.ptyByRun.delete(runId);
+    const session = this.live.get(ptyId);
+    if (session?.runId === runId) this.live.set(ptyId, { ...session, runId: null });
+    await this.finishRun(runId, { exitCode: null, signal: null, status: "exited" });
+    this.dropBlip(runId);
+  }
+
+  private dropBlip(runId: string): void {
+    const run = this.store.getRun(runId);
+    if (!run?.endedAt || run.stopRequested) return;
+    const lasted = Date.parse(run.endedAt) - Date.parse(run.startedAt);
+    if (lasted >= BLIP_MS || (run.changes && run.changes !== "No changes")) return;
+    this.store.deleteRun(run);
+    this.emit("runs");
   }
 
   // ---------------------------------------------------------------- exits
@@ -1382,6 +1509,7 @@ export class TeamService {
   async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
+    this.shellArgv.delete(ptyId);
     try {
       if (!session?.runId) {
         this.emit("live");
@@ -1423,13 +1551,15 @@ export class TeamService {
       }
     }
     const latest = this.store.getRun(runId) ?? run;
+    const before = this.gitAtStart.get(runId);
+    this.gitAtStart.delete(runId);
     const finished = this.store.saveRun({
       ...latest,
       status: latest.stopRequested ? "stopped" : outcome.status,
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       endedAt: this.now().toISOString(),
-      changes: summarizeSnapshot(git),
+      changes: before !== undefined && before === git ? "No changes" : summarizeSnapshot(git),
     });
     if (finished.taskId) {
       const task = this.store.getTask(finished.taskId);

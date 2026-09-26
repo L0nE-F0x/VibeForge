@@ -13,7 +13,6 @@ import {
   Play,
   RotateCcw,
   Rows2,
-  Rocket,
   SquareTerminal,
   TerminalSquare,
   Trash2,
@@ -21,18 +20,19 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api.js";
-import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { tipProps } from "../components/Tooltip.js";
-import { Button, Empty, Input, Menu, MenuButton, Popover, Select, type MenuItem } from "../components/ui.js";
+import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
-import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
+import { setDictationTarget, type DictationTarget } from "../voice.js";
+import { trackLive, useAttention } from "../attention.js";
 
 interface Runtime {
   ptyId: string | null;
@@ -59,6 +59,20 @@ function zoneFor(event: React.DragEvent<HTMLElement>): DropZone {
   ];
   const [zone, distance] = edges.sort((a, b) => a[1] - b[1])[0];
   return distance < 0.28 ? zone : "center";
+}
+
+function useWindowFocused(): boolean {
+  const [focused, setFocused] = useState(() => document.hasFocus());
+  useEffect(() => {
+    const update = () => setFocused(document.hasFocus());
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+  return focused;
 }
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -96,12 +110,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [runtime, setRuntime] = useState<Record<string, Runtime>>({});
   const [focus, setFocus] = useState<Record<string, string>>({});
   const [side, setSide] = useState(() => readLocal<{ open: boolean; tab: "files" | "browser"; width: number }>("vf.code.side", { open: true, tab: "files", width: 320 }));
-  const [engineId, setEngineId] = useState("");
-  const [prompt, setPrompt] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState<Record<string, string | null>>({});
   const [dragPane, setDragPane] = useState<string | null>(null);
-  const [barOpen, setBarOpen] = useState(false);
   const [dragWorkspace, setDragWorkspace] = useState<{ id: string; over: number | null } | null>(null);
   const [workspaceMenu, setWorkspaceMenu] = useState<{ workspace: Workspace; anchor: HTMLElement } | null>(null);
   const terminals = useRef(new Map<string, TerminalHandle>());
@@ -116,9 +127,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   liveRef.current = live;
   const fontSizeRef = useRef(13);
   fontSizeRef.current = settings?.terminalFontSize ?? 13;
+  const attention = useAttention();
+  const windowFocused = useWindowFocused();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
-  const available = engines.filter((engine) => engine.available);
   // The view stays mounted so terminals survive mode switches, but nothing starts until it is opened.
   const [opened, setOpened] = useState(active);
   useEffect(() => {
@@ -138,13 +150,21 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (next !== currentId) setCurrentId(next);
   }, [route?.workspaceId, workspaces, file.data, currentId]);
 
-  useEffect(() => {
-    if (engineId && available.some((engine) => engine.id === engineId)) return;
-    const preferred = available.find((engine) => engine.id === settings?.defaultEngine) ?? available[0];
-    if (preferred) setEngineId(preferred.id);
-  }, [available, settings, engineId]);
-
   useEffect(() => writeLocal("vf.code.side", side), [side]);
+
+  // A CLI that goes quiet or finishes out of sight flags its workspace; looking at it clears that.
+  const onScreen = active && windowFocused ? (current?.id ?? null) : null;
+  useEffect(() => {
+    for (const note of trackLive(live, onScreen)) {
+      if (windowFocused) continue;
+      const name = workspaces.find((workspace) => workspace.id === note.workspaceId)?.name ?? "";
+      void call("app.notify", {
+        title: t(note.attention === "waiting" ? "notify.waiting" : "notify.done", { label: note.label }),
+        body: name,
+        workspaceId: note.workspaceId,
+      }).catch(() => undefined);
+    }
+  }, [live, onScreen]);
 
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => undefined);
   useEffect(() => {
@@ -166,7 +186,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }, []);
 
   const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { prompt?: string; continueSession?: boolean } = {}) => {
+    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}) => {
       if (starting.current.has(pane.id)) return;
       starting.current.add(pane.id);
       patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
@@ -185,7 +205,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
           const result = await call("code.engine", {
             workspaceId: workspace.id,
             engineId: pane.launch.engineId,
-            prompt: opts.prompt,
             continueSession: opts.continueSession,
             ...size,
           });
@@ -240,7 +259,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }, [route?.ptyId, current?.id, layouts[current?.id ?? ""]]);
 
   function engineOfTitle(title: string): string {
-    return engines.find((engine) => title.startsWith(engine.label))?.id ?? engineId;
+    return engines.find((engine) => title.startsWith(engine.label))?.id ?? settings?.defaultEngine ?? "";
   }
 
   function adopt(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch) {
@@ -256,14 +275,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }
 
   /** The first pane of a workspace whose panes were all closed. */
-  function openFirst(workspace: Workspace, launch: PaneLaunch, opts: { prompt?: string } = {}) {
+  function openFirst(workspace: Workspace, launch: PaneLaunch) {
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, pane);
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane, opts);
+    void startPane(workspace, pane);
   }
 
-  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch, opts: { prompt?: string } = {}) {
+  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch) {
     const layout = layoutsRef.current[workspace.id];
     if (!layout) return;
     const existing = panesOf(layout).find((pane) => pane.id === paneId);
@@ -271,7 +290,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir, ratio: 0.5, a: existing, b: pane }));
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane, opts);
+    void startPane(workspace, pane);
   }
 
   async function closePane(workspace: Workspace, pane: PaneNode) {
@@ -279,7 +298,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (state?.state === "live" && state.ptyId) {
       const ok = await confirm({
         title: t("code.close.title"),
-        body: state.runId ? t("code.close.bodyRun") : t("code.close.bodyShell"),
+        body: state.runId || live.find((session) => session.ptyId === state.ptyId)?.runId ? t("code.close.bodyRun") : t("code.close.bodyShell"),
         confirm: t("code.close.confirm"),
       });
       if (!ok) return;
@@ -306,7 +325,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     setZoomed((prev) => (prev[workspace.id] === pane.id ? { ...prev, [workspace.id]: null } : prev));
   }
 
-  function launchHere(workspace: Workspace, pane: PaneNode, launch: PaneLaunch, opts: { continueSession?: boolean; prompt?: string } = {}) {
+  function launchHere(workspace: Workspace, pane: PaneNode, launch: PaneLaunch, opts: { continueSession?: boolean } = {}) {
     const layout = layoutsRef.current[workspace.id];
     if (!layout) return;
     const next: PaneNode = { ...pane, launch };
@@ -314,46 +333,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     void startPane(workspace, next, opts);
   }
 
-  async function launchFromBar(override?: string) {
-    if (!current || !engineId) return;
-    const layout = layoutsRef.current[current.id];
-    const text = (override ?? prompt).trim();
-    if (layout === null) {
-      setPrompt("");
-      setBarOpen(false);
-      openFirst(current, { type: "engine", engineId }, { prompt: text || undefined });
-      return;
-    }
-    if (!layout) return;
-    const focusedId = focusRef.current[current.id] ?? panesOf(layout)[0].id;
-    const focused = panesOf(layout).find((pane) => pane.id === focusedId) ?? panesOf(layout)[0];
-    const state = runtimeRef.current[focused.id]?.state ?? "idle";
-    setPrompt("");
-    setBarOpen(false);
-    if (state === "idle" || state === "exited") {
-      launchHere(current, focused, { type: "engine", engineId }, { prompt: text || undefined });
-      return;
-    }
-    splitPane(current, focused.id, "row", { type: "engine", engineId }, { prompt: text || undefined });
-  }
-
   /** A new shell beside the focused pane, or the first one in an empty workspace. */
   function newTerminal(workspace: Workspace, dir: "row" | "col") {
     const layout = layoutsRef.current[workspace.id];
     if (layout === null) openFirst(workspace, { type: "shell" });
     else if (layout) splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
-  }
-
-  function openBar() {
-    setBarOpen(true);
-    requestAnimationFrame(() => launchInput.current?.focus());
-    setTimeout(() => launchInput.current?.focus(), 50);
-  }
-
-  function closeBar() {
-    setBarOpen(false);
-    setPrompt("");
-    if (current) terminals.current.get(focusRef.current[current.id] ?? "")?.focus();
   }
 
   shortcuts.current = (event: KeyboardEvent) => {
@@ -366,7 +350,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     else if (key === "d") newTerminal(current, "row");
     else if (key === "e") newTerminal(current, "col");
     else if (key === "w" && pane) void closePane(current, pane);
-    else if (key === "l") (barOpen ? closeBar() : openBar());
     else return;
     event.preventDefault();
   };
@@ -382,18 +365,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     return {
       label: `${title} · ${workspace.name}`,
       element: () => document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(pane.id)}"]`),
-      insert: (text) => {
-        const handle = terminals.current.get(pane.id);
-        if (handle) handle.paste(text);
-        else setPrompt((prev) => joinDictation(prev, text));
-      },
+      insert: (text) => terminals.current.get(pane.id)?.paste(text),
       submit: (text) => {
         const ptyId = livePty(pane.id);
         const handle = terminals.current.get(pane.id);
-        if (!ptyId || !handle) {
-          setPrompt((prev) => joinDictation(prev, text));
-          return;
-        }
+        if (!ptyId || !handle) return;
         void call("pty.send", ptyId, text).catch(() => undefined);
         handle.focus();
       },
@@ -427,33 +403,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     const state = runtimeRef.current[paneId];
     return state?.state === "live" ? state.ptyId : null;
   }
-
-  const launchInput = useRef<HTMLInputElement>(null);
-  // The terminal that was focused when the bar last launched, so its answer isn't mistaken for the new one's.
-  const launchedFrom = useRef<string | null>(null);
-  const launchDictation = useDictationTarget(() => ({
-    label: t("code.launchTarget", { engine: engineLabel(engineId), workspace: current?.name ?? "" }),
-    element: () => launchInput.current,
-    insert: (text) => {
-      setPrompt((prev) => joinDictation(prev, text));
-      setBarOpen(true);
-      launchInput.current?.focus();
-    },
-    submit: (text) => {
-      if (!current) return;
-      launchedFrom.current = livePty(focusRef.current[current.id] ?? "");
-      void launchFromBar(joinDictation(prompt, text));
-    },
-    send: () => void launchFromBar(),
-    clear: () => setPrompt(""),
-    // Launching focuses the pane it starts in; its terminal is the one that answers.
-    ptyId: () => {
-      if (!current) return null;
-      const ptyId = livePty(focusRef.current[current.id] ?? "");
-      return ptyId && ptyId !== launchedFrom.current ? ptyId : null;
-    },
-    words: () => (current ? workspaceWords(current) : []),
-  }));
 
   function insertPath(target: string) {
     if (!current) return;
@@ -545,7 +494,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     "sep",
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void removeWorkspace(workspace) },
   ];
-  const showBar = barOpen || prompt !== "";
 
   return (
     <div className="view" hidden={!active}>
@@ -570,7 +518,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   label={`${workspace.name} — ${tildify(workspace.path, home)}`}
                   selected={workspace.id === currentId}
                   onClick={() => select(workspace)}
-                  badge={liveCount(workspace.id) > 0 ? <span className="strip-count">{liveCount(workspace.id)}</span> : undefined}
+                  badge={<WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} strip />}
                 >
                   <span className="strip-initials">{workspace.name.slice(0, 2).toUpperCase()}</span>
                 </StripItem>
@@ -585,7 +533,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               return (
                 <div
                   key={workspace.id}
-                  className={`row workspace-row${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
+                  className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
                   role="button"
                   tabIndex={0}
                   aria-selected={workspace.id === currentId}
@@ -645,11 +593,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                     )}
                     <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
                   </span>
-                  {liveCount(workspace.id) > 0 && (
-                    <span className="ws-live" {...tipProps(t.count("code.running", liveCount(workspace.id)))}>
-                      {liveCount(workspace.id)}
-                    </span>
-                  )}
+                  <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
                   <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
                     <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
                   </span>
@@ -687,8 +631,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   {tildify(current.path, home)}
                 </button>
               </div>
-              <Button data-tour="launch" size="sm" variant="ghost" icon={Rocket} pressed={showBar} tip={t("code.launchTip")} kbd="Ctrl+Shift+L" onClick={() => (showBar ? closeBar() : openBar())} />
-              <span className="toolbar-sep" />
               <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd="Ctrl+Shift+D" onClick={() => newTerminal(current, "row")} />
               <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd="Ctrl+Shift+E" onClick={() => newTerminal(current, "col")} />
               <span className="toolbar-sep" />
@@ -706,14 +648,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         icon={SquareTerminal}
                         title={t("code.noPanes.title")}
                         actions={
-                          <>
-                            <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
-                              {t("code.newTerminal")}
-                            </Button>
-                            <Button icon={Rocket} kbd="Ctrl+Shift+L" onClick={openBar}>
-                              {t("code.launchTip")}
-                            </Button>
-                          </>
+                          <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
+                            {t("code.newTerminal")}
+                          </Button>
                         }
                       >
                         {t("code.noPanes.body")}
@@ -734,42 +671,47 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                           return node ? { ...prev, [workspace.id]: setRatioAt(node, path, ratio) } : prev;
                         })
                       }
-                      renderPane={(pane) => (
-                        <PaneView
-                          key={pane.id}
-                          pane={pane}
-                          runtime={runtime[pane.id]}
-                          program={live.find((session) => session.ptyId === runtime[pane.id]?.ptyId)?.program ?? null}
-                          engines={engines}
-                          active={active && visible}
-                          focused={focus[workspace.id] === pane.id}
-                          onFocus={() => {
-                            setDictationTarget(paneTarget(workspace, pane));
-                            setFocus((prev) => (prev[workspace.id] === pane.id ? prev : { ...prev, [workspace.id]: pane.id }));
-                          }}
-                          register={(handle) => {
-                            if (handle) terminals.current.set(pane.id, handle);
-                            else terminals.current.delete(pane.id);
-                          }}
-                          onExit={(text) => patchRuntime(pane.id, { state: "exited", exitText: text })}
-                          onStart={(launch, continueSession) => launchHere(workspace, pane, launch, { continueSession })}
-                          onSplit={(dir) => splitPane(workspace, pane.id, dir, { type: "shell" })}
-                          canZoom={paneCount > 1}
-                          onClose={() => void closePane(workspace, pane)}
-                          onReview={() => runtime[pane.id]?.runId && go({ view: "runs", runId: runtime[pane.id].runId! })}
-                          canMove={paneCount > 1 && !zoomedPane}
-                          dragging={dragPane}
-                          onDragPane={setDragPane}
-                          onDropPane={(sourceId, zone) => {
-                            setDragPane(null);
-                            const latest = layoutsRef.current[workspace.id];
-                            if (latest) updateLayout(workspace.id, movePane(latest, sourceId, pane.id, zone));
-                            setFocus((prev) => ({ ...prev, [workspace.id]: sourceId }));
-                          }}
-                          zoomed={zoomedPane === pane.id}
-                          onZoom={() => setZoomed((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] === pane.id ? null : pane.id }))}
-                        />
-                      )}
+                      renderPane={(pane) => {
+                        const session = live.find((item) => item.ptyId === runtime[pane.id]?.ptyId);
+                        // A launched CLI is its own run; a shell has one while a CLI typed into it is recorded.
+                        const runId = runtime[pane.id]?.runId ?? session?.runId ?? null;
+                        return (
+                          <PaneView
+                            key={pane.id}
+                            pane={pane}
+                            runtime={runtime[pane.id]}
+                            runId={runId}
+                            program={session?.program ?? null}
+                            engines={engines}
+                            active={active && visible}
+                            focused={focus[workspace.id] === pane.id}
+                            onFocus={() => {
+                              setDictationTarget(paneTarget(workspace, pane));
+                              setFocus((prev) => (prev[workspace.id] === pane.id ? prev : { ...prev, [workspace.id]: pane.id }));
+                            }}
+                            register={(handle) => {
+                              if (handle) terminals.current.set(pane.id, handle);
+                              else terminals.current.delete(pane.id);
+                            }}
+                            onExit={(text) => patchRuntime(pane.id, { state: "exited", exitText: text })}
+                            onStart={(launch, continueSession) => launchHere(workspace, pane, launch, { continueSession })}
+                            canZoom={paneCount > 1}
+                            onClose={() => void closePane(workspace, pane)}
+                            onReview={() => runId && go({ view: "runs", runId })}
+                            canMove={paneCount > 1 && !zoomedPane}
+                            dragging={dragPane}
+                            onDragPane={setDragPane}
+                            onDropPane={(sourceId, zone) => {
+                              setDragPane(null);
+                              const latest = layoutsRef.current[workspace.id];
+                              if (latest) updateLayout(workspace.id, movePane(latest, sourceId, pane.id, zone));
+                              setFocus((prev) => ({ ...prev, [workspace.id]: sourceId }));
+                            }}
+                            zoomed={zoomedPane === pane.id}
+                            onZoom={() => setZoomed((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] === pane.id ? null : pane.id }))}
+                          />
+                        );
+                      }}
                     />
                   </div>
                 );
@@ -796,36 +738,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               )}
             </div>
 
-            <div className="launch-bar" hidden={!showBar} onFocusCapture={launchDictation.onFocusCapture}>
-              <div style={{ width: 170, flex: "none" }}>
-                <Select value={engineId} onChange={(event) => setEngineId(event.target.value)} disabled={!available.length}>
-                  {available.length === 0 && <option value="">{t("code.noClis")}</option>}
-                  {available.map((engine) => (
-                    <option key={engine.id} value={engine.id}>
-                      {engine.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <Input
-                ref={launchInput}
-                value={prompt}
-                placeholder={t("code.launchPlaceholder", { engine: engineLabel(engineId), workspace: current.name })}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void launchFromBar();
-                  if (event.key === "Escape") {
-                    event.stopPropagation();
-                    closeBar();
-                  }
-                }}
-              />
-              <MicButton target={launchDictation.target} />
-              <Button variant="primary" icon={Rocket} disabled={!engineId} onClick={() => void launchFromBar()}>
-                {t("code.launch")}
-              </Button>
-              <Button size="sm" variant="ghost" icon={X} tip={t("common.closeEsc")} onClick={closeBar} />
-            </div>
           </div>
         )}
       </div>
@@ -836,6 +748,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 function PaneView({
   pane,
   runtime,
+  runId,
   program,
   engines,
   active,
@@ -844,7 +757,6 @@ function PaneView({
   register,
   onExit,
   onStart,
-  onSplit,
   canZoom,
   onClose,
   onReview,
@@ -857,6 +769,8 @@ function PaneView({
 }: {
   pane: PaneNode;
   runtime: Runtime | undefined;
+  /** The run this pane is recording, if any. */
+  runId: string | null;
   /** What a shell is running in its foreground, when it isn't at its prompt. */
   program: string | null;
   engines: Engine[];
@@ -866,7 +780,6 @@ function PaneView({
   register: (handle: TerminalHandle | null) => void;
   onExit: (text: string) => void;
   onStart: (launch: PaneLaunch, continueSession?: boolean) => void;
-  onSplit: (dir: "row" | "col") => void;
   canZoom: boolean;
   onClose: () => void;
   onReview: () => void;
@@ -884,15 +797,6 @@ function PaneView({
   const title = pane.launch.type === "shell" ? t("common.shell") : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
   const shown = state === "live" && program ? program : title;
-  const available = engines.filter((item) => item.available);
-  const menu: Array<MenuItem | "sep"> = [
-    { label: t("pane.splitRight"), icon: Columns2, hint: "Ctrl+Shift+D", onSelect: () => onSplit("row") },
-    { label: t("pane.splitDown"), icon: Rows2, hint: "Ctrl+Shift+E", onSelect: () => onSplit("col") },
-    ...(canZoom || zoomed ? [{ label: zoomed ? t("pane.restore") : t("pane.maximize"), icon: zoomed ? Minimize2 : Maximize2, hint: "Ctrl+Shift+M", onSelect: onZoom }] : []),
-    "sep",
-    { label: t("pane.runHere", { title: t("common.shell") }), icon: TerminalSquare, onSelect: () => onStart({ type: "shell" }) },
-    ...available.map((item) => ({ label: t("pane.runHere", { title: item.label }), icon: Play, onSelect: () => onStart({ type: "engine", engineId: item.id }) })),
-  ];
 
   return (
     <div className={`pane${focused ? " focused" : ""}${zoomed ? " is-zoomed" : ""}${dragging === pane.id ? " is-dragging" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
@@ -924,7 +828,7 @@ function PaneView({
         )}
         <span className="pane-title truncate">{shown}</span>
         {shown !== title && <span className="pane-sub truncate">{title}</span>}
-        {runtime?.runId && (
+        {runId && (
           <button type="button" className="pane-run-link" onClick={onReview} {...tipProps(t("pane.openRun"))}>
             {t("pane.run")}
           </button>
@@ -932,7 +836,9 @@ function PaneView({
         {zoomed && <span className="chip accent">{t("pane.maximized")}</span>}
         <span className="grow" />
         <div className="pane-actions">
-          <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} tip={t("pane.more")} items={menu} />
+          {(canZoom || zoomed) && (
+            <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />
+          )}
           <Button size="sm" variant="ghost" icon={X} tip={t("pane.close")} kbd="Ctrl+Shift+W" onClick={onClose} />
         </div>
       </div>

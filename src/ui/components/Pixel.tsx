@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { tipProps } from "./Tooltip.js";
 import { mark, scatter, shade, wordmark, type Art } from "../../shared/pixel.js";
 
 // Pixel art in the Omarchy manner. Shades come from CSS (--px-0 … --px-3, derived from the
@@ -88,5 +89,47 @@ export function BlockBars({ values, rows = 6, label }: { values: number[]; rows?
         );
       })}
     </div>
+  );
+}
+
+/** GitHub's four steps: quartiles of the busy days, so one huge day doesn't wash out the rest. */
+export function contributionLevels(counts: readonly number[]): (count: number) => 0 | 1 | 2 | 3 | 4 {
+  const busy = counts.filter((count) => count > 0).sort((a, b) => a - b);
+  const at = (q: number) => busy[Math.min(busy.length - 1, Math.floor(q * busy.length))] ?? 0;
+  const [q1, q2, q3] = [at(0.25), at(0.5), at(0.75)];
+  return (count) => (count <= 0 ? 0 : count <= q1 ? 1 : count <= q2 ? 2 : count <= q3 ? 3 : 4);
+}
+
+/**
+ * A year of days as pixels, a column per week from Sunday: the contribution graph, drawn in the
+ * theme's shades. The busiest days take the brightest one.
+ */
+export function ContributionGraph({ days, cell = 12, size = 9, tip, className }: {
+  days: ReadonlyArray<{ day: string; count: number }>;
+  cell?: number;
+  size?: number;
+  tip: (day: string, count: number) => string;
+  className?: string;
+}) {
+  const level = useMemo(() => contributionLevels(days.map((item) => item.count)), [days]);
+  const weeks = Math.ceil(days.length / 7);
+  return (
+    <svg className={className} viewBox={`0 0 ${weeks * cell - (cell - size)} ${7 * cell - (cell - size)}`} shapeRendering="crispEdges">
+      {days.map((item, index) => {
+        const step = level(item.count);
+        return (
+          <rect
+            style={{ animationDelay: `${Math.round((weeks - Math.floor(index / 7)) * 14)}ms` }}
+            key={item.day}
+            x={Math.floor(index / 7) * cell}
+            y={(index % 7) * cell}
+            width={size}
+            height={size}
+            className={step ? `px-s${4 - step}` : "px-none"}
+            {...tipProps(tip(item.day, item.count))}
+          />
+        );
+      })}
+    </svg>
   );
 }

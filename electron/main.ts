@@ -13,6 +13,8 @@ import { TeamService, type DeskHost } from "../src/core/team-service.js";
 import { resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
 import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
+import { UsageScanner } from "../src/core/usage.js";
+import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -111,13 +113,15 @@ function focusWindow(): void {
   win.focus();
 }
 
-function notify(note: { title: string; body: string; runId: string }): void {
+/** A desktop notification; clicking it brings VibeForge up on the run or workspace it is about. */
+function notify(note: { title: string; body: string; runId?: string; workspaceId?: string }): void {
   if (Notification.isSupported()) {
     const notification = new Notification({ title: note.title, body: note.body, icon: iconPath() });
     notifications.add(notification);
     notification.on("click", () => {
       focusWindow();
-      send("open-run", { runId: note.runId });
+      if (note.runId) send("open-run", { runId: note.runId });
+      else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
     });
     notification.on("close", () => notifications.delete(notification));
     notification.show();
@@ -143,6 +147,7 @@ const host: DeskHost = {
   },
   send: (ptyId, text) => supervisor.send(ptyId, text),
   kill: (ptyId) => supervisor.kill(ptyId),
+  record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
   resolveBin: (bin) => whichBin(bin),
   notify,
   snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
@@ -150,6 +155,30 @@ const host: DeskHost = {
 };
 
 const dock = new Dock(() => win, (state) => send("dock", state));
+
+const usage = new UsageScanner(os.homedir());
+
+// The graph changes slowly: git is read again after 5 minutes, GitHub after 30.
+let activity: { key: string; at: number; value: Promise<Activity> } | null = null;
+
+function activityFor(source: ActivitySource, fresh: boolean): Promise<Activity> | null {
+  if (source === "off" || !service) return null;
+  const paths = service.listWorkspaces().workspaces.map((workspace) => workspace.path);
+  // Adding or removing a workspace changes what git counts.
+  const key = source === "github" ? source : `${source}:${paths.join("\n")}`;
+  const maxAge = source === "github" ? 30 * 60_000 : 5 * 60_000;
+  if (!fresh && activity?.key === key && Date.now() - activity.at < maxAge) return activity.value;
+  const now = new Date();
+  const value =
+    source === "github"
+      ? githubActivity(now).then((result) => {
+          log.info(result.error ? `GitHub activity not read: ${result.error}` : "GitHub activity read");
+          return result;
+        })
+      : gitActivity(paths, now);
+  activity = { key, at: Date.now(), value };
+  return value;
+}
 
 const updater = new Updater({
   current: app.getVersion(),
@@ -231,6 +260,12 @@ function handlers(): Handlers {
       app.quit();
     },
     "app.copyText": (text) => clipboard.writeText(text),
+    "app.clipboard": () => ({ text: clipboard.readText(), image: clipboard.availableFormats().some((format) => format.startsWith("image/")) }),
+    "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
+    "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
+    "app.notify": (note) => {
+      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId });
+    },
     "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
 
     "updates.get": () => updater.get(),
@@ -488,6 +523,7 @@ supervisor.onExit.add((event) => {
   void service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
 });
 supervisor.onProgram.add((event) => service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
+supervisor.onActivity.add((event) => service?.onPtyActivity(event.ptyId, event.working));
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
   send("host-crash", message);

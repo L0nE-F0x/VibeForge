@@ -372,6 +372,14 @@ button:disabled {
   box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
+.rail-dot.waiting {
+  animation: needs-you 1.4s ease-in-out infinite;
+}
+
+.rail-dot.done {
+  background: var(--green);
+}
+
 .rail-foot {
   margin-top: auto;
   display: flex;
@@ -1779,24 +1787,6 @@ button:disabled {
   min-width: 0;
 }
 
-.launch-bar {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--bg-dark);
-}
-
-.launch-bar[hidden] {
-  display: none;
-}
-
-.launch-bar .input {
-  height: 32px;
-}
-
 .toolbar-sep {
   width: 1px;
   height: 18px;
@@ -1958,10 +1948,54 @@ button:disabled {
   background: var(--hover-fill);
 }
 
-.workspace-row .ws-live {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  color: var(--accent);
+/* A workspace's terminals as one pixel: open, working, waiting for you, finished. */
+.ws-state {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin: 0 3px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.ws-state.working {
+  background: var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.ws-state.waiting {
+  width: 9px;
+  height: 9px;
+  margin: 0 2px;
+  background: var(--accent-2);
+  animation: needs-you 1.4s ease-in-out infinite;
+}
+
+.ws-state.done {
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent);
+}
+
+.ws-state.in-strip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  margin: 0;
+  outline: 2px solid var(--bg-dark);
+}
+
+.needs-you {
+  border-color: var(--focus-line) !important;
+  box-shadow: inset 2px 0 0 var(--accent-2), 0 0 22px -10px var(--accent-2);
+}
+
+@keyframes needs-you {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 35%, transparent), 0 0 10px color-mix(in srgb, var(--accent-2) 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-2) 8%, transparent), 0 0 4px color-mix(in srgb, var(--accent-2) 30%, transparent);
+  }
 }
 
 /* ------------------------------------------------------------------ board */
@@ -2071,6 +2105,66 @@ button:disabled {
   pointer-events: none;
   opacity: 0.55;
   mask-image: linear-gradient(90deg, transparent, #000 45%);
+}
+
+/* A year of contributions where the decorative drift used to be, newest week on the right. */
+.home-graph {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  width: min(630px, 44%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.home-graph .graph {
+  width: 100%;
+  height: auto;
+  mask-image: linear-gradient(90deg, transparent, #000 30%);
+}
+
+.home-graph rect {
+  animation: graph-in 0.5s ease-out both;
+}
+
+.home-graph rect.px-none {
+  fill: color-mix(in srgb, var(--fg-3) 16%, transparent);
+}
+
+.home-graph rect:hover {
+  stroke: var(--accent-2);
+  stroke-width: 1.5px;
+}
+
+.home-graph-caption {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+}
+
+.home-graph-caption button {
+  color: var(--fg-2);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.home-graph-caption button:hover {
+  color: var(--accent);
+}
+
+@keyframes graph-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .home-graph {
+    display: none;
+  }
 }
 
 .home-hero .wordmark {
@@ -2197,6 +2291,102 @@ button:disabled {
   background: var(--accent-2);
 }
 
+/* Token usage: squares under the rail's live button, rows in its popover. */
+.usage-meter {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.usage-meter i {
+  width: 4px;
+  height: 4px;
+  background: color-mix(in srgb, var(--fg-3) 22%, transparent);
+}
+
+.usage-meter i.on {
+  background: var(--accent);
+}
+
+.usage-meter.hot i.on {
+  background: var(--accent-2);
+}
+
+.usage-panel {
+  width: 330px;
+  padding-bottom: 4px;
+}
+
+.usage-source {
+  padding: 7px 9px 8px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-head b {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.usage-sub {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.usage-sub .block-bars {
+  width: 84px;
+  flex: none;
+  padding-top: 4px;
+  gap: 2px;
+}
+
+.usage-sub .block-col i {
+  height: 3px;
+}
+
+.usage-limit {
+  display: grid;
+  grid-template-columns: auto minmax(40px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+.usage-track {
+  height: 5px;
+  background: color-mix(in srgb, var(--fg-3) 18%, transparent);
+}
+
+.usage-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.usage-limit.hot .usage-track i {
+  background: var(--accent-2);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-2) 60%, transparent);
+}
+
+.usage-note {
+  padding: 6px 9px 4px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
@@ -2281,39 +2471,28 @@ button:disabled {
   font-size: var(--fs-sm);
 }
 
-/* The CLIs on this machine, set like `which` output. */
-.which {
-  border: 1px solid var(--line);
-  background: var(--bg-deep);
-  padding: 10px 12px;
-  font-size: var(--fs-sm);
-  line-height: 1.75;
+/* The CLIs on this machine, one chip each; the path is in the tooltip. */
+.cli-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.which .prompt {
-  color: var(--fg-3);
-}
-
-.which .prompt b {
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.which-row {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 8.5em) minmax(0, 1fr);
+.cli-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
 }
 
-.which-row .pixel {
+.cli-chip .pixel {
   width: 6px;
   height: 6px;
   background: var(--green);
-}
-
-.which-row .path {
-  color: var(--fg-3);
 }
 
 .workspace-tiles {

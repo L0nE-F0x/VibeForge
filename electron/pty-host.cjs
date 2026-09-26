@@ -21,6 +21,12 @@ const PASTE_MAX_WAIT_MS = 20000;
 const ENTER_AFTER_PASTE_MS = 150;
 const EXIT_SETTLE_MS = 120;
 const PROGRAM_POLL_MS = 1000;
+// A terminal is "working" while the text on its screen keeps changing, and quiet once it has
+// held still for a few seconds: a coding CLI's spinner ticks while it thinks and stops when it
+// wants you. Rows are compared as text, so a CLI that redraws the same screen stays quiet.
+const ACTIVITY_TICK_MS = 1000;
+const WORK_ROWS = 3;
+const QUIET_TICKS = 3;
 
 /** @type {Map<string, any>} */
 const sessions = new Map();
@@ -52,43 +58,105 @@ function signalGroup(pid, signal) {
 
 // ------------------------------------------------------------------ scrollback file
 
-function openScrollback(session) {
-  if (!session.runDir) return;
-  const file = path.join(session.runDir, "scrollback.txt");
+// A session's own run folder and a recording inside a shell (below) both keep these files; each
+// is a "sink": { runDir, mirror, serializer, scrollFd, scrollBytes, scrollFile }.
+
+function openScrollback(sink) {
+  if (!sink.runDir) return;
+  const file = path.join(sink.runDir, "scrollback.txt");
   try {
-    session.scrollFd = fs.openSync(file, "a");
-    session.scrollBytes = fs.fstatSync(session.scrollFd).size;
-    session.scrollFile = file;
+    sink.scrollFd = fs.openSync(file, "a");
+    sink.scrollBytes = fs.fstatSync(sink.scrollFd).size;
+    sink.scrollFile = file;
   } catch (error) {
     log("scrollback:", error.message);
-    session.scrollFd = null;
+    sink.scrollFd = null;
   }
 }
 
-function appendScrollback(session, data) {
-  if (session.scrollFd == null) return;
+function appendScrollback(sink, data) {
+  if (sink.scrollFd == null) return;
   try {
     const bytes = Buffer.from(data, "utf8");
-    fs.writeSync(session.scrollFd, bytes);
-    session.scrollBytes += bytes.length;
-    if (session.scrollBytes > MAX_SCROLLBACK_BYTES + SCROLLBACK_SLACK_BYTES) trimScrollback(session);
+    fs.writeSync(sink.scrollFd, bytes);
+    sink.scrollBytes += bytes.length;
+    if (sink.scrollBytes > MAX_SCROLLBACK_BYTES + SCROLLBACK_SLACK_BYTES) trimScrollback(sink);
   } catch (error) {
     log("scrollback:", error.message);
   }
 }
 
 /** Keep the last 2 MB. Trimming in 512 KB steps keeps the rewrite rare. */
-function trimScrollback(session) {
-  fs.closeSync(session.scrollFd);
-  const size = fs.statSync(session.scrollFile).size;
+function trimScrollback(sink) {
+  fs.closeSync(sink.scrollFd);
+  const size = fs.statSync(sink.scrollFile).size;
   const keep = Math.min(size, MAX_SCROLLBACK_BYTES);
   const buffer = Buffer.alloc(keep);
-  const fd = fs.openSync(session.scrollFile, "r");
+  const fd = fs.openSync(sink.scrollFile, "r");
   fs.readSync(fd, buffer, 0, keep, size - keep);
   fs.closeSync(fd);
-  fs.writeFileSync(session.scrollFile, buffer);
-  session.scrollFd = fs.openSync(session.scrollFile, "a");
-  session.scrollBytes = keep;
+  fs.writeFileSync(sink.scrollFile, buffer);
+  sink.scrollFd = fs.openSync(sink.scrollFile, "a");
+  sink.scrollBytes = keep;
+}
+
+/** The final screen and a text transcript, once the mirror has caught up; then the scrollback closes. */
+function closeSink(sink, done) {
+  sink.mirror.write("", () => {
+    if (sink.runDir) {
+      try {
+        fs.writeFileSync(path.join(sink.runDir, "terminal.ansi"), sink.serializer.serialize({ scrollback: MIRROR_SCROLLBACK_LINES }));
+        fs.writeFileSync(path.join(sink.runDir, "transcript.txt"), transcriptOf(sink.mirror));
+      } catch (error) {
+        log("artifacts:", error.message);
+      }
+    }
+    if (sink.scrollFd != null) {
+      try {
+        fs.closeSync(sink.scrollFd);
+      } catch {
+        /* closed */
+      }
+      sink.scrollFd = null;
+    }
+    done();
+  });
+}
+
+// ------------------------------------------------------------------ recording a shell
+
+// `claude` typed into a shell is recorded like a launched run: from the moment it takes the
+// foreground until the prompt comes back, into its own run folder, through a second mirror
+// that starts from what the screen showed then.
+
+function startRecording(session, runDir) {
+  return stopRecording(session).then(
+    () =>
+      new Promise((resolve) => {
+        session.mirror.write("", () => {
+          const mirror = new Terminal({ cols: session.cols, rows: session.rows, scrollback: MIRROR_SCROLLBACK_LINES, allowProposedApi: true });
+          const serializer = new SerializeAddon();
+          mirror.loadAddon(serializer);
+          mirror.write(session.serializer.serialize({ scrollback: 0 }));
+          const rec = { runDir, mirror, serializer, scrollFd: null, scrollBytes: 0, scrollFile: null };
+          openScrollback(rec);
+          session.rec = rec;
+          resolve();
+        });
+      }),
+  );
+}
+
+function stopRecording(session) {
+  const rec = session.rec;
+  if (!rec) return Promise.resolve();
+  session.rec = null;
+  return new Promise((resolve) =>
+    closeSink(rec, () => {
+      rec.mirror.dispose();
+      resolve();
+    }),
+  );
 }
 
 // ------------------------------------------------------------------ text from the mirror
@@ -106,8 +174,7 @@ function bufferText(buffer) {
   return lines.join("\n");
 }
 
-function transcriptOf(session) {
-  const mirror = session.mirror;
+function transcriptOf(mirror) {
   const normal = bufferText(mirror.buffer.normal);
   if (mirror.buffer.active.type !== "alternate") return normal ? `${normal}\n` : "";
   const screen = bufferText(mirror.buffer.alternate);
@@ -206,6 +273,12 @@ function spawnSession(msg) {
     scrollFd: null,
     scrollBytes: 0,
     scrollFile: null,
+    rec: null,
+    dirty: false,
+    screen: null,
+    changes: 0,
+    stillTicks: 0,
+    working: false,
   };
   openScrollback(session);
   sessions.set(id, session);
@@ -216,7 +289,12 @@ function spawnSession(msg) {
     session.batch.push(data);
     mirror.write(data);
     appendScrollback(session, data);
+    if (session.rec) {
+      session.rec.mirror.write(data);
+      appendScrollback(session.rec, data);
+    }
     notePasteActivity(session);
+    session.dirty = true;
     if (!session.flushTimer) session.flushTimer = setTimeout(() => flush(session), FLUSH_MS);
   });
 
@@ -235,28 +313,16 @@ function finish(session, exitCode, signal) {
   for (const timer of session.killTimers) clearTimeout(timer);
   if (session.paste) clearPasteTimers(session.paste);
   flush(session);
-  session.mirror.write("", () => {
-    if (session.runDir) {
-      try {
-        fs.writeFileSync(path.join(session.runDir, "terminal.ansi"), session.serializer.serialize({ scrollback: MIRROR_SCROLLBACK_LINES }));
-        fs.writeFileSync(path.join(session.runDir, "transcript.txt"), transcriptOf(session));
-      } catch (error) {
-        log("artifacts:", error.message);
-      }
-    }
-    if (session.scrollFd != null) {
-      try {
-        fs.closeSync(session.scrollFd);
-      } catch {
-        /* closed */
-      }
-    }
-    send({ event: "exit", ptyId: session.id, exitCode: exitCode ?? null, signal: signal || null });
-    sessions.delete(session.id);
-    session.mirror.dispose();
-    const waiters = session.exitWaiters || [];
-    for (const wake of waiters) wake();
-  });
+  // A recording in progress is written before the exit is reported, so its run finds its files.
+  stopRecording(session)
+    .then(() => new Promise((resolve) => closeSink(session, resolve)))
+    .then(() => {
+      send({ event: "exit", ptyId: session.id, exitCode: exitCode ?? null, signal: signal || null });
+      sessions.delete(session.id);
+      session.mirror.dispose();
+      const waiters = session.exitWaiters || [];
+      for (const wake of waiters) wake();
+    });
 }
 
 function killSession(session) {
@@ -313,6 +379,8 @@ async function handle(msg) {
           try {
             session.term.resize(cols, rows);
             session.mirror.resize(cols, rows);
+            if (session.rec) session.rec.mirror.resize(cols, rows);
+            session.reflowed = true;
           } catch {
             /* the pty closed underneath us */
           }
@@ -324,6 +392,13 @@ async function handle(msg) {
     case "kill": {
       const session = sessions.get(msg.ptyId);
       if (session) killSession(session);
+      reply(msg.reqId, { ok: true });
+      return;
+    }
+    case "record": {
+      const session = need(msg);
+      if (typeof msg.runDir === "string" && msg.runDir) await startRecording(session, msg.runDir);
+      else await stopRecording(session);
       reply(msg.reqId, { ok: true });
       return;
     }
@@ -361,6 +436,56 @@ async function handle(msg) {
       throw new Error(`Unknown op ${msg.op}`);
   }
 }
+
+// ------------------------------------------------------------------ working or quiet
+
+function screenRows(session) {
+  const buffer = session.mirror.buffer.active;
+  const rows = [];
+  for (let index = 0; index < session.rows; index += 1) rows.push(buffer.getLine(buffer.baseY + index)?.translateToString(true) ?? "");
+  return { rows, base: buffer.baseY };
+}
+
+/** Rows whose text differs from the last look, allowing for lines that scrolled up since. */
+function changedRows(session) {
+  if (!session.dirty) return 0;
+  session.dirty = false;
+  const now = screenRows(session);
+  const before = session.screen;
+  session.screen = now;
+  // The first look, or the first since a resize reflowed everything, is only a baseline.
+  if (!before || before.rows.length !== now.rows.length || session.reflowed) {
+    session.reflowed = false;
+    return 0;
+  }
+  const shift = now.base - before.base;
+  let changed = 0;
+  for (let index = 0; index < now.rows.length; index += 1) if (now.rows[index] !== before.rows[index + shift]) changed += 1;
+  return changed;
+}
+
+setInterval(() => {
+  for (const session of sessions.values()) {
+    if (session.exited) continue;
+    const changed = changedRows(session);
+    if (changed > 0) {
+      session.stillTicks = 0;
+      session.changes += changed;
+      if (!session.working && session.changes >= WORK_ROWS) {
+        session.working = true;
+        send({ event: "activity", ptyId: session.id, working: true });
+      }
+      continue;
+    }
+    session.stillTicks += 1;
+    if (session.stillTicks < QUIET_TICKS) continue;
+    session.changes = 0;
+    if (session.working) {
+      session.working = false;
+      send({ event: "activity", ptyId: session.id, working: false });
+    }
+  }
+}, ACTIVITY_TICK_MS).unref();
 
 // ------------------------------------------------------------------ foreground program
 

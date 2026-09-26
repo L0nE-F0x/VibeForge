@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { DeskEvents, Method, MethodArgs, MethodResult, Topic, VibeForgeBridge } from "../shared/api.js";
+import type { DeskEvents, Method, MethodArgs, MethodResult, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
 
 declare global {
   interface Window {
@@ -226,6 +226,18 @@ export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox
 export const useLive = () => useQuery("live", ["live"], () => call("live.list"));
 export const useAppInfo = () => useQuery("app-info", [], () => call("app.info"));
 export const useUpdate = () => useQuery("updates", ["updates"], () => call("updates.get"));
+export const useActivity = () => useQuery("activity", ["settings", "workspaces"], () => call("activity.get"));
+
+/** Token usage from the CLIs' logs, read again every minute and whenever a run ends. */
+export function useUsage(): Query<UsageSummary | null> {
+  const query = useQuery("usage", ["settings", "runs"], () => call("usage.summary"));
+  const { reload } = query;
+  useEffect(() => {
+    const timer = setInterval(() => void reload(), 60_000);
+    return () => clearInterval(timer);
+  }, [reload]);
+  return query;
+}
 export const useChats = (agentId: string | null | undefined) =>
   useQuery(`chats:${agentId === undefined ? "*" : (agentId ?? "none")}`, ["chats", "runs", "live"], () =>
     call("chats.list", agentId === undefined ? {} : { agentId }),

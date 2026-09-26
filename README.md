@@ -59,14 +59,18 @@ npm run build       # production build
 
 | View | What it is for |
 | --- | --- |
-| **Home** | What's live, what finished and needs review, what fires next. |
+| **Home** | What's live, what finished and needs review, what fires next, and a year of your commits drawn in pixels. |
 | **Agents** | Named teammates with a brief, memory, skills and allowed folders. Chats with an agent are real terminals. Switch its engine from Claude to Codex to Grok and the teammate stays the same. |
-| **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser dock for your dev server. Type `claude`, `codex` or any CLI in a terminal and its title bar says so; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> hands a CLI a whole job as a recorded run instead. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. Layouts are remembered per workspace. |
+| **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser dock for your dev server. Type `claude`, `codex` or any CLI in a terminal: its title bar says so, and from the moment it starts until you're back at the prompt it is recorded as a run (transcript and git diff). A workspace whose CLI goes quiet or finishes while you're looking elsewhere glows until you open it. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. Layouts are remembered per workspace. |
 | **Chat** | Throwaway conversations in an empty scratch folder. |
 | **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. |
 | **Routines** | Cron or interval schedules that open a fresh agent run while VibeForge is open. Missed slots are shown, never replayed. |
 | **Skills** | Reusable `SKILL.md` procedures you install on agents. |
-| **Runs** | Every process VibeForge started: final screen, transcript, prompt, and the diff since it began. **Continue** reopens the exact session. |
+| **Runs** | Every CLI you typed into a terminal and every process VibeForge started: final screen, transcript, prompt, and the diff since it began. **Continue** reopens the exact session. |
+
+The pulse at the bottom of the rail counts the terminals running and, underneath, today's tokens: click it for each CLI's usage today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI already keep on this machine (and Codex's plan limits, when it records them). Nothing is sent anywhere; Settings → Usage and activity turns it off.
+
+The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
 It looks like the rest of Omarchy: square corners, JetBrains Mono with Geist headings, flat panels, and pixel art in place of glows. It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes, pixel wordmark included.
 
@@ -105,7 +109,7 @@ sudo pacman -S whisper-cpp      # listening
 uv tool install piper-tts       # talking back (or the AUR's piper-tts-bin)
 ```
 
-**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, a terminal in Code, or the launch bar (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>). They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
+**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, or a terminal in Code. They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
 
 **Talk to an agent by name.** Start with it: *"Atlas, add tests for the scheduler."* goes to Atlas's latest chat (a new one if it has none), whatever has focus.
 
@@ -145,7 +149,7 @@ Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own
 
 ## Keys
 
-<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> workspaces · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close it · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> give a CLI a job · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
+<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> workspaces · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close it · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selection (with nothing selected it interrupts the program) and <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes (an image on its own goes to the program, so Claude Code can paste it); Omarchy's <kbd>Super</kbd>+<kbd>C</kbd>/<kbd>V</kbd>, <kbd>Ctrl</kbd>+<kbd>Insert</kbd>/<kbd>Shift</kbd>+<kbd>Insert</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> work too · drop files on a terminal to insert their paths.
 
 In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Right-click a view in the rail to hide it; **Settings → Rail** shows it again and sets the order. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 

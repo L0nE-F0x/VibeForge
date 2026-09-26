@@ -141,6 +141,48 @@ describe("pty host", () => {
     await expect(host.request({ op: "write", ptyId: pty, data: "x" })).resolves.toMatchObject({ ok: false, error: "That session has ended." });
   });
 
+  it("records part of a shell into a run folder, and writes a recording still open when it exits", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
+    await host.request({ op: "write", ptyId: pty, data: "echo BEFORE-$((1+1))\r" });
+    await host.until(async () => (await host.screen(pty)).includes("BEFORE-2"));
+    await host.request({ op: "record", ptyId: pty, runDir });
+    await host.request({ op: "write", ptyId: pty, data: "echo DURING-$((2+2))\r" });
+    await host.until(async () => (await host.screen(pty)).includes("DURING-4"));
+    await host.request({ op: "record", ptyId: pty, runDir: null });
+    await host.request({ op: "write", ptyId: pty, data: "echo AFTER-$((3+3))\r" });
+    await host.until(async () => (await host.screen(pty)).includes("AFTER-6"));
+    const scrollback = fs.readFileSync(path.join(runDir, "scrollback.txt"), "utf8");
+    expect(scrollback).toContain("DURING-4");
+    expect(scrollback).not.toContain("BEFORE-2");
+    expect(scrollback).not.toContain("AFTER-6");
+    // The transcript starts from what the screen showed when recording began.
+    const transcript = fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8");
+    expect(transcript).toContain("BEFORE-2");
+    expect(transcript).toContain("DURING-4");
+    expect(transcript).not.toContain("AFTER-6");
+
+    const second = tempDir();
+    await host.request({ op: "record", ptyId: pty, runDir: second });
+    await host.request({ op: "write", ptyId: pty, data: "echo LAST-$((4+4)); exit\r" });
+    await host.until(() => Boolean(host.exitOf(pty)));
+    expect(fs.readFileSync(path.join(second, "transcript.txt"), "utf8")).toContain("LAST-8");
+    expect(fs.existsSync(path.join(second, "terminal.ansi"))).toBe(true);
+  });
+
+  it("reports a terminal working while its screen changes and quiet once it holds still", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // The same screen drawn again and again is not work.
+    await host.request({ op: "write", ptyId: pty, data: "for i in 1 2 3 4; do printf '\\r.'; sleep 0.4; done; for i in $(seq 8); do echo LINE-$i; sleep 0.3; done\r" });
+    const activity = () => host.events.filter((event) => event.event === "activity" && event.ptyId === pty).map((event) => event.working);
+    await host.until(() => activity().includes(true), 8000);
+    await host.until(() => activity().at(-1) === false, 10000);
+    expect(activity()).toEqual([true, false]);
+  }, 20000);
+
   it("reports a program's own exit code and rejects unknown requests", async () => {
     const host = await startHost();
     const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/sh", "-c", "exit 3"] })).ptyId);

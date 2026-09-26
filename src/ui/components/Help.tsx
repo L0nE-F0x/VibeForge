@@ -166,7 +166,6 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
       { keys: "Ctrl+Shift+E", text: "shortcuts.splitDown" },
       { keys: "Ctrl+Shift+W", text: "shortcuts.closePane" },
       { keys: "Ctrl+Shift+M", text: "shortcuts.maximize" },
-      { keys: "Ctrl+Shift+L", text: "shortcuts.launch" },
       { gesture: "shortcuts.doubleClick", text: "shortcuts.maximizeTitle" },
       { gesture: "shortcuts.drag", text: "shortcuts.movePane" },
       { gesture: "shortcuts.drag", text: "shortcuts.moveWorkspace" },
@@ -176,9 +175,9 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
   {
     group: "shortcuts.terminals",
     rows: [
-      { keys: "Ctrl+Shift+C", text: "shortcuts.copy" },
-      { keys: "Ctrl+Shift+V", text: "shortcuts.paste" },
-      { keys: "Ctrl+V", text: "shortcuts.ctrlV" },
+      { keys: "Ctrl+C", text: "shortcuts.copy" },
+      { keys: "Ctrl+V", text: "shortcuts.paste" },
+      { keys: "Ctrl+C", text: "shortcuts.interrupt" },
       { gesture: "shortcuts.dropFile", text: "shortcuts.drop" },
     ],
   },

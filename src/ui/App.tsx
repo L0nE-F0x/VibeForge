@@ -1,7 +1,9 @@
 import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate, useWorkspaces } from "./api.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
+import { compactTokens, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
+import { useAttention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
@@ -78,10 +80,12 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
+    const offWorkspace = on("open-workspace", ({ workspaceId }) => go({ view: "code", workspaceId }));
     const offCrash = on("host-crash", (message) => push("error", "Terminal host problem", message));
     return () => {
       window.removeEventListener("keydown", onKey);
       offRun();
+      offWorkspace();
       offCrash();
     };
   }, [go, back, push]);
@@ -167,6 +171,9 @@ function Rail() {
   const inbox = useInbox().data ?? [];
   const tasks = useTasks().data ?? [];
   const live = useLive().data ?? [];
+  const attention = useAttention();
+  const usage = useUsage().data;
+  const tokensToday = usageToday(usage).today;
   const review = tasks.filter((task) => task.status === "review").length;
   const [liveAnchor, setLiveAnchor] = useState<HTMLElement | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
@@ -205,6 +212,7 @@ function Rail() {
             <item.icon size={19} strokeWidth={1.9} />
             <span>{t(item.label)}</span>
             {count > 0 && <span className="rail-badge">{count > 99 ? "99+" : count}</span>}
+            {item.view === "code" && attention.size > 0 && <span className={`rail-dot${[...attention.values()].includes("waiting") ? " waiting" : " done"}`} />}
           </button>
         );
       })}
@@ -213,11 +221,17 @@ function Rail() {
           type="button"
           className="rail-btn"
           aria-pressed={Boolean(liveAnchor)}
-          {...tipProps(live.length ? t("rail.tip.liveSome") : t("rail.tip.liveNone"), { side: "right" })}
+          {...tipProps(
+            [live.length ? t("rail.tip.liveSome") : t("rail.tip.liveNone"), usage?.sources.length ? t("rail.tip.usage", { tokens: compactTokens(tokensToday, t.language) }) : ""]
+              .filter(Boolean)
+              .join(" · "),
+            { side: "right" },
+          )}
           onClick={(event) => setLiveAnchor(liveAnchor ? null : event.currentTarget)}
         >
           <Activity size={19} strokeWidth={1.9} className={live.length ? "accent-text" : undefined} />
           <span className={live.length ? "live-pulse" : undefined}>{live.length ? t.count("rail.live", live.length) : t("rail.idle")}</span>
+          <UsageMeter summary={usage} />
         </button>
         <button
           type="button"
@@ -265,6 +279,7 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   const live = useLive().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const now = useNow(1000);
+  const usage = useUsage().data;
   return (
     <Popover anchor={anchor} onClose={onClose}>
       <div className="list-label" style={{ paddingTop: 6 }}>
@@ -299,6 +314,7 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
           </span>
         </button>
       ))}
+      <UsagePanel summary={usage} />
     </Popover>
   );
 }

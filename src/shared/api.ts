@@ -33,6 +33,8 @@ import type {
   VoiceSettings,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
+import type { UsageSummary } from "../core/usage.js";
+import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
@@ -69,7 +71,10 @@ export type {
   WorkspaceFile,
   InstallKind,
   Release,
+  UsageSummary,
+  Activity,
 };
+export type { UsageSource, UsageLimit, Tokens } from "../core/usage.js";
 export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
 
 export interface AppInfo {
@@ -207,6 +212,14 @@ export interface DeskMethods {
   "app.toggleDevTools": () => void;
   "app.restart": () => void;
   "app.copyText": (text: string) => void;
+  /** The clipboard's text, and whether it also holds an image. */
+  "app.clipboard": () => { text: string; image: boolean };
+  /** Token usage from the CLIs' own logs, or null when Settings turn it off. */
+  "usage.summary": () => UsageSummary | null;
+  /** The contribution graph for Home, or null when Settings turn it off. `fresh` skips the cache. */
+  "activity.get": (fresh?: boolean) => Activity | null;
+  /** A desktop notification (when Settings allow them) that opens the workspace when clicked. */
+  "app.notify": (note: { title: string; body: string; workspaceId: string }) => void;
   /** The last lines of VibeForge's own log, oldest first. */
   "app.logTail": (lines: number) => string[];
 
@@ -320,6 +333,7 @@ export interface DeskEvents {
   palette: Palette;
   dock: DockState;
   "open-run": { runId: string };
+  "open-workspace": { workspaceId: string };
   "host-crash": string;
   voice: VoiceState;
   "voice-talk": TalkEvent;

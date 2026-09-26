@@ -2,10 +2,13 @@ import { Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Messag
 import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useWorkspaces } from "../api.js";
-import { BlockBars, PixelField, PixelWordmark } from "../components/Pixel.js";
+import { call, useActivity, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useWorkspaces } from "../api.js";
+import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_LABEL } from "../components/RunDetail.js";
 import { Button, StatusChip, TimeAgo } from "../components/ui.js";
+import { tipProps } from "../components/Tooltip.js";
+import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { useAttention } from "../attention.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useNav } from "../state.js";
@@ -67,7 +70,7 @@ export function HomeView() {
     .sort((a, b) => a.at.localeCompare(b.at))
     .slice(0, 5);
   const available = engines.filter((engine) => engine.available);
-  const activity = perDay(recent, DAYS, now);
+  const runsPerDay = perDay(recent, DAYS, now);
   const hour = new Date(now).getHours();
   const greeting = t(hour < 5 ? "home.greeting.night" : hour < 12 ? "home.greeting.morning" : hour < 18 ? "home.greeting.afternoon" : "home.greeting.evening");
   const date = new Date(now).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short" });
@@ -79,6 +82,14 @@ export function HomeView() {
     return key ? <kbd>{key.replace("+", " ")}</kbd> : null;
   };
   const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
+  const attention = useAttention();
+  const contributions = useActivity().data;
+  const graph = contributions && !contributions.error && contributions.days.length ? contributions : null;
+  const number = (value: number) => value.toLocaleString(t.language);
+  const dayTip = (day: string, count: number) => {
+    const date = new Date(`${day}T12:00:00`).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    return t.count(graph?.source === "github" ? "home.activity.githubDay" : "home.activity.gitDay", count, { count: number(count), date });
+  };
 
   const status = [
     live.length ? t.count("home.status.live", live.length) : "",
@@ -91,7 +102,26 @@ export function HomeView() {
       <div className="page-body">
         <div className="home-page">
           <section className="home-hero">
-            <PixelField className="home-drift" cols={52} rows={17} cell={12} size={7} from="right" />
+            {graph ? (
+              <div className="home-graph">
+                <ContributionGraph days={graph.days} tip={dayTip} className="graph" />
+                <div className="home-graph-caption">
+                  {t.count(graph.source === "github" ? "home.activity.github" : "home.activity.git", graph.total, { count: number(graph.total) })}
+                  {" · "}
+                  {graph.source === "github" && graph.login ? (
+                    <button type="button" onClick={() => void call("app.openExternal", `https://github.com/${graph.login}`)}>
+                      github.com/{graph.login}
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => go({ view: "settings" })} {...tipProps(t("home.activity.gitTip"))}>
+                      {t.count("home.activity.workspaces", workspaces.length)}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <PixelField className="home-drift" cols={52} rows={17} cell={12} size={7} from="right" />
+            )}
             <PixelWordmark px={7} className="wordmark" />
             <p className="home-when">
               {greeting} · <b>{date}</b> · {clock}
@@ -119,7 +149,7 @@ export function HomeView() {
             <span className="value">{recent.length}</span>
             <span className="label">{t("home.stat.runs")}</span>
             <span className="grow" />
-            <BlockBars values={activity} label={t("home.stat.runsChart")} />
+            <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
           </button>
 
           {onboarding && (
@@ -145,21 +175,24 @@ export function HomeView() {
 
           <div className="home-grid">
             <div>
-              <div className="section-title">
-                <History size={13} /> {t("home.review.title")} {inbox.length > 0 && <span className="count">{inbox.length}</span>}
-                <span className="grow" />
-                {inbox.length > 1 && (
-                  <Button size="sm" variant="ghost" icon={CheckCheck} busy={marking} onClick={() => void markAll()}>
-                    {t("home.review.markAll")}
-                  </Button>
-                )}
-              </div>
-              <div className="vstack" style={{ gap: 6 }}>
-                {inbox.length === 0 && <div className="home-empty">{t("home.review.empty")}</div>}
-                {inbox.map((run) => (
-                  <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id })} />
-                ))}
-              </div>
+              {inbox.length > 0 && (
+                <>
+                  <div className="section-title">
+                    <History size={13} /> {t("home.review.title")} <span className="count">{inbox.length}</span>
+                    <span className="grow" />
+                    {inbox.length > 1 && (
+                      <Button size="sm" variant="ghost" icon={CheckCheck} busy={marking} onClick={() => void markAll()}>
+                        {t("home.review.markAll")}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="vstack" style={{ gap: 6 }}>
+                    {inbox.map((run) => (
+                      <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id })} />
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div className="section-title">
                 <FolderOpen size={13} /> {t("home.workspaces.title")}
@@ -169,13 +202,18 @@ export function HomeView() {
               ) : (
                 <div className="workspace-tiles">
                   {workspaces.map((workspace) => (
-                    <button key={workspace.id} type="button" className="run-row" onClick={() => go({ view: "code", workspaceId: workspace.id })}>
+                    <button
+                      key={workspace.id}
+                      type="button"
+                      className={`run-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}`}
+                      onClick={() => go({ view: "code", workspaceId: workspace.id })}
+                    >
                       <FolderOpen size={14} className="accent-text" />
                       <span className="vstack grow" style={{ gap: 1 }}>
                         <span className="title truncate">{workspace.name}</span>
                         <span className="meta truncate">{tildify(workspace.path, home)}</span>
                       </span>
-                      {liveIn(workspace.id) > 0 && <span className="ws-live">{liveIn(workspace.id)}</span>}
+                      <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveIn(workspace.id)} />
                     </button>
                   ))}
                 </div>
@@ -183,11 +221,12 @@ export function HomeView() {
             </div>
 
             <div>
-              <div className="section-title">
-                <TerminalSquare size={13} /> {t("home.live.title")}
-              </div>
+              {live.length > 0 && (
+                <div className="section-title">
+                  <TerminalSquare size={13} /> {t("home.live.title")}
+                </div>
+              )}
               <div className="vstack" style={{ gap: 6 }}>
-                {live.length === 0 && <div className="home-empty">{t("home.live.empty")}</div>}
                 {live.slice(0, 8).map((session) => (
                   <button
                     key={session.ptyId}
@@ -201,7 +240,11 @@ export function HomeView() {
                       else if (session.runId) go({ view: "runs", runId: session.runId });
                     }}
                   >
-                    {session.kind === "shell" ? <SquareTerminal size={14} className="faint" /> : <span className="dot running" />}
+                    {session.kind === "shell" && !session.programEngineId ? (
+                      <SquareTerminal size={14} className="faint" />
+                    ) : (
+                      <span className={`ws-state ${session.working ? "working" : "open"}`} {...tipProps(session.working ? t("ws.working") : t("home.live.quiet"))} />
+                    )}
                     <span className="vstack grow" style={{ gap: 1 }}>
                       <span className="title truncate">{session.program ?? session.title}</span>
                       <span className="meta truncate">
@@ -214,11 +257,12 @@ export function HomeView() {
                 ))}
               </div>
 
-              <div className="section-title">
-                <CalendarClock size={13} /> {t("home.next.title")}
-              </div>
+              {upcoming.length > 0 && (
+                <div className="section-title">
+                  <CalendarClock size={13} /> {t("home.next.title")}
+                </div>
+              )}
               <div className="vstack" style={{ gap: 6 }}>
-                {upcoming.length === 0 && <div className="home-empty">{t("home.next.empty")}</div>}
                 {upcoming.map(({ routine, at }) => (
                   <button key={routine.id} type="button" className="run-row" onClick={() => go({ view: "routines", routineId: routine.id })}>
                     <CalendarClock size={14} className="accent-text" />
@@ -240,20 +284,18 @@ export function HomeView() {
                   {t("home.clis.manage")}
                 </Button>
               </div>
-              <div className="which selectable">
-                <div className="prompt">
-                  <b>$</b> which {available.map((engine) => engine.bin).join(" ") || "…"}
+              {available.length === 0 ? (
+                <div className="home-empty">{t("home.clis.none")}</div>
+              ) : (
+                <div className="cli-chips">
+                  {available.map((engine) => (
+                    <span key={engine.id} className="cli-chip" {...tipProps(engine.path ? tildify(engine.path, home) : engine.bin)}>
+                      <span className="pixel" />
+                      {engine.label}
+                    </span>
+                  ))}
                 </div>
-                {available.length === 0 && <div className="faint">{t("home.clis.none")}</div>}
-                {available.slice(0, 9).map((engine) => (
-                  <div key={engine.id} className="which-row">
-                    <span className="pixel" />
-                    <span className="truncate">{engine.label}</span>
-                    <span className="path truncate">{engine.path ? tildify(engine.path, home) : engine.bin}</span>
-                  </div>
-                ))}
-                {available.length > 9 && <div className="faint">{t("home.clis.more", { count: available.length - 9 })}</div>}
-              </div>
+              )}
             </div>
           </div>
         </div>
