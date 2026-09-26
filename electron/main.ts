@@ -18,6 +18,10 @@ import { Dock } from "./dock.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
+import { controlSocketPath, voiceArg } from "../src/core/control.js";
+import { listenControl } from "./control.js";
+import { Talk } from "./talk.js";
+import { Voice } from "./voice.js";
 
 const APP_ID = "dev.vibeforge.app";
 const REPO_URL = "https://github.com/L0nE-F0x/VibeForge";
@@ -149,6 +153,27 @@ const updater = new Updater({
   enabled: () => service?.getSettings().checkUpdates ?? false,
   changed: () => send("changed", ["updates"]),
 });
+
+const voice = new Voice({
+  log,
+  home: os.homedir(),
+  dataRoot: roots.dataRoot,
+  settings: () => svc().getSettings().voice,
+  resolveBin: (bin) => whichBin(bin),
+  state: (state) => send("voice", state),
+  changed: () => send("changed", ["voice"]),
+  speaking: () => send("changed", ["voice"]),
+  // Settings' language, or the desktop's: a voice in it is preferred.
+  language: () => {
+    const chosen = service?.getSettings().language ?? "system";
+    return (chosen === "system" ? app.getLocale() : chosen).slice(0, 2).toLowerCase();
+  },
+  controlSocket: controlSocketPath(roots.dataRoot, process.env.XDG_RUNTIME_DIR, process.getuid?.() ?? 0),
+  // The installed launcher when it is on PATH (it is a link to scripts/vibeforge), else the script itself.
+  launcher: () => (whichBin("vibeforge") ? "vibeforge" : path.join(appRoot(), "scripts", "vibeforge")),
+});
+
+const talk = new Talk({ voice, service: () => service, log, send: (event) => send("voice-talk", event) });
 
 function refreshPalette(): void {
   if (!service) return;
@@ -282,6 +307,25 @@ function handlers(): Handlers {
     "runs.diff": (id) => s().runDiff(id),
 
     "live.list": () => s().listLive(),
+
+    "voice.status": () => voice.status(),
+    "voice.start": (opts) => voice.start({ endpoint: Boolean(opts?.endpoint) }),
+    "voice.stop": (prompt) => voice.stop(typeof prompt === "string" ? prompt.slice(0, 1000) : ""),
+    "voice.cancel": () => voice.cancel(),
+    "voice.download": (kind, id) => voice.startDownload(kind === "voice" ? "voice" : "model", String(id)),
+    "voice.stopDownload": () => voice.stopDownload(),
+    "voice.speak": (text, voiceFile) => void talk.say(null, "VibeForge", String(text).slice(0, 2000), typeof voiceFile === "string" ? voiceFile : "", "full"),
+    "voice.silence": () => voice.speaker.stop(),
+    "voice.expect": (ptyId, words) => {
+      try {
+        return talk.expect(String(ptyId), String(words ?? "").slice(0, 2000));
+      } catch (error) {
+        log.warn(`Voice: could not wait for an answer: ${describeError(error)}`);
+        return false;
+      }
+    },
+    "voice.forget": (ptyId) => talk.forget(typeof ptyId === "string" ? ptyId : undefined),
+    "voice.installBindings": () => voice.installBindings(),
 
     "pty.write": (ptyId, data) => supervisor.write(ptyId, data),
     "pty.send": (ptyId, text) => supervisor.send(ptyId, text),
@@ -433,7 +477,7 @@ supervisor.onData.add((event) => send("pty-data", event));
 supervisor.onExit.add((event) => {
   log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
   send("pty-exit", event);
-  void service?.onPtyExit(event.ptyId, event.exitCode, event.signal);
+  void service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
 });
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
@@ -444,6 +488,8 @@ supervisor.onCrash.add((message) => {
 });
 
 async function shutdown(): Promise<void> {
+  talk.dispose();
+  voice.dispose();
   if (!service) return;
   service.prepareShutdown();
   await supervisor.shutdown(7000);
@@ -458,7 +504,12 @@ async function shutdown(): Promise<void> {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", focusWindow);
+  // `vibeforge --voice start` from a keybinding reaches the window here when the control socket can't.
+  app.on("second-instance", (_event, argv) => {
+    const action = voiceArg(argv);
+    if (action) send("voice-command", { action });
+    else focusWindow();
+  });
 
   app.whenReady().then(async () => {
     log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${appRoot()}`);
@@ -480,6 +531,7 @@ if (!app.requestSingleInstanceLock()) {
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig();
+    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
     win?.on("focus", refreshPalette);
     const tick = () =>
       void service?.tick().catch((error: unknown) => {
@@ -495,6 +547,7 @@ if (!app.requestSingleInstanceLock()) {
       updater.stop();
       stopThemeWatch();
       stopConfigWatch();
+      stopControl();
     });
   });
 

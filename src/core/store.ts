@@ -20,6 +20,7 @@ import type {
   RunStatus,
   Schedule,
   Settings,
+  VoiceSettings,
   Skill,
   Task,
   TaskStatus,
@@ -84,6 +85,7 @@ export function defaultSettings(): Settings {
     tourDone: false,
     checkUpdates: true,
     language: "system",
+    voice: { model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" },
   };
 }
 
@@ -97,6 +99,17 @@ function strOrNull(value: unknown): string | null {
 
 function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeVoiceSettings(value: unknown, defaults: VoiceSettings): VoiceSettings {
+  const raw = value && typeof value === "object" ? (value as Partial<VoiceSettings>) : {};
+  return {
+    model: str(raw.model).trim(),
+    language: /^(auto|[a-z]{2,3})$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
+    autoSend: bool(raw.autoSend, defaults.autoSend),
+    talkBack: raw.talkBack === "off" || raw.talkBack === "full" || raw.talkBack === "summary" ? raw.talkBack : defaults.talkBack,
+    speaker: str(raw.speaker).trim(),
+  };
 }
 
 function strList(value: unknown): string[] {
@@ -137,6 +150,7 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
     places: strList(record.places),
     skills: strList(record.skills),
     allowRoutines: bool(record.allowRoutines, true),
+    voice: str(record.voice).trim(),
     createdAt: str(record.createdAt),
     updatedAt: str(record.updatedAt),
   };
@@ -394,6 +408,7 @@ export class Store {
       tourDone: bool(raw.tourDone, defaults.tourDone),
       checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
+      voice: normalizeVoiceSettings(raw.voice, defaults.voice),
     };
   }
 

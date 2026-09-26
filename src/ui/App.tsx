@@ -21,6 +21,7 @@ import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
+import { VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Popover, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT, type Key } from "./i18n/index.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
@@ -99,6 +100,7 @@ function Shell() {
   return (
     <div className="app">
       <Guides />
+      <VoiceLayer />
       <Rail />
       <main className="stage">
         <CrashBoundary key={route.view}>

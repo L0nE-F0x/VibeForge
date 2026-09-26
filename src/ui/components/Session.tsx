@@ -1,12 +1,14 @@
 import { ArrowUp, History, Play, RotateCcw, Square, TerminalSquare, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefObject } from "react";
 import type { ChatView } from "../../shared/api.js";
+import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, pathForFile, useAppInfo, useQuery, useSettings } from "../api.js";
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
 import { Button, Empty, Kbd, StatusChip, TimeAgo } from "./ui.js";
 import { useT } from "../i18n/index.js";
+import { expectAnswer, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
 
 // ------------------------------------------------------------------ composer
 
@@ -19,6 +21,11 @@ export function Composer({
   leading,
   autoFocus,
   sendLabel = "Send",
+  voiceLabel,
+  voiceScope,
+  voicePty,
+  voiceResume,
+  draftKey,
 }: {
   placeholder: string;
   onSend: (text: string) => Promise<boolean | void>;
@@ -28,11 +35,75 @@ export function Composer({
   leading?: ReactNode;
   autoFocus?: boolean;
   sendLabel?: string;
+  /** Where dictated words go, as the listening bar names it. */
+  voiceLabel?: string;
+  /** Focus anywhere in here (the session's terminal, say) makes this box where dictation lands. */
+  voiceScope?: RefObject<HTMLElement | null>;
+  /** The terminal messages from this box reach, for hearing answers and interrupting. */
+  voicePty?: () => string | null;
+  /** Reopens the ended session ("Forge, continue"). */
+  voiceResume?: () => void;
+  /** Words dictated for this chat from elsewhere ("Atlas, …") arrive under this key. */
+  draftKey?: string | null;
 }) {
   const t = useT();
   const [text, setText] = useState("");
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const textRef = useRef(text);
+  textRef.current = text;
+  // Dictated words not sent yet: once they are, the answer is listened for.
+  const dictated = useRef("");
+
+  const dictation = useDictationTarget(() => ({
+    label: voiceLabel ?? placeholder,
+    element: () => box.current,
+    insert: (words) => {
+      dictated.current = joinDictation(dictated.current, words);
+      const next = joinDictation(textRef.current, words);
+      setText(next);
+      requestAnimationFrame(() => {
+        const node = ref.current;
+        if (!node) return;
+        node.focus();
+        node.selectionStart = node.selectionEnd = next.length;
+      });
+    },
+    submit: (words) => {
+      const value = joinDictation(textRef.current, words).trim();
+      if (!value || busy || disabled) {
+        setText(joinDictation(textRef.current, words));
+        return;
+      }
+      setText("");
+      dictated.current = "";
+      void onSend(value).then((ok) => {
+        if (ok === false) setText(value);
+      });
+    },
+    send: () => void submit(),
+    clear: () => {
+      dictated.current = "";
+      setText("");
+    },
+    interrupt: () => {
+      const ptyId = voicePty?.();
+      if (ptyId) void call("pty.write", ptyId, "\x1b").catch(() => undefined);
+    },
+    resume: voiceResume,
+    ptyId: voicePty,
+  }));
+
+  useDraft(draftKey, (words) => dictation.target.insert(words));
+
+  useEffect(() => {
+    const scope = voiceScope?.current;
+    if (!scope) return;
+    const claim = () => setDictationTarget(dictation.target);
+    scope.addEventListener("focusin", claim);
+    return () => scope.removeEventListener("focusin", claim);
+  }, [voiceScope, dictation.target]);
 
   useEffect(() => {
     const node = ref.current;
@@ -46,10 +117,14 @@ export function Composer({
   }, [autoFocus]);
 
   async function submit() {
-    const value = text.trim();
+    const value = textRef.current.trim();
     if (!value || busy || disabled) return;
+    const words = dictated.current;
     const ok = await onSend(value);
-    if (ok !== false) setText("");
+    if (ok === false) return;
+    setText("");
+    dictated.current = "";
+    if (words) expectAnswer(dictation.target, words);
   }
 
   function insert(snippet: string) {
@@ -87,8 +162,8 @@ export function Composer({
   };
 
   return (
-    <div className="composer">
-      <div className={`composer-box${dragging ? " dragging" : ""}`} {...dropHandlers}>
+    <div className="composer" onFocusCapture={dictation.onFocusCapture}>
+      <div ref={box} className={`composer-box${dragging ? " dragging" : ""}`} {...dropHandlers}>
         {leading}
         <textarea
           ref={ref}
@@ -104,13 +179,14 @@ export function Composer({
             }
           }}
         />
+        <MicButton target={dictation.target} disabled={disabled} />
         <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel })}>
           {sendLabel}
         </Button>
       </div>
       <div className="composer-hint">
         <span>
-          <Kbd>Enter</Kbd> send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line · drop files to insert paths
+          <Kbd>Enter</Kbd> send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line · <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>Space</Kbd> dictate · drop files to insert paths
         </span>
         <span className="grow" />
         {hint}
@@ -157,6 +233,9 @@ export function SessionPane({
   const terminal = useRef<TerminalHandle>(null);
 
   const livePty = pending && pending.chatId === chat?.id ? pending.ptyId : chat?.live ? chat.ptyId : null;
+  // A chat made by this send has its terminal before the view has the chat itself.
+  const livePtyRef = useRef(livePty);
+  livePtyRef.current = livePty ?? pending?.ptyId ?? null;
 
   useEffect(() => {
     if (pending && chat?.id === pending.chatId && chat.ptyId === pending.ptyId) setPending(null);
@@ -236,6 +315,11 @@ export function SessionPane({
         busy={sending}
         autoFocus={!livePty}
         sendLabel={livePty ? t("common.send") : last ? t("common.continue") : t("common.start")}
+        voiceLabel={chat?.title ?? t("agents.newChat")}
+        voiceScope={root}
+        voicePty={() => livePtyRef.current}
+        voiceResume={() => void resume()}
+        draftKey={chat?.id}
         hint={
           livePty ? (
             <span className="hstack">

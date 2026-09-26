@@ -96,6 +96,35 @@ React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (sy
 - **Login-shell PATH**: VibeForge asks your login shell for `PATH` at start, so CLIs installed with mise or into `~/.local/bin` are found however it was launched.
 - **Allowed folders are a policy, not a sandbox.** Runs start inside them and the prompt tells the CLI to stay there, but a coding CLI has a shell.
 
+## Voice
+
+Talk to your agents instead of typing to them, and hear them answer. Everything happens on this machine: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) turns speech into text, [Piper](https://github.com/OHF-Voice/piper1-gpl) reads answers aloud, and no audio leaves your computer or is kept.
+
+```bash
+sudo pacman -S whisper-cpp      # listening
+uv tool install piper-tts       # talking back (or the AUR's piper-tts-bin)
+```
+
+**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, a terminal in Code, or the launch bar. They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
+
+**Talk to an agent by name.** Start with it: *"Atlas, add tests for the scheduler."* goes to Atlas's latest chat (a new one if it has none), whatever has focus.
+
+**Hear the answer.** When you've spoken to an agent, its answer is read back to you: the first paragraph by default, all of it, or nothing (Settings → Voice). Claude Code and Codex answers come from their own session logs; other CLIs say when they finish and what changed. Each agent can have its own voice (its Settings tab). Start talking to cut an answer short.
+
+**Have a conversation.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> goes hands-free: speak, pause, and it sends; the answer is read; then it listens again. <kbd>Esc</kbd>, **End**, or *"Forge, stop listening"* ends it.
+
+**Commands** begin with *"Forge,"*: *send* (what's waiting in the box), *clear*, *stop* (interrupt the agent), *continue*, *new task: …*, *run routine …*, *go to tasks* (or any view), *stop listening*.
+
+**From anywhere on the desktop.** Settings → Voice adds these to Hyprland for you (or copy them):
+
+```lua
+o.bind("SUPER + ALT + V", "VibeForge: hold to talk", "vibeforge --voice start")
+o.bind("SUPER + ALT + V", "VibeForge: stop talking", "vibeforge --voice stop", { release = true })
+o.bind("SUPER + ALT + T", "VibeForge: conversation", "vibeforge --voice converse")
+```
+
+`vibeforge --voice start|stop|toggle|cancel|converse` reaches the running window over a local socket in a few milliseconds; a short tone marks the start and end while it's in the background. Models (`base.en` is quick, `large-v3-turbo` hears best and knows many languages) and voices download from Hugging Face in Settings → Voice, and ones Omarchy's Voxtype or the AUR's `piper-voices` packages installed are found too. Whisper is told the names of your agents, routines, CLIs and workspace files, so it spells them right.
+
 ## Your files
 
 ```
@@ -109,13 +138,14 @@ React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (sy
 ~/.local/share/vibeforge/
   runs/<stamp>_<slug>/          meta.json, preamble.md, terminal.ansi, transcript.txt, scrollback.txt, git.txt
   scratch/<chat>/               Chat mode working folders
+  models/  voices/              whisper models and Piper voices downloaded in Settings → Voice
 ```
 
 Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
 
 ## Keys
 
-<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
+<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
 
 In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 

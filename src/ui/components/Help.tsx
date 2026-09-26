@@ -177,6 +177,14 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
     ],
   },
   {
+    group: "shortcuts.voice",
+    rows: [
+      { keys: "Ctrl+Shift+Space", text: "shortcuts.dictate" },
+      { keys: "Ctrl+Alt+Space", text: "shortcuts.converse" },
+      { keys: "Esc", text: "shortcuts.dictateCancel" },
+    ],
+  },
+  {
     group: "shortcuts.editing",
     rows: [
       { keys: "Ctrl+S", text: "shortcuts.save" },

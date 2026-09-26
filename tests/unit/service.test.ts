@@ -64,6 +64,19 @@ async function agentIn(ctx: ReturnType<typeof setup>, engine = "argy") {
 }
 
 describe("agents", () => {
+  it("keeps an agent's voice until it is changed", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    expect(agent.voice).toBe("");
+    const voiced = ctx.svc.saveAgent({ ...agent, voice: " /v/en_GB-alan-medium.onnx " });
+    expect(voiced.voice).toBe("/v/en_GB-alan-medium.onnx");
+    // Saving from a form that doesn't know about voices leaves it alone.
+    const { voice: _voice, ...rest } = voiced;
+    expect(ctx.svc.saveAgent({ ...rest, brief: "New brief." }).voice).toBe("/v/en_GB-alan-medium.onnx");
+    expect(ctx.svc.getAgent(agent.id)?.voice).toBe("/v/en_GB-alan-medium.onnx");
+    ctx.svc.close();
+  });
+
   it("keeps the brief and memory when the engine changes, and validates input", async () => {
     const ctx = setup();
     const agent = await agentIn(ctx);

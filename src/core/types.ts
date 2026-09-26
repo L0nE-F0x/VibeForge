@@ -17,6 +17,8 @@ export interface Agent {
   places: string[];
   skills: string[];
   allowRoutines: boolean;
+  /** The Piper voice (.onnx) this agent's answers are read in; empty uses the one in Settings. */
+  voice: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -115,6 +117,21 @@ export interface Settings {
   checkUpdates: boolean;
   /** "system" follows the desktop's language; otherwise a code such as "de". */
   language: string;
+  voice: VoiceSettings;
+}
+
+/** Dictation: speech to text on this machine with whisper.cpp. */
+export interface VoiceSettings {
+  /** A whisper.cpp model file; empty picks the best one found in the usual folders. */
+  model: string;
+  /** "auto" lets whisper tell; otherwise a code such as "de". English-only models always hear English. */
+  language: string;
+  /** Press Enter after the words too. Off: they wait in the box or terminal for you to read first. */
+  autoSend: boolean;
+  /** Read an agent's answer to what you said aloud: its first paragraph, all of it, or not at all. */
+  talkBack: "off" | "summary" | "full";
+  /** The Piper voice (.onnx) answers are read in unless the agent has its own; empty picks one. */
+  speaker: string;
 }
 
 export interface Workspace {
@@ -167,4 +184,5 @@ export type Topic =
   | "engines"
   | "settings"
   | "live"
-  | "updates";
+  | "updates"
+  | "voice";

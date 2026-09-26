@@ -30,8 +30,11 @@ import type {
   Skill,
   TaskStatus,
   Topic,
+  VoiceSettings,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
+import type { VoiceAction } from "../core/control.js";
+import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 
 export type {
@@ -62,6 +65,7 @@ export type {
   TaskView,
   TermSize,
   Topic,
+  VoiceSettings,
   WorkspaceFile,
   InstallKind,
   Release,
@@ -97,6 +101,76 @@ export interface UpdateInfo {
   install: InstallKind;
   /** What "Update now" runs in a terminal; null when this copy updates some other way. */
   command: string | null;
+}
+
+export type VoicePhase = "idle" | "recording" | "transcribing";
+
+/** Sent many times a second while recording, for the level meter and the timer. */
+export interface VoiceState {
+  phase: VoicePhase;
+  /** 0–1, for the meter. */
+  level: number;
+  seconds: number;
+  /** In conversation mode: whether someone has started, or finished, speaking. */
+  speech: SpeechPhase | null;
+}
+
+/** An answer being waited for, read aloud, or finished with. */
+export interface TalkEvent {
+  /** The terminal the answer comes from; null for a test phrase. */
+  ptyId: string | null;
+  stage: "waiting" | "speaking" | "done";
+  /** Who is answering: the agent's name, or the session's title. */
+  who: string;
+  /** What is being said (for "speaking"). */
+  text: string;
+}
+
+export type DownloadKind = "model" | "voice";
+
+/** What dictation found on this machine. */
+export interface VoiceStatus {
+  /** The recorder's name ("pw-record"), or null when none was found. */
+  recorder: string | null;
+  server: string | null;
+  cli: string | null;
+  /** The model that will be loaded, or null when none was found. */
+  model: string | null;
+  /** Every model file found, best first. */
+  models: string[];
+  /** Where downloaded models go. */
+  modelDir: string;
+  /** What whisper listens for with this model and setting: a code, or "auto". */
+  language: string;
+  ready: boolean;
+  catalog: Array<ModelChoice & { path: string | null }>;
+  download: { kind: DownloadKind; id: string; received: number; total: number } | null;
+  downloadError: string | null;
+  /** Piper, for reading answers aloud; null when it isn't installed. */
+  piper: string | null;
+  /** The audio player's name ("pw-play"), or null. */
+  player: string | null;
+  /** Every Piper voice found. */
+  voices: string[];
+  /** The voice answers are read in unless an agent has its own. */
+  speaker: string | null;
+  voiceDir: string;
+  voiceCatalog: Array<VoiceChoice & { path: string | null }>;
+  /** Something is being read aloud right now. */
+  speaking: boolean;
+  /** Where `vibeforge --voice …` reaches this window. */
+  controlSocket: string;
+  /** Lines for Hyprland that reach VibeForge's voice from anywhere, and the file they belong in. */
+  hyprland: { file: string; text: string; installed: boolean };
+}
+
+export interface Dictation {
+  text: string;
+  seconds: number;
+  /** Milliseconds from key-up to words. */
+  tookMs: number;
+  /** Why nothing came back: a stray tap, a silent mic, or whisper heard no words. */
+  empty: "short" | "silent" | "nothing" | null;
 }
 
 export interface PtySnapshot {
@@ -205,6 +279,26 @@ export interface DeskMethods {
 
   "live.list": () => LiveSession[];
 
+  "voice.status": () => VoiceStatus;
+  /** `endpoint`: stop by itself when the speaker pauses (conversation mode). */
+  "voice.start": (opts?: { endpoint?: boolean }) => void;
+  /** Stops recording and returns the words. `prompt` names things whisper should expect. */
+  "voice.stop": (prompt?: string) => Dictation;
+  "voice.cancel": () => void;
+  "voice.download": (kind: DownloadKind, id: string) => void;
+  "voice.stopDownload": () => void;
+  /** Reads a phrase aloud, in a voice file or the default one. */
+  "voice.speak": (text: string, voice?: string) => void;
+  "voice.silence": () => void;
+  /**
+   * Waits for the answer to `words` in this terminal and reads it aloud (as Settings says).
+   * False when the terminal's program leaves no log to read and will not be heard from.
+   */
+  "voice.expect": (ptyId: string, words: string) => boolean;
+  "voice.forget": (ptyId?: string) => void;
+  /** Appends the keybinding lines to the Hyprland config (after a backup); returns the file. */
+  "voice.installBindings": () => string;
+
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
   "pty.resize": (ptyId: string, cols: number, rows: number) => void;
@@ -226,6 +320,10 @@ export interface DeskEvents {
   dock: DockState;
   "open-run": { runId: string };
   "host-crash": string;
+  voice: VoiceState;
+  "voice-talk": TalkEvent;
+  /** `vibeforge --voice …` from a keybinding. */
+  "voice-command": { action: VoiceAction };
 }
 
 export type Method = keyof DeskMethods;

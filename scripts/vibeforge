@@ -3,6 +3,28 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+# `vibeforge --voice start|stop|toggle|cancel|converse`, from a keybinding: hand the action to the
+# running window over its control socket, which takes milliseconds, where starting Electron to be
+# handed off would lose the first words. The path matches src/core/control.ts.
+if [[ "${1:-}" == --voice* ]]; then
+  action="${1#--voice}"
+  action="${action#=}"
+  [[ -z "$action" ]] && action="${2:-toggle}"
+  data="${VIBEFORGE_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/vibeforge}"
+  tag="$(printf %s "$data" | sha1sum | cut -c1-8)"
+  if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then sock="$XDG_RUNTIME_DIR/vibeforge-$tag.sock"; else sock="/tmp/vibeforge-$(id -u)-$tag.sock"; fi
+  if [[ -S "$sock" ]]; then
+    if command -v socat >/dev/null 2>&1; then
+      printf 'voice %s\n' "$action" | socat - "UNIX-CONNECT:$sock" 2>/dev/null && exit 0
+    else
+      node -e 'const s=require("net").connect(process.argv[1]);s.on("error",()=>process.exit(1));s.end("voice "+process.argv[2]+"\n")' "$sock" "$action" 2>/dev/null && exit 0
+    fi
+  fi
+  # Not running: a press opens VibeForge; a release has nothing to stop.
+  case "$action" in stop|cancel) exit 0 ;; esac
+  set --
+fi
 export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
 export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
 

@@ -1,4 +1,5 @@
 import {
+  Volume2,
   Bot,
   BookOpen,
   Brain,
@@ -24,6 +25,7 @@ import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, S
 import { useAction, useConfirm, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
+import { useVoiceStatus } from "../voice.js";
 
 const BRIEF_PLACEHOLDER = `What do you own?
 What context matters?
@@ -518,11 +520,14 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const [name, setName] = useState(agent.name);
   const [engine, setEngine] = useState(agent.engine);
   const [allow, setAllow] = useState(agent.allowRoutines);
-  const dirty = name !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines;
+  const [voice, setVoice] = useState(agent.voice);
+  const voices = useVoiceStatus().data?.voices ?? [];
+  const t = useT();
+  const dirty = name !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
-    await call("agents.save", { ...agent, name, engine, allowRoutines: allow });
+    await call("agents.save", { ...agent, name, engine, allowRoutines: allow, voice });
     push("success", "Agent updated", engine !== agent.engine ? `${engineRow?.label ?? engine} runs from the next chat on.` : undefined);
   }, "Could not save");
   const [remove, removing] = useAction(async () => {
@@ -556,6 +561,20 @@ function SettingsTab({ agent }: { agent: Agent }) {
           </Notice>
         )}
         <Toggle checked={allow} onChange={setAllow} label="Routines may start this agent on a schedule" />
+        <Field label={t("voice.agentVoice")} hint={voices.length ? t("voice.agentVoiceHint") : t("voice.agentVoiceNone")}>
+          <div className="hstack" style={{ gap: 6, maxWidth: 420 }}>
+            <Select value={voice} onChange={(event) => setVoice(event.target.value)} disabled={!voices.length && !voice}>
+              <option value="">{t("voice.agentVoiceDefault")}</option>
+              {voice && !voices.includes(voice) && <option value={voice}>{voice.slice(voice.lastIndexOf("/") + 1)} ({t("voice.missing")})</option>}
+              {voices.map((file) => (
+                <option key={file} value={file}>
+                  {file.slice(file.lastIndexOf("/") + 1).replace(/\.onnx$/, "")}
+                </option>
+              ))}
+            </Select>
+            <Button icon={Volume2} disabled={!voices.length} tip={t("voice.hearIt")} onClick={() => void call("voice.speak", t("voice.agentSample", { name }), voice)} />
+          </div>
+        </Field>
         <div className="hstack">
           <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={() => void save()}>
             Save changes

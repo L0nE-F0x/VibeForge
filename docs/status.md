@@ -1,4 +1,4 @@
-# Status — 2026-09-25
+# Status — 2026-09-26
 
 VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name, new UI, and a rewritten core. It runs from `npm start` (dev) and from the `vibeforge` launcher / app-menu entry (after `npm run build`).
 
@@ -66,7 +66,50 @@ The 0.4.0 website read as a copy of omarchy.org, so it was rebuilt again as a fu
 - The release pill under the plate was dropped (it crowded the hero). The version is printed on the plate's bottom edge instead, like a part number on a chip, and links to the latest release. **On each release**, update it (`class="part"` in `site/index.html`) and the version in the install terminal's last lines.
 - Checked in headless Chrome at 1920, 1440, 1024 and 390 px, in Apex Forge, Tokyo Night and Rosé Pine: no console errors, no horizontal overflow, the theme menu and T work, the desk demo, update sheet and language cards play.
 
+### Voice, phase 1: dictation (2026-09-26, released in 0.5.0)
+
+- **Dictate anywhere in the window.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> to talk, or tap it to keep listening and tap again (or click **Done**) to finish; <kbd>Esc</kbd> drops the recording. The words go to the last place that had focus: a chat's composer (focus in its terminal counts too), a Code pane's terminal, or the Code launch bar. A Code pane that has no terminal sends them to the launch bar. By default they wait there to be read (pasted into a terminal without Enter); **Settings → Voice → Send dictated words right away** presses Enter too. Composers and the launch bar have a mic button.
+- Not Ctrl+Space: that is fcitx5's default input-method trigger (fcitx5 runs on Omarchy), which would swallow the key for Japanese and Chinese typists.
+- **A listening bar** at the bottom: a pixel level meter, where the words will go, a timer, and the keys; it turns into a blinking cursor with "Turning speech into text" from key-up until the words land. It registers as a floating layer, so the browser dock steps aside.
+- **Local only** (`electron/voice.ts`, `src/core/voice.ts`): `pw-record` (else `parec`, else `arecord`) records 16 kHz mono into memory; `whisper-server` is started on 127.0.0.1 on first use (while you are still speaking), kept for ten minutes, and stopped on quit; `whisper-cli` is the fallback, with a temporary WAV deleted at once. Silence (loudest 50 ms below −44 dBFS) and taps shorter than 0.4 s are never sent to whisper, which invents words for silence. Whisper's markers ("[BLANK_AUDIO]", "(music)") are dropped. Whisper gets a prompt sentence naming the agents, CLIs, and the workspace's top-level files. The log records lengths and timings, never words.
+- **Settings → Voice**: what was found (recorder, whisper.cpp, model) with the install line when something is missing, the model (default: the best one found, including Voxtype's), the spoken language (English-only `.en` models always hear English), downloads of five ggml models from Hugging Face with progress and cancel, auto-send, and a line to try it on. `VIBEFORGE_VOICE_RECORDER`, `VIBEFORGE_WHISPER_SERVER` and `VIBEFORGE_WHISPER_CLI` override the programs, for tests and odd setups.
+- The shortcut sheet has a Voice group; all new text is in the seven languages.
+- Checked on the built app over CDP on the hidden workspace, with a whisper.cpp 1.9.3 build, Voxtype's `ggml-base.en.bin`, and a recorder override that plays the JFK sample in real time:
+  - holding the keys in Chat showed the bar with the meter lit; the words were in the box 1.2 s after key-up (whisper-server ready 0.2 s after key-down)
+  - tap to keep listening, tap again: the bar said "Turning speech into text" at once, then cleared; a second dictation appended with one space; Esc dropped a recording and left the box alone
+  - a silent recording gave the "only silence" toast and no transcription; dictating with nothing focused asked where the words should go
+  - in Code, the words were pasted at the shell prompt and not run; with auto-send they ran (bash: "command not found: And"); the launch bar filled
+  - with whisper-server hidden, whisper-cli transcribed in 0.7 s and its temp folder was gone; with neither, the key opened Settings → Voice with the install line
+  - a model download showed progress in the card and left no `.part` file when cancelled
+  - quitting stopped whisper-server
+- `npm test`: 85 tests, adding the voice core (recorder and whisper plans, model choice, loudness, WAV header, transcript clean-up, the prompt, settings repair).
+
+### 0.5.0: talk to your agents (2026-09-26)
+
+Phases 2–4 of the voice plan, on top of phase 1's dictation.
+
+- **Talk to an agent by name.** A sentence that starts with an agent's name ("Atlas, …", "Hey Atlas: …", "tell Atlas to …", multi-word names too) goes to that agent's latest chat, or a new one, whatever has focus: left in its composer for review (the view opens on it), or sent with auto-send. Dictation now starts with nothing focused; plain words with nowhere to go are copied to the clipboard.
+- **Answers read aloud** (`electron/talk.ts`, `electron/replies.ts`, `src/core/replies.ts`). After words reach an agent's terminal (sent, or pasted and later sent with Enter), VibeForge watches the CLI's own session log for the turn to end: Claude Code's `~/.claude/projects/<cwd with non-alphanumerics as ->/*.jsonl` (`stop_reason: "end_turn"`; the reply is that message's text blocks), falling back to any log whose `cwd` matches; Codex's `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (`task_complete`). It reads only the tail of each log and prefers the session whose prompt contains the dictated words. Other CLIs say "<name> has finished" and the git change summary when they exit. Piper speaks (text on stdin, raw audio into `pw-play`, else `paplay`, else `aplay`); markdown is read as words, code blocks are skipped (or described in full mode), tables and links are dropped. Talk-back is the first paragraph by default, or all of it, or off; only answers to what you said are read.
+- **Voices**: nine Piper voices to download (English ×4, German, Spanish, French, Portuguese, Chinese; Piper has no Japanese), found also in `~/.local/share/piper*` and `/usr/share/piper-voices`; the default follows the app's language; each agent can have its own (agent Settings tab, `voice:` in agent.yaml). **Barge-in**: opening the microphone stops any speech.
+- **Conversation mode** (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd>, or the button on the listening bar): an end-of-speech detector (`Endpointer`: loudness against a tracked noise floor, 800 ms pause after 300 ms of speech, 20 s of nothing ends the conversation) stops each turn; the words are sent; the answer is read; the microphone opens again. The bar says "Your turn", "Hearing you", "Waiting for Atlas", or shows the answer being read.
+- **Commands** after the wake word "Forge" (`src/shared/commands.ts`, a fixed grammar, English only): send, clear, stop (Esc to a CLI, Ctrl+C to a shell), continue, new task [for <agent>]: …, run [the] <routine> [routine], go to <view>, stop listening. Without a pause after "Forge" it is a command only if the rest is one ("Forge the sword" stays words). Whisper's prompt now carries command examples: with only names in it, "new task" came back as "New Desk".
+- **From anywhere**: `vibeforge --voice start|stop|toggle|cancel|converse` writes to a control socket (`$XDG_RUNTIME_DIR/vibeforge-<sha1 of the data folder>.sock`, so test instances never answer for the real one; `src/core/control.ts` and `scripts/vibeforge` compute it alike) in about 10 ms, with the second-instance hook as a fallback. Settings → Voice shows Hyprland bindings (Omarchy's Lua `o.bind`, or `bind`/`bindr` for hyprland.conf): Super+Alt+V held to talk, Super+Alt+T for a conversation, and **Add to Hyprland** appends them after copying the file to `.bak.<time>`. In the background, a short tone marks start and stop and results arrive as desktop notifications.
+- **Fixed on the way:** a composer replaced while whisper worked (a view re-rendering its chat) no longer loses the words; a new chat's first answer is waited for (its terminal is known before the view has the chat).
+- Checked on a built copy (so the running app's `dist/` was untouched) over CDP, with a scratch HOME, a fake `claude` that writes Claude Code-format logs, a player override that captured audio to a file, the real Piper and whisper.cpp, and test sentences spoken by Piper and heard by whisper:
+  - "Atlas, add tests for the scheduler." with nothing focused opened Atlas's chat with the words in the box; Send reached the CLI and the answer was read (0.6 s to transcribe)
+  - "Forge, new task: fix the login page." added the task; "Forge, go to tasks." opened Tasks
+  - a conversation on a new chat: paused speech sent itself, "Waiting for Atlas", the answer read, the microphone reopened, Esc ended it
+  - `scripts/vibeforge --voice start|stop` took 9–15 ms; "Atlas, …" then "Forge, send" from the socket sent the waiting words and the answer was read
+  - the launch bar with auto-send started Claude Code with the words and read its answer; review mode in a Claude pane pasted without sending, and Enter brought the answer
+  - speaking stopped 8 ms after the microphone opened; an engine without a log said "Plain · place has finished. 1 file changed, …"; Add to Hyprland wrote the bindings to the scratch HOME's hyprland.conf
+  - quitting left no whisper-server, Piper or CLI behind, and removed the socket
+- The website has a voice card and an answer card in the bento, and says 0.5.0 on the plate and in the install terminal. Checked at 1440 and 390 px: no overflow, no console errors.
+- `npm test`: 106 tests, adding the end-of-speech detector, Piper planning, both session-log readers, speech text, the command grammar (with what whisper really wrote), the control socket and bindings, and agent voices.
+
 ## Not verified yet
+
+- **Voice with a real microphone, real speakers, and real Claude Code**: the checks drove keys over CDP (which bypasses fcitx5), played files instead of the mic, captured speech to a file, and used a stand-in CLI writing Claude Code's log format (taken from a real session log). Codex's reader follows the rollout format but no Codex session has been read yet. The end-of-speech thresholds are tuned on Piper's voice, not a room. Screenshots failed on the hidden workspace, so the bars and the Voice card were checked through the DOM, not by eye.
+- **The Hyprland bindings on the real desktop**: Add to Hyprland was tried against a scratch HOME only.
 
 - Real runs with Codex, Grok, Cursor Agent, Gemini and OpenCode. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Copilot, Kimi, Crush, Pi and Hermes get the prompt pasted.
 - A routine firing on its own at a real cron time (the scheduler is covered by tests, not by waiting).

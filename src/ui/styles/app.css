@@ -2446,6 +2446,111 @@ button.stat:focus-visible {
   }
 }
 
+/* ------------------------------------------------------------------ voice */
+
+/* The listening bar: bottom centre, above everything but dialogs, with the floating edge. */
+.listening {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 85;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(760px, calc(100vw - 32px));
+  padding: 8px 8px 8px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--sel-line);
+  box-shadow: var(--shadow), var(--glow);
+  animation: toast-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.listening::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: var(--gradient);
+}
+
+.listening-text {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.listening-clock {
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.listening-keys {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* The level meter: a row of pixels that light from the left, the last three in the second accent. */
+.meter {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  flex: none;
+}
+
+.meter i {
+  width: 4px;
+  height: 12px;
+  background: color-mix(in srgb, var(--fg-3) 30%, transparent);
+  transition: background 0.06s;
+}
+
+.meter i.on {
+  background: var(--accent);
+}
+
+.meter i.hot {
+  background: var(--accent-2);
+}
+
+/* In a conversation the bar keeps the accent edge all round: the microphone is yours until you end it. */
+.listening.conversation {
+  border-color: var(--hover-line);
+}
+
+.listening.answer .listening-text .faint {
+  max-width: 460px;
+}
+
+.btn.mic.live {
+  color: var(--accent);
+  border-color: var(--sel-line);
+  background: var(--sel-fill);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.voice-progress {
+  height: 6px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+}
+
+.voice-progress i {
+  display: block;
+  height: 100%;
+  background: var(--gradient);
+}
+
+.voice-try {
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--bg-deep) 70%, transparent);
+  min-height: 38px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

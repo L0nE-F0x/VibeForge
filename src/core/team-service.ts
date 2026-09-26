@@ -78,6 +78,8 @@ export interface AgentInput {
   places: string[];
   skills?: string[];
   allowRoutines?: boolean;
+  /** A Piper voice file; empty uses the one in Settings. */
+  voice?: string;
 }
 
 export interface SkillInput {
@@ -375,6 +377,7 @@ export class TeamService {
       places,
       skills: input.skills ? input.skills.filter((id) => this.store.getSkill(id)) : (existing?.skills ?? []),
       allowRoutines: typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
+      voice: typeof input.voice === "string" ? input.voice.trim() : (existing?.voice ?? ""),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };

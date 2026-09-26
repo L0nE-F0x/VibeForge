@@ -1,4 +1,4 @@
-import { Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
+import { Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
@@ -7,6 +7,7 @@ import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnos
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
+import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { usePalette } from "../theme.js";
 import { useAction, useToast } from "../state.js";
@@ -181,6 +182,11 @@ export function SettingsView() {
               <Input className="mono" value={shell} onChange={(event) => setShell(event.target.value)} onBlur={() => shell.trim() && shell !== current.defaultShell && void patch({ defaultShell: shell.trim() })} />
             </Field>
           </div>
+
+          <div className="section-title" id="settings-voice">
+            <Mic size={13} /> {t("voice.title")}
+          </div>
+          <VoiceCard />
 
           <div className="section-title">
             <Bell size={13} /> {t("settings.notifications")}

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api.js";
+import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
@@ -30,6 +31,7 @@ import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
+import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 
 interface Runtime {
   ptyId: string | null;
@@ -101,6 +103,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const starting = useRef(new Set<string>());
   const layoutsRef = useRef(layouts);
   layoutsRef.current = layouts;
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
   const fontSizeRef = useRef(13);
   fontSizeRef.current = settings?.terminalFontSize ?? 13;
 
@@ -305,19 +311,19 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     void startPane(workspace, next, opts);
   }
 
-  async function launchFromBar() {
+  async function launchFromBar(override?: string) {
     if (!current || !engineId) return;
-    const layout = layouts[current.id];
-    const text = prompt.trim();
+    const layout = layoutsRef.current[current.id];
+    const text = (override ?? prompt).trim();
     if (layout === null) {
       setPrompt("");
       openFirst(current, { type: "engine", engineId }, { prompt: text || undefined });
       return;
     }
     if (!layout) return;
-    const focusedId = focus[current.id] ?? panesOf(layout)[0].id;
+    const focusedId = focusRef.current[current.id] ?? panesOf(layout)[0].id;
     const focused = panesOf(layout).find((pane) => pane.id === focusedId) ?? panesOf(layout)[0];
-    const state = runtime[focused.id]?.state ?? "idle";
+    const state = runtimeRef.current[focused.id]?.state ?? "idle";
     setPrompt("");
     if (state === "idle" || state === "exited") {
       launchHere(current, focused, { type: "engine", engineId }, { prompt: text || undefined });
@@ -325,6 +331,87 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     }
     splitPane(current, focused.id, "row", { type: "engine", engineId }, { prompt: text || undefined });
   }
+
+  // ---------------------------------------------------------------- dictation
+
+  /** Names whisper should expect in a workspace: its own name and what sits at its top level. */
+  const workspaceWords = async (workspace: Workspace) => [workspace.name, ...(await call("files.list", workspace.path)).slice(0, 60).map((node) => node.name)];
+
+  /** A pane as a place for dictated words: pasted into its terminal, or into the launch bar while it has none. */
+  function paneTarget(workspace: Workspace, pane: PaneNode): DictationTarget {
+    const title = pane.launch.type === "shell" ? t("common.shell") : engineLabel(pane.launch.engineId);
+    return {
+      label: `${title} · ${workspace.name}`,
+      element: () => document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(pane.id)}"]`),
+      insert: (text) => {
+        const handle = terminals.current.get(pane.id);
+        if (handle) handle.paste(text);
+        else setPrompt((prev) => joinDictation(prev, text));
+      },
+      submit: (text) => {
+        const ptyId = livePty(pane.id);
+        const handle = terminals.current.get(pane.id);
+        if (!ptyId || !handle) {
+          setPrompt((prev) => joinDictation(prev, text));
+          return;
+        }
+        void call("pty.send", ptyId, text).catch(() => undefined);
+        handle.focus();
+      },
+      send: () => {
+        const ptyId = livePty(pane.id);
+        if (ptyId) void call("pty.write", ptyId, "\r").catch(() => undefined);
+      },
+      // Ctrl+U empties a shell's input line, and Claude Code's.
+      clear: () => {
+        const ptyId = livePty(pane.id);
+        if (ptyId) void call("pty.write", ptyId, "\x15").catch(() => undefined);
+      },
+      // Esc interrupts a coding CLI; a shell wants Ctrl+C.
+      interrupt: () => {
+        const ptyId = livePty(pane.id);
+        if (ptyId) void call("pty.write", ptyId, pane.launch.type === "shell" ? "\x03" : "\x1b").catch(() => undefined);
+      },
+      resume: () => {
+        const latest = panesOf(layoutsRef.current[workspace.id] ?? pane).find((item) => item.id === pane.id) ?? pane;
+        if (runtimeRef.current[pane.id]?.state === "exited" && latest.launch.type === "engine") launchHere(workspace, latest, latest.launch, { continueSession: true });
+        else if (livePty(pane.id)) void call("pty.send", livePty(pane.id)!, "Continue.").catch(() => undefined);
+      },
+      ptyId: () => livePty(pane.id),
+      words: () => workspaceWords(workspace),
+    };
+  }
+
+  function livePty(paneId: string): string | null {
+    const state = runtimeRef.current[paneId];
+    return state?.state === "live" ? state.ptyId : null;
+  }
+
+  const launchInput = useRef<HTMLInputElement>(null);
+  // The terminal that was focused when the bar last launched, so its answer isn't mistaken for the new one's.
+  const launchedFrom = useRef<string | null>(null);
+  const launchDictation = useDictationTarget(() => ({
+    label: t("code.launchTarget", { engine: engineLabel(engineId), workspace: current?.name ?? "" }),
+    element: () => launchInput.current,
+    insert: (text) => {
+      setPrompt((prev) => joinDictation(prev, text));
+      launchInput.current?.focus();
+    },
+    submit: (text) => {
+      if (!current) return;
+      launchedFrom.current = livePty(focusRef.current[current.id] ?? "");
+      void launchFromBar(joinDictation(prompt, text));
+    },
+    send: () => void launchFromBar(),
+    clear: () => setPrompt(""),
+    // Launching focuses the pane it starts in; its terminal is the one that answers.
+    ptyId: () => {
+      if (!current) return null;
+      const ptyId = livePty(focusRef.current[current.id] ?? "");
+      return ptyId && ptyId !== launchedFrom.current ? ptyId : null;
+    },
+    words: () => (current ? workspaceWords(current) : []),
+  }));
 
   function insertPath(target: string) {
     if (!current) return;
@@ -609,7 +696,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                           engines={engines}
                           active={active && visible}
                           focused={focus[workspace.id] === pane.id}
-                          onFocus={() => setFocus((prev) => (prev[workspace.id] === pane.id ? prev : { ...prev, [workspace.id]: pane.id }))}
+                          onFocus={() => {
+                            setDictationTarget(paneTarget(workspace, pane));
+                            setFocus((prev) => (prev[workspace.id] === pane.id ? prev : { ...prev, [workspace.id]: pane.id }));
+                          }}
                           register={(handle) => {
                             if (handle) terminals.current.set(pane.id, handle);
                             else terminals.current.delete(pane.id);
@@ -658,7 +748,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               )}
             </div>
 
-            <div className="launch-bar">
+            <div className="launch-bar" onFocusCapture={launchDictation.onFocusCapture}>
               <div style={{ width: 170, flex: "none" }}>
                 <Select value={engineId} onChange={(event) => setEngineId(event.target.value)} disabled={!available.length}>
                   {available.length === 0 && <option value="">{t("code.noClis")}</option>}
@@ -670,6 +760,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                 </Select>
               </div>
               <Input
+                ref={launchInput}
                 value={prompt}
                 placeholder={t("code.launchPlaceholder", { engine: engineLabel(engineId), workspace: current.name })}
                 onChange={(event) => setPrompt(event.target.value)}
@@ -677,6 +768,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   if (event.key === "Enter") void launchFromBar();
                 }}
               />
+              <MicButton target={launchDictation.target} />
               <Button variant="primary" icon={Rocket} disabled={!engineId} onClick={() => void launchFromBar()}>
                 {t("code.launch")}
               </Button>
