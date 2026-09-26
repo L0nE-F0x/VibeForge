@@ -129,6 +129,15 @@ describe("chats", () => {
     ctx.svc.close();
   });
 
+  it("records a short prompt as its slot without hiding the rest of the command", async () => {
+    const ctx = setup();
+    const chat = ctx.svc.createChat({ engine: "argy" });
+    const first = await ctx.svc.sendChat(chat.id, "a");
+    expect(ctx.spawns[0].argv.slice(0, 2)).toEqual(["/usr/bin/argy", "--flag"]);
+    expect(ctx.svc.getRun(first.runId).run.argv).toEqual(["/usr/bin/argy", "--flag", "{prompt}"]);
+    ctx.svc.close();
+  });
+
   it("reopens the exact session the CLI printed on exit", async () => {
     const ctx = setup();
     const chat = ctx.svc.createChat({ engine: "argy" });

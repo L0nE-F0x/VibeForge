@@ -1305,7 +1305,7 @@ export class TeamService {
       chatId: input.chatId ?? null,
       workspaceId: input.workspaceId ?? null,
       engine: input.engine.row.id,
-      argv: plan.argv.map((arg) => (input.promptText && arg.includes(input.promptText) ? "{prompt}" : arg)),
+      argv: plan.recordArgv,
       cwd: input.cwd,
       prompt: input.prompt,
       startedAt: started.toISOString(),

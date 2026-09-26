@@ -81,13 +81,27 @@ else
   git clone --quiet "$REPO" "$DEST"
 fi
 
-# The newest release, or a branch when one was asked for (main until the first release exists).
+# The tag on GitHub's latest release: the same one the app's Update checks for, so a stray tag
+# that was never released can't win. Prints nothing if GitHub can't be asked.
+latest_release_tag() {
+  [[ "$REPO" =~ github\.com[/:]([^/]+)/([^/]+)$ ]] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  curl -fsSL --max-time 10 "https://api.github.com/repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}/releases/latest" 2>/dev/null |
+    node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => { try { process.stdout.write(String(JSON.parse(s).tag_name || "")); } catch {} });' || true
+}
+
+# The latest release, or a branch when one was asked for. Without an answer from GitHub, the
+# newest version tag; without any tag, main.
 if [[ -n "$BRANCH" ]]; then
   git -C "$DEST" fetch --quiet origin "$BRANCH"
   target="origin/$BRANCH"
 else
-  target=$(git -C "$DEST" tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
-  target="${target:-origin/main}"
+  target=$(latest_release_tag)
+  if [[ -z "$target" ]] || ! git -C "$DEST" rev-parse --quiet --verify "refs/tags/$target" >/dev/null; then
+    target=$(git -C "$DEST" tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+    [[ -n "$target" ]] && note "Could not ask GitHub for the latest release; using the newest tag, $target"
+    target="${target:-origin/main}"
+  fi
 fi
 git -C "$DEST" checkout --quiet --force --detach "$target"
 # Lets the app know this copy is the installer's, so its Update button runs this script.

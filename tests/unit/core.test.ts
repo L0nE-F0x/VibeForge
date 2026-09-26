@@ -86,17 +86,34 @@ describe("engines", () => {
 
   it("passes the prompt as an argument, pastes it, or points at a file when it is too long", () => {
     const claude = seedEngines().find((row) => row.id === "claude")!;
-    expect(planLaunch(claude, "/bin/claude", { prompt: "line one\nline two" })).toEqual({ argv: ["/bin/claude", "line one\nline two"], pasteInput: null });
-    expect(planLaunch(claude, "/bin/claude", { prompt: "" })).toEqual({ argv: ["/bin/claude"], pasteInput: null });
+    expect(planLaunch(claude, "/bin/claude", { prompt: "line one\nline two" })).toEqual({
+      argv: ["/bin/claude", "line one\nline two"],
+      recordArgv: ["/bin/claude", "{prompt}"],
+      pasteInput: null,
+    });
+    expect(planLaunch(claude, "/bin/claude", { prompt: "" })).toEqual({ argv: ["/bin/claude"], recordArgv: ["/bin/claude"], pasteInput: null });
     expect(planLaunch(claude, "/bin/claude", { continueSession: true }).argv).toEqual(["/bin/claude", "--continue"]);
     const gemini = seedEngines().find((row) => row.id === "gemini")!;
     expect(planLaunch(gemini, "/bin/gemini", { prompt: "hi" }).argv).toEqual(["/bin/gemini", "-i", "hi"]);
     const pasted = planLaunch({ id: "x", label: "X", bin: "x", args: ["--flag"] }, "/bin/x", { prompt: "hello" });
-    expect(pasted).toEqual({ argv: ["/bin/x", "--flag"], pasteInput: "hello" });
+    expect(pasted).toEqual({ argv: ["/bin/x", "--flag"], recordArgv: ["/bin/x", "--flag"], pasteInput: "hello" });
     const huge = "x".repeat(150_000);
     const long = planLaunch(claude, "/bin/claude", { prompt: huge, promptFile: "/runs/1/preamble.md" });
     expect(long.argv[1]).toContain("/runs/1/preamble.md");
     expect(long.pasteInput).toBeNull();
+  });
+
+  it("ends the options before a prompt that looks like a flag, only where it is positional", () => {
+    const [claude, gemini, pi] = ["claude", "gemini", "pi"].map((id) => seedEngines().find((row) => row.id === id)!);
+    expect(planLaunch(claude, "/bin/claude", { prompt: "--help" })).toMatchObject({ argv: ["/bin/claude", "--", "--help"], recordArgv: ["/bin/claude", "--", "{prompt}"] });
+    expect(planLaunch(pi, "/bin/pi", { prompt: "- Summarize these points", continueSession: true }).argv).toEqual(["/bin/pi", "--continue", "--", "- Summarize these points"]);
+    expect(planLaunch(claude, "/bin/claude", { prompt: "fix -v" }).argv).toEqual(["/bin/claude", "fix -v"]);
+    // After "-i" the prompt is the flag's value: "--" there would make it a stray positional.
+    expect(planLaunch(gemini, "/bin/gemini", { prompt: "-x" }).argv).toEqual(["/bin/gemini", "-i", "-x"]);
+    const valued = { id: "v", label: "V", bin: "v", args: [], promptArgs: ["--model", "big", "{prompt}"] };
+    expect(planLaunch(valued, "/bin/v", { prompt: "-x" }).argv).toEqual(["/bin/v", "--model", "big", "--", "-x"]);
+    const trailing = { id: "t", label: "T", bin: "t", args: [], promptArgs: ["{prompt}", "--yes"] };
+    expect(planLaunch(trailing, "/bin/t", { prompt: "-x" }).argv).toEqual(["/bin/t", "-x", "--yes"]);
   });
 
   it("names the program in a shell's foreground, seeing through interpreters", () => {

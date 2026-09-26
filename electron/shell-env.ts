@@ -5,21 +5,25 @@ const MARKER = "__VIBEFORGE_PATH__";
 
 /**
  * PATH as a login shell sees it. Launched from the app menu, Electron gets a bare PATH
- * without mise or ~/.local/bin; the CLIs VibeForge runs live there.
+ * without mise or ~/.local/bin; the CLIs VibeForge runs live there. `printenv` reads the
+ * exported PATH, which is colon-separated even in fish or nushell, where "$PATH" is a list.
  */
-export function loadShellPath(timeoutMs = 4000): Promise<string | null> {
-  const shell = process.env.SHELL || "/bin/bash";
+export function loadShellPath(timeoutMs = 4000, shell = process.env.SHELL || "/bin/bash"): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       shell,
-      ["-ilc", `printf '%s%s%s' '${MARKER}' "$PATH" '${MARKER}'`],
+      ["-ilc", `printf '%s' '${MARKER}'; printenv PATH; printf '%s' '${MARKER}'`],
       { timeout: timeoutMs, encoding: "utf8", maxBuffer: 1024 * 1024, env: { ...process.env, VIBEFORGE_ENV_PROBE: "1" } },
-      (_error, stdout) => {
-        const match = (stdout ?? "").match(new RegExp(`${MARKER}([\\s\\S]*?)${MARKER}`));
-        resolve(match && match[1].trim() ? match[1].trim() : null);
-      },
+      (_error, stdout) => resolve(parseShellPath(stdout ?? "")),
     );
   });
+}
+
+/** The PATH between the markers, keeping only absolute entries so shell noise can't land in it. */
+export function parseShellPath(stdout: string): string | null {
+  const match = stdout.match(new RegExp(`${MARKER}([\\s\\S]*?)${MARKER}`));
+  const entries = (match?.[1].trim() ?? "").split(path.delimiter).filter((part) => path.isAbsolute(part));
+  return entries.length ? entries.join(path.delimiter) : null;
 }
 
 /** Login-shell entries first, then anything only the current process had. */

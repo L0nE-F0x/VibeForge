@@ -63,6 +63,13 @@ const install = installKind(appRoot(), {
 });
 
 /** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
+/** Puts the login shell's PATH ahead of Electron's, so CLIs installed through mise are found. */
+async function adoptShellPath(): Promise<void> {
+  const shellPath = await loadShellPath();
+  if (shellPath) process.env.PATH = mergePath(shellPath, process.env.PATH);
+  else log.warn(`Could not read PATH from the login shell (${process.env.SHELL || "/bin/bash"}); CLIs found only on that PATH will show as missing`);
+}
+
 function osDescription(): string {
   let name = os.type();
   try {
@@ -231,7 +238,8 @@ function handlers(): Handlers {
     "updates.run": (size) => {
       const command = updater.get().command;
       if (!command) throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
-      log.info(`Update started: ${command}`);
+      // The kind of copy, never the command: a packager's VIBEFORGE_UPDATE_COMMAND can hold a secret.
+      log.info(`Update started for the ${install} copy${process.env.VIBEFORGE_UPDATE_COMMAND ? " (VIBEFORGE_UPDATE_COMMAND)" : ""}`);
       return s().startCommand({ command, title: "VibeForge update", cwd: os.homedir(), ...size });
     },
 
@@ -243,8 +251,7 @@ function handlers(): Handlers {
     },
     "engines.list": () => s().listEngines(),
     "engines.recheck": async () => {
-      const shellPath = await loadShellPath();
-      if (shellPath) process.env.PATH = mergePath(shellPath, process.env.PATH);
+      await adoptShellPath();
       s().emit("engines", "agents", "routines", "tasks");
       return s().listEngines();
     },
@@ -516,8 +523,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${appRoot()}`);
     Menu.setApplicationMenu(null);
-    const shellPath = await loadShellPath();
-    if (shellPath) process.env.PATH = mergePath(shellPath, process.env.PATH);
+    await adoptShellPath();
     service = new TeamService({
       configRoot: roots.configRoot,
       dataRoot: roots.dataRoot,

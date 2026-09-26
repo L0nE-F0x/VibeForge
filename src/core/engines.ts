@@ -146,6 +146,8 @@ export const MAX_PROMPT_ARG_BYTES = 100_000;
 
 export interface LaunchPlan {
   argv: string[];
+  /** The argv for the run record: the same, with each prompt slot left as "{prompt}". */
+  recordArgv: string[];
   /** Text VibeForge pastes into the session once the CLI is ready, if it could not go on argv. */
   pasteInput: string | null;
 }
@@ -159,13 +161,27 @@ export function planLaunch(
   if (opts.resumeArgs?.length) argv.push(...opts.resumeArgs);
   else if (opts.continueSession && row.continueArgs?.length) argv.push(...row.continueArgs);
   const prompt = opts.prompt?.trim() ? opts.prompt : null;
-  if (!prompt) return { argv, pasteInput: null };
-  if (!row.promptArgs?.length) return { argv, pasteInput: prompt };
+  if (!prompt) return { argv, recordArgv: argv, pasteInput: null };
+  if (!row.promptArgs?.length) return { argv, recordArgv: argv, pasteInput: prompt };
   let text = prompt;
   if (Buffer.byteLength(text, "utf8") > MAX_PROMPT_ARG_BYTES) {
-    if (!opts.promptFile) return { argv, pasteInput: prompt };
+    if (!opts.promptFile) return { argv, recordArgv: argv, pasteInput: prompt };
     text = `Your full instructions for this run are in ${opts.promptFile}. Read that file first and follow it.`;
   }
-  argv.push(...row.promptArgs.map((arg) => arg.replaceAll("{prompt}", text)));
-  return { argv, pasteInput: null };
+  const promptArgs = text.startsWith("-") && endsPositional(row.promptArgs) ? [...row.promptArgs.slice(0, -1), "--", "{prompt}"] : row.promptArgs;
+  return {
+    argv: [...argv, ...promptArgs.map((arg) => arg.replaceAll("{prompt}", text))],
+    recordArgv: [...argv, ...promptArgs],
+    pasteInput: null,
+  };
+}
+
+/**
+ * Whether the prompt is the last argument and not a flag's value. Only then can "--" go before
+ * a prompt such as "--help" so the CLI reads it as text: after "-i" the prompt is the flag's value,
+ * and anything after "--" would no longer be read as an option.
+ */
+function endsPositional(promptArgs: string[]): boolean {
+  const last = promptArgs.length - 1;
+  return promptArgs[last] === "{prompt}" && (last === 0 || !promptArgs[last - 1].startsWith("-"));
 }
