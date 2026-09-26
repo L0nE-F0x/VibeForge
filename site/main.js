@@ -619,6 +619,54 @@ function setupUpdateArt() {
   });
 }
 
+/** The voice card plays a dictation: the meter moves with the speech, the words arrive, then it starts again. */
+function setupVoiceArt() {
+  const art = $("[data-voice-art]");
+  if (!art || reduceMotion) return;
+  const cells = $$("[data-voice-meter] i");
+  const typed = $("[data-voice-typed]");
+  const clock = $("[data-voice-clock]");
+  const lines = ["Atlas, add tests for the scheduler.", "Forge, new task: fix the login page.", "Refactor the lamp so it glows at night.", "Forge, send."];
+  let visible = false;
+  let running = false;
+  const level = (value) => {
+    const lit = Math.round(value * cells.length);
+    cells.forEach((cell, i) => {
+      cell.classList.toggle("on", i < lit && i < cells.length - 3);
+      cell.classList.toggle("hot", i < lit && i >= cells.length - 3);
+    });
+  };
+  const run = async () => {
+    running = true;
+    let n = 0;
+    while (visible) {
+      const line = lines[n % lines.length];
+      n += 1;
+      typed.textContent = "";
+      const started = Date.now();
+      // Speaking: the meter dances for a couple of seconds.
+      while (visible && Date.now() - started < 2200) {
+        level(0.35 + Math.random() * 0.6);
+        clock.textContent = `0:0${Math.floor((Date.now() - started) / 1000)}`;
+        await sleep(90);
+      }
+      level(0);
+      // Then the words arrive, a few at a time, as whisper hands them back.
+      for (const word of line.split(" ")) {
+        if (!visible) break;
+        typed.textContent += (typed.textContent ? " " : "") + word;
+        await sleep(70);
+      }
+      await sleep(2400);
+    }
+    running = false;
+  };
+  watch(art, (now) => {
+    visible = now;
+    if (visible && !running) void run();
+  });
+}
+
 function setupGlow() {
   for (const card of $$("[data-glow]")) {
     card.addEventListener("pointermove", (event) => {
@@ -839,6 +887,7 @@ setupReveal();
 setupDesk();
 setupFlips();
 setupUpdateArt();
+setupVoiceArt();
 setupGlow();
 setupTour();
 setupFinal();

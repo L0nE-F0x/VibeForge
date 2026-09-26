@@ -3290,3 +3290,163 @@ kbd.big {
     display: none;
   }
 }
+
+/* voice: the listening bar, a line being dictated, and an answer being read */
+.art-voice {
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-height: 150px;
+}
+
+.v-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--sel-line);
+  box-shadow: var(--glow);
+  position: relative;
+}
+
+.v-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+}
+
+.v-meter {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+}
+
+.v-meter i {
+  width: 4px;
+  height: 12px;
+  background: color-mix(in srgb, var(--fg-3) 30%, transparent);
+}
+
+.v-meter i.on {
+  background: var(--accent);
+}
+
+.v-meter i.hot {
+  background: var(--accent-2);
+}
+
+.v-to {
+  color: var(--fg-3);
+  flex: 1;
+}
+
+.v-clock {
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.v-box {
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--bg-deep) 70%, transparent);
+  min-height: 36px;
+  color: var(--fg);
+}
+
+.v-caret {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: blink 1s steps(1) infinite;
+}
+
+.v-hint {
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+.keycap-s {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  color: var(--fg-2);
+}
+
+.art-answer {
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 110px;
+}
+
+.a-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.a-line svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+}
+
+.a-line span {
+  color: var(--fg-2);
+}
+
+.a-wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+}
+
+.a-wave i {
+  width: 5px;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: center;
+  animation: speak 1.1s steps(4) infinite;
+}
+
+.a-wave i:nth-child(3n) {
+  background: var(--accent-2);
+  animation-duration: 0.9s;
+}
+
+.a-wave i:nth-child(2n) {
+  animation-delay: -0.4s;
+}
+
+.a-wave i:nth-child(5n) {
+  animation-delay: -0.7s;
+  animation-duration: 1.3s;
+}
+
+@keyframes speak {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .a-wave i {
+    animation: none;
+    transform: scaleY(0.5);
+  }
+}
