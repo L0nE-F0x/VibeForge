@@ -225,6 +225,7 @@ export interface DeskMethods {
   "workspaces.add": (folder: string) => WorkspaceFile;
   "workspaces.remove": (id: string) => WorkspaceFile;
   "workspaces.select": (id: string) => void;
+  "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
   "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
   "layouts.get": (workspaceId: string) => LayoutNode | null;
   "layouts.save": (workspaceId: string, layout: LayoutNode | null) => void;

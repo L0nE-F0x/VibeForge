@@ -213,6 +213,24 @@ describe("routines", () => {
     ctx.svc.close();
   });
 
+  it("records a routine that cannot start, once per slot, instead of passing silently", async () => {
+    const ctx = setup({ appStartedAt: new Date(9 * INTERVAL) });
+    const agent = await agentIn(ctx);
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(routine.id)!, lastFiredAt: new Date(9 * INTERVAL).toISOString() });
+    fs.rmSync(agent.places[0], { recursive: true, force: true });
+
+    const [result] = await ctx.svc.tick(new Date(10 * INTERVAL + 1000));
+    expect(result.error).toMatch(/allowed folders exist/);
+    await ctx.svc.tick(new Date(10 * INTERVAL + 31_000));
+    expect(ctx.spawns).toHaveLength(0);
+    const failed = ctx.svc.listRuns().filter((run) => run.routineId === routine.id);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ status: "failed", origin: "routine" });
+    expect(failed[0].error).toMatch(/allowed folders exist/);
+    ctx.svc.close();
+  });
+
   it("does not fire a slot that passed before the routine was saved", async () => {
     const ctx = setup({ appStartedAt: new Date(0) });
     const agent = await agentIn(ctx);
@@ -314,6 +332,32 @@ describe("runs", () => {
     expect(run.status).toBe("stopped");
     expect(run.error).toMatch(/closed while this run was going/);
     expect(fs.existsSync(path.join(dir, "git.txt"))).toBe(true);
+    ctx.svc.close();
+  });
+
+  it("sends a crashed task to review only while the orphan is still its run", async () => {
+    const configRoot = tempDir();
+    const dataRoot = tempDir();
+    const store = new Store(configRoot, dataRoot);
+    const orphan = (label: string) => {
+      const { id, dir } = allocateRunDir(dataRoot, new Date(), label);
+      const meta = normalizeRun({ id, dir, origin: "task", status: "running", startedAt: new Date().toISOString(), cwd: dataRoot, title: label, taskId: label }) as RunMeta;
+      writeRunMeta(meta);
+      store.saveRun(meta);
+      return id;
+    };
+    const stamp = new Date().toISOString();
+    const task = (id: string, runIds: string[]) =>
+      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, createdAt: stamp, updatedAt: stamp });
+    task("crashed", [orphan("crashed")]);
+    // Its latest run is a newer one, as after an Execute that raced the settling.
+    task("restarted", [orphan("restarted"), "a-newer-run"]);
+    store.close();
+    const ctx = setup({ configRoot, dataRoot });
+    await ctx.svc.whenSettled();
+    const status = (id: string) => ctx.svc.listTasks().find((item) => item.id === id)?.status;
+    expect(status("crashed")).toBe("review");
+    expect(status("restarted")).toBe("running");
     ctx.svc.close();
   });
 

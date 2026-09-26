@@ -42,9 +42,9 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
               value={filter}
               onChange={setFilter}
               options={[
-                { value: "review", label: `Review${inbox.data?.length ? ` ${inbox.data.length}` : ""}` },
-                { value: "live", label: "Live" },
-                { value: "all", label: "All" },
+                { value: "review", label: `${t("runs.filter.review")}${inbox.data?.length ? ` ${inbox.data.length}` : ""}` },
+                { value: "live", label: t("runs.filter.live") },
+                { value: "all", label: t("runs.filter.all") },
               ]}
             />
           </>

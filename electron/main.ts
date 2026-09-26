@@ -254,6 +254,7 @@ function handlers(): Handlers {
     "workspaces.add": (folder) => s().addWorkspace(folder),
     "workspaces.remove": (id) => s().removeWorkspace(id),
     "workspaces.select": (id) => s().selectWorkspace(id),
+    "workspaces.move": (id, toIndex) => s().moveWorkspace(id, toIndex),
     "workspaces.update": (id, patch) => s().updateWorkspace(id, patch),
     "layouts.get": (id) => s().getLayout(id),
     "layouts.save": (id, layout) => s().saveLayout(id, layout),
@@ -479,6 +480,7 @@ supervisor.onExit.add((event) => {
   send("pty-exit", event);
   void service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
 });
+supervisor.onProgram.add((event) => service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
   send("host-crash", message);
@@ -534,10 +536,15 @@ if (!app.requestSingleInstanceLock()) {
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
     win?.on("focus", refreshPalette);
     const tick = () =>
-      void service?.tick().catch((error: unknown) => {
-        console.error(error);
-        log.error(`Routine scheduler: ${describeError(error)}`);
-      });
+      void service
+        ?.tick()
+        .then((results) => {
+          for (const result of results) if (result.error) log.warn(`Routine ${result.routineId} could not start: ${result.error}`);
+        })
+        .catch((error: unknown) => {
+          console.error(error);
+          log.error(`Routine scheduler: ${describeError(error)}`);
+        });
     const first = setTimeout(tick, 3000);
     const timer = setInterval(tick, TICK_MS);
     updater.start();

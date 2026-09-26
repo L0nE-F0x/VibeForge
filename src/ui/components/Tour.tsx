@@ -94,6 +94,7 @@ const STEPS: Step[] = [
     side: "left",
     icon: Move,
     keys: [
+      ["Ctrl+Shift+D", "shortcuts.splitRight"],
       ["Ctrl+Shift+M", "shortcuts.maximize"],
       ["Ctrl+Shift+C", "shortcuts.copy"],
       ["Ctrl+Shift+V", "shortcuts.paste"],
@@ -104,9 +105,10 @@ const STEPS: Step[] = [
     title: "tour.launch.title",
     body: "tour.launch.body",
     route: { view: "code" },
-    target: [".code-view .launch-bar"],
+    target: ['[data-tour="launch"]'],
     optional: true,
-    side: "top",
+    side: "left",
+    keys: [["Ctrl+Shift+L", "shortcuts.launch"]],
     icon: Rocket,
   },
   {

@@ -118,6 +118,8 @@ export interface Settings {
   /** "system" follows the desktop's language; otherwise a code such as "de". */
   language: string;
   voice: VoiceSettings;
+  /** The views in the left rail: their order, and which ones are hidden. Unknown names are ignored. */
+  rail: { order: string[]; hidden: string[] };
 }
 
 /** Dictation: speech to text on this machine with whisper.cpp. */
@@ -171,6 +173,12 @@ export interface LiveSession {
   chatId: string | null;
   taskId: string | null;
   workspaceId: string | null;
+  /** What a shell is running in its foreground right now ("vim", or an engine's label), if anything. */
+  program?: string | null;
+  /** The engine behind `program`, when it is one of the coding CLIs. */
+  programEngineId?: string | null;
+  /** The folder `program` runs in. */
+  programCwd?: string | null;
 }
 
 export type Topic =

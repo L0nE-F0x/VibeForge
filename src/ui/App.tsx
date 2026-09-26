@@ -1,29 +1,16 @@
-import {
-  Activity,
-  Bot,
-  CalendarClock,
-  CircleHelp,
-  History,
-  House,
-  KanbanSquare,
-  MessagesSquare,
-  Settings as SettingsIcon,
-  Sparkles,
-  SquareTerminal,
-  TerminalSquare,
-  type LucideIcon,
-} from "lucide-react";
+import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate } from "./api.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, useSettings, useTasks, useUpdate, useWorkspaces } from "./api.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { VoiceLayer } from "./voice.js";
-import { Button, ConfirmDialog, Empty, Logo, Popover, Toasts } from "./components/ui.js";
-import { applyLanguageSetting, t as translateNow, useT, type Key } from "./i18n/index.js";
+import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Toasts } from "./components/ui.js";
+import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
+import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
 import { AgentsView } from "./views/Agents.js";
 import { ChatView } from "./views/Chat.js";
@@ -34,17 +21,6 @@ import { RunsView } from "./views/Runs.js";
 import { SettingsView } from "./views/Settings.js";
 import { SkillsView } from "./views/Skills.js";
 import { TasksView } from "./views/Tasks.js";
-
-const VIEWS: Array<{ view: Exclude<ViewName, "settings">; label: Key; tip: Key; icon: LucideIcon }> = [
-  { view: "home", label: "rail.home", tip: "rail.tip.home", icon: House },
-  { view: "agents", label: "rail.agents", tip: "rail.tip.agents", icon: Bot },
-  { view: "code", label: "rail.code", tip: "rail.tip.code", icon: SquareTerminal },
-  { view: "chat", label: "rail.chat", tip: "rail.tip.chat", icon: MessagesSquare },
-  { view: "tasks", label: "rail.tasks", tip: "rail.tip.tasks", icon: KanbanSquare },
-  { view: "routines", label: "rail.routines", tip: "rail.tip.routines", icon: CalendarClock },
-  { view: "skills", label: "rail.skills", tip: "rail.tip.skills", icon: Sparkles },
-  { view: "runs", label: "rail.runs", tip: "rail.tip.runs", icon: History },
-];
 
 export function App() {
   return (
@@ -64,15 +40,28 @@ export function App() {
 function Shell() {
   const { route, go, back } = useNav();
   const { push } = useToast();
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  const rail = useSettings().data?.rail;
+  const railRef = useRef(rail);
+  railRef.current = rail;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-8]$/.test(event.key)) {
+      if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+        const item = railViews(railRef.current).visible[Number(event.key) - 1];
+        if (!item) return;
         event.preventDefault();
-        go({ view: VIEWS[Number(event.key) - 1].view } as Route);
+        go({ view: item.view } as Route);
       } else if (event.ctrlKey && !event.altKey && event.key === ",") {
         event.preventDefault();
         go({ view: "settings" });
+      } else if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) {
+        const workspace = workspacesRef.current[Number(event.code.slice(5)) - 1];
+        if (!workspace) return;
+        event.preventDefault();
+        go({ view: "code", workspaceId: workspace.id });
       } else if (event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
         back();
@@ -181,6 +170,10 @@ function Rail() {
   const review = tasks.filter((task) => task.status === "review").length;
   const [liveAnchor, setLiveAnchor] = useState<HTMLElement | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
+  const [viewMenu, setViewMenu] = useState<{ view: RailView; anchor: HTMLElement } | null>(null);
+  const rail = useSettings().data?.rail;
+  const { visible } = railViews(rail);
+  const hide = (view: RailView) => void call("settings.save", { rail: { order: rail?.order ?? [], hidden: [...(rail?.hidden ?? []), view] } });
 
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
@@ -193,7 +186,7 @@ function Rail() {
       <div className="rail-logo" {...tipProps("VibeForge", { side: "right" })}>
         <Logo size={22} />
       </div>
-      {VIEWS.map((item, index) => {
+      {visible.map((item, index) => {
         const count = badge(item.view);
         return (
           <button
@@ -202,8 +195,12 @@ function Rail() {
             className="rail-btn"
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
-            {...tipProps(t(item.tip), { kbd: `Ctrl+${index + 1}`, side: "right" })}
+            {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
             onClick={() => go({ view: item.view } as Route)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setViewMenu({ view: item.view, anchor: event.currentTarget });
+            }}
           >
             <item.icon size={19} strokeWidth={1.9} />
             <span>{t(item.label)}</span>
@@ -245,6 +242,17 @@ function Rail() {
           <span>{t("rail.settings")}</span>
         </button>
       </div>
+      {viewMenu && (
+        <Popover anchor={viewMenu.anchor} onClose={() => setViewMenu(null)}>
+          <Menu
+            onClose={() => setViewMenu(null)}
+            items={[
+              ...(viewMenu.view === PINNED ? [] : [{ label: t("rail.hide", { view: t(`rail.${viewMenu.view}`) }), icon: EyeOff, onSelect: () => hide(viewMenu.view) }]),
+              { label: t("rail.customize"), icon: SlidersHorizontal, onSelect: () => go({ view: "settings" }) },
+            ]}
+          />
+        </Popover>
+      )}
       {liveAnchor && <LivePopover anchor={liveAnchor} onClose={() => setLiveAnchor(null)} />}
       {helpAnchor && <HelpPopover anchor={helpAnchor} onClose={() => setHelpAnchor(null)} />}
     </nav>
@@ -280,7 +288,7 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
           {session.kind === "shell" ? <TerminalSquare size={14} /> : <span className="dot running" />}
           <span className="vstack grow" style={{ gap: 0 }}>
             <span className="truncate" style={{ color: "var(--fg)" }}>
-              {session.title}
+              {session.program ?? session.title}
             </span>
             <span className="truncate faint mono" style={{ fontSize: "var(--fs-xs)" }}>
               {tildify(session.cwd, home)}

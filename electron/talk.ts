@@ -7,7 +7,8 @@ import { watchReply } from "./replies.js";
 import type { Voice } from "./voice.js";
 
 interface Expectation {
-  runId: string;
+  /** Null for a CLI typed into a shell: there is no run to report on. */
+  runId: string | null;
   who: string;
   voice: string;
   abort: AbortController;
@@ -35,21 +36,40 @@ export class Talk {
   expect(ptyId: string, words: string): boolean {
     const service = this.opts.service();
     const session = service?.listLive().find((item) => item.ptyId === ptyId);
-    if (!service || !session || session.kind !== "run" || !session.runId) return false;
-    const run = service.getRun(session.runId).run;
-    const engine = service.listEngines().find((item) => item.id === run.engine);
-    const agent = run.agentId ? service.listAgents().find((item) => item.id === run.agentId) : undefined;
-    const who = agent?.name ?? session.title;
-    const kind = replyLogFor(run.engine, engine?.bin ?? run.engine);
+    if (!service || !session) return false;
+    let runId: string | null = null;
+    let engineId: string;
+    let who: string;
+    let voice = "";
+    let cwd = session.cwd;
+    if (session.kind === "run" && session.runId) {
+      const run = service.getRun(session.runId).run;
+      const agent = run.agentId ? service.listAgents().find((item) => item.id === run.agentId) : undefined;
+      runId = session.runId;
+      engineId = run.engine;
+      who = agent?.name ?? session.title;
+      voice = agent?.voice ?? "";
+    } else if (session.kind === "shell" && session.programEngineId) {
+      // `claude` typed at a shell prompt answers in the same session log as one VibeForge started.
+      engineId = session.programEngineId;
+      who = session.program ?? session.title;
+      cwd = session.programCwd ?? session.cwd;
+    } else {
+      return false;
+    }
+    const engine = service.listEngines().find((item) => item.id === engineId);
+    const kind = replyLogFor(engineId, engine?.bin ?? engineId);
+    // A shell outlives the CLI in it, so without a log there is nothing to wait for.
+    if (!kind && !runId) return false;
 
     this.forget(ptyId, false);
-    const expectation: Expectation = { runId: session.runId, who, voice: agent?.voice ?? "", abort: new AbortController(), atExit: !kind };
+    const expectation: Expectation = { runId, who, voice, abort: new AbortController(), atExit: !kind };
     this.expecting.set(ptyId, expectation);
     this.opts.send({ ptyId, stage: "waiting", who, text: "" });
     if (!kind) return true;
 
     const since = Date.now() - 2000;
-    void watchReply({ kind, home: os.homedir(), cwd: session.cwd, since, words, signal: expectation.abort.signal })
+    void watchReply({ kind, home: os.homedir(), cwd, since, words, signal: expectation.abort.signal })
       .then(async (reply) => {
         if (this.expecting.get(ptyId) !== expectation) return;
         this.expecting.delete(ptyId);
@@ -90,7 +110,7 @@ export class Talk {
     }
     let changes = "";
     try {
-      const run = this.opts.service()?.getRun(expectation.runId).run;
+      const run = expectation.runId ? this.opts.service()?.getRun(expectation.runId).run : undefined;
       // "1 file changed, 1 insertion(+)" reads better without the signs.
       if (run?.changes) changes = ` ${run.changes.replace(/\s*\([+-]\)/g, "")}.`;
     } catch {

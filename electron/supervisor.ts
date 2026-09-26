@@ -16,6 +16,14 @@ export interface PtyExit {
   signal: number | null;
 }
 
+/** What holds a terminal's foreground now; argv is null when it is the process VibeForge started. */
+export interface PtyProgram {
+  ptyId: string;
+  argv: string[] | null;
+  /** Where that program runs, which can differ from where the shell started. */
+  cwd: string | null;
+}
+
 export interface PtySnapshot {
   ansi: string;
   seq: number;
@@ -37,6 +45,7 @@ export class PtySupervisor {
   private stopping = false;
   readonly onData = new Set<(event: PtyData) => void>();
   readonly onExit = new Set<(event: PtyExit) => void>();
+  readonly onProgram = new Set<(event: PtyProgram) => void>();
   readonly onCrash = new Set<(message: string) => void>();
 
   async start(appRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -107,6 +116,13 @@ export class PtySupervisor {
         signal: typeof msg.signal === "number" && msg.signal > 0 ? msg.signal : null,
       };
       for (const handler of this.onExit) handler(event);
+    } else if (msg.event === "program") {
+      const event: PtyProgram = {
+        ptyId: String(msg.ptyId),
+        argv: Array.isArray(msg.argv) ? msg.argv.map(String) : null,
+        cwd: typeof msg.cwd === "string" ? msg.cwd : null,
+      };
+      for (const handler of this.onProgram) handler(event);
     }
   }
 

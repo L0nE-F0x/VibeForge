@@ -818,6 +818,11 @@ button:disabled {
   background: color-mix(in srgb, var(--bg-deep) 60%, transparent);
 }
 
+.list-head .segmented,
+.page-head .segmented {
+  align-self: center;
+}
+
 .segmented button {
   height: 24px;
   padding: 0 10px;
@@ -1710,15 +1715,22 @@ button:disabled {
   color: var(--fg);
 }
 
+.pane-head .pane-sub {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+/* Quiet until wanted: the focused pane shows its two buttons, the others on hover. */
 .pane-head .pane-actions {
   display: flex;
   gap: 1px;
-  opacity: 0.55;
+  opacity: 0;
   transition: opacity 0.12s;
 }
 
 .pane:hover .pane-head .pane-actions,
-.pane.focused .pane-head .pane-actions {
+.pane.focused .pane-head .pane-actions,
+.pane-head .pane-actions:focus-within {
   opacity: 1;
 }
 
@@ -1757,7 +1769,7 @@ button:disabled {
 }
 
 .code-toolbar {
-  height: 58px;
+  height: 48px;
   flex: none;
   display: flex;
   align-items: center;
@@ -1777,8 +1789,19 @@ button:disabled {
   background: var(--bg-dark);
 }
 
+.launch-bar[hidden] {
+  display: none;
+}
+
 .launch-bar .input {
   height: 32px;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
 }
 
 .side-panel {
@@ -1909,6 +1932,30 @@ button:disabled {
   padding: 20px;
   text-align: center;
   color: var(--fg-3);
+}
+
+.workspace-row.is-dragging {
+  opacity: 0.45;
+}
+
+.workspace-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.workspace-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.rail-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid transparent;
+}
+
+.rail-setting:hover {
+  background: var(--hover-fill);
 }
 
 .workspace-row .ws-live {
@@ -2081,69 +2128,46 @@ button:disabled {
 }
 
 /* Four stats in one bordered strip, divided by hairlines. */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+/* One line under the hero: the runs of the last two weeks, as a block chart. */
+.home-activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
   margin-top: 26px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
   background: var(--fill);
-}
-
-.stat {
-  position: relative;
-  padding: 16px 18px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 132px;
   text-align: left;
-  border-right: 1px solid var(--line);
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s;
 }
 
-.stat:last-child {
-  border-right: 0;
-}
-
-button.stat:hover {
+.home-activity:hover {
   background: var(--hover-fill);
+  border-color: var(--hover-line);
 }
 
-button.stat:focus-visible {
+.home-activity:focus-visible {
   background: var(--focus-fill);
+  border-color: var(--focus-line);
 }
 
-.stat .value {
+.home-activity .value {
   font-family: var(--font-display);
-  font-size: 34px;
+  font-size: 22px;
   font-weight: 560;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
-.stat .value small {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--fg-3);
-  letter-spacing: 0;
-}
-
-.stat.hot .value {
-  color: var(--accent);
-}
-
-.stat .label {
+.home-activity .label {
   font-size: var(--fs-sm);
   color: var(--fg-2);
 }
 
-.stat .foot {
-  margin-top: auto;
-  padding-top: 10px;
-  font-size: var(--fs-xs);
-  color: var(--fg-3);
-  min-width: 0;
+.home-activity .block-bars {
+  width: min(340px, 45%);
+  margin: 0;
+  padding: 0;
 }
 
 /* Block charts: columns of squares, like the pledge and download charts on omarchy.org. */

@@ -86,6 +86,7 @@ export function defaultSettings(): Settings {
     checkUpdates: true,
     language: "system",
     voice: { model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" },
+    rail: { order: [], hidden: [] },
   };
 }
 
@@ -95,6 +96,10 @@ function str(value: unknown, fallback = ""): string {
 
 function strOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function names(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string"))] : [];
 }
 
 function bool(value: unknown, fallback: boolean): boolean {
@@ -409,6 +414,10 @@ export class Store {
       checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
       voice: normalizeVoiceSettings(raw.voice, defaults.voice),
+      rail: {
+        order: names(raw.rail?.order),
+        hidden: names(raw.rail?.hidden),
+      },
     };
   }
 

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { planLaunch, resumeArgsFromTranscript, withAvailability } from "./engines.js";
+import { planLaunch, programOf, resumeArgsFromTranscript, withAvailability } from "./engines.js";
 import { isDirectory, readText, writeFileAtomic } from "./fsx.js";
 import { diffSince, summarizeSnapshot } from "./vcs.js";
 import { isPathInside } from "./places.js";
@@ -30,6 +30,7 @@ import type {
 } from "./types.js";
 import {
   addWorkspaceRecord,
+  moveWorkspaceRecord,
   removeWorkspaceRecord,
   selectWorkspaceRecord,
   updateWorkspaceRecord,
@@ -315,6 +316,13 @@ export class TeamService {
     this.store.writeWorkspaces(selectWorkspaceRecord(this.store.readWorkspaces(), id));
   }
 
+  moveWorkspace(id: string, toIndex: number): WorkspaceFile {
+    const next = moveWorkspaceRecord(this.store.readWorkspaces(), id, Number(toIndex) || 0);
+    this.store.writeWorkspaces(next);
+    this.emit("workspaces");
+    return next;
+  }
+
   updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
     const clean: { name?: string; dockUrl?: string } = {};
     if (typeof patch.name === "string" && patch.name.trim()) clean.name = patch.name.trim();
@@ -546,9 +554,9 @@ export class TeamService {
     return this.launchRoutine(routine, agent, size);
   }
 
-  async tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision }>> {
+  async tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
     await this.settled;
-    const results: Array<{ routineId: string; decision: TickDecision }> = [];
+    const results: Array<{ routineId: string; decision: TickDecision; error?: string }> = [];
     for (const routine of this.store.listRoutines()) {
       const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
       const engine = agent ? this.resolveEngine(agent.engine) : null;
@@ -571,10 +579,16 @@ export class TeamService {
       } else if (decision.action === "fire" && agent) {
         // Consume the slot first so a failed start never hot-loops on every tick.
         this.store.writeRoutine({ ...routine, lastFiredAt: decision.scheduledAt });
+        const runsBefore = new Set(this.store.queryRuns({ routineId: routine.id, limit: 5 }).map((run) => run.id));
         try {
           await this.launchRoutine(routine, agent, {});
-        } catch {
-          /* the failed run is recorded in the run index */
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          results[results.length - 1].error = message;
+          // A spawn failure has already recorded its run; a missing folder or CLI fails before
+          // there is one, so record it here or the slot would pass with nothing to show for it.
+          const recorded = this.store.queryRuns({ routineId: routine.id, limit: 5 }).some((run) => !runsBefore.has(run.id));
+          if (!recorded) this.recordFailedStart(routine, agent, message);
         }
         this.emit("routines");
       }
@@ -597,6 +611,42 @@ export class TeamService {
       routineId: routine.id,
       ...size,
     });
+  }
+
+  /** A routine that could not even start: a failed run, so Review shows why the slot passed. */
+  private recordFailedStart(routine: Routine, agent: Agent, message: string): void {
+    const started = this.now();
+    const title = `${agent.name} · ${routine.name}`;
+    const { id, dir } = allocateRunDir(this.options.dataRoot, started, title);
+    const at = started.toISOString();
+    this.store.saveRun({
+      id,
+      origin: "routine",
+      title,
+      agentId: agent.id,
+      routineId: routine.id,
+      taskId: null,
+      chatId: null,
+      workspaceId: null,
+      engine: agent.engine,
+      argv: [],
+      cwd: agent.places[0] ?? "",
+      prompt: routine.prompt,
+      startedAt: at,
+      endedAt: at,
+      status: "failed",
+      exitCode: null,
+      signal: null,
+      stopRequested: false,
+      openedAt: null,
+      notifiedAt: null,
+      dir,
+      error: message,
+      changes: null,
+      gitStart: null,
+      continuedFrom: null,
+    });
+    this.emit("runs");
   }
 
   private routineStillRunning(routineId: string): boolean {
@@ -677,6 +727,8 @@ export class TeamService {
   }
 
   async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
+    // Runs left over from a crash are still being recorded; starting now could race them.
+    await this.settled;
     const task = this.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (task.status === "running" && this.taskLive(task)) throw new Error("This task is already running.");
@@ -874,6 +926,8 @@ export class TeamService {
 
   /** Reopen the engine's latest session for this chat, with no new prompt. */
   async continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
+    // Runs left over from a crash are still being recorded; starting now could race them.
+    await this.settled;
     const chat = this.store.getChat(id);
     if (!chat) throw new Error("That chat no longer exists.");
     const lastId = chat.runIds[chat.runIds.length - 1];
@@ -952,7 +1006,8 @@ export class TeamService {
       ptyId: spawned.ptyId,
       runId: null,
       kind: "shell",
-      title: path.basename(shell),
+      // Named for where it runs; what it is running shows up as `program`.
+      title: workspace?.name ?? (path.basename(cwd) || cwd),
       cwd,
       pid: spawned.pid,
       startedAt: this.now().toISOString(),
@@ -989,6 +1044,8 @@ export class TeamService {
   }
 
   async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
+    // Runs left over from a crash are still being recorded; starting now could race them.
+    await this.settled;
     const workspace = this.workspaceById(opts.workspaceId);
     if (!workspace) throw new Error("Open a workspace first.");
     if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
@@ -1071,6 +1128,8 @@ export class TeamService {
 
   /** Start the next attempt of a finished run, in the same place it belongs to. */
   async continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+    // Runs left over from a crash are still being recorded; starting now could race them.
+    await this.settled;
     const run = this.store.getRun(id);
     if (!run) throw new Error("That run no longer exists.");
     const livePty = this.ptyByRun.get(id);
@@ -1305,6 +1364,19 @@ export class TeamService {
     return { runId: id, ptyId: spawned.ptyId };
   }
 
+  /** A shell's foreground program changed: `claude` typed at its prompt, or back to the prompt. */
+  onPtyProgram(ptyId: string, argv: string[] | null, cwd: string | null = null): void {
+    const session = this.live.get(ptyId);
+    if (!session || session.kind !== "shell") return;
+    const found = argv ? programOf(argv, this.store.readEngineRows()) : null;
+    const program = found?.label || null;
+    const programEngineId = found?.engineId ?? null;
+    const programCwd = found ? cwd : null;
+    if (session.program === program && session.programEngineId === programEngineId && session.programCwd === programCwd) return;
+    this.live.set(ptyId, { ...session, program, programEngineId, programCwd });
+    this.emit("live");
+  }
+
   // ---------------------------------------------------------------- exits
 
   async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
@@ -1423,8 +1495,9 @@ export class TeamService {
         changes,
       });
       if (run.taskId) {
+        // Only when this orphan is still the task's run: an Execute during settling owns it now.
         const task = this.store.getTask(run.taskId);
-        if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });
+        if (task?.status === "running" && task.runIds.at(-1) === run.id) this.store.writeTask({ ...task, status: "review" });
       }
     }
     if (orphans.length) this.emit("runs", "tasks");

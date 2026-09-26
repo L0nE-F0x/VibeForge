@@ -14,11 +14,11 @@ export function seedEngines(): EngineRow[] {
     { id: "cursor-agent", label: "Cursor Agent", bin: "cursor-agent", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
     { id: "gemini", label: "Gemini CLI", bin: "gemini", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--resume", "latest"] },
     { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
-    { id: "copilot", label: "Copilot", bin: "copilot", args: [] },
+    { id: "copilot", label: "Copilot", bin: "copilot", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--continue"] },
     { id: "kimi", label: "Kimi", bin: "kimi", args: [], continueArgs: ["--continue"] },
-    { id: "crush", label: "Crush", bin: "crush", args: [] },
-    { id: "pi", label: "Pi", bin: "pi", args: [] },
-    { id: "hermes", label: "Hermes", bin: "hermes", args: [] },
+    { id: "crush", label: "Crush", bin: "crush", args: [], continueArgs: ["--continue"] },
+    { id: "pi", label: "Pi", bin: "pi", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
+    { id: "hermes", label: "Hermes", bin: "hermes", args: [], continueArgs: ["--continue"] },
   ];
 }
 
@@ -94,6 +94,38 @@ export function withAvailability(
   });
 }
 
+const INTERPRETERS = /^(node|bun|deno|python[\d.]*|bash|sh|env)$/;
+
+/**
+ * Name the program in a terminal's foreground from its command line. A coding CLI is found by
+ * its binary, including when it is a script run by an interpreter (`node …/claude`).
+ */
+export function programOf(argv: readonly string[], rows: readonly EngineRow[]): { label: string; engineId: string | null } {
+  // Programs that set process.title (npm does) leave one space-separated string behind.
+  if (argv.length === 1 && /\s/.test(argv[0]) && !argv[0].startsWith("/")) argv = argv[0].split(/\s+/);
+  const runner = path.basename(argv[0] ?? "");
+  const rest = argv.slice(1).filter((arg) => !arg.startsWith("-"));
+  // `npx vitest`, `npm exec vitest`: name the package it runs. `npm run dev` reads best whole.
+  if (/^(npx|bunx|pnpx)$/.test(runner) && rest[0]) return programOf(rest, rows);
+  if (/^(npm|pnpm|yarn|bun)$/.test(runner) && /^(exec|x|dlx)$/.test(rest[0] ?? "") && rest[1]) return programOf(rest.slice(1), rows);
+  if (/^(npm|pnpm|yarn|bun)$/.test(runner) && /^(run|run-script|start|test)$/.test(rest[0] ?? "")) return { label: [runner, ...rest.slice(0, 2)].join(" "), engineId: null };
+  const name = (arg: string | undefined) => {
+    const base = path.basename(arg ?? "").replace(/\.(c|m)?js$/, "").replace(/^-/, "");
+    // Self-updating CLIs run a file named for its version: ~/.local/share/claude/versions/2.1.283.
+    if (!/^v?\d+(\.\d+)+/.test(base)) return base;
+    const parts = (arg ?? "").split("/");
+    const at = parts.lastIndexOf("versions");
+    return (at > 0 ? parts[at - 1] : parts.at(-2)) || base;
+  };
+  // Look past an interpreter to the script it runs; later arguments are only the CLI's own.
+  const script = argv.slice(1).find((arg) => !arg.startsWith("-"));
+  const names = INTERPRETERS.test(name(argv[0])) ? [name(argv[0]), name(script)] : [name(argv[0])];
+  for (const row of rows) {
+    if (names.includes(path.basename(row.bin))) return { label: row.label, engineId: row.id };
+  }
+  return { label: names.at(-1) || names[0], engineId: null };
+}
+
 /**
  * CLIs print how to reopen a session when they exit: "claude --resume <id>", "grok --resume <id>",
  * "codex resume <id>". Resuming that exact session beats "--continue", which takes whichever
@@ -101,10 +133,12 @@ export function withAvailability(
  */
 export function resumeArgsFromTranscript(row: EngineRow, transcript: string): string[] | null {
   const name = path.basename(row.bin).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\b${name}\\s+(--resume|resume)\\s+([0-9A-Za-z][\\w-]{7,})`, "g");
+  // "claude --resume <id>", "codex resume <id>", "copilot --resume=<id>", "crush --session <id>".
+  const pattern = new RegExp(`\\b${name}\\s+(--resume|resume|--session)(?:\\s+|=)([0-9A-Za-z][\\w-]{7,})`, "g");
   const matches = [...transcript.slice(-20_000).matchAll(pattern)];
   const last = matches[matches.length - 1];
-  return last ? [last[1], last[2]] : null;
+  if (!last) return null;
+  return last[0].includes(`${last[1]}=`) ? [`${last[1]}=${last[2]}`] : [last[1], last[2]];
 }
 
 /** Linux refuses a single argv string past 128 KiB. Stay well under it. */

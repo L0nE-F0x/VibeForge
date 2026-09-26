@@ -151,6 +151,7 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
     group: "shortcuts.anywhere",
     rows: [
       { keys: "Ctrl+1…8", text: "shortcuts.switchViews" },
+      { keys: "Alt+1…9", text: "shortcuts.workspaces" },
       { keys: "Ctrl+,", text: "shortcuts.settings" },
       { keys: "Alt+←", text: "shortcuts.back" },
       { keys: "Ctrl+Shift+B", text: "shortcuts.panel" },
@@ -161,10 +162,15 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
   {
     group: "shortcuts.code",
     rows: [
+      { keys: "Ctrl+Shift+D", text: "shortcuts.splitRight" },
+      { keys: "Ctrl+Shift+E", text: "shortcuts.splitDown" },
+      { keys: "Ctrl+Shift+W", text: "shortcuts.closePane" },
       { keys: "Ctrl+Shift+M", text: "shortcuts.maximize" },
+      { keys: "Ctrl+Shift+L", text: "shortcuts.launch" },
       { gesture: "shortcuts.doubleClick", text: "shortcuts.maximizeTitle" },
       { gesture: "shortcuts.drag", text: "shortcuts.movePane" },
-      { keys: "Enter", text: "shortcuts.launch" },
+      { gesture: "shortcuts.drag", text: "shortcuts.moveWorkspace" },
+      { gesture: "shortcuts.doubleClick", text: "shortcuts.renameWorkspace" },
     ],
   },
   {

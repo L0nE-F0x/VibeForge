@@ -38,7 +38,9 @@ export function estimateTermSize(element: HTMLElement | null, fontSize: number, 
 function isAppShortcut(event: KeyboardEvent): boolean {
   if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
   if (event.ctrlKey && !event.altKey && event.key === ",") return true;
-  if (event.ctrlKey && event.shiftKey && (/^[ibm]$/i.test(event.key) || event.code === "Slash")) return true;
+  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewl]$/i.test(event.key) || event.code === "Slash")) return true;
+  // Alt+1…9 jumps between workspaces.
+  if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
   return false;
 }
 

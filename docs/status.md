@@ -106,12 +106,29 @@ Phases 2–4 of the voice plan, on top of phase 1's dictation.
 - The website has a voice card and an answer card in the bento, and says 0.5.0 on the plate and in the install terminal. Checked at 1440 and 390 px: no overflow, no console errors.
 - `npm test`: 106 tests, adding the end-of-speech detector, Piper planning, both session-log readers, speech text, the command grammar (with what whisper really wrote), the control socket and bindings, and agent voices.
 
+### Polish pass (2026-09-26, after 0.5.0)
+
+A pass over the UI for daily use, plus three bugs from the audit.
+
+- **Code** lost the four engine buttons in its top bar and in empty panes; people type `claude` or `codex` in a terminal. The toolbar is now: give a CLI a job, new terminal right, new terminal below, and one toggle for the Files/Browser panel. The launch bar is hidden until <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>, the rocket button, or dictated words with no terminal to land in open it; <kbd>Esc</kbd> closes it.
+- **Pane title bars** have two buttons, ⋯ and ✕, which show on the focused pane and on hover. The ⋯ menu holds split right/down, maximize and "Run … here". New shortcuts: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close the focused one.
+- **Terminals name what they run.** The PTY host polls each terminal's foreground process group once a second (`/proc/<pid>/stat` tpgid and `/proc/<tpgid>/cmdline`, Linux only), and `programOf` (src/core/engines.ts) names it: an engine's label when the binary matches (seeing through `node …/codex.js`, `npx`/`npm exec`, npm's rewritten process title, and Claude's `~/.local/share/claude/versions/2.1.283` launcher), else the program's own name (`tsc`, `vim`, `npm run dev`). Pane titles, Home's Live now and the rail's live list use it; shells are named after their workspace instead of `bash`.
+- **Voice with CLIs typed into a shell.** "Stop" sends Esc (not Ctrl+C) to a detected CLI, and talk-back reads the answer from the CLI's session log in the folder that CLI runs in. Before, talk-back only worked for CLIs VibeForge had launched.
+- **Workspaces** drag to reorder (saved through `workspaces.move`), rename with a double-click or F2, have a right-click menu, and <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps to one from anywhere.
+- **The rail** can hide views (right-click one) and reorder them (**Settings → Rail**, saved as `rail` in settings.json); <kbd>Ctrl</kbd>+number follows the visible order, and Home's key hints follow it too. Code can't be hidden.
+- **Home** dropped the four stat tiles that repeated the headline and the lists; the 14-day chart is one strip.
+- Smaller things: the Runs filter sat against the top edge of its header (`.segmented` had `align-self: flex-start`); the Agents header no longer repeats **New chat** on the Chats tab; the Routines header hides its **New routine** while the empty state shows one; a few English leftovers are translated; the tour's "Hand a CLI a job" step points at the rocket button.
+- **Audit fixes** (docs/audit.md, items 1–3): a routine that can't start (folder or CLI gone) records a failed run and logs why instead of passing its slot silently; a crashed task is sent to Review only while the orphan is still its latest run, and Execute, Continue and Code launches wait for crash cleanup; Copilot, Crush, Pi and Hermes seeds gained continue flags (Copilot and Pi prompt flags too), and exact resume also reads `--resume=<id>` and `--session <id>`. Existing `engines.json` files are not rewritten; delete yours to pick up the new seeds.
+- Checked on the built app over CDP on a hidden workspace: the shortcuts, the launch bar opening and closing, a drag reorder, Alt+3, hiding Tasks from the rail and its Settings card, pane titles for a fake CLI, `vitest`, and `tsc`, and every view with demo data. The website's three screenshots were retaken from a demo profile.
+- `npm test`: 109 tests, now including `programOf`, the new resume shapes, a routine whose folder vanished, and the orphan-task rule.
+
 ## Not verified yet
 
 - **Voice with a real microphone, real speakers, and real Claude Code**: the checks drove keys over CDP (which bypasses fcitx5), played files instead of the mic, captured speech to a file, and used a stand-in CLI writing Claude Code's log format (taken from a real session log). Codex's reader follows the rollout format but no Codex session has been read yet. The end-of-speech thresholds are tuned on Piper's voice, not a room. Screenshots failed on the hidden workspace, so the bars and the Voice card were checked through the DOM, not by eye.
 - **The Hyprland bindings on the real desktop**: Add to Hyprland was tried against a scratch HOME only.
 
-- Real runs with Codex, Grok, Cursor Agent, Gemini and OpenCode. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Copilot, Kimi, Crush, Pi and Hermes get the prompt pasted.
+- Real runs with Codex, Grok, Cursor Agent, Gemini, OpenCode, Copilot, Crush, Pi and Hermes. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Kimi, Crush and Hermes get the first prompt pasted.
+- Program detection and talk-back with the real `claude`, `codex` and `grok` typed into a shell (checked with stand-ins and the process table, not a live session).
 - A routine firing on its own at a real cron time (the scheduler is covered by tests, not by waiting).
 - Desktop notifications were sent (one reached the desktop during testing), but clicking one to open its run was not tried.
 - The dock's still-for-live swap, seen on screen. The checks ran on a hidden workspace, where nothing paints, so the swap was confirmed from the page's own screenshots and the view's state, not by eye.

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeEngineRows, planLaunch, resumeArgsFromTranscript, seedEngines, whichBin, withAvailability } from "../../src/core/engines.js";
+import { normalizeEngineRows, planLaunch, programOf, resumeArgsFromTranscript, seedEngines, whichBin, withAvailability } from "../../src/core/engines.js";
 import { listDir } from "../../src/core/files.js";
 import { cwdAllowed, isPathInside } from "../../src/core/places.js";
 import { buildPreamble, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
@@ -99,6 +99,19 @@ describe("engines", () => {
     expect(long.pasteInput).toBeNull();
   });
 
+  it("names the program in a shell's foreground, seeing through interpreters", () => {
+    const rows = seedEngines();
+    expect(programOf(["claude"], rows)).toEqual({ label: "Claude Code", engineId: "claude" });
+    expect(programOf(["node", "--no-warnings", "/home/me/.npm/bin/codex.js", "resume"], rows)).toEqual({ label: "Codex", engineId: "codex" });
+    expect(programOf(["/usr/bin/grok", "--continue"], rows)).toEqual({ label: "Grok Build", engineId: "grok" });
+    expect(programOf(["/home/me/.local/share/claude/versions/2.1.283", "--resume"], rows)).toEqual({ label: "Claude Code", engineId: "claude" });
+    expect(programOf(["npm exec vitest tests/unit/core.test.ts"], rows)).toEqual({ label: "vitest", engineId: null });
+    expect(programOf(["npx", "--yes", "@openai/codex"], rows)).toEqual({ label: "Codex", engineId: "codex" });
+    expect(programOf(["npm run dev"], rows)).toEqual({ label: "npm run dev", engineId: null });
+    expect(programOf(["nvim", "pi"], rows)).toEqual({ label: "nvim", engineId: null });
+    expect(programOf(["python3", "manage.py", "runserver"], rows)).toEqual({ label: "manage.py", engineId: null });
+  });
+
   it("finds the exact session a CLI said to resume, for that CLI only", () => {
     const [claude, codex, grok] = ["claude", "codex", "grok"].map((id) => seedEngines().find((row) => row.id === id)!);
     const claudeText = "● done\nResume this session with:\nclaude --resume e6ea7991-1d65-4897-a691-d1edeedb9275\n";
@@ -107,6 +120,9 @@ describe("engines", () => {
     expect(resumeArgsFromTranscript(grok, "Resume this session with:\n  grok --resume 01a0d5e8-2cf3-7c53-a4cd-7222d18f1757")).toEqual(["--resume", "01a0d5e8-2cf3-7c53-a4cd-7222d18f1757"]);
     expect(resumeArgsFromTranscript(codex, "To continue this session, run codex resume 0199a1b2-c3d4-7e5f")).toEqual(["resume", "0199a1b2-c3d4-7e5f"]);
     expect(resumeArgsFromTranscript(claude, "nothing to see")).toBeNull();
+    const [copilot, crush] = ["copilot", "crush"].map((id) => seedEngines().find((row) => row.id === id)!);
+    expect(resumeArgsFromTranscript(copilot, "Resume with copilot --resume=3f2a9c1e-77aa")).toEqual(["--resume=3f2a9c1e-77aa"]);
+    expect(resumeArgsFromTranscript(crush, "crush --session 01HZX8K2M4 to pick up")).toEqual(["--session", "01HZX8K2M4"]);
     const plan = planLaunch(claude, "/bin/claude", { continueSession: true, resumeArgs: ["--resume", "abc12345"] });
     expect(plan.argv).toEqual(["/bin/claude", "--resume", "abc12345"]);
   });

@@ -61,7 +61,7 @@ npm run build       # production build
 | --- | --- |
 | **Home** | What's live, what finished and needs review, what fires next. |
 | **Agents** | Named teammates with a brief, memory, skills and allowed folders. Chats with an agent are real terminals. Switch its engine from Claude to Codex to Grok and the teammate stays the same. |
-| **Code** | A workspace with tiled terminals (shells and CLIs side by side) that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser dock for your dev server. Layouts are remembered per workspace. |
+| **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser dock for your dev server. Type `claude`, `codex` or any CLI in a terminal and its title bar says so; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> hands a CLI a whole job as a recorded run instead. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. Layouts are remembered per workspace. |
 | **Chat** | Throwaway conversations in an empty scratch folder. |
 | **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. |
 | **Routines** | Cron or interval schedules that open a fresh agent run while VibeForge is open. Missed slots are shown, never replayed. |
@@ -105,7 +105,7 @@ sudo pacman -S whisper-cpp      # listening
 uv tool install piper-tts       # talking back (or the AUR's piper-tts-bin)
 ```
 
-**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, a terminal in Code, or the launch bar. They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
+**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, a terminal in Code, or the launch bar (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>). They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
 
 **Talk to an agent by name.** Start with it: *"Atlas, add tests for the scheduler."* goes to Atlas's latest chat (a new one if it has none), whatever has focus.
 
@@ -145,9 +145,9 @@ Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own
 
 ## Keys
 
-<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
+<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> workspaces · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close it · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> give a CLI a job · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> copy and paste (plain <kbd>Ctrl</kbd>+<kbd>V</kbd> reaches the program, as in a native terminal) · drop files on a terminal to insert their paths.
 
-In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
+In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Right-click a view in the rail to hide it; **Settings → Rail** shows it again and sets the order. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 
 ## Develop
 

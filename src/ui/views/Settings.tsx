@@ -1,4 +1,4 @@
-import { Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
@@ -10,6 +10,7 @@ import { startTour } from "../components/Tour.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { usePalette } from "../theme.js";
+import { PINNED, railViews, type RailView } from "../rail.js";
 import { useAction, useToast } from "../state.js";
 import { useT } from "../i18n/index.js";
 
@@ -79,6 +80,38 @@ function EngineEditor({ engine, onSave, onCancel, isNew }: { engine: EngineRow; 
           Cancel
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** Which views the left rail shows, and in what order (Ctrl+1…9 follow it). */
+function RailCard({ rail, onChange }: { rail: Settings["rail"]; onChange: (rail: Settings["rail"]) => void }) {
+  const t = useT();
+  const { all, hidden } = railViews(rail);
+  const order = all.map((item) => item.view);
+  const move = (view: RailView, by: number) => {
+    const next = order.slice();
+    const from = next.indexOf(view);
+    const to = from + by;
+    if (to < 0 || to >= next.length) return;
+    [next[from], next[to]] = [next[to], next[from]];
+    onChange({ order: next, hidden: [...hidden] });
+  };
+  const show = (view: RailView, on: boolean) =>
+    onChange({ order, hidden: on ? [...hidden].filter((item) => item !== view) : [...hidden, view] });
+  return (
+    <div className="card vstack" style={{ gap: 2 }}>
+      <p className="faint" style={{ margin: "0 0 8px" }}>{t("settings.railHint")}</p>
+      {all.map((item, index) => (
+        <div key={item.view} className="rail-setting">
+          <item.icon size={15} className={hidden.has(item.view) && item.view !== PINNED ? "faint" : "accent-text"} />
+          <span className="grow">
+            <Toggle checked={item.view === PINNED || !hidden.has(item.view)} disabled={item.view === PINNED} onChange={(on) => show(item.view, on)} label={t(item.label)} />
+          </span>
+          <Button size="sm" variant="ghost" icon={ArrowUp} tip={t("settings.railUp")} disabled={index === 0} onClick={() => move(item.view, -1)} />
+          <Button size="sm" variant="ghost" icon={ArrowDown} tip={t("settings.railDown")} disabled={index === all.length - 1} onClick={() => move(item.view, 1)} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -163,6 +196,11 @@ export function SettingsView() {
               </Field>
             </div>
           </div>
+
+          <div className="section-title">
+            <PanelLeft size={13} /> {t("settings.rail")}
+          </div>
+          <RailCard rail={current.rail} onChange={(rail) => void patch({ rail })} />
 
           <div className="section-title">
             <SquareTerminal size={13} /> {t("settings.defaults")}

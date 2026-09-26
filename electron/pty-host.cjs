@@ -20,6 +20,7 @@ const PASTE_FIRST_OUTPUT_MS = 3000;
 const PASTE_MAX_WAIT_MS = 20000;
 const ENTER_AFTER_PASTE_MS = 150;
 const EXIT_SETTLE_MS = 120;
+const PROGRAM_POLL_MS = 1000;
 
 /** @type {Map<string, any>} */
 const sessions = new Map();
@@ -360,6 +361,43 @@ async function handle(msg) {
       throw new Error(`Unknown op ${msg.op}`);
   }
 }
+
+// ------------------------------------------------------------------ foreground program
+
+/**
+ * The command line of whatever holds the terminal's foreground, when that isn't the process
+ * VibeForge started: `claude` typed into a shell, say. Linux only (/proc); null elsewhere.
+ */
+function foreground(session) {
+  try {
+    const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
+    // Fields after the command name: state ppid pgrp session tty_nr tpgid ...
+    const tpgid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[5]);
+    if (!(tpgid > 0) || tpgid === session.pid) return null;
+    const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
+    if (!argv.length) return null;
+    let cwd = null;
+    try {
+      cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
+    } catch {
+      /* gone already */
+    }
+    return { argv, cwd };
+  } catch {
+    return null;
+  }
+}
+
+setInterval(() => {
+  for (const session of sessions.values()) {
+    if (session.exited) continue;
+    const found = foreground(session);
+    const key = found ? found.argv.join("\0") : "";
+    if (key === (session.programKey || "")) continue;
+    session.programKey = key;
+    send({ event: "program", ptyId: session.id, argv: found ? found.argv : null, cwd: found ? found.cwd : null });
+  }
+}, PROGRAM_POLL_MS).unref();
 
 let shuttingDown = null;
 

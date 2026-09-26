@@ -56,9 +56,11 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
           <h1>{t("rail.routines")}</h1>
           <span className="sub">{t("routines.sub")}</span>
         </div>
-        <Button variant="primary" icon={Plus} disabled={agents.length === 0} onClick={() => setEditing("new")} title={agents.length ? undefined : t("routines.needAgent")}>
-          {t("routines.new")}
-        </Button>
+        {!(routines.loaded && list.length === 0) && (
+          <Button variant="primary" icon={Plus} disabled={agents.length === 0} onClick={() => setEditing("new")} title={agents.length ? undefined : t("routines.needAgent")}>
+            {t("routines.new")}
+          </Button>
+        )}
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 10, maxWidth: 980 }}>

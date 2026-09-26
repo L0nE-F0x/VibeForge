@@ -260,6 +260,7 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
 // ------------------------------------------------------------------ detail
 
 function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chatId?: string }) {
+  const t = useT();
   const { go } = useNav();
   const engines = useEngines().data ?? [];
   const engine = engines.find((item) => item.id === agent.engine);
@@ -280,9 +281,12 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
             {agent.allowRoutines ? "" : " · routines off"}
           </div>
         </div>
-        <Button icon={MessageSquarePlus} variant="primary" onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
-          New chat
-        </Button>
+        {/* The Chats tab has its own New chat row; elsewhere this is the way back to talking. */}
+        {tab !== "chats" && (
+          <Button icon={MessageSquarePlus} variant="primary" onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+            {t("agents.newChat")}
+          </Button>
+        )}
       </div>
       <Tabs
         value={tab}
@@ -357,7 +361,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         <div className="list-scroll">
           <button type="button" className="row" aria-selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
             <MessageSquarePlus size={15} className="accent-text" />
-            <span className="row-title">New chat</span>
+            <span className="row-title">{t("agents.newChat")}</span>
           </button>
           {chats.length > 0 && <div className="list-label">Recent</div>}
           {chats.map((item) => (

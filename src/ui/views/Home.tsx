@@ -2,13 +2,14 @@ import { Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Messag
 import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useTasks, useWorkspaces } from "../api.js";
+import { call, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useWorkspaces } from "../api.js";
 import { BlockBars, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_LABEL } from "../components/RunDetail.js";
 import { Button, StatusChip, TimeAgo } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useNav } from "../state.js";
+import { railKey, type RailView } from "../rail.js";
 
 const DAYS = 14;
 
@@ -51,7 +52,6 @@ export function HomeView() {
   const inbox = useInbox().data ?? [];
   const live = useLive().data ?? [];
   const routines = useRoutines().data ?? [];
-  const tasks = useTasks().data ?? [];
   const agents = useAgents().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const engines = useEngines().data ?? [];
@@ -66,7 +66,6 @@ export function HomeView() {
     .map((routine) => ({ routine, at: routine.nextFires[0] }))
     .sort((a, b) => a.at.localeCompare(b.at))
     .slice(0, 5);
-  const reviewTasks = tasks.filter((task) => task.status === "review");
   const available = engines.filter((engine) => engine.available);
   const activity = perDay(recent, DAYS, now);
   const hour = new Date(now).getHours();
@@ -74,6 +73,11 @@ export function HomeView() {
   const date = new Date(now).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short" });
   const clock = new Date(now).toLocaleTimeString(t.language, { hour: "2-digit", minute: "2-digit" });
   const onboarding = agents.length === 0 || workspaces.length === 0;
+  const rail = useSettings().data?.rail;
+  const keyFor = (view: RailView) => {
+    const key = railKey(rail, view);
+    return key ? <kbd>{key.replace("+", " ")}</kbd> : null;
+  };
   const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
 
   const status = [
@@ -98,43 +102,25 @@ export function HomeView() {
             <div className="home-actions">
               <Button variant="primary" icon={FolderOpen} onClick={() => go({ view: "code" })}>
                 {t("home.action.workspace")}
-                <kbd>Ctrl 3</kbd>
+                {keyFor("code")}
               </Button>
               <Button icon={Bot} onClick={() => go({ view: "agents" })}>
                 {t("home.action.agent")}
-                <kbd>Ctrl 2</kbd>
+                {keyFor("agents")}
               </Button>
               <Button icon={MessagesSquare} onClick={() => go({ view: "chat" })}>
                 {t("home.action.chat")}
-                <kbd>Ctrl 4</kbd>
+                {keyFor("chat")}
               </Button>
             </div>
           </section>
 
-          <div className="stats">
-            <button type="button" className={`stat${live.length ? " hot" : ""}`} onClick={() => go({ view: "runs", filter: "live" })}>
-              <span className="value">{live.length}</span>
-              <span className="label">{t("home.stat.live")}</span>
-              <span className="foot truncate">{live[0]?.title ?? t("home.stat.liveNone")}</span>
-            </button>
-            <button type="button" className={`stat${inbox.length ? " hot" : ""}`} onClick={() => go({ view: "runs", filter: "review" })}>
-              <span className="value">{inbox.length}</span>
-              <span className="label">{t("home.stat.review")}</span>
-              <span className="foot truncate">
-                {reviewTasks.length ? t.count("home.stat.reviewTasks", reviewTasks.length) : (inbox[0]?.title ?? t("home.stat.reviewNone"))}
-              </span>
-            </button>
-            <button type="button" className="stat" onClick={() => go({ view: "runs", filter: "all" })}>
-              <span className="value">{recent.length}</span>
-              <span className="label">{t("home.stat.runs")}</span>
-              <BlockBars values={activity} label={t("home.stat.runsChart")} />
-            </button>
-            <button type="button" className="stat" onClick={() => go({ view: "routines" })}>
-              <span className="value">{routines.filter((routine) => routine.enabled).length}</span>
-              <span className="label">{t("home.stat.routines")}</span>
-              <span className="foot truncate">{upcoming[0] ? t("home.stat.routineNext", { time: time(upcoming[0].at) }) : t("home.stat.routineNone")}</span>
-            </button>
-          </div>
+          <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
+            <span className="value">{recent.length}</span>
+            <span className="label">{t("home.stat.runs")}</span>
+            <span className="grow" />
+            <BlockBars values={activity} label={t("home.stat.runsChart")} />
+          </button>
 
           {onboarding && (
             <div className="home-steps">
@@ -217,8 +203,11 @@ export function HomeView() {
                   >
                     {session.kind === "shell" ? <SquareTerminal size={14} className="faint" /> : <span className="dot running" />}
                     <span className="vstack grow" style={{ gap: 1 }}>
-                      <span className="title truncate">{session.title}</span>
-                      <span className="meta truncate">{tildify(session.cwd, home)}</span>
+                      <span className="title truncate">{session.program ?? session.title}</span>
+                      <span className="meta truncate">
+                        {session.program ? `${session.title} · ` : ""}
+                        {tildify(session.cwd, home)}
+                      </span>
                     </span>
                     <span className="meta">{duration(session.startedAt, null, now)}</span>
                   </button>
