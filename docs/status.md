@@ -56,6 +56,15 @@ VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name
 - **Fixed on the way:** git snapshots and review diffs no longer fill with colour codes when someone's git config says `color.ui = always` (a demo profile with that setting failed the snapshot test). The file tree shows `~` paths like the rest of the app.
 - Checked: every view and the shortcut sheet under the new styles, in the built app; the Home and Code screens in a populated demo profile; the website at 1440 and 390 px and after a theme switch. `npm test`: 72 tests, adding the pixel art.
 
+### The website, fused (2026-09-26)
+
+The 0.4.0 website read as a copy of omarchy.org, so it was rebuilt again as a fusion of the first site and the pixel look (unreleased; the app is unchanged).
+
+- **From the first site:** the waybar (workspaces 1–5 that follow the scroll, the clock in the middle, the theme menu), the bold mono headline with "forged" in the shimmering gradient, the install line and facts, the tiled desk that plays an agent run end to end, the CLI marquee, the bento of features with small animated illustrations and a spotlight under the cursor, the "hit Send" flow, the live theme preview with swatches, and the glowing install terminal.
+- **From 0.4.0:** square geometry, the pixel wordmark, mark and status pixels, the desk mock redrawn as the 0.4.0 app, the real screenshots (now tabs that advance on their own), the pixel drift, and the newer copy (updates, languages, shortcuts, `vibe-forge.net/install`).
+- **New:** the wordmark sits on a glowing plate that is the circuit's chip. Its traces leave the sides as parallel buses, bend at 45°, and fall down the margins beside the copy (measured from where the text really is, so the middle stays readable; on narrow screens they run off the edges). Bento cards carry pixel corner brackets that warm to the accent. The final section has embers rising off the drift. The install terminal prints its output line by line the first time it's seen. Loops pause when off screen.
+- Checked in headless Chrome at 1920, 1440, 1024 and 390 px, in Apex Forge, Tokyo Night and Rosé Pine: no console errors, no horizontal overflow, the theme menu and T work, the desk demo, update sheet and language cards play.
+
 ## Not verified yet
 
 - Real runs with Codex, Grok, Cursor Agent, Gemini and OpenCode. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Copilot, Kimi, Crush, Pi and Hermes get the prompt pasted.

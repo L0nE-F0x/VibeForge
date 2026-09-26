@@ -20,242 +20,507 @@
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..700;1,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
       <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
-      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M12 19h8"/><path d="m4 17 6-6-6-6"/></symbol>
       <symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3"/></symbol>
-      <symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></symbol>
+      <symbol id="i-messages-square" viewBox="0 0 24 24"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></symbol>
       <symbol id="i-kanban" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></symbol>
+      <symbol id="i-calendar-clock" viewBox="0 0 24 24"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></symbol>
+      <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></symbol>
+      <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+      <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
       <symbol id="i-git-compare" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></symbol>
-      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
-      <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
-      <symbol id="i-zap" viewBox="0 0 24 24"><path d="M15.914 4a1.5 1.5 0 00-2.474-1.561l-9 9A1.5 1.5 0 005.5 14h4.002a.5.5 0 01.471.666L8.086 20a1.5 1.5 0 002.475 1.56l9-9A1.5 1.5 0 0018.5 10h-3.997a.5.5 0 01-.472-.667z"/></symbol>
-      <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
-      <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
-      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
-      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
-      <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
-      <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8"/><path d="M4 16V4h12"/></symbol>
-      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
-      <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+      <symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M12 19h8"/><path d="m4 17 6-6-6-6"/></symbol>
+      <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/></symbol>
+      <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 5v16"/><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+      <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+      <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+      <symbol id="i-message-square-plus" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M12 8v6"/><path d="M9 11h6"/></symbol>
       <symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+      <symbol id="i-package" viewBox="0 0 24 24"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></symbol>
+      <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16"/><rect x="8" y="8" width="8" height="8"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+      <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z" fill="currentColor" stroke="none"/></symbol>
       <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></symbol>
     </svg>
 
-    <header class="nav">
-      <div class="wrap nav-row">
+    <!-- ============================================================ waybar -->
+    <header class="bar">
+      <div class="bar-left">
         <a class="brand" href="#top" aria-label="VibeForge home"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --><span>VibeForge</span></a>
-        <nav class="links" aria-label="Sections">
-          <a href="#action">Tour</a>
-          <a href="#features">Features</a>
-          <a href="#themes">Themes</a>
-          <a href="https://github.com/L0nE-F0x/VibeForge/releases">Releases</a>
+        <nav class="workspaces" aria-label="Sections">
+          <a href="#top" data-ws="top" aria-current="true"><span>1</span><em>Home</em></a>
+          <a href="#features" data-ws="features"><span>2</span><em>Features</em></a>
+          <a href="#tour" data-ws="tour"><span>3</span><em>Tour</em></a>
+          <a href="#themes" data-ws="themes"><span>4</span><em>Themes</em></a>
+          <a href="#install" data-ws="install"><span>5</span><em>Install</em></a>
         </nav>
-        <div class="nav-right">
-          <button class="icon-btn" type="button" data-theme-next aria-label="Change the theme (T)" title="Change the theme (T)"><svg><use href="#i-palette" /></svg></button>
-          <a class="icon-btn stars" href="https://github.com/L0nE-F0x/VibeForge" aria-label="VibeForge on GitHub"><svg><use href="#i-github" /></svg><span data-stars></span></a>
-          <a class="btn primary sm" href="#install">Install</a>
-        </div>
+      </div>
+      <span class="clock" data-clock>Saturday 09:00</span>
+      <div class="bar-right">
+        <button class="bar-item theme-button" type="button" data-theme-open aria-haspopup="true" aria-expanded="false" title="Change the theme (T)">
+          <svg><use href="#i-palette" /></svg>
+          <span data-theme-name>Apex Forge</span>
+        </button>
+        <a class="bar-item" href="https://github.com/L0nE-F0x/VibeForge" aria-label="VibeForge on GitHub">
+          <svg><use href="#i-github" /></svg>
+          <span class="stars" data-stars></span>
+        </a>
+        <a class="btn primary xs" href="#install">Install</a>
       </div>
     </header>
+
+    <div class="theme-menu" data-theme-menu hidden>
+      <div class="theme-menu-head">
+        <span>Omarchy theme</span>
+        <span><kbd>T</kbd> next</span>
+      </div>
+      <div class="theme-list" role="menu" data-theme-list></div>
+    </div>
 
     <main>
       <!-- ============================================================ hero -->
       <section class="hero" id="top">
-        <svg class="drift" data-drift aria-hidden="true" shape-rendering="crispEdges"></svg>
-        <div class="wrap hero-inner">
-          <a class="banner" href="https://github.com/L0nE-F0x/VibeForge/releases/latest">
-            <span>New in 0.4.0: an Omarchy look and a new Home</span>
+        <div class="backdrop" aria-hidden="true">
+          <div class="backdrop-glow"></div>
+          <div class="backdrop-grid"></div>
+          <svg class="circuit" data-circuit></svg>
+        </div>
+
+        <div class="hero-copy">
+          <div class="forge" data-forge>
+            <!-- brand:wordmark --><svg class="wordmark" viewBox="0 0 62 7" width="992" height="112" shape-rendering="crispEdges" role="img" aria-label="VibeForge"><rect x="0" y="0" width="1" height="1" class="px-s0"/><rect x="1" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="0" width="1" height="1" class="px-s0"/><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="0" y="1" width="1" height="1" class="px-s0"/><rect x="1" y="1" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="0" y="2" width="1" height="1" class="px-s1"/><rect x="1" y="2" width="1" height="1" class="px-s1"/><rect x="4" y="2" width="1" height="1" class="px-s1"/><rect x="5" y="2" width="1" height="1" class="px-s1"/><rect x="0" y="3" width="1" height="1" class="px-s2"/><rect x="1" y="3" width="1" height="1" class="px-s2"/><rect x="4" y="3" width="1" height="1" class="px-s2"/><rect x="5" y="3" width="1" height="1" class="px-s2"/><rect x="1" y="4" width="1" height="1" class="px-s2"/><rect x="2" y="4" width="1" height="1" class="px-s2"/><rect x="3" y="4" width="1" height="1" class="px-s2"/><rect x="4" y="4" width="1" height="1" class="px-s2"/><rect x="1" y="5" width="1" height="1" class="px-s3"/><rect x="2" y="5" width="1" height="1" class="px-s3"/><rect x="3" y="5" width="1" height="1" class="px-s3"/><rect x="4" y="5" width="1" height="1" class="px-s3"/><rect x="2" y="6" width="1" height="1" class="px-s3"/><rect x="3" y="6" width="1" height="1" class="px-s3"/><rect x="7" y="0" width="1" height="1" class="px-s0"/><rect x="8" y="0" width="1" height="1" class="px-s0"/><rect x="9" y="0" width="1" height="1" class="px-s0"/><rect x="10" y="0" width="1" height="1" class="px-s0"/><rect x="11" y="0" width="1" height="1" class="px-s0"/><rect x="12" y="0" width="1" height="1" class="px-s0"/><rect x="9" y="1" width="1" height="1" class="px-s0"/><rect x="10" y="1" width="1" height="1" class="px-s0"/><rect x="9" y="2" width="1" height="1" class="px-s1"/><rect x="10" y="2" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s2"/><rect x="10" y="3" width="1" height="1" class="px-s2"/><rect x="9" y="4" width="1" height="1" class="px-s2"/><rect x="10" y="4" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s3"/><rect x="10" y="5" width="1" height="1" class="px-s3"/><rect x="7" y="6" width="1" height="1" class="px-s3"/><rect x="8" y="6" width="1" height="1" class="px-s3"/><rect x="9" y="6" width="1" height="1" class="px-s3"/><rect x="10" y="6" width="1" height="1" class="px-s3"/><rect x="11" y="6" width="1" height="1" class="px-s3"/><rect x="12" y="6" width="1" height="1" class="px-s3"/><rect x="14" y="0" width="1" height="1" class="px-s0"/><rect x="15" y="0" width="1" height="1" class="px-s0"/><rect x="16" y="0" width="1" height="1" class="px-s0"/><rect x="17" y="0" width="1" height="1" class="px-s0"/><rect x="18" y="0" width="1" height="1" class="px-s0"/><rect x="14" y="1" width="1" height="1" class="px-s0"/><rect x="15" y="1" width="1" height="1" class="px-s0"/><rect x="18" y="1" width="1" height="1" class="px-s0"/><rect x="19" y="1" width="1" height="1" class="px-s0"/><rect x="14" y="2" width="1" height="1" class="px-s1"/><rect x="15" y="2" width="1" height="1" class="px-s1"/><rect x="18" y="2" width="1" height="1" class="px-s1"/><rect x="19" y="2" width="1" height="1" class="px-s1"/><rect x="14" y="3" width="1" height="1" class="px-s2"/><rect x="15" y="3" width="1" height="1" class="px-s2"/><rect x="16" y="3" width="1" height="1" class="px-s2"/><rect x="17" y="3" width="1" height="1" class="px-s2"/><rect x="18" y="3" width="1" height="1" class="px-s2"/><rect x="14" y="4" width="1" height="1" class="px-s2"/><rect x="15" y="4" width="1" height="1" class="px-s2"/><rect x="18" y="4" width="1" height="1" class="px-s2"/><rect x="19" y="4" width="1" height="1" class="px-s2"/><rect x="14" y="5" width="1" height="1" class="px-s3"/><rect x="15" y="5" width="1" height="1" class="px-s3"/><rect x="18" y="5" width="1" height="1" class="px-s3"/><rect x="19" y="5" width="1" height="1" class="px-s3"/><rect x="14" y="6" width="1" height="1" class="px-s3"/><rect x="15" y="6" width="1" height="1" class="px-s3"/><rect x="16" y="6" width="1" height="1" class="px-s3"/><rect x="17" y="6" width="1" height="1" class="px-s3"/><rect x="18" y="6" width="1" height="1" class="px-s3"/><rect x="21" y="0" width="1" height="1" class="px-s0"/><rect x="22" y="0" width="1" height="1" class="px-s0"/><rect x="23" y="0" width="1" height="1" class="px-s0"/><rect x="24" y="0" width="1" height="1" class="px-s0"/><rect x="25" y="0" width="1" height="1" class="px-s0"/><rect x="26" y="0" width="1" height="1" class="px-s0"/><rect x="21" y="1" width="1" height="1" class="px-s0"/><rect x="22" y="1" width="1" height="1" class="px-s0"/><rect x="21" y="2" width="1" height="1" class="px-s1"/><rect x="22" y="2" width="1" height="1" class="px-s1"/><rect x="21" y="3" width="1" height="1" class="px-s2"/><rect x="22" y="3" width="1" height="1" class="px-s2"/><rect x="23" y="3" width="1" height="1" class="px-s2"/><rect x="24" y="3" width="1" height="1" class="px-s2"/><rect x="25" y="3" width="1" height="1" class="px-s2"/><rect x="21" y="4" width="1" height="1" class="px-s2"/><rect x="22" y="4" width="1" height="1" class="px-s2"/><rect x="21" y="5" width="1" height="1" class="px-s3"/><rect x="22" y="5" width="1" height="1" class="px-s3"/><rect x="21" y="6" width="1" height="1" class="px-s3"/><rect x="22" y="6" width="1" height="1" class="px-s3"/><rect x="23" y="6" width="1" height="1" class="px-s3"/><rect x="24" y="6" width="1" height="1" class="px-s3"/><rect x="25" y="6" width="1" height="1" class="px-s3"/><rect x="26" y="6" width="1" height="1" class="px-s3"/><rect x="28" y="0" width="1" height="1" class="px-s0"/><rect x="29" y="0" width="1" height="1" class="px-s0"/><rect x="30" y="0" width="1" height="1" class="px-s0"/><rect x="31" y="0" width="1" height="1" class="px-s0"/><rect x="32" y="0" width="1" height="1" class="px-s0"/><rect x="33" y="0" width="1" height="1" class="px-s0"/><rect x="28" y="1" width="1" height="1" class="px-s0"/><rect x="29" y="1" width="1" height="1" class="px-s0"/><rect x="28" y="2" width="1" height="1" class="px-s1"/><rect x="29" y="2" width="1" height="1" class="px-s1"/><rect x="28" y="3" width="1" height="1" class="px-s2"/><rect x="29" y="3" width="1" height="1" class="px-s2"/><rect x="30" y="3" width="1" height="1" class="px-s2"/><rect x="31" y="3" width="1" height="1" class="px-s2"/><rect x="32" y="3" width="1" height="1" class="px-s2"/><rect x="28" y="4" width="1" height="1" class="px-s2"/><rect x="29" y="4" width="1" height="1" class="px-s2"/><rect x="28" y="5" width="1" height="1" class="px-s3"/><rect x="29" y="5" width="1" height="1" class="px-s3"/><rect x="28" y="6" width="1" height="1" class="px-s3"/><rect x="29" y="6" width="1" height="1" class="px-s3"/><rect x="36" y="0" width="1" height="1" class="px-s0"/><rect x="37" y="0" width="1" height="1" class="px-s0"/><rect x="38" y="0" width="1" height="1" class="px-s0"/><rect x="39" y="0" width="1" height="1" class="px-s0"/><rect x="35" y="1" width="1" height="1" class="px-s0"/><rect x="36" y="1" width="1" height="1" class="px-s0"/><rect x="39" y="1" width="1" height="1" class="px-s0"/><rect x="40" y="1" width="1" height="1" class="px-s0"/><rect x="35" y="2" width="1" height="1" class="px-s1"/><rect x="36" y="2" width="1" height="1" class="px-s1"/><rect x="39" y="2" width="1" height="1" class="px-s1"/><rect x="40" y="2" width="1" height="1" class="px-s1"/><rect x="35" y="3" width="1" height="1" class="px-s2"/><rect x="36" y="3" width="1" height="1" class="px-s2"/><rect x="39" y="3" width="1" height="1" class="px-s2"/><rect x="40" y="3" width="1" height="1" class="px-s2"/><rect x="35" y="4" width="1" height="1" class="px-s2"/><rect x="36" y="4" width="1" height="1" class="px-s2"/><rect x="39" y="4" width="1" height="1" class="px-s2"/><rect x="40" y="4" width="1" height="1" class="px-s2"/><rect x="35" y="5" width="1" height="1" class="px-s3"/><rect x="36" y="5" width="1" height="1" class="px-s3"/><rect x="39" y="5" width="1" height="1" class="px-s3"/><rect x="40" y="5" width="1" height="1" class="px-s3"/><rect x="36" y="6" width="1" height="1" class="px-s3"/><rect x="37" y="6" width="1" height="1" class="px-s3"/><rect x="38" y="6" width="1" height="1" class="px-s3"/><rect x="39" y="6" width="1" height="1" class="px-s3"/><rect x="42" y="0" width="1" height="1" class="px-s0"/><rect x="43" y="0" width="1" height="1" class="px-s0"/><rect x="44" y="0" width="1" height="1" class="px-s0"/><rect x="45" y="0" width="1" height="1" class="px-s0"/><rect x="46" y="0" width="1" height="1" class="px-s0"/><rect x="42" y="1" width="1" height="1" class="px-s0"/><rect x="43" y="1" width="1" height="1" class="px-s0"/><rect x="46" y="1" width="1" height="1" class="px-s0"/><rect x="47" y="1" width="1" height="1" class="px-s0"/><rect x="42" y="2" width="1" height="1" class="px-s1"/><rect x="43" y="2" width="1" height="1" class="px-s1"/><rect x="46" y="2" width="1" height="1" class="px-s1"/><rect x="47" y="2" width="1" height="1" class="px-s1"/><rect x="42" y="3" width="1" height="1" class="px-s2"/><rect x="43" y="3" width="1" height="1" class="px-s2"/><rect x="44" y="3" width="1" height="1" class="px-s2"/><rect x="45" y="3" width="1" height="1" class="px-s2"/><rect x="46" y="3" width="1" height="1" class="px-s2"/><rect x="42" y="4" width="1" height="1" class="px-s2"/><rect x="43" y="4" width="1" height="1" class="px-s2"/><rect x="45" y="4" width="1" height="1" class="px-s2"/><rect x="46" y="4" width="1" height="1" class="px-s2"/><rect x="42" y="5" width="1" height="1" class="px-s3"/><rect x="43" y="5" width="1" height="1" class="px-s3"/><rect x="46" y="5" width="1" height="1" class="px-s3"/><rect x="47" y="5" width="1" height="1" class="px-s3"/><rect x="42" y="6" width="1" height="1" class="px-s3"/><rect x="43" y="6" width="1" height="1" class="px-s3"/><rect x="46" y="6" width="1" height="1" class="px-s3"/><rect x="47" y="6" width="1" height="1" class="px-s3"/><rect x="50" y="0" width="1" height="1" class="px-s0"/><rect x="51" y="0" width="1" height="1" class="px-s0"/><rect x="52" y="0" width="1" height="1" class="px-s0"/><rect x="53" y="0" width="1" height="1" class="px-s0"/><rect x="49" y="1" width="1" height="1" class="px-s0"/><rect x="50" y="1" width="1" height="1" class="px-s0"/><rect x="53" y="1" width="1" height="1" class="px-s0"/><rect x="54" y="1" width="1" height="1" class="px-s0"/><rect x="49" y="2" width="1" height="1" class="px-s1"/><rect x="50" y="2" width="1" height="1" class="px-s1"/><rect x="49" y="3" width="1" height="1" class="px-s2"/><rect x="50" y="3" width="1" height="1" class="px-s2"/><rect x="52" y="3" width="1" height="1" class="px-s2"/><rect x="53" y="3" width="1" height="1" class="px-s2"/><rect x="54" y="3" width="1" height="1" class="px-s2"/><rect x="49" y="4" width="1" height="1" class="px-s2"/><rect x="50" y="4" width="1" height="1" class="px-s2"/><rect x="53" y="4" width="1" height="1" class="px-s2"/><rect x="54" y="4" width="1" height="1" class="px-s2"/><rect x="49" y="5" width="1" height="1" class="px-s3"/><rect x="50" y="5" width="1" height="1" class="px-s3"/><rect x="53" y="5" width="1" height="1" class="px-s3"/><rect x="54" y="5" width="1" height="1" class="px-s3"/><rect x="50" y="6" width="1" height="1" class="px-s3"/><rect x="51" y="6" width="1" height="1" class="px-s3"/><rect x="52" y="6" width="1" height="1" class="px-s3"/><rect x="53" y="6" width="1" height="1" class="px-s3"/><rect x="54" y="6" width="1" height="1" class="px-s3"/><rect x="56" y="0" width="1" height="1" class="px-s0"/><rect x="57" y="0" width="1" height="1" class="px-s0"/><rect x="58" y="0" width="1" height="1" class="px-s0"/><rect x="59" y="0" width="1" height="1" class="px-s0"/><rect x="60" y="0" width="1" height="1" class="px-s0"/><rect x="61" y="0" width="1" height="1" class="px-s0"/><rect x="56" y="1" width="1" height="1" class="px-s0"/><rect x="57" y="1" width="1" height="1" class="px-s0"/><rect x="56" y="2" width="1" height="1" class="px-s1"/><rect x="57" y="2" width="1" height="1" class="px-s1"/><rect x="56" y="3" width="1" height="1" class="px-s2"/><rect x="57" y="3" width="1" height="1" class="px-s2"/><rect x="58" y="3" width="1" height="1" class="px-s2"/><rect x="59" y="3" width="1" height="1" class="px-s2"/><rect x="60" y="3" width="1" height="1" class="px-s2"/><rect x="56" y="4" width="1" height="1" class="px-s2"/><rect x="57" y="4" width="1" height="1" class="px-s2"/><rect x="56" y="5" width="1" height="1" class="px-s3"/><rect x="57" y="5" width="1" height="1" class="px-s3"/><rect x="56" y="6" width="1" height="1" class="px-s3"/><rect x="57" y="6" width="1" height="1" class="px-s3"/><rect x="58" y="6" width="1" height="1" class="px-s3"/><rect x="59" y="6" width="1" height="1" class="px-s3"/><rect x="60" y="6" width="1" height="1" class="px-s3"/><rect x="61" y="6" width="1" height="1" class="px-s3"/></svg><!-- /brand:wordmark -->
+          </div>
+          <a class="eyebrow" href="https://github.com/L0nE-F0x/VibeForge/releases/latest">
+            <span class="ping"></span>
+            <span>New in 0.4.0<span class="eyebrow-extra"> · a pixel look and a new Home</span></span>
             <svg><use href="#i-arrow-right" /></svg>
           </a>
-          <h1 class="hero-title"><!-- brand:wordmark --><svg class="wordmark" viewBox="0 0 62 7" width="992" height="112" shape-rendering="crispEdges" role="img" aria-label="VibeForge"><rect x="0" y="0" width="1" height="1" class="px-s0"/><rect x="1" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="0" width="1" height="1" class="px-s0"/><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="0" y="1" width="1" height="1" class="px-s0"/><rect x="1" y="1" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="0" y="2" width="1" height="1" class="px-s1"/><rect x="1" y="2" width="1" height="1" class="px-s1"/><rect x="4" y="2" width="1" height="1" class="px-s1"/><rect x="5" y="2" width="1" height="1" class="px-s1"/><rect x="0" y="3" width="1" height="1" class="px-s2"/><rect x="1" y="3" width="1" height="1" class="px-s2"/><rect x="4" y="3" width="1" height="1" class="px-s2"/><rect x="5" y="3" width="1" height="1" class="px-s2"/><rect x="1" y="4" width="1" height="1" class="px-s2"/><rect x="2" y="4" width="1" height="1" class="px-s2"/><rect x="3" y="4" width="1" height="1" class="px-s2"/><rect x="4" y="4" width="1" height="1" class="px-s2"/><rect x="1" y="5" width="1" height="1" class="px-s3"/><rect x="2" y="5" width="1" height="1" class="px-s3"/><rect x="3" y="5" width="1" height="1" class="px-s3"/><rect x="4" y="5" width="1" height="1" class="px-s3"/><rect x="2" y="6" width="1" height="1" class="px-s3"/><rect x="3" y="6" width="1" height="1" class="px-s3"/><rect x="7" y="0" width="1" height="1" class="px-s0"/><rect x="8" y="0" width="1" height="1" class="px-s0"/><rect x="9" y="0" width="1" height="1" class="px-s0"/><rect x="10" y="0" width="1" height="1" class="px-s0"/><rect x="11" y="0" width="1" height="1" class="px-s0"/><rect x="12" y="0" width="1" height="1" class="px-s0"/><rect x="9" y="1" width="1" height="1" class="px-s0"/><rect x="10" y="1" width="1" height="1" class="px-s0"/><rect x="9" y="2" width="1" height="1" class="px-s1"/><rect x="10" y="2" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s2"/><rect x="10" y="3" width="1" height="1" class="px-s2"/><rect x="9" y="4" width="1" height="1" class="px-s2"/><rect x="10" y="4" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s3"/><rect x="10" y="5" width="1" height="1" class="px-s3"/><rect x="7" y="6" width="1" height="1" class="px-s3"/><rect x="8" y="6" width="1" height="1" class="px-s3"/><rect x="9" y="6" width="1" height="1" class="px-s3"/><rect x="10" y="6" width="1" height="1" class="px-s3"/><rect x="11" y="6" width="1" height="1" class="px-s3"/><rect x="12" y="6" width="1" height="1" class="px-s3"/><rect x="14" y="0" width="1" height="1" class="px-s0"/><rect x="15" y="0" width="1" height="1" class="px-s0"/><rect x="16" y="0" width="1" height="1" class="px-s0"/><rect x="17" y="0" width="1" height="1" class="px-s0"/><rect x="18" y="0" width="1" height="1" class="px-s0"/><rect x="14" y="1" width="1" height="1" class="px-s0"/><rect x="15" y="1" width="1" height="1" class="px-s0"/><rect x="18" y="1" width="1" height="1" class="px-s0"/><rect x="19" y="1" width="1" height="1" class="px-s0"/><rect x="14" y="2" width="1" height="1" class="px-s1"/><rect x="15" y="2" width="1" height="1" class="px-s1"/><rect x="18" y="2" width="1" height="1" class="px-s1"/><rect x="19" y="2" width="1" height="1" class="px-s1"/><rect x="14" y="3" width="1" height="1" class="px-s2"/><rect x="15" y="3" width="1" height="1" class="px-s2"/><rect x="16" y="3" width="1" height="1" class="px-s2"/><rect x="17" y="3" width="1" height="1" class="px-s2"/><rect x="18" y="3" width="1" height="1" class="px-s2"/><rect x="14" y="4" width="1" height="1" class="px-s2"/><rect x="15" y="4" width="1" height="1" class="px-s2"/><rect x="18" y="4" width="1" height="1" class="px-s2"/><rect x="19" y="4" width="1" height="1" class="px-s2"/><rect x="14" y="5" width="1" height="1" class="px-s3"/><rect x="15" y="5" width="1" height="1" class="px-s3"/><rect x="18" y="5" width="1" height="1" class="px-s3"/><rect x="19" y="5" width="1" height="1" class="px-s3"/><rect x="14" y="6" width="1" height="1" class="px-s3"/><rect x="15" y="6" width="1" height="1" class="px-s3"/><rect x="16" y="6" width="1" height="1" class="px-s3"/><rect x="17" y="6" width="1" height="1" class="px-s3"/><rect x="18" y="6" width="1" height="1" class="px-s3"/><rect x="21" y="0" width="1" height="1" class="px-s0"/><rect x="22" y="0" width="1" height="1" class="px-s0"/><rect x="23" y="0" width="1" height="1" class="px-s0"/><rect x="24" y="0" width="1" height="1" class="px-s0"/><rect x="25" y="0" width="1" height="1" class="px-s0"/><rect x="26" y="0" width="1" height="1" class="px-s0"/><rect x="21" y="1" width="1" height="1" class="px-s0"/><rect x="22" y="1" width="1" height="1" class="px-s0"/><rect x="21" y="2" width="1" height="1" class="px-s1"/><rect x="22" y="2" width="1" height="1" class="px-s1"/><rect x="21" y="3" width="1" height="1" class="px-s2"/><rect x="22" y="3" width="1" height="1" class="px-s2"/><rect x="23" y="3" width="1" height="1" class="px-s2"/><rect x="24" y="3" width="1" height="1" class="px-s2"/><rect x="25" y="3" width="1" height="1" class="px-s2"/><rect x="21" y="4" width="1" height="1" class="px-s2"/><rect x="22" y="4" width="1" height="1" class="px-s2"/><rect x="21" y="5" width="1" height="1" class="px-s3"/><rect x="22" y="5" width="1" height="1" class="px-s3"/><rect x="21" y="6" width="1" height="1" class="px-s3"/><rect x="22" y="6" width="1" height="1" class="px-s3"/><rect x="23" y="6" width="1" height="1" class="px-s3"/><rect x="24" y="6" width="1" height="1" class="px-s3"/><rect x="25" y="6" width="1" height="1" class="px-s3"/><rect x="26" y="6" width="1" height="1" class="px-s3"/><rect x="28" y="0" width="1" height="1" class="px-s0"/><rect x="29" y="0" width="1" height="1" class="px-s0"/><rect x="30" y="0" width="1" height="1" class="px-s0"/><rect x="31" y="0" width="1" height="1" class="px-s0"/><rect x="32" y="0" width="1" height="1" class="px-s0"/><rect x="33" y="0" width="1" height="1" class="px-s0"/><rect x="28" y="1" width="1" height="1" class="px-s0"/><rect x="29" y="1" width="1" height="1" class="px-s0"/><rect x="28" y="2" width="1" height="1" class="px-s1"/><rect x="29" y="2" width="1" height="1" class="px-s1"/><rect x="28" y="3" width="1" height="1" class="px-s2"/><rect x="29" y="3" width="1" height="1" class="px-s2"/><rect x="30" y="3" width="1" height="1" class="px-s2"/><rect x="31" y="3" width="1" height="1" class="px-s2"/><rect x="32" y="3" width="1" height="1" class="px-s2"/><rect x="28" y="4" width="1" height="1" class="px-s2"/><rect x="29" y="4" width="1" height="1" class="px-s2"/><rect x="28" y="5" width="1" height="1" class="px-s3"/><rect x="29" y="5" width="1" height="1" class="px-s3"/><rect x="28" y="6" width="1" height="1" class="px-s3"/><rect x="29" y="6" width="1" height="1" class="px-s3"/><rect x="36" y="0" width="1" height="1" class="px-s0"/><rect x="37" y="0" width="1" height="1" class="px-s0"/><rect x="38" y="0" width="1" height="1" class="px-s0"/><rect x="39" y="0" width="1" height="1" class="px-s0"/><rect x="35" y="1" width="1" height="1" class="px-s0"/><rect x="36" y="1" width="1" height="1" class="px-s0"/><rect x="39" y="1" width="1" height="1" class="px-s0"/><rect x="40" y="1" width="1" height="1" class="px-s0"/><rect x="35" y="2" width="1" height="1" class="px-s1"/><rect x="36" y="2" width="1" height="1" class="px-s1"/><rect x="39" y="2" width="1" height="1" class="px-s1"/><rect x="40" y="2" width="1" height="1" class="px-s1"/><rect x="35" y="3" width="1" height="1" class="px-s2"/><rect x="36" y="3" width="1" height="1" class="px-s2"/><rect x="39" y="3" width="1" height="1" class="px-s2"/><rect x="40" y="3" width="1" height="1" class="px-s2"/><rect x="35" y="4" width="1" height="1" class="px-s2"/><rect x="36" y="4" width="1" height="1" class="px-s2"/><rect x="39" y="4" width="1" height="1" class="px-s2"/><rect x="40" y="4" width="1" height="1" class="px-s2"/><rect x="35" y="5" width="1" height="1" class="px-s3"/><rect x="36" y="5" width="1" height="1" class="px-s3"/><rect x="39" y="5" width="1" height="1" class="px-s3"/><rect x="40" y="5" width="1" height="1" class="px-s3"/><rect x="36" y="6" width="1" height="1" class="px-s3"/><rect x="37" y="6" width="1" height="1" class="px-s3"/><rect x="38" y="6" width="1" height="1" class="px-s3"/><rect x="39" y="6" width="1" height="1" class="px-s3"/><rect x="42" y="0" width="1" height="1" class="px-s0"/><rect x="43" y="0" width="1" height="1" class="px-s0"/><rect x="44" y="0" width="1" height="1" class="px-s0"/><rect x="45" y="0" width="1" height="1" class="px-s0"/><rect x="46" y="0" width="1" height="1" class="px-s0"/><rect x="42" y="1" width="1" height="1" class="px-s0"/><rect x="43" y="1" width="1" height="1" class="px-s0"/><rect x="46" y="1" width="1" height="1" class="px-s0"/><rect x="47" y="1" width="1" height="1" class="px-s0"/><rect x="42" y="2" width="1" height="1" class="px-s1"/><rect x="43" y="2" width="1" height="1" class="px-s1"/><rect x="46" y="2" width="1" height="1" class="px-s1"/><rect x="47" y="2" width="1" height="1" class="px-s1"/><rect x="42" y="3" width="1" height="1" class="px-s2"/><rect x="43" y="3" width="1" height="1" class="px-s2"/><rect x="44" y="3" width="1" height="1" class="px-s2"/><rect x="45" y="3" width="1" height="1" class="px-s2"/><rect x="46" y="3" width="1" height="1" class="px-s2"/><rect x="42" y="4" width="1" height="1" class="px-s2"/><rect x="43" y="4" width="1" height="1" class="px-s2"/><rect x="45" y="4" width="1" height="1" class="px-s2"/><rect x="46" y="4" width="1" height="1" class="px-s2"/><rect x="42" y="5" width="1" height="1" class="px-s3"/><rect x="43" y="5" width="1" height="1" class="px-s3"/><rect x="46" y="5" width="1" height="1" class="px-s3"/><rect x="47" y="5" width="1" height="1" class="px-s3"/><rect x="42" y="6" width="1" height="1" class="px-s3"/><rect x="43" y="6" width="1" height="1" class="px-s3"/><rect x="46" y="6" width="1" height="1" class="px-s3"/><rect x="47" y="6" width="1" height="1" class="px-s3"/><rect x="50" y="0" width="1" height="1" class="px-s0"/><rect x="51" y="0" width="1" height="1" class="px-s0"/><rect x="52" y="0" width="1" height="1" class="px-s0"/><rect x="53" y="0" width="1" height="1" class="px-s0"/><rect x="49" y="1" width="1" height="1" class="px-s0"/><rect x="50" y="1" width="1" height="1" class="px-s0"/><rect x="53" y="1" width="1" height="1" class="px-s0"/><rect x="54" y="1" width="1" height="1" class="px-s0"/><rect x="49" y="2" width="1" height="1" class="px-s1"/><rect x="50" y="2" width="1" height="1" class="px-s1"/><rect x="49" y="3" width="1" height="1" class="px-s2"/><rect x="50" y="3" width="1" height="1" class="px-s2"/><rect x="52" y="3" width="1" height="1" class="px-s2"/><rect x="53" y="3" width="1" height="1" class="px-s2"/><rect x="54" y="3" width="1" height="1" class="px-s2"/><rect x="49" y="4" width="1" height="1" class="px-s2"/><rect x="50" y="4" width="1" height="1" class="px-s2"/><rect x="53" y="4" width="1" height="1" class="px-s2"/><rect x="54" y="4" width="1" height="1" class="px-s2"/><rect x="49" y="5" width="1" height="1" class="px-s3"/><rect x="50" y="5" width="1" height="1" class="px-s3"/><rect x="53" y="5" width="1" height="1" class="px-s3"/><rect x="54" y="5" width="1" height="1" class="px-s3"/><rect x="50" y="6" width="1" height="1" class="px-s3"/><rect x="51" y="6" width="1" height="1" class="px-s3"/><rect x="52" y="6" width="1" height="1" class="px-s3"/><rect x="53" y="6" width="1" height="1" class="px-s3"/><rect x="54" y="6" width="1" height="1" class="px-s3"/><rect x="56" y="0" width="1" height="1" class="px-s0"/><rect x="57" y="0" width="1" height="1" class="px-s0"/><rect x="58" y="0" width="1" height="1" class="px-s0"/><rect x="59" y="0" width="1" height="1" class="px-s0"/><rect x="60" y="0" width="1" height="1" class="px-s0"/><rect x="61" y="0" width="1" height="1" class="px-s0"/><rect x="56" y="1" width="1" height="1" class="px-s0"/><rect x="57" y="1" width="1" height="1" class="px-s0"/><rect x="56" y="2" width="1" height="1" class="px-s1"/><rect x="57" y="2" width="1" height="1" class="px-s1"/><rect x="56" y="3" width="1" height="1" class="px-s2"/><rect x="57" y="3" width="1" height="1" class="px-s2"/><rect x="58" y="3" width="1" height="1" class="px-s2"/><rect x="59" y="3" width="1" height="1" class="px-s2"/><rect x="60" y="3" width="1" height="1" class="px-s2"/><rect x="56" y="4" width="1" height="1" class="px-s2"/><rect x="57" y="4" width="1" height="1" class="px-s2"/><rect x="56" y="5" width="1" height="1" class="px-s3"/><rect x="57" y="5" width="1" height="1" class="px-s3"/><rect x="56" y="6" width="1" height="1" class="px-s3"/><rect x="57" y="6" width="1" height="1" class="px-s3"/><rect x="58" y="6" width="1" height="1" class="px-s3"/><rect x="59" y="6" width="1" height="1" class="px-s3"/><rect x="60" y="6" width="1" height="1" class="px-s3"/><rect x="61" y="6" width="1" height="1" class="px-s3"/></svg><!-- /brand:wordmark --></h1>
-          <p class="tagline">Your coding agents, forged into one desk.</p>
-          <p class="sub">An open-source desktop for Omarchy that runs Claude Code, Codex, Grok<br class="wide-only" /> and every other coding CLI you use — in real terminals, as a team.</p>
+          <h1>Your coding agents, <span class="forged">forged</span> into one desk.</h1>
+          <p class="lede">
+            VibeForge runs Claude Code, Codex, Grok and every other coding CLI you already use — in real terminals, as a team. Teammates that remember,
+            routines that run on schedule, and a review inbox for everything they touched.
+          </p>
           <div class="cta">
-            <a class="btn primary" href="#install"><svg><use href="#i-download" /></svg>Get VibeForge</a>
-            <a class="btn" href="#action"><svg><use href="#i-play" /></svg>See it in action</a>
+            <a class="btn primary" href="#install"><svg><use href="#i-terminal" /></svg>Install on Omarchy</a>
+            <a class="btn" href="#tour"><svg><use href="#i-play" /></svg>See the real thing</a>
           </div>
-          <p class="hint">Press <kbd>T</kbd> to put this page in another Omarchy theme. The app does it too.</p>
+          <div class="install-line">
+            <span class="prompt">$</span>
+            <code data-install-cmd>curl -fsSL https://vibe-forge.net/install | bash</code>
+            <button class="copy" type="button" data-copy-install aria-label="Copy the install command"><svg><use href="#i-copy" /></svg></button>
+          </div>
+          <ul class="facts">
+            <li><i></i>No accounts</li>
+            <li><i></i>No API keys</li>
+            <li><i></i>No telemetry</li>
+            <li><i></i>Plain files on disk</li>
+          </ul>
+        </div>
+
+        <!-- The desk: three tiled windows, Hyprland style, playing one agent run end to end -->
+        <div class="desk reveal" aria-hidden="true">
+          <div class="win win-app is-focused" data-win>
+            <div class="app">
+              <nav class="m-rail">
+                <span class="m-logo"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --></span>
+                <span class="m-rail-btn"><svg><use href="#i-house" /></svg><i>Home</i></span>
+                <span class="m-rail-btn is-on"><svg><use href="#i-bot" /></svg><i>Agents</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-square-terminal" /></svg><i>Code</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-messages-square" /></svg><i>Chat</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-kanban" /></svg><i>Tasks</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-calendar-clock" /></svg><i>Routines</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-sparkles" /></svg><i>Skills</i></span>
+                <span class="m-rail-btn"><svg><use href="#i-history" /></svg><i>Runs</i><b class="m-badge" data-demo-badge>2</b></span>
+                <span class="m-rail-foot"><svg><use href="#i-activity" /></svg><i data-demo-live>1 live</i></span>
+              </nav>
+              <aside class="m-list">
+                <div class="m-list-head">Agents <span class="m-chip-btn"><svg><use href="#i-plus" /></svg>New</span></div>
+                <div class="m-row is-on">
+                  <span class="m-avatar">RN</span>
+                  <span class="m-row-text"><b>Release notes</b><i>Claude Code</i></span>
+                  <span class="m-dot is-live"></span>
+                </div>
+                <div class="m-row">
+                  <span class="m-avatar">DJ</span>
+                  <span class="m-row-text"><b>Dependency janitor</b><i>Codex</i></span>
+                  <span class="m-count">1</span>
+                </div>
+                <div class="m-row">
+                  <span class="m-avatar">DG</span>
+                  <span class="m-row-text"><b>Docs gardener</b><i>Grok Build</i></span>
+                </div>
+              </aside>
+              <div class="m-main">
+                <div class="m-head">
+                  <span class="m-avatar lg">RN</span>
+                  <span class="m-head-text"><b>Release notes</b><i>Claude Code · 1 folder · 2 skills</i></span>
+                  <span class="m-primary"><svg><use href="#i-message-square-plus" /></svg>New chat</span>
+                </div>
+                <div class="m-tabs">
+                  <span class="is-on"><svg><use href="#i-messages-square" /></svg>Chats</span>
+                  <span><svg><use href="#i-book-open" /></svg>Brief</span>
+                  <span><svg><use href="#i-brain" /></svg>Memory</span>
+                  <span><svg><use href="#i-sparkles" /></svg>Skills</span>
+                  <span class="m-hide-sm"><svg><use href="#i-folder-open" /></svg>Allowed folders</span>
+                  <span class="m-hide-sm"><svg><use href="#i-history" /></svg>Runs</span>
+                </div>
+                <div class="m-term" data-demo-term></div>
+                <div class="m-sessionbar" data-demo-sessionbar>
+                  <span class="m-dot is-live"></span>
+                  <span>Live in <code>~/Projects/frontier-halls</code></span>
+                  <span class="m-ghost-btn"><svg><use href="#i-square" /></svg>Stop</span>
+                </div>
+                <div class="m-composer">
+                  <span>Message the running session…</span>
+                  <span class="m-send"><svg><use href="#i-arrow-up" /></svg>Send</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="win win-review" data-win>
+            <div class="w-head"><svg><use href="#i-history" /></svg>Needs review <b data-demo-review>2</b></div>
+            <div class="w-run is-new is-hidden" data-demo-newrun>
+              <span class="m-dot is-ok"></span>
+              <span class="w-run-text"><b>Release notes · Weekday notes</b><i>Routine · RELEASE_NOTES.md +38 −4 · just now</i></span>
+            </div>
+            <div class="w-run">
+              <span class="m-dot is-ok"></span>
+              <span class="w-run-text"><b>Bump vite to 7.1</b><i>Task · 3 files changed · 1 hr ago</i></span>
+            </div>
+            <div class="w-run">
+              <span class="m-dot is-warn"></span>
+              <span class="w-run-text"><b>Dependency janitor · Nightly audit</b><i>Routine · stopped · yesterday</i></span>
+            </div>
+            <div class="w-diff">
+              <div class="d-file">RELEASE_NOTES.md</div>
+              <div class="d-add">+## What you can do now</div>
+              <div class="d-add">+- Great-hall lamps glow warm at night</div>
+              <div class="d-add">+- Doors remember who opened them</div>
+              <div class="d-del">-- fixed lamp bug</div>
+            </div>
+          </div>
+
+          <div class="win win-next" data-win>
+            <div class="w-head"><svg><use href="#i-calendar-clock" /></svg>Up next</div>
+            <div class="w-next"><span class="w-time">09:00</span><span><b>Weekday notes</b><i>At 09:00, Monday through Friday</i></span></div>
+            <div class="w-next"><span class="w-time">02:00</span><span><b>Nightly audit</b><i>Every day at 02:00</i></span></div>
+            <div class="w-next"><span class="w-time">+30m</span><span><b>Inbox triage</b><i>Every 30 minutes</i></span></div>
+          </div>
+
+          <div class="toast" data-demo-toast>
+            <span class="toast-icon"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --></span>
+            <span><b>Release notes · Weekday notes</b><i>finished · 1 file changed, 38 insertions(+)</i></span>
+          </div>
         </div>
       </section>
 
-      <!-- ============================================================ intro -->
-      <section class="section" id="about">
-        <div class="wrap two">
-          <div class="prose reveal">
-            <h2>One window for the whole crew.</h2>
-            <p>Vibe coding on Omarchy already works: the CLIs are installed and signed in. What was missing is one window that remembers <b>who</b> does the work, <b>where</b> they may work, <b>when</b> work starts, and <b>what to review</b> when it ends.</p>
-            <p>VibeForge is that window. It never calls a model API and never holds a key. Every engine is a CLI you're already signed in to; VibeForge gives them a home, a schedule and a memory.</p>
-            <p>No accounts. No telemetry. Everything on disk is plain YAML and Markdown in <code>~/.config/vibeforge</code>, so you can change it all from Neovim.</p>
+      <!-- ============================================================ engines -->
+      <section class="engines reveal" aria-label="Supported command-line agents">
+        <p class="engines-title">Works with the CLIs already on your <code>PATH</code></p>
+        <div class="marquee">
+          <div class="marquee-track">
+            <span>Claude Code</span><span>Codex</span><span>Grok Build</span><span>Cursor Agent</span><span>Gemini CLI</span><span>OpenCode</span><span>Copilot</span><span>Crush</span><span>Kimi</span><span>Pi</span><span>Hermes</span><span class="any">+ anything with a command line</span>
           </div>
-          <figure class="which reveal" aria-label="The coding CLIs VibeForge works with">
-            <div class="which-head"><span>ghostty</span><span>~</span></div>
-            <div class="which-body">
-              <p class="prompt"><b>$</b> which claude codex grok gemini opencode</p>
-              <p><i></i><span>Claude Code</span><em>~/.local/bin/claude</em></p>
-              <p><i></i><span>Codex</span><em>~/.local/bin/codex</em></p>
-              <p><i></i><span>Grok Build</span><em>~/.local/bin/grok</em></p>
-              <p><i></i><span>Gemini CLI</span><em>~/.local/bin/gemini</em></p>
-              <p><i></i><span>OpenCode</span><em>~/.local/bin/opencode</em></p>
-              <p class="also">+ Cursor Agent, Copilot, Kimi, Crush, Pi, Hermes, or anything else with a command line.</p>
-            </div>
-          </figure>
-        </div>
-      </section>
-
-      <!-- ============================================================ see it -->
-      <section class="section alt" id="action">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>See it in action</h2>
-              <p>The desk on a real day: the review inbox, tiled terminals, a board of work.</p>
-            </div>
-            <div class="carousel-nav">
-              <button class="square" type="button" data-slide="-1" aria-label="Previous screenshot"><svg><use href="#i-chevron-left" /></svg></button>
-              <button class="square" type="button" data-slide="1" aria-label="Next screenshot"><svg><use href="#i-chevron-right" /></svg></button>
-            </div>
-          </div>
-          <div class="carousel reveal" data-carousel>
-            <div class="slides">
-              <figure class="slide">
-                <img src="assets/app-home.webp" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark, three terminals running, three runs to review, a 14-day activity chart, and the routines coming up next." />
-                <figcaption><b>Home</b> What's live, what finished and needs a look, and what runs next.</figcaption>
-              </figure>
-              <figure class="slide">
-                <img src="assets/app-code.webp" width="1890" height="1138" alt="Code mode: three tiled shells in a project with git log, a diffstat and a file listing, and the file tree on the right." loading="lazy" />
-                <figcaption><b>Code</b> Shells and CLIs tiled side by side, a file tree, and a browser dock for your dev server.</figcaption>
-              </figure>
-              <figure class="slide">
-                <img src="assets/app-tasks.webp" width="1890" height="1138" alt="The task board with cards in To do, Review and Done, each assigned to an agent and a workspace." loading="lazy" />
-                <figcaption><b>Tasks</b> Writing a task starts nothing. Execute does, and the result lands in Review with its diff.</figcaption>
-              </figure>
-            </div>
-            <div class="progress" aria-hidden="true"><span data-progress></span></div>
+          <div class="marquee-track" aria-hidden="true">
+            <span>Claude Code</span><span>Codex</span><span>Grok Build</span><span>Cursor Agent</span><span>Gemini CLI</span><span>OpenCode</span><span>Copilot</span><span>Crush</span><span>Kimi</span><span>Pi</span><span>Hermes</span><span class="any">+ anything with a command line</span>
           </div>
         </div>
+        <p class="engines-note">VibeForge never calls a model API and never holds a key. Every engine is a CLI you're already signed in to, found through your login shell: mise, <code>~/.local/bin</code>, all of it.</p>
       </section>
 
       <!-- ============================================================ features -->
       <section class="section" id="features">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>A crew, not a chat box.</h2>
-              <p>Agents are teammates with a job. Routines and tasks decide when work starts.</p>
-            </div>
-          </div>
-          <div class="triad">
-            <article class="reveal">
-              <h3><svg><use href="#i-bot" /></svg>Teammates that outlive the engine</h3>
+        <div class="section-head reveal">
+          <span class="kicker"><b>02</b> Features</span>
+          <h2>A crew, not a chat box.</h2>
+          <p>
+            The CLIs are already installed and signed in. VibeForge remembers <b>who</b> does the work, <b>where</b> they may work, <b>when</b> work
+            starts, and <b>what to review</b> when it ends.
+          </p>
+        </div>
+
+        <div class="bento">
+          <article class="card wide reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-bot" /></svg></span>
+              <h3>Teammates that outlive the engine</h3>
               <p>Each agent keeps a brief, a memory file, installed skills and the folders it may touch. Switch it from Claude Code to Codex to Grok and it's still the same teammate.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-calendar-clock" /></svg>Routines that respect your time</h3>
-              <p>Cron or intervals, read back in plain words. Each fire is a fresh run. They only run while VibeForge is open, and missed slots are shown, never replayed.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-kanban" /></svg>Tasks that wait for you</h3>
-              <p>Writing or assigning a task never starts anything. <b>Execute</b> does. When the process ends, the task lands in Review with its diff.</p>
-            </article>
-          </div>
+            </div>
+            <div class="art art-agent">
+              <div class="agent-card">
+                <span class="m-avatar xl">RN</span>
+                <div class="agent-meta">
+                  <b>Release notes</b>
+                  <span class="engine-flip"><i data-engine-flip>Claude Code</i></span>
+                </div>
+                <span class="m-dot is-live"></span>
+              </div>
+              <div class="agent-parts">
+                <span><svg><use href="#i-book-open" /></svg>Brief</span>
+                <span><svg><use href="#i-brain" /></svg>Memory</span>
+                <span><svg><use href="#i-sparkles" /></svg>2 skills</span>
+                <span><svg><use href="#i-folder-open" /></svg>~/Projects/frontier-halls</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-square-terminal" /></svg></span>
+              <h3>Tiled like your desktop</h3>
+              <p>Split terminals side by side, a file tree that drops paths into the focused pane, and a browser dock for localhost.</p>
+            </div>
+            <div class="art art-tiles">
+              <div class="tile"><i>shell</i><code>npm run dev</code><code class="dim">➜ localhost:5173</code></div>
+              <div class="tile is-focused"><i>Claude Code</i><code>● Editing lamp.ts</code><code class="dim">✓ tests pass</code></div>
+              <div class="tile tile-web"><i>localhost</i><span class="web-block"></span><span class="web-line"></span><span class="web-line short"></span></div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-calendar-clock" /></svg></span>
+              <h3>Routines that respect your time</h3>
+              <p>Cron or intervals, read back in plain words. They only run while VibeForge is open; missed slots are shown, never replayed.</p>
+            </div>
+            <div class="art art-cron">
+              <code class="cron">0 9 * * 1-5</code>
+              <b>At 09:00, Monday through Friday</b>
+              <div class="cron-next"><span>Mon 09:00</span><span>Tue 09:00</span><span>Wed 09:00</span></div>
+            </div>
+          </article>
+
+          <article class="card wide reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-git-compare" /></svg></span>
+              <h3>Review everything they touched</h3>
+              <p>
+                Every run keeps its final screen, a transcript, the exact prompt and the git diff since it began. <b>Continue</b> reopens the very same
+                session when the CLI printed one (<code>claude --resume</code>, <code>grok --resume</code>, …).
+              </p>
+            </div>
+            <div class="art art-review">
+              <div class="rv-head">
+                <b>Weekday notes</b>
+                <span class="chip ok">Finished</span>
+                <span class="chip">1 commit · 2 files</span>
+              </div>
+              <div class="rv-tabs"><span>Final screen</span><span class="is-on">Changes</span><span>Prompt</span><span>Transcript</span></div>
+              <div class="rv-diff">
+                <div class="d-file">diff --git a/RELEASE_NOTES.md</div>
+                <div class="d-add">+- Great-hall lamps glow warm at night</div>
+                <div class="d-add">+- Doors remember who opened them</div>
+                <div class="d-del">-- fixed lamp bug</div>
+              </div>
+              <div class="rv-foot"><code>claude --resume e6ea7991-…</code><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Continue</span></div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-kanban" /></svg></span>
+              <h3>Tasks that wait for you</h3>
+              <p>Writing or assigning a task never starts anything. <b>Execute</b> does, and the result lands in Review with its diff.</p>
+            </div>
+            <div class="art art-board">
+              <div class="col"><i>To do</i></div>
+              <div class="col"><i>Running</i></div>
+              <div class="col"><i>Review</i></div>
+              <div class="board-card"><b>Fix lamp flicker</b><span></span></div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
+              <h3>Real terminals, not a chat skin</h3>
+              <p>WebGL xterm, split and dragged into place. Plain <kbd>Ctrl</kbd> <kbd>V</kbd> reaches the program, so screenshots paste into Claude Code like in ghostty.</p>
+            </div>
+            <div class="art art-keys">
+              <span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">V</span>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-shield" /></svg></span>
+              <h3>Private by construction</h3>
+              <p>No accounts, no keys, no telemetry. Agents, skills, routines and tasks are YAML and Markdown you can edit in Neovim.</p>
+            </div>
+            <div class="art art-private">
+              <span class="lock"><svg><use href="#i-lock" /></svg></span>
+              <code>~/.config/vibeforge/agents/<br />release-notes/memory.md</code>
+            </div>
+          </article>
+
+          <article class="card wide reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-refresh" /></svg></span>
+              <h3>Updates itself, in plain sight</h3>
+              <p>When a release is out, Help gets a dot. Update shows the notes, runs the installer in a terminal you can watch, and restarts. The only thing it ever asks GitHub is the newest release number.</p>
+            </div>
+            <div class="art art-update" data-update-art>
+              <div class="up-head"><b>Update VibeForge</b><span class="chip ok">0.4.1</span></div>
+              <p class="up-line">VibeForge 0.4.1 is available. You have 0.4.0.</p>
+              <div class="up-term">
+                <div><span class="t-acc">▸</span> Updating ~/.local/share/vibeforge-app</div>
+                <div><span class="t-acc">▸</span> Installing dependencies</div>
+                <div><span class="t-acc">▸</span> Building</div>
+                <div class="t-ok"><span>✓</span> VibeForge 0.4.1 is installed.</div>
+              </div>
+              <div class="up-foot"><span>Updated. Restart to start using 0.4.1.</span><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Restart</span></div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-languages" /></svg></span>
+              <h3>Seven languages</h3>
+              <p>Following your system language unless you pick one.</p>
+            </div>
+            <div class="art art-lang">
+              <div class="lang-codes" data-lang-codes><span>EN</span><span>DE</span><span>ES</span><span>FR</span><span>PT</span><span>JA</span><span>ZH</span></div>
+              <p class="lang-line"><i data-lang-line>3 runs to review</i></p>
+            </div>
+          </article>
         </div>
       </section>
 
-      <section class="section alt">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>Tiled like the rest of your desktop.</h2>
-              <p>Real terminals, arranged the Hyprland way, and a record of everything they did.</p>
-            </div>
-          </div>
-          <div class="triad">
-            <article class="reveal">
-              <h3><svg><use href="#i-square-terminal" /></svg>Real terminals, not a chat skin</h3>
-              <p>WebGL xterm, split and dragged into place. Plain <kbd>Ctrl</kbd> <kbd>V</kbd> reaches the program, so pasting screenshots into Claude Code works like in ghostty.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-git-compare" /></svg>Review everything they touched</h3>
-              <p>Every run keeps its final screen, a transcript, the exact prompt and the git diff since it began. <b>Continue</b> reopens the very same session.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-zap" /></svg>Knows what's on your PATH</h3>
-              <p>Finds your CLIs through your login shell (mise, <code>~/.local/bin</code>, all of it). Prompts go in as one argument, or get pasted once the CLI has settled.</p>
-            </article>
-          </div>
+      <!-- ============================================================ tour -->
+      <section class="section" id="tour">
+        <div class="section-head reveal">
+          <span class="kicker"><b>03</b> Tour</span>
+          <h2>Not a mockup. The real desk.</h2>
+          <p>Screenshots of VibeForge 0.4.0 on a working day, in the Apex Forge theme.</p>
         </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>Yours, and nobody else's.</h2>
-              <p>No sign-up, no cloud, no keys. It keeps itself current and speaks your language.</p>
-            </div>
+        <div class="tour reveal" data-tour>
+          <div class="tour-tabs" role="tablist" aria-label="Screenshots">
+            <button type="button" role="tab" aria-selected="true" data-shot="0"><svg><use href="#i-house" /></svg><span>Home</span><i></i></button>
+            <button type="button" role="tab" aria-selected="false" data-shot="1"><svg><use href="#i-square-terminal" /></svg><span>Code</span><i></i></button>
+            <button type="button" role="tab" aria-selected="false" data-shot="2"><svg><use href="#i-kanban" /></svg><span>Tasks</span><i></i></button>
           </div>
-          <div class="triad">
-            <article class="reveal">
-              <h3><svg><use href="#i-shield" /></svg>Private by construction</h3>
-              <p>No accounts, no API keys, no telemetry. VibeForge only ever asks GitHub for the newest release number, and you can turn that off.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-refresh" /></svg>Updates itself, in plain sight</h3>
-              <p>When a release is out, Help gets a dot. Update shows the notes, runs the installer in a terminal you can watch, and restarts.</p>
-            </article>
-            <article class="reveal">
-              <h3><svg><use href="#i-languages" /></svg>Seven languages</h3>
-              <p>English, Deutsch, Español, Français, Português, 日本語 and 简体中文, following your system language unless you pick one.</p>
-            </article>
+          <div class="tour-frame">
+            <figure class="shot is-on">
+              <img src="assets/app-home.webp" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark, three terminals running, three runs to review, a 14-day activity chart, and the routines coming up next." />
+            </figure>
+            <figure class="shot">
+              <img src="assets/app-code.webp" width="1890" height="1138" alt="Code mode: three tiled shells in a project with git log, a diffstat and a file listing, and the file tree on the right." loading="lazy" />
+            </figure>
+            <figure class="shot">
+              <img src="assets/app-tasks.webp" width="1890" height="1138" alt="The task board with cards in To do, Review and Done, each assigned to an agent and a workspace." loading="lazy" />
+            </figure>
           </div>
-        </div>
-      </section>
-
-      <!-- ============================================================ themes -->
-      <section class="section alt" id="themes">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>It wears your theme.</h2>
-              <p>Chrome from <code>colors.toml</code>, terminals from your ghostty palette, restyled the moment you switch. Pick one, or press <kbd>T</kbd>, and this page follows.</p>
-            </div>
-          </div>
-          <div class="theme-shot reveal">
-            <img src="assets/app-home.webp" width="1890" height="1138" alt="VibeForge in the Apex Forge theme." loading="lazy" />
-          </div>
-          <p class="theme-list reveal" data-theme-list></p>
+          <p class="tour-caption" data-tour-caption><b>Home</b> What's live, what finished and needs a look, and what runs next.</p>
         </div>
       </section>
 
       <!-- ============================================================ flow -->
       <section class="section">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>What happens when you hit Send.</h2>
-              <p>No magic, no parsing a TUI into cards. A process, a terminal, and a record.</p>
-            </div>
+        <div class="section-head reveal">
+          <span class="kicker"><b>—</b> Under the hood</span>
+          <h2>What happens when you hit Send.</h2>
+          <p>No magic, no parsing a TUI into cards. A process, a terminal, and a record.</p>
+        </div>
+        <ol class="flow">
+          <li class="reveal">
+            <span class="flow-node">01</span>
+            <h3>One argument, intact</h3>
+            <p>The brief, memory, skills and your prompt reach the CLI as a single argument. Nothing is typed into a TUI line by line.</p>
+          </li>
+          <li class="reveal">
+            <span class="flow-node">02</span>
+            <h3>A real terminal</h3>
+            <p>It runs in the agent's allowed folder. A headless mirror keeps every screen, so switching views never loses a line.</p>
+          </li>
+          <li class="reveal">
+            <span class="flow-node">03</span>
+            <h3>A record when it ends</h3>
+            <p>Final screen, transcript and a git snapshot land in the run folder. Stop hangs up the process group, like closing a window.</p>
+          </li>
+          <li class="reveal">
+            <span class="flow-node">04</span>
+            <h3>Pick it back up</h3>
+            <p>Continue reopens the exact session. Follow-ups are pasted into the live CLI and submitted, even multi-line ones.</p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ============================================================ themes -->
+      <section class="section themes" id="themes">
+        <div class="themes-grid">
+          <div class="section-head left reveal">
+            <span class="kicker"><b>04</b> Themes</span>
+            <h2>It wears your theme.</h2>
+            <p>
+              You change your Omarchy theme every other week. VibeForge follows: chrome from <code>colors.toml</code>, terminals from your ghostty palette,
+              restyled the moment you switch. Try it here, or press <kbd>T</kbd> anywhere on this page.
+            </p>
+            <div class="theme-pills" data-theme-pills></div>
           </div>
-          <ol class="steps">
-            <li class="reveal"><span>01</span><h3>One argument, intact</h3><p>The brief, memory, skills and your prompt reach the CLI as a single argument. Nothing is typed into a TUI line by line.</p></li>
-            <li class="reveal"><span>02</span><h3>A real terminal</h3><p>It runs in the agent's allowed folder. A headless mirror keeps every screen, so switching views never loses a line.</p></li>
-            <li class="reveal"><span>03</span><h3>A record when it ends</h3><p>Final screen, transcript and a git snapshot land in the run folder. Stop hangs up the process group, like closing a window.</p></li>
-            <li class="reveal"><span>04</span><h3>Pick it back up</h3><p>Continue reopens the exact session. Follow-ups are pasted into the live CLI and submitted, even multi-line ones.</p></li>
-          </ol>
+          <div class="theme-preview reveal" aria-hidden="true">
+            <div class="win is-focused">
+              <div class="tp">
+                <div class="tp-rail">
+                  <span class="m-logo"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --></span>
+                  <span class="m-rail-btn"><svg><use href="#i-house" /></svg></span>
+                  <span class="m-rail-btn"><svg><use href="#i-bot" /></svg></span>
+                  <span class="m-rail-btn is-on"><svg><use href="#i-square-terminal" /></svg></span>
+                  <span class="m-rail-btn"><svg><use href="#i-kanban" /></svg></span>
+                </div>
+                <div class="tp-canvas">
+                  <div class="tp-pane">
+                    <div class="tp-pane-head"><span class="m-dot is-live"></span>Shell</div>
+                    <pre><span class="t-dir">frontier-halls</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> git log --oneline
+<span class="t-yel">3f2a91c</span> Warm the great-hall lamps
+<span class="t-yel">8e01bd4</span> Doors remember who opened them
+<span class="t-yel">c7d4a02</span> Split the lighting shader
+<span class="t-dir">frontier-halls</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> <span class="t-cursor"></span></pre>
+                  </div>
+                  <div class="tp-pane is-focused">
+                    <div class="tp-pane-head"><span class="m-dot is-live"></span>Codex</div>
+                    <pre><span class="t-acc">●</span> Reading src/lighting/lamp.ts
+<span class="t-acc">●</span> Found flicker: frame time used as seed
+<span class="t-grn">+</span> seed = hash(lamp.id)
+<span class="t-red">-</span> seed = performance.now()
+<span class="t-grn">✓</span> 42 tests passed</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="swatches" data-swatches></div>
+          </div>
         </div>
       </section>
 
       <!-- ============================================================ keys + files -->
-      <section class="section alt">
-        <div class="wrap two">
+      <section class="section">
+        <div class="duo">
           <div class="reveal">
-            <h2>Keys, like your desktop.</h2>
+            <div class="section-head left">
+              <span class="kicker"><b>—</b> Keyboard</span>
+              <h2>Keys, like the rest of your desktop.</h2>
+            </div>
             <dl class="keys">
               <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>8</kbd></dt><dd>Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>C</kbd>/<kbd>V</kbd></dt><dd>Copy and paste in a terminal</dd></div>
@@ -266,94 +531,104 @@
             </dl>
           </div>
           <div class="reveal">
-            <h2>Plain files. Yours.</h2>
-            <div class="file">
-              <div class="file-head"><svg><use href="#i-file-text" /></svg>~/.config/vibeforge/agents/release-notes/agent.yaml</div>
-<pre><span class="k">name</span>: Release notes
-<span class="k">engine</span>: claude
-<span class="k">brief</span>: |
+            <div class="section-head left">
+              <span class="kicker"><b>—</b> Files</span>
+              <h2>Plain files. Yours.</h2>
+            </div>
+            <div class="code-window">
+              <div class="code-title"><svg><use href="#i-file-text" /></svg>~/.config/vibeforge/agents/release-notes/agent.yaml</div>
+<pre class="code"><span class="y-key">name</span>: Release notes
+<span class="y-key">engine</span>: claude
+<span class="y-key">brief</span>: |
   You draft release notes from merged work.
   Group changes by what a person can now do.
   Verify every claim against the repo.
-  <span class="em">Do not push, tag or publish.</span>
-<span class="k">places</span>:
+  <span class="y-em">Do not push, tag or publish.</span>
+<span class="y-key">places</span>:
   - ~/Projects/frontier-halls
-<span class="k">skills</span>:
+<span class="y-key">skills</span>:
   - release-notes
-<span class="k">allowRoutines</span>: <span class="b">true</span></pre>
+<span class="y-key">allowRoutines</span>: <span class="y-bool">true</span></pre>
             </div>
           </div>
         </div>
       </section>
 
       <!-- ============================================================ install -->
-      <section class="section" id="install">
-        <div class="wrap">
-          <div class="section-head reveal">
-            <div>
-              <h2>Install VibeForge</h2>
-              <p>One line on Omarchy, or any Arch + Hyprland setup. Then <kbd>Super</kbd> <kbd>Space</kbd> and type VibeForge.</p>
-            </div>
-            <a class="more" href="https://github.com/L0nE-F0x/VibeForge#readme">Read the README <svg><use href="#i-arrow-right" /></svg></a>
+      <section class="section install" id="install">
+        <div class="section-head reveal">
+          <span class="kicker"><b>05</b> Install</span>
+          <h2>One line. Then <kbd class="big">Super</kbd> + <kbd class="big">Space</kbd>.</h2>
+          <p>Made for Omarchy, and fine on any Arch + Hyprland setup. Linux only, on purpose — there are no Windows or macOS builds to maintain.</p>
+        </div>
+        <div class="install-window reveal" data-install-window>
+          <div class="iw-head">
+            <span class="iw-title"><svg><use href="#i-terminal" /></svg>ghostty — ~</span>
+            <button class="btn xs" type="button" data-copy-install><svg><use href="#i-copy" /></svg><span>Copy</span></button>
           </div>
-          <div class="install-grid">
-            <div class="card reveal">
-              <h3><svg><use href="#i-terminal" /></svg>One line</h3>
-              <p>Clones the newest release into <code>~/.local/share/vibeforge-app</code>, builds it, and adds the <code>vibeforge</code> command and a launcher entry.</p>
-              <div class="command">
-                <code><span class="dollar">$</span> <span data-install-cmd>curl -fsSL https://vibe-forge.net/install | bash</span></code>
-                <button class="btn sm" type="button" data-copy-install><svg><use href="#i-copy" /></svg><span>Copy</span></button>
-              </div>
-              <p class="small">Needs <code>git</code>, <code>base-devel</code> and <code>python</code>, and Node 20+ (<code>mise use -g node@lts</code> on Omarchy). Add <code>--uninstall</code> to remove the launcher; your data stays.</p>
-            </div>
-            <div class="card reveal">
-              <h3><svg><use href="#i-git-branch" /></svg>Build it yourself</h3>
-              <p>MIT licensed, and hacking on it is the point. Clone, install, and run it with hot reload.</p>
-<pre class="command-block">git clone https://github.com/L0nE-F0x/VibeForge.git
+<pre class="iw-body"><span class="iw-ln"><span class="t-acc">$</span> <span data-install-cmd>curl -fsSL https://vibe-forge.net/install | bash</span></span>
+<span class="iw-ln"> </span>
+<span class="iw-ln">  <b class="t-yel">VibeForge</b> <span class="t-dim">— your coding agents, forged into one desk</span></span>
+<span class="iw-ln"> </span>
+<span class="iw-ln"><span class="t-acc">▸</span> Cloning VibeForge into ~/.local/share/vibeforge-app</span>
+<span class="iw-ln"><span class="t-acc">▸</span> Installing dependencies (Electron and the terminal engine; the first run takes a minute)</span>
+<span class="iw-ln"><span class="t-acc">▸</span> Building</span>
+<span class="iw-ln"><span class="t-acc">▸</span> Adding the vibeforge command and the launcher entry</span>
+<span class="iw-ln"> </span>
+<span class="iw-ln iw-done"><span class="t-acc">✓ VibeForge 0.4.0 is installed.</span></span>
+<span class="iw-ln">  <span class="t-dim">Open it from the app launcher (Super + Space), or run: vibeforge</span></span>
+<span class="iw-ln">  <span class="t-dim">CLIs found on PATH: claude codex grok gemini opencode</span></span></pre>
+        </div>
+        <div class="needs reveal">
+          <div><svg><use href="#i-package" /></svg><span><b>git, base-devel, python</b><i>to build the terminal engine</i></span></div>
+          <div><svg><use href="#i-cpu" /></svg><span><b>Node 20+</b><i><code>mise use -g node@lts</code> on Omarchy</i></span></div>
+          <div><svg><use href="#i-refresh" /></svg><span><b>Update</b><i>from Help in the app, or run the line again</i></span></div>
+          <div><svg><use href="#i-x" /></svg><span><b>Uninstall</b><i>add <code>--uninstall</code>; your data stays</i></span></div>
+        </div>
+        <details class="build reveal">
+          <summary><svg><use href="#i-git-branch" /></svg>Build it yourself<span class="build-hint">MIT licensed, and hacking on it is the point</span></summary>
+<pre>git clone https://github.com/L0nE-F0x/VibeForge.git
 cd VibeForge
 npm install
 npm start            # Vite + Electron, hot reload
 npm run build && ./scripts/vibeforge</pre>
-            </div>
-          </div>
-        </div>
+        </details>
       </section>
 
       <!-- ============================================================ final -->
-      <section class="final">
-        <svg class="drift drift-final" data-drift="bottom" aria-hidden="true" shape-rendering="crispEdges"></svg>
-        <div class="wrap final-inner reveal">
-          <!-- brand:mark-large --><svg class="mark-large" viewBox="0 0 11 11" width="88" height="88" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark-large -->
+      <section class="final" data-final>
+        <svg class="drift" data-drift aria-hidden="true" shape-rendering="crispEdges"></svg>
+        <div class="embers" data-embers aria-hidden="true"></div>
+        <div class="final-inner reveal">
+          <span class="final-mark"><!-- brand:mark-large --><svg class="mark-large" viewBox="0 0 11 11" width="88" height="88" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark-large --></span>
           <h2>Light the forge.</h2>
           <p>Free and open source under the MIT license. Built on Omarchy, for Omarchy.</p>
           <div class="cta">
-            <a class="btn primary" href="#install"><svg><use href="#i-download" /></svg>Get VibeForge</a>
-            <a class="btn" href="https://github.com/L0nE-F0x/VibeForge"><svg><use href="#i-github" /></svg>Star on GitHub</a>
+            <a class="btn primary" href="#install"><svg><use href="#i-download" /></svg>Install VibeForge</a>
+            <a class="btn" href="https://github.com/L0nE-F0x/VibeForge"><svg><use href="#i-star" /></svg>Star on GitHub</a>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <div class="wrap">
-        <div class="footer-row">
-          <div class="footer-brand">
-            <a class="brand" href="#top"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --><span>VibeForge</span></a>
-            <span class="credit">Created by <a href="https://ame-apexforge.org/">ApexForge</a></span>
-          </div>
-          <nav>
-            <a href="https://github.com/L0nE-F0x/VibeForge">Source</a>
-            <a href="https://github.com/L0nE-F0x/VibeForge/issues">Issues</a>
-            <a href="https://github.com/L0nE-F0x/VibeForge/releases">Releases</a>
-            <a href="https://github.com/L0nE-F0x/VibeForge/blob/main/LICENSE">MIT license</a>
-            <a href="https://omarchy.org">Omarchy</a>
-          </nav>
+      <div class="footer-row">
+        <div class="footer-brand">
+          <a class="brand" href="#top"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --><span>VibeForge</span></a>
+          <span class="credit">Created by <a href="https://ame-apexforge.org/">ApexForge</a></span>
         </div>
-        <p class="fine">
-          VibeForge is an independent open-source project. It is not affiliated with Omarchy, Anthropic, OpenAI, xAI, Google, GitHub or any CLI it runs;
-          their names are used only to say what VibeForge works with.
-        </p>
+        <nav>
+          <a href="https://github.com/L0nE-F0x/VibeForge">Source</a>
+          <a href="https://github.com/L0nE-F0x/VibeForge/issues">Issues</a>
+          <a href="https://github.com/L0nE-F0x/VibeForge/releases">Releases</a>
+          <a href="https://github.com/L0nE-F0x/VibeForge/blob/main/LICENSE">MIT license</a>
+          <a href="https://omarchy.org">Omarchy</a>
+        </nav>
       </div>
+      <p class="fine">
+        VibeForge is an independent open-source project. It is not affiliated with Omarchy, Anthropic, OpenAI, xAI, Google, GitHub or any CLI it runs; their
+        names are used only to say what VibeForge works with.
+      </p>
     </footer>
 
     <script src="main.js" defer></script>
