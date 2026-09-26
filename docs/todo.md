@@ -4,17 +4,18 @@ Updated for 0.7.0 (2026-09-27): plan limits for Claude, Grok, Kimi and Codex in 
 
 ## Handoff for Monday (2026-09-28)
 
-0.6.0 is tagged and released. Start here, in this order:
+0.7.0 is tagged and released (plan limits, 2026-09-27). Start here, in this order:
 
-1. **Try 0.6.0 with real CLIs** (only stand-ins and bash have been through it). In a Code terminal type `claude`, then `codex`, then `grok`, and check:
+1. **Plan limits in daily use**: turn on Settings → Usage and activity → Show plan limits and keep the rail popover in view for a day. Check the countdowns tick, the day's line climbs, "full in" appears once a window is climbing, and that an expired sign-in (Kimi's lasts 15 minutes when neither Kimi nor the Omarchy widget is renewing it) shows "Sign-in expired" with the last numbers. Compare with the Omarchy widget, whose Kimi row now has its countdown too.
+2. **Try 0.6.0's typed-CLI runs with real CLIs** (only stand-ins and bash have been through it). In a Code terminal type `claude`, then `codex`, then `grok`, and check:
    - the pane shows a **run** link while it runs, and after you exit, the run is in Runs with its transcript and diff (and in Needs review only if files changed);
    - switch to another workspace while it thinks: it should stay "working" (pulsing pixel) through a long think, then glow amber when it asks you something or finishes; with VibeForge in the background a notification should open that workspace;
    - resizing the window while a CLI sits idle in a hidden workspace should *not* flag it;
    - `claude --version` leaves no run behind.
-2. **Copy and paste in a real Claude Code session**: select text and press Super+C (and Ctrl+C), paste elsewhere; Super+V / Ctrl+V into Claude's prompt; copy an image (a screenshot) and Ctrl+V it into Claude Code, which should still receive it as an image; Ctrl+C with nothing selected should still interrupt.
-3. **Usage for Codex and Gemini**: run one short session of each and check the rail popover counts it (the readers follow the documented log formats; neither had logs here). Codex's plan limits should show as bars.
-4. **Retake the website's screenshots** (see the recipe in the testing memory): they still show the rocket button and the old Home. Worth showing the contribution graph and the rail's usage popover.
-5. Then carry on with the list below.
+3. **Copy and paste in a real Claude Code session**: select text and press Super+C (and Ctrl+C), paste elsewhere; Super+V / Ctrl+V into Claude's prompt; copy an image (a screenshot) and Ctrl+V it into Claude Code, which should still receive it as an image; Ctrl+C with nothing selected should still interrupt.
+4. **Usage for Codex and Gemini**: run one short session of each and check the rail popover counts it (the readers follow the documented log formats; neither had logs here). Codex's plan limits should show as bars.
+5. **Retake the website's screenshots** (see the recipe in the testing memory): they still show the rocket button and the old Home. Worth showing the contribution graph and the rail's plan limits popover.
+6. Then carry on with the list below.
 
 
 ## Next up
