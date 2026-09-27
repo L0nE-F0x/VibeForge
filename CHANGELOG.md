@@ -1,0 +1,154 @@
+# Changelog
+
+All notable changes to VibeForge are documented in this file.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a version, a date, and an [Unreleased] section for what is on `main` but not tagged yet. Versioning rules are in [CONTRIBUTING.md](CONTRIBUTING.md). The notes for each tagged version are the ones published on its [GitHub Release](https://github.com/L0nE-F0x/VibeForge/releases).
+
+## [Unreleased]
+
+## [0.7.0] - 2026-09-26
+
+**Plan limits.**
+
+- **See how much of each plan you've used.** Click the pulse at the bottom of the rail: the new **Limits** tab shows Claude's 5-hour and 7-day windows, Grok's credits by product, Kimi's weekly and 5-hour windows, and Codex's limits. Each plan shows when it resets, the last day as a line, and when you'll run out at your current pace. The plan closest to its limit is marked **Hot**.
+- **The rail follows your hottest plan.** The six squares under the pulse fill with it, turn amber past 80% and red when a plan is full, and the tooltip names it.
+- **Off until you turn it on.** Settings → Usage and activity → **Show plan limits**. VibeForge then asks Anthropic, xAI and Moonshot at most every 3 minutes, with the sign-in each CLI already saved on your machine. It only reads those sign-ins: it never renews, rewrites or keeps them. When one has expired, the last numbers stay up until you next open that CLI. Only percentages are saved.
+- Codex's limits come from its own logs, so they show without the switch. Token counts per CLI moved to the **Tokens** tab.
+
+## [0.6.0] - 2026-09-26
+
+**One way in, and a desk that notices.**
+
+- **Type a CLI, get a run.** Type `claude`, `codex`, `grok` or any coding CLI in a Code terminal and VibeForge records the session as a run, from the moment it starts until you're back at the prompt: transcript, final screen and the git diff. The **run** link on the pane opens it, and sessions that changed files wait in **Needs review**. The rocket button, the launch bar (`Ctrl+Shift+L`) and the pane's "Run … here" menu are gone.
+- **See who needs you.** When a CLI goes quiet or finishes in a workspace you aren't looking at, that workspace glows amber and the Code button in the rail gets a dot. With VibeForge in the background, a notification takes you there.
+- **Workspace status at a glance.** One pixel per workspace: open, working, waiting for you, or finished.
+- **Token usage.** Under the live pulse in the rail, today's tokens; click it for each CLI's usage today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI keep on your machine. Nothing is sent anywhere.
+- **A year of commits on Home**, from git in your workspaces, drawn in your theme's colours. Pick **GitHub** in Settings → Usage and activity to show your GitHub contribution graph through the `gh` CLI you're signed in to (off by default; VibeForge keeps no token).
+- **Copy and paste in terminals.** Ctrl+C copies the selection (and interrupts when nothing is selected), Ctrl+V pastes, and Omarchy's Super+C / Super+V work too. An image on its own still pastes into Claude Code.
+- A quieter Home: empty sections hide, and your CLIs are a row of chips.
+
+## [0.5.1] - 2026-09-26
+
+A polish pass for daily use: a quieter Code view, terminals that say what they're running, and a rail you can shape.
+
+### Code
+
+- The engine buttons are gone from the top bar and empty panes. Type `claude`, `codex` or any CLI in a terminal, as you would anyway.
+- The launch bar is hidden until you want it: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> or the rocket button opens it, <kbd>Esc</kbd> closes it. Dictated words with no terminal to land in open it too.
+- Each pane shows just two buttons, ⋯ and ✕. The menu holds split, maximize and "Run … here".
+- New shortcuts: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> / <kbd>E</kbd> for a new terminal right or below, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> to close one.
+- Terminals are named for what runs in them: `claude` typed at a prompt reads "Claude Code" in its title bar, on Home and in the live list. Shells are named after their workspace.
+- Workspaces drag to reorder, rename with a double-click, have a right-click menu, and <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> jumps to one from anywhere.
+
+### Voice
+
+- A CLI typed into a shell now answers out loud like one VibeForge launched, and "stop" interrupts it with Esc instead of Ctrl+C.
+
+### Everywhere
+
+- Right-click a view in the rail to hide it. **Settings → Rail** brings it back and sets the order; <kbd>Ctrl</kbd>+number follows it.
+- Home is simpler: the stat tiles that repeated the headline are gone.
+- Smaller fixes to headers, duplicate buttons and untranslated text.
+
+### Fixes
+
+- A routine that can't start (its folder or CLI is gone) now leaves a failed run saying why, instead of skipping silently.
+- After a crash, a task you run again straight away is no longer knocked back to Review.
+- Continue now reopens the last session for Copilot, Crush, Pi and Hermes. Existing `engines.json` files are left alone; delete yours to pick up the new defaults.
+
+**Update:** use Help → Update to 0.5.1, or rerun `curl -fsSL https://vibe-forge.net/install | bash`.
+
+## [0.5.0] - 2026-09-26
+
+Talk to your agents, and hear them answer. Everything runs on your machine: whisper.cpp turns speech into text, Piper reads answers aloud, and no audio leaves your computer or is kept.
+
+### Set up
+
+- Install whisper.cpp with `sudo pacman -S whisper-cpp`, and Piper with `uv tool install piper-tts` (or the AUR's `piper-tts-bin`).
+- **Settings → Voice** shows what VibeForge found. It downloads speech models and voices from Hugging Face and gives you a line to try dictation on. Models that Omarchy's Voxtype already downloaded are found too.
+
+### Dictate
+
+- Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go. Or tap it to keep listening and tap again to finish. Every message box also has a mic button.
+- The words land where you last clicked: a chat, a terminal in Code, or the launch bar. They wait there for you to read and press Enter. Settings can send them straight away instead.
+- Whisper is told the names of your agents, routines, CLIs and workspace files, so it spells them right.
+
+### Talk to agents
+
+- Start with a name: "Atlas, add tests for the scheduler." goes to Atlas's latest chat, whatever has focus.
+- When you've spoken to an agent, its answer is read back to you: the first paragraph (the default), all of it, or nothing. Each agent can have its own voice. Start talking to cut the answer short.
+- Claude Code and Codex answers are read from their own session logs. Other CLIs say when they finish and what changed.
+- <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> starts a hands-free conversation. Pause and it sends; the answer is read; then it listens again.
+- Commands start with "Forge": "Forge, send", "Forge, new task: fix the login page", "Forge, run the nightly routine", "Forge, go to tasks", "Forge, stop listening".
+
+### From anywhere on the desktop
+
+- `vibeforge --voice start|stop|toggle|cancel|converse` reaches the open window in a few milliseconds.
+- **Settings → Voice → Add to Hyprland** binds hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> to talk and <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> for a conversation. It backs up your bindings file first.
+- While VibeForge is in the background, a short tone marks the start and the end, and results arrive as notifications.
+
+All the new text is in the seven languages.
+
+**Update:** use Help → Update to 0.5.0, or rerun `curl -fsSL https://vibe-forge.net/install | bash`.
+
+## [0.4.0] - 2026-09-25
+
+An Omarchy look for VibeForge and its website.
+
+### The look
+
+- The app is restyled after omarchy.org and the Omarchy desktop. It has square corners, JetBrains Mono for text and Geist for headings (both come with the app), and flat panels with one-pixel borders.
+- Buttons are solid accent colour, status dots are pixels, and loading shows a blinking block cursor.
+- The accent gradient is only on the edges of menus and dialogs. Hover, press and focus look the same as before.
+- A new pixel-art mark (a V with a spark) is now the app icon and the logo in the rail. The pixel art takes its colours from your theme.
+
+### A new Home
+
+- The Home screen shows the pixel wordmark, the date and time, and one sentence on what is running and what waits for review. Buttons with their shortcuts open a workspace, start an agent or start a quick chat.
+- A row of stats shows what is live, what waits for review, runs over the last 14 days as a block chart, and your routines.
+- New installs see three numbered setup steps.
+- Your workspaces open in one click, and the coding CLIs VibeForge found are listed like `which` output.
+- Home is translated into all seven languages.
+
+### Fixes
+
+- If your git config sets `color.ui = always`, run snapshots and review diffs no longer fill up with colour codes.
+- The file tree shows `~` paths, like the rest of the app.
+
+### The website
+
+- https://vibe-forge.net has been rebuilt to match. It has real screenshots, a theme switcher (press T) and a new social image.
+
+**Update:** use Help → Update to 0.4.0, or rerun `curl -fsSL https://vibe-forge.net/install | bash`.
+
+## [0.3.0] - 2026-09-25
+
+The first versioned release. From here on, VibeForge tells you when a new one is out and updates itself in a terminal you can watch.
+
+**New**
+
+- **Updates in the app.** VibeForge checks GitHub for a newer release when it starts and every 6 hours (turn it off in Settings → Updates). When one is out, Help gets a dot; Update shows these notes, runs the update and restarts.
+- **Seven languages.** English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language, or pick one in Settings → Appearance. The tour, menus, tooltips and empty screens are translated so far.
+- **Diagnostics.** Help → Copy diagnostics copies your versions, a few settings and the end of VibeForge's own log, ready to paste into a bug report. The log never holds your prompts or terminal output.
+
+**Fixed**
+
+- Closing the last terminal in a workspace now closes it, instead of starting a new shell in its place.
+- Restart and Close on a pane whose program exited respond to clicks again.
+- Tooltips, notifications and menus no longer hide behind the browser dock.
+
+**Install or update**
+
+```bash
+curl -fsSL https://vibe-forge.net/install | bash
+```
+
+The installer now installs the newest release rather than the latest commit.
+
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.7.0
+[0.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.6.0
+[0.5.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.5.1
+[0.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.5.0
+[0.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.4.0
+[0.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.3.0

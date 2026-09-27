@@ -167,3 +167,5 @@ The code is in `src/core` (the service, storage, scheduler — plain Node), `src
 ---
 
 VibeForge is an independent project. It is not affiliated with Omarchy, Anthropic, OpenAI, xAI, Google, GitHub or any CLI it runs; their names are used only to say what VibeForge works with. Released under the [MIT license](LICENSE).
+
+Contributing notes are in [CONTRIBUTING.md](CONTRIBUTING.md). Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).
