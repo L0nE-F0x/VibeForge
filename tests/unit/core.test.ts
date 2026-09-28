@@ -364,6 +364,16 @@ describe("store", () => {
     expect(store.readSettings().tourDone).toBe(false);
     store.close();
   });
+
+  it("leaves a settings.json that doesn't parse alone, and reads defaults meanwhile", () => {
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "settings.json");
+    const halfEdited = '{ "defaultEngine": "codex", "theme": "builtin",\n';
+    fs.writeFileSync(file, halfEdited);
+    expect(store.readSettings()).toMatchObject({ defaultEngine: "claude", theme: "omarchy" });
+    expect(fs.readFileSync(file, "utf8")).toBe(halfEdited);
+    store.close();
+  });
 });
 
 describe("files", () => {

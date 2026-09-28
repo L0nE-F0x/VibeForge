@@ -432,7 +432,8 @@ export class Store {
     const defaults = defaultSettings();
     const raw = readJson<Partial<Settings> | null>(file, null);
     if (!raw) {
-      writeJson(file, defaults);
+      // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its author.
+      if (!fs.existsSync(file)) writeJson(file, defaults);
       return defaults;
     }
     return {
