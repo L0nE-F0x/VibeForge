@@ -20,6 +20,7 @@ import type {
   RunStatus,
   Schedule,
   Settings,
+  SoundSettings,
   VoiceSettings,
   Skill,
   Task,
@@ -85,7 +86,10 @@ export function defaultSettings(): Settings {
     tourDone: false,
     checkUpdates: true,
     language: "system",
-    voice: { model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" },
+    voice: { model: "", language: "auto", talkBack: true, speaker: "", agent: "" },
+    sounds: { on: true, volume: 0.6, voice: true, attention: true, finished: true, routines: false, inFront: false },
+    tray: true,
+    closeToTray: true,
     usage: true,
     planLimits: false,
     activity: "git",
@@ -109,14 +113,36 @@ function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+/** Older settings said "summary", "full", or "off". Reading aloud is now on or off; on is the first paragraph. */
+function talkBackFlag(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === "off") return false;
+  if (value === "summary" || value === "full") return true;
+  return fallback;
+}
+
+function normalizeSoundSettings(value: unknown, defaults: SoundSettings): SoundSettings {
+  const raw = value && typeof value === "object" ? (value as Partial<SoundSettings>) : {};
+  const volume = typeof raw.volume === "number" && Number.isFinite(raw.volume) ? Math.min(1, Math.max(0, raw.volume)) : defaults.volume;
+  return {
+    on: bool(raw.on, defaults.on),
+    volume,
+    voice: bool(raw.voice, defaults.voice),
+    attention: bool(raw.attention, defaults.attention),
+    finished: bool(raw.finished, defaults.finished),
+    routines: bool(raw.routines, defaults.routines),
+    inFront: bool(raw.inFront, defaults.inFront),
+  };
+}
+
 function normalizeVoiceSettings(value: unknown, defaults: VoiceSettings): VoiceSettings {
-  const raw = value && typeof value === "object" ? (value as Partial<VoiceSettings>) : {};
+  const raw = value && typeof value === "object" ? (value as Partial<VoiceSettings> & { talkBack?: unknown }) : {};
   return {
     model: str(raw.model).trim(),
     language: /^(auto|[a-z]{2,3})$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
-    autoSend: bool(raw.autoSend, defaults.autoSend),
-    talkBack: raw.talkBack === "off" || raw.talkBack === "full" || raw.talkBack === "summary" ? raw.talkBack : defaults.talkBack,
+    talkBack: talkBackFlag(raw.talkBack, defaults.talkBack),
     speaker: str(raw.speaker).trim(),
+    agent: str(raw.agent).trim(),
   };
 }
 
@@ -423,6 +449,9 @@ export class Store {
       checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
       voice: normalizeVoiceSettings(raw.voice, defaults.voice),
+      sounds: normalizeSoundSettings(raw.sounds, defaults.sounds),
+      tray: bool(raw.tray, defaults.tray),
+      closeToTray: bool(raw.closeToTray, defaults.closeToTray),
       usage: bool(raw.usage, defaults.usage),
       planLimits: bool(raw.planLimits, defaults.planLimits),
       activity: raw.activity === "off" || raw.activity === "github" ? raw.activity : defaults.activity,

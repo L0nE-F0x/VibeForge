@@ -113,6 +113,8 @@ export function readRunMeta(dir: string): RunMeta | null {
 
 export interface RunFiles {
   preamble: string;
+  /** What the person typed, when VibeForge itself didn't hand the run a prompt. */
+  prompts: string;
   /** Serialized final terminal state, the best thing to replay. */
   screen: string;
   /** Raw PTY capture, used when the screen was never written (a crash). */
@@ -125,6 +127,7 @@ export function readRunFiles(dir: string): RunFiles {
   const screen = readText(path.join(dir, RUN_FILES.screen));
   return {
     preamble: readText(path.join(dir, RUN_FILES.preamble)),
+    prompts: "",
     screen,
     scrollback: screen ? "" : readText(path.join(dir, RUN_FILES.scrollback)),
     transcript: readText(path.join(dir, RUN_FILES.transcript)),

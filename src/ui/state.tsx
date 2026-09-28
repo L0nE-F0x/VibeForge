@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { RunView } from "../shared/api.js";
 import { errorText } from "./api.js";
 import { covers, sameBox, type Box, type Layer } from "./floating.js";
@@ -25,22 +25,76 @@ export type ViewName = Route["view"];
 interface Nav {
   route: Route;
   go: (route: Route) => void;
+  /** Switch to a view where you left it: the same agent, chat, task or run. */
+  open: (view: ViewName) => void;
+  /** Go somewhere without leaving the current place in the history. */
+  replace: (route: Route) => void;
   back: () => void;
+  forward: () => void;
 }
 
 const NavContext = createContext<Nav | null>(null);
 
+function pushRoute(prev: Route[], route: Route): Route[] {
+  if (JSON.stringify(prev[prev.length - 1]) === JSON.stringify(route)) return prev;
+  return [...prev.slice(-30), route];
+}
+
+const VIEWS: ViewName[] = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "settings"];
+const NAV_KEY = "vf.nav";
+
+function isRoute(value: unknown): value is Route {
+  return Boolean(value) && typeof value === "object" && VIEWS.includes((value as Route).view);
+}
+
+/** Where the last session was: the open view and where each view was left. */
+function loadNav(): { route: Route; left: Array<[ViewName, Route]> } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NAV_KEY) ?? "null") as { route?: unknown; left?: unknown } | null;
+    const left = Array.isArray(saved?.left) ? saved.left.filter((entry): entry is [ViewName, Route] => Array.isArray(entry) && isRoute(entry[1]) && entry[1].view === entry[0]) : [];
+    return { route: isRoute(saved?.route) ? saved.route : { view: "home" }, left };
+  } catch {
+    return { route: { view: "home" }, left: [] };
+  }
+}
+
 export function NavProvider({ children }: { children: ReactNode }) {
-  const [stack, setStack] = useState<Route[]>([{ view: "home" }]);
-  const go = useCallback((route: Route) => {
-    setStack((prev) => {
-      const last = prev[prev.length - 1];
-      if (JSON.stringify(last) === JSON.stringify(route)) return prev;
-      return [...prev.slice(-30), route];
+  const saved = useRef<ReturnType<typeof loadNav> | null>(null);
+  saved.current ??= loadNav();
+  // Behind you, and ahead of you after going back. Going somewhere new drops what was ahead.
+  const [history, setHistory] = useState<{ stack: Route[]; ahead: Route[] }>(() => ({ stack: [saved.current!.route], ahead: [] }));
+  const route = history.stack[history.stack.length - 1];
+  // Code stays mounted and keeps its own workspace, so it isn't remembered here.
+  const left = useRef(new Map<ViewName, Route>(saved.current.left));
+  useLayoutEffect(() => {
+    if (route.view !== "code") left.current.set(route.view, route);
+    try {
+      localStorage.setItem(NAV_KEY, JSON.stringify({ route: route.view === "code" ? { view: "code" } : route, left: [...left.current] }));
+    } catch {
+      /* storage can be unavailable; the next launch opens Home */
+    }
+  }, [route]);
+  const visit = useCallback((next: Route) => {
+    setHistory((prev) => {
+      const stack = pushRoute(prev.stack, next);
+      return stack === prev.stack ? prev : { stack, ahead: [] };
     });
   }, []);
-  const back = useCallback(() => setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev)), []);
-  const value = useMemo(() => ({ route: stack[stack.length - 1], go, back }), [stack, go, back]);
+  const go = visit;
+  const open = useCallback((view: ViewName) => visit(left.current.get(view) ?? ({ view } as Route)), [visit]);
+  const replace = useCallback((next: Route) => setHistory((prev) => ({ ...prev, stack: [...prev.stack.slice(0, -1), next] })), []);
+  const back = useCallback(
+    () =>
+      setHistory((prev) =>
+        prev.stack.length > 1 ? { stack: prev.stack.slice(0, -1), ahead: [prev.stack[prev.stack.length - 1], ...prev.ahead].slice(0, 30) } : prev,
+      ),
+    [],
+  );
+  const forward = useCallback(
+    () => setHistory((prev) => (prev.ahead.length ? { stack: [...prev.stack, prev.ahead[0]], ahead: prev.ahead.slice(1) } : prev)),
+    [],
+  );
+  const value = useMemo(() => ({ route, go, open, replace, back, forward }), [route, go, open, replace, back, forward]);
   return <NavContext.Provider value={value}>{children}</NavContext.Provider>;
 }
 
@@ -48,6 +102,20 @@ export function useNav(): Nav {
   const nav = useContext(NavContext);
   if (!nav) throw new Error("useNav outside NavProvider");
   return nav;
+}
+
+/**
+ * A remembered place can point at something deleted since. Once the view's list has loaded, if
+ * the route names something missing, open the view without it instead of an empty page.
+ */
+export function useDropMissing(loaded: boolean, missing: boolean, bare: Route): void {
+  const { replace } = useNav();
+  const checked = useRef(false);
+  useEffect(() => {
+    if (checked.current || !loaded) return;
+    checked.current = true;
+    if (missing) replace(bare);
+  });
 }
 
 /** Where a run lives: its chat, its task, its pane, or the run page. */

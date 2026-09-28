@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
+import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { gitHead, snapshotGit } from "../src/core/vcs.js";
@@ -18,6 +19,7 @@ import { PlanWatcher } from "../src/core/plans.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
+import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
@@ -49,6 +51,11 @@ let service: TeamService | null = null;
 let palette: Palette = resolvePalette("omarchy");
 let quitting = false;
 let shutdownDone = false;
+/** Started by the login autostart entry: stay in the tray until opened. */
+const startHidden = process.argv.includes(HIDDEN_ARG);
+/** CLIs and chats waiting for you, as the page counts them. */
+let waiting = 0;
+let trayNoticeShown = false;
 const notifications = new Set<Notification>();
 
 function appRoot(): string {
@@ -114,14 +121,28 @@ function focusWindow(): void {
   win.focus();
 }
 
+/** Omarchy's shell keeps its Do Not Disturb switch in this file. */
+function omarchyDoNotDisturb(): boolean {
+  const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(state, "omarchy", "notifications.json"), "utf8")) as { dnd?: unknown };
+    return parsed.dnd === true;
+  } catch {
+    return false;
+  }
+}
+
 /** A desktop notification; clicking it brings VibeForge up on the run or workspace it is about. */
-function notify(note: { title: string; body: string; runId?: string; workspaceId?: string }): void {
+function notify(note: { title: string; body: string; runId?: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null }): void {
   if (Notification.isSupported()) {
-    const notification = new Notification({ title: note.title, body: note.body, icon: iconPath() });
+    // VibeForge plays its own sounds, so the desktop's would be a second one for the same moment.
+    const silent = Boolean(service?.getSettings().sounds.on);
+    const notification = new Notification({ title: note.title, body: note.body, icon: iconPath(), silent });
     notifications.add(notification);
     notification.on("click", () => {
       focusWindow();
       if (note.runId) send("open-run", { runId: note.runId });
+      else if (note.chatId) send("open-chat", { chatId: note.chatId, agentId: note.agentId ?? null });
       else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
     });
     notification.on("close", () => notifications.delete(notification));
@@ -151,6 +172,7 @@ const host: DeskHost = {
   record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
   resolveBin: (bin) => whichBin(bin),
   notify,
+  finished: (run) => send("run-finished", run),
   snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
   gitHead: (cwd) => gitHead(cwd),
 };
@@ -225,6 +247,80 @@ function refreshPalette(): void {
   palette = resolvePalette(service.getSettings().theme);
   send("palette", palette);
   if (win && !win.isDestroyed()) win.setBackgroundColor(palette.background);
+  tray.recolor(palette.accent2, palette.darkerBackground);
+}
+
+// ------------------------------------------------------------------ tray
+
+const autostartPath = autostartFile(process.env, os.homedir());
+const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${appRoot()}"`);
+
+const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.darkerBackground }, {
+  open: () => focusWindow(),
+  goAnywhere: () => {
+    focusWindow();
+    send("open-switcher", true);
+  },
+  settings: () => {
+    focusWindow();
+    send("open-view", { view: "settings" });
+  },
+  setSounds: (on) => {
+    if (service) service.saveSettings({ sounds: { ...service.getSettings().sounds, on } });
+  },
+  setNotify: (on) => service?.saveSettings({ notify: on }),
+  setAutostart: (on) => {
+    setAutostart(on);
+    syncTray();
+  },
+  quit: () => void quitFromTray(),
+});
+
+function setAutostart(on: boolean): void {
+  try {
+    writeAutostart(autostartPath, on, launcher());
+    log.info(`Start at login ${on ? "on" : "off"} (${autostartPath})`);
+  } catch (error) {
+    log.warn(`Could not change the autostart entry: ${describeError(error)}`);
+  }
+}
+
+function trayState(): TrayState {
+  const settings = service!.getSettings();
+  return { live: service!.liveCount(), waiting, sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
+}
+
+function syncTray(): void {
+  if (!service) return;
+  try {
+    if (service.getSettings().tray) tray.show(trayState());
+    // Electron can't take an icon out of the bar's tray while it runs (the entry stays behind,
+    // dead), so switching it off applies from the next start; until then it keeps working.
+    else if (tray.shown) tray.update(trayState());
+  } catch (error) {
+    log.warn(`The tray icon: ${describeError(error)}`);
+  }
+}
+
+/** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
+async function quitFromTray(): Promise<void> {
+  const live = service?.listLive() ?? [];
+  if (live.length && win) {
+    focusWindow();
+    const runs = live.filter((session) => session.kind === "run").length;
+    const { response } = await dialog.showMessageBox(win, {
+      type: "question",
+      buttons: ["Quit and stop them", "Keep working"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "VibeForge",
+      message: `${live.length} terminal${live.length === 1 ? " is" : "s are"} still running.`,
+      detail: runs ? "Quitting stops them. Every run keeps its transcript and git snapshot." : "Quitting closes them.",
+    });
+    if (response !== 0) return;
+  }
+  quitting = true;
+  app.quit();
 }
 
 // ------------------------------------------------------------------ IPC
@@ -269,12 +365,26 @@ function handlers(): Handlers {
       app.quit();
     },
     "app.copyText": (text) => clipboard.writeText(text),
+    "app.focus": () => focusWindow(),
     "app.clipboard": () => ({ text: clipboard.readText(), image: clipboard.availableFormats().some((format) => format.startsWith("image/")) }),
     "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
     "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
-      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId });
+      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId });
+    },
+    "app.doNotDisturb": () => omarchyDoNotDisturb(),
+    "app.autostart": () => readAutostart(autostartPath),
+    "app.setAutostart": (on) => {
+      setAutostart(on);
+      syncTray();
+      return readAutostart(autostartPath);
+    },
+    "app.attention": (count) => {
+      const next = Math.max(0, Math.floor(Number(count) || 0));
+      if (next === waiting) return;
+      waiting = next;
+      syncTray();
     },
     "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
 
@@ -352,7 +462,7 @@ function handlers(): Handlers {
 
     "runs.list": (query) => s().listRuns(query ?? {}),
     "runs.inbox": () => s().inbox(),
-    "runs.get": (id) => s().getRun(id),
+    "runs.get": (id) => s().loadRun(id),
     "runs.markOpened": (id, opened) => s().markRunOpened(id, opened ?? true),
     "runs.markAllOpened": () => s().markAllOpened(),
     "runs.stop": (id) => s().stopRun(id),
@@ -362,7 +472,7 @@ function handlers(): Handlers {
     "live.list": () => s().listLive(),
 
     "voice.status": () => voice.status(),
-    "voice.start": (opts) => voice.start({ endpoint: Boolean(opts?.endpoint) }),
+    "voice.start": () => voice.start(),
     "voice.stop": (prompt) => voice.stop(typeof prompt === "string" ? prompt.slice(0, 1000) : ""),
     "voice.cancel": () => voice.cancel(),
     "voice.download": (kind, id) => voice.startDownload(kind === "voice" ? "voice" : "model", String(id)),
@@ -471,7 +581,10 @@ async function createWindow(): Promise<void> {
       spellcheck: false,
     },
   });
-  win.once("ready-to-show", () => win?.show());
+  win.once("ready-to-show", () => {
+    // From the login autostart entry, the window waits in the tray (unless there's no tray to wait in).
+    if (!(startHidden && service?.getSettings().tray)) win?.show();
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -485,6 +598,15 @@ async function createWindow(): Promise<void> {
   });
   win.on("close", (event) => {
     if (quitting || !service) return;
+    if (tray.shown && service.getSettings().tray && service.getSettings().closeToTray) {
+      event.preventDefault();
+      win?.hide();
+      if (!trayNoticeShown && service.getSettings().notify) {
+        trayNoticeShown = true;
+        notify({ title: "VibeForge is still running", body: "It's in the tray with your terminals and routines. Quit from its menu." });
+      }
+      return;
+    }
     const live = service.listLive();
     const runs = live.filter((session) => session.kind === "run").length;
     if (live.length === 0) return;
@@ -563,7 +685,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", (_event, argv) => {
     const action = voiceArg(argv);
     if (action) send("voice-command", { action });
-    else focusWindow();
+    // A second autostart at login shouldn't pull the window up.
+    else if (!argv.includes(HIDDEN_ARG)) focusWindow();
   });
 
   app.whenReady().then(async () => {
@@ -577,9 +700,14 @@ if (!app.requestSingleInstanceLock()) {
       now: () => new Date(),
       host,
     });
-    service.onChange((topics) => send("changed", topics));
+    service.onChange((topics) => {
+      send("changed", topics);
+      if (topics.includes("settings") || topics.includes("live")) syncTray();
+    });
     palette = resolvePalette(service.getSettings().theme);
     registerIpc();
+    tray.recolor(palette.accent2, palette.darkerBackground);
+    syncTray();
     const hostReady = startHost();
     await createWindow();
     await hostReady;

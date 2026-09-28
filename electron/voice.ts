@@ -9,8 +9,6 @@ import type { VoiceSettings } from "../src/core/types.js";
 import {
   BYTES_PER_SECOND,
   cleanTranscript,
-  Endpointer,
-  FRAME_BYTES,
   isVoiceFile,
   pickVoice,
   VOICE_CATALOG,
@@ -65,10 +63,6 @@ interface Recording {
   exited: Promise<void>;
   timer: NodeJS.Timeout;
   error: string | null;
-  /** Conversation mode: listens for the end of a sentence. */
-  endpointer: Endpointer | null;
-  /** Audio not yet measured as a whole frame. */
-  pending: Buffer;
 }
 
 function freePort(): Promise<number> {
@@ -249,7 +243,7 @@ export class Voice {
 
   // ---------------------------------------------------------------- recording
 
-  start(opts: { endpoint?: boolean } = {}): void {
+  start(): void {
     if (this.recording) return;
     // Talking over an answer silences it.
     this.speaker.stop();
@@ -271,8 +265,6 @@ export class Voice {
       // At the limit the microphone closes; what was said so far is still transcribed on stop.
       timer: setTimeout(() => child.kill("SIGTERM"), MAX_SECONDS * 1000),
       error: null,
-      endpointer: opts.endpoint ? new Endpointer() : null,
-      pending: Buffer.alloc(0),
     };
     this.recording = recording;
     let stderr = "";
@@ -289,23 +281,12 @@ export class Voice {
     child.stdout?.on("data", (data: Buffer) => {
       recording.chunks.push(data);
       recording.bytes += data.length;
-      let changed = false;
-      if (recording.endpointer) {
-        const before = recording.endpointer.phase;
-        let audio = recording.pending.length ? Buffer.concat([recording.pending, data]) : data;
-        while (audio.length >= FRAME_BYTES) {
-          recording.endpointer.push(rms(audio, 0, FRAME_BYTES), 30);
-          audio = audio.subarray(FRAME_BYTES);
-        }
-        recording.pending = Buffer.from(audio);
-        changed = recording.endpointer.phase !== before;
-      }
       const now = Date.now();
-      if (!changed && now - recording.lastLevelAt < LEVEL_EVERY_MS) return;
+      if (now - recording.lastLevelAt < LEVEL_EVERY_MS) return;
       recording.lastLevelAt = now;
-      this.opts.state({ phase: "recording", level: meterLevel(rms(data)), seconds: recording.bytes / BYTES_PER_SECOND, speech: recording.endpointer?.phase ?? null });
+      this.opts.state({ phase: "recording", level: meterLevel(rms(data)), seconds: recording.bytes / BYTES_PER_SECOND, speech: null });
     });
-    this.opts.state({ phase: "recording", level: 0, seconds: 0, speech: recording.endpointer ? "waiting" : null });
+    this.opts.state({ phase: "recording", level: 0, seconds: 0, speech: null });
     this.opts.log.info(`Voice: recording with ${recorder.label}`);
     // Loading a model takes a moment; do it while the person talks.
     if (status.server) void this.ensureServer(status.server, status.model, status.language).catch(() => undefined);

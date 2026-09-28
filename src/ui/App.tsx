@@ -3,17 +3,19 @@ import { Component, useCallback, useEffect, useRef, useState, type ReactNode } f
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
-import { useAttention } from "./attention.js";
+import { useAttention, useChatAttention, type Attention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
+import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
+import { SessionWatch } from "./watch.js";
 import { VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
-import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type Route, type ViewName } from "./state.js";
+import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
 import { AgentsView } from "./views/Agents.js";
 import { ChatView } from "./views/Chat.js";
 import { CodeView } from "./views/Code.js";
@@ -40,7 +42,8 @@ export function App() {
 }
 
 function Shell() {
-  const { route, go, back } = useNav();
+  const { route, go, open, back, forward } = useNav();
+  const [switcher, setSwitcher] = useState(false);
   const { push } = useToast();
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const workspacesRef = useRef(workspaces);
@@ -55,7 +58,7 @@ function Shell() {
         const item = railViews(railRef.current).visible[Number(event.key) - 1];
         if (!item) return;
         event.preventDefault();
-        go({ view: item.view } as Route);
+        open(item.view);
       } else if (event.ctrlKey && !event.altKey && event.key === ",") {
         event.preventDefault();
         go({ view: "settings" });
@@ -67,6 +70,12 @@ function Shell() {
       } else if (event.altKey && event.key === "ArrowLeft") {
         event.preventDefault();
         back();
+      } else if (event.altKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        forward();
+      } else if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSwitcher((open) => !open);
       } else if (event.ctrlKey && event.shiftKey && event.code === "Slash") {
         event.preventDefault();
         window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT));
@@ -78,22 +87,40 @@ function Shell() {
         void call("app.toggleDevTools");
       }
     };
+    // A mouse's side buttons: back and forward, wherever the pointer is (terminals included).
+    const onMouse = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.type === "mouseup") (event.button === 3 ? back : forward)();
+    };
+    const showSwitcher = () => setSwitcher(true);
+    window.addEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
+    const offSwitcher = on("open-switcher", showSwitcher);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onMouse, true);
+    window.addEventListener("mouseup", onMouse, true);
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
     const offWorkspace = on("open-workspace", ({ workspaceId }) => go({ view: "code", workspaceId }));
     const offCrash = on("host-crash", (message) => push("error", "Terminal host problem", message));
     return () => {
+      window.removeEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
+      offSwitcher();
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onMouse, true);
+      window.removeEventListener("mouseup", onMouse, true);
       offRun();
       offWorkspace();
       offCrash();
     };
-  }, [go, back, push]);
+  }, [go, open, back, forward, push]);
 
   return (
     <div className="app">
       <Guides />
       <VoiceLayer />
+      <SessionWatch />
+      {switcher && <Switcher onClose={() => setSwitcher(false)} />}
       <Rail />
       <main className="stage">
         <CrashBoundary key={route.view}>
@@ -163,15 +190,22 @@ function Guides() {
   );
 }
 
+/** The dot on a rail button while something in that view wants you. */
+function RailDot({ marks }: { marks: Attention[] }) {
+  if (!marks.length) return null;
+  return <span className={`rail-dot${marks.includes("waiting") ? " waiting" : " done"}`} />;
+}
+
 function Rail() {
   const t = useT();
-  const { route, go } = useNav();
+  const { route, go, open } = useNav();
   const update = useUpdate().data;
   const waiting = update?.available && update.latest ? update.latest.version : null;
   const inbox = useInbox().data ?? [];
   const tasks = useTasks().data ?? [];
   const live = useLive().data ?? [];
   const attention = useAttention();
+  const chatAttention = useChatAttention();
   const usage = useUsage().data;
   const plans = usePlans().data;
   const tokensToday = usageToday(usage).today;
@@ -192,9 +226,9 @@ function Rail() {
 
   return (
     <nav className="rail" aria-label="Views">
-      <div className="rail-logo" {...tipProps("VibeForge", { side: "right" })}>
+      <button type="button" className="rail-logo" aria-label={t("switcher.title")} {...tipProps(t("switcher.title"), { kbd: "Ctrl+K", side: "right" })} onClick={() => window.dispatchEvent(new Event(OPEN_SWITCHER_EVENT))}>
         <Logo size={22} />
-      </div>
+      </button>
       {visible.map((item, index) => {
         const count = badge(item.view);
         return (
@@ -205,7 +239,7 @@ function Rail() {
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
             {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
-            onClick={() => go({ view: item.view } as Route)}
+            onClick={() => open(item.view)}
             onContextMenu={(event) => {
               event.preventDefault();
               setViewMenu({ view: item.view, anchor: event.currentTarget });
@@ -214,7 +248,7 @@ function Rail() {
             <item.icon size={19} strokeWidth={1.9} />
             <span>{t(item.label)}</span>
             {count > 0 && <span className="rail-badge">{count > 99 ? "99+" : count}</span>}
-            {item.view === "code" && attention.size > 0 && <span className={`rail-dot${[...attention.values()].includes("waiting") ? " waiting" : " done"}`} />}
+            <RailDot marks={item.view === "code" ? [...attention.values()] : item.view === "agents" || item.view === "chat" ? [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (item.view === "agents")).map((mark) => mark.attention) : []} />
           </button>
         );
       })}

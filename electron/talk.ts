@@ -1,25 +1,21 @@
 import os from "node:os";
 import { describeError, type LogFile } from "../src/core/log.js";
-import { replyLogFor, speakable } from "../src/core/replies.js";
+import { replyLogFor, speakable, type TalkBack } from "../src/core/replies.js";
 import type { TeamService } from "../src/core/team-service.js";
 import type { TalkEvent } from "../src/shared/api.js";
 import { watchReply } from "./replies.js";
 import type { Voice } from "./voice.js";
 
 interface Expectation {
-  /** Null for a CLI typed into a shell: there is no run to report on. */
-  runId: string | null;
   who: string;
   voice: string;
   abort: AbortController;
-  /** No log to read: say something when the program ends instead. */
-  atExit: boolean;
 }
 
 /**
- * Agents answering out loud. After something is said to a terminal, waits for the answer in the
- * CLI's session log and reads it (or its first paragraph) in the agent's voice. For CLIs without a
- * readable log, says when the run ends and what changed.
+ * Agents answering out loud. After a dictated message is sent to a terminal, waits for the answer
+ * in the CLI's session log and reads its first paragraph in the agent's voice. A program with no
+ * readable log stays quiet.
  */
 export class Talk {
   private expecting = new Map<string, Expectation>();
@@ -37,7 +33,6 @@ export class Talk {
     const service = this.opts.service();
     const session = service?.listLive().find((item) => item.ptyId === ptyId);
     if (!service || !session) return false;
-    let runId: string | null = null;
     let engineId: string;
     let who: string;
     let voice = "";
@@ -45,7 +40,6 @@ export class Talk {
     if (session.kind === "run" && session.runId) {
       const run = service.getRun(session.runId).run;
       const agent = run.agentId ? service.listAgents().find((item) => item.id === run.agentId) : undefined;
-      runId = session.runId;
       engineId = run.engine;
       who = agent?.name ?? session.title;
       voice = agent?.voice ?? "";
@@ -59,14 +53,13 @@ export class Talk {
     }
     const engine = service.listEngines().find((item) => item.id === engineId);
     const kind = replyLogFor(engineId, engine?.bin ?? engineId);
-    // A shell outlives the CLI in it, so without a log there is nothing to wait for.
-    if (!kind && !runId) return false;
+    // Without a session log there is nothing to read, so stay quiet. "Has finished" is a notification already.
+    if (!kind) return false;
 
     this.forget(ptyId, false);
-    const expectation: Expectation = { runId, who, voice, abort: new AbortController(), atExit: !kind };
+    const expectation: Expectation = { who, voice, abort: new AbortController() };
     this.expecting.set(ptyId, expectation);
     this.opts.send({ ptyId, stage: "waiting", who, text: "" });
-    if (!kind) return true;
 
     const since = Date.now() - 2000;
     void watchReply({ kind, home: os.homedir(), cwd, since, words, signal: expectation.abort.signal })
@@ -87,9 +80,10 @@ export class Talk {
     return true;
   }
 
-  /** Reads a reply aloud as Settings says (summary, full, or not at all), with events either side. */
-  async say(ptyId: string | null, who: string, markdown: string, voice = "", mode = this.opts.service()?.getSettings().voice.talkBack ?? "summary"): Promise<void> {
-    const text = speakable(markdown, mode);
+  /** Reads a reply aloud: the first paragraph when talk-back is on, unless `mode` says otherwise. */
+  async say(ptyId: string | null, who: string, markdown: string, voice = "", mode?: TalkBack): Promise<void> {
+    const chosen = mode ?? (this.opts.service()?.getSettings().voice.talkBack ? "summary" : "off");
+    const text = speakable(markdown, chosen);
     const file = this.opts.voice.voiceFor(voice);
     if (text && file && this.opts.voice.speaker.piper()) {
       this.opts.send({ ptyId, stage: "speaking", who, text });
@@ -98,25 +92,13 @@ export class Talk {
     this.opts.send({ ptyId, stage: "done", who, text: speakable(markdown, "summary") });
   }
 
-  /** The program in `ptyId` ended: for one with no log, say so. */
+  /** The program in `ptyId` ended before its log had an answer: stop waiting, and don't invent one. */
   async exited(ptyId: string): Promise<void> {
     const expectation = this.expecting.get(ptyId);
     if (!expectation) return;
     this.expecting.delete(ptyId);
     expectation.abort.abort();
-    if (!expectation.atExit) {
-      this.opts.send({ ptyId, stage: "done", who: expectation.who, text: "" });
-      return;
-    }
-    let changes = "";
-    try {
-      const run = expectation.runId ? this.opts.service()?.getRun(expectation.runId).run : undefined;
-      // "1 file changed, 1 insertion(+)" reads better without the signs.
-      if (run?.changes) changes = ` ${run.changes.replace(/\s*\([+-]\)/g, "")}.`;
-    } catch {
-      /* the run is gone */
-    }
-    await this.say(ptyId, expectation.who, `${expectation.who} has finished.${changes}`, expectation.voice, "full");
+    this.opts.send({ ptyId, stage: "done", who: expectation.who, text: "" });
   }
 
   forget(ptyId?: string, announce = true): void {

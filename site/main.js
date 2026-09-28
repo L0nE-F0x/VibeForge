@@ -650,7 +650,7 @@ function setupVoiceArt() {
   const cells = $$("[data-voice-meter] i");
   const typed = $("[data-voice-typed]");
   const clock = $("[data-voice-clock]");
-  const lines = ["Atlas, add tests for the scheduler.", "Forge, new task: fix the login page.", "Refactor the lamp so it glows at night.", "Forge, send."];
+  const lines = ["Add tests for the scheduler.", "Refactor the lamp so it glows at night.", "Check why the dock hides the menu."];
   let visible = false;
   let running = false;
   const level = (value) => {

@@ -215,9 +215,10 @@ export type SpeechPhase = "waiting" | "speaking" | "ended" | "timeout";
 export const FRAME_BYTES = (BYTES_PER_SECOND * 30) / 1000;
 
 /**
- * Tells when someone has finished speaking, for conversation mode: speech is loudness well above
- * the room's own noise (tracked as it goes), and a turn ends after a pause of `silenceMs` that
- * follows at least `minSpeechMs` of speech. Nothing said for `noSpeechMs` is a timeout.
+ * Tells when someone has finished speaking: speech is loudness well above the room's own noise
+ * (tracked as it goes), and a turn ends after a pause of `silenceMs` that follows at least
+ * `minSpeechMs` of speech. Nothing said for `noSpeechMs` is a timeout. Hold-to-talk does not use
+ * this; it is here for a later option that listens again after a reply.
  */
 export class Endpointer {
   private floor = -1;

@@ -136,13 +136,12 @@ describe("voice: words", () => {
   });
 
   it("writes a prompt sentence of distinct names that fits", () => {
-    const commands = "Forge, new task: fix the bug. Forge, send.";
-    expect(vocabularyPrompt([])).toBe(commands);
-    expect(vocabularyPrompt(["Atlas", "atlas", " Claude  Code ", "", "team-service.ts"])).toBe(`Names that may come up: Atlas, Claude Code, team-service.ts. ${commands}`);
+    expect(vocabularyPrompt([])).toBe("");
+    expect(vocabularyPrompt(["Atlas", "atlas", " Claude  Code ", "", "team-service.ts"])).toBe("Names that may come up: Atlas, Claude Code, team-service.ts.");
     const long = vocabularyPrompt(Array.from({ length: 200 }, (_, i) => `name${i}`), 100);
     expect(long.length).toBeLessThan(190);
     expect(long.endsWith(".")).toBe(true);
-    expect(vocabularyPrompt(["x".repeat(61), "ok"])).toBe(`Names that may come up: ok. ${commands}`);
+    expect(vocabularyPrompt(["x".repeat(61), "ok"])).toBe("Names that may come up: ok.");
   });
 
   it("adds dictated words to what is already in a box with one space", () => {
@@ -155,15 +154,17 @@ describe("voice: words", () => {
 });
 
 describe("voice: settings", () => {
-  it("defaults to review before sending, and repairs a hand-edited voice block", () => {
+  it("reads answers aloud by default, and repairs a hand-edited voice block", () => {
     const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
     const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-data-"));
     const store = new Store(configRoot, dataRoot);
-    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", autoSend: false, talkBack: "summary", speaker: "" });
+    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", talkBack: true, speaker: "", agent: "" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { model: " /m/ggml-base.bin ", language: "Klingon!", autoSend: "yes", talkBack: "loud", speaker: 3 } }));
-    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", autoSend: false, talkBack: "summary", speaker: "" });
-    fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { language: "de", autoSend: true, talkBack: "full", speaker: "/v/a.onnx" } }));
-    expect(store.readSettings().voice).toEqual({ model: "", language: "de", autoSend: true, talkBack: "full", speaker: "/v/a.onnx" });
+    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", talkBack: true, speaker: "", agent: "" });
+    fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { language: "de", autoSend: true, talkBack: "off", speaker: "/v/a.onnx", agent: " atlas " } }));
+    expect(store.readSettings().voice).toEqual({ model: "", language: "de", talkBack: false, speaker: "/v/a.onnx", agent: "atlas" });
+    fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { talkBack: "full" } }));
+    expect(store.readSettings().voice.talkBack).toBe(true);
     store.close();
   });
 });

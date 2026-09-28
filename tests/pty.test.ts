@@ -183,6 +183,34 @@ describe("pty host", () => {
     expect(activity()).toEqual([true, false]);
   }, 20000);
 
+  it("keeps the screen when a full-screen program clears it on the way out", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const script = "printf '\\033[?1049h\\033[HKEEP-SCREEN\\r\\n'; printf '\\033[?1049l\\033[2J'";
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", script], runDir })).ptyId);
+    await host.until(() => Boolean(host.exitOf(pty)));
+    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toContain("KEEP-SCREEN");
+    expect(fs.readFileSync(path.join(runDir, "terminal.ansi"), "utf8")).toContain("KEEP-SCREEN");
+  });
+
+  it("keeps that frame for a program recorded inside a shell, after the shell prompt returns", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
+    await host.until(async () => (await host.screen(pty)).includes("$"));
+    await host.request({ op: "record", ptyId: pty, runDir });
+    await host.request({
+      op: "write",
+      ptyId: pty,
+      data: "printf '\\033[?1049h\\033[HKEEP-SCREEN\\r\\n'; printf '\\033[?1049l\\033[2J'; echo BACK-OK\r",
+    });
+    await host.until(async () => (await host.screen(pty)).includes("BACK-OK"));
+    await host.request({ op: "record", ptyId: pty, runDir: null });
+    const transcript = fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8");
+    expect(transcript).toContain("KEEP-SCREEN");
+    expect(fs.readFileSync(path.join(runDir, "terminal.ansi"), "utf8")).toContain("KEEP-SCREEN");
+  });
+
   it("reports a program's own exit code and rejects unknown requests", async () => {
     const host = await startHost();
     const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/sh", "-c", "exit 3"] })).ptyId);

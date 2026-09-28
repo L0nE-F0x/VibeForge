@@ -195,11 +195,20 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
         ))}
       {tab === "changes" && <ChangesTab run={run} snapshot={files.git} />}
       {tab === "prompt" && (
-        <div className="page-body">
+        <div className="page-body vstack">
           {files.preamble.trim() ? (
             <pre className="pre">{files.preamble}</pre>
+          ) : files.prompts.trim() ? (
+            <>
+              <span className="faint">What you typed in this session.</span>
+              <pre className="pre">{files.prompts}</pre>
+            </>
           ) : (
-            <Notice>This run started without a prompt{run.argv.length ? `: ${run.argv.join(" ")}` : ""}.</Notice>
+            <Notice>
+              {run.origin === "code"
+                ? "This was typed into a terminal, so VibeForge did not hand it a prompt. The session is on Final screen and Transcript."
+                : "This run started without a prompt."}
+            </Notice>
           )}
         </div>
       )}

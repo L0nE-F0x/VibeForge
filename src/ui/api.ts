@@ -26,6 +26,21 @@ export function on<K extends keyof DeskEvents>(event: K, listener: (payload: Des
   return bridge().on(event, listener as (payload: unknown) => void);
 }
 
+/** Whether the VibeForge window has the keyboard. */
+export function useWindowFocused(): boolean {
+  const [focused, setFocused] = useState(() => document.hasFocus());
+  useEffect(() => {
+    const update = () => setFocused(document.hasFocus());
+    window.addEventListener("focus", update);
+    window.addEventListener("blur", update);
+    return () => {
+      window.removeEventListener("focus", update);
+      window.removeEventListener("blur", update);
+    };
+  }, []);
+  return focused;
+}
+
 export function pathForFile(file: File): string {
   try {
     return bridge().pathForFile(file);

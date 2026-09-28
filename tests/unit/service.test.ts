@@ -33,6 +33,7 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
   const sent: Array<{ ptyId: string; text: string }> = [];
   const killed: string[] = [];
   const notes: Array<{ title: string; body: string }> = [];
+  const ended: Array<{ runId: string; origin: string; outcome: string }> = [];
   const recorded: Array<{ ptyId: string; runDir: string | null }> = [];
   let n = 0;
   let svc: TeamService;
@@ -55,12 +56,13 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
     },
     resolveBin: (bin) => (bin === "argy" || bin === "pasty" ? `/usr/bin/${bin}` : null),
     notify: (note) => notes.push(note),
+    finished: (run) => ended.push(run),
     snapshotGit: async () => "git status --short\n M a.txt\n\ngit diff --stat\n a.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
     gitHead: async () => "abc1234",
   };
   svc = new TeamService({ configRoot, dataRoot, appStartedAt: opts.appStartedAt ?? new Date(9 * INTERVAL), now: () => new Date(), host });
   const exit = (ptyId: string, code = 0) => svc.onPtyExit(ptyId, code, null);
-  return { svc, host, spawns, sent, killed, notes, recorded, place, configRoot, dataRoot, exit };
+  return { svc, host, spawns, sent, killed, notes, ended, recorded, place, configRoot, dataRoot, exit };
 }
 
 /** Wait for work the service queues on its own (a shell's program changing). */
@@ -229,6 +231,7 @@ describe("routines", () => {
     expect(ctx.spawns).toHaveLength(2);
     expect(ctx.notes).toHaveLength(1);
     expect(ctx.notes[0].title).toBe("Notes · Notes");
+    expect(ctx.ended).toEqual([{ runId: expect.any(String), origin: "routine", outcome: "ok" }]);
     ctx.svc.close();
   });
 

@@ -118,6 +118,11 @@ export interface Settings {
   /** "system" follows the desktop's language; otherwise a code such as "de". */
   language: string;
   voice: VoiceSettings;
+  sounds: SoundSettings;
+  /** An icon in the system tray (Omarchy's bar), with a small menu. */
+  tray: boolean;
+  /** With the tray icon, closing the window leaves VibeForge running there: terminals and routines go on. */
+  closeToTray: boolean;
   /** Add up token usage from the logs the CLIs keep on this machine. Read locally, never sent. */
   usage: boolean;
   /**
@@ -131,18 +136,35 @@ export interface Settings {
   rail: { order: string[]; hidden: string[] };
 }
 
+/** Short tones, made in the app, for moments worth hearing about. */
+export interface SoundSettings {
+  on: boolean;
+  /** 0 to 1. */
+  volume: number;
+  /** Recording starts, stops, or is dropped. Your own action, so Do Not Disturb doesn't silence it. */
+  voice: boolean;
+  /** A coding CLI or agent went quiet and it's your turn. */
+  attention: boolean;
+  /** A task, routine or typed CLI finished, or failed. */
+  finished: boolean;
+  /** A routine started on its schedule. */
+  routines: boolean;
+  /** Also play the event sounds while you're looking at VibeForge. Off: only when it's in the background. */
+  inFront: boolean;
+}
+
 /** Dictation: speech to text on this machine with whisper.cpp. */
 export interface VoiceSettings {
   /** A whisper.cpp model file; empty picks the best one found in the usual folders. */
   model: string;
   /** "auto" lets whisper tell; otherwise a code such as "de". English-only models always hear English. */
   language: string;
-  /** Press Enter after the words too. Off: they wait in the box or terminal for you to read first. */
-  autoSend: boolean;
-  /** Read an agent's answer to what you said aloud: its first paragraph, all of it, or not at all. */
-  talkBack: "off" | "summary" | "full";
+  /** Read the first paragraph of an answer to a message that was sent by voice. */
+  talkBack: boolean;
   /** The Piper voice (.onnx) answers are read in unless the agent has its own; empty picks one. */
   speaker: string;
+  /** Who Super+Alt+V talks to. Empty: the agent you last dictated to. */
+  agent: string;
 }
 
 export interface Workspace {

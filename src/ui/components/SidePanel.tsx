@@ -1,5 +1,5 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
@@ -29,6 +29,9 @@ function load(id: string, fallback: PanelState): PanelState {
   }
 }
 
+/** How far each panel's list was scrolled, so switching views and back lands in the same place. */
+const scrolled = new Map<string, number>();
+
 function save(id: string, state: PanelState): void {
   try {
     localStorage.setItem(`vf.panel.${id}`, JSON.stringify(state));
@@ -48,6 +51,7 @@ export function SidePanel({
   max = 520,
   primary = true,
   className,
+  scrollKey = id,
 }: {
   id: string;
   title: ReactNode;
@@ -61,6 +65,8 @@ export function SidePanel({
   /** The primary panel of a view answers Ctrl+Shift+B. */
   primary?: boolean;
   className?: string;
+  /** Which remembered scroll position the list uses, when one panel shows different lists. */
+  scrollKey?: string;
 }) {
   const t = useT();
   const [state, setState] = useState<PanelState>(() => load(id, { width: defaultWidth, collapsed: false }));
@@ -92,6 +98,36 @@ export function SidePanel({
     return () => window.removeEventListener(TOGGLE_PANEL_EVENT, toggle);
   }, [id, primary]);
 
+  useLayoutEffect(() => {
+    const top = scrolled.get(scrollKey);
+    const list = ref.current?.querySelector<HTMLElement>(".list-scroll");
+    if (list && top) list.scrollTop = top;
+  }, [scrollKey, state.collapsed]);
+
+  const rememberScroll = (event: React.UIEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.classList.contains("list-scroll")) scrolled.set(scrollKey, target.scrollTop);
+  };
+
+  // With a row focused (click one, or Tab in), ↑/↓ open the one above or below; Home/End the ends.
+  const moveInList = (event: React.KeyboardEvent) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const row = (event.target as HTMLElement).closest<HTMLElement>(".list-scroll .row");
+    const list = row?.closest(".list-scroll");
+    if (!row || !list) return;
+    const rows = [...list.querySelectorAll<HTMLElement>(".row")];
+    const at = rows.indexOf(row);
+    const next = event.key === "Home" ? rows[0] : event.key === "End" ? rows[rows.length - 1] : rows[at + (event.key === "ArrowDown" ? 1 : -1)];
+    event.preventDefault();
+    if (!next || next === row) return;
+    next.focus();
+    next.scrollIntoView({ block: "nearest" });
+    next.click();
+    // Opening it can focus a message box; stay in the list so the next key keeps moving.
+    setTimeout(() => next.isConnected && next.focus({ preventScroll: true }), 0);
+  };
+
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -120,6 +156,8 @@ export function SidePanel({
       ref={ref}
       className={cx("list-panel", collapsed && "is-collapsed", dragging && "is-resizing", className)}
       style={{ width: collapsed ? STRIP : state.width }}
+      onScrollCapture={rememberScroll}
+      onKeyDown={moveInList}
     >
       {collapsed ? (
         <>

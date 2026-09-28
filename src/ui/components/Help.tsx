@@ -150,10 +150,14 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
   {
     group: "shortcuts.anywhere",
     rows: [
+      { keys: "Ctrl+K", text: "shortcuts.switcher" },
       { keys: "Ctrl+1…8", text: "shortcuts.switchViews" },
       { keys: "Alt+1…9", text: "shortcuts.workspaces" },
       { keys: "Ctrl+,", text: "shortcuts.settings" },
       { keys: "Alt+←", text: "shortcuts.back" },
+      { keys: "Alt+→", text: "shortcuts.forward" },
+      { gesture: "shortcuts.sideButtons", text: "shortcuts.backForward" },
+      { keys: "↑/↓", text: "shortcuts.listMove" },
       { keys: "Ctrl+Shift+B", text: "shortcuts.panel" },
       { keys: "Ctrl+Shift+/", text: "shortcuts.list" },
       { keys: "Esc", text: "shortcuts.closeDialog" },
@@ -185,7 +189,6 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
     group: "shortcuts.voice",
     rows: [
       { keys: "Ctrl+Shift+Space", text: "shortcuts.dictate" },
-      { keys: "Ctrl+Alt+Space", text: "shortcuts.converse" },
       { keys: "Esc", text: "shortcuts.dictateCancel" },
     ],
   },

@@ -25,9 +25,11 @@ import type {
   LayoutNode,
   LiveSession,
   Routine,
+  RunOrigin,
   Schedule,
   Settings,
   Skill,
+  SoundSettings,
   TaskStatus,
   Topic,
   VoiceSettings,
@@ -68,6 +70,7 @@ export type {
   TaskView,
   TermSize,
   Topic,
+  SoundSettings,
   VoiceSettings,
   WorkspaceFile,
   InstallKind,
@@ -215,6 +218,8 @@ export interface DeskMethods {
   "app.toggleDevTools": () => void;
   "app.restart": () => void;
   "app.copyText": (text: string) => void;
+  /** Bring the window forward, so a transcript dictated from another desktop is on screen. */
+  "app.focus": () => void;
   /** The clipboard's text, and whether it also holds an image. */
   "app.clipboard": () => { text: string; image: boolean };
   /** Token usage from the CLIs' own logs, or null when Settings turn it off. */
@@ -226,8 +231,15 @@ export interface DeskMethods {
   "plans.summary": (fresh?: boolean) => PlanSummary | null;
   /** The contribution graph for Home, or null when Settings turn it off. `fresh` skips the cache. */
   "activity.get": (fresh?: boolean) => Activity | null;
-  /** A desktop notification (when Settings allow them) that opens the workspace when clicked. */
-  "app.notify": (note: { title: string; body: string; workspaceId: string }) => void;
+  /** A desktop notification (when Settings allow them) that opens the chat or workspace when clicked. */
+  "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null }) => void;
+  /** Omarchy's Do Not Disturb is on. */
+  "app.doNotDisturb": () => boolean;
+  /** "Start at login, in the tray": whether the autostart entry is there, and setting it. */
+  "app.autostart": () => boolean;
+  "app.setAutostart": (on: boolean) => boolean;
+  /** How many CLIs and chats are waiting for you, for the tray icon's dot. */
+  "app.attention": (waiting: number) => void;
   /** The last lines of VibeForge's own log, oldest first. */
   "app.logTail": (lines: number) => string[];
 
@@ -302,8 +314,7 @@ export interface DeskMethods {
   "live.list": () => LiveSession[];
 
   "voice.status": () => VoiceStatus;
-  /** `endpoint`: stop by itself when the speaker pauses (conversation mode). */
-  "voice.start": (opts?: { endpoint?: boolean }) => void;
+  "voice.start": () => void;
   /** Stops recording and returns the words. `prompt` names things whisper should expect. */
   "voice.stop": (prompt?: string) => Dictation;
   "voice.cancel": () => void;
@@ -342,11 +353,23 @@ export interface DeskEvents {
   dock: DockState;
   "open-run": { runId: string };
   "open-workspace": { workspaceId: string };
+  "open-chat": { chatId: string; agentId: string | null };
+  /** From the tray menu. */
+  "open-view": { view: "settings" };
+  "open-switcher": true;
+  /** A run ended: for the finished and failed sounds. */
+  "run-finished": RunEnded;
   "host-crash": string;
   voice: VoiceState;
   "voice-talk": TalkEvent;
   /** `vibeforge --voice …` from a keybinding. */
   "voice-command": { action: VoiceAction };
+}
+
+export interface RunEnded {
+  runId: string;
+  origin: RunOrigin;
+  outcome: "ok" | "failed" | "stopped";
 }
 
 export type Method = keyof DeskMethods;

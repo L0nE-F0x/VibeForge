@@ -4,13 +4,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-# `vibeforge --voice start|stop|toggle|cancel|converse`, from a keybinding: hand the action to the
+# `vibeforge --voice start|stop|cancel`, from a keybinding: hand the action to the
 # running window over its control socket, which takes milliseconds, where starting Electron to be
 # handed off would lose the first words. The path matches src/core/control.ts.
 if [[ "${1:-}" == --voice* ]]; then
   action="${1#--voice}"
   action="${action#=}"
-  [[ -z "$action" ]] && action="${2:-toggle}"
+  [[ -z "$action" ]] && action="${2:-start}"
   data="${VIBEFORGE_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/vibeforge}"
   tag="$(printf %s "$data" | sha1sum | cut -c1-8)"
   if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then sock="$XDG_RUNTIME_DIR/vibeforge-$tag.sock"; else sock="/tmp/vibeforge-$(id -u)-$tag.sock"; fi
