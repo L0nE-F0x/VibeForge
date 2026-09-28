@@ -88,7 +88,10 @@ function appendScrollback(sink, data) {
 
 /** Keep the last 2 MB. Trimming in 512 KB steps keeps the rewrite rare. */
 function trimScrollback(sink) {
-  fs.closeSync(sink.scrollFd);
+  const writing = sink.scrollFd;
+  // Until it reopens, the file is closed: a failure below (the run folder deleted) stops the capture.
+  sink.scrollFd = null;
+  fs.closeSync(writing);
   const size = fs.statSync(sink.scrollFile).size;
   const keep = Math.min(size, MAX_SCROLLBACK_BYTES);
   const buffer = Buffer.alloc(keep);
