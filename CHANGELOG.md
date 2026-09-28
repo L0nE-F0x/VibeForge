@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-28
+
+**1.0: checked end to end, on a supported Electron.**
+
+Nothing to relearn. Every line was read and every view gone through before this release, and what turned up is fixed below. From 1.0 on, versions follow semantic versioning: a change that breaks how you use VibeForge gets a new major version.
+
 - **Electron 44, with Chromium 152.** VibeForge ran on Electron 37, which stopped getting security fixes in November 2025, so the browser dock showed web pages in a year-old Chromium. Updating downloads the new Electron once (about 120 MB).
 - **Folder pickers open beside your projects**: next to the folder you picked last, or your newest workspace, instead of Downloads.
 - **Closing the window quits when your bar has no tray.** Closing to the tray on a bar without one hid VibeForge with no icon to bring it back. It now checks that something shows tray icons (Omarchy's bar does), and a start at login waits a few seconds for the bar before showing the window instead.
@@ -172,7 +178,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.0.0
 [0.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.8.0
 [0.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.7.0
 [0.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.6.0
