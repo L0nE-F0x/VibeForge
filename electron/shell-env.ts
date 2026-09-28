@@ -43,9 +43,5 @@ export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
       delete out[key];
     }
   }
-  if (out.ORIGINAL_XDG_CURRENT_DESKTOP) {
-    out.XDG_CURRENT_DESKTOP = out.ORIGINAL_XDG_CURRENT_DESKTOP;
-    delete out.ORIGINAL_XDG_CURRENT_DESKTOP;
-  }
   return out;
 }

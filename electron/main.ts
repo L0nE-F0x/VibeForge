@@ -325,6 +325,9 @@ async function quitFromTray(): Promise<void> {
 
 // ------------------------------------------------------------------ IPC
 
+/** Where the last folder picked sits, so the next folder dialog opens there. */
+let pickedBeside: string | null = null;
+
 type Handlers = { [K in Method]: (...args: MethodArgs<K>) => MethodResult<K> | Promise<MethodResult<K>> };
 
 function handlers(): Handlers {
@@ -351,9 +354,19 @@ function handlers(): Handlers {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     },
     "app.pickFolder": async (title) => {
-      const options = { title: title || "Choose a folder", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+      // Electron opens dialogs in Downloads unless told where. Projects sit side by side, so start
+      // beside the folder picked last, or beside the newest workspace.
+      const newest = service?.listWorkspaces().workspaces.at(-1)?.path;
+      const start = [pickedBeside, newest && path.dirname(newest)].find((dir): dir is string => Boolean(dir && fs.existsSync(dir)));
+      const options = {
+        title: title || "Choose a folder",
+        defaultPath: start ?? os.homedir(),
+        properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+      };
       const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-      return result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
+      const picked = result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
+      if (picked) pickedBeside = path.dirname(picked);
+      return picked;
     },
     "app.pathExists": (target) => fs.existsSync(target),
     "app.toggleDevTools": () => win?.webContents.toggleDevTools(),
@@ -366,7 +379,11 @@ function handlers(): Handlers {
     },
     "app.copyText": (text) => clipboard.writeText(text),
     "app.focus": () => focusWindow(),
-    "app.clipboard": () => ({ text: clipboard.readText(), image: clipboard.availableFormats().some((format) => format.startsWith("image/")) }),
+    "app.clipboard": async () => ({
+      text: await clipboard.readText(),
+      // An item's types list what's on offer without fetching the image itself.
+      image: (await clipboard.read()).some((item) => item.types.some((type) => type.startsWith("image/"))),
+    }),
     "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
     "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),

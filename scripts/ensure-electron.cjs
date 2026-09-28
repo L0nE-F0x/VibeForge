@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 "use strict";
-// Electron's own postinstall unzips its binary with extract-zip, which on Node 26 stops
-// part-way and exits with code 0, leaving node_modules/electron without an executable.
-// This runs after it: if the binary is missing, extract the (cached) zip with bsdtar,
-// unzip or Python instead.
+// Puts Electron's binary in node_modules/electron/dist at install time, where the launcher and the
+// installer look for it. Electron 42 and later no longer download it on install (only when
+// `npx electron` first runs, which VibeForge never does), and its own extract-zip used to stop
+// part-way on Node 26. So: download the zip if it isn't cached, and extract it with bsdtar,
+// unzip or Python.
 
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
