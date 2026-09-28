@@ -4,6 +4,7 @@ import type { UpdateInfo } from "../../shared/api.js";
 import { call, useLive, useUpdate } from "../api.js";
 import { useT, type Translator } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
+import { notesBlocks } from "../notes.js";
 import { useConfirm, useToast } from "../state.js";
 import { LiveTerminal } from "./Terminal.js";
 import { Button, Modal, Notice } from "./ui.js";
@@ -15,6 +16,32 @@ export const SHOW_UPDATE_EVENT = "vibeforge:update";
 
 export function showUpdate(): void {
   window.dispatchEvent(new Event(SHOW_UPDATE_EVENT));
+}
+
+function Notes({ text }: { text: string }) {
+  return (
+    <div className="update-notes selectable">
+      {notesBlocks(text).map((block, index) =>
+        block.kind === "list" ? (
+          <ul key={index}>
+            {block.items.map((item, at) => (
+              <li key={at}>
+                <Rich text={item} />
+              </li>
+            ))}
+          </ul>
+        ) : block.kind === "head" ? (
+          <h4 key={index}>
+            <Rich text={block.text} />
+          </h4>
+        ) : (
+          <p key={index}>
+            <Rich text={block.text} />
+          </p>
+        ),
+      )}
+    </div>
+  );
 }
 
 /** One line on where things stand: newest, behind, not checked, or failed. */
@@ -111,7 +138,7 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
       {info.available && latest && !ptyId && (
         <>
           <div className="list-label">{latest.name}</div>
-          <pre className="update-notes selectable">{latest.notes.trim() || t("updates.noNotes")}</pre>
+          {latest.notes.trim() ? <Notes text={latest.notes} /> : <div className="update-notes">{t("updates.noNotes")}</div>}
         </>
       )}
       {info.available && info.command && !ptyId && (
