@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+- **Electron 44, with Chromium 152.** VibeForge ran on Electron 37, which stopped getting security fixes in November 2025, so the browser dock showed web pages in a year-old Chromium. Updating downloads the new Electron once (about 120 MB).
+- **Folder pickers open beside your projects**: next to the folder you picked last, or your newest workspace, instead of Downloads.
+- **Closing the window quits when your bar has no tray.** Closing to the tray on a bar without one hid VibeForge with no icon to bring it back. It now checks that something shows tray icons (Omarchy's bar does), and a start at login waits a few seconds for the bar before showing the window instead.
+- **Web pages in the browser dock can't use your microphone.** Electron gives a page every permission it asks for unless the app says otherwise, so a page open in the dock could turn on the microphone, send notifications or read the clipboard without asking. Pages now get only what a browser allows without asking: copying to the clipboard.
+- **Quitting works when the terminal host is down.** If the terminal host had failed to start, or had stopped for good, quitting closed the window but left VibeForge running without one, and opening it again did nothing until that process was killed.
+- **A terminal host that won't start says so once.** It was restarted every second, forever, with two error messages each time. Now a failed start shows one message, even when it happens as VibeForge opens, and a host that keeps crashing is brought back three times in five minutes, then left off with a note to restart VibeForge.
+- **A settings.json you're editing by hand is left alone.** One that didn't parse, say mid-edit, was replaced with the defaults the next time VibeForge read it.
+- **Release notes in the update dialog are formatted**, with lists and bold, instead of showing raw Markdown.
+- **The tour shows every step.** "Every session is kept" was skipped when no terminal was open, which is every first run, so the count jumped from 4 to 6; its bold word also showed as `**run**`.
+- **The Sounds toggles no longer black out the window.** Clicking one scrolled the whole app off screen, because each toggle's hidden checkbox sat outside the Settings scroll area. Every toggle now keeps its checkbox with it.
+
 ## [0.8.0] - 2026-09-28
 
 **A desk that keeps your place.**

@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, session, shell } from "electron";
 import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
@@ -17,7 +17,7 @@ import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src
 import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
-import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import type { DeskEvents, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -72,7 +72,6 @@ const install = installKind(appRoot(), {
   checkout: fs.existsSync(path.join(appRoot(), ".git")),
 });
 
-/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
 /** Puts the login shell's PATH ahead of Electron's, so CLIs installed through mise are found. */
 async function adoptShellPath(): Promise<void> {
   const shellPath = await loadShellPath();
@@ -80,6 +79,7 @@ async function adoptShellPath(): Promise<void> {
   else log.warn(`Could not read PATH from the login shell (${process.env.SHELL || "/bin/bash"}); CLIs found only on that PATH will show as missing`);
 }
 
+/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
 function osDescription(): string {
   let name = os.type();
   try {
@@ -302,6 +302,41 @@ function syncTray(): void {
   }
 }
 
+/**
+ * Whether anything hosts tray icons. Omarchy's bar does; a bar without a tray doesn't, and a window
+ * closed to the tray there could only come back by launching VibeForge again.
+ */
+let trayHost = true;
+
+function findTrayHost(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      "dbus-send",
+      ["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.kde.StatusNotifierWatcher"],
+      { timeout: 2000 },
+      // Without dbus-send there's no telling, so the settings decide, as before.
+      (error, stdout) => resolve(error ? error.code === "ENOENT" : /boolean true/.test(stdout)),
+    );
+  });
+}
+
+function refreshTrayHost(): void {
+  void findTrayHost().then((found) => {
+    if (found !== trayHost) log.info(found ? "A tray host is back; closing the window keeps VibeForge in the tray" : "Nothing hosts the tray; closing the window quits VibeForge");
+    trayHost = found;
+  });
+}
+
+/** At login the bar can come up after VibeForge, so a missing tray host gets a few seconds to appear. */
+async function waitForTrayHost(ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (!(await findTrayHost())) {
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return true;
+}
+
 /** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
 async function quitFromTray(): Promise<void> {
   const live = service?.listLive() ?? [];
@@ -325,6 +360,9 @@ async function quitFromTray(): Promise<void> {
 
 // ------------------------------------------------------------------ IPC
 
+/** Where the last folder picked sits, so the next folder dialog opens there. */
+let pickedBeside: string | null = null;
+
 type Handlers = { [K in Method]: (...args: MethodArgs<K>) => MethodResult<K> | Promise<MethodResult<K>> };
 
 function handlers(): Handlers {
@@ -336,6 +374,7 @@ function handlers(): Handlers {
       dataRoot: roots.dataRoot,
       home: os.homedir(),
       hostRunning: supervisor.running,
+      hostError: supervisor.running ? null : hostError,
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
@@ -351,9 +390,19 @@ function handlers(): Handlers {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     },
     "app.pickFolder": async (title) => {
-      const options = { title: title || "Choose a folder", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+      // Electron opens dialogs in Downloads unless told where. Projects sit side by side, so start
+      // beside the folder picked last, or beside the newest workspace.
+      const newest = service?.listWorkspaces().workspaces.at(-1)?.path;
+      const start = [pickedBeside, newest && path.dirname(newest)].find((dir): dir is string => Boolean(dir && fs.existsSync(dir)));
+      const options = {
+        title: title || "Choose a folder",
+        defaultPath: start ?? os.homedir(),
+        properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+      };
       const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-      return result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
+      const picked = result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
+      if (picked) pickedBeside = path.dirname(picked);
+      return picked;
     },
     "app.pathExists": (target) => fs.existsSync(target),
     "app.toggleDevTools": () => win?.webContents.toggleDevTools(),
@@ -366,7 +415,11 @@ function handlers(): Handlers {
     },
     "app.copyText": (text) => clipboard.writeText(text),
     "app.focus": () => focusWindow(),
-    "app.clipboard": () => ({ text: clipboard.readText(), image: clipboard.availableFormats().some((format) => format.startsWith("image/")) }),
+    "app.clipboard": async () => ({
+      text: await clipboard.readText(),
+      // An item's types list what's on offer without fetching the image itself.
+      image: (await clipboard.read()).some((item) => item.types.some((type) => type.startsWith("image/"))),
+    }),
     "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
     "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
@@ -561,6 +614,22 @@ function watchConfig(): () => void {
 
 // ------------------------------------------------------------------ window
 
+/** What web pages may use: copying to the clipboard, as any browser lets them. */
+const WEB_PERMISSIONS = new Set(["clipboard-sanitized-write"]);
+/** VibeForge's own page also shows notifications. */
+const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
+
+/**
+ * Electron grants every permission unless told otherwise, so a page in the browser dock could open
+ * the microphone or read the clipboard without asking. Everything else is refused.
+ */
+function guardPermissions(): void {
+  const allowed = (contents: Electron.WebContents | null, permission: string) =>
+    (win && contents === win.webContents ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(allowed(contents, permission)));
+  session.defaultSession.setPermissionCheckHandler((contents, permission) => allowed(contents, permission));
+}
+
 async function createWindow(): Promise<void> {
   const icon = nativeImage.createFromPath(iconPath());
   win = new BrowserWindow({
@@ -582,8 +651,17 @@ async function createWindow(): Promise<void> {
     },
   });
   win.once("ready-to-show", () => {
-    // From the login autostart entry, the window waits in the tray (unless there's no tray to wait in).
-    if (!(startHidden && service?.getSettings().tray)) win?.show();
+    if (!(startHidden && service?.getSettings().tray)) {
+      win?.show();
+      return;
+    }
+    // From the login autostart entry, the window waits in the tray, once something hosts one.
+    void waitForTrayHost(10_000).then((found) => {
+      trayHost = found;
+      if (found) return;
+      log.info("Started hidden, but nothing hosts the tray; showing the window");
+      win?.show();
+    });
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
@@ -598,7 +676,7 @@ async function createWindow(): Promise<void> {
   });
   win.on("close", (event) => {
     if (quitting || !service) return;
-    if (tray.shown && service.getSettings().tray && service.getSettings().closeToTray) {
+    if (tray.shown && trayHost && service.getSettings().tray && service.getSettings().closeToTray) {
       event.preventDefault();
       win?.hide();
       if (!trayNoticeShown && service.getSettings().notify) {
@@ -637,13 +715,18 @@ async function createWindow(): Promise<void> {
   else await win.loadFile(path.join(appRoot(), "dist", "index.html"));
 }
 
+/** Why the terminal host is down, for a page that loads after it happened. */
+let hostError: string | null = null;
+
 async function startHost(): Promise<void> {
   try {
     await supervisor.start(appRoot(), childEnv(process.env));
+    hostError = null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
     log.error(`The terminal host did not start: ${message}`);
+    hostError = message;
     send("host-crash", message);
   }
 }
@@ -656,11 +739,22 @@ supervisor.onExit.add((event) => {
 });
 supervisor.onProgram.add((event) => service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
 supervisor.onActivity.add((event) => service?.onPtyActivity(event.ptyId, event.working));
+/** When the host last crashed, so one that keeps crashing isn't brought back forever. */
+let hostCrashes: number[] = [];
+
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
-  send("host-crash", message);
   // Every terminal died with the host. Record them, then bring the host back.
   for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
+  const now = Date.now();
+  hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
+  if (hostCrashes.length > 3) {
+    log.error("The terminal host keeps stopping; it stays off until VibeForge restarts");
+    hostError = `${message} It stopped ${hostCrashes.length} times in five minutes, so it stays off: restart VibeForge.`;
+    send("host-crash", hostError);
+    return;
+  }
+  send("host-crash", message);
   setTimeout(() => void startHost(), 1000);
 });
 
@@ -705,6 +799,7 @@ if (!app.requestSingleInstanceLock()) {
       if (topics.includes("settings") || topics.includes("live")) syncTray();
     });
     palette = resolvePalette(service.getSettings().theme);
+    guardPermissions();
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);
     syncTray();
@@ -715,6 +810,9 @@ if (!app.requestSingleInstanceLock()) {
     const stopConfigWatch = watchConfig();
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
     win?.on("focus", refreshPalette);
+    // Checked again whenever the window comes forward, so it's current before a close.
+    refreshTrayHost();
+    win?.on("focus", refreshTrayHost);
     const tick = () =>
       void service
         ?.tick()
@@ -747,7 +845,9 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     void shutdown().finally(() => {
       shutdownDone = true;
-      app.quit();
+      // On the next turn: with no terminal host to wait for, shutdown settles while Electron is
+      // still inside this event, where a quit is ignored and the app would stay on, windowless.
+      setImmediate(() => app.quit());
     });
   });
 

@@ -41,10 +41,8 @@ interface Step {
   id: string;
   /** Opened before the step is shown. */
   route?: Route;
-  /** Selectors tried in order; the first one on screen is spotlit. */
+  /** Selectors tried in order; the first one on screen is spotlit. With none, the card sits in the middle. */
   target?: string[];
-  /** Skip the step when nothing matches, rather than showing it without a spotlight. */
-  optional?: boolean;
   side?: Side;
   icon: LucideIcon;
   title?: Key;
@@ -108,7 +106,6 @@ const STEPS: Step[] = [
     body: "tour.record.body",
     route: { view: "code" },
     target: [".code-view .pane.focused .pane-head", ".code-view .pane-head"],
-    optional: true,
     side: "bottom",
     icon: CircleDot,
   },
@@ -237,19 +234,12 @@ export function Tour({ onClose }: { onClose: () => void }) {
   // the card stays hidden until it has been placed for the current step.
   const [hole, setHole] = useState<ForStep<Rect> | null>(null);
   const [cardPos, setCardPos] = useState<ForStep<{ left: number; top: number }> | null>(null);
-  const direction = useRef(1);
   const cardRef = useRef<HTMLDivElement>(null);
   const step = STEPS[index];
   const centered = step.id === "welcome" || step.id === "done";
   useOverlay(true);
 
-  const move = useCallback(
-    (delta: number) => {
-      direction.current = delta;
-      setIndex((current) => Math.min(STEPS.length - 1, Math.max(0, current + delta)));
-    },
-    [],
-  );
+  const move = useCallback((delta: number) => setIndex((current) => Math.min(STEPS.length - 1, Math.max(0, current + delta))), []);
 
   // Open the step's view, then follow its target while the view loads and the window resizes.
   useEffect(() => {
@@ -258,15 +248,9 @@ export function Tour({ onClose }: { onClose: () => void }) {
       setHole(null);
       return;
     }
-    let found = false;
-    const started = Date.now();
     const measure = () => {
       const node = findTarget(step.target);
-      if (!node) {
-        if (!found && step.optional && Date.now() - started > 900) move(direction.current || 1);
-        return;
-      }
-      found = true;
+      if (!node) return;
       const rect = node.getBoundingClientRect();
       const next = { top: rect.top - PAD, left: rect.left - PAD, width: rect.width + PAD * 2, height: rect.height + PAD * 2, step: index };
       // Keep the spotlight inside the window so its rounded edge stays visible.
@@ -361,7 +345,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
             </button>
           </div>
           <h3>{step.title && t(step.title)}</h3>
-          <p>{step.body && t(step.body)}</p>
+          <p>{step.body && <Rich text={t(step.body)} />}</p>
           {step.keys && (
             <div className="tour-keys">
               {step.keys.map(([keys, text]) => (

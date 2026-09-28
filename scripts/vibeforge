@@ -26,7 +26,6 @@ if [[ "${1:-}" == --voice* ]]; then
   set --
 fi
 export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
-export ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}"
 
 fail() {
   echo "VibeForge: $1" >&2

@@ -38,4 +38,4 @@ Since then, on the `feat/desk-polish` branch: views remember where you were (acr
 ## Known rough edges
 
 - Restart after an update relaunches with the same arguments and environment; worth a real click on an installer copy after the next release.
-- `npm audit` (2026-09-26): 2 high, 2 moderate, none reachable from how the app runs. Electron's two are macOS-only `moveToApplicationsFolder` (not called) and service-worker IPC spoofing (the packaged page registers none, under a strict CSP); `extract-zip` is on Electron's install path; Vitest's is dev-only. Fold them into a dependency pass; don't bump Electron alongside a bug fix.
+- `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).
