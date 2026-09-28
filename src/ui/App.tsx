@@ -103,6 +103,12 @@ function Shell() {
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
     const offWorkspace = on("open-workspace", ({ workspaceId }) => go({ view: "code", workspaceId }));
     const offCrash = on("host-crash", (message) => push("error", "Terminal host problem", message));
+    // A host that failed before this page was listening (it starts alongside the window).
+    void call("app.info")
+      .then((info) => {
+        if (!info.hostRunning) push("error", "Terminal host problem", info.hostError ?? "The terminal host is not running, so no terminal can start.");
+      })
+      .catch(() => undefined);
     return () => {
       window.removeEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
       offSwitcher();

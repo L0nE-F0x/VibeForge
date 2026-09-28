@@ -89,6 +89,8 @@ export interface AppInfo {
   dataRoot: string;
   home: string;
   hostRunning: boolean;
+  /** Why the terminal host isn't running, when it failed to start or kept crashing. */
+  hostError: string | null;
   electron: string;
   chrome: string;
   node: string;

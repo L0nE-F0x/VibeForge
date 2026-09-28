@@ -61,9 +61,15 @@ export class PtySupervisor {
     const script = path.join(appRoot, "electron", "pty-host.cjs");
     const child = spawn(node, [script], { cwd: appRoot, env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
+    // A host that dies before it is ready failed to start (the rejection below says so); only
+    // one that stops later has crashed.
+    let started = false;
     const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     const ready = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("The terminal host did not start within 10 seconds.")), 10_000);
+      const timer = setTimeout(() => {
+        reject(new Error("The terminal host did not start within 10 seconds."));
+        child.kill("SIGKILL");
+      }, 10_000);
       lines.on("line", (line) => {
         if (line.startsWith('{"event":"ready"')) {
           clearTimeout(timer);
@@ -84,9 +90,10 @@ export class PtySupervisor {
         waiter.reject(new Error("The terminal host stopped."));
         this.waiting.delete(id);
       }
-      if (!this.stopping) for (const handler of this.onCrash) handler(`The terminal host stopped (${signal ?? code}).`);
+      if (started && !this.stopping) for (const handler of this.onCrash) handler(`The terminal host stopped (${signal ?? code}).`);
     });
     await ready;
+    started = true;
   }
 
   get running(): boolean {

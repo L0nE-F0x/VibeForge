@@ -339,6 +339,7 @@ function handlers(): Handlers {
       dataRoot: roots.dataRoot,
       home: os.homedir(),
       hostRunning: supervisor.running,
+      hostError: supervisor.running ? null : hostError,
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
@@ -670,13 +671,18 @@ async function createWindow(): Promise<void> {
   else await win.loadFile(path.join(appRoot(), "dist", "index.html"));
 }
 
+/** Why the terminal host is down, for a page that loads after it happened. */
+let hostError: string | null = null;
+
 async function startHost(): Promise<void> {
   try {
     await supervisor.start(appRoot(), childEnv(process.env));
+    hostError = null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
     log.error(`The terminal host did not start: ${message}`);
+    hostError = message;
     send("host-crash", message);
   }
 }
@@ -689,11 +695,22 @@ supervisor.onExit.add((event) => {
 });
 supervisor.onProgram.add((event) => service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
 supervisor.onActivity.add((event) => service?.onPtyActivity(event.ptyId, event.working));
+/** When the host last crashed, so one that keeps crashing isn't brought back forever. */
+let hostCrashes: number[] = [];
+
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
-  send("host-crash", message);
   // Every terminal died with the host. Record them, then bring the host back.
   for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
+  const now = Date.now();
+  hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
+  if (hostCrashes.length > 3) {
+    log.error("The terminal host keeps stopping; it stays off until VibeForge restarts");
+    hostError = `${message} It stopped ${hostCrashes.length} times in five minutes, so it stays off: restart VibeForge.`;
+    send("host-crash", hostError);
+    return;
+  }
+  send("host-crash", message);
   setTimeout(() => void startHost(), 1000);
 });
 
