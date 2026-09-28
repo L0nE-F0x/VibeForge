@@ -17,7 +17,7 @@ import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src
 import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
-import type { DeskEvents, DeskMethods, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import type { DeskEvents, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { Dock } from "./dock.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -72,7 +72,6 @@ const install = installKind(appRoot(), {
   checkout: fs.existsSync(path.join(appRoot(), ".git")),
 });
 
-/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
 /** Puts the login shell's PATH ahead of Electron's, so CLIs installed through mise are found. */
 async function adoptShellPath(): Promise<void> {
   const shellPath = await loadShellPath();
@@ -80,6 +79,7 @@ async function adoptShellPath(): Promise<void> {
   else log.warn(`Could not read PATH from the login shell (${process.env.SHELL || "/bin/bash"}); CLIs found only on that PATH will show as missing`);
 }
 
+/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
 function osDescription(): string {
   let name = os.type();
   try {
