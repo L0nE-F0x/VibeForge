@@ -161,6 +161,40 @@ The rail's usage popover now does what the Omarchy bar's AI usage widget does: h
 - **The website caught up with the app** (the same night): the three screenshots were retaken from a demo profile (no rocket or launch bar in Code; Home with the contribution graph and CLI chips), and the hero's Agents mock was redrawn as the app is now: the chat list inside the Chats tab, a Settings tab, Help and Settings in the rail with the plan meter under the pulse, the real live and finished session bars (Stop; Review and Continue session), and the composer with its mic and key hints. Checked at 1440, 1000 and 390 px. The page now asks for `?v=0.7.0` copies of its CSS, JS and screenshots, because Netlify lets browsers keep `/assets/*` for a week.
 - `npm test`: 133 tests, adding the three answer formats, Codex's windows, which providers are asked and with what, never renewing or writing a sign-in, windows resetting while signed out, surviving a restart, and the pace.
 
+### Voice, one gesture (2026-09-28)
+
+Hold to talk, into one obvious place. The whisper and Piper engines are unchanged.
+
+- **In the window.** Hold Ctrl+Shift+Space, or hold the mic, and let go. The words go into the message box or terminal that has focus and wait for Enter. Esc drops the recording. With nothing focused, it asks you to click one and does not record.
+- **From the desktop.** Super+Alt+V (Settings → Voice still adds it) talks to one agent: the one chosen there, or the one you last dictated to. The words land in that agent's chat, the window comes forward, and Enter still sends them. `vibeforge --voice start|stop|cancel`.
+- **The reply.** Only after you send a message that was dictated, and only the first paragraph, in that agent's voice. Holding the key cuts it off. A CLI with no session log stays quiet.
+- **Removed.** Tap-to-toggle, Ctrl+Alt+Space, the "Forge," commands, routing a sentence by an agent's name, auto-send, and reading "has finished".
+
+### Views remember where you were (2026-09-28)
+
+- The rail and Ctrl+1…9 reopen a view on its last route (agent, tab, chat, task, routine, skill, run and filter) instead of its first item; links that name a place still go there. Code isn't part of this: it stays mounted and keeps its own workspace.
+- Side lists keep their scroll position per panel (the agent chat list per agent) for the session.
+- Checked on the hidden test window with 30 agents: Agent 25, its 21st chat and both lists scrolled survived Agents → Code → Agents by rail and by Ctrl+2; an agent's Settings tab and a Chat selection survived too.
+
+### Sounds, drafts and getting around (2026-09-28)
+
+- **Sounds** (`src/ui/sounds.ts`): seven cues made with Web Audio, each a different shape. Settings → Sounds has the master switch, Soft/Medium/Loud, a switch per group with a preview button, and "Also while VibeForge is in front" (off by default). Voice cues always play when on; event cues skip while the window has focus (unless that switch is on), are spaced at least 700 ms apart, and stay silent while Omarchy's Do Not Disturb is on (`dnd` in `~/.local/state/omarchy/notifications.json`, read by the main process). Desktop notifications are marked silent while sounds are on, so one moment makes one sound.
+- **Who wants you, app-wide** (`src/ui/watch.tsx`): the live-session watch moved from Code to the shell. Chats (agent and plain) are flagged by chat; everything else by workspace as before. A flagged agent chat glows on the agent row, the chat row and their collapsed strips, puts a dot on the Agents (or Chat) rail button, and its notification opens the chat. `run-finished` from the service drives the finished and failed cues for tasks, routines and typed CLIs (stops and chats are silent).
+- **Drafts** (`src/ui/drafts.ts`, `useDraftState`): composer text per chat (and per agent for a chat not made yet), the brief, memory and settings tabs, the task sheet, the skill editor and the routine sheet. Kept in localStorage while they differ from the saved value; Discard buttons where there was only Save.
+- **Navigation**: the route and each view's last place persist across restarts (`vf.nav`); a remembered agent, skill or chat that was deleted since falls back to the view's first item. Forward history (Alt+→, mouse buttons 3/4 captured before terminals see them). Auto-selecting an agent or skill replaces the history entry, so Back no longer bounces.
+- **Switcher** (`src/ui/components/Switcher.tsx`, `src/ui/fuzzy.ts`): Ctrl+K outside terminals, Ctrl+Shift+K anywhere, or the rail logo. Name matches beat word starts beat scattered letters; a second line (a path, an agent's name) counts only when it contains the query.
+- **Lists**: ↑/↓/Home/End in any side panel list open the neighbouring row and keep focus in the list.
+- Checked on the hidden test window with stand-in CLIs: an agent chat going quiet out of sight played the knock once and lit Agents (not Code); opening the chat cleared it; a task exiting 0 played the chime and one exiting 3 the falling tone; nothing played with focus, nor with DND on; the four previews played; the switcher found and opened an agent by Enter; ↓ walked the agent list to its end; Alt+←/→ and mouse buttons moved through history; a composer draft and a task edit survived a view switch, Esc and a restart; Discard restored the saved title; the app reopened on the same agent after a restart; a deleted remembered agent fell back to the first. Tone playback was checked by counting oscillators, not by ear.
+- `npm test`: 143 tests (chat attention, the matcher, run-finished from the service).
+
+### The tray (2026-09-28)
+
+- `electron/tray.ts`: an Electron `Tray`, which Omarchy's quickshell bar lists over StatusNotifierItem next to Steam. Left click opens the window; the right-click menu (DBusMenu) has Open, a status line (running and waiting), Go to anything, Sounds, Notifications and Start at login as checkmarks, Settings and Quit. Quit asks about running terminals first, like closing the window used to. The icon is the app icon at 32 px with an 11 px amber square (the theme's second accent, outlined in its darkest background) while anything waits; the page reports that count with `app.attention`.
+- Settings `tray` and `closeToTray` (both on): closing the window hides it (one notification per session says where it went). `src/core/autostart.ts` writes `~/.config/autostart/vibeforge.desktop` (or `$XDG_CONFIG_HOME`) with the app menu entry's `Exec` plus `--hidden`; with the tray on, `--hidden` keeps the window unshown, and a second `--hidden` launch doesn't raise it.
+- Checked on the hidden workspace against the real bar's StatusNotifierWatcher: a `--hidden` start registered the item with no window mapped; the menu read back over DBus as designed; its Start at login item wrote the entry to a scratch `XDG_CONFIG_HOME` (nothing in the real one); `app.attention` changed the tooltip and turned the icon's corner amber (rendered from the pixmap); Activate mapped the window; closing it kept the process and the item; the menu's Quit exited and the item left the watcher.
+- **Known limits**: switching the tray off applies from the next start, because a destroyed Electron tray leaves a dead entry in the watcher until the process exits (Settings says so). Electron names every tray item `chrome_status_icon_1` and offers no way to change it, and Omarchy remembers pins by that name, so a pin could also catch another Electron app's icon.
+- `npm test`: 145 tests (the autostart entry).
+
 ## Not verified yet
 
 - **Plan limits over a long day**: the day's line and "full in" were checked with tests, not by watching a real window climb; nor has an expired Claude or Grok sign-in been seen in the real popover (Kimi's 15-minute sign-in will show it first when Kimi isn't running and the Omarchy widget isn't renewing it).
@@ -169,7 +203,8 @@ The rail's usage popover now does what the Omarchy bar's AI usage widget does: h
 - **Codex and Gemini usage** follow their documented log formats; no Codex or Gemini session was on this machine to read.
 - **Copy and paste with real keys**: checked with CDP events on a hidden window, not with Super+C on the desktop or an image pasted into Claude Code.
 
-- **Voice with a real microphone, real speakers, and real Claude Code**: the checks drove keys over CDP (which bypasses fcitx5), played files instead of the mic, captured speech to a file, and used a stand-in CLI writing Claude Code's log format (taken from a real session log). Codex's reader follows the rollout format but no Codex session has been read yet. The end-of-speech thresholds are tuned on Piper's voice, not a room. Screenshots failed on the hidden workspace, so the bars and the Voice card were checked through the DOM, not by eye.
+- **Voice with a real microphone, real speakers, and real Claude Code**: the checks drove keys over CDP (which bypasses fcitx5), played files instead of the mic, captured speech to a file, and used a stand-in CLI writing Claude Code's log format (taken from a real session log). Codex's reader follows the rollout format but no Codex session has been read yet. Screenshots failed on the hidden workspace, so the bars and the Voice card were checked through the DOM, not by eye. Hold-to-talk replaced the hands-free loop; see “Voice, one gesture” above.
+- **Sounds by ear**: the tones' shapes and loudness were tuned on paper and counted in tests, not listened to; they may want adjusting once heard on real speakers.
 - **The Hyprland bindings on the real desktop**: Add to Hyprland was tried against a scratch HOME only.
 
 - Real runs with Codex, Grok, Cursor Agent, Gemini, OpenCode, Copilot, Crush, Pi and Hermes. Their seed rows use the prompt-argument and continue forms from each CLI's `--help`; Kimi, Crush and Hermes get the first prompt pasted.

@@ -17,8 +17,7 @@ export function vocabularyPrompt(words: readonly string[], maxLength = 400): str
     kept.push(word);
     length += word.length + 2;
   }
-  // Examples of the commands teach whisper the wake word and its phrasing ("new task", not "New Desk").
-  return `${kept.length ? `Names that may come up: ${kept.join(", ")}. ` : ""}Forge, new task: fix the bug. Forge, send.`;
+  return kept.length ? `Names that may come up: ${kept.join(", ")}.` : "";
 }
 
 /** Dictated words joined onto what is already in a box, with one space between. */

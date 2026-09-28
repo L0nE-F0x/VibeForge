@@ -10,10 +10,10 @@ const readline = require("readline");
 const pty = require("node-pty");
 const { Terminal } = require("@xterm/headless");
 const { SerializeAddon } = require("@xterm/addon-serialize");
+const { SCROLLBACK_LINES, attachCapture, captureWrite, captureSynced, captureFinish } = require("./terminal-capture.cjs");
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
 const SCROLLBACK_SLACK_BYTES = 512 * 1024;
-const MIRROR_SCROLLBACK_LINES = 10000;
 const FLUSH_MS = 6;
 const PASTE_QUIET_MS = 700;
 const PASTE_FIRST_OUTPUT_MS = 3000;
@@ -102,25 +102,30 @@ function trimScrollback(sink) {
 
 /** The final screen and a text transcript, once the mirror has caught up; then the scrollback closes. */
 function closeSink(sink, done) {
-  sink.mirror.write("", () => {
-    if (sink.runDir) {
-      try {
-        fs.writeFileSync(path.join(sink.runDir, "terminal.ansi"), sink.serializer.serialize({ scrollback: MIRROR_SCROLLBACK_LINES }));
-        fs.writeFileSync(path.join(sink.runDir, "transcript.txt"), transcriptOf(sink.mirror));
-      } catch (error) {
-        log("artifacts:", error.message);
+  captureFinish(sink)
+    .then((captured) => {
+      if (sink.runDir) {
+        try {
+          fs.writeFileSync(path.join(sink.runDir, "terminal.ansi"), captured.ansi);
+          fs.writeFileSync(path.join(sink.runDir, "transcript.txt"), captured.transcript);
+        } catch (error) {
+          log("artifacts:", error.message);
+        }
       }
-    }
-    if (sink.scrollFd != null) {
-      try {
-        fs.closeSync(sink.scrollFd);
-      } catch {
-        /* closed */
+      if (sink.scrollFd != null) {
+        try {
+          fs.closeSync(sink.scrollFd);
+        } catch {
+          /* closed */
+        }
+        sink.scrollFd = null;
       }
-      sink.scrollFd = null;
-    }
-    done();
-  });
+      done();
+    })
+    .catch((error) => {
+      log("artifacts:", error.message);
+      done();
+    });
 }
 
 // ------------------------------------------------------------------ recording a shell
@@ -130,21 +135,24 @@ function closeSink(sink, done) {
 // that starts from what the screen showed then.
 
 function startRecording(session, runDir) {
-  return stopRecording(session).then(
-    () =>
-      new Promise((resolve) => {
-        session.mirror.write("", () => {
-          const mirror = new Terminal({ cols: session.cols, rows: session.rows, scrollback: MIRROR_SCROLLBACK_LINES, allowProposedApi: true });
+  return stopRecording(session)
+    .then(() => captureSynced(session))
+    .then(
+      () =>
+        new Promise((resolve) => {
+          const mirror = new Terminal({ cols: session.cols, rows: session.rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
           const serializer = new SerializeAddon();
           mirror.loadAddon(serializer);
-          mirror.write(session.serializer.serialize({ scrollback: 0 }));
           const rec = { runDir, mirror, serializer, scrollFd: null, scrollBytes: 0, scrollFile: null };
-          openScrollback(rec);
-          session.rec = rec;
-          resolve();
-        });
-      }),
-  );
+          attachCapture(rec);
+          // Seed with the screen as it is now, then publish the recording so later output lands in it.
+          mirror.write(session.serializer.serialize({ scrollback: 0 }), () => {
+            openScrollback(rec);
+            session.rec = rec;
+            resolve();
+          });
+        }),
+    );
 }
 
 function stopRecording(session) {
@@ -157,28 +165,6 @@ function stopRecording(session) {
       resolve();
     }),
   );
-}
-
-// ------------------------------------------------------------------ text from the mirror
-
-function bufferText(buffer) {
-  const lines = [];
-  for (let index = 0; index < buffer.length; index += 1) {
-    const line = buffer.getLine(index);
-    if (!line) continue;
-    const text = line.translateToString(true);
-    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += text;
-    else lines.push(text);
-  }
-  while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop();
-  return lines.join("\n");
-}
-
-function transcriptOf(mirror) {
-  const normal = bufferText(mirror.buffer.normal);
-  if (mirror.buffer.active.type !== "alternate") return normal ? `${normal}\n` : "";
-  const screen = bufferText(mirror.buffer.alternate);
-  return `${normal ? `${normal}\n\n` : ""}--- final screen ---\n${screen}\n`;
 }
 
 // ------------------------------------------------------------------ input
@@ -249,7 +235,7 @@ function spawnSession(msg) {
   const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge" };
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
-  const mirror = new Terminal({ cols, rows, scrollback: MIRROR_SCROLLBACK_LINES, allowProposedApi: true });
+  const mirror = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
   const serializer = new SerializeAddon();
   mirror.loadAddon(serializer);
   const session = {
@@ -280,6 +266,7 @@ function spawnSession(msg) {
     stillTicks: 0,
     working: false,
   };
+  attachCapture(session);
   openScrollback(session);
   sessions.set(id, session);
 
@@ -287,10 +274,10 @@ function spawnSession(msg) {
     session.seq += 1;
     if (session.batchFirst === null) session.batchFirst = session.seq;
     session.batch.push(data);
-    mirror.write(data);
+    captureWrite(session, data);
     appendScrollback(session, data);
     if (session.rec) {
-      session.rec.mirror.write(data);
+      captureWrite(session.rec, data);
       appendScrollback(session.rec, data);
     }
     notePasteActivity(session);
@@ -410,16 +397,19 @@ async function handle(msg) {
       }
       flush(session);
       const seq = session.seq;
-      session.mirror.write("", () => {
-        reply(msg.reqId, {
-          ok: true,
-          ansi: session.serializer.serialize({ scrollback: MIRROR_SCROLLBACK_LINES }),
-          seq,
-          cols: session.cols,
-          rows: session.rows,
-          alive: true,
-        });
-      });
+      captureSynced(session).then(
+        () => {
+          reply(msg.reqId, {
+            ok: true,
+            ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
+            seq,
+            cols: session.cols,
+            rows: session.rows,
+            alive: true,
+          });
+        },
+        (error) => reply(msg.reqId, { ok: false, error: error.message }),
+      );
       return;
     }
     case "list":

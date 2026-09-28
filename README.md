@@ -74,6 +74,12 @@ Plan limits for Claude, Grok and Kimi are off until you turn them on in Settings
 
 The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
+It keeps your place. Each view reopens where you left it, the same agent, chat or task with its list scrolled where it was, including after a restart. A half-written message or an unsaved brief, task or skill waits for you until you send it, save it or press **Discard**. <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the logo at the top of the rail) jumps to any agent, chat, workspace, task, routine or skill by typing part of its name.
+
+When an agent or CLI goes quiet while you're looking elsewhere, it glows until you look: the workspace in Code, the agent and its chat in Agents, with a dot on the rail. Short tones, made on your machine, say the same: two soft knocks when it's your turn, a rising chime when a task, routine or typed CLI finishes, a lower one when it fails, and a chirp when dictation starts and stops. By default they play only while VibeForge is in the background, never while Omarchy's Do Not Disturb is on (voice aside), and each one can be turned off or previewed in **Settings → Sounds**.
+
+It lives in the tray, next to Steam and the rest in Omarchy's bar (right-click the tray's arrow to pin it to the bar itself). A click opens the window; right-click for sounds, notifications, **Start at login, in the tray**, and Quit. The icon gets an amber corner while something is waiting for you. Closing the window leaves VibeForge running there, so terminals keep going and routines keep firing; **Settings → Tray and startup** changes any of that. Start at login adds an entry to `~/.config/autostart`, the same way Omarchy starts other tray apps, and is off until you turn it on.
+
 It looks like the rest of Omarchy: square corners, JetBrains Mono with Geist headings, flat panels, and pixel art in place of glows. It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes, pixel wordmark included.
 
 It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language unless you pick one in Settings. The tour, menus, tooltips and empty screens are translated so far; some other text is still English. Translations live in `src/ui/i18n/`, one file per language, and the typecheck fails if one is missing a line.
@@ -111,25 +117,18 @@ sudo pacman -S whisper-cpp      # listening
 uv tool install piper-tts       # talking back (or the AUR's piper-tts-bin)
 ```
 
-**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go; or tap it to keep listening and tap again to finish (<kbd>Esc</kbd> drops it). The words land wherever you last clicked: a chat's message box, or a terminal in Code. They wait there for you to read and press Enter; **Settings → Voice** can send them straight away instead. Message boxes also have a mic button.
+**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go (<kbd>Esc</kbd> drops it). The words land in the message box or terminal that has focus, and wait there for you to read and press Enter. Message boxes also have a mic button: hold it, then let go.
 
-**Talk to an agent by name.** Start with it: *"Atlas, add tests for the scheduler."* goes to Atlas's latest chat (a new one if it has none), whatever has focus.
+**Hear the answer.** After you send a message you dictated, the first paragraph of the reply is read aloud, in that agent's voice (its Settings tab). Claude Code and Codex answers come from their own session logs. Hold the dictate key to cut an answer short. Settings → Voice can turn this off.
 
-**Hear the answer.** When you've spoken to an agent, its answer is read back to you: the first paragraph by default, all of it, or nothing (Settings → Voice). Claude Code and Codex answers come from their own session logs; other CLIs say when they finish and what changed. Each agent can have its own voice (its Settings tab). Start talking to cut an answer short.
-
-**Have a conversation.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> goes hands-free: speak, pause, and it sends; the answer is read; then it listens again. <kbd>Esc</kbd>, **End**, or *"Forge, stop listening"* ends it.
-
-**Commands** begin with *"Forge,"*: *send* (what's waiting in the box), *clear*, *stop* (interrupt the agent), *continue*, *new task: …*, *run routine …*, *go to tasks* (or any view), *stop listening*.
-
-**From anywhere on the desktop.** Settings → Voice adds these to Hyprland for you (or copy them):
+**From anywhere on the desktop.** Hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> to talk to one agent: the one you pick in Settings → Voice, or the one you last dictated to. The words land in that agent's chat for you to read, and still wait for Enter. Settings → Voice adds the binding to Hyprland for you (or copy it):
 
 ```lua
 o.bind("SUPER + ALT + V", "VibeForge: hold to talk", "vibeforge --voice start")
 o.bind("SUPER + ALT + V", "VibeForge: stop talking", "vibeforge --voice stop", { release = true })
-o.bind("SUPER + ALT + T", "VibeForge: conversation", "vibeforge --voice converse")
 ```
 
-`vibeforge --voice start|stop|toggle|cancel|converse` reaches the running window over a local socket in a few milliseconds; a short tone marks the start and end while it's in the background. Models (`base.en` is quick, `large-v3-turbo` hears best and knows many languages) and voices download from Hugging Face in Settings → Voice, and ones Omarchy's Voxtype or the AUR's `piper-voices` packages installed are found too. Whisper is told the names of your agents, routines, CLIs and workspace files, so it spells them right.
+`vibeforge --voice start|stop|cancel` reaches the running window over a local socket in a few milliseconds; a short tone marks the start and end while it's in the background. Models (`base.en` is quick, `large-v3-turbo` hears best and knows many languages) and voices download from Hugging Face in Settings → Voice, and ones Omarchy's Voxtype or the AUR's `piper-voices` packages installed are found too. Whisper is told the names of your agents, routines, CLIs and workspace files, so it spells them right.
 
 ## Your files
 
@@ -151,7 +150,7 @@ Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own
 
 ## Keys
 
-<kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> workspaces · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd> back · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close it · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, or tap twice) · <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> conversation · in terminals <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selection (with nothing selected it interrupts the program) and <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes (an image on its own goes to the program, so Claude Code can paste it); Omarchy's <kbd>Super</kbd>+<kbd>C</kbd>/<kbd>V</kbd>, <kbd>Ctrl</kbd>+<kbd>Insert</kbd>/<kbd>Shift</kbd>+<kbd>Insert</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> work too · drop files on a terminal to insert their paths.
+<kbd>Ctrl</kbd>+<kbd>K</kbd> go to anything (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> inside a terminal) · <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>8</kbd> views · <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> workspaces · <kbd>Ctrl</kbd>+<kbd>,</kbd> settings · <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd> or the mouse's side buttons back and forward · <kbd>↑</kbd>/<kbd>↓</kbd> move through the list you're in · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> collapse the side panel · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>/<kbd>E</kbd> new terminal right/below · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> close it · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> maximize the focused pane · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> every shortcut · <kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Esc</kbd> close · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> dictate (hold, then let go) · in terminals <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the selection (with nothing selected it interrupts the program) and <kbd>Ctrl</kbd>+<kbd>V</kbd> pastes (an image on its own goes to the program, so Claude Code can paste it); Omarchy's <kbd>Super</kbd>+<kbd>C</kbd>/<kbd>V</kbd>, <kbd>Ctrl</kbd>+<kbd>Insert</kbd>/<kbd>Shift</kbd>+<kbd>Insert</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>/<kbd>V</kbd> work too · drop files on a terminal to insert their paths.
 
 In Code, drag a pane by its title bar onto another pane: the middle swaps them, an edge docks it on that side. Double-click a title bar to maximize. Right-click a view in the rail to hide it; **Settings → Rail** shows it again and sets the order. Side panels resize from their edge and collapse to a strip. **Help** in the rail replays the welcome tour, checks for updates, copies diagnostics, and opens bug reports and feature ideas as GitHub issues with your versions filled in; nothing is sent from the app.
 

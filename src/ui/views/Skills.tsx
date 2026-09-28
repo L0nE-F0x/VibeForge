@@ -1,10 +1,11 @@
-import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Plus, Save, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { useEffect } from "react";
 import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { useAction, useConfirm, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
@@ -23,15 +24,16 @@ Use this when …
 
 export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }> }) {
   const t = useT();
-  const { go } = useNav();
+  const { go, replace } = useNav();
   const skills = useSkills();
   const list = skills.data ?? [];
   const creating = route.skillId === "new";
   const selected = list.find((skill) => skill.id === route.skillId) ?? null;
+  useDropMissing(skills.loaded, Boolean(route.skillId) && !creating && !selected, { view: "skills" });
 
   useEffect(() => {
-    if (!route.skillId && list.length) go({ view: "skills", skillId: list[0].id });
-  }, [route.skillId, list, go]);
+    if (!route.skillId && list.length) replace({ view: "skills", skillId: list[0].id });
+  }, [route.skillId, list, replace]);
 
   return (
     <div className="view split-list">
@@ -96,15 +98,24 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const agents = useAgents().data ?? [];
-  const [name, setName] = useState(skill?.name ?? "");
-  const [description, setDescription] = useState(skill?.description ?? "");
-  const [body, setBody] = useState(skill?.body ?? TEMPLATE);
+  const [form, setForm, discard] = useDraftState(skill ? `skill:${skill.id}` : "skill:new", {
+    name: skill?.name ?? "",
+    description: skill?.description ?? "",
+    body: skill?.body ?? TEMPLATE,
+  });
+  const { name, description, body } = form;
+  const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
+  const setDescription = (next: string) => setForm((prev) => ({ ...prev, description: next }));
+  const setBody = (next: string) => setForm((prev) => ({ ...prev, body: next }));
   const dirty = !skill || name !== skill.name || description !== skill.description || body !== skill.body;
 
   const [save, saving] = useAction(async () => {
     const saved = await call("skills.save", { id: skill?.id, name, description, body });
     push("success", skill ? "Skill saved" : "Skill created", "Agents that have it use the new text from their next run.");
-    if (!skill) go({ view: "skills", skillId: saved.id });
+    if (!skill) {
+      forgetDraft("skill:new");
+      go({ view: "skills", skillId: saved.id });
+    }
   }, "Could not save the skill");
   const [remove, removing] = useAction(async () => {
     if (!skill) return;
@@ -132,6 +143,11 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
         <Sparkles size={17} className="accent-text" />
         <h1 className="grow truncate">{skill ? skill.name : t("skills.new")}</h1>
         {skill && <Button size="sm" variant="ghost" icon={Trash2} busy={removing} onClick={() => void remove()} title={t("skills.delete")} />}
+        {skill && dirty && (
+          <Button variant="ghost" icon={Undo2} onClick={discard}>
+            {t("common.discard")}
+          </Button>
+        )}
         <Button variant="primary" icon={Save} busy={saving} disabled={!dirty || !name.trim()} onClick={() => void save()}>
           {skill ? "Save" : "Create skill"}
         </Button>

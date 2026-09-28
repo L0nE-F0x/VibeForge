@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { RoutineView, Schedule, SchedulePreview } from "../../shared/api.js";
 import { clockTime } from "../../shared/text.js";
 import { call, useAgents, useRoutines } from "../api.js";
+import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
@@ -147,12 +148,23 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
   const t = useT();
   const { push } = useToast();
   const agents = useAgents().data ?? [];
-  const [name, setName] = useState(routine?.name ?? "");
-  const [agentId, setAgentId] = useState(routine?.agentId ?? agents.find((agent) => agent.allowRoutines)?.id ?? agents[0]?.id ?? "");
-  const [schedule, setSchedule] = useState<Schedule>(routine?.schedule ?? { kind: "cron", expr: "0 9 * * 1-5" });
-  const [prompt, setPrompt] = useState(routine?.prompt ?? "");
-  const [notify, setNotify] = useState(routine?.notify ?? true);
-  const [enabled, setEnabled] = useState(routine?.enabled ?? true);
+  // Esc or the close button puts an unsaved edit aside for next time; Cancel throws it away.
+  const draftKey = routine ? `routine:${routine.id}` : "routine:new";
+  const [form, setForm, discard] = useDraftState(draftKey, {
+    name: routine?.name ?? "",
+    agentId: routine?.agentId ?? agents.find((agent) => agent.allowRoutines)?.id ?? agents[0]?.id ?? "",
+    schedule: routine?.schedule ?? ({ kind: "cron", expr: "0 9 * * 1-5" } as Schedule),
+    prompt: routine?.prompt ?? "",
+    notify: routine?.notify ?? true,
+    enabled: routine?.enabled ?? true,
+  });
+  const { name, agentId, schedule, prompt, notify, enabled } = form;
+  const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
+  const setAgentId = (next: string) => setForm((prev) => ({ ...prev, agentId: next }));
+  const setSchedule = (next: Schedule) => setForm((prev) => ({ ...prev, schedule: next }));
+  const setPrompt = (next: string) => setForm((prev) => ({ ...prev, prompt: next }));
+  const setNotify = (next: boolean) => setForm((prev) => ({ ...prev, notify: next }));
+  const setEnabled = (next: boolean) => setForm((prev) => ({ ...prev, enabled: next }));
   const [preview, setPreview] = useState<SchedulePreview | null>(null);
   const agent = agents.find((item) => item.id === agentId);
 
@@ -171,6 +183,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
 
   const [save, saving] = useAction(async () => {
     await call("routines.save", { id: routine?.id, name, agentId, schedule, prompt, notify, enabled });
+    forgetDraft(draftKey);
     push("success", routine ? "Routine saved" : "Routine created", preview?.next[0] ? `Next: ${clockTime(preview.next[0])}` : undefined);
     onClose();
   }, "Could not save the routine");
@@ -266,7 +279,13 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
           <Button variant="primary" icon={Save} busy={saving} disabled={!ready} onClick={() => void save()}>
             {routine ? "Save routine" : "Create routine"}
           </Button>
-          <Button variant="ghost" onClick={onClose}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              discard();
+              onClose();
+            }}
+          >
             Cancel
           </Button>
         </div>

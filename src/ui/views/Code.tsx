@@ -32,7 +32,7 @@ import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
 import { setDictationTarget, type DictationTarget } from "../voice.js";
-import { trackLive, useAttention } from "../attention.js";
+import { setWorkspaceInView, useAttention } from "../attention.js";
 
 interface Runtime {
   ptyId: string | null;
@@ -42,7 +42,6 @@ interface Runtime {
 }
 
 const newPaneId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-const shellPane = (): PaneNode => ({ kind: "pane", id: newPaneId(), launch: { type: "shell" } });
 
 const PANE_MIME = "application/x-vibeforge-pane";
 const WORKSPACE_MIME = "application/x-vibeforge-workspace";
@@ -59,20 +58,6 @@ function zoneFor(event: React.DragEvent<HTMLElement>): DropZone {
   ];
   const [zone, distance] = edges.sort((a, b) => a[1] - b[1])[0];
   return distance < 0.28 ? zone : "center";
-}
-
-function useWindowFocused(): boolean {
-  const [focused, setFocused] = useState(() => document.hasFocus());
-  useEffect(() => {
-    const update = () => setFocused(document.hasFocus());
-    window.addEventListener("focus", update);
-    window.addEventListener("blur", update);
-    return () => {
-      window.removeEventListener("focus", update);
-      window.removeEventListener("blur", update);
-    };
-  }, []);
-  return focused;
 }
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -128,7 +113,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const fontSizeRef = useRef(13);
   fontSizeRef.current = settings?.terminalFontSize ?? 13;
   const attention = useAttention();
-  const windowFocused = useWindowFocused();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
   // The view stays mounted so terminals survive mode switches, but nothing starts until it is opened.
@@ -152,19 +136,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   useEffect(() => writeLocal("vf.code.side", side), [side]);
 
-  // A CLI that goes quiet or finishes out of sight flags its workspace; looking at it clears that.
-  const onScreen = active && windowFocused ? (current?.id ?? null) : null;
-  useEffect(() => {
-    for (const note of trackLive(live, onScreen)) {
-      if (windowFocused) continue;
-      const name = workspaces.find((workspace) => workspace.id === note.workspaceId)?.name ?? "";
-      void call("app.notify", {
-        title: t(note.attention === "waiting" ? "notify.waiting" : "notify.done", { label: note.label }),
-        body: name,
-        workspaceId: note.workspaceId,
-      }).catch(() => undefined);
-    }
-  }, [live, onScreen]);
+  // The shell's session watch flags CLIs that go quiet out of sight; it needs to know what's shown.
+  useEffect(() => setWorkspaceInView(active ? (current?.id ?? null) : null), [active, current?.id]);
+  useEffect(() => () => setWorkspaceInView(null), []);
 
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => undefined);
   useEffect(() => {
@@ -221,7 +195,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     [fail, patchRuntime],
   );
 
-  // Load (or create) the current workspace's layout, then bring its shells back.
+  // Load the current workspace's layout. Nothing saved stays empty, so New terminal
+  // is the way in. A layout left open from last time brings its shells back.
   useEffect(() => {
     if (!opened || !current || current.id in layoutsRef.current) return;
     let cancelled = false;
@@ -229,10 +204,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       .catch(() => null)
       .then((saved) => {
         if (cancelled || current.id in layoutsRef.current) return;
-        const layout = saved ?? shellPane();
-        setLayouts((prev) => ({ ...prev, [current.id]: layout }));
-        const panes = panesOf(layout);
-        setFocus((prev) => ({ ...prev, [current.id]: prev[current.id] ?? panes[0].id }));
+        setLayouts((prev) => ({ ...prev, [current.id]: saved }));
+        if (!saved) return;
+        const panes = panesOf(saved);
+        const first = panes[0];
+        if (first) setFocus((prev) => ({ ...prev, [current.id]: prev[current.id] ?? first.id }));
         for (const pane of panes) if (pane.launch.type === "shell") void startPane(current, pane);
       });
     return () => {
@@ -366,34 +342,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       label: `${title} · ${workspace.name}`,
       element: () => document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(pane.id)}"]`),
       insert: (text) => terminals.current.get(pane.id)?.paste(text),
-      submit: (text) => {
-        const ptyId = livePty(pane.id);
-        const handle = terminals.current.get(pane.id);
-        if (!ptyId || !handle) return;
-        void call("pty.send", ptyId, text).catch(() => undefined);
-        handle.focus();
-      },
-      send: () => {
-        const ptyId = livePty(pane.id);
-        if (ptyId) void call("pty.write", ptyId, "\r").catch(() => undefined);
-      },
-      // Ctrl+U empties a shell's input line, and Claude Code's.
-      clear: () => {
-        const ptyId = livePty(pane.id);
-        if (ptyId) void call("pty.write", ptyId, "\x15").catch(() => undefined);
-      },
-      // Esc interrupts a coding CLI, including one typed into a shell; a plain shell wants Ctrl+C.
-      interrupt: () => {
-        const ptyId = livePty(pane.id);
-        if (!ptyId) return;
-        const cli = pane.launch.type === "engine" || Boolean(liveRef.current.find((session) => session.ptyId === ptyId)?.programEngineId);
-        void call("pty.write", ptyId, cli ? "\x1b" : "\x03").catch(() => undefined);
-      },
-      resume: () => {
-        const latest = panesOf(layoutsRef.current[workspace.id] ?? pane).find((item) => item.id === pane.id) ?? pane;
-        if (runtimeRef.current[pane.id]?.state === "exited" && latest.launch.type === "engine") launchHere(workspace, latest, latest.launch, { continueSession: true });
-        else if (livePty(pane.id)) void call("pty.send", livePty(pane.id)!, "Continue.").catch(() => undefined);
-      },
       ptyId: () => livePty(pane.id),
       words: () => workspaceWords(workspace),
     };

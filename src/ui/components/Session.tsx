@@ -4,6 +4,7 @@ import type { ChatView } from "../../shared/api.js";
 import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, pathForFile, useAppInfo, useQuery, useSettings } from "../api.js";
+import { forgetDraft, useDraftState } from "../drafts.js";
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
 import { Button, Empty, Kbd, StatusChip, TimeAgo } from "./ui.js";
@@ -24,8 +25,9 @@ export function Composer({
   voiceLabel,
   voiceScope,
   voicePty,
-  voiceResume,
+  voiceAgent,
   draftKey,
+  keepKey,
 }: {
   placeholder: string;
   onSend: (text: string) => Promise<boolean | void>;
@@ -39,15 +41,17 @@ export function Composer({
   voiceLabel?: string;
   /** Focus anywhere in here (the session's terminal, say) makes this box where dictation lands. */
   voiceScope?: RefObject<HTMLElement | null>;
-  /** The terminal messages from this box reach, for hearing answers and interrupting. */
+  /** The terminal messages from this box reach, for hearing the answer after Enter. */
   voicePty?: () => string | null;
-  /** Reopens the ended session ("Forge, continue"). */
-  voiceResume?: () => void;
-  /** Words dictated for this chat from elsewhere ("Atlas, …") arrive under this key. */
+  /** The agent this chat belongs to, so the desktop key can come back to them. */
+  voiceAgent?: string | null;
+  /** Words dictated for this chat from the desktop key arrive under this key. */
   draftKey?: string | null;
+  /** What's typed and not sent yet is kept under this key, across view switches and restarts. */
+  keepKey?: string | null;
 }) {
   const t = useT();
-  const [text, setText] = useState("");
+  const [text, setText] = useDraftState(keepKey ?? null, "");
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -59,6 +63,8 @@ export function Composer({
   const dictation = useDictationTarget(() => ({
     label: voiceLabel ?? placeholder,
     element: () => box.current,
+    ownsSend: true,
+    agentId: () => voiceAgent ?? null,
     insert: (words) => {
       dictated.current = joinDictation(dictated.current, words);
       const next = joinDictation(textRef.current, words);
@@ -70,28 +76,6 @@ export function Composer({
         node.selectionStart = node.selectionEnd = next.length;
       });
     },
-    submit: (words) => {
-      const value = joinDictation(textRef.current, words).trim();
-      if (!value || busy || disabled) {
-        setText(joinDictation(textRef.current, words));
-        return;
-      }
-      setText("");
-      dictated.current = "";
-      void onSend(value).then((ok) => {
-        if (ok === false) setText(value);
-      });
-    },
-    send: () => void submit(),
-    clear: () => {
-      dictated.current = "";
-      setText("");
-    },
-    interrupt: () => {
-      const ptyId = voicePty?.();
-      if (ptyId) void call("pty.write", ptyId, "\x1b").catch(() => undefined);
-    },
-    resume: voiceResume,
     ptyId: voicePty,
   }));
 
@@ -120,8 +104,10 @@ export function Composer({
     const value = textRef.current.trim();
     if (!value || busy || disabled) return;
     const words = dictated.current;
+    const sentFrom = keepKey;
     const ok = await onSend(value);
     if (ok === false) return;
+    if (sentFrom) forgetDraft(sentFrom);
     setText("");
     dictated.current = "";
     if (words) expectAnswer(dictation.target, words);
@@ -171,7 +157,12 @@ export function Composer({
           value={text}
           placeholder={placeholder}
           disabled={disabled}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            const next = event.target.value;
+            setText(next);
+            // Emptied by hand: what gets typed next was not dictated.
+            if (!next.trim()) dictated.current = "";
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
@@ -212,12 +203,15 @@ export function SessionPane({
   empty,
   placeholder,
   active = true,
+  newKey,
 }: {
   chat: ChatView | null;
   /** Makes the chat on first send when none is selected yet. */
   create: () => Promise<ChatView>;
   onCreated?: (chat: ChatView) => void;
   empty: { icon: LucideIcon; title: ReactNode; body: ReactNode };
+  /** Names the unsent message of a chat that doesn't exist yet: the agent's id, or "chat". */
+  newKey: string;
   placeholder: string;
   active?: boolean;
 }) {
@@ -318,8 +312,9 @@ export function SessionPane({
         voiceLabel={chat?.title ?? t("agents.newChat")}
         voiceScope={root}
         voicePty={() => livePtyRef.current}
-        voiceResume={() => void resume()}
+        voiceAgent={chat?.agentId ?? null}
         draftKey={chat?.id}
+        keepKey={chat ? `chat:${chat.id}` : `chat:new:${newKey}`}
         hint={
           livePty ? (
             <span className="hstack">

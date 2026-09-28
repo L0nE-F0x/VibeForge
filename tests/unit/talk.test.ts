@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { controlSocketPath, hyprlandBindings, parseControl, voiceArg } from "../../src/core/control.js";
 import { claudeLogCwd, claudeProjectDir, claudeTurn, codexLogCwd, codexTurn, mentions, replyLogFor, speakable } from "../../src/core/replies.js";
 import { Endpointer, findPiper, isVoiceFile, pickVoice, planPlayer, voiceName, voiceRate } from "../../src/core/voice.js";
-import { parseUtterance } from "../../src/shared/commands.js";
 
 const at = (seconds: number) => new Date(Date.UTC(2026, 8, 26, 12, 0, seconds)).toISOString();
 const since = Date.parse(at(10));
@@ -179,51 +178,6 @@ describe("talk: what gets said", () => {
   });
 });
 
-describe("talk: what a sentence is for", () => {
-  const context = { agents: [{ id: "atlas", name: "Atlas" }, { id: "code-review", name: "Code Review" }], routines: [{ id: "nightly", name: "Nightly review" }] };
-  const parse = (text: string) => parseUtterance(text, context);
-
-  it("leaves ordinary words alone", () => {
-    expect(parse("Refactor the scheduler, then run the tests.")).toEqual({ kind: "text", text: "Refactor the scheduler, then run the tests." });
-    expect(parse("Stop the server if it's running.")).toEqual({ kind: "text", text: "Stop the server if it's running." });
-    expect(parse("Forge the sword.")).toEqual({ kind: "text", text: "Forge the sword." });
-    expect(parse("Bob, fix it.")).toEqual({ kind: "text", text: "Bob, fix it." });
-  });
-
-  it("addresses an agent by name, however whisper punctuates it", () => {
-    expect(parse("Atlas, add tests for the scheduler.")).toEqual({ kind: "agent", agentId: "atlas", text: "Add tests for the scheduler." });
-    expect(parse("Hey Atlas: what changed?")).toEqual({ kind: "agent", agentId: "atlas", text: "What changed?" });
-    expect(parse("code review, look at the diff")).toEqual({ kind: "agent", agentId: "code-review", text: "Look at the diff" });
-    expect(parse("Tell Atlas to update the docs.")).toEqual({ kind: "agent", agentId: "atlas", text: "Update the docs." });
-    expect(parse("Ask Code Review to check the PR")).toEqual({ kind: "agent", agentId: "code-review", text: "Check the PR" });
-  });
-
-  it("takes commands after the wake word", () => {
-    const command = (text: string) => {
-      const result = parse(text);
-      return result.kind === "command" ? result.command : result;
-    };
-    expect(command("Forge, send.")).toEqual({ type: "send" });
-    expect(command("VibeForge, send it!")).toEqual({ type: "send" });
-    expect(command("Forge. Clear.")).toEqual({ type: "clear" });
-    expect(command("Forge, stop.")).toEqual({ type: "stop" });
-    expect(command("Forge, keep going")).toEqual({ type: "continue" });
-    expect(command("Hey Forge, stop listening.")).toEqual({ type: "stopListening" });
-    expect(command("Forge, go to tasks.")).toEqual({ type: "open", view: "tasks" });
-    expect(command("Forge, open the routine page")).toEqual({ type: "open", view: "routines" });
-    expect(command("Forge, new task: fix the login page.")).toEqual({ type: "newTask", title: "Fix the login page", agentId: null });
-    expect(command("Forge, create a task for Atlas, write release notes")).toEqual({ type: "newTask", title: "Write release notes", agentId: "atlas" });
-    expect(command("Forge, run the nightly review routine.")).toEqual({ type: "runRoutine", routineId: "nightly" });
-    expect(command("Forge, run routine nightly review")).toEqual({ type: "runRoutine", routineId: "nightly" });
-    expect(command("Forge, make me a sandwich.")).toEqual({ type: "unknown", text: "make me a sandwich" });
-    expect(command("Forge.")).toEqual({ type: "unknown", text: "" });
-    // What whisper really wrote for Piper saying these.
-    expect(command("forge new task. Fix the login page.")).toEqual({ type: "newTask", title: "Fix the login page", agentId: null });
-    expect(command("Forge, New task. Fix the login page.")).toEqual({ type: "newTask", title: "Fix the login page", agentId: null });
-    expect(command("Forge, Go to Tasks.")).toEqual({ type: "open", view: "tasks" });
-  });
-});
-
 describe("talk: the control socket", () => {
   it("puts one socket per data folder in the runtime folder, briefly named", () => {
     const a = controlSocketPath("/home/me/.local/share/vibeforge", "/run/user/1000", 1000);
@@ -234,12 +188,13 @@ describe("talk: the control socket", () => {
 
   it("understands voice actions from the socket and from a second instance's arguments", () => {
     expect(parseControl("voice start")).toBe("start");
-    expect(parseControl(" voice converse \n")).toBe("converse");
+    expect(parseControl(" voice cancel \n")).toBe("cancel");
+    expect(parseControl("voice converse")).toBeNull();
     expect(parseControl("voice explode")).toBeNull();
     expect(parseControl("rm -rf")).toBeNull();
     expect(voiceArg(["electron", ".", "--voice", "stop"])).toBe("stop");
-    expect(voiceArg(["electron", "--voice=toggle"])).toBe("toggle");
-    expect(voiceArg(["electron", "--voice"])).toBe("toggle");
+    expect(voiceArg(["electron", "--voice=toggle"])).toBeNull();
+    expect(voiceArg(["electron", "--voice"])).toBe("start");
     expect(voiceArg(["electron", "."])).toBeNull();
   });
 
@@ -247,7 +202,7 @@ describe("talk: the control socket", () => {
     const lua = hyprlandBindings("vibeforge", true);
     expect(lua).toContain('o.bind("SUPER + ALT + V", "VibeForge: hold to talk", "vibeforge --voice start")');
     expect(lua).toContain('"vibeforge --voice stop", { release = true })');
-    expect(lua).toContain("--voice converse");
+    expect(lua).not.toContain("converse");
     const conf = hyprlandBindings("/opt/vf/scripts/vibeforge", false);
     expect(conf).toContain("bindr = SUPER ALT, V, exec, /opt/vf/scripts/vibeforge --voice stop");
   });

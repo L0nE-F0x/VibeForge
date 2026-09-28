@@ -38,4 +38,23 @@ describe("attention", () => {
     trackLive([session("a", "one", claude)], "two");
     expect(trackLive([], "two")).toEqual([{ workspaceId: "one", label: "Claude Code", attention: "done" }]);
   });
+
+  it("flags an agent's chat, not its workspace, and clears it when the chat is in view", () => {
+    const chat = (working: boolean) =>
+      session("p-chat", "ws", { kind: "run", origin: "agent-chat", agentId: "atlas", chatId: "c1", title: "Atlas", working });
+    trackLive([chat(true)], null, null);
+    expect(trackLive([chat(false)], "ws", null)).toEqual([{ chatId: "c1", agentId: "atlas", label: "Atlas", attention: "waiting" }]);
+    // Already waiting: not flagged twice.
+    trackLive([chat(true)], null, null);
+    expect(trackLive([chat(false)], null, null)).toEqual([]);
+    // Opening the chat clears it, so the next quiet spell flags again.
+    trackLive([chat(false)], null, "c1");
+    trackLive([chat(true)], null, null);
+    expect(trackLive([chat(false)], null, null)).toHaveLength(1);
+    // Quiet while you're looking at it: nothing.
+    trackLive([chat(false)], null, "c1");
+    trackLive([chat(true)], null, "c1");
+    expect(trackLive([chat(false)], null, "c1")).toEqual([]);
+    trackLive([], null, "c1");
+  });
 });

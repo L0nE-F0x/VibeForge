@@ -14,15 +14,18 @@ import {
   Sparkles,
   Trash2,
   X,
+  Undo2,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useChatAttention } from "../attention.js";
 import type { Agent, ChatView, Engine } from "../../shared/api.js";
 import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
+import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useNav, useToast, type AgentTab, type Route } from "../state.js";
+import { useAction, useConfirm, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 import { useVoiceStatus } from "../voice.js";
@@ -67,7 +70,7 @@ export function EngineSelect({ engines, value, onChange, allowMissing }: { engin
 
 export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }> }) {
   const t = useT();
-  const { go } = useNav();
+  const { go, replace } = useNav();
   const agents = useAgents();
   const chats = useChats(undefined).data ?? [];
   const inbox = useInbox().data ?? [];
@@ -75,10 +78,13 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const [creating, setCreating] = useState(false);
   const list = agents.data ?? [];
   const selected = list.find((agent) => agent.id === route.agentId) ?? null;
+  useDropMissing(agents.loaded, Boolean(route.agentId) && !selected, { view: "agents" });
+  const chatAttention = useChatAttention();
+  const wants = (agentId: string) => [...chatAttention.values()].some((mark) => mark.agentId === agentId && mark.attention === "waiting");
 
   useEffect(() => {
-    if (!route.agentId && list.length > 0) go({ view: "agents", agentId: list[0].id, tab: "chats" });
-  }, [route.agentId, list, go]);
+    if (!route.agentId && list.length > 0) replace({ view: "agents", agentId: list[0].id, tab: "chats" });
+  }, [route.agentId, list, replace]);
 
   return (
     <div className="view split-list">
@@ -101,7 +107,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                 label={agent.name}
                 selected={agent.id === selected?.id}
                 onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
-                badge={chats.some((chat) => chat.agentId === agent.id && chat.live) ? <span className="strip-live" /> : undefined}
+                badge={wants(agent.id) ? <span className="ws-state waiting in-strip" /> : chats.some((chat) => chat.agentId === agent.id && chat.live) ? <span className="strip-live" /> : undefined}
               >
                 <Avatar name={agent.name} />
               </StripItem>
@@ -119,7 +125,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
               <button
                 key={agent.id}
                 type="button"
-                className="row"
+                className={`row${wants(agent.id) ? " needs-you" : ""}`}
                 aria-selected={agent.id === selected?.id}
                 onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
               >
@@ -324,6 +330,8 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
   const { go } = useNav();
   const confirm = useConfirm();
   const chat = chats.find((item) => item.id === chatId) ?? null;
+  const chatAttention = useChatAttention();
+  const chatWants = (id: string) => chatAttention.get(id)?.attention === "waiting";
   const [remove] = useAction(async (target: ChatView) => {
     const ok = await confirm({
       title: `Delete "${target.title}"?`,
@@ -340,6 +348,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       <SidePanel
         id="agent-chats"
+        scrollKey={`agent-chats:${agent.id}`}
         title={t("agents.chats")}
         primary={false}
         defaultWidth={240}
@@ -351,7 +360,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
               <MessageSquarePlus size={16} />
             </StripItem>
             {chats.slice(0, 12).map((item) => (
-              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
+              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} badge={chatWants(item.id) ? <span className="ws-state waiting in-strip" /> : undefined}>
                 <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               </StripItem>
             ))}
@@ -365,7 +374,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
           </button>
           {chats.length > 0 && <div className="list-label">Recent</div>}
           {chats.map((item) => (
-            <div key={item.id} className="row" aria-selected={item.id === chat?.id} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
+            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-selected={item.id === chat?.id} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
               <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{item.title}</span>
@@ -384,6 +393,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         key={chat?.id ?? "new"}
         chat={chat}
         create={() => call("chats.create", { agentId: agent.id })}
+        newKey={agent.id}
         onCreated={(created) => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: created.id })}
         placeholder={t("agents.placeholder", { name: agent.name })}
         empty={{
@@ -396,7 +406,8 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
   );
 }
 
-function EditorShell({ children, dirty, onSave, saving, note }: { children: ReactNode; dirty: boolean; onSave: () => void; saving: boolean; note?: ReactNode }) {
+function EditorShell({ children, dirty, onSave, onDiscard, saving, note }: { children: ReactNode; dirty: boolean; onSave: () => void; onDiscard: () => void; saving: boolean; note?: ReactNode }) {
+  const t = useT();
   useSaveShortcut(onSave, dirty && !saving);
   return (
     <div className="page-body">
@@ -406,6 +417,11 @@ function EditorShell({ children, dirty, onSave, saving, note }: { children: Reac
           <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={onSave}>
             Save
           </Button>
+          {dirty && (
+            <Button variant="ghost" icon={Undo2} onClick={onDiscard}>
+              {t("common.discard")}
+            </Button>
+          )}
           <span className="faint">{dirty ? "Unsaved changes · Ctrl+S" : note ?? "Saved"}</span>
         </div>
       </div>
@@ -415,14 +431,13 @@ function EditorShell({ children, dirty, onSave, saving, note }: { children: Reac
 
 function BriefTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
-  const [brief, setBrief] = useState(agent.brief);
-  useEffect(() => setBrief(agent.brief), [agent.brief]);
+  const [brief, setBrief, discard] = useDraftState(`agent:${agent.id}:brief`, agent.brief);
   const [save, saving] = useAction(async () => {
     await call("agents.save", { ...agent, brief });
     push("success", "Brief saved", "It applies to the next run.");
   }, "Could not save the brief");
   return (
-    <EditorShell dirty={brief !== agent.brief} saving={saving} onSave={() => void save()}>
+    <EditorShell dirty={brief !== agent.brief} saving={saving} onSave={() => void save()} onDiscard={discard}>
       <Notice icon={BookOpen}>
         The brief opens every run: the job, the standards, and the actions that still need you. A good brief answers four questions — what the agent owns,
         what context matters, what good looks like, and what needs a person.
@@ -436,17 +451,14 @@ function BriefTab({ agent }: { agent: Agent }) {
 function MemoryTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id));
-  const [text, setText] = useState<string | null>(null);
-  useEffect(() => {
-    if (memory.data !== undefined) setText(memory.data);
-  }, [memory.data]);
+  const [text, setText, discard] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
   const [save, saving] = useAction(async () => {
     await call("agents.writeMemory", agent.id, text ?? "");
     push("success", "Memory saved");
   }, "Could not save memory");
   if (text === null) return null;
   return (
-    <EditorShell dirty={text !== memory.data} saving={saving} onSave={() => void save()} note="Stored as memory.md next to the agent; edit it anywhere.">
+    <EditorShell dirty={text !== memory.data} saving={saving} onSave={() => void save()} onDiscard={discard} note="Stored as memory.md next to the agent; edit it anywhere.">
       <Notice icon={Brain}>
         Durable facts that should still matter next week: preferences, decisions, constraints, lessons. Dated bullets work well. VibeForge adds this to
         every run; agents never rewrite it themselves.
@@ -521,10 +533,12 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const engines = useEngines().data ?? [];
-  const [name, setName] = useState(agent.name);
-  const [engine, setEngine] = useState(agent.engine);
-  const [allow, setAllow] = useState(agent.allowRoutines);
-  const [voice, setVoice] = useState(agent.voice);
+  const [form, setForm, discard] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice });
+  const { name, engine, allow, voice } = form;
+  const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
+  const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
+  const setAllow = (next: boolean) => setForm((prev) => ({ ...prev, allow: next }));
+  const setVoice = (next: string) => setForm((prev) => ({ ...prev, voice: next }));
   const voices = useVoiceStatus().data?.voices ?? [];
   const t = useT();
   const dirty = name !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
@@ -583,6 +597,11 @@ function SettingsTab({ agent }: { agent: Agent }) {
           <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={() => void save()}>
             Save changes
           </Button>
+          {dirty && (
+            <Button variant="ghost" icon={Undo2} onClick={discard}>
+              {t("common.discard")}
+            </Button>
+          )}
           {dirty && <span className="faint">Ctrl+S</span>}
         </div>
         <div className="section-title" style={{ marginTop: 28 }}>

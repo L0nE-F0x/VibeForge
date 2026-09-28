@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, SquareTerminal, Stethoscope, Trash2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
@@ -7,6 +7,8 @@ import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnos
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
+import { SoundsCard } from "../components/SoundsCard.js";
+import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { usePalette } from "../theme.js";
@@ -253,12 +255,22 @@ export function SettingsView() {
           </div>
           <div className="card hstack">
             <span className="grow">
-              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label="Notify when a routine or task run finishes, or a CLI is waiting while VibeForge is in the background" />
+              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label="Notify when a routine or task run finishes, or a CLI or agent is waiting, while VibeForge is in the background" />
             </span>
             <Button size="sm" onClick={() => new Notification("VibeForge", { body: "Notifications reach your desktop." })}>
               Send a test
             </Button>
           </div>
+
+          <div className="section-title" id="settings-tray">
+            <Power size={13} /> {t("tray.title")}
+          </div>
+          <TrayCard />
+
+          <div className="section-title" id="settings-sounds">
+            <Volume2 size={13} /> {t("sounds.title")}
+          </div>
+          <SoundsCard />
 
           <div className="section-title">
             <Activity size={13} /> {t("settings.insights")}

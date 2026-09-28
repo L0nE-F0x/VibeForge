@@ -7,6 +7,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Drag
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
 import { clipboardKey } from "../terminal-keys.js";
+import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
 
 export const PATH_MIME = "application/x-vibeforge-path";
@@ -39,7 +40,8 @@ export function estimateTermSize(element: HTMLElement | null, fontSize: number, 
 function isAppShortcut(event: KeyboardEvent): boolean {
   if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
   if (event.ctrlKey && !event.altKey && event.key === ",") return true;
-  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewl]$/i.test(event.key) || event.code === "Slash")) return true;
+  // Ctrl+Shift+K opens the switcher; plain Ctrl+K stays the program's (kill to end of line).
+  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewlk]$/i.test(event.key) || event.code === "Slash")) return true;
   // Alt+1…9 jumps between workspaces.
   if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
   return false;
@@ -216,7 +218,10 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       }
       return false;
     });
-    const input = term.onData((data) => void call("pty.write", ptyId, data).catch(() => undefined));
+    const input = term.onData((data) => {
+      notePtyInput(ptyId, data);
+      void call("pty.write", ptyId, data).catch(() => undefined);
+    });
     const binary = term.onBinary((data) => void call("pty.write", ptyId, data).catch(() => undefined));
     const focusSub = term.textarea ? (() => {
       const handler = () => onFocusRef.current?.();

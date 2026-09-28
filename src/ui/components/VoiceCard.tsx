@@ -2,11 +2,11 @@ import { Copy, Download, FolderOpen, Keyboard, Mic, Square, Volume2 } from "luci
 import { useRef, useState } from "react";
 import type { DownloadKind, VoiceSettings, VoiceStatus } from "../../shared/api.js";
 import { tildify } from "../../shared/text.js";
-import { call, useAppInfo, useSettings } from "../api.js";
+import { call, useAgents, useAppInfo, useSettings } from "../api.js";
 import { LANGUAGES, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useToast } from "../state.js";
-import { CONVERSE_KEYS, DICTATE_KEYS, MicButton, useDictationTarget, useVoiceStatus } from "../voice.js";
+import { DICTATE_KEYS, MicButton, useDictationTarget, useVoiceStatus } from "../voice.js";
 import { Button, Chip, Field, Notice, Select, Toggle } from "./ui.js";
 
 // Settings → Voice: what dictation and talking back found on this machine, the models and voices
@@ -93,6 +93,7 @@ export function VoiceCard() {
   const t = useT();
   const { push } = useToast();
   const settings = useSettings().data;
+  const agents = useAgents().data ?? [];
   const status = useVoiceStatus().data;
   const home = useAppInfo().data?.home ?? "";
   const [patch] = useAction(async (next: Partial<VoiceSettings>) => {
@@ -154,10 +155,6 @@ export function VoiceCard() {
           />
         </Field>
 
-        <Field hint={t("voice.autoSendHint")}>
-          <Toggle checked={voice.autoSend} onChange={(autoSend) => void patch({ autoSend })} label={t("voice.autoSend")} />
-        </Field>
-
         <Field label={t("voice.try")} hint={<Rich text={t("voice.tryHint", { keys: DICTATE_KEYS })} />}>
           {status.ready ? <TryIt /> : <Chip tone="warn">{t("voice.notReady")}</Chip>}
         </Field>
@@ -176,12 +173,8 @@ export function VoiceCard() {
           <StatusRow ok={Boolean(status.speaker)} label={t("voice.voice")} detail={status.speaker ? tildify(status.speaker, home) : t("voice.voiceMissing")} />
         </div>
         <div className="form-grid">
-          <Field label={t("voice.talkBack")} hint={t("voice.talkBackHint")}>
-            <Select value={voice.talkBack} onChange={(event) => void patch({ talkBack: event.target.value as VoiceSettings["talkBack"] })}>
-              <option value="summary">{t("voice.talkBack.summary")}</option>
-              <option value="full">{t("voice.talkBack.full")}</option>
-              <option value="off">{t("voice.talkBack.off")}</option>
-            </Select>
+          <Field hint={t("voice.talkBackHint")}>
+            <Toggle checked={voice.talkBack} onChange={(talkBack) => void patch({ talkBack })} label={t("voice.talkBack")} />
           </Field>
           <Field label={t("voice.voice")} hint={t("voice.voiceHint")}>
             <div className="hstack" style={{ gap: 6 }}>
@@ -217,8 +210,18 @@ export function VoiceCard() {
       </div>
       <div className="card vstack" style={{ gap: 12 }}>
         <span className="faint">
-          <Rich text={t("voice.anywhereIntro", { converse: CONVERSE_KEYS })} />
+          <Rich text={t("voice.anywhereIntro")} />
         </span>
+        <Field label={t("voice.agent")} hint={t("voice.agentHint")}>
+          <Select value={agents.some((agent) => agent.id === voice.agent) ? voice.agent : ""} onChange={(event) => void patch({ agent: event.target.value })}>
+            <option value="">{t("voice.agentLast")}</option>
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <pre className="about-env selectable">{status.hyprland.text}</pre>
         <div className="hstack wrap" style={{ gap: 8 }}>
           <Button variant={status.hyprland.installed ? "default" : "primary"} icon={Keyboard} busy={installing} disabled={status.hyprland.installed} onClick={() => void install()}>
@@ -231,9 +234,6 @@ export function VoiceCard() {
             {tildify(status.hyprland.file, home)}
           </span>
         </div>
-        <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
-          <Rich text={t("voice.commandsHint")} />
-        </span>
       </div>
     </div>
   );

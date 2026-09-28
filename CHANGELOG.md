@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+- **Views remember where you were**, even after a restart. Switch from Agents to Code and back (the rail or Ctrl+1…9) and you land on the same agent, tab and chat, with the lists scrolled where you left them. The same goes for Chat, Tasks, Routines, Skills and Runs.
+- **Go to anything with Ctrl+K.** Type part of a name to jump to an agent, chat, workspace, task, routine, skill, view or a Settings section. From inside a terminal it's Ctrl+Shift+K, since Ctrl+K belongs to the program there. The logo at the top of the rail opens it too.
+- **Sounds.** Short tones made on your machine: two soft knocks when a CLI or agent is waiting for you, a chime when a task, routine or typed CLI finishes, a lower tone when one fails, and a chirp when dictation starts, stops or is dropped. By default only while VibeForge is in the background, and never during Omarchy's Do Not Disturb (voice aside). Settings → Sounds turns each one off, sets the volume and plays them.
+- **Agents tell you when they answer.** An agent chat that goes quiet while you're elsewhere now glows in Agents (the agent and the chat), puts a dot on the rail, and sends a notification that opens that chat. Before, only Code's workspaces did this.
+- **Nothing you typed gets lost.** A half-written chat message, and unsaved edits to a brief, memory, agent settings, task, skill or routine, are kept when you switch views, close the sheet or quit, until you send, save or press Discard. Cancel in the routine editor still throws the edit away.
+- **VibeForge in the tray.** An icon in Omarchy's bar with the other tray apps (pin it to the bar from the tray's arrow). Click to open the window; right-click for sounds, notifications, start at login, Settings and Quit. The icon gets an amber corner while something is waiting for you. Closing the window keeps VibeForge running there, so terminals and routines carry on. **Start at login, in the tray** (off by default) adds an autostart entry that opens VibeForge with its window tucked away. All three are in Settings → Tray and startup.
+- **Back and forward.** Alt+→ goes forward again after Alt+←, and the mouse's side buttons do both, even over a terminal.
+- **Arrow keys in lists.** With an agent, chat, skill, run or workspace focused, ↑/↓ open the one above or below; Home and End jump to the ends.
+- **Voice is one gesture: hold to talk.** Hold Ctrl+Shift+Space, or the mic, and let go. The words go into the box or terminal that has focus and wait for Enter. Super+Alt+V talks to one agent, the one picked in Settings → Voice or the last you dictated to. After you send a dictated message, the first paragraph of the answer is read aloud. Tap-to-toggle, conversation mode (Ctrl+Alt+Space), the "Forge," commands, routing by an agent's name and auto-send are gone.
+- **Finished runs keep their last screen.** A full-screen CLI that cleared the terminal on exit used to leave a blank run; the last frame with text is kept now, and older blank runs are rebuilt from their scrollback when opened.
+- **Grok runs show what you typed.** A `grok` started in a terminal lists the prompts you gave it in the run's Prompt tab, read from Grok's own session log.
+
 ## [0.7.0] - 2026-09-26
 
 **Plan limits.**

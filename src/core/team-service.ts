@@ -7,6 +7,8 @@ import { isPathInside } from "./places.js";
 import { buildPreamble, plainPrompt, taskPrompt } from "./preamble.js";
 import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, nextFireTimes, type TickDecision } from "./routines.js";
 import { allocateRunDir, readRunFiles, RUN_FILES, type RunFiles } from "./runs.js";
+import { repairBlankCapture } from "./restore-screen.js";
+import { grokHome, readGrokPrompts } from "./session-prompts.js";
 import { slugify } from "./slug.js";
 import { Store, type RunQuery } from "./store.js";
 import { createTask, markStopped, requestExecute, syncTaskWithRun, type ExecuteBlocker } from "./tasks.js";
@@ -59,6 +61,8 @@ export interface DeskHost {
   record(ptyId: string, runDir: string | null): Promise<void>;
   resolveBin(bin: string): string | null;
   notify(note: { title: string; body: string; runId: string }): void;
+  /** Every run that ends, for the finished and failed sounds. */
+  finished?(run: { runId: string; origin: RunOrigin; outcome: "ok" | "failed" | "stopped" }): void;
   snapshotGit(cwd: string, startHead: string | null): Promise<string>;
   gitHead(cwd: string): Promise<string | null>;
 }
@@ -1106,8 +1110,29 @@ export class TeamService {
     if (!run) throw new Error("That run no longer exists.");
     const files: RunFiles = run.dir && isDirectory(run.dir)
       ? readRunFiles(run.dir)
-      : { preamble: "", screen: "", scrollback: "", transcript: "", git: "" };
+      : { preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "" };
     return { run: this.view(run), files };
+  }
+
+  /** The run plus its screen, transcript and, for a typed Grok, the prompts it was given. */
+  async loadRun(id: string): Promise<RunBundle> {
+    const bundle = this.getRun(id);
+    let files = bundle.files;
+    if (bundle.run.dir && bundle.run.status !== "running") {
+      try {
+        files = await repairBlankCapture(bundle.run.dir, files);
+      } catch {
+        /* the stored files still open */
+      }
+    }
+    if (!files.preamble.trim() && bundle.run.engine === "grok" && bundle.run.cwd) {
+      try {
+        files = { ...files, prompts: readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt) };
+      } catch {
+        /* the prompt tab explains that none was handed over */
+      }
+    }
+    return { ...bundle, files };
   }
 
   markRunOpened(id: string, opened = true): void {
@@ -1569,6 +1594,15 @@ export class TeamService {
       }
     }
     this.notifyFinished(finished);
+    try {
+      this.options.host.finished?.({
+        runId: finished.id,
+        origin: finished.origin,
+        outcome: finished.status === "stopped" ? "stopped" : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0) ? "failed" : "ok",
+      });
+    } catch {
+      /* a sound is never worth failing a run over */
+    }
     this.emit("runs", "live", "tasks", "chats", "routines");
   }
 

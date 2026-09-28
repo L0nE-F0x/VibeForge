@@ -1,11 +1,12 @@
 import { FolderOpen, MessageSquarePlus, MessagesSquare, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useChatAttention } from "../attention.js";
 import type { ChatView as Chat } from "../../shared/api.js";
 import { call, useChats, useEngines, useSettings } from "../api.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Chip, Input, TimeAgo } from "../components/ui.js";
-import { useAction, useConfirm, useNav, type Route } from "../state.js";
+import { useAction, useConfirm, useDropMissing, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
@@ -13,13 +14,16 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const t = useT();
   const { go } = useNav();
   const confirm = useConfirm();
-  const chats = useChats(null).data ?? [];
+  const chatList = useChats(null);
+  const chats = chatList.data ?? [];
   const engines = useEngines().data ?? [];
   const settings = useSettings().data;
   const [engine, setEngine] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
   const chat = chats.find((item) => item.id === route.chatId) ?? null;
+  useDropMissing(chatList.loaded, Boolean(route.chatId) && !chat, { view: "chat" });
+  const chatAttention = useChatAttention();
 
   useEffect(() => {
     if (engine) return;
@@ -73,7 +77,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
               <MessageSquarePlus size={16} />
             </StripItem>
             {chats.slice(0, 14).map((item) => (
-              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "chat", chatId: item.id })}>
+              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "chat", chatId: item.id })} badge={chatAttention.get(item.id)?.attention === "waiting" ? <span className="ws-state waiting in-strip" /> : undefined}>
                 <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               </StripItem>
             ))}
@@ -85,7 +89,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
           {chats.map((item) => (
             <div
               key={item.id}
-              className="row"
+              className={`row${chatAttention.get(item.id)?.attention === "waiting" ? " needs-you" : ""}`}
               role="button"
               tabIndex={0}
               aria-selected={item.id === chat?.id}
@@ -139,6 +143,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
           key={chat?.id ?? "new"}
           chat={chat}
           create={() => call("chats.create", { engine })}
+          newKey="chat"
           onCreated={(created) => go({ view: "chat", chatId: created.id })}
           placeholder={t("chat.placeholder", { engine: engineLabel(chat?.engine ?? engine) })}
           empty={{

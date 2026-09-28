@@ -64,6 +64,7 @@ const STEPS: Step[] = [
     side: "right",
     icon: Compass,
     keys: [
+      ["Ctrl+K", "shortcuts.switcher"],
       ["Ctrl+1…8", "shortcuts.switchViews"],
       ["Alt+←", "shortcuts.back"],
     ],

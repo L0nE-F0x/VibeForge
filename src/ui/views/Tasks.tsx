@@ -1,5 +1,5 @@
 import { CheckCircle2, FolderPlus, KanbanSquare, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useState, type DragEvent } from "react";
+import { useState, type DragEvent } from "react";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
@@ -7,6 +7,7 @@ import { Button, Chip, Field, Input, Notice, Select, Sheet, StatusChip, TextArea
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
+import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT } from "../i18n/index.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: string }> = [
@@ -155,18 +156,17 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     rows: Math.floor((window.innerHeight * 0.46 - 14) / Math.ceil(fontSize * 1.32 * 1.18)),
   });
   const runs = useQuery(task ? `runs:task:${task.id}` : null, ["runs"], () => call("runs.list", { taskId: task!.id, limit: 50 }));
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [body, setBody] = useState(task?.body ?? "");
-  const [agentId, setAgentId] = useState(task?.agentId ?? agents[0]?.id ?? "");
-  const [workspaceId, setWorkspaceId] = useState(task?.workspaceId ?? workspaces[0]?.id ?? "");
-
-  useEffect(() => {
-    if (!task) return;
-    setTitle(task.title);
-    setBody(task.body);
-    setAgentId(task.agentId ?? "");
-    setWorkspaceId(task.workspaceId ?? "");
-  }, [task?.id]);
+  const [form, setForm, discard] = useDraftState(task ? `task:${task.id}` : "task:new", {
+    title: task?.title ?? "",
+    body: task?.body ?? "",
+    agentId: task ? (task.agentId ?? "") : (agents[0]?.id ?? ""),
+    workspaceId: task ? (task.workspaceId ?? "") : (workspaces[0]?.id ?? ""),
+  });
+  const { title, body, agentId, workspaceId } = form;
+  const setTitle = (next: string) => setForm((prev) => ({ ...prev, title: next }));
+  const setBody = (next: string) => setForm((prev) => ({ ...prev, body: next }));
+  const setAgentId = (next: string) => setForm((prev) => ({ ...prev, agentId: next }));
+  const setWorkspaceId = (next: string) => setForm((prev) => ({ ...prev, workspaceId: next }));
 
   const dirty = !task || title !== task.title || body !== task.body || (agentId || null) !== task.agentId || (workspaceId || null) !== task.workspaceId;
   const agent = agents.find((item) => item.id === agentId);
@@ -175,8 +175,10 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
 
   const [save, saving] = useAction(async () => {
     const saved = await call("tasks.save", { id: task?.id, title, body, agentId: agentId || null, workspaceId: workspaceId || null });
-    if (!task) onCreated(saved);
-    else push("success", "Task saved");
+    if (!task) {
+      forgetDraft("task:new");
+      onCreated(saved);
+    } else push("success", "Task saved");
     return saved;
   }, "Could not save the task");
   const [execute, executing] = useAction(async () => {
@@ -245,6 +247,11 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             </Button>
           )}
           <span className="grow" />
+          {task && dirty && (
+            <Button variant="ghost" icon={Undo2} onClick={discard}>
+              {t("common.discard")}
+            </Button>
+          )}
           <Button icon={Save} busy={saving} disabled={!dirty || !title.trim()} onClick={() => void save()}>
             {task ? "Save" : "Create task"}
           </Button>
