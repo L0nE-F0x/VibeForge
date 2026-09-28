@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, session, shell } from "electron";
 import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
@@ -578,6 +578,22 @@ function watchConfig(): () => void {
 
 // ------------------------------------------------------------------ window
 
+/** What web pages may use: copying to the clipboard, as any browser lets them. */
+const WEB_PERMISSIONS = new Set(["clipboard-sanitized-write"]);
+/** VibeForge's own page also shows notifications. */
+const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
+
+/**
+ * Electron grants every permission unless told otherwise, so a page in the browser dock could open
+ * the microphone or read the clipboard without asking. Everything else is refused.
+ */
+function guardPermissions(): void {
+  const allowed = (contents: Electron.WebContents | null, permission: string) =>
+    (win && contents === win.webContents ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(allowed(contents, permission)));
+  session.defaultSession.setPermissionCheckHandler((contents, permission) => allowed(contents, permission));
+}
+
 async function createWindow(): Promise<void> {
   const icon = nativeImage.createFromPath(iconPath());
   win = new BrowserWindow({
@@ -722,6 +738,7 @@ if (!app.requestSingleInstanceLock()) {
       if (topics.includes("settings") || topics.includes("live")) syncTray();
     });
     palette = resolvePalette(service.getSettings().theme);
+    guardPermissions();
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);
     syncTray();
