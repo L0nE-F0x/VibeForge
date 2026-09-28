@@ -759,7 +759,10 @@ button:disabled {
   gap: 14px;
 }
 
+/* Relative so the hidden checkbox sits inside its label: anchored further out, it stays behind
+   when Settings scrolls, and focusing it scrolls the whole app off screen. */
 .toggle {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 9px;
