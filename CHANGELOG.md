@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-28
+
+**A desk that keeps your place.**
+
 - **Views remember where you were**, even after a restart. Switch from Agents to Code and back (the rail or Ctrl+1…9) and you land on the same agent, tab and chat, with the lists scrolled where you left them. The same goes for Chat, Tasks, Routines, Skills and Runs.
 - **Go to anything with Ctrl+K.** Type part of a name to jump to an agent, chat, workspace, task, routine, skill, view or a Settings section. From inside a terminal it's Ctrl+Shift+K, since Ctrl+K belongs to the program there. The logo at the top of the rail opens it too.
 - **Sounds.** Short tones made on your machine: two soft knocks when a CLI or agent is waiting for you, a chime when a task, routine or typed CLI finishes, a lower tone when one fails, and a chirp when dictation starts, stops or is dropped. By default only while VibeForge is in the background, and never during Omarchy's Do Not Disturb (voice aside). Settings → Sounds turns each one off, sets the volume and plays them.
@@ -157,7 +161,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.8.0
 [0.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.7.0
 [0.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.6.0
 [0.5.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.5.1

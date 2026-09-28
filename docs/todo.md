@@ -1,6 +1,6 @@
 # To do
 
-Updated for 0.7.0 (2026-09-27): plan limits for Claude, Grok, Kimi and Codex in the rail's usage popover; see `status.md`. Before that, 0.6.0 (2026-09-26): typed CLIs are runs, the "needs you" glow, token usage, the contribution graph and terminal copy/paste.
+Updated for 0.8.0 (2026-09-28): a desk that keeps your place (view memory, drafts, sounds, Ctrl+K, the tray, hold-to-talk voice); see `CHANGELOG.md`. Before that, 0.7.0 (2026-09-27): plan limits for Claude, Grok, Kimi and Codex in the rail's usage popover; see `status.md`. Before that, 0.6.0 (2026-09-26): typed CLIs are runs, the "needs you" glow, token usage, the contribution graph and terminal copy/paste.
 
 ## Monday (2026-09-28)
 
