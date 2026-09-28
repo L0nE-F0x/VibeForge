@@ -781,7 +781,9 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     void shutdown().finally(() => {
       shutdownDone = true;
-      app.quit();
+      // On the next turn: with no terminal host to wait for, shutdown settles while Electron is
+      // still inside this event, where a quit is ignored and the app would stay on, windowless.
+      setImmediate(() => app.quit());
     });
   });
 
