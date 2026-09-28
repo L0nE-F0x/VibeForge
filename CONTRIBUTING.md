@@ -44,7 +44,7 @@ Write the subject in the imperative, and keep it short: `fix: close the workspac
 
 ## Versions
 
-Until `1.0.0` is chosen on purpose, this is a `0.x` line: breaking changes and compatible features both bump the minor version, and fixes bump the patch. A `0.x` release is still allowed to change shape. Moving to `1.0.0` is its own decision.
+Since `1.0.0`, versions follow [semantic versioning](https://semver.org/). A change that breaks something people rely on bumps the major version: files in `~/.config/vibeforge` that the new version reads differently or not at all, a `vibeforge` command-line flag or a keybinding that changes, or a feature that goes away. New features bump the minor version, and fixes bump the patch. The `0.x` releases before it bumped the minor version for both features and breaking changes.
 
 `package.json`, the git tag (`vX.Y.Z`), and the GitHub Release stay on the same number. Tags are cut by the maintainer when a release is published.
 
