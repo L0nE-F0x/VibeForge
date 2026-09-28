@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -300,6 +300,41 @@ function syncTray(): void {
   } catch (error) {
     log.warn(`The tray icon: ${describeError(error)}`);
   }
+}
+
+/**
+ * Whether anything hosts tray icons. Omarchy's bar does; a bar without a tray doesn't, and a window
+ * closed to the tray there could only come back by launching VibeForge again.
+ */
+let trayHost = true;
+
+function findTrayHost(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      "dbus-send",
+      ["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.kde.StatusNotifierWatcher"],
+      { timeout: 2000 },
+      // Without dbus-send there's no telling, so the settings decide, as before.
+      (error, stdout) => resolve(error ? error.code === "ENOENT" : /boolean true/.test(stdout)),
+    );
+  });
+}
+
+function refreshTrayHost(): void {
+  void findTrayHost().then((found) => {
+    if (found !== trayHost) log.info(found ? "A tray host is back; closing the window keeps VibeForge in the tray" : "Nothing hosts the tray; closing the window quits VibeForge");
+    trayHost = found;
+  });
+}
+
+/** At login the bar can come up after VibeForge, so a missing tray host gets a few seconds to appear. */
+async function waitForTrayHost(ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (!(await findTrayHost())) {
+    if (Date.now() >= until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return true;
 }
 
 /** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
@@ -616,8 +651,17 @@ async function createWindow(): Promise<void> {
     },
   });
   win.once("ready-to-show", () => {
-    // From the login autostart entry, the window waits in the tray (unless there's no tray to wait in).
-    if (!(startHidden && service?.getSettings().tray)) win?.show();
+    if (!(startHidden && service?.getSettings().tray)) {
+      win?.show();
+      return;
+    }
+    // From the login autostart entry, the window waits in the tray, once something hosts one.
+    void waitForTrayHost(10_000).then((found) => {
+      trayHost = found;
+      if (found) return;
+      log.info("Started hidden, but nothing hosts the tray; showing the window");
+      win?.show();
+    });
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
@@ -632,7 +676,7 @@ async function createWindow(): Promise<void> {
   });
   win.on("close", (event) => {
     if (quitting || !service) return;
-    if (tray.shown && service.getSettings().tray && service.getSettings().closeToTray) {
+    if (tray.shown && trayHost && service.getSettings().tray && service.getSettings().closeToTray) {
       event.preventDefault();
       win?.hide();
       if (!trayNoticeShown && service.getSettings().notify) {
@@ -766,6 +810,9 @@ if (!app.requestSingleInstanceLock()) {
     const stopConfigWatch = watchConfig();
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
     win?.on("focus", refreshPalette);
+    // Checked again whenever the window comes forward, so it's current before a close.
+    refreshTrayHost();
+    win?.on("focus", refreshTrayHost);
     const tick = () =>
       void service
         ?.tick()
