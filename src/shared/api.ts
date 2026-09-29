@@ -202,6 +202,8 @@ export interface DockBounds {
 }
 
 export interface DockState {
+  /** The workspace this page belongs to. A late event from another workspace is ignored. */
+  workspaceId: string;
   url: string;
   title: string;
   loading: boolean;
@@ -311,7 +313,8 @@ export interface DeskMethods {
   "runs.markAllOpened": () => void;
   "runs.stop": (id: string) => void;
   "runs.continue": (id: string, size?: TermSize) => Launched & { chatId: string | null; taskId: string | null };
-  "runs.diff": (id: string) => string;
+  /** `saved` is the patch frozen when the run ended. `now` reads the folder as it is. */
+  "runs.diff": (id: string, source?: "saved" | "now") => string;
 
   "live.list": () => LiveSession[];
 
@@ -340,8 +343,11 @@ export interface DeskMethods {
   "pty.snapshot": (ptyId: string) => PtySnapshot;
   "pty.kill": (ptyId: string) => void;
 
-  "dock.show": (bounds: DockBounds, url: string) => void;
-  "dock.hide": () => void;
+  "dock.show": (bounds: DockBounds, url: string, workspaceId: string) => void;
+  /** Hides the page. With a workspace id, that workspace stays the one back, forward and reload act on. */
+  "dock.hide": (workspaceId?: string) => void;
+  /** Drops a workspace's page. Called when the workspace is removed. */
+  "dock.release": (workspaceId: string) => void;
   /** The dock's page as a JPEG data URL, or null when it has nothing on screen. */
   "dock.capture": () => string | null;
   "dock.command": (command: "back" | "forward" | "reload" | "stop" | "devtools") => void;

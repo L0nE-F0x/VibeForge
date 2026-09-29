@@ -18,6 +18,7 @@ import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -177,7 +178,23 @@ const host: DeskHost = {
   gitHead: (cwd) => gitHead(cwd),
 };
 
-const dock = new Dock(() => win, (state) => send("dock", state));
+const dock = new Dock(
+  () => win,
+  (state) => send("dock", state),
+  (workspaceId, url) => {
+    // The view names its workspace, so a page that moves while another workspace is on screen
+    // is stored on the one that owns it.
+    const row = service?.listWorkspaces().workspaces.find((item) => item.id === workspaceId);
+    if (!service || !row) return;
+    const next = savedDockUrl(workspaceId, workspaceId, url, row.dockUrl);
+    if (!next) return;
+    try {
+      service.updateWorkspace(workspaceId, { dockUrl: next });
+    } catch (error) {
+      log.warn(`Could not remember the browser address: ${describeError(error)}`);
+    }
+  },
+);
 
 const usage = new UsageScanner(os.homedir());
 const plans = new PlanWatcher({ home: os.homedir(), file: path.join(roots.dataRoot, "plans.json"), agent: `VibeForge/${app.getVersion()}` });
@@ -520,7 +537,7 @@ function handlers(): Handlers {
     "runs.markAllOpened": () => s().markAllOpened(),
     "runs.stop": (id) => s().stopRun(id),
     "runs.continue": (id, size) => s().continueRun(id, size),
-    "runs.diff": (id) => s().runDiff(id),
+    "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
 
     "live.list": () => s().listLive(),
 
@@ -549,8 +566,9 @@ function handlers(): Handlers {
     "pty.snapshot": (ptyId) => supervisor.snapshot(ptyId),
     "pty.kill": (ptyId) => s().killPty(ptyId),
 
-    "dock.show": (bounds, url) => dock.show(bounds, url),
-    "dock.hide": () => dock.hide(),
+    "dock.show": (bounds, url, workspaceId) => dock.show(bounds, String(url ?? ""), String(workspaceId ?? "")),
+    "dock.hide": (workspaceId) => dock.hide(typeof workspaceId === "string" ? workspaceId : undefined),
+    "dock.release": (workspaceId) => dock.release(String(workspaceId ?? "")),
     "dock.capture": () => dock.capture(),
     "dock.command": (command) => dock.command(command),
   };

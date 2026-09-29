@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+- **A run keeps the diff from the moment it ended.** When a CLI exits, a pane is closed, or the process is killed mid-task, the run saves the full patch: tracked changes since it began, and the text of new files. Changes shows that saved patch, so later edits in the folder stay separate. A new file over 256 KB, or a binary one, is named and left in the working tree. If VibeForge itself is killed before it can save, it writes the patch the next time it opens.
+- **A link in a Code terminal opens the side browser.** Click an http or https address, including a local dev server, and that workspace's browser opens on it. Each workspace keeps its own page: switch projects and you get that project's page (or the empty card), and switching back leaves you where you were. The arrow on the address bar opens the page in your own browser, and so do links in Help, Settings, Home and the update dialog.
+
 ## [1.0.0] - 2026-09-28
 
 **1.0: checked end to end, on a supported Electron.**

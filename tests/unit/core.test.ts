@@ -13,7 +13,7 @@ import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
 import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/tasks.js";
 import { BUILTIN_PALETTE, companionColor, contrast, paletteFromFiles, parseFlatToml, readableMuted, toHex } from "../../src/core/theme.js";
 import type { RunMeta } from "../../src/core/types.js";
-import { gitHead, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
+import { diffSince, gitHead, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
 import { joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
 
@@ -318,6 +318,46 @@ describe("git snapshot", () => {
     expect(text).toContain("commits since the run started");
     expect(summarizeSnapshot(text)).toBe("1 commit · 1 file changed, 1 insertion(+) · 1 new file");
     expect(summarizeSnapshot("not a git repo\n")).toBeNull();
+  });
+
+  it("builds a patch of tracked edits and new file contents", async () => {
+    const dir = tempDir();
+    expect(await diffSince(dir, null)).toBe("");
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, stdio: "pipe" });
+    git("init", "-q");
+    git("config", "color.ui", "always");
+    git("config", "diff.mnemonicPrefix", "true");
+    fs.writeFileSync(path.join(dir, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "init");
+    const start = await gitHead(dir);
+    fs.writeFileSync(path.join(dir, "a.txt"), "one\nmore\n");
+    fs.mkdirSync(path.join(dir, "sub"));
+    fs.writeFileSync(path.join(dir, "sub", "n.txt"), "deep\n");
+    fs.writeFileSync(path.join(dir, "my notes.txt"), "hello notes\n");
+    fs.writeFileSync(path.join(dir, "bare.txt"), "x");
+    fs.writeFileSync(path.join(dir, "blob.bin"), Buffer.from("BINARY_SENTINEL_XYZ\0more"));
+    fs.writeFileSync(path.join(dir, "huge.txt"), Buffer.alloc(NEW_FILE_LIMIT + 1, "A"));
+
+    const text = await diffSince(dir, start);
+    expect(text).toContain("diff --git a/a.txt b/a.txt");
+    expect(text).toContain("+more");
+    expect(text).not.toContain("diff --git c/a.txt");
+    expect(text).toContain("diff --git a/sub/n.txt b/sub/n.txt");
+    expect(text).toContain("+deep");
+    expect(text).toContain("diff --git a/my notes.txt b/my notes.txt");
+    expect(text).toContain("+hello notes");
+    expect(text).toContain("diff --git a/bare.txt b/bare.txt");
+    expect(text).toContain("\\ No newline at end of file");
+    expect(text).toContain("blob.bin: binary, left in the working tree");
+    expect(text).not.toContain("BINARY_SENTINEL_XYZ");
+    expect(text).toContain(`huge.txt: ${NEW_FILE_LIMIT + 1} bytes, left in the working tree`);
+    expect(text).not.toContain("A".repeat(80));
+    // The recorded start commit can be gone. The work tree is still diffed.
+    const fallback = await diffSince(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    expect(fallback).toContain("+more");
+    expect(fallback).toContain("+deep");
   });
 });
 

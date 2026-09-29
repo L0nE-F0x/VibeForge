@@ -12,6 +12,8 @@ export const RUN_FILES = {
   screen: "terminal.ansi",
   transcript: "transcript.txt",
   git: "git.txt",
+  /** Full patch frozen when the run ended. Absent on runs saved before this existed. */
+  patch: "diff.patch",
 } as const;
 
 export const RUN_ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];
@@ -121,6 +123,8 @@ export interface RunFiles {
   scrollback: string;
   transcript: string;
   git: string;
+  /** True when diff.patch was written. The body stays on disk until Changes asks for it. */
+  patchSaved: boolean;
 }
 
 export function readRunFiles(dir: string): RunFiles {
@@ -132,6 +136,7 @@ export function readRunFiles(dir: string): RunFiles {
     scrollback: screen ? "" : readText(path.join(dir, RUN_FILES.scrollback)),
     transcript: readText(path.join(dir, RUN_FILES.transcript)),
     git: readText(path.join(dir, RUN_FILES.git)),
+    patchSaved: fs.existsSync(path.join(dir, RUN_FILES.patch)),
   };
 }
 

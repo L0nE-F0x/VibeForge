@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api.js";
+import { isDockUrl } from "../../shared/dock-url.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
@@ -95,6 +96,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [runtime, setRuntime] = useState<Record<string, Runtime>>({});
   const [focus, setFocus] = useState<Record<string, string>>({});
   const [side, setSide] = useState(() => readLocal<{ open: boolean; tab: "files" | "browser"; width: number }>("vf.code.side", { open: true, tab: "files", width: 320 }));
+  // The address a click or the bar just asked for, shown before the workspace file catches up.
+  const [pendingDock, setPendingDock] = useState<{ id: string; url: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState<Record<string, string | null>>({});
   const [dragPane, setDragPane] = useState<string | null>(null);
@@ -115,6 +118,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const attention = useAttention();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
+  const browserUrl = current ? (pendingDock?.id === current.id ? pendingDock.url : current.dockUrl) : "";
   // The view stays mounted so terminals survive mode switches, but nothing starts until it is opened.
   const [opened, setOpened] = useState(active);
   useEffect(() => {
@@ -135,6 +139,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }, [route?.workspaceId, workspaces, file.data, currentId]);
 
   useEffect(() => writeLocal("vf.code.side", side), [side]);
+
+  useEffect(() => {
+    if (!pendingDock) return;
+    const saved = workspaces.find((item) => item.id === pendingDock.id)?.dockUrl ?? "";
+    if (saved === pendingDock.url) setPendingDock(null);
+  }, [workspaces, pendingDock]);
 
   // The shell's session watch flags CLIs that go quiet out of sight; it needs to know what's shown.
   useEffect(() => setWorkspaceInView(active ? (current?.id ?? null) : null), [active, current?.id]);
@@ -385,6 +395,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     });
     if (!ok) return;
     await call("workspaces.remove", workspace.id);
+    await call("dock.release", workspace.id).catch(() => undefined);
+    setPendingDock((prev) => (prev?.id === workspace.id ? null : prev));
     setLayouts((prev) => {
       const copy = { ...prev };
       delete copy[workspace.id];
@@ -398,9 +410,28 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     setRenaming(null);
   }, t("code.renameFailed"));
 
-  const [setDockUrl] = useAction(async (url: string) => {
-    if (current) await call("workspaces.update", current.id, { dockUrl: url });
+  const [setDockUrl] = useAction(async (workspaceId: string, url: string) => {
+    await call("workspaces.update", workspaceId, { dockUrl: url });
   }, t("code.urlFailed"));
+
+  /** The address bar committed. The id is the workspace the bar was editing. */
+  function rememberDock(workspaceId: string, url: string) {
+    setPendingDock({ id: workspaceId, url });
+    // Stop a hidden page from writing its address back over a bar the person just cleared.
+    if (!url) void call("dock.show", { x: 0, y: 0, width: 0, height: 0 }, "", workspaceId).catch(() => undefined);
+    void setDockUrl(workspaceId, url);
+  }
+
+  /** A link in this workspace's terminal: open its own browser on that address. */
+  function openInBrowser(workspaceId: string, url: string) {
+    if (!isDockUrl(url)) {
+      void call("app.openExternal", url);
+      return;
+    }
+    setPendingDock({ id: workspaceId, url });
+    setSide((prev) => (prev.open && prev.tab === "browser" ? prev : { ...prev, open: true, tab: "browser" }));
+    void setDockUrl(workspaceId, url);
+  }
 
   const [moveWorkspace] = useAction(async (id: string, toIndex: number) => {
     await call("workspaces.move", id, toIndex);
@@ -657,6 +688,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             }}
                             zoomed={zoomedPane === pane.id}
                             onZoom={() => setZoomed((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] === pane.id ? null : pane.id }))}
+                            onOpenLink={(url) => openInBrowser(workspace.id, url)}
                           />
                         );
                       }}
@@ -680,7 +712,13 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   {side.tab === "files" ? (
                     <FilesPanel root={current.path} onInsert={insertPath} />
                   ) : (
-                    <DockPanel url={current.dockUrl} onUrl={(url) => void setDockUrl(url)} visible={active && side.open && side.tab === "browser"} />
+                    <DockPanel
+                      key={current.id}
+                      workspaceId={current.id}
+                      url={browserUrl}
+                      onUrl={rememberDock}
+                      visible={active && side.open && side.tab === "browser"}
+                    />
                   )}
                 </aside>
               )}
@@ -714,6 +752,7 @@ function PaneView({
   onDropPane,
   zoomed,
   onZoom,
+  onOpenLink,
 }: {
   pane: PaneNode;
   runtime: Runtime | undefined;
@@ -737,6 +776,7 @@ function PaneView({
   onDropPane: (sourceId: string, zone: DropZone) => void;
   zoomed: boolean;
   onZoom: () => void;
+  onOpenLink?: (url: string) => void;
 }) {
   const t = useT();
   const state = runtime?.state ?? "idle";
@@ -827,6 +867,7 @@ function PaneView({
             active={active}
             autoFocus={focused}
             onFocus={onFocus}
+            onLink={onOpenLink}
             onExit={(info) => onExit(info.signal ? t("pane.exitSignal", { signal: info.signal }) : t("pane.exitCode", { code: info.exitCode ?? "?" }))}
           />
           {state === "exited" && (
