@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=0.8.0" />
+    <link rel="stylesheet" href="styles.css?v=1.2.0" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
@@ -316,7 +316,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-square-terminal" /></svg></span>
               <h3>Tiled like your desktop</h3>
-              <p>Split terminals side by side, a file tree that drops paths into the focused pane, and a browser dock for localhost.</p>
+              <p>Split terminals side by side, a file tree that drops paths into the focused pane, and a browser beside them: click a link in a terminal and it opens there, one page per workspace.</p>
             </div>
             <div class="art art-tiles">
               <div class="tile"><i>shell</i><code>npm run dev</code><code class="dim">➜ localhost:5173</code></div>
@@ -375,7 +375,7 @@
               <span class="card-icon"><svg><use href="#i-git-compare" /></svg></span>
               <h3>Review everything they touched</h3>
               <p>
-                Every run keeps its final screen, a transcript, the exact prompt and the git diff since it began. <b>Continue</b> reopens the very same
+                Every run keeps its final screen, a transcript, the exact prompt and the git diff since it began, saved the moment it ends so later edits stay out of it. <b>Continue</b> reopens the very same
                 session when the CLI printed one (<code>claude --resume</code>, <code>grok --resume</code>, …).
               </p>
             </div>
@@ -414,7 +414,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
               <h3>Real terminals, not a chat skin</h3>
-              <p>WebGL xterm, split and dragged into place. Plain <kbd>Ctrl</kbd> <kbd>V</kbd> reaches the program, so screenshots paste into Claude Code like in ghostty.</p>
+              <p>WebGL xterm, split and dragged into place. <kbd>Ctrl</kbd> <kbd>V</kbd> pastes text, and a screenshot on its own goes straight to the program, so images paste into Claude Code like in ghostty.</p>
             </div>
             <div class="art art-keys">
               <span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">V</span>
@@ -425,7 +425,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-shield" /></svg></span>
               <h3>Private by construction</h3>
-              <p>No accounts, no keys, no telemetry. Agents, skills, routines and tasks are YAML and Markdown you can edit in Neovim.</p>
+              <p>No accounts, no keys, no telemetry. Anything that goes online, like plan limits or your GitHub graph, is off until you turn it on. Agents, skills, routines and tasks are YAML and Markdown you can edit in Neovim.</p>
             </div>
             <div class="art art-private">
               <span class="lock"><svg><use href="#i-lock" /></svg></span>
@@ -437,7 +437,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-refresh" /></svg></span>
               <h3>Updates itself, in plain sight</h3>
-              <p>When a release is out, Help gets a dot. Update shows the notes, runs the installer in a terminal you can watch, and restarts. The only thing it ever asks GitHub is the newest release number.</p>
+              <p>When a release is out, Help gets a dot. Update shows the notes, runs the installer in a terminal you can watch, and restarts. All it asks GitHub for is the newest release and its notes.</p>
             </div>
             <div class="art art-update" data-update-art>
               <div class="up-head"><b>Update VibeForge</b><span class="chip ok">1.2.1</span></div>
@@ -449,6 +449,30 @@
                 <div class="t-ok"><span>✓</span> VibeForge 1.2.1 is installed.</div>
               </div>
               <div class="up-foot"><span>Updated. Restart to start using 1.2.1.</span><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Restart</span></div>
+            </div>
+          </article>
+
+          <article class="card wide reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-activity" /></svg></span>
+              <h3>It glows when it's your turn</h3>
+              <p>When a CLI or agent goes quiet where you aren't looking, its workspace or chat lights up like an ember, and so does the view's icon in the rail. With VibeForge in the background, two soft knocks and a notification bring you there.</p>
+            </div>
+            <div class="art art-ember" aria-hidden="true">
+              <div class="em-row"><i class="em-px open"></i><b>pixel-weather</b><span>~/projects/pixel-weather</span></div>
+              <div class="em-row wants"><i class="em-px lit"></i><b>landing-page</b><span>Claude Code · your turn</span></div>
+              <div class="em-row"><i class="em-px work"></i><b>weather-api</b><span>Codex is working</span></div>
+            </div>
+          </article>
+
+          <article class="card reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-rotate-ccw" /></svg></span>
+              <h3>Undo, not "are you sure?"</h3>
+              <p>Deleting a chat, task, skill or routine happens at once. Undo on the toast, or <kbd>Ctrl</kbd> <kbd>Z</kbd>, puts it back.</p>
+            </div>
+            <div class="art art-undo" aria-hidden="true">
+              <div class="undo-toast"><span>Deleted Old notes</span><b>Undo</b></div>
             </div>
           </article>
 
@@ -471,7 +495,7 @@
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
           <h2>Not a mockup. The real desk.</h2>
-          <p>Screenshots of VibeForge 0.7.0 on a working day, in the Apex Forge theme.</p>
+          <p>Screenshots of VibeForge 1.2.0 on a working day, in the Apex Forge theme.</p>
         </div>
         <div class="tour reveal" data-tour>
           <div class="tour-tabs" role="tablist" aria-label="Screenshots">
@@ -481,13 +505,13 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=0.7.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, three terminals running, three runs to review, a 14-day run chart, workspaces, the routines coming up next and the CLIs on this machine." />
+              <img src="assets/app-home.webp?v=1.2.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, five terminals running, four runs to review led by their projects, a 14-day run chart, workspaces with two glowing because their CLIs are waiting, the terminals live now and the routines coming up next." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=0.7.0" width="1890" height="1138" alt="Code mode: three tiled terminals in a project with git log, a diffstat and a TypeScript watch that its title bar names, split from the toolbar, with the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=1.2.0" width="1890" height="1138" alt="Code mode on the VibeForge repository: three tiled terminals with git log and its release tags, a diffstat from 1.1.0 to 1.2.0 in the focused pane and a TypeScript watch its title bar names, the unfocused panes dimmed, two other workspaces glowing in the list, and the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp?v=0.7.0" width="1890" height="1138" alt="The task board with cards in To do, Review and Done, each assigned to an agent and a workspace." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=1.2.0" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace, the finished ones with their diff." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> What's live, what finished and needs a look, and what runs next.</p>
@@ -505,7 +529,7 @@
           <li class="reveal">
             <span class="flow-node">01</span>
             <h3>One argument, intact</h3>
-            <p>The brief, memory, skills and your prompt reach the CLI as a single argument. Nothing is typed into a TUI line by line.</p>
+            <p>The brief, memory, skills and your prompt reach the CLI as a single argument. The few CLIs without a prompt flag get it pasted in once, never typed line by line.</p>
           </li>
           <li class="reveal">
             <span class="flow-node">02</span>
@@ -515,7 +539,7 @@
           <li class="reveal">
             <span class="flow-node">03</span>
             <h3>A record when it ends</h3>
-            <p>Final screen, transcript and a git snapshot land in the run folder. Stop hangs up the process group, like closing a window.</p>
+            <p>Final screen, transcript and the full diff land in the run folder, frozen as it ends. Stop hangs up the process group, like closing a window.</p>
           </li>
           <li class="reveal">
             <span class="flow-node">04</span>
@@ -581,11 +605,11 @@
               <h2>Keys, like the rest of your desktop.</h2>
             </div>
             <dl class="keys">
+              <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Go to any agent, chat, workspace, task or skill</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>8</kbd></dt><dd>Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>C</kbd>/<kbd>V</kbd></dt><dd>Copy and paste in a terminal</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd>/<kbd>E</kbd></dt><dd>A new terminal on the right, or below</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>M</kbd></dt><dd>Maximize the focused pane</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd></dt><dd>Collapse the side panel</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>S</kbd></dt><dd>Save the open brief, memory or skill</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Z</kbd></dt><dd>Undo a delete, while its toast is up</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>/</kbd></dt><dd>Every shortcut on one sheet</dd></div>
             </dl>
           </div>
@@ -690,6 +714,6 @@ npm run build && ./scripts/vibeforge</pre>
       </p>
     </footer>
 
-    <script src="main.js?v=0.8.0" defer></script>
+    <script src="main.js?v=1.2.0" defer></script>
   </body>
 </html>

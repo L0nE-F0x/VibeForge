@@ -1887,6 +1887,126 @@ h2 {
   font: 12px var(--mono);
 }
 
+/* ember: the "your turn" glow, as the app draws it (src/ui/styles/app.css, "ember glow") */
+
+.art-ember {
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.em-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 9px auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  color: var(--fg-2);
+}
+
+.em-row b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.em-row span {
+  overflow: hidden;
+  color: var(--fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.em-row.wants {
+  border-color: var(--focus-line);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent-2) 4%, transparent) 55%, transparent);
+  box-shadow: 0 0 26px -14px var(--accent-2);
+}
+
+.em-row.wants span {
+  color: var(--accent-2);
+}
+
+.em-row.wants::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: color-mix(in srgb, var(--accent-2) 70%, #ffffff);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--accent-2) 70%, transparent), 0 0 14px 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: em-edge 2.2s ease-in-out infinite;
+}
+
+.em-px {
+  width: 7px;
+  height: 7px;
+  justify-self: center;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.em-px.work {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 6px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: em-work 2.4s ease-in-out infinite;
+}
+
+.em-px.lit {
+  width: 9px;
+  height: 9px;
+  background: color-mix(in srgb, var(--accent-2) 70%, #ffffff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 90%, transparent), 0 0 8px 2px color-mix(in srgb, var(--accent-2) 75%, transparent), 0 0 20px 5px color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: em-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes em-breathe {
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 0 4px 0 color-mix(in srgb, var(--accent-2) 40%, transparent), 0 0 10px 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+}
+
+@keyframes em-work {
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 0 2px 0 color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+}
+
+@keyframes em-edge {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* undo: the toast that replaced "are you sure?" */
+
+.art-undo {
+  align-items: center;
+  justify-content: center;
+  min-height: 110px;
+}
+
+.undo-toast {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 12px 12px 16px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-raised);
+  box-shadow: 0 18px 40px -20px rgba(0, 0, 0, 0.8);
+}
+
+.undo-toast b {
+  padding: 5px 10px;
+  border: 1px solid var(--sel-line);
+  background: var(--sel-fill);
+  color: var(--fg);
+  font-weight: 600;
+}
+
 /* agent */
 
 .art-agent {
