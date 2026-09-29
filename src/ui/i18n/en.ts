@@ -12,6 +12,8 @@ export const en = {
   "common.delete": "Delete",
   "common.discard": "Discard",
   "common.dismiss": "Dismiss",
+  "common.undo": "Undo",
+  "common.undoFailed": "Could not undo",
   "common.edit": "Edit",
   "common.new": "New",
   "common.next": "Next",
@@ -293,6 +295,7 @@ export const en = {
   "runs.empty.body": "A run is one process VibeForge started: an agent chat, a routine, a task, or a prompt from Code. Each keeps its prompt, the final screen, a plain-text transcript and a git snapshot of what changed.",
   "runs.notFound": "Run not found",
   "runs.openFolder": "Open the folder",
+  "runs.more": "More for this run",
   "runs.markReviewed": "Mark as reviewed",
   "runs.unreview": "Put it back in Needs review",
 

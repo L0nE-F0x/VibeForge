@@ -607,6 +607,13 @@ export class Store {
     writeFileAtomic(path.join(this.configRoot, "skills", skill.id, "SKILL.md"), skillDocument(skill));
   }
 
+  /** Where a skill, routine or task lives on disk, for moving it aside (see Trash). Null for a bad id. */
+  pathOf(kind: "skill" | "routine" | "task", id: string): string | null {
+    if (!isSafeId(id)) return null;
+    if (kind === "skill") return path.join(this.configRoot, "skills", id);
+    return path.join(this.configRoot, kind === "routine" ? "routines" : "tasks", `${id}.yaml`);
+  }
+
   deleteSkill(id: string): void {
     if (!isSafeId(id)) return;
     fs.rmSync(path.join(this.configRoot, "skills", id), { recursive: true, force: true });

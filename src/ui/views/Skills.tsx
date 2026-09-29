@@ -5,7 +5,7 @@ import { call, useAgents, useSkills } from "../api.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useDropMissing, useNav, useToast, type Route } from "../state.js";
+import { useAction, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
@@ -96,7 +96,7 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
-  const confirm = useConfirm();
+  const deleted = useDeleted();
   const agents = useAgents().data ?? [];
   const [form, setForm, discard] = useDraftState(skill ? `skill:${skill.id}` : "skill:new", {
     name: skill?.name ?? "",
@@ -119,16 +119,9 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   }, "Could not save the skill");
   const [remove, removing] = useAction(async () => {
     if (!skill) return;
-    const users = agents.filter((agent) => agent.skills.includes(skill.id));
-    const ok = await confirm({
-      title: `Delete ${skill.name}?`,
-      body: users.length ? `It is removed from ${users.map((agent) => agent.name).join(", ")} too.` : "No agent has it installed.",
-      confirm: "Delete skill",
-      danger: true,
-    });
-    if (!ok) return;
-    await call("skills.delete", skill.id);
+    const result = await call("skills.delete", skill.id);
     go({ view: "skills" });
+    deleted(`Deleted ${skill.name}`, result);
   }, "Could not delete the skill");
   const [install] = useAction(async (agentId: string, on: boolean) => {
     if (!skill) return;

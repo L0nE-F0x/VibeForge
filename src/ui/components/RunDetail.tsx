@@ -8,6 +8,7 @@ import {
   GitCompare,
   Info,
   ListRestart,
+  MoreHorizontal,
   RotateCcw,
   ScrollText,
   Square,
@@ -19,7 +20,7 @@ import { duration, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
-import { Button, Chip, Empty, Notice, Spinner, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT } from "../i18n/index.js";
 
 export const ORIGIN_LABEL: Record<RunView["origin"], string> = {
@@ -148,8 +149,8 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
     return (
-      <div className="empty">
-        <Spinner />
+      <div className="main">
+        <Skeleton page rows={6} />
       </div>
     );
   }
@@ -177,26 +178,33 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
             Open in {place.view === "agents" ? "agent" : place.view === "chat" ? "chat" : place.view === "tasks" ? "task" : "workspace"}
           </Button>
         )}
-        <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", run.cwd)} title={t("runs.openFolder")} />
         {run.status === "running" ? (
           <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
             Stop
           </Button>
         ) : (
-          <>
-            <Button
-              size="sm"
-              icon={run.openedAt ? ListRestart : CheckCheck}
-              onClick={() => void call("runs.markOpened", run.id, !run.openedAt)}
-              title={run.openedAt ? t("runs.unreview") : t("runs.markReviewed")}
-            >
-              {run.openedAt ? "Unreview" : "Reviewed"}
-            </Button>
-            <Button size="sm" variant="primary" icon={RotateCcw} busy={continuing} onClick={() => void cont()}>
-              Continue
-            </Button>
-          </>
+          <Button size="sm" variant="primary" icon={RotateCcw} busy={continuing} onClick={() => void cont()}>
+            Continue
+          </Button>
         )}
+        <MenuButton
+          size="sm"
+          variant="ghost"
+          icon={MoreHorizontal}
+          title={t("runs.more")}
+          items={[
+            { label: t("runs.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", run.cwd) },
+            ...(run.status === "running"
+              ? []
+              : [
+                  {
+                    label: run.openedAt ? t("runs.unreview") : t("runs.markReviewed"),
+                    icon: run.openedAt ? ListRestart : CheckCheck,
+                    onSelect: () => void call("runs.markOpened", run.id, !run.openedAt),
+                  },
+                ]),
+          ]}
+        />
       </div>
       <Tabs
         value={tab}

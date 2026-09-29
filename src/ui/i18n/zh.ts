@@ -11,6 +11,8 @@ export const zh: Catalog = {
   "common.continue": "继续",
   "common.delete": "删除",
   "common.dismiss": "关闭",
+  "common.undo": "撤销",
+  "common.undoFailed": "无法撤销",
   "common.edit": "编辑",
   "common.new": "新建",
   "common.next": "下一步",
@@ -285,6 +287,7 @@ export const zh: Catalog = {
   "runs.empty.body": "一次运行就是 VibeForge 启动的一个进程：智能体聊天、例行任务、任务，或来自代码的提示词。每次运行都会保留提示词、最后的画面、纯文本记录，以及变更内容的 git 快照。",
   "runs.notFound": "找不到这次运行",
   "runs.openFolder": "打开文件夹",
+  "runs.more": "此运行的更多操作",
   "runs.markReviewed": "标记为已审阅",
   "runs.unreview": "放回待审阅",
 

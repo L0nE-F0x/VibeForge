@@ -1,10 +1,11 @@
 import { History, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { RunView } from "../../shared/api.js";
+import { dayHeading, dayKey } from "../../shared/text.js";
 import { call, useInbox, useQuery } from "../api.js";
 import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Empty, Input, Segmented } from "../components/ui.js";
+import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
@@ -68,14 +69,22 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
           </div>
         )}
         <div className="list-scroll list-compact">
-          {runs.length === 0 && (
+          {!(filter === "review" ? inbox.loaded : all.loaded) && <Skeleton rows={6} />}
+          {(filter === "review" ? inbox.loaded : all.loaded) && runs.length === 0 && (
             <div className="faint" style={{ padding: "14px 10px" }}>
               {filter === "review" ? "Nothing waiting for review." : filter === "live" ? "Nothing is running." : "No runs yet."}
             </div>
           )}
-          {runs.map((run) => (
-            <RunRow key={run.id} run={run} compact selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
-          ))}
+          {runs.map((run, index) => {
+            const day = dayKey(run.startedAt);
+            const heading = index === 0 || dayKey(runs[index - 1].startedAt) !== day;
+            return (
+              <Fragment key={run.id}>
+                {heading && <div className="list-day">{dayHeading(run.startedAt, t.language)}</div>}
+                <RunRow run={run} compact selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
+              </Fragment>
+            );
+          })}
         </div>
       </SidePanel>
       {selected ? (

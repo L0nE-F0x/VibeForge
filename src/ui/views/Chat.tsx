@@ -5,8 +5,8 @@ import type { ChatView as Chat } from "../../shared/api.js";
 import { call, useChats, useEngines, useSettings } from "../api.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Button, Chip, Input, TimeAgo } from "../components/ui.js";
-import { useAction, useConfirm, useDropMissing, useNav, type Route } from "../state.js";
+import { Button, Chip, Input, Skeleton, TimeAgo } from "../components/ui.js";
+import { useAction, useConfirm, useDeleted, useDropMissing, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
@@ -14,6 +14,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const t = useT();
   const { go } = useNav();
   const confirm = useConfirm();
+  const deleted = useDeleted();
   const chatList = useChats(null);
   const chats = chatList.data ?? [];
   const engines = useEngines().data ?? [];
@@ -42,15 +43,19 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
     setRenaming(false);
   }, "Could not rename");
   const [remove] = useAction(async (target: Chat) => {
-    const ok = await confirm({
-      title: `Delete "${target.title}"?`,
-      body: "Its scratch folder and transcripts are deleted. The run records stay in Runs.",
-      confirm: "Delete chat",
-      danger: true,
-    });
-    if (!ok) return;
-    await call("chats.delete", target.id);
+    // Deleting is undone from the toast. Only a live session asks first: stopping it can't be undone.
+    if (target.live) {
+      const ok = await confirm({
+        title: `Delete "${target.title}"?`,
+        body: "Its session is still going and will be stopped. The chat itself can be undone.",
+        confirm: "Stop and delete",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const result = await call("chats.delete", target.id);
     if (target.id === route.chatId) go({ view: "chat" });
+    deleted(`Deleted "${target.title}"`, result);
   }, "Could not delete the chat");
   const [switchEngine] = useAction(async (next: string) => {
     if (chat) await call("chats.setEngine", chat.id, next);
@@ -85,7 +90,8 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
         }
       >
         <div className="list-scroll">
-          {chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
+          {!chatList.loaded && <Skeleton rows={5} />}
+          {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
           {chats.map((item) => (
             <div
               key={item.id}

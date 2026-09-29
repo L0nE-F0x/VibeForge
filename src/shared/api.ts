@@ -41,6 +41,9 @@ import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
+import type { Deleted } from "../core/team-service.js";
+
+export type { Deleted };
 
 export type {
   Agent,
@@ -276,19 +279,19 @@ export interface DeskMethods {
 
   "skills.list": () => Skill[];
   "skills.save": (input: SkillInput) => Skill;
-  "skills.delete": (id: string) => void;
+  "skills.delete": (id: string) => Deleted;
   "skills.setAgents": (skillId: string, agentIds: string[]) => void;
 
   "routines.list": () => RoutineView[];
   "routines.save": (input: RoutineInput) => Routine;
-  "routines.delete": (id: string) => void;
+  "routines.delete": (id: string) => Deleted;
   "routines.setEnabled": (id: string, enabled: boolean) => Routine;
   "routines.runNow": (id: string, size?: TermSize) => Launched;
   "routines.preview": (schedule: Schedule) => SchedulePreview;
 
   "tasks.list": () => TaskView[];
   "tasks.save": (input: TaskInput) => TaskView;
-  "tasks.delete": (id: string) => void;
+  "tasks.delete": (id: string) => Deleted;
   "tasks.execute": (id: string, size?: TermSize) => Launched;
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
@@ -298,7 +301,9 @@ export interface DeskMethods {
   "chats.create": (input: { agentId?: string | null; engine?: string }) => ChatView;
   "chats.rename": (id: string, title: string) => ChatView;
   "chats.setEngine": (id: string, engine: string) => ChatView;
-  "chats.delete": (id: string) => void;
+  "chats.delete": (id: string) => Deleted;
+  /** Put back what a delete removed, while its Undo is still offered. */
+  "undo.delete": (token: string) => void;
   "chats.send": (id: string, text: string, size?: TermSize) => SendResult;
   "chats.continue": (id: string, size?: TermSize) => SendResult;
   "chats.stop": (id: string) => void;

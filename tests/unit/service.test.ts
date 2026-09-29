@@ -206,6 +206,62 @@ describe("chats", () => {
   });
 });
 
+describe("undo", () => {
+  it("puts back a deleted skill, routine, task and chat, with what went with them", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const skill = ctx.svc.saveSkill({ name: "Review", body: "Read the diff first." });
+    ctx.svc.setSkillAgents(skill.id, [agent.id]);
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id });
+    const chat = ctx.svc.createChat({ engine: "pasty" });
+    const sent = await ctx.svc.sendChat(chat.id, "hi");
+    await ctx.exit(sent.ptyId);
+    const run = ctx.svc.getRun(sent.runId).run;
+    fs.writeFileSync(path.join(run.dir, "transcript.txt"), "what was said");
+
+    const deleted = [
+      ctx.svc.deleteSkill(skill.id),
+      ctx.svc.deleteRoutine(routine.id),
+      await ctx.svc.deleteTask(task.id),
+      await ctx.svc.deleteChat(chat.id),
+    ];
+    expect(ctx.svc.store.getSkill(skill.id)).toBeNull();
+    expect(ctx.svc.store.getAgent(agent.id)?.skills).toEqual([]);
+    expect(ctx.svc.store.getRoutine(routine.id)).toBeNull();
+    expect(ctx.svc.store.getTask(task.id)).toBeNull();
+    expect(ctx.svc.listChats()).toEqual([]);
+    expect(fs.existsSync(run.cwd)).toBe(false);
+    expect(fs.existsSync(path.join(run.dir, "transcript.txt"))).toBe(false);
+
+    for (const { undo } of deleted) ctx.svc.undoDelete(undo);
+    expect(ctx.svc.store.getSkill(skill.id)?.body).toContain("Read the diff first.");
+    expect(ctx.svc.store.getAgent(agent.id)?.skills).toEqual([skill.id]);
+    expect(ctx.svc.store.getRoutine(routine.id)?.name).toBe("Notes");
+    expect(ctx.svc.store.getTask(task.id)?.title).toBe("Edit");
+    expect(ctx.svc.listChats().map((item) => item.id)).toEqual([chat.id]);
+    expect(fs.existsSync(run.cwd)).toBe(true);
+    expect(fs.readFileSync(path.join(run.dir, "transcript.txt"), "utf8")).toBe("what was said");
+    expect(() => ctx.svc.undoDelete(deleted[0].undo)).toThrow(/too late/);
+    ctx.svc.close();
+  });
+
+  it("keeps a delete from an earlier session deleted", async () => {
+    const ctx = setup();
+    const skill = ctx.svc.saveSkill({ name: "Review" });
+    const { undo } = ctx.svc.deleteSkill(skill.id);
+    expect(fs.readdirSync(path.join(ctx.dataRoot, "trash"))).toHaveLength(1);
+    // The app closes while the Undo is still up: the delete stands.
+    ctx.svc.close();
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    expect(fs.existsSync(path.join(ctx.dataRoot, "trash"))).toBe(false);
+    expect(next.svc.store.getSkill(skill.id)).toBeNull();
+    expect(() => next.svc.undoDelete(undo)).toThrow(/too late/);
+    next.svc.close();
+  });
+});
+
 describe("routines", () => {
   it("fires one fresh run per slot, never overlaps, and records slots missed while closed", async () => {
     const ctx = setup({ appStartedAt: new Date(9 * INTERVAL) });

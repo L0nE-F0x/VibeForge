@@ -10,6 +10,8 @@ export const pt: Catalog = {
   "common.continue": "Continuar",
   "common.delete": "Excluir",
   "common.dismiss": "Dispensar",
+  "common.undo": "Desfazer",
+  "common.undoFailed": "Não foi possível desfazer",
   "common.edit": "Editar",
   "common.new": "Novo",
   "common.next": "Próximo",
@@ -284,6 +286,7 @@ export const pt: Catalog = {
   "runs.empty.body": "Uma execução é um processo que o VibeForge iniciou: um chat de agente, uma rotina, uma tarefa ou um prompt em Código. Cada uma guarda o prompt, a tela final, uma transcrição em texto e um snapshot do git do que mudou.",
   "runs.notFound": "Execução não encontrada",
   "runs.openFolder": "Abrir a pasta",
+  "runs.more": "Mais opções desta execução",
   "runs.markReviewed": "Marcar como revisada",
   "runs.unreview": "Voltar para Aguardando revisão",
 

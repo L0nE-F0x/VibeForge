@@ -11,6 +11,8 @@ export const fr: Catalog = {
   "common.continue": "Continuer",
   "common.delete": "Supprimer",
   "common.dismiss": "Ignorer",
+  "common.undo": "Annuler",
+  "common.undoFailed": "Impossible d’annuler",
   "common.edit": "Modifier",
   "common.new": "Nouveau",
   "common.next": "Suivant",
@@ -285,6 +287,7 @@ export const fr: Catalog = {
   "runs.empty.body": "Une exécution est un processus lancé par VibeForge : un chat d'agent, une routine, une tâche ou un prompt depuis Code. Chacune garde son prompt, l'écran final, une transcription en texte brut et un instantané git de ce qui a changé.",
   "runs.notFound": "Exécution introuvable",
   "runs.openFolder": "Ouvrir le dossier",
+  "runs.more": "Plus pour cette exécution",
   "runs.markReviewed": "Marquer comme relue",
   "runs.unreview": "Remettre dans À relire",
 

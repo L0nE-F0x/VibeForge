@@ -5,7 +5,7 @@ import { clockTime } from "../../shared/text.js";
 import { call, useAgents, useRoutines } from "../api.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { useAction, useDeleted, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
@@ -27,7 +27,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
-  const confirm = useConfirm();
+  const deleted = useDeleted();
   const routines = useRoutines();
   const agents = useAgents().data ?? [];
   const [editing, setEditing] = useState<RoutineView | "new" | null>(null);
@@ -45,8 +45,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   }, "Could not run the routine");
   const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), "Could not change the routine");
   const [remove] = useAction(async (routine: RoutineView) => {
-    const ok = await confirm({ title: `Delete ${routine.name}?`, body: "The schedule is removed. Its past runs stay in Runs.", confirm: "Delete routine", danger: true });
-    if (ok) await call("routines.delete", routine.id);
+    deleted(`Deleted ${routine.name}`, await call("routines.delete", routine.id));
   }, "Could not delete the routine");
 
   return (

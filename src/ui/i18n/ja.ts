@@ -11,6 +11,8 @@ export const ja: Catalog = {
   "common.continue": "続ける",
   "common.delete": "削除",
   "common.dismiss": "閉じる",
+  "common.undo": "元に戻す",
+  "common.undoFailed": "元に戻せませんでした",
   "common.edit": "編集",
   "common.new": "新規",
   "common.next": "次へ",
@@ -285,6 +287,7 @@ export const ja: Catalog = {
   "runs.empty.body": "実行とは、VibeForge が起動したひとつのプロセスです。エージェントとのチャット、ルーティン、タスク、コードからのプロンプトなど。それぞれにプロンプト、最後の画面、テキストの記録、変更内容の git スナップショットが残ります。",
   "runs.notFound": "実行が見つかりません",
   "runs.openFolder": "フォルダーを開く",
+  "runs.more": "この実行のその他の操作",
   "runs.markReviewed": "レビュー済みにする",
   "runs.unreview": "レビュー待ちに戻す",
 

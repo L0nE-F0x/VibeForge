@@ -1,5 +1,5 @@
 import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
-import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
@@ -224,6 +224,35 @@ function Rail() {
   const { visible } = railViews(rail);
   const hide = (view: RailView) => void call("settings.save", { rail: { order: rail?.order ?? [], hidden: [...(rail?.hidden ?? []), view] } });
 
+  // One marker for the open view, which slides from button to button instead of jumping.
+  const navRef = useRef<HTMLElement>(null);
+  const [marker, setMarker] = useState<{ box: { left: number; top: number; height: number } | null; glides: boolean }>({ box: null, glides: false });
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const place = () => {
+      const current = nav.querySelector<HTMLElement>('.rail-btn[aria-current="page"]');
+      const box = current ? { left: current.offsetLeft - 7, top: current.offsetTop + 9, height: current.offsetHeight - 18 } : null;
+      setMarker((prev) =>
+        prev.box?.left === box?.left && prev.box?.top === box?.top && prev.box?.height === box?.height
+          ? prev
+          : // The first placement lands in place; after that it glides.
+            { box, glides: prev.box !== null && box !== null },
+      );
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [route.view, visible.map((item) => item.view).join()]);
+
+  /** What wants you in a view: Code's workspaces, and agent or plain chats. */
+  const attentionFor = (view: ViewName): Attention[] => {
+    if (view === "code") return [...attention.values()];
+    if (view !== "agents" && view !== "chat") return [];
+    return [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (view === "agents")).map((mark) => mark.attention);
+  };
+
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
     if (view === "tasks") return review;
@@ -231,17 +260,19 @@ function Rail() {
   };
 
   return (
-    <nav className="rail" aria-label="Views">
+    <nav ref={navRef} className="rail" aria-label="Views">
+      <span className={`rail-marker${marker.glides ? " glides" : ""}`} style={marker.box ? { transform: `translate(${marker.box.left}px, ${marker.box.top}px)`, height: marker.box.height } : { opacity: 0 }} aria-hidden />
       <button type="button" className="rail-logo" aria-label={t("switcher.title")} {...tipProps(t("switcher.title"), { kbd: "Ctrl+K", side: "right" })} onClick={() => window.dispatchEvent(new Event(OPEN_SWITCHER_EVENT))}>
         <Logo size={22} />
       </button>
       {visible.map((item, index) => {
         const count = badge(item.view);
+        const marks = attentionFor(item.view);
         return (
           <button
             key={item.view}
             type="button"
-            className="rail-btn"
+            className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
             {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
@@ -254,7 +285,7 @@ function Rail() {
             <item.icon size={19} strokeWidth={1.9} />
             <span>{t(item.label)}</span>
             {count > 0 && <span className="rail-badge">{count > 99 ? "99+" : count}</span>}
-            <RailDot marks={item.view === "code" ? [...attention.values()] : item.view === "agents" || item.view === "chat" ? [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (item.view === "agents")).map((mark) => mark.attention) : []} />
+            <RailDot marks={marks} />
           </button>
         );
       })}
