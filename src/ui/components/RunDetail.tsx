@@ -20,7 +20,7 @@ import { duration, tildify } from "../../shared/text.js";
 import { call, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
-import { Button, Chip, Empty, MenuButton, Notice, Spinner, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT } from "../i18n/index.js";
 
 export const ORIGIN_LABEL: Record<RunView["origin"], string> = {
@@ -149,8 +149,8 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
     return (
-      <div className="empty">
-        <Spinner />
+      <div className="main">
+        <Skeleton page rows={6} />
       </div>
     );
   }

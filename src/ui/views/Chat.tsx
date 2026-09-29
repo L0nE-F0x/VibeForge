@@ -5,7 +5,7 @@ import type { ChatView as Chat } from "../../shared/api.js";
 import { call, useChats, useEngines, useSettings } from "../api.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Button, Chip, Input, TimeAgo } from "../components/ui.js";
+import { Button, Chip, Input, Skeleton, TimeAgo } from "../components/ui.js";
 import { useAction, useConfirm, useDropMissing, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
 import { useT } from "../i18n/index.js";
@@ -85,7 +85,8 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
         }
       >
         <div className="list-scroll">
-          {chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
+          {!chatList.loaded && <Skeleton rows={5} />}
+          {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
           {chats.map((item) => (
             <div
               key={item.id}

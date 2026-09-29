@@ -5,7 +5,7 @@ import { dayHeading, dayKey } from "../../shared/text.js";
 import { call, useInbox, useQuery } from "../api.js";
 import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Empty, Input, Segmented } from "../components/ui.js";
+import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
@@ -69,7 +69,8 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
           </div>
         )}
         <div className="list-scroll list-compact">
-          {runs.length === 0 && (
+          {!(filter === "review" ? inbox.loaded : all.loaded) && <Skeleton rows={6} />}
+          {(filter === "review" ? inbox.loaded : all.loaded) && runs.length === 0 && (
             <div className="faint" style={{ padding: "14px 10px" }}>
               {filter === "review" ? "Nothing waiting for review." : filter === "live" ? "Nothing is running." : "No runs yet."}
             </div>

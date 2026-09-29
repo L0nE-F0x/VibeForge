@@ -21,7 +21,7 @@ import { tildify } from "../../shared/text.js";
 import { call, errorText, on, useAppInfo } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
-import { Button, Input, Spinner } from "../components/ui.js";
+import { Button, Input, Skeleton } from "../components/ui.js";
 import { boxOf } from "../floating.js";
 import { useT } from "../i18n/index.js";
 import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
@@ -116,7 +116,7 @@ function TreeLevel({
       cancelled = true;
     };
   }, [dir, refreshKey]);
-  if (!nodes) return depth === 0 ? <div style={{ padding: 10 }}><Spinner /></div> : null;
+  if (!nodes) return depth === 0 ? <Skeleton rows={5} /> : null;
   if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>Empty folder.</div>;
   return (
     <>

@@ -203,6 +203,32 @@ export function Spinner() {
   return <span className="spinner" />;
 }
 
+const SKELETON_WIDTHS = [[72, 46], [58, 38], [80, 52], [64, 30], [50, 42]];
+
+/**
+ * Stand-in rows while a list or page loads, shaped like what is coming so nothing jumps when it
+ * lands. They stay invisible for the first moment, so a quick local read never flickers.
+ */
+export function Skeleton({ rows = 4, page }: { rows?: number; page?: boolean }) {
+  return (
+    <div className={cx("skeleton", page && "is-page")} aria-hidden>
+      {page && <span className="skeleton-head" />}
+      {Array.from({ length: rows }, (_, index) => {
+        const [first, second] = SKELETON_WIDTHS[index % SKELETON_WIDTHS.length];
+        return (
+          <div key={index} className="skeleton-row">
+            <span className="skeleton-pixel" />
+            <span className="skeleton-lines">
+              <span style={{ width: `${first}%` }} />
+              <span style={{ width: `${second}%` }} />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Avatar({ name, size }: { name: string; size?: "lg" }) {
   return <span className={cx("avatar", size)}>{initials(name)}</span>;
 }

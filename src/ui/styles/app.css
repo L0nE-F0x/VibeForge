@@ -529,6 +529,75 @@ button:disabled {
   border-color: transparent !important;
 }
 
+/* Stand-ins while something loads (ui.tsx Skeleton). Invisible for the first moment, then a slow
+   sweep of light across flat blocks, so a long read looks alive and a short one shows nothing. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  animation: skeleton-in 0.2s ease-out 0.15s both;
+}
+
+.skeleton.is-page {
+  padding: 22px 24px;
+  gap: 12px;
+}
+
+.skeleton-head {
+  width: 38%;
+  height: 18px;
+  margin-bottom: 10px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+}
+
+.skeleton-pixel {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+
+.skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-lines > span {
+  height: 8px;
+}
+
+.skeleton-head,
+.skeleton-pixel,
+.skeleton-lines > span {
+  display: block;
+  background: linear-gradient(90deg, var(--fill-2) 0%, color-mix(in srgb, var(--accent) 9%, var(--fill-2)) 50%, var(--fill-2) 100%);
+  background-size: 300% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 /* A day in a long list. It stays at the top while its runs scroll under it. */
 .list-day {
   position: sticky;
