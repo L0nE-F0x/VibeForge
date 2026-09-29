@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+- **What needs you glows like an ember.** A workspace or chat waiting for you is lit, not ringed: a bright core with a soft bloom around it, which flares once when it starts waiting and then breathes. Its row warms from a glowing left edge, and the view's own icon in the rail lights up too. A CLI at work is a slower ember, and a finished one glows green for a moment before it settles. With reduced motion on, the glow stays and the movement goes.
+- **Runs read by project, a day at a time.** The Runs list has a heading for each day (Today, Yesterday, then the weekday and the date), and a Code run leads with its project, with the CLI on the line under it.
+- **A quieter run header.** Continue or Stop, and Open in workspace, stay in view. Opening the folder and marking a run reviewed moved into the … menu.
+- **Things move instead of jumping.** The rail's marker slides to the view you open, a list's highlight slides to the row you pick, and views fade in. ↑/↓ now also move through the Runs list.
+- **The terminals you're not typing in step back.** In a split, the other panes dim a little; hovering one brings it forward.
+- **Loading looks like what's coming.** Lists and a run's page show placeholder rows while they load, instead of a spinner or an early "No runs yet". A quick load shows nothing at all.
+- **Undo instead of "are you sure?".** Deleting a chat, task, skill or routine happens at once, with Undo on the toast (or Ctrl+Z) for a few seconds. Only a chat or task that is still running asks first, since stopping it can't be undone.
 ## [1.1.0] - 2026-09-29
 
 **What a run changed stays with it, and a link in Code opens beside the terminal.**

@@ -2,6 +2,10 @@
 
 Updated for 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the side browser, Open in workspace goes to the run's own workspace, and a CLI started with a prompt glows after its first turn; see `CHANGELOG.md`. Before that, 1.0.0 (2026-09-28): the 1.0 audit's fixes and Electron 44; see `status.md` ("The 1.0 audit").
 
+## On `feat/ember-and-calm` (for 1.2.0)
+
+A look-and-feel pass, committed one change per commit and opened as a pull request on 2026-09-29, after the founder ran the build (see `CHANGELOG.md` → Unreleased): the ember glow, runs grouped by day with the project first, a quieter run header, sliding selection and rail marker, views that fade in, unfocused split terminals that step back, loading placeholders, and Undo instead of "are you sure?" for chats, tasks, skills and routines (`src/core/trash.ts`; a delete waits 30 s in `<data>/trash`, which is emptied at start and on close). 158 tests and the typecheck pass; checked on a scratch build on the hidden workspace (glow, Runs list and menu, Undo button and Ctrl+Z, the glide's cleanup with no frames, ↑/↓ in Runs). The founder restarted onto this build before the release. The launch-video kit for 1.2 (post text and a 44 s film) is in `~/Pictures/VibeForge 1.2/`; post it after `v1.2.0` is published.
+
 ## Next up
 
 **Voice** shipped in 0.5.0, and 0.8.0 made it hold-to-talk (see `status.md` and `CHANGELOG.md`). Still to try for real:
@@ -19,10 +23,10 @@ Updated for 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the sid
 - [ ] **Token usage from more CLIs**: Kimi's session logs weren't read (its plan limits are in 0.7.0), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush weren't looked at.
 - [ ] **Translate the rest of the UI.** The forms in Agents, Tasks, Routines and Skills, the engine editor, run details, Home, toast messages, and the errors the main process sends (`src/core/team-service.ts`) are still English. Relative times ("5m ago", `src/shared/text.ts`) should use `Intl.RelativeTimeFormat` in the chosen language. Add each key to `src/ui/i18n/en.ts` first; the typecheck then lists every language that needs it.
 - [ ] **Release notes on each tag.** `gh release create vX.Y.Z --notes-file …` after bumping `package.json`; the in-app Update shows those notes.
-- [ ] **Undo instead of "are you sure?"** for deleting chats, tasks, skills and routines: delete at once and offer Undo on the toast (the last item from the 2026-09-28 flow audit). Needs a soft delete in `src/core`.
 
 ## Parked
 
+- [ ] **A phone companion** (on the roadmap): a PWA served by VibeForge over Tailscale only, off by default, to see who's waiting, the runs inbox and plan limits (then maybe reply, Continue or Stop). Parked 2026-09-29 while the founder reads up on Tailscale. Open questions: Tailscale or not, a desktop that stays on or a laptop that suspends, and see-only or drive.
 - [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
 
 ## Known rough edges
