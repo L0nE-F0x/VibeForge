@@ -5,8 +5,10 @@
  * or a different accent works without new CSS.
  *
  * Look: Omarchy's. Square corners, monospace text with Geist for headings, flat surfaces with
- * one-pixel borders, and pixel art (see components/Pixel.tsx) instead of soft glows. The
+ * one-pixel borders, and pixel art (see components/Pixel.tsx) instead of soft shadows. The
  * accent gradient is kept for the edges of floating things, as the Omarchy shell draws them.
+ * Light is kept for the few things that are alive: a pixel that is working, or waiting for you,
+ * glows like an ember (see "ember glow").
  *
  * Interaction language, borrowed from the Apex Forge shell theme:
  *   idle      recedes: 3% fill, ash border
@@ -48,6 +50,11 @@
   --press-fill: color-mix(in srgb, var(--accent) 28%, transparent);
   --gradient: linear-gradient(45deg, var(--accent), var(--accent-2));
   --gradient-soft: linear-gradient(45deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
+  /* Ember glow: a hot core, a close halo of the second accent, and a wide bloom of the first. */
+  --ember-core: color-mix(in srgb, var(--accent-2) 70%, #ffffff);
+  --ember-lit: 0 0 0 1px color-mix(in srgb, var(--accent-2) 90%, transparent), 0 0 8px 2px color-mix(in srgb, var(--accent-2) 75%, transparent), 0 0 20px 5px color-mix(in srgb, var(--accent) 45%, transparent);
+  --ember-low: 0 0 0 1px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 0 4px 0 color-mix(in srgb, var(--accent-2) 40%, transparent), 0 0 10px 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  --ember-flare: 0 0 0 2px color-mix(in srgb, var(--accent-2) 95%, transparent), 0 0 12px 4px color-mix(in srgb, var(--accent-2) 85%, transparent), 0 0 34px 10px color-mix(in srgb, var(--accent) 55%, transparent);
   --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 22px -6px color-mix(in srgb, var(--accent) 70%, transparent);
   --scrim: color-mix(in srgb, var(--bg-deep) 62%, transparent);
   --shadow: 0 24px 70px -24px rgba(0, 0, 0, 0.75);
@@ -373,11 +380,22 @@ button:disabled {
 }
 
 .rail-dot.waiting {
-  animation: needs-you 1.4s ease-in-out infinite;
+  background: var(--ember-core);
+  box-shadow: var(--ember-lit);
+  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
 }
 
 .rail-dot.done {
   background: var(--green);
+  box-shadow: var(--done-rest);
+  animation: afterglow 2.6s ease-out;
+}
+
+/* The view's own icon lights up while something in it waits for you. */
+.rail-btn.wants-you > svg {
+  color: var(--accent-2);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-2) 80%, transparent)) drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 45%, transparent));
+  animation: ember-icon 2.2s ease-in-out infinite;
 }
 
 .rail-foot {
@@ -981,8 +999,8 @@ button:disabled {
 
 .dot.running {
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-  animation: pulse 1.8s ease-in-out infinite;
+  box-shadow: var(--work-lit);
+  animation: ember-work 2.4s ease-in-out infinite;
 }
 
 .dot.exited {
@@ -2034,20 +2052,23 @@ button.rail-logo:focus-visible {
 
 .ws-state.working {
   background: var(--accent);
-  animation: pulse 1.8s ease-in-out infinite;
+  box-shadow: var(--work-lit);
+  animation: ember-work 2.4s ease-in-out infinite;
 }
 
 .ws-state.waiting {
   width: 9px;
   height: 9px;
   margin: 0 2px;
-  background: var(--accent-2);
-  animation: needs-you 1.4s ease-in-out infinite;
+  background: var(--ember-core);
+  box-shadow: var(--ember-lit);
+  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
 }
 
 .ws-state.done {
   background: var(--green);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 20%, transparent);
+  box-shadow: var(--done-rest);
+  animation: afterglow 2.6s ease-out;
 }
 
 .ws-state.in-strip {
@@ -2058,18 +2079,98 @@ button.rail-logo:focus-visible {
   outline: 2px solid var(--bg-dark);
 }
 
-.needs-you {
-  border-color: var(--focus-line) !important;
-  box-shadow: inset 2px 0 0 var(--accent-2), 0 0 22px -10px var(--accent-2);
+/* ------------------------------------------------------------------ ember glow
+ * What asks for you is lit, not ringed. Working is a slow ember in the first accent. Waiting is
+ * a brighter core in the second, which flares once when it starts and then breathes. Done is a
+ * green afterglow that settles to a quiet pixel. Reduced motion keeps the light and drops the motion.
+ */
+
+:root {
+  --work-lit: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 6px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  --work-low: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 0 2px 0 color-mix(in srgb, var(--accent) 25%, transparent);
+  --done-rest: 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent), 0 0 5px 0 color-mix(in srgb, var(--green) 30%, transparent);
 }
 
-@keyframes needs-you {
+/* A row that waits for you: warmth from its left edge, and an edge that is itself lit. */
+.needs-you {
+  position: relative;
+  border-color: var(--focus-line) !important;
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 14%, transparent), color-mix(in srgb, var(--accent-2) 4%, transparent) 55%, transparent) !important;
+  box-shadow: 0 0 26px -14px var(--accent-2);
+}
+
+.needs-you::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--ember-core);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--accent-2) 70%, transparent), 0 0 14px 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: ember-edge 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes ember-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-2) 35%, transparent), 0 0 10px color-mix(in srgb, var(--accent-2) 60%, transparent);
+    box-shadow: var(--ember-lit);
   }
   50% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-2) 8%, transparent), 0 0 4px color-mix(in srgb, var(--accent-2) 30%, transparent);
+    box-shadow: var(--ember-low);
+  }
+}
+
+@keyframes ember-flare {
+  0% {
+    box-shadow: var(--ember-flare);
+    transform: scale(1.4);
+  }
+  100% {
+    box-shadow: var(--ember-lit);
+    transform: none;
+  }
+}
+
+@keyframes ember-work {
+  0%,
+  100% {
+    box-shadow: var(--work-lit);
+  }
+  50% {
+    box-shadow: var(--work-low);
+  }
+}
+
+@keyframes ember-edge {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes ember-icon {
+  50% {
+    filter: drop-shadow(0 0 2px color-mix(in srgb, var(--accent-2) 55%, transparent)) drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 20%, transparent));
+  }
+}
+
+@keyframes afterglow {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 80%, transparent), 0 0 12px 3px color-mix(in srgb, var(--green) 65%, transparent), 0 0 26px 6px color-mix(in srgb, var(--green) 28%, transparent);
+  }
+  100% {
+    box-shadow: var(--done-rest);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-state,
+  .rail-dot,
+  .dot,
+  .needs-you::before,
+  .rail-btn.wants-you > svg {
+    animation: none !important;
   }
 }
 

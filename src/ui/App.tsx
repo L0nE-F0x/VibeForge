@@ -224,6 +224,13 @@ function Rail() {
   const { visible } = railViews(rail);
   const hide = (view: RailView) => void call("settings.save", { rail: { order: rail?.order ?? [], hidden: [...(rail?.hidden ?? []), view] } });
 
+  /** What wants you in a view: Code's workspaces, and agent or plain chats. */
+  const attentionFor = (view: ViewName): Attention[] => {
+    if (view === "code") return [...attention.values()];
+    if (view !== "agents" && view !== "chat") return [];
+    return [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (view === "agents")).map((mark) => mark.attention);
+  };
+
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
     if (view === "tasks") return review;
@@ -237,11 +244,12 @@ function Rail() {
       </button>
       {visible.map((item, index) => {
         const count = badge(item.view);
+        const marks = attentionFor(item.view);
         return (
           <button
             key={item.view}
             type="button"
-            className="rail-btn"
+            className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
             {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
@@ -254,7 +262,7 @@ function Rail() {
             <item.icon size={19} strokeWidth={1.9} />
             <span>{t(item.label)}</span>
             {count > 0 && <span className="rail-badge">{count > 99 ? "99+" : count}</span>}
-            <RailDot marks={item.view === "code" ? [...attention.values()] : item.view === "agents" || item.view === "chat" ? [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (item.view === "agents")).map((mark) => mark.attention) : []} />
+            <RailDot marks={marks} />
           </button>
         );
       })}
