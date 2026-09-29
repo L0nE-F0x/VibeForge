@@ -1851,6 +1851,19 @@ button.rail-logo:focus-visible {
   z-index: 2;
 }
 
+/* In a split, the terminals you're not typing in step back a little; hovering one brings it forward. */
+.term-host {
+  transition: opacity 0.2s ease-out;
+}
+
+.split .pane:not(.focused) .term-host {
+  opacity: 0.72;
+}
+
+.split .pane:not(.focused):hover .term-host {
+  opacity: 0.9;
+}
+
 .pane-head {
   height: 34px;
   flex: none;
