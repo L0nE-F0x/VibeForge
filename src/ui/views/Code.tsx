@@ -226,9 +226,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     };
   }, [opened, current, startPane]);
 
-  // Jumping here for a specific session: focus its pane, or give it one.
+  // Jumping here for a specific session: focus its pane, or give it one. The switch to the
+  // route's workspace lands a render later, so until then `current` is the one being left.
   useEffect(() => {
     if (!route?.ptyId || !current) return;
+    if (route.workspaceId && route.workspaceId !== current.id) return;
     const layout = layouts[current.id];
     if (layout === undefined) return;
     const owner = (layout ? panesOf(layout) : []).find((pane) => runtime[pane.id]?.ptyId === route.ptyId);
@@ -242,7 +244,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     adopt(current, session.ptyId, session.runId, session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: engineOfTitle(session.title) });
     go({ view: "code", workspaceId: current.id });
     // Adoption runs once per requested session.
-  }, [route?.ptyId, current?.id, layouts[current?.id ?? ""]]);
+  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""]]);
 
   function engineOfTitle(title: string): string {
     return engines.find((engine) => title.startsWith(engine.label))?.id ?? settings?.defaultEngine ?? "";
