@@ -4,7 +4,7 @@ import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
 import { Button, Chip, Field, Input, Notice, Select, Sheet, StatusChip, TextArea, TimeAgo } from "../components/ui.js";
-import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { useAction, useConfirm, useDeleted, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
@@ -147,6 +147,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
+  const deleted = useDeleted();
   const agents = useAgents().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const fontSize = useSettings().data?.terminalFontSize ?? 13;
@@ -196,10 +197,14 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   }, "Could not add the folder");
   const [remove] = useAction(async () => {
     if (!task) return;
-    const ok = await confirm({ title: `Delete "${task.title}"?`, body: "Its runs stay in Runs.", confirm: "Delete task", danger: true });
-    if (!ok) return;
-    await call("tasks.delete", task.id);
+    // Deleting is undone from the toast. A running task asks first: stopping it can't be undone.
+    if (task.status === "running") {
+      const ok = await confirm({ title: `Delete "${task.title}"?`, body: "It is running and will be stopped. The task itself can be undone.", confirm: "Stop and delete", danger: true });
+      if (!ok) return;
+    }
+    const result = await call("tasks.delete", task.id);
     onClose();
+    deleted(`Deleted "${task.title}"`, result);
   }, "Could not delete the task");
   useSaveShortcut(() => void save(), dirty && !saving && Boolean(title.trim()));
 

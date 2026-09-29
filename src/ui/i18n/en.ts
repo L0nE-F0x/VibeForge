@@ -12,6 +12,8 @@ export const en = {
   "common.delete": "Delete",
   "common.discard": "Discard",
   "common.dismiss": "Dismiss",
+  "common.undo": "Undo",
+  "common.undoFailed": "Could not undo",
   "common.edit": "Edit",
   "common.new": "New",
   "common.next": "Next",

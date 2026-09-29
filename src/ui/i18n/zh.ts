@@ -11,6 +11,8 @@ export const zh: Catalog = {
   "common.continue": "继续",
   "common.delete": "删除",
   "common.dismiss": "关闭",
+  "common.undo": "撤销",
+  "common.undoFailed": "无法撤销",
   "common.edit": "编辑",
   "common.new": "新建",
   "common.next": "下一步",

@@ -11,6 +11,8 @@ export const ja: Catalog = {
   "common.continue": "続ける",
   "common.delete": "削除",
   "common.dismiss": "閉じる",
+  "common.undo": "元に戻す",
+  "common.undoFailed": "元に戻せませんでした",
   "common.edit": "編集",
   "common.new": "新規",
   "common.next": "次へ",

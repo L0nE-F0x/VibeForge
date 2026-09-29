@@ -484,6 +484,20 @@ export function Toasts() {
               <div className="toast-title">{toast.title}</div>
               {toast.body && <div className="toast-body selectable">{toast.body}</div>}
             </div>
+            {toast.action && (
+              <Button
+                size="sm"
+                className="toast-action"
+                onClick={() => {
+                  dismiss(toast.id);
+                  toast.action?.run();
+                }}
+                tip={toast.action.label}
+                kbd="Ctrl+Z"
+              >
+                {toast.action.label}
+              </Button>
+            )}
             <Button variant="ghost" size="sm" icon={X} onClick={() => dismiss(toast.id)} title={t("common.dismiss")} />
           </div>
         );

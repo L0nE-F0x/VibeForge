@@ -11,6 +11,7 @@ import { repairBlankCapture } from "./restore-screen.js";
 import { grokHome, readGrokPrompts } from "./session-prompts.js";
 import { slugify } from "./slug.js";
 import { Store, type RunQuery } from "./store.js";
+import { Trash, type Bin } from "./trash.js";
 import { createTask, markStopped, requestExecute, syncTaskWithRun, type ExecuteBlocker } from "./tasks.js";
 import type {
   Agent,
@@ -171,6 +172,17 @@ const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat", "code"];
 /** A CLI typed into a shell that ends this quickly without changing anything (`claude --version`) isn't kept. */
 const BLIP_MS = 5000;
+/**
+ * How long a delete can be undone. The toast that offers Undo goes sooner; this is the margin.
+ * After it, or when the app closes, the files are removed for good.
+ */
+const UNDO_MS = 30_000;
+
+/** What a delete hands back: the token that undoes it. */
+export interface Deleted {
+  undo: string;
+}
+
 /** Written on a patch that could not be taken at exit, because the app was already gone. */
 const LATE_PATCH_NOTE = "# Saved when VibeForge next opened, because it closed during this run.\n";
 
@@ -216,6 +228,8 @@ export class TeamService {
   private readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
   private readonly gitAtStart = new Map<string, string>();
+  private readonly trash: Trash;
+  private readonly undoable = new Map<string, { bin: Bin; restore: () => void; timer: ReturnType<typeof setTimeout> }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   private readonly settled: Promise<void>;
@@ -223,6 +237,9 @@ export class TeamService {
   constructor(options: DeskOptions) {
     this.options = options;
     this.store = new Store(options.configRoot, options.dataRoot);
+    // Anything left in the trash was deleted in an earlier session, past its undo.
+    this.trash = new Trash(path.join(options.dataRoot, "trash"));
+    this.trash.empty();
     // Anything still "running" in the index belongs to a process that died with the last app session.
     const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
     this.settled = this.settleOrphans(orphans);
@@ -237,7 +254,33 @@ export class TeamService {
   }
 
   close(): void {
+    for (const entry of this.undoable.values()) clearTimeout(entry.timer);
+    this.undoable.clear();
+    this.trash.empty();
     this.store.close();
+  }
+
+  // ---------------------------------------------------------------- undo
+
+  /** Keep a delete undoable for a while; after that its files go for good. */
+  private keepForUndo(bin: Bin, restore: () => void): Deleted {
+    const timer = setTimeout(() => {
+      this.undoable.delete(bin.token);
+      this.trash.drop(bin);
+    }, UNDO_MS);
+    timer.unref?.();
+    this.undoable.set(bin.token, { bin, restore, timer });
+    return { undo: bin.token };
+  }
+
+  /** Put back what a delete removed. */
+  undoDelete(token: string): void {
+    const entry = this.undoable.get(token);
+    if (!entry) throw new Error("It is too late to undo that.");
+    clearTimeout(entry.timer);
+    this.undoable.delete(token);
+    this.trash.restore(entry.bin);
+    entry.restore();
   }
 
   // ---------------------------------------------------------------- events
@@ -451,10 +494,17 @@ export class TeamService {
     return skill;
   }
 
-  deleteSkill(id: string): void {
-    this.store.deleteSkill(id);
+  deleteSkill(id: string): Deleted {
+    const dir = this.store.pathOf("skill", id);
+    if (!dir) throw new Error("That skill no longer exists.");
+    const agents = this.store.listAgents().filter((agent) => agent.skills.includes(id)).map((agent) => agent.id);
+    const bin = this.trash.stash([dir]);
     this.setSkillAgents(id, []);
     this.emit("skills", "agents");
+    return this.keepForUndo(bin, () => {
+      this.setSkillAgents(id, agents);
+      this.emit("skills", "agents");
+    });
   }
 
   setSkillAgents(skillId: string, agentIds: string[]): void {
@@ -532,9 +582,12 @@ export class TeamService {
     return routine;
   }
 
-  deleteRoutine(id: string): void {
-    this.store.deleteRoutine(id);
+  deleteRoutine(id: string): Deleted {
+    const file = this.store.pathOf("routine", id);
+    if (!file) throw new Error("That routine no longer exists.");
+    const bin = this.trash.stash([file]);
     this.emit("routines");
+    return this.keepForUndo(bin, () => this.emit("routines"));
   }
 
   setRoutineEnabled(id: string, enabled: boolean): Routine {
@@ -735,12 +788,14 @@ export class TeamService {
     return this.taskView(task);
   }
 
-  async deleteTask(id: string): Promise<void> {
+  async deleteTask(id: string): Promise<Deleted> {
     const task = this.store.getTask(id);
-    if (!task) return;
+    const file = this.store.pathOf("task", id);
+    if (!task || !file) throw new Error("That task no longer exists.");
     if (task.status === "running") await this.stopTask(id);
-    this.store.deleteTask(id);
+    const bin = this.trash.stash([file]);
     this.emit("tasks");
+    return this.keepForUndo(bin, () => this.emit("tasks"));
   }
 
   async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
@@ -887,9 +942,9 @@ export class TeamService {
     return this.chatView(next);
   }
 
-  async deleteChat(id: string): Promise<void> {
+  async deleteChat(id: string): Promise<Deleted> {
     const chat = this.store.getChat(id);
-    if (!chat) return;
+    if (!chat) throw new Error("That chat no longer exists.");
     for (const runId of chat.runIds) {
       const ptyId = this.ptyByRun.get(runId);
       if (!ptyId) continue;
@@ -897,19 +952,25 @@ export class TeamService {
       await this.stopRun(runId);
       await exited;
     }
+    // Its scratch folder and what its runs said go with it; the runs themselves stay in Runs.
+    const paths: string[] = [];
     const scratchRoot = path.join(this.options.dataRoot, "scratch");
     if (!chat.agentId && chat.cwd && isPathInside(scratchRoot, chat.cwd) && path.resolve(chat.cwd) !== path.resolve(scratchRoot)) {
-      fs.rmSync(chat.cwd, { recursive: true, force: true });
+      paths.push(chat.cwd);
     }
     for (const runId of chat.runIds) {
       const run = this.store.getRun(runId);
-      if (!run) continue;
-      this.store.deleteRunFile(run, "scrollback");
-      this.store.deleteRunFile(run, "screen");
-      this.store.deleteRunFile(run, "transcript");
+      if (!run?.dir) continue;
+      for (const name of ["scrollback", "screen", "transcript"] as const) paths.push(path.join(run.dir, RUN_FILES[name]));
     }
+    const record = this.store.getChat(id) ?? chat;
+    const bin = this.trash.stash(paths);
     this.store.deleteChat(id);
     this.emit("chats", "runs");
+    return this.keepForUndo(bin, () => {
+      this.store.writeChat(record);
+      this.emit("chats", "runs");
+    });
   }
 
   /**

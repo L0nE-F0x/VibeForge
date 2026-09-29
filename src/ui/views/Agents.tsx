@@ -25,7 +25,7 @@ import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
+import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 import { useVoiceStatus } from "../voice.js";
@@ -332,16 +332,21 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
   const chat = chats.find((item) => item.id === chatId) ?? null;
   const chatAttention = useChatAttention();
   const chatWants = (id: string) => chatAttention.get(id)?.attention === "waiting";
+  const deleted = useDeleted();
   const [remove] = useAction(async (target: ChatView) => {
-    const ok = await confirm({
-      title: `Delete "${target.title}"?`,
-      body: "The chat and its transcripts are removed. Run records and git snapshots stay in Runs.",
-      confirm: "Delete chat",
-      danger: true,
-    });
-    if (!ok) return;
-    await call("chats.delete", target.id);
+    // Deleting is undone from the toast. Only a live session asks first: stopping it can't be undone.
+    if (target.live) {
+      const ok = await confirm({
+        title: `Delete "${target.title}"?`,
+        body: "Its session is still going and will be stopped. The chat itself can be undone.",
+        confirm: "Stop and delete",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const result = await call("chats.delete", target.id);
     if (target.id === chatId) go({ view: "agents", agentId: agent.id, tab: "chats" });
+    deleted(`Deleted "${target.title}"`, result);
   }, "Could not delete the chat");
 
   return (

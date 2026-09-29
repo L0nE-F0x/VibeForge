@@ -10,6 +10,8 @@ export const de: Catalog = {
   "common.continue": "Fortsetzen",
   "common.delete": "Löschen",
   "common.dismiss": "Ausblenden",
+  "common.undo": "Rückgängig",
+  "common.undoFailed": "Rückgängig machen fehlgeschlagen",
   "common.edit": "Bearbeiten",
   "common.new": "Neu",
   "common.next": "Weiter",

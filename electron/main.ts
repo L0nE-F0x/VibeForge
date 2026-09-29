@@ -523,6 +523,7 @@ function handlers(): Handlers {
     "chats.rename": (id, title) => s().renameChat(id, title),
     "chats.setEngine": (id, engine) => s().setChatEngine(id, engine),
     "chats.delete": (id) => s().deleteChat(id),
+    "undo.delete": (token) => s().undoDelete(String(token ?? "")),
     "chats.send": (id, text, size) => s().sendChat(id, text, size),
     "chats.continue": (id, size) => s().continueChat(id, size),
     "chats.stop": (id) => s().stopChat(id),

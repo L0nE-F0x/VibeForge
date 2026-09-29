@@ -2305,7 +2305,10 @@ button.rail-logo:focus-visible {
   .rail-dot,
   .dot,
   .needs-you::before,
-  .rail-btn.wants-you > svg {
+  .rail-btn.wants-you > svg,
+  .skeleton-head,
+  .skeleton-pixel,
+  .skeleton-lines > span {
     animation: none !important;
   }
 }

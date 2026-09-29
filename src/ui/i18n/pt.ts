@@ -10,6 +10,8 @@ export const pt: Catalog = {
   "common.continue": "Continuar",
   "common.delete": "Excluir",
   "common.dismiss": "Dispensar",
+  "common.undo": "Desfazer",
+  "common.undoFailed": "Não foi possível desfazer",
   "common.edit": "Editar",
   "common.new": "Novo",
   "common.next": "Próximo",

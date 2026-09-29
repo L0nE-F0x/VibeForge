@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { RunView } from "../shared/api.js";
-import { errorText } from "./api.js";
+import type { Deleted, RunView } from "../shared/api.js";
+import { call, errorText } from "./api.js";
+import { useT } from "./i18n/index.js";
 import { covers, sameBox, type Box, type Layer } from "./floating.js";
 
 // ------------------------------------------------------------------ routes
@@ -191,16 +192,23 @@ export function useOverlay(open: boolean): void {
 
 export type ToastKind = "info" | "success" | "error";
 
+/** A button on a toast, like Undo. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   kind: ToastKind;
   title: string;
   body?: string;
+  action?: ToastAction;
 }
 
 interface Toaster {
   toasts: Toast[];
-  push: (kind: ToastKind, title: string, body?: string) => void;
+  push: (kind: ToastKind, title: string, body?: string, action?: ToastAction) => void;
   dismiss: (id: number) => void;
   fail: (error: unknown, title?: string) => void;
 }
@@ -212,14 +220,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const seq = useRef(0);
   const dismiss = useCallback((id: number) => setToasts((prev) => prev.filter((toast) => toast.id !== id)), []);
   const push = useCallback(
-    (kind: ToastKind, title: string, body?: string) => {
+    (kind: ToastKind, title: string, body?: string, action?: ToastAction) => {
       seq.current += 1;
       const id = seq.current;
-      setToasts((prev) => [...prev.slice(-4), { id, kind, title, body }]);
-      setTimeout(() => dismiss(id), kind === "error" ? 9000 : 4500);
+      setToasts((prev) => [...prev.slice(-4), { id, kind, title, body, action }]);
+      // A toast with a button stays long enough to reach it.
+      setTimeout(() => dismiss(id), kind === "error" ? 9000 : action ? 9000 : 4500);
     },
     [dismiss],
   );
+  // Ctrl+Z takes the newest toast's action (Undo) while it's up, unless you're typing somewhere.
+  const latest = useRef<Toast | undefined>(undefined);
+  latest.current = [...toasts].reverse().find((toast) => toast.action);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || event.key.toLowerCase() !== "z") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true'], .xterm")) return;
+      const toast = latest.current;
+      if (!toast?.action) return;
+      event.preventDefault();
+      dismiss(toast.id);
+      toast.action.run();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dismiss]);
   const fail = useCallback((error: unknown, title = "That did not work") => push("error", title, errorText(error)), [push]);
   const value = useMemo(() => ({ toasts, push, dismiss, fail }), [toasts, push, dismiss, fail]);
   return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
@@ -229,6 +255,23 @@ export function useToast(): Toaster {
   const toaster = useContext(ToastContext);
   if (!toaster) throw new Error("useToast outside ToastProvider");
   return toaster;
+}
+
+/**
+ * After a delete: a toast saying what went, with Undo (and Ctrl+Z) to put it back. Deleting
+ * this way needs no "are you sure?" first.
+ */
+export function useDeleted(): (title: string, deleted: Deleted) => void {
+  const t = useT();
+  const { push, fail } = useToast();
+  return useCallback(
+    (title: string, deleted: Deleted) =>
+      push("info", title, undefined, {
+        label: t("common.undo"),
+        run: () => void call("undo.delete", deleted.undo).catch((error: unknown) => fail(error, t("common.undoFailed"))),
+      }),
+    [push, fail, t],
+  );
 }
 
 /** Run an async action, report failure as a toast, and track whether it is running. */

@@ -11,6 +11,8 @@ export const fr: Catalog = {
   "common.continue": "Continuer",
   "common.delete": "Supprimer",
   "common.dismiss": "Ignorer",
+  "common.undo": "Annuler",
+  "common.undoFailed": "Impossible d’annuler",
   "common.edit": "Modifier",
   "common.new": "Nouveau",
   "common.next": "Suivant",
