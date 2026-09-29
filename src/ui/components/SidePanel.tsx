@@ -29,6 +29,70 @@ function load(id: string, fallback: PanelState): PanelState {
   }
 }
 
+const GLIDE_MS = 170;
+
+/**
+ * When the selected row of a list changes, its highlight slides from the old row to the new one.
+ * A copy of the highlight does the moving, above the list and clipped to it; the rows keep their
+ * own styles, and the new one's highlight shows again when the copy lands.
+ */
+function useSelectionGlide(ref: React.RefObject<HTMLElement | null>, enabled: boolean): void {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root || !enabled || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const find = () => root.querySelector<HTMLElement>('.list-scroll [aria-selected="true"]');
+    let last = find();
+    const observer = new MutationObserver(() => {
+      const next = find();
+      const prev = last;
+      last = next;
+      if (next && prev && next !== prev && prev.isConnected) glide(prev, next);
+    });
+    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected"] });
+    return () => observer.disconnect();
+  }, [ref, enabled]);
+}
+
+function glide(prev: HTMLElement, next: HTMLElement): void {
+  const list = next.closest<HTMLElement>(".list-scroll");
+  if (!list || prev.closest(".list-scroll") !== list) return;
+  const box = list.getBoundingClientRect();
+  const from = prev.getBoundingClientRect();
+  const to = next.getBoundingClientRect();
+  // A jump across a long list reads better as a switch than a streak.
+  if (!from.height || !to.height || Math.abs(from.top - to.top) > box.height) return;
+  const frame = document.createElement("div");
+  frame.className = "sel-glide-frame";
+  Object.assign(frame.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+  const ghost = document.createElement("div");
+  ghost.className = "sel-glide";
+  ghost.style.left = `${to.left - box.left}px`;
+  ghost.style.width = `${to.width}px`;
+  frame.appendChild(ghost);
+  document.body.appendChild(frame);
+  next.dataset.gliding = "";
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    // The row's own highlight fades back in as the copy fades out, so the hand-over doesn't blink.
+    delete next.dataset.gliding;
+    ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 110, fill: "forwards" });
+    setTimeout(() => frame.remove(), 130);
+  };
+  const animation = ghost.animate(
+    [
+      { top: `${from.top - box.top}px`, height: `${from.height}px` },
+      { top: `${to.top - box.top}px`, height: `${to.height}px` },
+    ],
+    { duration: GLIDE_MS, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)", fill: "forwards" },
+  );
+  animation.onfinish = finish;
+  animation.oncancel = finish;
+  // A window that gets no frames never finishes an animation; never leave a row without its highlight.
+  setTimeout(finish, GLIDE_MS + 120);
+}
+
 /** How far each panel's list was scrolled, so switching views and back lands in the same place. */
 const scrolled = new Map<string, number>();
 
@@ -113,10 +177,10 @@ export function SidePanel({
   const moveInList = (event: React.KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const row = (event.target as HTMLElement).closest<HTMLElement>(".list-scroll .row");
+    const row = (event.target as HTMLElement).closest<HTMLElement>(".list-scroll :is(.row, .run-row)");
     const list = row?.closest(".list-scroll");
     if (!row || !list) return;
-    const rows = [...list.querySelectorAll<HTMLElement>(".row")];
+    const rows = [...list.querySelectorAll<HTMLElement>(".row, .run-row")];
     const at = rows.indexOf(row);
     const next = event.key === "Home" ? rows[0] : event.key === "End" ? rows[rows.length - 1] : rows[at + (event.key === "ArrowDown" ? 1 : -1)];
     event.preventDefault();
@@ -149,6 +213,8 @@ export function SidePanel({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+
+  useSelectionGlide(ref, !state.collapsed);
 
   const collapsed = state.collapsed;
   return (

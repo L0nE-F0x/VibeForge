@@ -254,6 +254,7 @@ button:disabled {
 }
 
 .rail {
+  position: relative;
   background: var(--bg-dark);
   border-right: 1px solid var(--line);
   display: flex;
@@ -340,15 +341,19 @@ button:disabled {
   border-color: var(--sel-line);
 }
 
-.rail-btn[aria-current="page"]::before {
-  content: "";
+/* The open view's edge: one marker that slides to whichever button is current (see Rail). */
+.rail-marker {
   position: absolute;
-  left: -7px;
-  top: 9px;
-  bottom: 9px;
+  top: 0;
+  left: 0;
   width: 3px;
-  border-radius: 0;
   background: var(--gradient);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.rail-marker.glides {
+  transition: transform 0.24s cubic-bezier(0.2, 0.9, 0.3, 1), height 0.24s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.15s;
 }
 
 .rail-badge {
@@ -429,6 +434,17 @@ button:disabled {
   display: flex;
 }
 
+/* Views cross-fade in. Opacity only: a transform would move what the browser dock measures. */
+.stage > :is(.view, .main) {
+  animation: view-in 0.14s ease-out;
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+  }
+}
+
 .view[hidden] {
   display: none;
 }
@@ -492,6 +508,25 @@ button:disabled {
   text-transform: uppercase;
   color: var(--fg-3);
   padding: 12px 8px 4px;
+}
+
+/* The highlight on its way from one row to the next (SidePanel's selection glide). */
+.sel-glide-frame {
+  position: fixed;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.sel-glide {
+  position: absolute;
+  background: var(--sel-fill);
+  border: 1px solid var(--sel-line);
+}
+
+[data-gliding][aria-selected="true"] {
+  background-color: transparent !important;
+  border-color: transparent !important;
 }
 
 /* A day in a long list. It stays at the top while its runs scroll under it. */
