@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-30
+
+**1.2: it glows when it needs you, and stays out of the way when it doesn't.**
+
 - **What needs you glows like an ember.** A workspace or chat waiting for you is lit, not ringed: a bright core with a soft bloom around it, which flares once when it starts waiting and then breathes. Its row warms from a glowing left edge, and the view's own icon in the rail lights up too. A CLI at work is a slower ember, and a finished one glows green for a moment before it settles. With reduced motion on, the glow stays and the movement goes.
 - **Runs read by project, a day at a time.** The Runs list has a heading for each day (Today, Yesterday, then the weekday and the date), and a Code run leads with its project, with the CLI on the line under it.
 - **A quieter run header.** Continue or Stop, and Open in workspace, stay in view. Opening the folder and marking a run reviewed moved into the … menu.
@@ -13,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **The terminals you're not typing in step back.** In a split, the other panes dim a little; hovering one brings it forward.
 - **Loading looks like what's coming.** Lists and a run's page show placeholder rows while they load, instead of a spinner or an early "No runs yet". A quick load shows nothing at all.
 - **Undo instead of "are you sure?".** Deleting a chat, task, skill or routine happens at once, with Undo on the toast (or Ctrl+Z) for a few seconds. Only a chat or task that is still running asks first, since stopping it can't be undone.
+
 ## [1.1.0] - 2026-09-29
 
 **What a run changed stays with it, and a link in Code opens beside the terminal.**
@@ -194,7 +199,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.2.0
 [1.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.0.0
 [0.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.8.0
