@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-29
+
+**What a run changed stays with it, and a link in Code opens beside the terminal.**
+
 - **A run keeps the diff from the moment it ended.** When a CLI exits, a pane is closed, or the process is killed mid-task, the run saves the full patch: tracked changes since it began, and the text of new files. Changes shows that saved patch, so later edits in the folder stay separate. A new file over 256 KB, or a binary one, is named and left in the working tree. If VibeForge itself is killed before it can save, it writes the patch the next time it opens.
 - **A link in a Code terminal opens the side browser.** Click an http or https address, including a local dev server, and that workspace's browser opens on it. Each workspace keeps its own page: switch projects and you get that project's page (or the empty card), and switching back leaves you where you were. The arrow on the address bar opens the page in your own browser, and so do links in Help, Settings, Home and the update dialog.
 - **Open in workspace takes a run to its own workspace.** After Continue on a Code run from Runs, Open in workspace put the CLI in whichever workspace Code last showed, and stayed there. It now switches to the run's workspace first.
@@ -183,7 +187,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.0.0
 [0.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.8.0
 [0.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v0.7.0
