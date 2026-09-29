@@ -1,6 +1,7 @@
 import { History, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { RunView } from "../../shared/api.js";
+import { dayHeading, dayKey } from "../../shared/text.js";
 import { call, useInbox, useQuery } from "../api.js";
 import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
@@ -73,9 +74,16 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
               {filter === "review" ? "Nothing waiting for review." : filter === "live" ? "Nothing is running." : "No runs yet."}
             </div>
           )}
-          {runs.map((run) => (
-            <RunRow key={run.id} run={run} compact selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
-          ))}
+          {runs.map((run, index) => {
+            const day = dayKey(run.startedAt);
+            const heading = index === 0 || dayKey(runs[index - 1].startedAt) !== day;
+            return (
+              <Fragment key={run.id}>
+                {heading && <div className="list-day">{dayHeading(run.startedAt, t.language)}</div>}
+                <RunRow run={run} compact selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
+              </Fragment>
+            );
+          })}
         </div>
       </SidePanel>
       {selected ? (

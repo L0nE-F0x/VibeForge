@@ -17,13 +17,15 @@ import { railKey, type RailView } from "../rail.js";
 const DAYS = 14;
 
 export function RunRow({ run, selected, onClick, compact }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean }) {
+  const engines = useEngines().data ?? [];
+  const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
   return (
     <button type="button" className="run-row" aria-selected={selected} onClick={onClick}>
       <span className={`dot ${run.status}`} />
       <span className="vstack grow" style={{ gap: 1 }}>
-        <span className="title truncate">{run.title}</span>
+        <span className="title truncate">{title}</span>
         <span className="meta truncate">
-          {ORIGIN_LABEL[run.origin]}
+          {kind}
           {run.changes ? ` · ${run.changes}` : ""}
           {" · "}
           <TimeAgo iso={run.endedAt ?? run.startedAt} />
@@ -32,6 +34,18 @@ export function RunRow({ run, selected, onClick, compact }: { run: RunView; sele
       {!compact && <StatusChip status={run.status} exitCode={run.exitCode} />}
     </button>
   );
+}
+
+/**
+ * A Code run is titled "Claude Code · project". In a list the project leads and the CLI moves to
+ * the line under it, in place of "Code", so a column of runs reads as projects, not one CLI's name.
+ */
+export function runLabel(run: Pick<RunView, "origin" | "title">, engineLabel: string | null): { title: string; kind: string } {
+  const prefix = engineLabel ? `${engineLabel} · ` : null;
+  if (run.origin === "code" && prefix && run.title.startsWith(prefix) && run.title.length > prefix.length) {
+    return { title: run.title.slice(prefix.length), kind: engineLabel! };
+  }
+  return { title: run.title, kind: ORIGIN_LABEL[run.origin] };
 }
 
 /** Runs started on each of the last `days` days, oldest first, by local date. */

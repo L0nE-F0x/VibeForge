@@ -98,3 +98,30 @@ export function splitArgs(text: string): string[] {
 export function joinArgs(args: string[] | undefined): string {
   return (args ?? []).map((arg) => (/[\s"'\\]/.test(arg) || arg === "" ? `"${arg.replace(/[\\"]/g, (match) => `\\${match}`)}"` : arg)).join(" ");
 }
+
+/** The local calendar day of an ISO time, as `YYYY-MM-DD`, for grouping a list by day. */
+export function dayKey(iso: string): string {
+  const date = new Date(iso);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * A heading for a day in a list: "Today", "Yesterday", the weekday within the last week, then
+ * a date (with the year once it isn't this year). Worded by `Intl` in the given language.
+ */
+export function dayHeading(iso: string, language: string, now = Date.now()): string {
+  const date = new Date(iso);
+  const start = (value: Date | number) => {
+    const copy = new Date(value);
+    copy.setHours(0, 0, 0, 0);
+    return copy.getTime();
+  };
+  const back = Math.round((start(now) - start(date)) / 86_400_000);
+  const upper = (text: string) => text.charAt(0).toLocaleUpperCase(language) + text.slice(1);
+  if (back >= 0 && back < 2) return upper(new Intl.RelativeTimeFormat(language, { numeric: "auto" }).format(-back, "day"));
+  if (back > 0 && back < 7) return upper(date.toLocaleDateString(language, { weekday: "long" }));
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString(language, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });
+}

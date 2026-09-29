@@ -15,7 +15,7 @@ import { BUILTIN_PALETTE, companionColor, contrast, paletteFromFiles, parseFlatT
 import type { RunMeta } from "../../src/core/types.js";
 import { diffSince, gitHead, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
-import { joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
+import { dayHeading, dayKey, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
 
 function tempDir(prefix = "vibeforge-core-"): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -444,5 +444,25 @@ describe("text helpers", () => {
     expect(timeAgo("2026-09-25T11:59:50Z", now)).toBe("just now");
     expect(timeAgo("2026-09-25T11:30:00Z", now)).toBe("30 min ago");
     expect(timeAgo("2026-09-25T15:00:00Z", now)).toBe("in 3 hr");
+  });
+});
+
+describe("day headings", () => {
+  const now = new Date(2026, 8, 29, 15, 0).getTime();
+  const at = (month: number, day: number, hour = 10, year = 2026) => new Date(year, month, day, hour).toISOString();
+
+  it("groups by the local calendar day", () => {
+    expect(dayKey(at(8, 29, 0))).toBe("2026-09-29");
+    expect(dayKey(at(8, 29, 23))).toBe("2026-09-29");
+    expect(dayKey(at(8, 28, 23))).toBe("2026-09-28");
+  });
+
+  it("says today, yesterday, a weekday, then a date", () => {
+    expect(dayHeading(at(8, 29, 1), "en", now)).toBe("Today");
+    expect(dayHeading(at(8, 28, 23), "en", now)).toBe("Yesterday");
+    expect(dayHeading(at(8, 25), "en", now)).toBe("Friday");
+    expect(dayHeading(at(8, 20), "en", now)).toBe("Sep 20");
+    expect(dayHeading(at(11, 31, 10, 2025), "en", now)).toBe("Dec 31, 2025");
+    expect(dayHeading(at(8, 28), "de", now)).toBe("Gestern");
   });
 });
