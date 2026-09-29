@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import { allocateRunDir, normalizeRun, writeRunMeta } from "../../src/core/runs.
 import { Store } from "../../src/core/store.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
 import type { RunMeta } from "../../src/core/types.js";
+import { gitHead, snapshotGit } from "../../src/core/vcs.js";
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-svc-"));
@@ -354,6 +356,49 @@ describe("runs", () => {
     expect(run.status).toBe("stopped");
     expect(run.error).toMatch(/closed while this run was going/);
     expect(fs.existsSync(path.join(dir, "git.txt"))).toBe(true);
+    expect(fs.readFileSync(path.join(dir, "diff.patch"), "utf8")).toMatch(/next opened/);
+    ctx.svc.close();
+  });
+
+  it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
+    const repo = tempDir();
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" });
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "init");
+
+    const ctx = setup();
+    ctx.host.gitHead = (cwd) => gitHead(cwd);
+    ctx.host.snapshotGit = (cwd, start) => snapshotGit(cwd, 5000, start);
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "Keep notes.", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id });
+    const launched = await ctx.svc.executeTask(task.id);
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nsession-line-two\n");
+    fs.writeFileSync(path.join(repo, "new.txt"), "brand-new-file\n");
+
+    const mid = ctx.svc.getRun(launched.runId);
+    expect(mid.files.patchSaved).toBe(false);
+    expect(await ctx.svc.runDiff(launched.runId)).toContain("+brand-new-file");
+
+    await ctx.exit(launched.ptyId);
+    const done = ctx.svc.getRun(launched.runId);
+    expect(done.files.patchSaved).toBe(true);
+    expect(done.run.status).toBe("exited");
+    const saved = fs.readFileSync(path.join(done.run.dir, "diff.patch"), "utf8");
+    expect(saved).toContain("diff --git a/a.txt b/a.txt");
+    expect(saved).toContain("+session-line-two");
+    expect(saved).toContain("diff --git a/new.txt b/new.txt");
+    expect(saved).toContain("+brand-new-file");
+    expect(saved).not.toContain("session-line-three");
+    expect(saved).not.toMatch(/next opened/);
+
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nsession-line-two\nsession-line-three\n");
+    expect(await ctx.svc.runDiff(launched.runId)).toBe(saved);
+    expect(await ctx.svc.runDiff(launched.runId, "now")).toContain("+session-line-three");
+    expect(await ctx.svc.runDiff(launched.runId)).not.toContain("session-line-three");
     ctx.svc.close();
   });
 
@@ -458,6 +503,20 @@ describe("runs", () => {
     expect(ctx.svc.listLive()[0].working).toBe(false);
     ctx.svc.onPtyActivity(ptyId, true);
     ctx.svc.onPtyProgram(ptyId, null);
+    expect(ctx.svc.listLive()[0].working).toBe(false);
+    ctx.svc.close();
+  });
+
+  it("keeps a CLI working when it starts while the shell is already busy", async () => {
+    // `argy "fix the tests"` typed at the prompt: the host marks the pty working while the line
+    // is typed and never says so again, because the CLI carries on with no quiet gap.
+    const ctx = setup();
+    const file = ctx.svc.addWorkspace(ctx.place);
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: file.workspaces[0].id });
+    ctx.svc.onPtyActivity(ptyId, true);
+    ctx.svc.onPtyProgram(ptyId, ["argy", "fix the tests"], ctx.place);
+    expect(ctx.svc.listLive()[0].working).toBe(true);
+    ctx.svc.onPtyActivity(ptyId, false);
     expect(ctx.svc.listLive()[0].working).toBe(false);
     ctx.svc.close();
   });

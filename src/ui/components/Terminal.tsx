@@ -129,18 +129,22 @@ interface LiveProps {
   autoFocus?: boolean;
   onExit?: (info: { exitCode: number | null; signal: number | null }) => void;
   onFocus?: () => void;
+  /** An http(s) link was clicked. When omitted, the link opens in the system browser. */
+  onLink?: (url: string) => void;
 }
 
 /** A terminal attached to a live PTY in the host. */
-export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus }, ref) {
+export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus, onLink }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const activeRef = useRef(active);
   const onExitRef = useRef(onExit);
   const onFocusRef = useRef(onFocus);
+  const onLinkRef = useRef(onLink);
   onExitRef.current = onExit;
   onFocusRef.current = onFocus;
+  onLinkRef.current = onLink;
   activeRef.current = active;
   const settings = useSettings().data;
   const palette = usePalette();
@@ -168,7 +172,11 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    term.loadAddon(new WebLinksAddon((_event, uri) => void call("app.openExternal", uri)));
+    term.loadAddon(new WebLinksAddon((_event, uri) => {
+      const open = onLinkRef.current;
+      if (open) open(uri);
+      else void call("app.openExternal", uri);
+    }));
     term.open(host);
     const releaseWebgl = attachWebgl(term);
     termRef.current = term;

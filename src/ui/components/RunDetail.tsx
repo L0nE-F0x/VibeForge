@@ -33,39 +33,58 @@ export const ORIGIN_LABEL: Record<RunView["origin"], string> = {
 type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
 
 export function DiffView({ text }: { text: string }) {
-  const lines = useMemo(() => text.split("\n").slice(0, 20000), [text]);
+  const all = useMemo(() => text.split("\n"), [text]);
+  const lines = all.length > 20000 ? all.slice(0, 20000) : all;
   if (!text.trim()) return <Notice>No differences.</Notice>;
   return (
-    <div className="diff">
-      {lines.map((line, index) => {
-        const kind = line.startsWith("diff --git") || line.startsWith("# Untracked")
-          ? "file"
-          : line.startsWith("@@")
-            ? "hunk"
-            : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ")
+    <>
+      <div className="diff">
+        {lines.map((line, index) => {
+          const kind = line.startsWith("diff --git")
+            ? "file"
+            : line.startsWith("#")
               ? "meta"
-              : line.startsWith("+")
-                ? "add"
-                : line.startsWith("-")
-                  ? "del"
-                  : "";
-        return (
-          <div key={index} className={kind}>
-            {line || " "}
-          </div>
-        );
-      })}
-    </div>
+              : line.startsWith("@@")
+                ? "hunk"
+                : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
+                  ? "meta"
+                  : line.startsWith("+")
+                    ? "add"
+                    : line.startsWith("-")
+                      ? "del"
+                      : "";
+          return (
+            <div key={index} className={kind}>
+              {line || " "}
+            </div>
+          );
+        })}
+      </div>
+      {all.length > 20000 && <Notice>Showing the first 20,000 lines. The whole diff is saved with the run.</Notice>}
+    </>
   );
 }
 
-function ChangesTab({ run, snapshot }: { run: RunView; snapshot: string }) {
-  const [diff, setDiff] = useState<string | null>(null);
-  const [load, loading] = useAction(async () => setDiff(await call("runs.diff", run.id)), "Could not read the diff");
+function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null): string {
+  const sha = run.gitStart?.slice(0, 8);
+  if (shown === "now" || run.status === "running" || !saved) {
+    return sha ? `The folder now, compared with ${sha} from when the run started, plus new files.` : "The folder now, compared with HEAD, plus new files.";
+  }
+  return sha ? `The diff saved for this run: everything since ${sha}, plus new files.` : "The diff saved for this run, including new files.";
+}
+
+function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: string; patchSaved: boolean }) {
+  const { push } = useToast();
+  const [diff, setDiff] = useState<{ text: string; source: "saved" | "now" } | null>(null);
+  const [load, loading] = useAction(async (source: "saved" | "now") => {
+    setDiff({ text: await call("runs.diff", run.id, source), source });
+  }, "Could not read the diff");
   const notRepo = snapshot.startsWith("not a git repo");
+  const saved = run.status !== "running" && patchSaved;
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
-      {run.status === "running" && <Notice icon={Info}>The snapshot is written when the run ends. The live diff below reads the folder now.</Notice>}
+      {run.status === "running" && <Notice icon={Info}>The diff is saved when the run ends. Until then, this reads the folder now.</Notice>}
+      {saved && !notRepo && <Notice icon={Info}>Saved with this run. Later edits in the folder stay out of it.</Notice>}
       {notRepo ? (
         <Notice>{run.cwd} is not a git repository, so there is no change summary.</Notice>
       ) : snapshot ? (
@@ -76,14 +95,22 @@ function ChangesTab({ run, snapshot }: { run: RunView; snapshot: string }) {
       {!notRepo && (
         <div className="vstack">
           <div className="hstack">
-            <Button icon={GitCompare} busy={loading} onClick={() => void load()}>
-              {diff === null ? "Show the full diff" : "Refresh diff"}
+            <Button icon={GitCompare} busy={loading} onClick={() => void load(saved ? "saved" : "now")}>
+              {saved ? "Show the saved diff" : diff === null ? "Show the full diff" : "Refresh diff"}
             </Button>
-            <span className="faint">
-              {run.gitStart ? `Everything since ${run.gitStart.slice(0, 8)}, when the run started, plus untracked files.` : "Working tree against HEAD."}
-            </span>
+            {saved && (
+              <Button variant="ghost" icon={GitCompare} busy={loading} onClick={() => void load("now")}>
+                Diff the folder now
+              </Button>
+            )}
+            {diff && (
+              <Button size="sm" variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(diff.text).then(() => push("success", "Diff copied"))}>
+                Copy
+              </Button>
+            )}
+            <span className="faint">{diffCaption(run, saved, diff?.source ?? null)}</span>
           </div>
-          {diff !== null && <DiffView text={diff} />}
+          {diff !== null && <DiffView text={diff.text} />}
         </div>
       )}
     </div>
@@ -193,7 +220,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
         ) : (
           <ReplayTerminal ansi={files.screen || files.scrollback} />
         ))}
-      {tab === "changes" && <ChangesTab run={run} snapshot={files.git} />}
+      {tab === "changes" && <ChangesTab run={run} snapshot={files.git} patchSaved={files.patchSaved} />}
       {tab === "prompt" && (
         <div className="page-body vstack">
           {files.preamble.trim() ? (
@@ -242,6 +269,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
               `ended         ${run.endedAt ? new Date(run.endedAt).toLocaleString() : "—"}`,
               `exit code     ${run.exitCode ?? "—"}${run.signal ? ` (signal ${run.signal})` : ""}`,
               `git at start  ${run.gitStart ?? "—"}`,
+              `saved diff    ${files.patchSaved ? "diff.patch" : "—"}`,
               `continues     ${run.continuedFrom ?? "—"}`,
               `run folder    ${run.dir}`,
             ].join("\n")}

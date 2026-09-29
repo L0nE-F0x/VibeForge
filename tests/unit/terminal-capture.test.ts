@@ -28,7 +28,7 @@ function openSink() {
   return sink;
 }
 
-const blank = (): RunFiles => ({ preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "" });
+const blank = (): RunFiles => ({ preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "", patchSaved: false });
 
 describe("terminal capture", () => {
   it("keeps the alt screen when the program clears on the way out", async () => {

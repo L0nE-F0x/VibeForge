@@ -171,6 +171,8 @@ const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat", "code"];
 /** A CLI typed into a shell that ends this quickly without changing anything (`claude --version`) isn't kept. */
 const BLIP_MS = 5000;
+/** Written on a patch that could not be taken at exit, because the app was already gone. */
+const LATE_PATCH_NOTE = "# Saved when VibeForge next opened, because it closed during this run.\n";
 
 export const BLOCKER_TEXT: Record<ExecuteBlocker | "engine-missing", string> = {
   "missing-agent": "Assign an agent first.",
@@ -210,6 +212,8 @@ export class TeamService {
   /** Per shell: the latest command line in its foreground, and the queue that records it. */
   private readonly shellArgv = new Map<string, string[]>();
   private readonly recordings = new Map<string, Promise<void>>();
+  /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
+  private readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
   private readonly gitAtStart = new Map<string, string>();
   private pending = new Set<Topic>();
@@ -1110,7 +1114,7 @@ export class TeamService {
     if (!run) throw new Error("That run no longer exists.");
     const files: RunFiles = run.dir && isDirectory(run.dir)
       ? readRunFiles(run.dir)
-      : { preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "" };
+      : { preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "", patchSaved: false };
     return { run: this.view(run), files };
   }
 
@@ -1201,9 +1205,17 @@ export class TeamService {
     return { ...launched, chatId: null, taskId: null };
   }
 
-  async runDiff(id: string): Promise<string> {
+  /**
+   * The patch for a run. Once the run has ended and diff.patch is on disk, that file is what
+   * comes back: it is the tree at the moment the run ended. `now` reads the folder as it is.
+   */
+  async runDiff(id: string, source: "saved" | "now" = "saved"): Promise<string> {
     const run = this.store.getRun(id);
     if (!run) throw new Error("That run no longer exists.");
+    if (source !== "now" && run.status !== "running" && run.dir) {
+      const file = path.join(run.dir, RUN_FILES.patch);
+      if (fs.existsSync(file)) return readText(file);
+    }
     return diffSince(run.cwd, run.gitStart);
   }
 
@@ -1408,7 +1420,10 @@ export class TeamService {
     const programEngineId = found?.engineId ?? null;
     const programCwd = found ? cwd : null;
     if (session.program === program && session.programEngineId === programEngineId && session.programCwd === programCwd) return;
-    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working: programEngineId ? session.working : false });
+    // The host only reports a change. A CLI that starts working at once was already "working" while
+    // its command line was typed, so it takes that state over from the shell.
+    const working = programEngineId ? (this.hostWorking.get(ptyId) ?? session.working) : false;
+    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working });
     this.emit("live");
     if (argv) this.shellArgv.set(ptyId, argv);
     if (session.programEngineId !== programEngineId) this.queueRecording(ptyId);
@@ -1417,7 +1432,9 @@ export class TeamService {
   /** Only coding CLIs count as working; a dev server's logs are just a shell being busy. */
   onPtyActivity(ptyId: string, working: boolean): void {
     const session = this.live.get(ptyId);
-    if (!session || (session.kind === "shell" && !session.programEngineId && working)) return;
+    if (!session) return;
+    if (session.kind === "shell") this.hostWorking.set(ptyId, working);
+    if (session.kind === "shell" && !session.programEngineId && working) return;
     if (Boolean(session.working) === working) return;
     this.live.set(ptyId, { ...session, working });
     this.emit("live");
@@ -1535,6 +1552,7 @@ export class TeamService {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
     this.shellArgv.delete(ptyId);
+    this.hostWorking.delete(ptyId);
     try {
       if (!session?.runId) {
         this.emit("live");
@@ -1562,19 +1580,8 @@ export class TeamService {
   ): Promise<void> {
     const run = this.store.getRun(runId);
     if (!run) return;
-    let git = "";
-    try {
-      git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
-    } catch {
-      git = "not a git repo\n";
-    }
-    if (run.dir && isDirectory(run.dir)) {
-      try {
-        writeFileAtomic(path.join(run.dir, RUN_FILES.git), git.endsWith("\n") ? git : `${git}\n`);
-      } catch {
-        /* the run folder can vanish if the human deletes it */
-      }
-    }
+    const git = await this.writeSnapshot(run);
+    await this.writePatch(run);
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
@@ -1635,21 +1642,14 @@ export class TeamService {
 
   private async settleOrphans(orphans: RunMeta[]): Promise<void> {
     for (const run of orphans) {
-      const hasGit = run.dir ? fs.existsSync(path.join(run.dir, RUN_FILES.git)) : true;
+      const dir = run.dir;
       let changes = run.changes;
-      if (!hasGit && run.cwd && run.dir && isDirectory(run.dir)) {
-        let git = "not a git repo\n";
-        try {
-          git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
-        } catch {
-          git = "not a git repo\n";
+      if (dir && run.cwd && isDirectory(dir)) {
+        if (!fs.existsSync(path.join(dir, RUN_FILES.git))) {
+          changes = summarizeSnapshot(await this.writeSnapshot(run));
         }
-        try {
-          writeFileAtomic(path.join(run.dir, RUN_FILES.git), git);
-        } catch {
-          /* the folder can disappear */
-        }
-        changes = summarizeSnapshot(git);
+        // The exit that should have frozen the patch never arrived. This is the tree now.
+        if (!fs.existsSync(path.join(dir, RUN_FILES.patch))) await this.writePatch(run, LATE_PATCH_NOTE);
       }
       this.store.saveRun({
         ...run,
@@ -1665,6 +1665,46 @@ export class TeamService {
       }
     }
     if (orphans.length) this.emit("runs", "tasks");
+  }
+
+  /** Status summary for git.txt. The string returned is the one compared with the snapshot from start. */
+  private async writeSnapshot(run: RunMeta): Promise<string> {
+    let git = "not a git repo\n";
+    try {
+      git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
+    } catch {
+      git = "not a git repo\n";
+    }
+    this.writeRunFile(run, RUN_FILES.git, git.endsWith("\n") ? git : `${git}\n`);
+    return git;
+  }
+
+  /**
+   * Freeze diff.patch. The first write wins, so a later pass cannot replace the tree from
+   * the moment the run ended with whatever the folder looks like afterwards.
+   * `preface` marks a patch taken on the next open, when the exit itself never wrote one.
+   */
+  private async writePatch(run: RunMeta, preface = ""): Promise<void> {
+    if (!run.dir || !isDirectory(run.dir)) return;
+    const file = path.join(run.dir, RUN_FILES.patch);
+    if (fs.existsSync(file)) return;
+    let patch = "";
+    try {
+      patch = await diffSince(run.cwd, run.gitStart);
+    } catch {
+      return;
+    }
+    const body = preface + patch;
+    this.writeRunFile(run, RUN_FILES.patch, body.length === 0 || body.endsWith("\n") ? body : `${body}\n`);
+  }
+
+  private writeRunFile(run: RunMeta, name: string, text: string): void {
+    if (!run.dir || !isDirectory(run.dir)) return;
+    try {
+      writeFileAtomic(path.join(run.dir, name), text);
+    } catch {
+      /* the run folder can vanish if the human deletes it */
+    }
   }
 
   /** Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped". */

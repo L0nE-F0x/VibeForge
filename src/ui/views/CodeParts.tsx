@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { DockState, FileNode, LayoutNode } from "../../shared/api.js";
+import { isDockUrl, normalizeDockInput, savedDockUrl } from "../../shared/dock-url.js";
 import { tildify } from "../../shared/text.js";
 import { call, errorText, on, useAppInfo } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
@@ -221,34 +222,84 @@ function nextPaint(): Promise<void> {
   });
 }
 
-export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: string) => void; visible: boolean }) {
+export function DockPanel({
+  workspaceId,
+  url,
+  onUrl,
+  visible,
+}: {
+  workspaceId: string;
+  url: string;
+  onUrl: (workspaceId: string, url: string) => void;
+  visible: boolean;
+}) {
   const t = useT();
   const { fail } = useToast();
   const viewRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState(url);
   const [state, setState] = useState<DockState | null>(null);
+  const [seenUrl, setSeenUrl] = useState(url);
+  const [still, setStill] = useState<string | null>(null);
+  const editing = useRef(false);
+  const urlRef = useRef(url);
+  urlRef.current = url;
+  // The address to give the view. `url` is what this workspace last saved; once the page moves,
+  // follow that, so a resize does not load the address from before the move.
+  const reported = useRef(url);
+  const covered = useDockCovered();
+  if (seenUrl !== url) {
+    setSeenUrl(url);
+    reported.current = url;
+    if (!editing.current) setDraft(url);
+  }
   // The page is a native view drawn above the app. Our own cards (no URL, a load error) take its
   // place; while a menu or dialog lands on it, a still of the page stands in so they can show.
-  const live = visible && Boolean(url) && !state?.error;
-  const covered = useDockCovered();
-  const [still, setStill] = useState<string | null>(null);
+  // State from another workspace is ignored, so its back button cannot flash on this one.
+  const mine = state?.workspaceId === workspaceId ? state : null;
+  const live = visible && Boolean(url) && !mine?.error;
 
-  useEffect(() => setDraft(url), [url]);
-  useEffect(() => on("dock", setState), []);
+  useEffect(
+    () =>
+      on("dock", (next) => {
+        // A page that belongs to another workspace must not move this bar.
+        const adopted = savedDockUrl(next.workspaceId, workspaceId, next.url, reported.current);
+        if (next.workspaceId !== workspaceId) return;
+        setState(next);
+        // A cleared address stays cleared. A hidden page must not type itself back into the bar.
+        if (!urlRef.current || !adopted) return;
+        reported.current = adopted;
+        if (!editing.current) setDraft(adopted);
+      }),
+    [workspaceId],
+  );
 
   const place = useCallback(() => {
     const node = viewRef.current;
-    if (!node || !live) {
+    if (!node || !visible) {
       setDockArea(null);
       void call("dock.hide").catch(() => undefined);
+      return;
+    }
+    if (!url) {
+      setDockArea(null);
+      // An empty address tells the dock to stop storing this page, so a later move cannot refill it.
+      void call("dock.show", { x: 0, y: 0, width: 0, height: 0 }, "", workspaceId).catch(() => undefined);
+      return;
+    }
+    if (mine?.error) {
+      setDockArea(null);
+      void call("dock.hide", workspaceId).catch(() => undefined);
       return;
     }
     const rect = node.getBoundingClientRect();
     setDockArea(boxOf(rect));
     // While covered, the view stays hidden behind its still and comes back at the latest size.
     // Ask the registry, not `covered`: publishing the area can itself make the dock covered.
-    if (!dockCovered()) void call("dock.show", { x: rect.left, y: rect.top, width: rect.width, height: rect.height }, url).catch(() => undefined);
-  }, [live, covered, url]);
+    if (!dockCovered()) {
+      const target = reported.current || url;
+      void call("dock.show", { x: rect.left, y: rect.top, width: rect.width, height: rect.height }, target, workspaceId).catch(() => undefined);
+    }
+  }, [visible, url, workspaceId, covered, mine?.error]);
 
   useEffect(() => {
     place();
@@ -286,12 +337,12 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
         }
       }
       // Without a still (the page never painted), the panel's own background shows instead.
-      void call("dock.hide").catch(() => undefined);
+      void call("dock.hide", workspaceId).catch(() => undefined);
     })();
     return () => {
       cancelled = true;
     };
-  }, [live, covered]);
+  }, [live, covered, workspaceId]);
 
   // Once the view is back, give it time to repaint over the still before dropping the still.
   useEffect(() => {
@@ -309,25 +360,25 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
   );
 
   const commit = () => {
-    let next = draft.trim();
-    if (next && !/^https?:\/\//i.test(next)) next = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(next) ? `http://${next}` : `https://${next}`;
+    const next = normalizeDockInput(draft);
     if (next !== url) {
+      reported.current = next;
       try {
-        onUrl(next);
+        onUrl(workspaceId, next);
       } catch (error) {
         fail(error, "That URL did not work");
       }
     } else void call("dock.command", "reload");
   };
 
-  const loading = Boolean(state?.loading) && live;
-  const error = visible && url ? state?.error : null;
+  const loading = Boolean(mine?.loading) && live;
+  const error = visible && url ? (mine?.error ?? null) : null;
 
   return (
     <>
       <div className="dock-bar">
-        <Button size="sm" variant="ghost" icon={ArrowLeft} disabled={!state?.canGoBack} onClick={() => void call("dock.command", "back")} title={t("common.back")} />
-        <Button size="sm" variant="ghost" icon={ArrowRight} disabled={!state?.canGoForward} onClick={() => void call("dock.command", "forward")} title={t("dock.forward")} />
+        <Button size="sm" variant="ghost" icon={ArrowLeft} disabled={!url || !mine?.canGoBack} onClick={() => void call("dock.command", "back")} title={t("common.back")} />
+        <Button size="sm" variant="ghost" icon={ArrowRight} disabled={!url || !mine?.canGoForward} onClick={() => void call("dock.command", "forward")} title={t("dock.forward")} />
         <Button
           size="sm"
           variant="ghost"
@@ -340,10 +391,18 @@ export function DockPanel({ url, onUrl, visible }: { url: string; onUrl: (url: s
           value={draft}
           placeholder="http://127.0.0.1:5173"
           onChange={(event) => setDraft(event.target.value)}
+          onFocus={() => {
+            editing.current = true;
+          }}
           onKeyDown={(event) => event.key === "Enter" && commit()}
-          onBlur={() => draft.trim() !== url && commit()}
+          onBlur={() => {
+            // The id is the one this bar was editing, so a blur during a workspace switch cannot
+            // write this address onto the workspace being switched to.
+            editing.current = false;
+            if (normalizeDockInput(draft) !== url) commit();
+          }}
         />
-        <Button size="sm" variant="ghost" icon={ExternalLink} disabled={!url} onClick={() => void call("app.openExternal", state?.url || url)} title={t("dock.openBrowser")} />
+        <Button size="sm" variant="ghost" icon={ExternalLink} disabled={!url} onClick={() => void call("app.openExternal", (mine && isDockUrl(mine.url) ? mine.url : url))} title={t("dock.openBrowser")} />
         <Button size="sm" variant="ghost" icon={Wrench} disabled={!url} onClick={() => void call("dock.command", "devtools")} title={t("dock.devtools")} />
       </div>
       <div ref={viewRef} className="dock-view">
