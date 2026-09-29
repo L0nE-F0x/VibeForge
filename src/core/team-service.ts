@@ -212,6 +212,8 @@ export class TeamService {
   /** Per shell: the latest command line in its foreground, and the queue that records it. */
   private readonly shellArgv = new Map<string, string[]>();
   private readonly recordings = new Map<string, Promise<void>>();
+  /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
+  private readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
   private readonly gitAtStart = new Map<string, string>();
   private pending = new Set<Topic>();
@@ -1418,7 +1420,10 @@ export class TeamService {
     const programEngineId = found?.engineId ?? null;
     const programCwd = found ? cwd : null;
     if (session.program === program && session.programEngineId === programEngineId && session.programCwd === programCwd) return;
-    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working: programEngineId ? session.working : false });
+    // The host only reports a change. A CLI that starts working at once was already "working" while
+    // its command line was typed, so it takes that state over from the shell.
+    const working = programEngineId ? (this.hostWorking.get(ptyId) ?? session.working) : false;
+    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working });
     this.emit("live");
     if (argv) this.shellArgv.set(ptyId, argv);
     if (session.programEngineId !== programEngineId) this.queueRecording(ptyId);
@@ -1427,7 +1432,9 @@ export class TeamService {
   /** Only coding CLIs count as working; a dev server's logs are just a shell being busy. */
   onPtyActivity(ptyId: string, working: boolean): void {
     const session = this.live.get(ptyId);
-    if (!session || (session.kind === "shell" && !session.programEngineId && working)) return;
+    if (!session) return;
+    if (session.kind === "shell") this.hostWorking.set(ptyId, working);
+    if (session.kind === "shell" && !session.programEngineId && working) return;
     if (Boolean(session.working) === working) return;
     this.live.set(ptyId, { ...session, working });
     this.emit("live");
@@ -1545,6 +1552,7 @@ export class TeamService {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
     this.shellArgv.delete(ptyId);
+    this.hostWorking.delete(ptyId);
     try {
       if (!session?.runId) {
         this.emit("live");

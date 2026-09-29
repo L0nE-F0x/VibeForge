@@ -507,6 +507,20 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("keeps a CLI working when it starts while the shell is already busy", async () => {
+    // `argy "fix the tests"` typed at the prompt: the host marks the pty working while the line
+    // is typed and never says so again, because the CLI carries on with no quiet gap.
+    const ctx = setup();
+    const file = ctx.svc.addWorkspace(ctx.place);
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: file.workspaces[0].id });
+    ctx.svc.onPtyActivity(ptyId, true);
+    ctx.svc.onPtyProgram(ptyId, ["argy", "fix the tests"], ctx.place);
+    expect(ctx.svc.listLive()[0].working).toBe(true);
+    ctx.svc.onPtyActivity(ptyId, false);
+    expect(ctx.svc.listLive()[0].working).toBe(false);
+    ctx.svc.close();
+  });
+
   it("fails a run cleanly when the process cannot start", async () => {
     const ctx = setup();
     ctx.host.spawn = async () => {
