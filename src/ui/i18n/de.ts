@@ -284,6 +284,7 @@ export const de: Catalog = {
   "runs.empty.body": "Ein Lauf ist ein Prozess, den VibeForge gestartet hat: ein Agenten-Chat, eine Routine, eine Aufgabe oder ein Prompt aus Code. Jeder behält seinen Prompt, den letzten Bildschirm, ein Transkript als Text und einen Git-Snapshot der Änderungen.",
   "runs.notFound": "Lauf nicht gefunden",
   "runs.openFolder": "Ordner öffnen",
+  "runs.more": "Mehr zu diesem Lauf",
   "runs.markReviewed": "Als geprüft markieren",
   "runs.unreview": "Wieder zur Prüfung legen",
 

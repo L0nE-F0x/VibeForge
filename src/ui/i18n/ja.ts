@@ -285,6 +285,7 @@ export const ja: Catalog = {
   "runs.empty.body": "実行とは、VibeForge が起動したひとつのプロセスです。エージェントとのチャット、ルーティン、タスク、コードからのプロンプトなど。それぞれにプロンプト、最後の画面、テキストの記録、変更内容の git スナップショットが残ります。",
   "runs.notFound": "実行が見つかりません",
   "runs.openFolder": "フォルダーを開く",
+  "runs.more": "この実行のその他の操作",
   "runs.markReviewed": "レビュー済みにする",
   "runs.unreview": "レビュー待ちに戻す",
 
