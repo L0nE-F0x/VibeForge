@@ -27,7 +27,9 @@ export default defineConfig({
     react(),
     contentSecurityPolicy(),
     electron({
-      main: { entry: "electron/main.ts" },
+      // Every `node:` import stays external. The plugin only knows the built-ins of the Node doing
+      // the build, and Node 22 doesn't list node:sqlite, so building there would bundle a stub.
+      main: { entry: "electron/main.ts", vite: { build: { rollupOptions: { external: [/^node:/] } } } },
       preload: { input: "electron/preload.ts" },
     }),
   ],
