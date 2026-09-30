@@ -1,5 +1,5 @@
 import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
-import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
@@ -12,19 +12,23 @@ import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
 import { VoiceLayer } from "./voice.js";
-import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Toasts } from "./components/ui.js";
+import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
+import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
-import { AgentsView } from "./views/Agents.js";
-import { ChatView } from "./views/Chat.js";
 import { CodeView } from "./views/Code.js";
 import { HomeView } from "./views/Home.js";
-import { RoutinesView } from "./views/Routines.js";
-import { RunsView } from "./views/Runs.js";
-import { SettingsView } from "./views/Settings.js";
-import { SkillsView } from "./views/Skills.js";
-import { TasksView } from "./views/Tasks.js";
+
+// Home is the first screen and Code stays mounted to keep its terminals; the other views load
+// the first time they're opened.
+const AgentsView = lazy(() => import("./views/Agents.js").then((module) => ({ default: module.AgentsView })));
+const ChatView = lazy(() => import("./views/Chat.js").then((module) => ({ default: module.ChatView })));
+const TasksView = lazy(() => import("./views/Tasks.js").then((module) => ({ default: module.TasksView })));
+const RoutinesView = lazy(() => import("./views/Routines.js").then((module) => ({ default: module.RoutinesView })));
+const SkillsView = lazy(() => import("./views/Skills.js").then((module) => ({ default: module.SkillsView })));
+const RunsView = lazy(() => import("./views/Runs.js").then((module) => ({ default: module.RunsView })));
+const SettingsView = lazy(() => import("./views/Settings.js").then((module) => ({ default: module.SettingsView })));
 
 export function App() {
   return (
@@ -102,11 +106,11 @@ function Shell() {
     window.addEventListener("mouseup", onMouse, true);
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
     const offWorkspace = on("open-workspace", ({ workspaceId }) => go({ view: "code", workspaceId }));
-    const offCrash = on("host-crash", (message) => push("error", "Terminal host problem", message));
+    const offCrash = on("host-crash", (message) => push("error", translateNow("app.hostProblem"), coreText(message)));
     // A host that failed before this page was listening (it starts alongside the window).
     void call("app.info")
       .then((info) => {
-        if (!info.hostRunning) push("error", "Terminal host problem", info.hostError ?? "The terminal host is not running, so no terminal can start.");
+        if (!info.hostRunning) push("error", translateNow("app.hostProblem"), info.hostError ? coreText(info.hostError) : translateNow("app.hostDown"));
       })
       .catch(() => undefined);
     return () => {
@@ -130,6 +134,7 @@ function Shell() {
       <Rail />
       <main className="stage">
         <CrashBoundary key={route.view}>
+          <Suspense fallback={<ViewLoading />}>
           {route.view === "home" && <HomeView />}
           {route.view === "agents" && <AgentsView route={route} />}
           {route.view === "chat" && <ChatView route={route} />}
@@ -138,6 +143,7 @@ function Shell() {
           {route.view === "skills" && <SkillsView route={route} />}
           {route.view === "runs" && <RunsView route={route} />}
           {route.view === "settings" && <SettingsView />}
+          </Suspense>
         </CrashBoundary>
         <CrashBoundary>
           <CodeView active={route.view === "code"} route={route.view === "code" ? route : null} />
@@ -260,7 +266,7 @@ function Rail() {
   };
 
   return (
-    <nav ref={navRef} className="rail" aria-label="Views">
+    <nav ref={navRef} className="rail" aria-label={t("app.views")}>
       <span className={`rail-marker${marker.glides ? " glides" : ""}`} style={marker.box ? { transform: `translate(${marker.box.left}px, ${marker.box.top}px)`, height: marker.box.height } : { opacity: 0 }} aria-hidden />
       <button type="button" className="rail-logo" aria-label={t("switcher.title")} {...tipProps(t("switcher.title"), { kbd: "Ctrl+K", side: "right" })} onClick={() => window.dispatchEvent(new Event(OPEN_SWITCHER_EVENT))}>
         <Logo size={22} />
@@ -461,3 +467,13 @@ class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | 
     return this.props.children;
   }
 }
+
+/** While a view's code loads, the first time it opens: the same stand-in a loading list shows. */
+function ViewLoading() {
+  return (
+    <div className="main">
+      <Skeleton page rows={6} />
+    </div>
+  );
+}
+

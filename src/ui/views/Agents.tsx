@@ -19,7 +19,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, ChatView, Engine } from "../../shared/api.js";
-import { tildify } from "../../shared/text.js";
+import { listText, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
 import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
@@ -29,11 +29,6 @@ import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, ty
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 import { useVoiceStatus } from "../voice.js";
-
-const BRIEF_PLACEHOLDER = `What do you own?
-What context matters?
-What does good look like?
-Which actions still need a person?`;
 
 /** Save on Ctrl+S while a form is on screen. */
 export function useSaveShortcut(save: () => void, enabled: boolean): void {
@@ -51,15 +46,16 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
 }
 
 export function EngineSelect({ engines, value, onChange, allowMissing }: { engines: Engine[]; value: string; onChange: (id: string) => void; allowMissing?: string }) {
+  const t = useT();
   return (
     <Select value={value} onChange={(event) => onChange(event.target.value)}>
-      {!value && <option value="">Pick an engine</option>}
+      {!value && <option value="">{t("agents.pickEngine")}</option>}
       {engines
         .filter((engine) => engine.available || engine.id === allowMissing)
         .map((engine) => (
           <option key={engine.id} value={engine.id}>
             {engine.label}
-            {engine.available ? "" : " (not on PATH)"}
+            {engine.available ? "" : ` ${t("common.notOnPath")}`}
           </option>
         ))}
     </Select>
@@ -116,7 +112,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
         }
       >
         <div className="list-scroll">
-          {agents.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>No agents yet.</div>}
+          {agents.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
           {list.map((agent) => {
             const live = chats.some((chat) => chat.agentId === agent.id && chat.live);
             const unread = inbox.filter((run) => run.agentId === agent.id).length;
@@ -134,7 +130,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                   <span className="row-title truncate">{agent.name}</span>
                   <span className="row-sub truncate" style={engine && !engine.available ? { color: "var(--red)" } : undefined}>
                     {engine?.label ?? agent.engine}
-                    {engine && !engine.available ? " · missing" : ""}
+                    {engine && !engine.available ? ` · ${t("common.missing")}` : ""}
                   </span>
                 </span>
                 {unread > 0 && <Chip tone="accent">{unread}</Chip>}
@@ -183,7 +179,7 @@ function FolderList({ places, onRemove, home }: { places: string[]; onRemove?: (
         <div key={place} className="card hstack" style={{ padding: "8px 10px" }}>
           <FolderOpen size={14} className={exists.data?.[index] === false ? undefined : "accent-text"} style={exists.data?.[index] === false ? { color: "var(--red)" } : undefined} />
           <span className="mono truncate grow">{tildify(place, home)}</span>
-          {exists.data?.[index] === false && <Chip tone="bad">missing</Chip>}
+          {exists.data?.[index] === false && <Chip tone="bad">{t("common.missing")}</Chip>}
           <Button size="sm" variant="ghost" icon={FolderOpen} title={t("common.open")} onClick={() => void call("app.openPath", place)} />
           {onRemove && <Button size="sm" variant="ghost" icon={X} title={t("common.remove")} onClick={() => onRemove(place)} />}
         </div>
@@ -193,6 +189,7 @@ function FolderList({ places, onRemove, home }: { places: string[]; onRemove?: (
 }
 
 function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (agent: Agent) => void }) {
+  const t = useT();
   const engines = useEngines().data ?? [];
   const settings = useQuery("settings", ["settings"], () => call("settings.get")).data;
   const home = useAppInfo().data?.home ?? "";
@@ -210,55 +207,60 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
   }, [available, engine, settings]);
 
   const [pick] = useAction(async () => {
-    const folder = await call("app.pickFolder", "Choose a folder this agent may work in");
+    const folder = await call("app.pickFolder", t("agents.pickFolder"));
     if (folder && !places.includes(folder)) setPlaces((prev) => [...prev, folder]);
   });
   const [save, saving] = useAction(async () => {
     const agent = await call("agents.save", { name, brief, engine, places, allowRoutines });
     onCreated(agent);
-  }, "Could not create the agent");
+  }, t("agents.createFailed"));
 
-  const missing = [!name.trim() && "a name", !brief.trim() && "a brief", !engine && "an engine", places.length === 0 && "an allowed folder"].filter(Boolean) as string[];
+  const missing = [
+    !name.trim() && t("agents.need.name"),
+    !brief.trim() && t("agents.need.brief"),
+    !engine && t("agents.need.engine"),
+    places.length === 0 && t("agents.need.folder"),
+  ].filter(Boolean) as string[];
 
   return (
     <Modal
-      title="New agent"
+      title={t("agents.newTitle")}
       icon={Bot}
       wide
       onClose={onClose}
       footer={
         <>
-          <span className="faint grow">{missing.length ? `Still needs ${missing.join(", ")}.` : "Ready."}</span>
+          <span className="faint grow">{missing.length ? t("agents.needs", { list: listText(missing, t.language) }) : t("agents.ready")}</span>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" busy={saving} disabled={missing.length > 0} onClick={() => void save()}>
-            Create agent
+            {t("agents.create")}
           </Button>
         </>
       }
     >
       <div className="form-grid">
-        <Field label="Name">
-          <Input autoFocus placeholder="Release notes" value={name} onChange={(event) => setName(event.target.value)} />
+        <Field label={t("common.name")}>
+          <Input autoFocus placeholder={t("agents.namePlaceholder")} value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
-        <Field label="Engine" hint="Only CLIs found on PATH are listed. You can switch later.">
+        <Field label={t("common.engine")} hint={t("agents.engineHint")}>
           <EngineSelect engines={engines} value={engine} onChange={setEngine} />
         </Field>
       </div>
-      <Field label="Brief" hint="The agent's job, standards and tone. Sent at the start of every run.">
-        <TextArea value={brief} placeholder={BRIEF_PLACEHOLDER} style={{ minHeight: 150 }} onChange={(event) => setBrief(event.target.value)} />
+      <Field label={t("agents.brief")} hint={t("agents.briefHint")}>
+        <TextArea value={brief} placeholder={t("agents.briefPlaceholder")} style={{ minHeight: 150 }} onChange={(event) => setBrief(event.target.value)} />
       </Field>
       <SecretNote />
-      <Field label="Allowed folders" hint="Runs start in the first one. The prompt tells the CLI to stay inside them. This is a policy, not a sandbox.">
+      <Field label={t("agents.folders")} hint={t("agents.foldersHint")}>
         {places.length > 0 && <FolderList places={places} home={home} onRemove={(place) => setPlaces((prev) => prev.filter((item) => item !== place))} />}
         <div>
           <Button icon={FolderPlus} onClick={() => void pick()}>
-            Add folder
+            {t("agents.addFolder")}
           </Button>
         </div>
       </Field>
-      <Toggle checked={allowRoutines} onChange={setAllowRoutines} label="Routines may start this agent on a schedule" />
+      <Toggle checked={allowRoutines} onChange={setAllowRoutines} label={t("agents.allowRoutines")} />
     </Modal>
   );
 }
@@ -282,9 +284,9 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
           <h1 className="truncate">{agent.name}</h1>
           <div className="sub truncate">
             {engine?.label ?? agent.engine}
-            {engine && !engine.available && <span style={{ color: "var(--red)" }}> (not on PATH)</span>} · {agent.places.length} folder
-            {agent.places.length === 1 ? "" : "s"} · {agent.skills.length} skill{agent.skills.length === 1 ? "" : "s"}
-            {agent.allowRoutines ? "" : " · routines off"}
+            {engine && !engine.available && <span style={{ color: "var(--red)" }}> {t("common.notOnPath")}</span>} · {t.count("agents.folderCount", agent.places.length)} ·{" "}
+            {t.count("agents.skillCount", agent.skills.length)}
+            {agent.allowRoutines ? "" : ` · ${t("agents.routinesOff")}`}
           </div>
         </div>
         {/* The Chats tab has its own New chat row; elsewhere this is the way back to talking. */}
@@ -298,13 +300,13 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: "chats", label: "Chats", icon: MessagesSquare, badge: chats.some((chat) => chat.live) ? <span className="dot running" /> : undefined },
-          { value: "brief", label: "Brief", icon: BookOpen },
-          { value: "memory", label: "Memory", icon: Brain },
-          { value: "skills", label: "Skills", icon: Sparkles, badge: agent.skills.length ? <Chip>{agent.skills.length}</Chip> : undefined },
-          { value: "folders", label: "Allowed folders", icon: FolderOpen },
-          { value: "runs", label: "Runs", icon: History },
-          { value: "settings", label: "Settings", icon: Settings2 },
+          { value: "chats", label: t("agents.chats"), icon: MessagesSquare, badge: chats.some((chat) => chat.live) ? <span className="dot running" /> : undefined },
+          { value: "brief", label: t("agents.brief"), icon: BookOpen },
+          { value: "memory", label: t("agents.tab.memory"), icon: Brain },
+          { value: "skills", label: t("skills.title"), icon: Sparkles, badge: agent.skills.length ? <Chip>{agent.skills.length}</Chip> : undefined },
+          { value: "folders", label: t("agents.folders"), icon: FolderOpen },
+          { value: "runs", label: t("runs.title"), icon: History },
+          { value: "settings", label: t("settings.title"), icon: Settings2 },
         ]}
       />
       {tab === "chats" && <ChatsTab agent={agent} chats={chats} chatId={chatId} />}
@@ -315,7 +317,7 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
       {tab === "runs" && (
         <div className="page-body">
           <div className="vstack page-narrow" style={{ gap: 6 }}>
-            {runs.data?.length === 0 && <Notice>No runs yet.</Notice>}
+            {runs.data?.length === 0 && <Notice>{t("runs.none")}</Notice>}
             {runs.data?.map((run) => <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id, filter: "all" })} />)}
           </div>
         </div>
@@ -337,17 +339,17 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
     // Deleting is undone from the toast. Only a live session asks first: stopping it can't be undone.
     if (target.live) {
       const ok = await confirm({
-        title: `Delete "${target.title}"?`,
-        body: "Its session is still going and will be stopped. The chat itself can be undone.",
-        confirm: "Stop and delete",
+        title: t("common.deleteNamed", { name: target.title }),
+        body: t("agents.deleteLiveChatBody"),
+        confirm: t("common.stopAndDelete"),
         danger: true,
       });
       if (!ok) return;
     }
     const result = await call("chats.delete", target.id);
     if (target.id === chatId) go({ view: "agents", agentId: agent.id, tab: "chats" });
-    deleted(`Deleted "${target.title}"`, result);
-  }, "Could not delete the chat");
+    deleted(t("common.deletedNamed", { name: target.title }), result);
+  }, t("agents.deleteChatFailed"));
 
   return (
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
@@ -377,7 +379,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
             <MessageSquarePlus size={15} className="accent-text" />
             <span className="row-title">{t("agents.newChat")}</span>
           </button>
-          {chats.length > 0 && <div className="list-label">Recent</div>}
+          {chats.length > 0 && <div className="list-label">{t("agents.recent")}</div>}
           {chats.map((item) => (
             <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-selected={item.id === chat?.id} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
               <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
@@ -420,14 +422,14 @@ function EditorShell({ children, dirty, onSave, onDiscard, saving, note }: { chi
         {children}
         <div className="hstack">
           <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={onSave}>
-            Save
+            {t("common.save")}
           </Button>
           {dirty && (
             <Button variant="ghost" icon={Undo2} onClick={onDiscard}>
               {t("common.discard")}
             </Button>
           )}
-          <span className="faint">{dirty ? "Unsaved changes · Ctrl+S" : note ?? "Saved"}</span>
+          <span className="faint">{dirty ? t("common.unsaved") : note ?? t("common.saved")}</span>
         </div>
       </div>
     </div>
@@ -435,39 +437,35 @@ function EditorShell({ children, dirty, onSave, onDiscard, saving, note }: { chi
 }
 
 function BriefTab({ agent }: { agent: Agent }) {
+  const t = useT();
   const { push } = useToast();
   const [brief, setBrief, discard] = useDraftState(`agent:${agent.id}:brief`, agent.brief);
   const [save, saving] = useAction(async () => {
     await call("agents.save", { ...agent, brief });
-    push("success", "Brief saved", "It applies to the next run.");
-  }, "Could not save the brief");
+    push("success", t("agents.briefSaved"), t("agents.briefSavedBody"));
+  }, t("agents.briefFailed"));
   return (
     <EditorShell dirty={brief !== agent.brief} saving={saving} onSave={() => void save()} onDiscard={discard}>
-      <Notice icon={BookOpen}>
-        The brief opens every run: the job, the standards, and the actions that still need you. A good brief answers four questions — what the agent owns,
-        what context matters, what good looks like, and what needs a person.
-      </Notice>
-      <TextArea value={brief} placeholder={BRIEF_PLACEHOLDER} style={{ minHeight: 320 }} onChange={(event) => setBrief(event.target.value)} />
+      <Notice icon={BookOpen}>{t("agents.briefNote")}</Notice>
+      <TextArea value={brief} placeholder={t("agents.briefPlaceholder")} style={{ minHeight: 320 }} onChange={(event) => setBrief(event.target.value)} />
       <SecretNote />
     </EditorShell>
   );
 }
 
 function MemoryTab({ agent }: { agent: Agent }) {
+  const t = useT();
   const { push } = useToast();
   const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id));
   const [text, setText, discard] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
   const [save, saving] = useAction(async () => {
     await call("agents.writeMemory", agent.id, text ?? "");
-    push("success", "Memory saved");
-  }, "Could not save memory");
+    push("success", t("agents.memorySaved"));
+  }, t("agents.memoryFailed"));
   if (text === null) return null;
   return (
-    <EditorShell dirty={text !== memory.data} saving={saving} onSave={() => void save()} onDiscard={discard} note="Stored as memory.md next to the agent; edit it anywhere.">
-      <Notice icon={Brain}>
-        Durable facts that should still matter next week: preferences, decisions, constraints, lessons. Dated bullets work well. VibeForge adds this to
-        every run; agents never rewrite it themselves.
-      </Notice>
+    <EditorShell dirty={text !== memory.data} saving={saving} onSave={() => void save()} onDiscard={discard} note={t("agents.memoryStored")}>
+      <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>
       <TextArea code value={text} style={{ minHeight: 320 }} onChange={(event) => setText(event.target.value)} />
       <SecretNote />
     </EditorShell>
@@ -481,11 +479,11 @@ function SkillsTab({ agent }: { agent: Agent }) {
   const [toggle] = useAction(async (skillId: string, on: boolean) => {
     const next = on ? [...agent.skills, skillId] : agent.skills.filter((id) => id !== skillId);
     await call("agents.save", { ...agent, skills: next });
-  }, "Could not update skills");
+  }, t("agents.skillsFailed"));
   return (
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 8 }}>
-        <Notice icon={Sparkles}>Installed skills are added to every run of this agent. Editing a skill changes the next run of every agent that has it.</Notice>
+        <Notice icon={Sparkles}>{t("agents.skillsNote")}</Notice>
         {skills.length === 0 && (
           <Empty icon={Sparkles} title={t("agents.noSkills.title")} actions={<Button icon={Plus} onClick={() => go({ view: "skills" })}>{t("skills.write")}</Button>}>
             {t("agents.noSkills.body")}
@@ -496,7 +494,7 @@ function SkillsTab({ agent }: { agent: Agent }) {
             <Sparkles size={15} className="accent-text" />
             <span className="vstack grow" style={{ gap: 1 }}>
               <strong>{skill.name}</strong>
-              <span className="faint truncate">{skill.description || "No description"}</span>
+              <span className="faint truncate">{skill.description || t("common.noDescription")}</span>
             </span>
             <Toggle checked={agent.skills.includes(skill.id)} onChange={(on) => void toggle(skill.id, on)} />
           </div>
@@ -507,25 +505,23 @@ function SkillsTab({ agent }: { agent: Agent }) {
 }
 
 function FoldersTab({ agent }: { agent: Agent }) {
+  const t = useT();
   const home = useAppInfo().data?.home ?? "";
   const [add] = useAction(async () => {
-    const folder = await call("app.pickFolder", `Allow ${agent.name} to work in…`);
+    const folder = await call("app.pickFolder", t("agents.allowIn", { name: agent.name }));
     if (folder) await call("agents.save", { ...agent, places: [...agent.places, folder] });
-  }, "Could not add the folder");
+  }, t("agents.addFolderFailed"));
   const [remove] = useAction(async (place: string) => {
     await call("agents.save", { ...agent, places: agent.places.filter((item) => item !== place) });
-  }, "Could not remove the folder");
+  }, t("agents.removeFolderFailed"));
   return (
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 12 }}>
-        <Notice icon={FolderOpen}>
-          Runs start in the first folder that exists, and the prompt tells the CLI to stay inside these. A coding CLI has a shell, so this is a policy, not
-          an OS sandbox.
-        </Notice>
+        <Notice icon={FolderOpen}>{t("agents.foldersNote")}</Notice>
         <FolderList places={agent.places} home={home} onRemove={agent.places.length > 1 ? (place) => void remove(place) : undefined} />
         <div>
           <Button icon={FolderPlus} onClick={() => void add()}>
-            Add folder
+            {t("agents.addFolder")}
           </Button>
         </div>
       </div>
@@ -534,6 +530,7 @@ function FoldersTab({ agent }: { agent: Agent }) {
 }
 
 function SettingsTab({ agent }: { agent: Agent }) {
+  const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
@@ -545,45 +542,42 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const setAllow = (next: boolean) => setForm((prev) => ({ ...prev, allow: next }));
   const setVoice = (next: string) => setForm((prev) => ({ ...prev, voice: next }));
   const voices = useVoiceStatus().data?.voices ?? [];
-  const t = useT();
   const dirty = name !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
     await call("agents.save", { ...agent, name, engine, allowRoutines: allow, voice });
-    push("success", "Agent updated", engine !== agent.engine ? `${engineRow?.label ?? engine} runs from the next chat on.` : undefined);
-  }, "Could not save");
+    push("success", t("agents.updated"), engine !== agent.engine ? t("agents.engineFromNext", { engine: engineRow?.label ?? engine }) : undefined);
+  }, t("common.saveFailed"));
   const [remove, removing] = useAction(async () => {
     const ok = await confirm({
-      title: `Delete ${agent.name}?`,
-      body: "This removes the agent, its brief and its memory file. Its runs, transcripts and chats stay on disk and in Runs.",
-      confirm: "Delete agent",
+      title: t("agents.deleteTitle", { name: agent.name }),
+      body: t("agents.deleteBody"),
+      confirm: t("agents.delete"),
       danger: true,
       typeToConfirm: agent.name,
     });
     if (!ok) return;
     await call("agents.delete", agent.id, agent.name);
     go({ view: "agents" });
-  }, "Could not delete the agent");
+  }, t("agents.deleteFailed"));
   useSaveShortcut(() => void save(), dirty && !saving);
 
   return (
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 16 }}>
         <div className="form-grid">
-          <Field label="Name">
+          <Field label={t("common.name")}>
             <Input value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
-          <Field label="Engine" hint="The teammate stays the same. The change applies to the next run.">
+          <Field label={t("common.engine")} hint={t("agents.engineChangeHint")}>
             <EngineSelect engines={engines} value={engine} onChange={setEngine} allowMissing={agent.engine} />
           </Field>
         </div>
         {engine !== agent.engine && (
-          <Notice tone="accent">
-            Switching to {engineRow?.label ?? engine} keeps the brief, memory, skills and folders. Chats that are already running keep their current engine.
-          </Notice>
+          <Notice tone="accent">{t("agents.switching", { engine: engineRow?.label ?? engine })}</Notice>
         )}
-        <Toggle checked={allow} onChange={setAllow} label="Routines may start this agent on a schedule" />
+        <Toggle checked={allow} onChange={setAllow} label={t("agents.allowRoutines")} />
         <Field label={t("voice.agentVoice")} hint={voices.length ? t("voice.agentVoiceHint") : t("voice.agentVoiceNone")}>
           <div className="hstack" style={{ gap: 6, maxWidth: 420 }}>
             <Select value={voice} onChange={(event) => setVoice(event.target.value)} disabled={!voices.length && !voice}>
@@ -600,7 +594,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
         </Field>
         <div className="hstack">
           <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={() => void save()}>
-            Save changes
+            {t("common.saveChanges")}
           </Button>
           {dirty && (
             <Button variant="ghost" icon={Undo2} onClick={discard}>
@@ -610,12 +604,12 @@ function SettingsTab({ agent }: { agent: Agent }) {
           {dirty && <span className="faint">Ctrl+S</span>}
         </div>
         <div className="section-title" style={{ marginTop: 28 }}>
-          Danger zone
+          {t("common.dangerZone")}
         </div>
         <div className="card hstack">
-          <span className="grow muted">Delete this agent. Run history is kept.</span>
+          <span className="grow muted">{t("agents.deleteNote")}</span>
           <Button variant="danger" icon={Trash2} busy={removing} onClick={() => void remove()}>
-            Delete agent
+            {t("agents.delete")}
           </Button>
         </div>
       </div>

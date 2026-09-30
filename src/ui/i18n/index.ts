@@ -1,16 +1,11 @@
 import { useSyncExternalStore } from "react";
-import { de } from "./de.js";
 import { en } from "./en.js";
-import { es } from "./es.js";
-import { fr } from "./fr.js";
-import { ja } from "./ja.js";
-import { pt } from "./pt.js";
-import { zh } from "./zh.js";
 
 // Translations with no dependencies. English (`en.ts`) is the source: its keys are the only
 // keys, and every other catalog must have all of them, so a missing translation fails the
 // typecheck instead of slipping out in English. Text may use {name} placeholders, **bold** and
-// `keycaps` (see Rich.tsx).
+// `keycaps` (see Rich.tsx). English is always loaded; another language loads when it's chosen,
+// and English stands in for the moment that takes.
 
 export type Key = keyof typeof en;
 export type Catalog = { readonly [K in Key]: string };
@@ -32,7 +27,31 @@ export const LANGUAGES = [
 
 export type Language = (typeof LANGUAGES)[number]["code"];
 
-const CATALOGS: Record<Language, Catalog> = { en, de, es, fr, pt, ja, zh };
+const LOADERS: Record<Exclude<Language, "en">, () => Promise<Catalog>> = {
+  de: () => import("./de.js").then((module) => module.de),
+  es: () => import("./es.js").then((module) => module.es),
+  fr: () => import("./fr.js").then((module) => module.fr),
+  pt: () => import("./pt.js").then((module) => module.pt),
+  ja: () => import("./ja.js").then((module) => module.ja),
+  zh: () => import("./zh.js").then((module) => module.zh),
+};
+
+const CATALOGS: Partial<Record<Language, Catalog>> = { en };
+const loading = new Map<Language, Promise<void>>();
+
+/** Fetch a language's catalog, once. Resolves when `translate` can use it. */
+export function loadLanguage(language: Language): Promise<void> {
+  if (CATALOGS[language]) return Promise.resolve();
+  let pending = loading.get(language);
+  if (!pending) {
+    pending = LOADERS[language as Exclude<Language, "en">]().then((catalog) => {
+      CATALOGS[language] = catalog;
+      if (language === current) refresh();
+    });
+    loading.set(language, pending);
+  }
+  return pending;
+}
 
 function known(tag: string): Language | null {
   const base = tag.toLowerCase().split(/[-_.]/)[0];
@@ -55,12 +74,12 @@ function fill(text: string, vars?: Vars): string {
 }
 
 export function translate(language: Language, key: Key, vars?: Vars): string {
-  return fill(CATALOGS[language][key] ?? en[key], vars);
+  return fill(CATALOGS[language]?.[key] ?? en[key], vars);
 }
 
 /** A sentence with a number in it, in the plural form the language uses for that number. */
 export function translateCount(language: Language, base: CountKey, count: number, vars?: Vars): string {
-  const catalog = CATALOGS[language] as Record<string, string>;
+  const catalog = (CATALOGS[language] ?? en) as Record<string, string>;
   const form = `${base}.${new Intl.PluralRules(language).select(count)}`;
   const key = (form in catalog ? form : `${base}.other`) as Key;
   return translate(language, key, { count, ...vars });
@@ -94,13 +113,26 @@ function translatorFor(language: Language): Translator {
   return found;
 }
 
-/** Follow the language setting ("system" or a code). */
+/** Components re-render with the current language's translator: after a switch, or once its catalog arrives. */
+function refresh(): void {
+  translators.delete(current);
+  for (const listener of listeners) listener();
+}
+
+let requested: Language = current;
+// The system language's catalog starts loading straight away, before Settings are read.
+if (current !== "en") void loadLanguage(current);
+
+/** Follow the language setting ("system" or a code). The switch happens once its catalog is here. */
 export function applyLanguageSetting(setting: string): void {
   const next = resolveLanguage(setting, systemLanguages());
   if (typeof document !== "undefined") document.documentElement.lang = next;
-  if (next === current) return;
-  current = next;
-  for (const listener of listeners) listener();
+  requested = next;
+  void loadLanguage(next).then(() => {
+    if (requested !== next || current === next) return;
+    current = next;
+    refresh();
+  });
 }
 
 function subscribe(listener: () => void): () => void {
@@ -110,7 +142,7 @@ function subscribe(listener: () => void): () => void {
 
 /** `t` for components; they re-render when the language changes. */
 export function useT(): Translator {
-  return translatorFor(useSyncExternalStore(subscribe, () => current));
+  return useSyncExternalStore(subscribe, () => translatorFor(current));
 }
 
 /** `t` for code outside render (callbacks that raise toasts or confirmations). */

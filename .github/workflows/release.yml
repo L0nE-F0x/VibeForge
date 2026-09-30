@@ -1,0 +1,35 @@
+name: Release
+
+# Pushing a version tag publishes its GitHub Release, with the notes taken word for word from
+# that version's section of CHANGELOG.md (scripts/release-notes.mjs). The in-app Update shows them.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches package.json
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but package.json says $version."
+            exit 1
+          fi
+      - run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+      - name: Publish, unless it already is
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already published; leaving it as it is."
+          else
+            gh release create "$GITHUB_REF_NAME" --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+          fi

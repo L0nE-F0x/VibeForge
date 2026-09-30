@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { coreText } from "./core-text.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
 
 declare global {
@@ -12,10 +13,10 @@ function bridge(): VibeForgeBridge {
   return window.vibeforge;
 }
 
-/** Electron wraps errors from the main process; keep only the part a person should read. */
+/** Electron wraps errors from the main process; keep only the part a person should read, in their language. */
 export function errorText(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  return raw.replace(/^Error invoking remote method '[^']+': /, "").replace(/^Error: /, "");
+  return coreText(raw.replace(/^Error invoking remote method '[^']+': /, "").replace(/^Error: /, ""));
 }
 
 export function call<K extends Method>(method: K, ...args: MethodArgs<K>): Promise<MethodResult<K>> {
@@ -217,6 +218,16 @@ export function useQuery<T>(key: string | null, topics: Topic[], fetcher: () => 
 }
 
 const EMPTY = { data: undefined, error: null, loaded: false };
+
+/** `value`, once it has stopped changing for `ms`: for search boxes that ask the main process. */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(timer);
+  }, [value, ms]);
+  return settled;
+}
 
 /** Re-render on an interval, for clocks and relative times. */
 export function useNow(intervalMs = 15_000): number {

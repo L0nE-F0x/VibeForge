@@ -1,0 +1,359 @@
+/* ------------------------------------------------------------------ welcome tour, help */
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+/* The spotlight: a rounded window whose shadow dims everything else. */
+.tour-hole {
+  position: fixed;
+  border-radius: 0;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent),
+    0 0 36px 2px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 0 0 200vmax color-mix(in srgb, var(--bg-deep) 74%, transparent);
+  transition:
+    top 0.42s cubic-bezier(0.3, 0.9, 0.3, 1),
+    left 0.42s cubic-bezier(0.3, 0.9, 0.3, 1),
+    width 0.42s cubic-bezier(0.3, 0.9, 0.3, 1),
+    height 0.42s cubic-bezier(0.3, 0.9, 0.3, 1),
+    box-shadow 0.3s;
+  pointer-events: none;
+}
+
+.tour-hole.is-empty {
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  box-shadow: 0 0 0 200vmax color-mix(in srgb, var(--bg-deep) 80%, transparent);
+}
+
+.tour.is-centered {
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(4px);
+}
+
+.tour-card {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 14px;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: var(--shadow);
+  animation: tour-in 0.3s 0.08s cubic-bezier(0.2, 0.9, 0.3, 1.1) backwards;
+}
+
+@keyframes tour-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+    scale: 0.98;
+  }
+}
+
+.tour-card h3 {
+  margin: 2px 0 0;
+  font-size: var(--fs-lg);
+  font-weight: 680;
+  letter-spacing: -0.015em;
+}
+
+.tour-card p {
+  margin: 0;
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+
+.tour-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tour-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+.tour-count {
+  flex: 1;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tour-skip {
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+  padding: 3px 8px;
+  border-radius: 0;
+}
+
+.tour-skip:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+}
+
+.tour-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: var(--fill);
+  border: 1px solid var(--line);
+}
+
+.tour-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+}
+
+.tour-caps {
+  display: inline-flex;
+  gap: 3px;
+  flex: none;
+}
+
+.tour-key .tour-caps {
+  min-width: 112px;
+}
+
+.tour-caps kbd,
+.tour-note kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 0;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  color: var(--fg);
+  background: var(--bg-raised);
+}
+
+.tour-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tour-progress {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+}
+
+.tour-progress span {
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
+  background: var(--line-2);
+  transition: width 0.25s, background 0.25s;
+}
+
+.tour-progress span.done {
+  background: color-mix(in srgb, var(--accent) 55%, var(--line-2));
+}
+
+.tour-progress span.on {
+  width: 18px;
+  background: var(--accent);
+}
+
+.tour-hero {
+  position: relative;
+  width: min(520px, calc(100vw - 48px));
+  padding: 30px 32px 22px;
+  gap: 14px;
+  text-align: left;
+}
+
+.tour-hero h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 720;
+  letter-spacing: -0.025em;
+  background: linear-gradient(90deg, var(--fg) 40%, var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.tour-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-deep);
+  border: 1px solid transparent;
+  animation: tour-glow 3.2s ease-in-out infinite;
+}
+
+@keyframes tour-glow {
+  50% {
+    box-shadow: 0 0 70px -6px color-mix(in srgb, var(--accent-2) 70%, transparent);
+  }
+}
+
+.tour-lead {
+  font-size: var(--fs-md);
+}
+
+.tour-points {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 2px 0;
+}
+
+.tour-points > div {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+.tour-points svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.tour-points strong,
+.tour-steps strong {
+  color: var(--fg);
+  font-weight: 620;
+}
+
+.tour-engines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.tour-engines > .faint:first-child {
+  margin-right: 4px;
+}
+
+.tour-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+.tour-steps li::marker {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.tour-note {
+  text-align: center;
+  color: var(--fg-3) !important;
+  font-size: var(--fs-xs);
+}
+
+.help-foot {
+  margin: 4px -6px -6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* "Created by ApexForge": recedes until hovered (ember) or focused from the keyboard (amber). */
+.credit a {
+  color: var(--fg-2);
+  text-decoration: none;
+  border-radius: 0;
+  transition: color 0.12s;
+}
+
+.credit a:hover {
+  color: var(--accent);
+}
+
+.credit a:focus-visible {
+  color: var(--accent-2);
+  outline: 1px solid var(--focus-line);
+  outline-offset: 2px;
+}
+
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 6px 26px;
+}
+
+.shortcut-grid section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-2);
+}
+
+.shortcut-row:last-child {
+  border-bottom: 0;
+}
+
+.about-env {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: var(--bg-dark);
+  border: 1px solid var(--line);
+  color: var(--fg-2);
+  font: 12px/1.6 var(--font-mono);
+  white-space: pre-wrap;
+}

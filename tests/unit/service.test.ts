@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { allocateRunDir, normalizeRun, writeRunMeta } from "../../src/core/runs.js";
-import { Store } from "../../src/core/store.js";
+import { matchExpression, Store } from "../../src/core/store.js";
+import { snippetParts } from "../../src/shared/text.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
 import type { RunMeta } from "../../src/core/types.js";
 import { gitHead, snapshotGit } from "../../src/core/vcs.js";
@@ -416,6 +417,143 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("tidies runs: compresses them, and removes old ones Settings don't keep, but not a chat's latest", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const chat = ctx.svc.createChat({ agentId: agent.id });
+    const sent = await ctx.svc.sendChat(chat.id, "hello");
+    await ctx.exit(sent.ptyId);
+    const longAgo = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const chatRun = ctx.svc.getRun(sent.runId).run;
+    ctx.svc.store.saveRun({ ...chatRun, startedAt: longAgo, endedAt: longAgo, openedAt: longAgo });
+    fs.writeFileSync(path.join(chatRun.dir, "scrollback.txt"), "x".repeat(64 * 1024));
+    const old = (name: string, extra: Partial<RunMeta> = {}) => {
+      const { id, dir } = allocateRunDir(ctx.dataRoot, new Date(longAgo), name);
+      ctx.svc.store.saveRun(normalizeRun({ id, dir, origin: "code", status: "exited", startedAt: longAgo, endedAt: longAgo, openedAt: longAgo, title: name, ...extra }) as RunMeta);
+      return { id, dir };
+    };
+    const gone = old("gone");
+    const fresh = old("fresh", { startedAt: new Date().toISOString(), endedAt: new Date().toISOString() });
+
+    // Nothing is removed until Settings say so; the scrollback is compressed either way.
+    expect(await ctx.svc.maintainRuns()).toMatchObject({ compressed: 1, removed: 0 });
+    expect(fs.existsSync(path.join(chatRun.dir, "scrollback.txt.gz"))).toBe(true);
+    // No screen was saved, so the scrollback is what opens, read back from the .gz.
+    expect(ctx.svc.getRun(chatRun.id).files.scrollback).toBe("x".repeat(64 * 1024));
+
+    ctx.svc.saveSettings({ keepRuns: { days: 30, maxMb: 0 } });
+    expect(await ctx.svc.maintainRuns()).toMatchObject({ removed: 1 });
+    expect(fs.existsSync(gone.dir)).toBe(false);
+    expect(() => ctx.svc.getRun(gone.id)).toThrow(/no longer exists/);
+    expect(ctx.svc.getRun(fresh.id).run.id).toBe(fresh.id);
+    expect(ctx.svc.getRun(chatRun.id).run.id).toBe(chatRun.id);
+    expect(ctx.svc.storageSummary()).toMatchObject({ runCount: 2, dataRoot: ctx.dataRoot });
+    ctx.svc.close();
+  });
+
+  it("finds runs by the words in their transcript, including runs from before search", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const chat = ctx.svc.createChat({ agentId: agent.id });
+    const sent = await ctx.svc.sendChat(chat.id, "Look at the sign-in page");
+    const dir = ctx.svc.getRun(sent.runId).run.dir;
+    fs.writeFileSync(path.join(dir, "transcript.txt"), "Reading login.ts…\nFixed the authentication bug: the token was never refreshed.\n");
+    await ctx.exit(sent.ptyId);
+
+    // A run the index has never seen, as after an update.
+    const { id: oldId, dir: oldDir } = allocateRunDir(ctx.dataRoot, new Date(Date.now() - 86_400_000), "older");
+    fs.writeFileSync(path.join(oldDir, "transcript.txt"), "Moved the settings page to Svelte.\n");
+    ctx.svc.store.saveRun(normalizeRun({ id: oldId, dir: oldDir, origin: "code", status: "exited", startedAt: new Date().toISOString(), title: "Older", cwd: "/work/site" }) as RunMeta);
+
+    const hits = ctx.svc.searchRuns("auth refresh");
+    expect(hits.map((hit) => hit.id)).toEqual([sent.runId]);
+    const marked = snippetParts(hits[0].snippet).filter((part) => part.hit).map((part) => part.text.toLowerCase());
+    expect(marked).toEqual(expect.arrayContaining(["authentication", "refreshed"]));
+    expect(ctx.svc.searchRuns("svelte").map((hit) => hit.id)).toEqual([oldId]);
+    // Folders match as typed.
+    expect(ctx.svc.searchRuns("/work/site").map((hit) => hit.id)).toEqual([oldId]);
+    expect(ctx.svc.searchRuns("nothing like this")).toEqual([]);
+    expect(ctx.svc.searchRuns("  \"*  ")).toEqual([]);
+    ctx.svc.store.deleteRun(ctx.svc.store.getRun(oldId)!);
+    expect(ctx.svc.searchRuns("svelte")).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("turns typed words into a safe full-text query", () => {
+    expect(matchExpression("auth  bug")).toBe('"auth"* "bug"*');
+    expect(matchExpression('he said "NEAR(" OR x')).toBe('"he"* "said"* "NEAR"* "OR"* "x"*');
+    expect(matchExpression("löschen 設定")).toBe('"löschen"* "設定"*');
+    expect(matchExpression("--- ...")).toBeNull();
+  });
+
+  it("runs an isolated task in its own worktree, then applies its changes to the workspace", async () => {
+    const repo = tempDir();
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+
+    const ctx = setup();
+    ctx.host.gitHead = (cwd) => gitHead(cwd);
+    ctx.host.snapshotGit = (cwd, start) => snapshotGit(cwd, 5000, start);
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "Keep notes.", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    expect(task.isolated).toBe(true);
+
+    const launched = await ctx.svc.executeTask(task.id);
+    const copy = ctx.svc.listTasks().find((item) => item.id === task.id)!.copy!;
+    expect(copy.path).toBe(path.join(ctx.dataRoot, "worktrees", task.id));
+    expect(ctx.spawns[0].cwd).toBe(copy.path);
+    const preamble = ctx.spawns[0].argv.slice(2).join(" ");
+    expect(preamble).toContain(`own git worktree of ${repo}`);
+    // The agent edits, commits one change and leaves another uncommitted, and adds a file.
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    git(copy.path, "commit", "-qam", "agent commit");
+    fs.writeFileSync(path.join(copy.path, "b.txt"), "new file\n");
+    await ctx.exit(launched.ptyId);
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+    expect(await ctx.svc.runDiff(launched.runId)).toContain("+TWO");
+
+    const applied = await ctx.svc.applyTaskCopy(task.id);
+    expect(applied).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new file\n");
+    // Uncommitted in the workspace, for you to review and commit.
+    expect(git(repo, "log", "--oneline").trim().split("\n")).toHaveLength(1);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(git(repo, "branch", "--list", "vibeforge/*").trim()).toBe("");
+    const done = ctx.svc.listTasks().find((item) => item.id === task.id)!;
+    expect(done).toMatchObject({ status: "done", copy: null });
+
+    // Another copy, while the workspace changes the same line: a conflict to resolve, copy kept.
+    git(repo, "commit", "-qam", "took the change");
+    const second = ctx.svc.saveTask({ title: "Again", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const again = await ctx.svc.executeTask(second.id);
+    const secondCopy = ctx.svc.listTasks().find((item) => item.id === second.id)!.copy!;
+    fs.writeFileSync(path.join(secondCopy.path, "a.txt"), "one\nfrom the copy\n");
+    await ctx.exit(again.ptyId);
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nfrom the workspace\n");
+    git(repo, "commit", "-qam", "meanwhile");
+    const clash = await ctx.svc.applyTaskCopy(second.id);
+    expect(clash.conflicts).toEqual(["a.txt"]);
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toContain("<<<<<<<");
+    expect(fs.existsSync(secondCopy.path)).toBe(true);
+    await ctx.svc.discardTaskCopy(second.id);
+    expect(fs.existsSync(secondCopy.path)).toBe(false);
+    expect(ctx.svc.listTasks().find((item) => item.id === second.id)!.copy).toBeNull();
+
+    // A folder that isn't a repository can't have a copy.
+    const plain = tempDir();
+    const plainAgent = await ctx.svc.saveAgent({ name: "Plain", brief: "b", engine: "argy", places: [plain] });
+    const plainSpace = ctx.svc.addWorkspace(plain).workspaces.find((item) => item.path === plain)!;
+    const third = ctx.svc.saveTask({ title: "Nope", agentId: plainAgent.id, workspaceId: plainSpace.id, isolated: true });
+    await expect(ctx.svc.executeTask(third.id)).rejects.toThrow(/git repository/);
+    ctx.svc.close();
+  });
+
   it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
     const repo = tempDir();
     const git = (...args: string[]) =>
@@ -471,7 +609,7 @@ describe("runs", () => {
     };
     const stamp = new Date().toISOString();
     const task = (id: string, runIds: string[]) =>
-      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, createdAt: stamp, updatedAt: stamp });
+      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, isolated: false, copy: null, createdAt: stamp, updatedAt: stamp });
     task("crashed", [orphan("crashed")]);
     // Its latest run is a newer one, as after an Execute that raced the settling.
     task("restarted", [orphan("restarted"), "a-newer-run"]);

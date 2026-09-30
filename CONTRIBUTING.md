@@ -15,6 +15,7 @@ npm install
 npm start            # Vite + Electron, with hot reload
 npm test             # unit tests and the real PTY host, driven with /bin/bash
 npm run typecheck
+npm run build && npm run smoke   # the built app, driven over DevTools (SMOKE_HEADLESS=1: no window)
 ```
 
 ## Issues
@@ -49,6 +50,8 @@ Since `1.0.0`, versions follow [semantic versioning](https://semver.org/). A cha
 `package.json`, the git tag (`vX.Y.Z`), and the GitHub Release stay on the same number. Tags are cut by the maintainer when a release is published.
 
 User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under `Unreleased`. The maintainer moves that entry when the release is published.
+
+Pushing a `vX.Y.Z` tag publishes its GitHub Release (`.github/workflows/release.yml`): the notes are that version's CHANGELOG section, word for word, which is what the in-app Update shows. The tag has to match `package.json`. `npm run release-notes X.Y.Z` prints the same notes locally.
 
 ## Pull requests
 

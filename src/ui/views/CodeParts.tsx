@@ -23,7 +23,7 @@ import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Skeleton } from "../components/ui.js";
 import { boxOf } from "../floating.js";
-import { useT } from "../i18n/index.js";
+import { t as translate, useT } from "../i18n/index.js";
 import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
 
 // ------------------------------------------------------------------ split layout
@@ -117,7 +117,7 @@ function TreeLevel({
     };
   }, [dir, refreshKey]);
   if (!nodes) return depth === 0 ? <Skeleton rows={5} /> : null;
-  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>Empty folder.</div>;
+  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{translate("files.empty")}</div>;
   return (
     <>
       {nodes.map((node) => {

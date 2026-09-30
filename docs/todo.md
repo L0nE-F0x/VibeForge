@@ -1,8 +1,15 @@
 # To do
 
-Updated for 1.2.0 (2026-09-30): the ember glow, runs by day, a quieter run header, sliding selection, dimmed split panes, loading placeholders and Undo instead of "are you sure?"; see `CHANGELOG.md`. The X post and video for it are in `~/Pictures/VibeForge 1.2/`. Before that, 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the side browser, and two fixes.
+1.3.0 (2026-09-30): the Code mic as a click, task copies (git worktrees), run search, run storage and Settings → Storage, plan alerts, the rest of the UI translated, keyboard focus, a quieter log, the service split up, a CI smoke test and releases from tags; see `CHANGELOG.md` and `status.md`. Updated for 1.2.0 (2026-09-30): the ember glow, runs by day, a quieter run header, sliding selection, dimmed split panes, loading placeholders and Undo instead of "are you sure?"; see `CHANGELOG.md`. The X post and video for it are in `~/Pictures/VibeForge 1.2/`. Before that, 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the side browser, and two fixes.
 
 ## Next up
+
+**Try for real** (from the 2026-09-30 pass; everything else was checked on the hidden test window):
+
+- [ ] **The Code mic with your microphone, leaning back**: click it, talk, click again, press Enter. Then the same in a chat box.
+- [ ] **A real task in its own copy**, with Claude Code: it will ask to trust the new folder (`~/.local/share/vibeforge/worktrees/<task>`) once. Apply it, and try a conflict.
+- [ ] **Settings → Storage on your real runs**: the first upkeep, 2 minutes after start, compresses them (86 MB → about 15 MB expected). Pick a keep rule only if you want old runs gone.
+- [ ] **The CI smoke job** on the first push (xvfb on GitHub's runner). If it's reliable, consider making it a required check.
 
 **Voice** shipped in 0.5.0, and 0.8.0 made it hold-to-talk (see `status.md` and `CHANGELOG.md`). Still to try for real:
 
@@ -10,15 +17,15 @@ Updated for 1.2.0 (2026-09-30): the ember glow, runs by day, a quieter run heade
 - [ ] **Talk-back from a CLI typed into a shell**, for real: type `claude` in a Code terminal, dictate a line, press Enter, and check the answer is read aloud (only stand-ins have been through it).
 - [ ] **Listen to the 0.8.0 sounds** on real speakers (Settings → Sounds has a play button for each) and say which ones to change.
 - [ ] Leave an agent chat thinking, switch to another app, and check the knock, the notification (it should open the chat) and the glow.
-- [ ] Ctrl+K from a chat, from Code, and Ctrl+Shift+K from inside a terminal.
+- [x] Ctrl+K from a chat, from Code, and Ctrl+Shift+K from inside a terminal (2026-09-30, CDP keys on the hidden window).
 - [ ] The tray on the real bar: the icon and its amber corner, pinning it from the tray's arrow, and a real login with Start at login on.
 
 - [ ] **Codex and Gemini usage**, when one of those CLIs is installed here. Run a short session and check the rail popover counts it. Codex's plan limits should show as bars.
 - [ ] **Gemini plan limits**, when the next Gemini Pro lands: Gemini CLI's `/stats` quota comes from the Code Assist API (`retrieveUserQuota`, per model, with a project from `loadCodeAssist`). Its Google access token lasts an hour and only Gemini CLI renews it, so read-only would show "sign-in expired" unless Gemini CLI ran recently. Work out the request from Gemini CLI's own source before adding it.
-- [ ] **Quota notifications** at 80 / 95 / 100% per window, once per reset, like the Omarchy widget's toasts. Skipped in 0.7.0 so the two don't both fire; would need its own switch.
+- [x] **Quota notifications** at 80 / 95 / 100% per window, once per reset, behind their own switch (off by default).
 - [ ] **Token usage from more CLIs**: Kimi's session logs weren't read (its plan limits are in 0.7.0), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush weren't looked at.
-- [ ] **Translate the rest of the UI.** The forms in Agents, Tasks, Routines and Skills, the engine editor, run details, Home, toast messages, and the errors the main process sends (`src/core/team-service.ts`) are still English. Relative times ("5m ago", `src/shared/text.ts`) should use `Intl.RelativeTimeFormat` in the chosen language. Add each key to `src/ui/i18n/en.ts` first; the typecheck then lists every language that needs it.
-- [ ] **Release notes on each tag.** `gh release create vX.Y.Z --notes-file …` after bumping `package.json`; the in-app Update shows those notes.
+- [x] **Translate the rest of the UI.** Done for the window and the main process's messages (`src/ui/core-text.ts`). Still English: the tray menu, native dialogs, desktop notifications, cronstrue's schedule descriptions and git's change summaries.
+- [x] **Release notes on each tag.** Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, which publishes the CHANGELOG section (`scripts/release-notes.mjs`). Watch the first one go through.
 
 ## Parked
 

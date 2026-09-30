@@ -8,10 +8,12 @@ import { boxOf, type Box } from "./floating.js";
 import { t as translate, useT, type Key, type Vars } from "./i18n/index.js";
 import { Rich } from "./i18n/Rich.js";
 import { useLayer, useNav, useToast } from "./state.js";
+import { micRelease } from "./mic.js";
 import { cue } from "./sounds.js";
 
 // Hold Ctrl+Shift+Space, or hold the mic, and let go: the words land in the box or terminal that
-// has focus and wait there. Esc drops the recording. Super+Alt+V (vibeforge --voice start/stop)
+// has focus and wait there. A quick click on the mic keeps it listening instead, until the mic (or
+// Stop) is clicked again, for dictating without holding anything down. Esc drops the recording. Super+Alt+V (vibeforge --voice start/stop)
 // does the same for one agent — the one chosen in Settings, or the one you last dictated to —
 // and leaves the words in that agent's chat. Pressing Enter on dictated words is what asks for
 // the answer to be read aloud. Holding the key again cuts that off.
@@ -189,6 +191,8 @@ interface Session {
   place: "focus" | "agent";
   /** Recording has stopped and whisper is working on it. */
   finishing: boolean;
+  /** Started with a click on the mic, so it listens until clicked again rather than until let go. */
+  latched?: boolean;
 }
 
 let session: Session | null = null;
@@ -217,6 +221,8 @@ function useSession(): Session | null {
 
 interface Controller {
   begin: (target: DictationTarget) => void;
+  /** The recording just begun keeps going until it is stopped. */
+  latch: () => void;
   finish: () => void;
   cancel: () => void;
   expectFromTarget: (target: DictationTarget, words: string) => void;
@@ -500,6 +506,9 @@ export function VoiceLayer() {
         if (!ensureReady()) return;
         begin(target, "focus");
       },
+      latch: () => {
+        if (session && !session.finishing && !session.latched) setSession({ ...session, latched: true });
+      },
       finish,
       cancel,
       expectFromTarget,
@@ -590,7 +599,7 @@ export function VoiceLayer() {
   }, [beginFocused, finish, cancel]);
 
   if (current) {
-    return <ListeningBar label={current.target.label} voice={voice} finishing={current.finishing} onStop={finish} onCancel={cancel} />;
+    return <ListeningBar label={current.target.label} voice={voice} finishing={current.finishing} latched={Boolean(current.latched)} onStop={finish} onCancel={cancel} />;
   }
   if (spoken) {
     return (
@@ -624,7 +633,21 @@ function useBarLayer(ref: React.RefObject<HTMLDivElement | null>): void {
   useLayer(box);
 }
 
-function ListeningBar({ label, voice, finishing, onStop, onCancel }: { label: string; voice: VoiceState; finishing: boolean; onStop: () => void; onCancel: () => void }) {
+function ListeningBar({
+  label,
+  voice,
+  finishing,
+  latched,
+  onStop,
+  onCancel,
+}: {
+  label: string;
+  voice: VoiceState;
+  finishing: boolean;
+  latched: boolean;
+  onStop: () => void;
+  onCancel: () => void;
+}) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   useBarLayer(ref);
@@ -650,7 +673,7 @@ function ListeningBar({ label, voice, finishing, onStop, onCancel }: { label: st
       <span className="listening-clock mono">{clock}</span>
       {!transcribing && (
         <span className="listening-keys faint">
-          <Rich text={t("voice.releaseToStop")} />
+          <Rich text={t(latched ? "voice.clickToStop" : "voice.releaseToStop")} />
         </span>
       )}
       {!transcribing && (
@@ -691,40 +714,58 @@ function AnswerBar({ who, text, waiting, onStop }: { who: string; text: string; 
 
 // ------------------------------------------------------------------ the mic button
 
-/** A mic beside a message box: hold it to dictate into that box, and let go to finish. */
-export function MicButton({ target, disabled }: { target: DictationTarget; disabled?: boolean }) {
+/**
+ * A mic for dictating into `target`. Click it to start and click again to stop, or hold it and
+ * let go; the keys (Ctrl+Shift+Space) are held the same way.
+ */
+export function MicButton({ target, disabled, size, hint }: { target: DictationTarget; disabled?: boolean; size?: "sm"; hint?: string }) {
   const t = useT();
   const current = useSession();
   const ready = useVoiceStatus().data?.ready ?? false;
   const mine = current?.target === target;
   const transcribing = mine && current.finishing;
-  const holding = useRef(false);
+  const press = useRef<{ at: number; started: boolean } | null>(null);
+  const toggle = () => {
+    if (mine) controller?.finish();
+    else {
+      controller?.begin(target);
+      controller?.latch();
+    }
+  };
   return (
     <Button
       variant="ghost"
+      size={size}
       icon={mine ? Square : Mic}
       className={mine && !transcribing ? "mic live" : "mic"}
       pressed={mine && !transcribing}
       busy={transcribing}
       disabled={disabled || (current !== null && !mine)}
       kbd={DICTATE_KEYS}
-      tip={mine ? t("voice.stopTip") : ready ? t("voice.micTip") : t("voice.micSetupTip")}
+      tip={mine ? t("voice.stopTip") : ready ? (hint ? `${hint}. ${t("voice.micTip")}` : t("voice.micTip")) : t("voice.micSetupTip")}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
-        holding.current = true;
+        // A press while this mic is listening is the click that stops it, on release.
+        press.current = { at: Date.now(), started: !mine };
         if (!mine) controller?.begin(target);
       }}
       onPointerUp={(event) => {
-        if (event.button !== 0 || !holding.current) return;
-        holding.current = false;
-        controller?.finish();
+        const held = press.current;
+        if (event.button !== 0 || !held) return;
+        press.current = null;
+        if (micRelease(held, Date.now()) === "latch") controller?.latch();
+        else controller?.finish();
       }}
       onPointerCancel={() => {
-        if (!holding.current) return;
-        holding.current = false;
+        if (!press.current) return;
+        press.current = null;
         controller?.finish();
+      }}
+      // Enter or Space on the focused button: a click, with no hold to measure.
+      onClick={(event) => {
+        if (event.detail === 0) toggle();
       }}
     />
   );

@@ -2,12 +2,14 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle, type LucideIcon
 import {
   forwardRef,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
+  type RefObject,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from "react";
@@ -17,7 +19,8 @@ import { mark, shade } from "../../shared/pixel.js";
 import { initials, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
-import { useT } from "../i18n/index.js";
+import { useT, type Key } from "../i18n/index.js";
+import { Rich } from "../i18n/Rich.js";
 import { useConfirmState, useDockArea, useLayer, useOverlay, useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 
@@ -176,23 +179,25 @@ export function Chip({ tone, children, title, icon: Icon }: { tone?: "accent" | 
 }
 
 export function StatusDot({ status, title }: { status: RunStatus | "idle" | null | undefined; title?: string }) {
-  const label = title ?? (status && status !== "idle" ? STATUS_TEXT[status] : undefined);
+  const t = useT();
+  const label = title ?? (status && status !== "idle" ? t(STATUS_KEY[status]) : undefined);
   return <span className={cx("dot", status ?? "idle")} {...tipProps(label)} />;
 }
 
-export const STATUS_TEXT: Record<RunStatus, string> = {
-  running: "Running",
-  exited: "Finished",
-  stopped: "Stopped",
-  failed: "Failed",
+export const STATUS_KEY: Record<RunStatus, Key> = {
+  running: "status.running",
+  exited: "status.exited",
+  stopped: "status.stopped",
+  failed: "status.failed",
 };
 
 export function StatusChip({ status, exitCode }: { status: RunStatus; exitCode?: number | null }) {
-  if (status === "running") return <Chip tone="accent">Running</Chip>;
-  if (status === "failed") return <Chip tone="bad">Failed</Chip>;
-  if (status === "stopped") return <Chip tone="warn">Stopped</Chip>;
-  if (exitCode && exitCode !== 0) return <Chip tone="bad">Exit {exitCode}</Chip>;
-  return <Chip tone="ok">Finished</Chip>;
+  const t = useT();
+  if (status === "running") return <Chip tone="accent">{t("status.running")}</Chip>;
+  if (status === "failed") return <Chip tone="bad">{t("status.failed")}</Chip>;
+  if (status === "stopped") return <Chip tone="warn">{t("status.stopped")}</Chip>;
+  if (exitCode && exitCode !== 0) return <Chip tone="bad">{t("status.exit", { code: exitCode })}</Chip>;
+  return <Chip tone="ok">{t("status.exited")}</Chip>;
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
@@ -256,20 +261,22 @@ export function Notice({ tone, icon: Icon = Info, children }: { tone?: "warn" | 
 }
 
 export function TimeAgo({ iso, prefix }: { iso: string | null | undefined; prefix?: string }) {
+  const t = useT();
   const now = useNow(20_000);
   if (!iso) return null;
   return (
-    <span {...tipProps(new Date(iso).toLocaleString())}>
+    <span {...tipProps(new Date(iso).toLocaleString(t.language))}>
       {prefix}
-      {timeAgo(iso, now)}
+      {timeAgo(iso, now, t.language)}
     </span>
   );
 }
 
 export function SecretNote() {
+  const t = useT();
   return (
     <Notice tone="warn" icon={AlertTriangle}>
-      Don't put passwords, keys or tokens here. This text is handed to the CLI as plain text.
+      {t("common.secretNote")}
     </Notice>
   );
 }
@@ -302,6 +309,46 @@ function useEscape(onClose: () => void, enabled = true): void {
   }, [onClose, enabled]);
 }
 
+/**
+ * Keyboard focus for a dialog: it moves in when the dialog opens, Tab stays inside it, and it
+ * goes back to where it was (the button that opened it) when the dialog closes.
+ */
+export function useDialogFocus(ref: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!node.contains(document.activeElement)) {
+      // Something marked autoFocus has already taken it; otherwise the dialog itself.
+      node.focus({ preventScroll: true });
+    }
+    const focusable = () =>
+      [...node.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')].filter(
+        (item) => item.getClientRects().length > 0,
+      );
+    const onKey = (event: KeyboardEvent) => {
+      // A terminal inside the dialog keeps Tab for its program.
+      if (event.key !== "Tab" || event.defaultPrevented || (event.target as HTMLElement | null)?.closest(".xterm")) return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === node)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    node.addEventListener("keydown", onKey);
+    return () => {
+      node.removeEventListener("keydown", onKey);
+      if (before?.isConnected) before.focus({ preventScroll: true });
+    };
+  }, [ref]);
+}
+
 export function Modal({
   title,
   icon: Icon,
@@ -318,14 +365,19 @@ export function Modal({
   wide?: boolean;
 }) {
   const t = useT();
+  const titleId = useId();
+  const ref = useRef<HTMLDivElement>(null);
   useOverlay(true);
   useEscape(onClose);
+  useDialogFocus(ref);
   return createPortal(
     <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className={cx("modal", wide && "wide")} role="dialog" aria-modal>
+      <div ref={ref} className={cx("modal", wide && "wide")} role="dialog" aria-modal aria-labelledby={titleId} tabIndex={-1}>
         <div className="modal-head">
           {Icon && <Icon size={18} className="accent-text" />}
-          <h2 className="grow">{title}</h2>
+          <h2 className="grow" id={titleId}>
+            {title}
+          </h2>
           <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
         </div>
         <div className="modal-body">{children}</div>
@@ -336,13 +388,23 @@ export function Modal({
   );
 }
 
-export function Sheet({ onClose, children, width }: { onClose: () => void; children: ReactNode; width?: number }) {
+export function Sheet({ onClose, children, width, label }: { onClose: () => void; children: ReactNode; width?: number; label?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
   useOverlay(true);
   useEscape(onClose);
+  useDialogFocus(ref);
   return createPortal(
     <>
       <div className="sheet-scrim" onMouseDown={onClose} />
-      <div className="sheet" role="dialog" aria-modal style={width ? { width: `min(${width}px, calc(100vw - 120px))` } : undefined}>
+      <div
+        ref={ref}
+        className="sheet"
+        role="dialog"
+        aria-modal
+        aria-label={label}
+        tabIndex={-1}
+        style={width ? { width: `min(${width}px, calc(100vw - 120px))` } : undefined}
+      >
         {children}
       </div>
     </>,
@@ -532,7 +594,7 @@ export function ConfirmDialog() {
     >
       {request.body && <div className="muted" style={{ lineHeight: 1.55 }}>{request.body}</div>}
       {request.typeToConfirm && (
-        <Field label={<>Type <strong className="accent-text">{request.typeToConfirm}</strong> to confirm</>}>
+        <Field label={<Rich text={t("common.typeToConfirm", { name: request.typeToConfirm })} />}>
           <Input
             autoFocus
             value={typed}

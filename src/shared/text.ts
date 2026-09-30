@@ -15,13 +15,28 @@ export function plural(count: number, word: string, many = `${word}s`): string {
   return `${count} ${count === 1 ? word : many}`;
 }
 
-export function timeAgo(iso: string | null | undefined, now = Date.now()): string {
+/**
+ * "5 min ago", "yesterday", "in 3 hr". English keeps its own short wording; other languages use
+ * `Intl.RelativeTimeFormat`, with the same steps.
+ */
+export function timeAgo(iso: string | null | undefined, now = Date.now(), language = "en"): string {
   if (!iso) return "";
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const seconds = Math.round((now - then) / 1000);
   const future = seconds < 0;
   const s = Math.abs(seconds);
+  // A clock that ticks every few seconds (TimeAgo) sees something that just happened as slightly
+  // ahead of it; that is "just now", not "in a moment".
+  if (future && s <= 60) return language.startsWith("en") ? "just now" : new Intl.RelativeTimeFormat(language, { numeric: "auto", style: "short" }).format(0, "second");
+  if (!language.startsWith("en")) {
+    const format = new Intl.RelativeTimeFormat(language, { numeric: "auto", style: "short" });
+    const sign = future ? 1 : -1;
+    if (s < 45) return format.format(0, "second");
+    if (s < 3600) return format.format(sign * Math.max(1, Math.round(s / 60)), "minute");
+    if (s < 86400) return format.format(sign * Math.max(1, Math.round(s / 3600)), "hour");
+    return format.format(sign * Math.max(1, Math.round(s / 86400)), "day");
+  }
   let text: string;
   if (s < 45) text = future ? "in a moment" : "just now";
   else if (s < 90) text = "1 min";
@@ -125,3 +140,33 @@ export function dayHeading(iso: string, language: string, now = Date.now()): str
   const sameYear = date.getFullYear() === new Date(now).getFullYear();
   return date.toLocaleDateString(language, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });
 }
+
+/** Around the matched words in a search snippet: control characters no indexed transcript keeps. */
+export const SNIPPET_OPEN = "\u0002";
+export const SNIPPET_CLOSE = "\u0003";
+
+/** A search snippet as plain runs and matched runs, for highlighting. */
+export function snippetParts(snippet: string): Array<{ text: string; hit: boolean }> {
+  const parts: Array<{ text: string; hit: boolean }> = [];
+  for (const piece of snippet.split(SNIPPET_OPEN)) {
+    const close = piece.indexOf(SNIPPET_CLOSE);
+    if (close < 0) {
+      if (piece) parts.push({ text: piece, hit: false });
+      continue;
+    }
+    if (close > 0) parts.push({ text: piece.slice(0, close), hit: true });
+    const rest = piece.slice(close + 1);
+    if (rest) parts.push({ text: rest, hit: false });
+  }
+  return parts.map((part) => ({ ...part, text: part.text.replace(/\s+/g, " ") }));
+}
+
+/** "a, b and c" in the reader's language. */
+export function listText(items: readonly string[], language: string): string {
+  try {
+    return new Intl.ListFormat(language, { type: "conjunction" }).format(items);
+  } catch {
+    return items.join(", ");
+  }
+}
+

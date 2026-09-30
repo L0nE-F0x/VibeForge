@@ -8,7 +8,7 @@ import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { gitHead, snapshotGit } from "../src/core/vcs.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
-import { describeError, LogFile } from "../src/core/log.js";
+import { describeError, LogFile, PageErrors } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService, type DeskHost } from "../src/core/team-service.js";
 import { resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
@@ -16,6 +16,7 @@ import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
+import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
@@ -44,7 +45,7 @@ process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in th
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
-if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", "9223");
+if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
 
 const supervisor = new PtySupervisor();
 let win: BrowserWindow | null = null;
@@ -198,12 +199,21 @@ const dock = new Dock(
 
 const usage = new UsageScanner(os.homedir());
 const plans = new PlanWatcher({ home: os.homedir(), file: path.join(roots.dataRoot, "plans.json"), agent: `VibeForge/${app.getVersion()}` });
+/** What was already announced about plan limits, so each step is told once per window. */
+const quotaAlerts = new QuotaAlerts(path.join(roots.dataRoot, "quota-alerts.json"));
 
 async function planSummary(fresh: boolean) {
   const settings = svc().getSettings();
   const codex = settings.usage ? ((await usage.scan()).sources.find((source) => source.id === "codex")?.limits ?? []) : [];
   if (!settings.planLimits && !codex.length) return null;
-  return plans.summary({ network: settings.planLimits, codex, fresh });
+  const summary = await plans.summary({ network: settings.planLimits, codex, fresh });
+  if (settings.quotaAlerts && settings.notify) {
+    for (const alert of quotaAlerts.check(summary)) {
+      log.info(`Plan alert: ${alert.plan} ${alert.window} at ${Math.floor(alert.percent)}%`);
+      notify(quotaNote(alert, Date.now()));
+    }
+  }
+  return summary;
 }
 
 // The graph changes slowly: git is read again after 5 minutes, GitHub after 30.
@@ -377,6 +387,10 @@ async function quitFromTray(): Promise<void> {
 
 // ------------------------------------------------------------------ IPC
 
+/** Run upkeep (compressing ended runs, Settings → Storage) waits for start to settle, then repeats. */
+const UPKEEP_FIRST_MS = 2 * 60 * 1000;
+const UPKEEP_EVERY_MS = 6 * 60 * 60 * 1000;
+
 /** Where the last folder picked sits, so the next folder dialog opens there. */
 let pickedBeside: string | null = null;
 
@@ -517,6 +531,8 @@ function handlers(): Handlers {
     "tasks.continue": (id, size) => s().executeTask(id, size, true),
     "tasks.stop": (id) => s().stopTask(id),
     "tasks.setStatus": (id, status) => s().setTaskStatus(id, status),
+    "tasks.applyCopy": (id) => s().applyTaskCopy(id),
+    "tasks.discardCopy": (id) => s().discardTaskCopy(id),
 
     "chats.list": (filter) => s().listChats(filter ?? {}),
     "chats.create": (input) => s().createChat(input),
@@ -538,7 +554,10 @@ function handlers(): Handlers {
     "runs.markAllOpened": () => s().markAllOpened(),
     "runs.stop": (id) => s().stopRun(id),
     "runs.continue": (id, size) => s().continueRun(id, size),
+    "runs.search": (text, limit) => s().searchRuns(String(text ?? "").slice(0, 200), typeof limit === "number" ? limit : undefined),
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
+    "storage.summary": () => s().storageSummary(),
+    "storage.tidy": () => s().maintainRuns(),
 
     "live.list": () => s().listLive(),
 
@@ -721,13 +740,15 @@ async function createWindow(): Promise<void> {
     if (choice === 1) event.preventDefault();
     else quitting = true;
   });
+  const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
   win.on("closed", () => {
+    pageErrors.flush();
     dock.dispose();
     win = null;
   });
   win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
   win.webContents.on("console-message", (event) => {
-    if (event.level === "error") log.warn(`Page error: ${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
+    if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
   });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) await win.loadURL(devUrl);
@@ -844,10 +865,22 @@ if (!app.requestSingleInstanceLock()) {
         });
     const first = setTimeout(tick, 3000);
     const timer = setInterval(tick, TICK_MS);
+    // Compress finished runs and apply Settings → Storage: shortly after start, then a few times a day.
+    const upkeep = () =>
+      void service
+        ?.maintainRuns()
+        .then((done) => {
+          if (done.compressed || done.removed) log.info(`Runs tidied: ${done.compressed} compressed, ${done.removed} removed, ${Math.round(done.freed / 1024 / 1024)} MB freed`);
+        })
+        .catch((error: unknown) => log.warn(`Run upkeep: ${describeError(error)}`));
+    const firstUpkeep = setTimeout(upkeep, UPKEEP_FIRST_MS);
+    const upkeepTimer = setInterval(upkeep, UPKEEP_EVERY_MS);
     updater.start();
     app.once("will-quit", () => {
       clearTimeout(first);
       clearInterval(timer);
+      clearTimeout(firstUpkeep);
+      clearInterval(upkeepTimer);
       updater.stop();
       stopThemeWatch();
       stopConfigWatch();

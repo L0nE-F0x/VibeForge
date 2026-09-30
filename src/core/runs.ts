@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readJson, readText, writeJson } from "./fsx.js";
+import { hasRunFile, readRunText } from "./run-storage.js";
 import { isSafeId } from "./slug.js";
 import type { RunMeta, RunOrigin, RunStatus } from "./types.js";
 
@@ -8,11 +9,12 @@ import type { RunMeta, RunOrigin, RunStatus } from "./types.js";
 export const RUN_FILES = {
   meta: "meta.json",
   preamble: "preamble.md",
+  /** Raw PTY capture. Gzipped once the run has ended (run-storage.ts). */
   scrollback: "scrollback.txt",
   screen: "terminal.ansi",
   transcript: "transcript.txt",
   git: "git.txt",
-  /** Full patch frozen when the run ended. Absent on runs saved before this existed. */
+  /** Full patch frozen when the run ended. Absent on runs saved before this existed. Gzipped later (run-storage.ts). */
   patch: "diff.patch",
 } as const;
 
@@ -133,10 +135,10 @@ export function readRunFiles(dir: string): RunFiles {
     preamble: readText(path.join(dir, RUN_FILES.preamble)),
     prompts: "",
     screen,
-    scrollback: screen ? "" : readText(path.join(dir, RUN_FILES.scrollback)),
+    scrollback: screen ? "" : readRunText(dir, RUN_FILES.scrollback),
     transcript: readText(path.join(dir, RUN_FILES.transcript)),
     git: readText(path.join(dir, RUN_FILES.git)),
-    patchSaved: fs.existsSync(path.join(dir, RUN_FILES.patch)),
+    patchSaved: hasRunFile(dir, RUN_FILES.patch),
   };
 }
 

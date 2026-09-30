@@ -444,6 +444,9 @@ describe("text helpers", () => {
     expect(timeAgo("2026-09-25T11:59:50Z", now)).toBe("just now");
     expect(timeAgo("2026-09-25T11:30:00Z", now)).toBe("30 min ago");
     expect(timeAgo("2026-09-25T15:00:00Z", now)).toBe("in 3 hr");
+    expect(timeAgo("2026-09-25T12:00:15Z", now)).toBe("just now");
+    expect(timeAgo("2026-09-25T11:30:00Z", now, "de")).toBe("vor 30 Min.");
+    expect(timeAgo("2026-09-24T11:30:00Z", now, "fr")).toBe("hier");
   });
 });
 

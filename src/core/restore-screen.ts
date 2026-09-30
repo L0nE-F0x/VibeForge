@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { readText, writeFileAtomic } from "./fsx.js";
+import { writeFileAtomic } from "./fsx.js";
+import { readRunText } from "./run-storage.js";
 import { RUN_FILES, type RunFiles } from "./runs.js";
 
 interface RestoredScreen {
@@ -37,7 +38,7 @@ export async function repairBlankCapture(dir: string, files: RunFiles): Promise<
   const capture = captureModule();
   if (!capture) return files;
   if (capture.plainText(files.transcript) || capture.plainText(files.screen)) return files;
-  const scrollback = readText(path.join(dir, RUN_FILES.scrollback));
+  const scrollback = readRunText(dir, RUN_FILES.scrollback);
   if (scrollback.length < 32) return files;
   const restored = await capture.restoreScrollback(scrollback);
   if (!restored || !capture.plainText(restored.transcript)) return files;

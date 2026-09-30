@@ -21,22 +21,24 @@ import { call, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
-import { useT } from "../i18n/index.js";
+import { useT, type Key, type Translator } from "../i18n/index.js";
+import { coreText } from "../core-text.js";
 
-export const ORIGIN_LABEL: Record<RunView["origin"], string> = {
-  "agent-chat": "Agent chat",
-  routine: "Routine",
-  task: "Task",
-  code: "Code",
-  chat: "Chat",
+export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
+  "agent-chat": "origin.agent-chat",
+  routine: "origin.routine",
+  task: "origin.task",
+  code: "origin.code",
+  chat: "origin.chat",
 };
 
 type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
 
 export function DiffView({ text }: { text: string }) {
+  const t = useT();
   const all = useMemo(() => text.split("\n"), [text]);
   const lines = all.length > 20000 ? all.slice(0, 20000) : all;
-  if (!text.trim()) return <Notice>No differences.</Notice>;
+  if (!text.trim()) return <Notice>{t("run.noDiff")}</Notice>;
   return (
     <>
       <div className="diff">
@@ -61,55 +63,54 @@ export function DiffView({ text }: { text: string }) {
           );
         })}
       </div>
-      {all.length > 20000 && <Notice>Showing the first 20,000 lines. The whole diff is saved with the run.</Notice>}
+      {all.length > 20000 && <Notice>{t("run.diffCapped")}</Notice>}
     </>
   );
 }
 
-function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null): string {
+function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null, t: Translator): string {
   const sha = run.gitStart?.slice(0, 8);
-  if (shown === "now" || run.status === "running" || !saved) {
-    return sha ? `The folder now, compared with ${sha} from when the run started, plus new files.` : "The folder now, compared with HEAD, plus new files.";
-  }
-  return sha ? `The diff saved for this run: everything since ${sha}, plus new files.` : "The diff saved for this run, including new files.";
+  if (shown === "now" || run.status === "running" || !saved) return sha ? t("run.diffNowSha", { sha }) : t("run.diffNow");
+  return sha ? t("run.diffSavedSha", { sha }) : t("run.diffSaved");
 }
 
 function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: string; patchSaved: boolean }) {
+  const t = useT();
   const { push } = useToast();
   const [diff, setDiff] = useState<{ text: string; source: "saved" | "now" } | null>(null);
   const [load, loading] = useAction(async (source: "saved" | "now") => {
     setDiff({ text: await call("runs.diff", run.id, source), source });
-  }, "Could not read the diff");
+  }, t("run.diffFailed"));
   const notRepo = snapshot.startsWith("not a git repo");
   const saved = run.status !== "running" && patchSaved;
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
-      {run.status === "running" && <Notice icon={Info}>The diff is saved when the run ends. Until then, this reads the folder now.</Notice>}
-      {saved && !notRepo && <Notice icon={Info}>Saved with this run. Later edits in the folder stay out of it.</Notice>}
+      {run.status === "running" && <Notice icon={Info}>{t("run.diffLater")}</Notice>}
+      {saved && !notRepo && <Notice icon={Info}>{t("run.diffKept")}</Notice>}
       {notRepo ? (
-        <Notice>{run.cwd} is not a git repository, so there is no change summary.</Notice>
+        <Notice>{t("run.notRepo", { path: run.cwd })}</Notice>
       ) : snapshot ? (
         <pre className="pre">{snapshot.trim()}</pre>
       ) : run.status !== "running" ? (
-        <Notice>No git snapshot was recorded.</Notice>
+        <Notice>{t("run.noSnapshot")}</Notice>
       ) : null}
       {!notRepo && (
         <div className="vstack">
           <div className="hstack">
             <Button icon={GitCompare} busy={loading} onClick={() => void load(saved ? "saved" : "now")}>
-              {saved ? "Show the saved diff" : diff === null ? "Show the full diff" : "Refresh diff"}
+              {saved ? t("run.showSaved") : diff === null ? t("run.showFull") : t("run.refreshDiff")}
             </Button>
             {saved && (
               <Button variant="ghost" icon={GitCompare} busy={loading} onClick={() => void load("now")}>
-                Diff the folder now
+                {t("run.diffFolderNow")}
               </Button>
             )}
             {diff && (
-              <Button size="sm" variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(diff.text).then(() => push("success", "Diff copied"))}>
-                Copy
+              <Button size="sm" variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(diff.text).then(() => push("success", t("run.diffCopied")))}>
+                {t("common.copy")}
               </Button>
             )}
-            <span className="faint">{diffCaption(run, saved, diff?.source ?? null)}</span>
+            <span className="faint">{diffCaption(run, saved, diff?.source ?? null, t)}</span>
           </div>
           {diff !== null && <DiffView text={diff.text} />}
         </div>
@@ -142,9 +143,9 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
     else if (next.chatId) go({ view: "chat", chatId: next.chatId });
     else if (next.taskId) go({ view: "tasks", taskId: next.taskId });
     else go({ view: "runs", runId: next.runId });
-    push("success", "Continued", "A new run picked up where this one stopped.");
-  }, "Could not continue");
-  const [stop, stopping] = useAction(async () => run && call("runs.stop", run.id), "Could not stop the run");
+    push("success", t("run.continued"), t("run.continuedBody"));
+  }, t("tasks.continueFailed"));
+  const [stop, stopping] = useAction(async () => run && call("runs.stop", run.id), t("run.stopFailed"));
 
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
@@ -169,22 +170,22 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
             {run.changes && <Chip icon={FileDiff}>{run.changes}</Chip>}
           </div>
           <div className="sub truncate">
-            {ORIGIN_LABEL[run.origin]} · {engine?.label ?? run.engine} · <span className="mono">{tildify(run.cwd, home)}</span> · started{" "}
+            {t(ORIGIN_KEY[run.origin])} · {engine?.label ?? run.engine} · <span className="mono">{tildify(run.cwd, home)}</span> · {t("run.started")}{" "}
             <TimeAgo iso={run.startedAt} /> · {duration(run.startedAt, run.endedAt, now)}
           </div>
         </div>
         {canOpenElsewhere && !embedded && (
           <Button size="sm" icon={ArrowUpRight} onClick={() => go(place)}>
-            Open in {place.view === "agents" ? "agent" : place.view === "chat" ? "chat" : place.view === "tasks" ? "task" : "workspace"}
+            {t(place.view === "agents" ? "run.openIn.agents" : place.view === "chat" ? "run.openIn.chat" : place.view === "tasks" ? "run.openIn.tasks" : "run.openIn.code")}
           </Button>
         )}
         {run.status === "running" ? (
           <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
-            Stop
+            {t("tasks.stop")}
           </Button>
         ) : (
           <Button size="sm" variant="primary" icon={RotateCcw} busy={continuing} onClick={() => void cont()}>
-            Continue
+            {t("common.continue")}
           </Button>
         )}
         <MenuButton
@@ -210,16 +211,16 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: "session", label: run.live ? "Live session" : "Final screen", icon: TerminalSquare },
-          { value: "changes", label: "Changes", icon: GitCompare },
-          { value: "prompt", label: "Prompt", icon: FileText },
-          { value: "transcript", label: "Transcript", icon: ScrollText },
-          { value: "details", label: "Details", icon: Info },
+          { value: "session", label: run.live ? t("run.tab.live") : t("run.tab.screen"), icon: TerminalSquare },
+          { value: "changes", label: t("run.tab.changes"), icon: GitCompare },
+          { value: "prompt", label: t("run.tab.prompt"), icon: FileText },
+          { value: "transcript", label: t("run.tab.transcript"), icon: ScrollText },
+          { value: "details", label: t("run.tab.details"), icon: Info },
         ]}
       />
       {run.error && run.status !== "running" && (
         <div style={{ padding: "10px 16px 0" }}>
-          <Notice tone={run.status === "failed" ? "bad" : "warn"}>{run.error}</Notice>
+          <Notice tone={run.status === "failed" ? "bad" : "warn"}>{coreText(run.error)}</Notice>
         </div>
       )}
       {tab === "session" &&
@@ -235,14 +236,12 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
             <pre className="pre">{files.preamble}</pre>
           ) : files.prompts.trim() ? (
             <>
-              <span className="faint">What you typed in this session.</span>
+              <span className="faint">{t("run.youTyped")}</span>
               <pre className="pre">{files.prompts}</pre>
             </>
           ) : (
             <Notice>
-              {run.origin === "code"
-                ? "This was typed into a terminal, so VibeForge did not hand it a prompt. The session is on Final screen and Transcript."
-                : "This run started without a prompt."}
+              {run.origin === "code" ? t("run.typedNoPrompt") : t("run.noPrompt")}
             </Notice>
           )}
         </div>
@@ -252,15 +251,15 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
           {files.transcript.trim() ? (
             <>
               <div className="hstack">
-                <Button size="sm" icon={Copy} onClick={() => void navigator.clipboard.writeText(files.transcript).then(() => push("success", "Transcript copied"))}>
-                  Copy
+                <Button size="sm" icon={Copy} onClick={() => void navigator.clipboard.writeText(files.transcript).then(() => push("success", t("run.transcriptCopied")))}>
+                  {t("common.copy")}
                 </Button>
-                <span className="faint">Plain text of the terminal, written when the run ended.</span>
+                <span className="faint">{t("run.transcriptNote")}</span>
               </div>
               <pre className="pre">{files.transcript}</pre>
             </>
           ) : (
-            <Notice>{run.status === "running" ? "The transcript is written when the run ends." : "No transcript was written for this run."}</Notice>
+            <Notice>{run.status === "running" ? t("run.transcriptLater") : t("run.noTranscript")}</Notice>
           )}
         </div>
       )}
@@ -284,7 +283,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
           </pre>
           <div className="hstack" style={{ marginTop: 10 }}>
             <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", run.dir)}>
-              Open run folder
+              {t("run.openRunFolder")}
             </Button>
           </div>
         </div>

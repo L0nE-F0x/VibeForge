@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { describeError, LogFile } from "../../src/core/log.js";
+import { describeError, LogFile, PageErrors } from "../../src/core/log.js";
 import { INSTALL_URL, installKind, isNewer, parseVersion, releaseFrom, updateCommand } from "../../src/core/updates.js";
 
 describe("updates", () => {
@@ -58,6 +58,23 @@ describe("the log file", () => {
     expect(tail[0]).toMatch(/^2026-09-25T12:00:\d\d\.000Z INFO  event \d+$/);
     expect(log.tail(1000).filter((line) => line.includes("event")).length).toBeGreaterThan(6);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("drops benign page notices and folds bursts of the same error", () => {
+    const lines: string[] = [];
+    let now = 0;
+    const errors = new PageErrors((line) => lines.push(line), 10_000, () => now);
+    for (let i = 0; i < 50; i++) errors.report("ResizeObserver loop completed with undelivered notifications. (index.html:0)");
+    expect(lines).toEqual([]);
+    for (let i = 0; i < 4; i++) {
+      errors.report("boom (index.html:1)");
+      now += 1000;
+    }
+    errors.report("other (index.html:2)");
+    now += 60_000;
+    errors.report("other (index.html:2)");
+    errors.flush();
+    expect(lines).toEqual(["boom (index.html:1)", "boom (index.html:1) (repeated 3 more times)", "other (index.html:2)", "other (index.html:2)"]);
   });
 
   it("describes errors on one line plus a few frames", () => {

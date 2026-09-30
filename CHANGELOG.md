@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-30
+
+**1.3: talk from your chair, let agents work in their own copy, and find any run by what it said.**
+
+- **Dictate without holding anything.** The mic now works as a click: click it, talk for as long as you like, click it again. Holding it and letting go still works, and so does holding Ctrl+Shift+Space. Code has a mic of its own in its toolbar, which types into the terminal that has focus and hands the keyboard back to it, so Enter sends.
+- **A task can work in its own copy.** Turn on **Work in a separate copy** and Execute makes a git worktree of the workspace on a `vibeforge/<task>` branch. The agent works there, so it never edits the folder you, or another agent, are in. **Apply** brings the changes into the workspace as uncommitted edits (with conflict markers if the workspace changed the same lines meanwhile) and removes the copy; **Discard copy** throws it away.
+- **Find a run by what it said.** Search in Runs, and Ctrl+K, look through every run's transcript as well as its title, prompt and folder, and show the words around the match.
+- **Runs take a tenth of the room.** A finished run's terminal capture and saved diff are kept gzipped, which makes them about ten times smaller; they open as before. **Settings → Storage** shows where the space goes, and can remove runs older than 30 days, 90 days or a year, or the oldest beyond a size you pick. It keeps everything by default, and never removes a run waiting for review or the latest run of a chat or task.
+- **Plan alerts.** Settings can notify you when a plan window passes 80%, 95% and 100%, once per step until it resets. Off by default.
+- **Everything in your language.** Agents, Tasks, Routines, Skills, run details, Settings, toasts and the errors VibeForge reports are now translated, and times like "5 min ago" follow your language. Only the language you use is loaded, so the app starts with a smaller bundle than 1.2 despite the extra text.
+- **Better with the keyboard.** Everything reached with Tab shows an ember focus ring, dialogs keep Tab inside them and give focus back when they close, and they have names for screen readers.
+- **A quieter log.** A harmless browser notice that filled a third of `vibeforge.log` is no longer written, and bursts of the same error are folded into one line with a count.
+- **A run that just ended says "just now"**, not "in a moment".
+
 ## [1.2.0] - 2026-09-30
 
 **1.2: it glows when it needs you, and stays out of the way when it doesn't.**
@@ -199,7 +213,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.0
 [1.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.2.0
 [1.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.1.0
 [1.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.0.0

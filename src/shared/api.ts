@@ -9,10 +9,13 @@ import type {
   RoutineInput,
   RoutineView,
   RunBundle,
+  RunHit,
+  RunUpkeep,
   RunView,
   SchedulePreview,
   SendResult,
   SkillInput,
+  StorageSummary,
   TaskInput,
   TaskView,
   TermSize,
@@ -41,6 +44,9 @@ import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
+import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
+
+export type { ApplyResult, WorkingCopy };
 import type { Deleted } from "../core/team-service.js";
 
 export type { Deleted };
@@ -60,10 +66,13 @@ export type {
   RoutineInput,
   RoutineView,
   RunBundle,
+  RunHit,
   RunQuery,
+  RunUpkeep,
   RunView,
   Schedule,
   SchedulePreview,
+  StorageSummary,
   SendResult,
   Settings,
   Skill,
@@ -296,6 +305,10 @@ export interface DeskMethods {
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
   "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
+  /** Bring an isolated task's changes into its workspace as uncommitted edits. */
+  "tasks.applyCopy": (id: string) => ApplyResult;
+  /** Throw an isolated task's copy away. */
+  "tasks.discardCopy": (id: string) => TaskView;
 
   "chats.list": (filter?: { agentId?: string | null }) => ChatView[];
   "chats.create": (input: { agentId?: string | null; engine?: string }) => ChatView;
@@ -318,8 +331,15 @@ export interface DeskMethods {
   "runs.markAllOpened": () => void;
   "runs.stop": (id: string) => void;
   "runs.continue": (id: string, size?: TermSize) => Launched & { chatId: string | null; taskId: string | null };
+  /** Runs whose title, prompt, transcript or folder hold the words typed, best first, with a snippet. */
+  "runs.search": (text: string, limit?: number) => RunHit[];
   /** `saved` is the patch frozen when the run ended. `now` reads the folder as it is. */
   "runs.diff": (id: string, source?: "saved" | "now") => string;
+
+  /** Where VibeForge's disk space goes. */
+  "storage.summary": () => StorageSummary;
+  /** Compress ended runs and remove the ones Settings → Storage doesn't keep, now. */
+  "storage.tidy": () => RunUpkeep;
 
   "live.list": () => LiveSession[];
 

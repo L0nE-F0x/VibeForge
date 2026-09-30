@@ -1,3 +1,5 @@
+import type { WorkingCopy } from "./worktrees.js";
+
 export type Schedule =
   | { kind: "cron"; expr: string }
   | { kind: "every"; minutes: number };
@@ -50,6 +52,10 @@ export interface Task {
   agentId: string | null;
   workspaceId: string | null;
   runIds: string[];
+  /** Work in a separate git worktree of the workspace instead of the workspace itself. */
+  isolated: boolean;
+  /** That worktree, once Execute has made it; gone again after Apply or Discard. */
+  copy: WorkingCopy | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -130,10 +136,14 @@ export interface Settings {
    * sign-in each CLI saved. Contacts those services, so it starts off.
    */
   planLimits: boolean;
+  /** A notification when a plan window passes 80, 95 and 100 percent. Off, since Omarchy's widget may already say so. */
+  quotaAlerts: boolean;
   /** The contribution graph on Home: off, your commits in the workspaces, or GitHub through `gh`. */
   activity: "off" | "git" | "github";
   /** The views in the left rail: their order, and which ones are hidden. Unknown names are ignored. */
   rail: { order: string[]; hidden: string[] };
+  /** How long finished runs are kept, and how much room they may take. Zeros keep everything. */
+  keepRuns: { days: number; maxMb: number };
 }
 
 /** Short tones, made in the app, for moments worth hearing about. */

@@ -1,0 +1,43 @@
+/* ------------------------------------------------------------------ diff */
+
+.diff {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  overflow: auto;
+  padding: 8px 0;
+  user-select: text;
+}
+
+.diff div {
+  padding: 0 14px;
+  white-space: pre;
+}
+
+.diff .add {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+
+.diff .del {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+}
+
+.diff .hunk {
+  color: var(--cyan);
+}
+
+.diff .file {
+  color: var(--accent);
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.diff .meta {
+  color: var(--fg-3);
+}

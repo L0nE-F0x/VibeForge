@@ -7,21 +7,15 @@ import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useDeleted, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
-import { useT } from "../i18n/index.js";
+import { useT, type Key } from "../i18n/index.js";
+import { coreText } from "../core-text.js";
 
-const PROMPT_PLACEHOLDER = `Look at commits merged in the allowed repo since yesterday.
-Draft release notes grouped by what a person can now do.
-Link each claim to a commit.
-Leave the draft in the chat. Do not push, tag, publish, delete or send.`;
-
-const CRON_PRESETS = [
-  { label: "Weekdays 09:00", expr: "0 9 * * 1-5" },
-  { label: "Every day 18:00", expr: "0 18 * * *" },
-  { label: "Every hour", expr: "0 * * * *" },
-  { label: "Mondays 10:00", expr: "0 10 * * 1" },
+const CRON_PRESETS: Array<{ label: Key; expr: string }> = [
+  { label: "routines.preset.weekdays", expr: "0 9 * * 1-5" },
+  { label: "routines.preset.daily", expr: "0 18 * * *" },
+  { label: "routines.preset.hourly", expr: "0 * * * *" },
+  { label: "routines.preset.mondays", expr: "0 10 * * 1" },
 ];
-
-const PROMPT_CHECKS = ["The outcome you want", "The source of truth", "The scope", "The output format", "What still needs your approval"];
 
 export function RoutinesView({ route }: { route: Extract<Route, { view: "routines" }> }) {
   const t = useT();
@@ -40,13 +34,13 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
 
   const [runNow] = useAction(async (routine: RoutineView) => {
     const launched = await call("routines.runNow", routine.id);
-    push("success", `${routine.name} started`, "Open it from Runs, or here once it finishes.");
+    push("success", t("routines.started", { name: routine.name }), t("routines.startedBody"));
     return launched;
-  }, "Could not run the routine");
-  const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), "Could not change the routine");
+  }, t("routines.runFailed"));
+  const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), t("routines.changeFailed"));
   const [remove] = useAction(async (routine: RoutineView) => {
-    deleted(`Deleted ${routine.name}`, await call("routines.delete", routine.id));
-  }, "Could not delete the routine");
+    deleted(t("routines.deleted", { name: routine.name }), await call("routines.delete", routine.id));
+  }, t("routines.deleteFailed"));
 
   return (
     <div className="main">
@@ -88,12 +82,12 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 <div className="vstack grow" style={{ gap: 1 }}>
                   <div className="hstack">
                     <h3 className="truncate">{routine.name}</h3>
-                    {!routine.enabled && <Chip>Paused</Chip>}
-                    {routine.stillRunning && <Chip tone="accent">Running</Chip>}
+                    {!routine.enabled && <Chip>{t("routines.paused")}</Chip>}
+                    {routine.stillRunning && <Chip tone="accent">{t("routines.running")}</Chip>}
                   </div>
                   <span className="faint truncate">
-                    {routine.agentName ?? "Missing agent"} · {routine.description}
-                    {routine.enabled && routine.nextFires[0] ? ` · next ${clockTime(routine.nextFires[0])}` : ""}
+                    {routine.agentName ?? t("routines.missingAgent")} · {routine.description}
+                    {routine.enabled && routine.nextFires[0] ? ` · ${t("routines.nextAt", { time: clockTime(routine.nextFires[0]) })}` : ""}
                   </span>
                 </div>
                 <Toggle checked={routine.enabled} onChange={(on) => void toggle(routine, on)} />
@@ -102,26 +96,26 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 <div className="vstack" style={{ gap: 6, marginTop: 10 }}>
                   {routine.issues.map((issue) => (
                     <Notice key={issue} tone="bad" icon={AlertTriangle}>
-                      {issue}
+                      {coreText(issue)}
                     </Notice>
                   ))}
                   {routine.lastMissedAt && (
                     <Notice tone="warn">
-                      Missed while closed: {new Date(routine.lastMissedAt).toLocaleString()}. It was not replayed.
+                      {t("routines.missed", { when: new Date(routine.lastMissedAt).toLocaleString(t.language) })}
                     </Notice>
                   )}
                 </div>
               )}
               <div className="hstack wrap" style={{ marginTop: 12 }}>
                 <Button size="sm" icon={Play} disabled={routine.stillRunning} onClick={() => void runNow(routine)}>
-                  Run now
+                  {t("routines.runNow")}
                 </Button>
                 <Button size="sm" icon={Pencil} onClick={() => setEditing(routine)}>
-                  Edit
+                  {t("common.edit")}
                 </Button>
                 {routine.lastRun && (
                   <Button size="sm" icon={History} onClick={() => go({ view: "runs", runId: routine.lastRun!.id, filter: "all" })}>
-                    Last run
+                    {t("routines.lastRun")}
                   </Button>
                 )}
                 {routine.lastRun && (
@@ -183,25 +177,25 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
   const [save, saving] = useAction(async () => {
     await call("routines.save", { id: routine?.id, name, agentId, schedule, prompt, notify, enabled });
     forgetDraft(draftKey);
-    push("success", routine ? "Routine saved" : "Routine created", preview?.next[0] ? `Next: ${clockTime(preview.next[0])}` : undefined);
+    push("success", routine ? t("routines.saved") : t("routines.created"), preview?.next[0] ? t("routines.nextToast", { time: clockTime(preview.next[0]) }) : undefined);
     onClose();
-  }, "Could not save the routine");
+  }, t("routines.saveFailed"));
   const ready = Boolean(name.trim() && agentId && prompt.trim() && preview?.valid);
   useSaveShortcut(() => void save(), ready && !saving);
 
   return (
-    <Sheet onClose={onClose} width={760}>
+    <Sheet onClose={onClose} width={760} label={routine ? routine.name : t("routines.newTitle")}>
       <div className="page-head">
         <CalendarClock size={17} className="accent-text" />
-        <h1 className="grow">{routine ? `Edit ${routine.name}` : "New routine"}</h1>
+        <h1 className="grow">{routine ? t("routines.editTitle", { name: routine.name }) : t("routines.newTitle")}</h1>
         <Button variant="ghost" size="sm" icon={X} tip={t("common.close")} kbd="Esc" onClick={onClose} />
       </div>
       <div className="page-body vstack" style={{ gap: 16 }}>
         <div className="form-grid">
-          <Field label="Name">
-            <Input autoFocus={!routine} value={name} placeholder="Weekday release notes" onChange={(event) => setName(event.target.value)} />
+          <Field label={t("common.name")}>
+            <Input autoFocus={!routine} value={name} placeholder={t("routines.namePlaceholder")} onChange={(event) => setName(event.target.value)} />
           </Field>
-          <Field label="Agent" error={agent && !agent.allowRoutines ? `${agent.name} does not allow routines. Turn it on in its settings.` : undefined}>
+          <Field label={t("tasks.agent")} error={agent && !agent.allowRoutines ? t("routines.agentOff", { name: agent.name }) : undefined}>
             <Select value={agentId} onChange={(event) => setAgentId(event.target.value)}>
               {agents.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -211,23 +205,23 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
             </Select>
           </Field>
         </div>
-        <Field label="Schedule" hint="Local time. Starts counting from now; past slots never fire.">
+        <Field label={t("routines.schedule")} hint={t("routines.scheduleHint")}>
           <div className="vstack" style={{ gap: 8 }}>
             <Segmented
               value={schedule.kind}
               onChange={(kind) => setSchedule(kind === "cron" ? { kind: "cron", expr: "0 9 * * 1-5" } : { kind: "every", minutes: 30 })}
               options={[
-                { value: "cron", label: "Cron" },
-                { value: "every", label: "Every N minutes" },
+                { value: "cron", label: t("routines.cron") },
+                { value: "every", label: t("routines.every") },
               ]}
             />
             {schedule.kind === "cron" ? (
               <>
-                <Input className="mono" value={schedule.expr} invalid={preview?.valid === false} onChange={(event) => setSchedule({ kind: "cron", expr: event.target.value })} placeholder="minute hour day month weekday" />
+                <Input className="mono" value={schedule.expr} invalid={preview?.valid === false} onChange={(event) => setSchedule({ kind: "cron", expr: event.target.value })} placeholder={t("routines.cronPlaceholder")} />
                 <div className="hstack wrap" style={{ gap: 5 }}>
                   {CRON_PRESETS.map((preset) => (
                     <Button key={preset.expr} size="sm" variant="ghost" pressed={schedule.expr === preset.expr} onClick={() => setSchedule({ kind: "cron", expr: preset.expr })}>
-                      {preset.label}
+                      {t(preset.label)}
                     </Button>
                   ))}
                 </div>
@@ -243,7 +237,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
                   invalid={preview?.valid === false}
                   onChange={(event) => setSchedule({ kind: "every", minutes: Number(event.target.value) })}
                 />
-                <span className="faint">minutes (at least 5)</span>
+                <span className="faint">{t("routines.minutesMin")}</span>
                 {[15, 30, 60, 240].map((minutes) => (
                   <Button key={minutes} size="sm" variant="ghost" pressed={schedule.minutes === minutes} onClick={() => setSchedule({ kind: "every", minutes })}>
                     {minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}
@@ -255,28 +249,26 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
               {preview?.valid ? (
                 <div className="vstack" style={{ gap: 4 }}>
                   <strong>{preview.description}</strong>
-                  <span className="faint">Next: {preview.next.map((when) => clockTime(when)).join("  ·  ")}</span>
+                  <span className="faint">{t("routines.nextList", { times: preview.next.map((when) => clockTime(when)).join("  ·  ") })}</span>
                 </div>
               ) : (
-                <span style={{ color: "var(--red)" }}>{schedule.kind === "cron" ? "Not a valid five-field cron expression." : "Use a whole number of minutes, 5 or more."}</span>
+                <span style={{ color: "var(--red)" }}>{schedule.kind === "cron" ? t("routines.badCron") : t("routines.badEvery")}</span>
               )}
             </div>
           </div>
         </Field>
-        <Field label="Prompt" hint="Each run starts fresh: it gets the brief, memory and skills, and this prompt — never earlier transcripts.">
-          <TextArea value={prompt} placeholder={PROMPT_PLACEHOLDER} style={{ minHeight: 170 }} onChange={(event) => setPrompt(event.target.value)} />
+        <Field label={t("routines.prompt")} hint={t("routines.promptHint")}>
+          <TextArea value={prompt} placeholder={t("routines.promptPlaceholder")} style={{ minHeight: 170 }} onChange={(event) => setPrompt(event.target.value)} />
         </Field>
-        <Notice icon={CalendarClock}>
-          A prompt that stands alone says: {PROMPT_CHECKS.join(" · ")}. Default to a draft for review; ask it not to push, publish, delete or send.
-        </Notice>
+        <Notice icon={CalendarClock}>{t("routines.checks")}</Notice>
         <SecretNote />
         <div className="hstack wrap" style={{ gap: 20 }}>
-          <Toggle checked={enabled} onChange={setEnabled} label="Enabled" />
-          <Toggle checked={notify} onChange={setNotify} label="Notify me when a run finishes" />
+          <Toggle checked={enabled} onChange={setEnabled} label={t("routines.enabled")} />
+          <Toggle checked={notify} onChange={setNotify} label={t("routines.notify")} />
         </div>
         <div className="hstack">
           <Button variant="primary" icon={Save} busy={saving} disabled={!ready} onClick={() => void save()}>
-            {routine ? "Save routine" : "Create routine"}
+            {routine ? t("routines.save") : t("routines.create")}
           </Button>
           <Button
             variant="ghost"
@@ -285,7 +277,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
               onClose();
             }}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </div>

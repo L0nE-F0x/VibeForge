@@ -267,7 +267,7 @@ export function StripItem({
   badge?: ReactNode;
 }) {
   return (
-    <button type="button" className="strip-item" aria-selected={selected} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
+    <button type="button" className="strip-item" aria-selected={selected} aria-current={selected || undefined} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
       {children}
       {badge}
     </button>

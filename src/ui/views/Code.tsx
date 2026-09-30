@@ -32,7 +32,7 @@ import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
-import { setDictationTarget, type DictationTarget } from "../voice.js";
+import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { setWorkspaceInView, useAttention } from "../attention.js";
 
 interface Runtime {
@@ -359,6 +359,22 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     };
   }
 
+  /** The toolbar mic: dictation into the pane that has focus in the workspace on screen, then back to it for Enter. */
+  const toolbarMic = useDictationTarget(() => {
+    const layout = current ? layouts[current.id] : null;
+    const panes = layout ? panesOf(layout) : [];
+    const pane = (current && panes.find((item) => item.id === focus[current.id])) ?? panes[0];
+    if (!current || !pane) return { label: "", element: () => null, insert: () => undefined };
+    const into = paneTarget(current, pane);
+    return {
+      ...into,
+      insert: (text) => {
+        into.insert(text);
+        terminals.current.get(pane.id)?.focus();
+      },
+    };
+  });
+
   function livePty(paneId: string): string | null {
     const state = runtimeRef.current[paneId];
     return state?.state === "live" ? state.ptyId : null;
@@ -612,6 +628,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   {tildify(current.path, home)}
                 </button>
               </div>
+              <MicButton size="sm" target={toolbarMic.target} hint={t("code.dictate")} disabled={!layouts[current.id]} />
+              <span className="toolbar-sep" />
               <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd="Ctrl+Shift+D" onClick={() => newTerminal(current, "row")} />
               <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd="Ctrl+Shift+E" onClick={() => newTerminal(current, "col")} />
               <span className="toolbar-sep" />

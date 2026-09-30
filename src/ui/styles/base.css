@@ -1,0 +1,272 @@
+/*
+ * VibeForge design system.
+ * Colours come from the active Omarchy theme (see ui/theme.ts), which fills the raw tokens
+ * below at runtime. Everything else is derived from them with color-mix, so a light theme
+ * or a different accent works without new CSS.
+ *
+ * Look: Omarchy's. Square corners, monospace text with Geist for headings, flat surfaces with
+ * one-pixel borders, and pixel art (see components/Pixel.tsx) instead of soft shadows. The
+ * accent gradient is kept for the edges of floating things, as the Omarchy shell draws them.
+ * Light is kept for the few things that are alive: a pixel that is working, or waiting for you,
+ * glows like an ember (see "ember glow").
+ *
+ * Interaction language, borrowed from the Apex Forge shell theme:
+ *   idle      recedes: 3% fill, ash border
+ *   hover     warms to the accent: 12% fill, 55% border, accent text
+ *   focus     keyboard focus is the second gradient stop: 10% fill, 65% border
+ *   selected  a committed choice sits in the accent: 20% fill, 45% border
+ */
+
+:root {
+  --bg: #09090b;
+  --bg-dark: #0c0c0e;
+  --bg-deep: #050506;
+  --bg-raised: #151518;
+  --fg: #ffffff;
+  --fg-2: #a1a1aa;
+  --fg-3: #71717a;
+  --accent: #ff6b35;
+  --accent-2: #fca311;
+  --on-accent: #09090b;
+  --red: #ff4d6d;
+  --green: #34d399;
+  --yellow: #fca311;
+  --blue: #38bdf8;
+  --cyan: #22d3ee;
+  --magenta: #7c3aed;
+  --selection: #232326;
+  --term-bg: #09090b;
+
+  --line: color-mix(in srgb, var(--fg-3) 24%, transparent);
+  --line-2: color-mix(in srgb, var(--fg-3) 38%, transparent);
+  --fill: color-mix(in srgb, var(--fg) 3%, transparent);
+  --fill-2: color-mix(in srgb, var(--fg) 6%, transparent);
+  --hover-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  --hover-line: color-mix(in srgb, var(--accent) 55%, transparent);
+  --focus-fill: color-mix(in srgb, var(--accent-2) 10%, transparent);
+  --focus-line: color-mix(in srgb, var(--accent-2) 65%, transparent);
+  --sel-fill: color-mix(in srgb, var(--accent) 20%, transparent);
+  --sel-line: color-mix(in srgb, var(--accent) 45%, transparent);
+  --press-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --gradient: linear-gradient(45deg, var(--accent), var(--accent-2));
+  --gradient-soft: linear-gradient(45deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent-2) 10%, transparent));
+  /* Ember glow: a hot core, a close halo of the second accent, and a wide bloom of the first. */
+  --ember-core: color-mix(in srgb, var(--accent-2) 70%, #ffffff);
+  --ember-lit: 0 0 0 1px color-mix(in srgb, var(--accent-2) 90%, transparent), 0 0 8px 2px color-mix(in srgb, var(--accent-2) 75%, transparent), 0 0 20px 5px color-mix(in srgb, var(--accent) 45%, transparent);
+  --ember-low: 0 0 0 1px color-mix(in srgb, var(--accent-2) 55%, transparent), 0 0 4px 0 color-mix(in srgb, var(--accent-2) 40%, transparent), 0 0 10px 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  --ember-flare: 0 0 0 2px color-mix(in srgb, var(--accent-2) 95%, transparent), 0 0 12px 4px color-mix(in srgb, var(--accent-2) 85%, transparent), 0 0 34px 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 22px -6px color-mix(in srgb, var(--accent) 70%, transparent);
+  --scrim: color-mix(in srgb, var(--bg-deep) 62%, transparent);
+  --shadow: 0 24px 70px -24px rgba(0, 0, 0, 0.75);
+
+  --r1: 0;
+  --r2: 0;
+  --r3: 0;
+  --r4: 0;
+  --font-mono: "JetBrains Mono Variable", "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
+  --font-ui: var(--font-mono);
+  --font-display: "Geist Variable", "Geist", system-ui, sans-serif;
+  --fs-xs: 10.5px;
+  --fs-sm: 11.5px;
+  --fs: 12.5px;
+  --fs-md: 13.5px;
+  --fs-lg: 16px;
+  --fs-xl: 24px;
+
+  /* Pixel-art shades, lightest to deepest (Omarchy's stepped wordmark bands). */
+  --px-0: color-mix(in srgb, var(--accent-2) 42%, #ffffff);
+  --px-1: var(--accent-2);
+  --px-2: var(--accent);
+  --px-3: color-mix(in srgb, var(--accent) 52%, #000000);
+  --rail: 68px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--fs) / 1.5 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Headings and big numbers in Geist, as on omarchy.org; everything else is monospace. */
+h1,
+h2,
+h3,
+.display {
+  font-family: var(--font-display);
+}
+
+/* Light themes step the other way: darkest at the top, as Omarchy's light wordmark does. */
+:root[data-theme="light"] {
+  --px-0: color-mix(in srgb, var(--accent) 50%, #000000);
+  --px-1: var(--accent);
+  --px-2: var(--accent-2);
+  --px-3: color-mix(in srgb, var(--accent-2) 45%, #ffffff);
+}
+
+.px-s0 {
+  fill: var(--px-0);
+}
+
+.px-s1 {
+  fill: var(--px-1);
+}
+
+.px-s2 {
+  fill: var(--px-2);
+}
+
+.px-s3 {
+  fill: var(--px-3);
+}
+
+.px-drift {
+  fill: var(--accent);
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+/*
+ * Whatever the keyboard reaches shows where it is: a thin ember ring. Controls with a focus look of
+ * their own (buttons, rows, tabs) turn the ring off below; text fields light their border instead,
+ * and containers focused by code (dialogs, panes) stay unmarked.
+ */
+:focus-visible {
+  outline: 1px solid var(--focus-line);
+  outline-offset: 2px;
+}
+
+[tabindex="-1"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.btn:not(.primary):focus-visible,
+.rail-btn:focus-visible,
+.segmented button:focus-visible,
+.tab:focus-visible,
+.card.interactive:focus-visible,
+.row:focus-visible,
+.menu-item:focus-visible,
+.tree-row:focus-visible,
+.task-card:focus-visible,
+.home-activity:focus-visible,
+.home-step:focus-visible,
+.run-row:focus-visible,
+.strip-item:focus-visible {
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-3) 30%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.selectable,
+.selectable * {
+  user-select: text;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--fg-2);
+}
+
+.faint {
+  color: var(--fg-3);
+}
+
+.accent-text {
+  color: var(--accent);
+}
+
+.grad-text {
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.hstack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vstack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}

@@ -1,0 +1,306 @@
+/* ------------------------------------------------------------------ chips, dots, cards */
+
+.chip {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  flex: none;
+  letter-spacing: 0.01em;
+}
+
+.chip.accent {
+  color: var(--accent);
+  border-color: var(--sel-line);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.chip.ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+.chip.warn {
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+}
+
+.chip.bad {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+}
+
+.chip.info {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 0;
+  flex: none;
+  background: var(--fg-3);
+}
+
+.dot.running {
+  background: var(--accent);
+  box-shadow: var(--work-lit);
+  animation: ember-work 2.4s ease-in-out infinite;
+}
+
+.dot.exited {
+  background: var(--green);
+}
+
+.dot.stopped {
+  background: var(--yellow);
+}
+
+.dot.failed {
+  background: var(--red);
+}
+
+.card {
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.card.interactive {
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.15s;
+  display: block;
+  width: 100%;
+}
+
+.card.interactive:hover {
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+}
+
+.card.interactive:focus-visible {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 620;
+  letter-spacing: -0.005em;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  color: var(--fg-2);
+  text-align: left;
+  min-width: 0;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.row:hover {
+  background: var(--hover-fill);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--fg);
+}
+
+.row:focus-visible {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+  color: var(--fg);
+}
+
+.row[aria-selected="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+  color: var(--fg);
+}
+
+.row .row-title {
+  font-weight: 560;
+  color: inherit;
+}
+
+.row .row-sub {
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.row-actions {
+  display: none;
+  gap: 2px;
+}
+
+.row:hover .row-actions,
+.row:focus-within .row-actions {
+  display: flex;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 0;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid transparent;
+}
+
+.avatar.lg {
+  width: 40px;
+  height: 40px;
+  border-radius: 0;
+  font-size: 14px;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 24px;
+  color: var(--fg-3);
+  min-height: 0;
+}
+
+.empty .empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--bg-deep);
+  border: 1px solid var(--sel-line);
+  margin-bottom: 6px;
+}
+
+.empty h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.empty p {
+  margin: 0;
+  max-width: 440px;
+  line-height: 1.55;
+}
+
+.empty .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 12px;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.notice svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.notice.warn {
+  border-color: color-mix(in srgb, var(--yellow) 35%, transparent);
+  background: color-mix(in srgb, var(--yellow) 6%, transparent);
+}
+
+.notice.warn svg {
+  color: var(--yellow);
+}
+
+.notice.bad {
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 7%, transparent);
+  color: color-mix(in srgb, var(--red) 70%, var(--fg));
+}
+
+.notice.accent {
+  border-color: var(--sel-line);
+  background: var(--gradient-soft);
+  color: var(--fg);
+}
+
+.notice.accent svg {
+  color: var(--accent);
+}
+
+.pre {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  user-select: text;
+}
+
+/* Loading: a block cursor blinking, as in a terminal. */
+.spinner {
+  width: 8px;
+  height: 14px;
+  background: var(--accent);
+  animation: cursor-blink 1s steps(1) infinite;
+  flex: none;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}

@@ -41,26 +41,26 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const [rename] = useAction(async () => {
     if (chat && title.trim() && title !== chat.title) await call("chats.rename", chat.id, title);
     setRenaming(false);
-  }, "Could not rename");
+  }, t("chat.renameFailed"));
   const [remove] = useAction(async (target: Chat) => {
     // Deleting is undone from the toast. Only a live session asks first: stopping it can't be undone.
     if (target.live) {
       const ok = await confirm({
-        title: `Delete "${target.title}"?`,
-        body: "Its session is still going and will be stopped. The chat itself can be undone.",
-        confirm: "Stop and delete",
+        title: t("common.deleteNamed", { name: target.title }),
+        body: t("agents.deleteLiveChatBody"),
+        confirm: t("common.stopAndDelete"),
         danger: true,
       });
       if (!ok) return;
     }
     const result = await call("chats.delete", target.id);
     if (target.id === route.chatId) go({ view: "chat" });
-    deleted(`Deleted "${target.title}"`, result);
-  }, "Could not delete the chat");
+    deleted(t("common.deletedNamed", { name: target.title }), result);
+  }, t("agents.deleteChatFailed"));
   const [switchEngine] = useAction(async (next: string) => {
     if (chat) await call("chats.setEngine", chat.id, next);
     else setEngine(next);
-  }, "Could not switch engine");
+  }, t("chat.engineFailed"));
 
   const engineLabel = (id: string) => engines.find((item) => item.id === id)?.label ?? id;
 
@@ -91,7 +91,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
       >
         <div className="list-scroll">
           {!chatList.loaded && <Skeleton rows={5} />}
-          {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>One-off questions live here. Each chat gets its own empty folder.</div>}
+          {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
           {chats.map((item) => (
             <div
               key={item.id}
