@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Better with the keyboard.** Everything reached with Tab shows an ember focus ring, dialogs keep Tab inside them and give focus back when they close, and they have names for screen readers.
 - **A quieter log.** A harmless browser notice that filled a third of `vibeforge.log` is no longer written, and bursts of the same error are folded into one line with a count.
 - **A run that just ended says "just now"**, not "in a moment".
+- **Installing with Node 22 works.** The build used to fail there (Node 22 doesn't list `node:sqlite` as a built-in, so the build tried to bundle it); it only worked on newer Node.
 
 ## [1.2.0] - 2026-09-30
 
