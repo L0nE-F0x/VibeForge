@@ -3,24 +3,25 @@ import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useWorkspaces } from "../api.js";
+import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
-import { ORIGIN_LABEL } from "../components/RunDetail.js";
+import { ORIGIN_KEY } from "../components/RunDetail.js";
 import { Button, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { useAttention } from "../attention.js";
-import { useT } from "../i18n/index.js";
+import { t as translate, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useNav } from "../state.js";
 import { railKey, type RailView } from "../rail.js";
 
 const DAYS = 14;
 
-export function RunRow({ run, selected, onClick, compact }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean }) {
+export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
   const engines = useEngines().data ?? [];
   const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
   return (
-    <button type="button" className="run-row" aria-selected={selected} onClick={onClick}>
+    <button type="button" className="run-row" aria-selected={selected} aria-current={selected || undefined} onClick={onClick}>
       <span className={`dot ${run.status}`} />
       <span className="vstack grow" style={{ gap: 1 }}>
         <span className="title truncate">{title}</span>
@@ -30,6 +31,7 @@ export function RunRow({ run, selected, onClick, compact }: { run: RunView; sele
           {" · "}
           <TimeAgo iso={run.endedAt ?? run.startedAt} />
         </span>
+        {snippet && <Snippet text={snippet} className="truncate-2" />}
       </span>
       {!compact && <StatusChip status={run.status} exitCode={run.exitCode} />}
     </button>
@@ -45,7 +47,7 @@ export function runLabel(run: Pick<RunView, "origin" | "title">, engineLabel: st
   if (run.origin === "code" && prefix && run.title.startsWith(prefix) && run.title.length > prefix.length) {
     return { title: run.title.slice(prefix.length), kind: engineLabel! };
   }
-  return { title: run.title, kind: ORIGIN_LABEL[run.origin] };
+  return { title: run.title, kind: translate(ORIGIN_KEY[run.origin]) };
 }
 
 /** Runs started on each of the last `days` days, oldest first, by local date. */

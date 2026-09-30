@@ -1,0 +1,62 @@
+/* ------------------------------------------------------------------ updates */
+
+.update-notes {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: var(--bg-dark);
+  border: 1px solid var(--line);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.update-notes p,
+.update-notes ul,
+.update-notes h4 {
+  margin: 0 0 8px;
+}
+
+.update-notes > :last-child {
+  margin-bottom: 0;
+}
+
+.update-notes ul {
+  padding-left: 18px;
+}
+
+.update-notes li + li {
+  margin-top: 4px;
+}
+
+.update-notes h4 {
+  font-size: inherit;
+  color: var(--fg);
+}
+
+.update-notes strong {
+  color: var(--fg);
+}
+
+.update-command {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 0;
+  background: var(--bg-dark);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  font: 12px/1.5 var(--font-mono);
+  word-break: break-all;
+}
+
+.update-term {
+  height: 280px;
+  display: flex;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}

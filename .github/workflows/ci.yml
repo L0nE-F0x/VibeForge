@@ -43,3 +43,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+
+  # The built app, started under a virtual display: every view opens, the language switches,
+  # Ctrl+K works and a real shell answers, with no errors from the page (scripts/smoke.mjs).
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # This job runs Electron, so it needs the binary the other jobs skip.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/smoke.mjs

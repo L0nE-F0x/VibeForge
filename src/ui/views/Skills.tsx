@@ -61,13 +61,13 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
         }
       >
         <div className="list-scroll">
-          {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>No skills yet.</div>}
+          {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
           {list.map((skill) => (
             <button key={skill.id} type="button" className="row" aria-selected={skill.id === selected?.id} onClick={() => go({ view: "skills", skillId: skill.id })}>
               <Sparkles size={14} className="accent-text" style={{ flex: "none" }} />
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{skill.name}</span>
-                <span className="row-sub truncate">{skill.description || "No description"}</span>
+                <span className="row-sub truncate">{skill.description || t("common.noDescription")}</span>
               </span>
             </button>
           ))}
@@ -111,23 +111,23 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
 
   const [save, saving] = useAction(async () => {
     const saved = await call("skills.save", { id: skill?.id, name, description, body });
-    push("success", skill ? "Skill saved" : "Skill created", "Agents that have it use the new text from their next run.");
+    push("success", skill ? t("skills.saved") : t("skills.created"), t("skills.savedBody"));
     if (!skill) {
       forgetDraft("skill:new");
       go({ view: "skills", skillId: saved.id });
     }
-  }, "Could not save the skill");
+  }, t("skills.saveFailed"));
   const [remove, removing] = useAction(async () => {
     if (!skill) return;
     const result = await call("skills.delete", skill.id);
     go({ view: "skills" });
-    deleted(`Deleted ${skill.name}`, result);
-  }, "Could not delete the skill");
+    deleted(t("skills.deleted", { name: skill.name }), result);
+  }, t("skills.deleteFailed"));
   const [install] = useAction(async (agentId: string, on: boolean) => {
     if (!skill) return;
     const current = agents.filter((agent) => agent.skills.includes(skill.id)).map((agent) => agent.id);
     await call("skills.setAgents", skill.id, on ? [...current, agentId] : current.filter((id) => id !== agentId));
-  }, "Could not update the agent");
+  }, t("skills.agentFailed"));
   useSaveShortcut(() => void save(), dirty && Boolean(name.trim()) && !saving);
 
   return (
@@ -142,27 +142,27 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
           </Button>
         )}
         <Button variant="primary" icon={Save} busy={saving} disabled={!dirty || !name.trim()} onClick={() => void save()}>
-          {skill ? "Save" : "Create skill"}
+          {skill ? t("common.save") : t("skills.create")}
         </Button>
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 14 }}>
           <div className="form-grid">
-            <Field label="Name">
+            <Field label={t("common.name")}>
               <Input autoFocus={!skill} value={name} placeholder="release-notes" onChange={(event) => setName(event.target.value)} />
             </Field>
-            <Field label="Description" hint="One line: when an agent should reach for it.">
-              <Input value={description} placeholder="Use when turning merged commits into release notes." onChange={(event) => setDescription(event.target.value)} />
+            <Field label={t("skills.description")} hint={t("skills.descriptionHint")}>
+              <Input value={description} placeholder={t("skills.descriptionPlaceholder")} onChange={(event) => setDescription(event.target.value)} />
             </Field>
           </div>
-          <Field label="SKILL.md" hint="Sections in this order: When, Steps, Verify, Ask first.">
+          <Field label="SKILL.md" hint={t("skills.bodyHint")}>
             <TextArea code value={body} style={{ minHeight: 340 }} onChange={(event) => setBody(event.target.value)} />
           </Field>
           <SecretNote />
           {skill && (
             <>
-              <div className="section-title">Installed on</div>
-              {agents.length === 0 && <Notice>No agents yet.</Notice>}
+              <div className="section-title">{t("skills.installedOn")}</div>
+              {agents.length === 0 && <Notice>{t("agents.none")}</Notice>}
               <div className="vstack" style={{ gap: 6 }}>
                 {agents.map((agent) => (
                   <div key={agent.id} className="card hstack" style={{ padding: "8px 12px" }}>

@@ -3,7 +3,7 @@ import { de } from "../../src/ui/i18n/de.js";
 import { en } from "../../src/ui/i18n/en.js";
 import { es } from "../../src/ui/i18n/es.js";
 import { fr } from "../../src/ui/i18n/fr.js";
-import { LANGUAGES, resolveLanguage, translate, translateCount, type Catalog, type Key } from "../../src/ui/i18n/index.js";
+import { LANGUAGES, loadLanguage, resolveLanguage, translate, translateCount, type Catalog, type Key } from "../../src/ui/i18n/index.js";
 import { ja } from "../../src/ui/i18n/ja.js";
 import { pt } from "../../src/ui/i18n/pt.js";
 import { zh } from "../../src/ui/i18n/zh.js";
@@ -41,7 +41,10 @@ describe("translations", () => {
     expect(resolveLanguage("xx", ["de-DE"])).toBe("en");
   });
 
-  it("fills placeholders and chooses the plural form each language uses", () => {
+  it("fills placeholders and chooses the plural form each language uses", async () => {
+    // Only English is there from the start; the others load when chosen.
+    expect(translateCount("de", "code.running", 1)).toBe("1 terminal running");
+    await Promise.all((["de", "fr", "ja"] as const).map((code) => loadLanguage(code)));
     expect(translate("en", "help.updateTo", { version: "0.3.0" })).toBe("Update to 0.3.0");
     expect(translate("en", "help.updateTo")).toBe("Update to {version}");
     expect(translateCount("en", "code.running", 1)).toBe("1 terminal running");

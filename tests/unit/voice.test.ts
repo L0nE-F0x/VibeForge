@@ -168,3 +168,13 @@ describe("voice: settings", () => {
     store.close();
   });
 });
+
+describe("the mic button", () => {
+  it("keeps listening after a click, and stops on a hold's release or the next click", async () => {
+    const { micRelease, MIC_TAP_MS } = await import("../../src/ui/mic.js");
+    expect(micRelease({ at: 1000, started: true }, 1000 + 120)).toBe("latch");
+    expect(micRelease({ at: 1000, started: true }, 1000 + MIC_TAP_MS + 1)).toBe("finish");
+    // The click that ends a latched recording didn't start one: it finishes, however quick.
+    expect(micRelease({ at: 1000, started: false }, 1000 + 80)).toBe("finish");
+  });
+});

@@ -1,1807 +1,272 @@
-import fs from "node:fs";
-import path from "node:path";
-import { planLaunch, programOf, resumeArgsFromTranscript, withAvailability } from "./engines.js";
-import { isDirectory, readText, writeFileAtomic } from "./fsx.js";
-import { diffSince, summarizeSnapshot } from "./vcs.js";
-import { isPathInside } from "./places.js";
-import { buildPreamble, plainPrompt, taskPrompt } from "./preamble.js";
-import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, nextFireTimes, type TickDecision } from "./routines.js";
-import { allocateRunDir, readRunFiles, RUN_FILES, type RunFiles } from "./runs.js";
-import { repairBlankCapture } from "./restore-screen.js";
-import { grokHome, readGrokPrompts } from "./session-prompts.js";
-import { slugify } from "./slug.js";
-import { Store, type RunQuery } from "./store.js";
-import { Trash, type Bin } from "./trash.js";
-import { createTask, markStopped, requestExecute, syncTaskWithRun, type ExecuteBlocker } from "./tasks.js";
-import type {
-  Agent,
-  ChatRecord,
-  Engine,
-  EngineRow,
-  LayoutNode,
-  LiveSession,
-  Routine,
-  RunMeta,
-  RunOrigin,
-  Schedule,
-  Settings,
-  Skill,
-  Task,
-  TaskStatus,
-  Topic,
-  Workspace,
-} from "./types.js";
-import {
-  addWorkspaceRecord,
-  moveWorkspaceRecord,
-  removeWorkspaceRecord,
-  selectWorkspaceRecord,
-  updateWorkspaceRecord,
-  type WorkspaceFile,
-} from "./workspaces.js";
+import { ServiceCore } from "./service/core.js";
+import { LibraryDesk } from "./service/library.js";
+import { WorkspaceDesk } from "./service/workspaces.js";
+import { RoutineDesk } from "./service/routines.js";
+import { TaskDesk } from "./service/tasks.js";
+import { ChatDesk } from "./service/chats.js";
+import { RunDesk } from "./service/runs.js";
+import { ShellRecorder } from "./service/shell-runs.js";
+import type { TickDecision } from "./routines.js";
+import type { RunQuery } from "./store.js";
+import type { Agent, LayoutNode, Routine, Schedule, Skill, TaskStatus } from "./types.js";
+import type { WorkspaceFile } from "./workspaces.js";
+import type { ApplyResult } from "./worktrees.js";
+import type { AgentInput, ChatView, Deleted, Launched, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
 
-// ------------------------------------------------------------------ host contract
+export * from "./service/types.js";
 
-export interface SpawnRequest {
-  cwd: string;
-  argv: string[];
-  /** Run directory the PTY host writes scrollback, the final screen, and a text transcript into. */
-  runDir: string | null;
-  /** Pasted once the CLI has drawn its UI and gone quiet. */
-  pasteInput: string | null;
-  cols?: number;
-  rows?: number;
-}
-
-export interface DeskHost {
-  spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number }>;
-  /** Paste text into a live session and press Enter. */
-  send(ptyId: string, text: string): Promise<void>;
-  kill(ptyId: string): Promise<void>;
-  /** Record a shell's terminal into a run folder from now on, or (null) stop and write its files. */
-  record(ptyId: string, runDir: string | null): Promise<void>;
-  resolveBin(bin: string): string | null;
-  notify(note: { title: string; body: string; runId: string }): void;
-  /** Every run that ends, for the finished and failed sounds. */
-  finished?(run: { runId: string; origin: RunOrigin; outcome: "ok" | "failed" | "stopped" }): void;
-  snapshotGit(cwd: string, startHead: string | null): Promise<string>;
-  gitHead(cwd: string): Promise<string | null>;
-}
-
-export interface DeskOptions {
-  configRoot: string;
-  dataRoot: string;
-  appStartedAt: Date;
-  now: () => Date;
-  host: DeskHost;
-}
-
-// ------------------------------------------------------------------ inputs and views
-
-export interface AgentInput {
-  id?: string;
-  name: string;
-  engine: string;
-  brief: string;
-  places: string[];
-  skills?: string[];
-  allowRoutines?: boolean;
-  /** A Piper voice file; empty uses the one in Settings. */
-  voice?: string;
-}
-
-export interface SkillInput {
-  id?: string;
-  name: string;
-  description?: string;
-  body?: string;
-}
-
-export interface RoutineInput {
-  id?: string;
-  name: string;
-  agentId: string;
-  enabled?: boolean;
-  schedule: Schedule;
-  prompt?: string;
-  notify?: boolean;
-}
-
-export interface TaskInput {
-  id?: string;
-  title: string;
-  body?: string;
-  agentId?: string | null;
-  workspaceId?: string | null;
-}
-
-export interface TermSize {
-  cols?: number;
-  rows?: number;
-}
-
-export interface RunView extends RunMeta {
-  live: boolean;
-  ptyId: string | null;
-}
-
-export interface RoutineView extends Routine {
-  agentName: string | null;
-  issues: string[];
-  stillRunning: boolean;
-  description: string;
-  nextFires: string[];
-  lastRun: RunView | null;
-}
-
-export interface TaskView extends Task {
-  lastRun: RunView | null;
-  blocker: ExecuteBlocker | "engine-missing" | null;
-}
-
-export interface ChatView extends ChatRecord {
-  live: boolean;
-  ptyId: string | null;
-  lastRun: RunView | null;
-}
-
-export interface RunBundle {
-  run: RunView;
-  files: RunFiles;
-}
-
-export interface Launched {
-  runId: string;
-  ptyId: string;
-}
-
-export interface SendResult extends Launched {
-  chatId: string;
-  /** True when the send started a new process instead of typing into a live one. */
-  started: boolean;
-  note: string | null;
-}
-
-export interface SchedulePreview {
-  valid: boolean;
-  description: string;
-  next: string[];
-}
-
-const TWO_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
-const REVIEW_ORIGINS: RunOrigin[] = ["routine", "task", "agent-chat", "code"];
-/** A CLI typed into a shell that ends this quickly without changing anything (`claude --version`) isn't kept. */
-const BLIP_MS = 5000;
 /**
- * How long a delete can be undone. The toast that offers Undo goes sooner; this is the margin.
- * After it, or when the app closes, the files are removed for good.
+ * Everything VibeForge does with agents, routines, tasks, chats and runs, behind one API for the
+ * main process. The work is split by subject into `./service/`; this class only puts it together.
  */
-const UNDO_MS = 30_000;
+export class TeamService extends ServiceCore {
+  private readonly library = new LibraryDesk(this);
+  private readonly workspaces = new WorkspaceDesk(this);
+  private readonly routines = new RoutineDesk(this);
+  private readonly tasks = new TaskDesk(this);
+  private readonly chats = new ChatDesk(this);
+  private readonly runs = new RunDesk(this, this.chats, this.tasks);
+  private readonly shellRuns = new ShellRecorder(this);
 
-/** What a delete hands back: the token that undoes it. */
-export interface Deleted {
-  undo: string;
-}
-
-/** Written on a patch that could not be taken at exit, because the app was already gone. */
-const LATE_PATCH_NOTE = "# Saved when VibeForge next opened, because it closed during this run.\n";
-
-export const BLOCKER_TEXT: Record<ExecuteBlocker | "engine-missing", string> = {
-  "missing-agent": "Assign an agent first.",
-  "missing-workspace": "Pick a workspace first.",
-  "outside-places": "That workspace is not one of the agent's allowed folders.",
-  "engine-missing": "The agent's engine is not on PATH.",
-};
-
-function normalizePlaces(places: readonly string[]): string[] {
-  const out: string[] = [];
-  for (const place of places) {
-    if (typeof place !== "string" || !place.trim()) continue;
-    const resolved = path.resolve(place.trim());
-    if (!out.includes(resolved)) out.push(resolved);
-  }
-  return out;
-}
-
-function titleFromPrompt(text: string): string {
-  const line = text.trim().split("\n").find((item) => item.trim()) ?? "Chat";
-  const clean = line.replace(/\s+/g, " ").trim();
-  return clean.length > 48 ? `${clean.slice(0, 47).trimEnd()}…` : clean;
-}
-
-const DEFAULT_CHAT_TITLE = "New chat";
-
-// ------------------------------------------------------------------ service
-
-export class TeamService {
-  private readonly options: DeskOptions;
-  readonly store: Store;
-  private readonly live = new Map<string, LiveSession>();
-  private readonly ptyByRun = new Map<string, string>();
-  private readonly listeners = new Set<(topics: Topic[]) => void>();
-  private readonly exitWaiters = new Map<string, Array<() => void>>();
-  private readonly finishing = new Set<Promise<void>>();
-  /** Per shell: the latest command line in its foreground, and the queue that records it. */
-  private readonly shellArgv = new Map<string, string[]>();
-  private readonly recordings = new Map<string, Promise<void>>();
-  /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
-  private readonly hostWorking = new Map<string, boolean>();
-  /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
-  private readonly gitAtStart = new Map<string, string>();
-  private readonly trash: Trash;
-  private readonly undoable = new Map<string, { bin: Bin; restore: () => void; timer: ReturnType<typeof setTimeout> }>();
-  private pending = new Set<Topic>();
-  private flushQueued = false;
-  private readonly settled: Promise<void>;
-
-  constructor(options: DeskOptions) {
-    this.options = options;
-    this.store = new Store(options.configRoot, options.dataRoot);
-    // Anything left in the trash was deleted in an earlier session, past its undo.
-    this.trash = new Trash(path.join(options.dataRoot, "trash"));
-    this.trash.empty();
-    // Anything still "running" in the index belongs to a process that died with the last app session.
-    const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
-    this.settled = this.settleOrphans(orphans);
-  }
-
-  whenSettled(): Promise<void> {
-    return this.settled;
-  }
-
-  now(): Date {
-    return this.options.now();
-  }
-
-  close(): void {
-    for (const entry of this.undoable.values()) clearTimeout(entry.timer);
-    this.undoable.clear();
-    this.trash.empty();
-    this.store.close();
-  }
-
-  // ---------------------------------------------------------------- undo
-
-  /** Keep a delete undoable for a while; after that its files go for good. */
-  private keepForUndo(bin: Bin, restore: () => void): Deleted {
-    const timer = setTimeout(() => {
-      this.undoable.delete(bin.token);
-      this.trash.drop(bin);
-    }, UNDO_MS);
-    timer.unref?.();
-    this.undoable.set(bin.token, { bin, restore, timer });
-    return { undo: bin.token };
-  }
-
-  /** Put back what a delete removed. */
-  undoDelete(token: string): void {
-    const entry = this.undoable.get(token);
-    if (!entry) throw new Error("It is too late to undo that.");
-    clearTimeout(entry.timer);
-    this.undoable.delete(token);
-    this.trash.restore(entry.bin);
-    entry.restore();
-  }
-
-  // ---------------------------------------------------------------- events
-
-  onChange(listener: (topics: Topic[]) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  emit(...topics: Topic[]): void {
-    for (const topic of topics) this.pending.add(topic);
-    if (this.flushQueued) return;
-    this.flushQueued = true;
-    queueMicrotask(() => {
-      this.flushQueued = false;
-      const batch = [...this.pending];
-      this.pending = new Set();
-      if (batch.length === 0) return;
-      for (const listener of this.listeners) {
-        try {
-          listener(batch);
-        } catch {
-          /* a listener failing must not break the service */
-        }
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------- settings & engines
-
-  getSettings(): Settings {
-    return this.store.readSettings();
-  }
-
-  saveSettings(patch: Partial<Settings>): Settings {
-    const next = { ...this.store.readSettings(), ...patch };
-    this.store.writeSettings(next);
-    this.emit("settings");
-    return this.store.readSettings();
-  }
-
-  listEngines(): Engine[] {
-    return withAvailability(this.store.readEngineRows(), (bin) => this.options.host.resolveBin(bin));
-  }
-
-  saveEngines(rows: EngineRow[]): Engine[] {
-    this.store.writeEngineRows(rows);
-    this.emit("engines", "agents", "routines", "tasks");
-    return this.listEngines();
-  }
-
-  private resolveEngine(engineId: string): { row: EngineRow; binPath: string } | null {
-    const row = this.store.readEngineRows().find((engine) => engine.id === engineId);
-    if (!row) return null;
-    const binPath = this.options.host.resolveBin(row.bin);
-    return binPath ? { row, binPath } : null;
-  }
-
-  private requireEngine(engineId: string): { row: EngineRow; binPath: string } {
-    const engine = this.resolveEngine(engineId);
-    if (engine) return engine;
-    const row = this.store.readEngineRows().find((item) => item.id === engineId);
-    throw new Error(row ? `${row.label} (${row.bin}) is not on PATH.` : `There is no engine called "${engineId}".`);
-  }
-
-  // ---------------------------------------------------------------- workspaces & layouts
-
-  listWorkspaces(): WorkspaceFile {
-    return this.store.readWorkspaces();
-  }
-
-  addWorkspace(folder: string): WorkspaceFile {
-    if (!isDirectory(folder)) throw new Error("Choose a folder that exists.");
-    const next = addWorkspaceRecord(this.store.readWorkspaces(), folder);
-    this.store.writeWorkspaces(next);
-    this.emit("workspaces");
-    return next;
-  }
-
-  async removeWorkspace(id: string): Promise<WorkspaceFile> {
-    for (const session of [...this.live.values()]) {
-      if (session.workspaceId === id && session.origin === "code") await this.killPty(session.ptyId);
-      else if (session.kind === "shell" && session.workspaceId === id) await this.killPty(session.ptyId);
-    }
-    const next = removeWorkspaceRecord(this.store.readWorkspaces(), id);
-    this.store.writeWorkspaces(next);
-    this.store.writeLayout(id, null);
-    this.emit("workspaces", "tasks");
-    return next;
-  }
-
-  selectWorkspace(id: string): void {
-    this.store.writeWorkspaces(selectWorkspaceRecord(this.store.readWorkspaces(), id));
-  }
-
-  moveWorkspace(id: string, toIndex: number): WorkspaceFile {
-    const next = moveWorkspaceRecord(this.store.readWorkspaces(), id, Number(toIndex) || 0);
-    this.store.writeWorkspaces(next);
-    this.emit("workspaces");
-    return next;
-  }
-
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
-    const clean: { name?: string; dockUrl?: string } = {};
-    if (typeof patch.name === "string" && patch.name.trim()) clean.name = patch.name.trim();
-    if (typeof patch.dockUrl === "string") {
-      const url = patch.dockUrl.trim();
-      if (url && !/^https?:\/\//i.test(url)) throw new Error("Enter a full URL, starting with http:// or https://");
-      clean.dockUrl = url;
-    }
-    const next = updateWorkspaceRecord(this.store.readWorkspaces(), id, clean);
-    this.store.writeWorkspaces(next);
-    this.emit("workspaces");
-    return next;
-  }
-
-  getLayout(workspaceId: string): LayoutNode | null {
-    return this.store.readLayout(workspaceId);
-  }
-
-  saveLayout(workspaceId: string, layout: LayoutNode | null): void {
-    this.store.writeLayout(workspaceId, layout);
-  }
-
-  private workspaceById(id: string | null | undefined): Workspace | null {
-    if (!id) return null;
-    return this.store.readWorkspaces().workspaces.find((item) => item.id === id) ?? null;
-  }
-
-  // ---------------------------------------------------------------- agents
+  // ---------------------------------------------------------------- library
 
   listAgents(): Agent[] {
-    return this.store.listAgents();
+    return this.library.listAgents();
   }
 
   getAgent(id: string): Agent | null {
-    return this.store.getAgent(id);
+    return this.library.getAgent(id);
   }
 
   saveAgent(input: AgentInput): Agent {
-    const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Give the agent a name.");
-    if (!input.brief?.trim()) throw new Error("Write a brief for the agent.");
-    const engineId = input.engine?.trim() ?? "";
-    if (!engineId) throw new Error("Pick an engine.");
-    const existing = input.id ? this.store.getAgent(input.id) : null;
-    if (input.id && !existing) throw new Error("That agent no longer exists.");
-    if (!existing || existing.engine !== engineId) this.requireEngine(engineId);
-    const places = normalizePlaces(input.places ?? []);
-    if (places.length === 0) throw new Error("Add at least one allowed folder.");
-    for (const place of places) {
-      if (existing?.places.includes(place)) continue;
-      if (!isDirectory(place)) throw new Error(`This folder does not exist: ${place}`);
-    }
-    const now = this.now().toISOString();
-    const agent: Agent = {
-      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "agents"), name, ""),
-      name,
-      engine: engineId,
-      brief: input.brief.trimEnd(),
-      memoryFile: "memory.md",
-      places,
-      skills: input.skills ? input.skills.filter((id) => this.store.getSkill(id)) : (existing?.skills ?? []),
-      allowRoutines: typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
-      voice: typeof input.voice === "string" ? input.voice.trim() : (existing?.voice ?? ""),
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-    };
-    this.store.writeAgent(agent);
-    this.emit("agents", "routines", "tasks");
-    return agent;
+    return this.library.saveAgent(input);
   }
 
   deleteAgent(id: string, confirmName: string): void {
-    const agent = this.store.getAgent(id);
-    if (!agent) throw new Error("That agent no longer exists.");
-    if (confirmName.trim() !== agent.name) throw new Error("Type the agent's name exactly to delete it.");
-    this.store.deleteAgent(id);
-    this.emit("agents", "routines", "tasks", "chats");
+    return this.library.deleteAgent(id, confirmName);
   }
 
   readMemory(agentId: string): string {
-    if (!this.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
-    return this.store.readMemory(agentId);
+    return this.library.readMemory(agentId);
   }
 
   writeMemory(agentId: string, text: string): void {
-    if (!this.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
-    this.store.writeMemory(agentId, text);
-    this.emit("agents");
+    return this.library.writeMemory(agentId, text);
   }
 
-  // ---------------------------------------------------------------- skills
-
   listSkills(): Skill[] {
-    return this.store.listSkills();
+    return this.library.listSkills();
   }
 
   saveSkill(input: SkillInput): Skill {
-    const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Give the skill a name.");
-    const existing = input.id ? this.store.getSkill(input.id) : null;
-    const skill: Skill = {
-      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "skills"), name, ""),
-      name,
-      description: (input.description ?? existing?.description ?? "").trim(),
-      body: input.body ?? existing?.body ?? "",
-    };
-    this.store.writeSkill(skill);
-    this.emit("skills");
-    return skill;
+    return this.library.saveSkill(input);
   }
 
   deleteSkill(id: string): Deleted {
-    const dir = this.store.pathOf("skill", id);
-    if (!dir) throw new Error("That skill no longer exists.");
-    const agents = this.store.listAgents().filter((agent) => agent.skills.includes(id)).map((agent) => agent.id);
-    const bin = this.trash.stash([dir]);
-    this.setSkillAgents(id, []);
-    this.emit("skills", "agents");
-    return this.keepForUndo(bin, () => {
-      this.setSkillAgents(id, agents);
-      this.emit("skills", "agents");
-    });
+    return this.library.deleteSkill(id);
   }
 
   setSkillAgents(skillId: string, agentIds: string[]): void {
-    const now = this.now().toISOString();
-    for (const agent of this.store.listAgents()) {
-      const has = agent.skills.includes(skillId);
-      const want = agentIds.includes(agent.id);
-      if (has === want) continue;
-      const skills = want ? [...agent.skills, skillId] : agent.skills.filter((id) => id !== skillId);
-      this.store.writeAgent({ ...agent, skills, updatedAt: now });
-    }
-    this.emit("agents", "skills");
+    return this.library.setSkillAgents(skillId, agentIds);
+  }
+
+  // ---------------------------------------------------------------- workspaces
+
+  listWorkspaces(): WorkspaceFile {
+    return this.workspaces.listWorkspaces();
+  }
+
+  addWorkspace(folder: string): WorkspaceFile {
+    return this.workspaces.addWorkspace(folder);
+  }
+
+  removeWorkspace(id: string): Promise<WorkspaceFile> {
+    return this.workspaces.removeWorkspace(id);
+  }
+
+  selectWorkspace(id: string): void {
+    return this.workspaces.selectWorkspace(id);
+  }
+
+  moveWorkspace(id: string, toIndex: number): WorkspaceFile {
+    return this.workspaces.moveWorkspace(id, toIndex);
+  }
+
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
+    return this.workspaces.updateWorkspace(id, patch);
+  }
+
+  getLayout(workspaceId: string): LayoutNode | null {
+    return this.workspaces.getLayout(workspaceId);
+  }
+
+  saveLayout(workspaceId: string, layout: LayoutNode | null): void {
+    return this.workspaces.saveLayout(workspaceId, layout);
+  }
+
+  startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
+    return this.workspaces.startShell(opts);
+  }
+
+  startCommand(opts: { command: string; title: string; cwd: string } & TermSize): Promise<{ ptyId: string }> {
+    return this.workspaces.startCommand(opts);
+  }
+
+  startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
+    return this.workspaces.startEngine(opts);
   }
 
   // ---------------------------------------------------------------- routines
 
   listRoutines(): RoutineView[] {
-    const now = this.now();
-    return this.store.listRoutines().map((routine) => {
-      const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
-      const last = this.store.queryRuns({ routineId: routine.id, limit: 1 })[0] ?? null;
-      return {
-        ...routine,
-        agentName: agent?.name ?? null,
-        issues: this.routineIssues(routine, agent),
-        stillRunning: this.routineStillRunning(routine.id),
-        description: describeSchedule(routine.schedule),
-        nextFires: routine.enabled ? nextFireTimes(routine.schedule, now, 3).map((date) => date.toISOString()) : [],
-        lastRun: last ? this.view(last) : null,
-      };
-    });
+    return this.routines.listRoutines();
   }
 
   previewSchedule(schedule: Schedule): SchedulePreview {
-    const valid = isScheduleValid(schedule);
-    return {
-      valid,
-      description: describeSchedule(schedule),
-      next: valid ? nextFireTimes(schedule, this.now(), 3).map((date) => date.toISOString()) : [],
-    };
+    return this.routines.previewSchedule(schedule);
   }
 
   saveRoutine(input: RoutineInput): Routine {
-    const name = input.name?.trim() ?? "";
-    if (!name) throw new Error("Give the routine a name.");
-    if (!input.agentId?.trim() || !this.store.getAgent(input.agentId)) throw new Error("Pick an agent for the routine.");
-    const schedule: Schedule =
-      input.schedule?.kind === "cron"
-        ? { kind: "cron", expr: input.schedule.expr.trim().replace(/\s+/g, " ") }
-        : { kind: "every", minutes: Math.round(Number(input.schedule?.minutes)) };
-    if (!isScheduleValid(schedule)) {
-      throw new Error(schedule.kind === "cron" ? "That cron expression is not valid (five fields, local time)." : "Intervals must be at least 5 minutes.");
-    }
-    if (!input.prompt?.trim()) throw new Error("Write the routine's prompt.");
-    const existing = input.id ? this.store.getRoutine(input.id) : null;
-    const routine: Routine = {
-      id: existing?.id ?? this.store.uniqueId(path.join(this.options.configRoot, "routines"), name, ".yaml"),
-      name,
-      agentId: input.agentId,
-      enabled: typeof input.enabled === "boolean" ? input.enabled : (existing?.enabled ?? true),
-      schedule,
-      prompt: input.prompt.trimEnd(),
-      notify: typeof input.notify === "boolean" ? input.notify : (existing?.notify ?? true),
-      lastFiredAt: existing?.lastFiredAt ?? null,
-      lastMissedAt: existing?.lastMissedAt ?? null,
-    };
-    // A new or rescheduled routine starts counting from now, not from a slot in the past.
-    const scheduleChanged = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(schedule);
-    if (scheduleChanged) {
-      routine.lastFiredAt = this.now().toISOString();
-      routine.lastMissedAt = null;
-    }
-    this.store.writeRoutine(routine);
-    this.emit("routines");
-    return routine;
+    return this.routines.saveRoutine(input);
   }
 
   deleteRoutine(id: string): Deleted {
-    const file = this.store.pathOf("routine", id);
-    if (!file) throw new Error("That routine no longer exists.");
-    const bin = this.trash.stash([file]);
-    this.emit("routines");
-    return this.keepForUndo(bin, () => this.emit("routines"));
+    return this.routines.deleteRoutine(id);
   }
 
   setRoutineEnabled(id: string, enabled: boolean): Routine {
-    const routine = this.store.getRoutine(id);
-    if (!routine) throw new Error("That routine no longer exists.");
-    // Resuming does not replay the slots that passed while it was paused.
-    const next = { ...routine, enabled, ...(enabled && !routine.enabled ? { lastFiredAt: this.now().toISOString() } : {}) };
-    this.store.writeRoutine(next);
-    this.emit("routines");
-    return next;
+    return this.routines.setRoutineEnabled(id, enabled);
   }
 
-  async runRoutineNow(id: string, size: TermSize = {}): Promise<Launched> {
-    await this.settled;
-    const routine = this.store.getRoutine(id);
-    if (!routine) throw new Error("That routine no longer exists.");
-    const agent = this.store.getAgent(routine.agentId);
-    if (!agent) throw new Error("The routine's agent no longer exists.");
-    const engine = this.resolveEngine(agent.engine);
-    const decision = decideRunNow({
-      allowRoutines: agent.allowRoutines,
-      engineAvailable: Boolean(engine),
-      previousStillRunning: this.routineStillRunning(routine.id),
-    });
-    if (!decision.ok) {
-      throw new Error(
-        decision.reason === "disallowed"
-          ? `${agent.name} does not allow routines. Turn it on in the agent's settings.`
-          : decision.reason === "engine-missing"
-            ? this.engineMissingText(agent.engine)
-            : "The previous run of this routine is still going.",
-      );
-    }
-    return this.launchRoutine(routine, agent, size);
+  runRoutineNow(id: string, size: TermSize = {}): Promise<Launched> {
+    return this.routines.runRoutineNow(id, size);
   }
 
-  async tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
-    await this.settled;
-    const results: Array<{ routineId: string; decision: TickDecision; error?: string }> = [];
-    for (const routine of this.store.listRoutines()) {
-      const agent = routine.agentId ? this.store.getAgent(routine.agentId) : null;
-      const engine = agent ? this.resolveEngine(agent.engine) : null;
-      const decision = decideRoutineTick({
-        now,
-        appStartedAt: this.options.appStartedAt,
-        enabled: routine.enabled,
-        allowRoutines: agent ? agent.allowRoutines : false,
-        engineAvailable: Boolean(engine),
-        schedule: routine.schedule,
-        lastFiredAt: routine.lastFiredAt,
-        previousStillRunning: this.routineStillRunning(routine.id),
-      });
-      results.push({ routineId: routine.id, decision });
-      if (decision.action === "miss") {
-        if (routine.lastMissedAt !== decision.scheduledAt) {
-          this.store.writeRoutine({ ...routine, lastMissedAt: decision.scheduledAt, lastFiredAt: decision.scheduledAt });
-          this.emit("routines");
-        }
-      } else if (decision.action === "fire" && agent) {
-        // Consume the slot first so a failed start never hot-loops on every tick.
-        this.store.writeRoutine({ ...routine, lastFiredAt: decision.scheduledAt });
-        const runsBefore = new Set(this.store.queryRuns({ routineId: routine.id, limit: 5 }).map((run) => run.id));
-        try {
-          await this.launchRoutine(routine, agent, {});
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          results[results.length - 1].error = message;
-          // A spawn failure has already recorded its run; a missing folder or CLI fails before
-          // there is one, so record it here or the slot would pass with nothing to show for it.
-          const recorded = this.store.queryRuns({ routineId: routine.id, limit: 5 }).some((run) => !runsBefore.has(run.id));
-          if (!recorded) this.recordFailedStart(routine, agent, message);
-        }
-        this.emit("routines");
-      }
-    }
-    return results;
-  }
-
-  private async launchRoutine(routine: Routine, agent: Agent, size: TermSize): Promise<Launched> {
-    const cwd = this.firstPlace(agent.places);
-    if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
-    const engine = this.requireEngine(agent.engine);
-    return this.launch({
-      origin: "routine",
-      title: `${agent.name} · ${routine.name}`,
-      engine,
-      cwd,
-      prompt: routine.prompt,
-      promptText: this.preambleFor(agent, routine.prompt),
-      agentId: agent.id,
-      routineId: routine.id,
-      ...size,
-    });
-  }
-
-  /** A routine that could not even start: a failed run, so Review shows why the slot passed. */
-  private recordFailedStart(routine: Routine, agent: Agent, message: string): void {
-    const started = this.now();
-    const title = `${agent.name} · ${routine.name}`;
-    const { id, dir } = allocateRunDir(this.options.dataRoot, started, title);
-    const at = started.toISOString();
-    this.store.saveRun({
-      id,
-      origin: "routine",
-      title,
-      agentId: agent.id,
-      routineId: routine.id,
-      taskId: null,
-      chatId: null,
-      workspaceId: null,
-      engine: agent.engine,
-      argv: [],
-      cwd: agent.places[0] ?? "",
-      prompt: routine.prompt,
-      startedAt: at,
-      endedAt: at,
-      status: "failed",
-      exitCode: null,
-      signal: null,
-      stopRequested: false,
-      openedAt: null,
-      notifiedAt: null,
-      dir,
-      error: message,
-      changes: null,
-      gitStart: null,
-      continuedFrom: null,
-    });
-    this.emit("runs");
-  }
-
-  private routineStillRunning(routineId: string): boolean {
-    for (const session of this.live.values()) {
-      if (!session.runId) continue;
-      const run = this.store.getRun(session.runId);
-      if (run?.routineId === routineId) return true;
-    }
-    return false;
-  }
-
-  private routineIssues(routine: Routine, agent: Agent | null): string[] {
-    if (!agent) return ["The agent for this routine is gone."];
-    const issues: string[] = [];
-    if (!agent.allowRoutines) issues.push(`${agent.name} does not allow routines.`);
-    if (!this.resolveEngine(agent.engine)) issues.push(this.engineMissingText(agent.engine));
-    if (!this.firstPlace(agent.places)) issues.push("None of the agent's allowed folders exist.");
-    if (!isScheduleValid(routine.schedule)) issues.push("The schedule is not valid.");
-    return issues;
-  }
-
-  private engineMissingText(engineId: string): string {
-    const row = this.store.readEngineRows().find((item) => item.id === engineId);
-    return row ? `${row.label} (${row.bin}) is not on PATH.` : `The engine "${engineId}" is not configured.`;
+  tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
+    return this.routines.tick(now);
   }
 
   // ---------------------------------------------------------------- tasks
 
   listTasks(): TaskView[] {
-    return this.store.listTasks().map((task) => this.taskView(task));
-  }
-
-  private taskView(task: Task): TaskView {
-    const lastId = task.runIds[task.runIds.length - 1];
-    const last = lastId ? this.store.getRun(lastId) : null;
-    return { ...task, lastRun: last ? this.view(last) : null, blocker: this.taskBlocker(task) };
-  }
-
-  private taskBlocker(task: Task): TaskView["blocker"] {
-    const agent = task.agentId ? this.store.getAgent(task.agentId) : null;
-    const workspace = this.workspaceById(task.workspaceId);
-    const decision = requestExecute(task, {
-      hasAgent: Boolean(agent),
-      workspacePath: workspace?.path ?? "",
-      agentPlaces: agent?.places ?? [],
-    });
-    if (!decision.ok) return decision.reason;
-    if (agent && !this.resolveEngine(agent.engine)) return "engine-missing";
-    return null;
+    return this.tasks.listTasks();
   }
 
   saveTask(input: TaskInput): TaskView {
-    const title = input.title?.trim() ?? "";
-    if (!title) throw new Error("Give the task a title.");
-    const now = this.now();
-    const existing = input.id ? this.store.getTask(input.id) : null;
-    const task: Task = existing
-      ? {
-          ...existing,
-          title,
-          body: input.body ?? existing.body,
-          agentId: input.agentId === undefined ? existing.agentId : input.agentId || null,
-          workspaceId: input.workspaceId === undefined ? existing.workspaceId : input.workspaceId || null,
-          updatedAt: now.toISOString(),
-        }
-      : createTask({ title, body: input.body, agentId: input.agentId || null, workspaceId: input.workspaceId || null, now });
-    this.store.writeTask(task);
-    this.emit("tasks");
-    return this.taskView(task);
+    return this.tasks.saveTask(input);
   }
 
-  async deleteTask(id: string): Promise<Deleted> {
-    const task = this.store.getTask(id);
-    const file = this.store.pathOf("task", id);
-    if (!task || !file) throw new Error("That task no longer exists.");
-    if (task.status === "running") await this.stopTask(id);
-    const bin = this.trash.stash([file]);
-    this.emit("tasks");
-    return this.keepForUndo(bin, () => this.emit("tasks"));
+  deleteTask(id: string): Promise<Deleted> {
+    return this.tasks.deleteTask(id);
   }
 
-  async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
-    // Runs left over from a crash are still being recorded; starting now could race them.
-    await this.settled;
-    const task = this.store.getTask(id);
-    if (!task) throw new Error("That task no longer exists.");
-    if (task.status === "running" && this.taskLive(task)) throw new Error("This task is already running.");
-    const blocker = this.taskBlocker(task);
-    if (blocker) throw new Error(BLOCKER_TEXT[blocker]);
-    const agent = this.store.getAgent(task.agentId!)!;
-    const workspace = this.workspaceById(task.workspaceId)!;
-    const engine = this.requireEngine(agent.engine);
-    const prompt = taskPrompt(task.title, task.body);
-    const previous = task.runIds[task.runIds.length - 1] ? this.store.getRun(task.runIds[task.runIds.length - 1]) : null;
-    const resume = continueSession ? this.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
-    const canContinue = resume.native;
-    const prior = continueSession && previous && !canContinue ? this.transcriptPath(previous) : null;
-    const launched = await this.launch({
-      origin: "task",
-      title: task.title,
-      engine,
-      cwd: workspace.path,
-      prompt,
-      promptText: canContinue ? null : this.preambleFor(agent, prompt, prior),
-      continueSession: canContinue,
-      resumeArgs: resume.resumeArgs,
-      agentId: agent.id,
-      taskId: task.id,
-      workspaceId: workspace.id,
-      continuedFrom: continueSession && previous ? previous.id : null,
-      ...size,
-    });
-    const current = this.store.getTask(id) ?? task;
-    this.store.writeTask({
-      ...current,
-      status: "running",
-      runIds: [...current.runIds, launched.runId],
-      updatedAt: this.now().toISOString(),
-    });
-    this.emit("tasks");
-    return launched;
+  executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
+    return this.tasks.executeTask(id, size, continueSession);
   }
 
-  async stopTask(id: string): Promise<TaskView> {
-    const task = this.store.getTask(id);
-    if (!task) throw new Error("That task no longer exists.");
-    const runId = task.runIds[task.runIds.length - 1];
-    if (runId) await this.stopRun(runId);
-    const next = { ...markStopped(this.store.getTask(id) ?? task), updatedAt: this.now().toISOString() };
-    this.store.writeTask(next);
-    this.emit("tasks");
-    return this.taskView(next);
+  stopTask(id: string): Promise<TaskView> {
+    return this.tasks.stopTask(id);
   }
 
   setTaskStatus(id: string, status: TaskStatus): TaskView {
-    const task = this.store.getTask(id);
-    if (!task) throw new Error("That task no longer exists.");
-    if (status === "running") throw new Error("Use Execute to run a task.");
-    if (task.status === "running" && this.taskLive(task)) throw new Error("Stop the task before moving it.");
-    const next = { ...task, status, updatedAt: this.now().toISOString() };
-    this.store.writeTask(next);
-    this.emit("tasks");
-    return this.taskView(next);
+    return this.tasks.setTaskStatus(id, status);
   }
 
-  private taskLive(task: Task): boolean {
-    const runId = task.runIds[task.runIds.length - 1];
-    return Boolean(runId && this.ptyByRun.has(runId));
+  applyTaskCopy(id: string): Promise<ApplyResult> {
+    return this.tasks.applyCopy(id);
+  }
+
+  discardTaskCopy(id: string): Promise<TaskView> {
+    return this.tasks.discardCopy(id);
   }
 
   // ---------------------------------------------------------------- chats
 
   listChats(filter: { agentId?: string | null } = {}): ChatView[] {
-    return this.store
-      .listChats()
-      .filter((chat) => (filter.agentId === undefined ? true : chat.agentId === filter.agentId))
-      .map((chat) => this.chatView(chat));
-  }
-
-  private chatView(chat: ChatRecord): ChatView {
-    const lastId = chat.runIds[chat.runIds.length - 1];
-    const last = lastId ? this.store.getRun(lastId) : null;
-    const ptyId = lastId ? (this.ptyByRun.get(lastId) ?? null) : null;
-    return { ...chat, live: Boolean(ptyId), ptyId, lastRun: last ? this.view(last) : null };
+    return this.chats.listChats(filter);
   }
 
   createChat(input: { agentId?: string | null; engine?: string }): ChatView {
-    const now = this.now().toISOString();
-    if (input.agentId) {
-      const agent = this.store.getAgent(input.agentId);
-      if (!agent) throw new Error("That agent no longer exists.");
-      const cwd = this.firstPlace(agent.places);
-      if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
-      const chat: ChatRecord = {
-        id: this.uniqueChatId(`${agent.id}-chat`),
-        title: DEFAULT_CHAT_TITLE,
-        agentId: agent.id,
-        engine: agent.engine,
-        cwd,
-        runIds: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.store.writeChat(chat);
-      this.emit("chats");
-      return this.chatView(chat);
-    }
-    const engineId = input.engine?.trim() || this.store.readSettings().defaultEngine;
-    this.requireEngine(engineId);
-    const id = this.uniqueChatId("chat");
-    const chat: ChatRecord = {
-      id,
-      title: DEFAULT_CHAT_TITLE,
-      agentId: null,
-      engine: engineId,
-      cwd: path.join(this.options.dataRoot, "scratch", id),
-      runIds: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.store.writeChat(chat);
-    this.emit("chats");
-    return this.chatView(chat);
+    return this.chats.createChat(input);
   }
 
   renameChat(id: string, title: string): ChatView {
-    const chat = this.store.getChat(id);
-    if (!chat) throw new Error("That chat no longer exists.");
-    const next = { ...chat, title: title.trim() || chat.title, updatedAt: this.now().toISOString() };
-    this.store.writeChat(next);
-    this.emit("chats");
-    return this.chatView(next);
+    return this.chats.renameChat(id, title);
   }
 
   setChatEngine(id: string, engineId: string): ChatView {
-    const chat = this.store.getChat(id);
-    if (!chat) throw new Error("That chat no longer exists.");
-    if (chat.agentId) throw new Error("An agent chat uses the agent's engine.");
-    this.requireEngine(engineId);
-    const next = { ...chat, engine: engineId, updatedAt: this.now().toISOString() };
-    this.store.writeChat(next);
-    this.emit("chats");
-    return this.chatView(next);
+    return this.chats.setChatEngine(id, engineId);
   }
 
-  async deleteChat(id: string): Promise<Deleted> {
-    const chat = this.store.getChat(id);
-    if (!chat) throw new Error("That chat no longer exists.");
-    for (const runId of chat.runIds) {
-      const ptyId = this.ptyByRun.get(runId);
-      if (!ptyId) continue;
-      const exited = this.waitForExit(ptyId, 6000);
-      await this.stopRun(runId);
-      await exited;
-    }
-    // Its scratch folder and what its runs said go with it; the runs themselves stay in Runs.
-    const paths: string[] = [];
-    const scratchRoot = path.join(this.options.dataRoot, "scratch");
-    if (!chat.agentId && chat.cwd && isPathInside(scratchRoot, chat.cwd) && path.resolve(chat.cwd) !== path.resolve(scratchRoot)) {
-      paths.push(chat.cwd);
-    }
-    for (const runId of chat.runIds) {
-      const run = this.store.getRun(runId);
-      if (!run?.dir) continue;
-      for (const name of ["scrollback", "screen", "transcript"] as const) paths.push(path.join(run.dir, RUN_FILES[name]));
-    }
-    const record = this.store.getChat(id) ?? chat;
-    const bin = this.trash.stash(paths);
-    this.store.deleteChat(id);
-    this.emit("chats", "runs");
-    return this.keepForUndo(bin, () => {
-      this.store.writeChat(record);
-      this.emit("chats", "runs");
-    });
+  deleteChat(id: string): Promise<Deleted> {
+    return this.chats.deleteChat(id);
   }
 
-  /**
-   * Send text to a chat. A live session gets it pasted in; an empty chat starts the engine with it;
-   * an ended chat continues the engine's session and pastes the text once it is ready.
-   */
-  async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
-    if (!text.trim()) throw new Error("Type something to send.");
-    await this.settled;
-    let chat = this.store.getChat(id);
-    if (!chat) throw new Error("That chat no longer exists.");
-    if (chat.title === DEFAULT_CHAT_TITLE) {
-      chat = { ...chat, title: titleFromPrompt(text) };
-      this.store.writeChat(chat);
-    }
-    const lastId = chat.runIds[chat.runIds.length - 1];
-    const livePty = lastId ? this.ptyByRun.get(lastId) : undefined;
-    if (lastId && livePty) {
-      await this.options.host.send(livePty, text);
-      this.store.writeChat({ ...chat, updatedAt: this.now().toISOString() });
-      this.emit("chats");
-      return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
-    }
-    if (!lastId) {
-      const launched = await this.startChatRun(chat, { prompt: text, continueSession: false, size });
-      return { ...launched, chatId: chat.id, started: true, note: null };
-    }
-    const launched = await this.startChatRun(chat, { prompt: text, continueSession: true, size });
-    return { ...launched, chatId: chat.id, started: true, note: "The last session had ended, so VibeForge picked it up again." };
+  sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
+    return this.chats.sendChat(id, text, size);
   }
 
-  /** Reopen the engine's latest session for this chat, with no new prompt. */
-  async continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
-    // Runs left over from a crash are still being recorded; starting now could race them.
-    await this.settled;
-    const chat = this.store.getChat(id);
-    if (!chat) throw new Error("That chat no longer exists.");
-    const lastId = chat.runIds[chat.runIds.length - 1];
-    const livePty = lastId ? this.ptyByRun.get(lastId) : undefined;
-    if (lastId && livePty) return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
-    const launched = await this.startChatRun(chat, { prompt: null, continueSession: Boolean(lastId), size });
-    return { ...launched, chatId: chat.id, started: true, note: null };
+  continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
+    return this.chats.continueChat(id, size);
   }
 
-  async stopChat(id: string): Promise<void> {
-    const chat = this.store.getChat(id);
-    const lastId = chat?.runIds[chat.runIds.length - 1];
-    if (lastId) await this.stopRun(lastId);
-  }
-
-  private async startChatRun(
-    chat: ChatRecord,
-    opts: { prompt: string | null; continueSession: boolean; size: TermSize },
-  ): Promise<Launched> {
-    const agent = chat.agentId ? this.store.getAgent(chat.agentId) : null;
-    if (chat.agentId && !agent) throw new Error("This chat's agent no longer exists.");
-    const engine = this.requireEngine(agent ? agent.engine : chat.engine);
-    const previous = opts.continueSession ? this.store.getRun(chat.runIds[chat.runIds.length - 1] ?? "") : null;
-    const resume = this.resumePlan(engine.row, previous);
-    const nativeContinue = resume.native;
-    const prior = previous && !nativeContinue ? this.transcriptPath(previous) : null;
-    let cwd = chat.cwd;
-    if (agent) cwd = isDirectory(chat.cwd) && agent.places.some((place) => isPathInside(place, chat.cwd)) ? chat.cwd : (this.firstPlace(agent.places) ?? "");
-    if (!cwd) throw new Error("The chat's folder is gone.");
-    if (!agent) fs.mkdirSync(cwd, { recursive: true });
-    let promptText: string | null = null;
-    let pasteAfterContinue: string | null = null;
-    if (nativeContinue) {
-      pasteAfterContinue = opts.prompt;
-    } else if (agent) {
-      const fallback = previous ? "Continue where the previous attempt stopped." : "Read this, then wait for my first instruction.";
-      promptText = this.preambleFor(agent, opts.prompt ?? fallback, prior);
-    } else if (opts.prompt || prior) {
-      promptText = plainPrompt(opts.prompt ?? "Continue where we left off.", prior);
-    }
-    return this.launch({
-      origin: agent ? "agent-chat" : "chat",
-      title: agent ? `${agent.name} · ${chat.title}` : chat.title,
-      engine,
-      cwd,
-      prompt: opts.prompt ?? "",
-      promptText,
-      pasteAfter: pasteAfterContinue,
-      continueSession: nativeContinue,
-      resumeArgs: resume.resumeArgs,
-      agentId: agent?.id ?? null,
-      chatId: chat.id,
-      continuedFrom: previous?.id ?? null,
-      ...opts.size,
-    });
-  }
-
-  private uniqueChatId(base: string): string {
-    const taken = new Set(this.store.listChats().map((chat) => chat.id));
-    const root = slugify(base, 40);
-    if (!taken.has(root)) return root;
-    let count = 2;
-    while (taken.has(`${root}-${count}`)) count += 1;
-    return `${root}-${count}`;
-  }
-
-  // ---------------------------------------------------------------- code mode
-
-  async startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
-    const workspace = this.workspaceById(opts.workspaceId);
-    const cwd = workspace?.path ?? opts.cwd ?? "";
-    if (!isDirectory(cwd)) throw new Error("That folder does not exist any more.");
-    const shell = this.store.readSettings().defaultShell || process.env.SHELL || "/bin/bash";
-    const spawned = await this.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: null, cols: opts.cols, rows: opts.rows });
-    this.live.set(spawned.ptyId, {
-      ptyId: spawned.ptyId,
-      runId: null,
-      kind: "shell",
-      // Named for where it runs; what it is running shows up as `program`.
-      title: workspace?.name ?? (path.basename(cwd) || cwd),
-      cwd,
-      pid: spawned.pid,
-      startedAt: this.now().toISOString(),
-      origin: null,
-      agentId: null,
-      chatId: null,
-      taskId: null,
-      workspaceId: workspace?.id ?? null,
-    });
-    this.emit("live");
-    return { ptyId: spawned.ptyId };
-  }
-
-  /** A one-off command in a terminal (the self-update), listed with the live sessions. */
-  async startCommand(opts: { command: string; title: string; cwd: string } & TermSize): Promise<{ ptyId: string }> {
-    if (!isDirectory(opts.cwd)) throw new Error("That folder does not exist any more.");
-    const spawned = await this.options.host.spawn({ cwd: opts.cwd, argv: ["/bin/bash", "-c", opts.command], runDir: null, pasteInput: null, cols: opts.cols, rows: opts.rows });
-    this.live.set(spawned.ptyId, {
-      ptyId: spawned.ptyId,
-      runId: null,
-      kind: "shell",
-      title: opts.title,
-      cwd: opts.cwd,
-      pid: spawned.pid,
-      startedAt: this.now().toISOString(),
-      origin: null,
-      agentId: null,
-      chatId: null,
-      taskId: null,
-      workspaceId: null,
-    });
-    this.emit("live");
-    return { ptyId: spawned.ptyId };
-  }
-
-  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
-    // Runs left over from a crash are still being recorded; starting now could race them.
-    await this.settled;
-    const workspace = this.workspaceById(opts.workspaceId);
-    if (!workspace) throw new Error("Open a workspace first.");
-    if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
-    const engine = this.requireEngine(opts.engineId);
-    const prompt = opts.prompt?.trim() ?? "";
-    const previous = opts.continueSession
-      ? (this.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
-      : null;
-    const resume = opts.continueSession ? this.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
-    return this.launch({
-      origin: "code",
-      title: `${engine.row.label} · ${workspace.name}`,
-      engine,
-      cwd: workspace.path,
-      prompt,
-      promptText: prompt || null,
-      continueSession: Boolean(opts.continueSession && (resume.resumeArgs || engine.row.continueArgs?.length)),
-      resumeArgs: resume.resumeArgs,
-      workspaceId: workspace.id,
-      continuedFrom: previous?.id ?? null,
-      cols: opts.cols,
-      rows: opts.rows,
-    });
+  stopChat(id: string): Promise<void> {
+    return this.chats.stopChat(id);
   }
 
   // ---------------------------------------------------------------- runs
 
-  private view(run: RunMeta): RunView {
-    const ptyId = this.ptyByRun.get(run.id) ?? null;
-    return { ...run, live: Boolean(ptyId), ptyId };
-  }
-
   listRuns(query: RunQuery = {}): RunView[] {
-    return this.store.queryRuns(query).map((run) => this.view(run));
+    return this.runs.listRuns(query);
   }
 
   inbox(now: Date = this.now()): RunView[] {
-    // A Code session was watched as it happened; it only waits for review when it changed something.
-    return this.listRuns({
-      status: ["exited", "stopped", "failed"],
-      unopened: true,
-      origin: REVIEW_ORIGINS,
-      since: new Date(now.getTime() - TWO_DAYS_MS).toISOString(),
-    }).filter((run) => run.origin !== "code" || (run.changes !== null && run.changes !== "No changes"));
+    return this.runs.inbox(now);
   }
 
   getRun(id: string): RunBundle {
-    const run = this.store.getRun(id);
-    if (!run) throw new Error("That run no longer exists.");
-    const files: RunFiles = run.dir && isDirectory(run.dir)
-      ? readRunFiles(run.dir)
-      : { preamble: "", prompts: "", screen: "", scrollback: "", transcript: "", git: "", patchSaved: false };
-    return { run: this.view(run), files };
+    return this.runs.getRun(id);
   }
 
-  /** The run plus its screen, transcript and, for a typed Grok, the prompts it was given. */
-  async loadRun(id: string): Promise<RunBundle> {
-    const bundle = this.getRun(id);
-    let files = bundle.files;
-    if (bundle.run.dir && bundle.run.status !== "running") {
-      try {
-        files = await repairBlankCapture(bundle.run.dir, files);
-      } catch {
-        /* the stored files still open */
-      }
-    }
-    if (!files.preamble.trim() && bundle.run.engine === "grok" && bundle.run.cwd) {
-      try {
-        files = { ...files, prompts: readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt) };
-      } catch {
-        /* the prompt tab explains that none was handed over */
-      }
-    }
-    return { ...bundle, files };
+  loadRun(id: string): Promise<RunBundle> {
+    return this.runs.loadRun(id);
   }
 
   markRunOpened(id: string, opened = true): void {
-    const run = this.store.getRun(id);
-    if (!run) return;
-    if (opened && (run.openedAt || run.status === "running")) return;
-    this.store.saveRun({ ...run, openedAt: opened ? this.now().toISOString() : null });
-    this.emit("runs");
+    return this.runs.markRunOpened(id, opened);
   }
 
   markAllOpened(): void {
-    const now = this.now().toISOString();
-    for (const run of this.inbox()) this.store.saveRun({ ...run, openedAt: now });
-    this.emit("runs");
+    return this.runs.markAllOpened();
   }
 
-  async stopRun(id: string): Promise<void> {
-    const run = this.store.getRun(id);
-    if (!run || run.status !== "running") return;
-    const ptyId = this.ptyByRun.get(id);
-    this.store.saveRun({ ...run, stopRequested: true });
-    if (ptyId) {
-      await this.options.host.kill(ptyId);
-      return;
-    }
-    await this.finishRun(run.id, { exitCode: null, signal: null, status: "stopped" });
+  continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+    return this.runs.continueRun(id, size);
   }
 
-  /** Start the next attempt of a finished run, in the same place it belongs to. */
-  async continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
-    // Runs left over from a crash are still being recorded; starting now could race them.
-    await this.settled;
-    const run = this.store.getRun(id);
-    if (!run) throw new Error("That run no longer exists.");
-    const livePty = this.ptyByRun.get(id);
-    if (livePty) return { runId: id, ptyId: livePty, chatId: run.chatId, taskId: run.taskId };
-    if (run.chatId && this.store.getChat(run.chatId)) {
-      const result = await this.continueChat(run.chatId, size);
-      return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
-    }
-    if (run.taskId && this.store.getTask(run.taskId)) {
-      const launched = await this.executeTask(run.taskId, size, true);
-      return { ...launched, chatId: null, taskId: run.taskId };
-    }
-    const engine = this.requireEngine(run.engine);
-    const resume = this.resumePlan(engine.row, run);
-    const nativeContinue = resume.native;
-    const agent = run.agentId ? this.store.getAgent(run.agentId) : null;
-    const prior = nativeContinue ? null : this.transcriptPath(run);
-    const followUp = "Continue where the previous attempt stopped.";
-    const launched = await this.launch({
-      origin: run.origin,
-      title: run.title,
-      engine,
-      cwd: run.cwd,
-      prompt: run.prompt,
-      promptText: nativeContinue ? null : agent ? this.preambleFor(agent, run.prompt || followUp, prior) : plainPrompt(run.prompt || followUp, prior),
-      continueSession: nativeContinue,
-      resumeArgs: resume.resumeArgs,
-      agentId: run.agentId,
-      routineId: run.routineId,
-      workspaceId: run.workspaceId,
-      continuedFrom: run.id,
-      ...size,
-    });
-    return { ...launched, chatId: null, taskId: null };
+  runDiff(id: string, source: "saved" | "now" = "saved"): Promise<string> {
+    return this.runs.runDiff(id, source);
   }
 
-  /**
-   * The patch for a run. Once the run has ended and diff.patch is on disk, that file is what
-   * comes back: it is the tree at the moment the run ended. `now` reads the folder as it is.
-   */
-  async runDiff(id: string, source: "saved" | "now" = "saved"): Promise<string> {
-    const run = this.store.getRun(id);
-    if (!run) throw new Error("That run no longer exists.");
-    if (source !== "now" && run.status !== "running" && run.dir) {
-      const file = path.join(run.dir, RUN_FILES.patch);
-      if (fs.existsSync(file)) return readText(file);
-    }
-    return diffSince(run.cwd, run.gitStart);
+  searchRuns(text: string, limit?: number): RunHit[] {
+    return this.runs.searchRuns(text, limit);
   }
 
-  /**
-   * How to pick a finished session back up with the same engine: its exact session id when the
-   * CLI printed one, the engine's continue flag otherwise, or not at all.
-   */
-  private resumePlan(row: EngineRow, previous: RunMeta | null): { native: boolean; resumeArgs: string[] | null } {
-    // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
-    if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
-    if (previous.dir) {
-      const resumeArgs = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-      if (resumeArgs) return { native: true, resumeArgs };
-    }
-    return { native: Boolean(row.continueArgs?.length), resumeArgs: null };
+  maintainRuns(): Promise<RunUpkeep> {
+    return this.runs.maintainRuns();
   }
 
-  private transcriptPath(run: RunMeta): string | null {
-    if (!run.dir) return null;
-    for (const file of [RUN_FILES.transcript, RUN_FILES.scrollback]) {
-      const full = path.join(run.dir, file);
-      try {
-        if (fs.statSync(full).size > 0) return full;
-      } catch {
-        /* try the next file */
-      }
-    }
-    return null;
+  storageSummary(): StorageSummary {
+    return this.runs.storageSummary();
   }
 
-  // ---------------------------------------------------------------- live sessions
+  // ---------------------------------------------------------------- shell runs
 
-  listLive(): LiveSession[] {
-    return [...this.live.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  }
-
-  liveCount(): number {
-    return this.live.size;
-  }
-
-  /** Close a terminal. A run is stopped (and keeps its transcript); a shell just ends. */
-  async killPty(ptyId: string): Promise<void> {
-    const session = this.live.get(ptyId);
-    if (session?.runId) {
-      await this.stopRun(session.runId);
-      return;
-    }
-    await this.options.host.kill(ptyId);
-  }
-
-  isLive(ptyId: string): boolean {
-    return this.live.has(ptyId);
-  }
-
-  /** Resolves once the PTY has exited and its run is finished, or after the timeout. */
-  waitForExit(ptyId: string, timeoutMs: number): Promise<void> {
-    if (!this.live.has(ptyId)) return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = setTimeout(resolve, timeoutMs);
-      const list = this.exitWaiters.get(ptyId) ?? [];
-      list.push(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-      this.exitWaiters.set(ptyId, list);
-    });
-  }
-
-  // ---------------------------------------------------------------- launching
-
-  private preambleFor(agent: Agent, prompt: string, priorTranscript: string | null = null): string {
-    const skills = agent.skills.flatMap((id) => {
-      const skill = this.store.getSkill(id);
-      return skill ? [{ name: skill.name, body: skill.body }] : [];
-    });
-    return buildPreamble({
-      agentName: agent.name,
-      places: agent.places,
-      brief: agent.brief,
-      memory: this.store.readMemory(agent.id),
-      skills,
-      prompt,
-      priorTranscript,
-    });
-  }
-
-  private async launch(input: {
-    origin: RunOrigin;
-    title: string;
-    engine: { row: EngineRow; binPath: string };
-    cwd: string;
-    /** What the human asked for, kept for the record. */
-    prompt: string;
-    /** What reaches the CLI as its first message: a preamble, the plain prompt, or nothing. */
-    promptText: string | null;
-    /** Text pasted after a continued session loads. */
-    pasteAfter?: string | null;
-    continueSession?: boolean;
-    /** The exact session to reopen, read from the previous run's transcript. */
-    resumeArgs?: string[] | null;
-    agentId?: string | null;
-    routineId?: string | null;
-    taskId?: string | null;
-    chatId?: string | null;
-    workspaceId?: string | null;
-    continuedFrom?: string | null;
-    cols?: number;
-    rows?: number;
-  }): Promise<Launched> {
-    const started = this.now();
-    const { id, dir } = allocateRunDir(this.options.dataRoot, started, input.title);
-    const preamblePath = path.join(dir, RUN_FILES.preamble);
-    writeFileAtomic(preamblePath, input.promptText ?? "");
-    const plan = planLaunch(input.engine.row, input.engine.binPath, {
-      prompt: input.promptText,
-      continueSession: input.continueSession,
-      resumeArgs: input.resumeArgs,
-      promptFile: preamblePath,
-    });
-    const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
-    let gitStart: string | null = null;
-    try {
-      gitStart = await this.options.host.gitHead(input.cwd);
-    } catch {
-      gitStart = null;
-    }
-    const meta: RunMeta = {
-      id,
-      origin: input.origin,
-      title: input.title,
-      agentId: input.agentId ?? null,
-      routineId: input.routineId ?? null,
-      taskId: input.taskId ?? null,
-      chatId: input.chatId ?? null,
-      workspaceId: input.workspaceId ?? null,
-      engine: input.engine.row.id,
-      argv: plan.recordArgv,
-      cwd: input.cwd,
-      prompt: input.prompt,
-      startedAt: started.toISOString(),
-      endedAt: null,
-      status: "running",
-      exitCode: null,
-      signal: null,
-      stopRequested: false,
-      openedAt: null,
-      notifiedAt: null,
-      dir,
-      error: null,
-      changes: null,
-      gitStart,
-      continuedFrom: input.continuedFrom ?? null,
-    };
-    this.store.saveRun(meta);
-    let spawned: { ptyId: string; pid: number };
-    try {
-      spawned = await this.options.host.spawn({
-        cwd: input.cwd,
-        argv: plan.argv,
-        runDir: dir,
-        pasteInput,
-        cols: input.cols,
-        rows: input.rows,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
-      this.emit("runs");
-      throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
-    }
-    this.ptyByRun.set(id, spawned.ptyId);
-    this.live.set(spawned.ptyId, {
-      ptyId: spawned.ptyId,
-      runId: id,
-      kind: "run",
-      title: input.title,
-      cwd: input.cwd,
-      pid: spawned.pid,
-      startedAt: meta.startedAt,
-      origin: input.origin,
-      agentId: meta.agentId,
-      chatId: meta.chatId,
-      taskId: meta.taskId,
-      workspaceId: meta.workspaceId,
-    });
-    if (input.chatId) {
-      const chat = this.store.getChat(input.chatId);
-      if (chat) {
-        this.store.writeChat({ ...chat, runIds: [...chat.runIds, id], cwd: input.cwd, updatedAt: meta.startedAt });
-      }
-    }
-    this.emit("runs", "live", "chats", "routines", "tasks");
-    return { runId: id, ptyId: spawned.ptyId };
-  }
-
-  /** A shell's foreground program changed: `claude` typed at its prompt, or back to the prompt. */
   onPtyProgram(ptyId: string, argv: string[] | null, cwd: string | null = null): void {
-    const session = this.live.get(ptyId);
-    if (!session || session.kind !== "shell") return;
-    const found = argv ? programOf(argv, this.store.readEngineRows()) : null;
-    const program = found?.label || null;
-    const programEngineId = found?.engineId ?? null;
-    const programCwd = found ? cwd : null;
-    if (session.program === program && session.programEngineId === programEngineId && session.programCwd === programCwd) return;
-    // The host only reports a change. A CLI that starts working at once was already "working" while
-    // its command line was typed, so it takes that state over from the shell.
-    const working = programEngineId ? (this.hostWorking.get(ptyId) ?? session.working) : false;
-    this.live.set(ptyId, { ...session, program, programEngineId, programCwd, working });
-    this.emit("live");
-    if (argv) this.shellArgv.set(ptyId, argv);
-    if (session.programEngineId !== programEngineId) this.queueRecording(ptyId);
+    return this.shellRuns.onPtyProgram(ptyId, argv, cwd);
   }
 
-  /** Only coding CLIs count as working; a dev server's logs are just a shell being busy. */
   onPtyActivity(ptyId: string, working: boolean): void {
-    const session = this.live.get(ptyId);
-    if (!session) return;
-    if (session.kind === "shell") this.hostWorking.set(ptyId, working);
-    if (session.kind === "shell" && !session.programEngineId && working) return;
-    if (Boolean(session.working) === working) return;
-    this.live.set(ptyId, { ...session, working });
-    this.emit("live");
-  }
-
-  // ---------------------------------------------------------------- runs typed into a shell
-
-  /** Changes of program are handled one at a time per shell, in the order they happened. */
-  private queueRecording(ptyId: string): void {
-    const next = (this.recordings.get(ptyId) ?? Promise.resolve())
-      .then(() => this.syncRecording(ptyId))
-      .catch(() => undefined)
-      .finally(() => {
-        if (this.recordings.get(ptyId) === next) this.recordings.delete(ptyId);
-      });
-    this.recordings.set(ptyId, next);
-  }
-
-  /** A shell in a workspace records a run while a coding CLI holds its foreground. */
-  private async syncRecording(ptyId: string): Promise<void> {
-    await this.settled;
-    const session = this.live.get(ptyId);
-    if (!session || session.kind !== "shell" || !session.workspaceId) return;
-    const want = session.programEngineId ?? null;
-    const current = session.runId ? this.store.getRun(session.runId) : null;
-    if (current?.status === "running" && current.engine === want) return;
-    if (current) await this.endShellRun(ptyId, current.id);
-    if (want) await this.startShellRun(ptyId, want);
-  }
-
-  private async startShellRun(ptyId: string, engineId: string): Promise<void> {
-    const session = this.live.get(ptyId);
-    const row = this.store.readEngineRows().find((item) => item.id === engineId);
-    if (!session || !row) return;
-    const workspace = this.workspaceById(session.workspaceId);
-    const cwd = session.programCwd || session.cwd;
-    const started = this.now();
-    const title = `${row.label} · ${workspace?.name ?? (path.basename(cwd) || cwd)}`;
-    const { id, dir } = allocateRunDir(this.options.dataRoot, started, title);
-    let gitStart: string | null = null;
-    try {
-      gitStart = await this.options.host.gitHead(cwd);
-      this.gitAtStart.set(id, await this.options.host.snapshotGit(cwd, gitStart));
-    } catch {
-      /* not a repo, or git is slow; the run is recorded without */
-    }
-    this.store.saveRun({
-      id,
-      origin: "code",
-      title,
-      agentId: null,
-      routineId: null,
-      taskId: null,
-      chatId: null,
-      workspaceId: session.workspaceId,
-      engine: row.id,
-      argv: this.shellArgv.get(ptyId) ?? [row.bin],
-      cwd,
-      prompt: "",
-      startedAt: started.toISOString(),
-      endedAt: null,
-      status: "running",
-      exitCode: null,
-      signal: null,
-      stopRequested: false,
-      openedAt: null,
-      notifiedAt: null,
-      dir,
-      error: null,
-      changes: null,
-      gitStart,
-      continuedFrom: null,
-    });
-    try {
-      await this.options.host.record(ptyId, dir);
-    } catch {
-      /* the shell ended meanwhile; its exit is handled below */
-    }
-    const latest = this.live.get(ptyId);
-    if (!latest) {
-      // The terminal closed while the run was being set up: record what there is.
-      await this.finishRun(id, { exitCode: null, signal: null, status: "stopped" });
-      return;
-    }
-    this.ptyByRun.set(id, ptyId);
-    this.live.set(ptyId, { ...latest, runId: id });
-    this.emit("runs", "live");
-  }
-
-  private async endShellRun(ptyId: string, runId: string): Promise<void> {
-    try {
-      await this.options.host.record(ptyId, null);
-    } catch {
-      /* already stopped with the terminal */
-    }
-    this.ptyByRun.delete(runId);
-    const session = this.live.get(ptyId);
-    if (session?.runId === runId) this.live.set(ptyId, { ...session, runId: null });
-    await this.finishRun(runId, { exitCode: null, signal: null, status: "exited" });
-    this.dropBlip(runId);
-  }
-
-  private dropBlip(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (!run?.endedAt || run.stopRequested) return;
-    const lasted = Date.parse(run.endedAt) - Date.parse(run.startedAt);
-    if (lasted >= BLIP_MS || (run.changes && run.changes !== "No changes")) return;
-    this.store.deleteRun(run);
-    this.emit("runs");
-  }
-
-  // ---------------------------------------------------------------- exits
-
-  async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
-    const session = this.live.get(ptyId);
-    this.live.delete(ptyId);
-    this.shellArgv.delete(ptyId);
-    this.hostWorking.delete(ptyId);
-    try {
-      if (!session?.runId) {
-        this.emit("live");
-        return;
-      }
-      this.ptyByRun.delete(session.runId);
-      const run = this.store.getRun(session.runId);
-      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited" });
-      this.finishing.add(done);
-      try {
-        await done;
-      } finally {
-        this.finishing.delete(done);
-      }
-    } finally {
-      const waiters = this.exitWaiters.get(ptyId) ?? [];
-      this.exitWaiters.delete(ptyId);
-      for (const wake of waiters) wake();
-    }
-  }
-
-  private async finishRun(
-    runId: string,
-    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped" },
-  ): Promise<void> {
-    const run = this.store.getRun(runId);
-    if (!run) return;
-    const git = await this.writeSnapshot(run);
-    await this.writePatch(run);
-    const latest = this.store.getRun(runId) ?? run;
-    const before = this.gitAtStart.get(runId);
-    this.gitAtStart.delete(runId);
-    const finished = this.store.saveRun({
-      ...latest,
-      status: latest.stopRequested ? "stopped" : outcome.status,
-      exitCode: outcome.exitCode,
-      signal: outcome.signal,
-      endedAt: this.now().toISOString(),
-      changes: before !== undefined && before === git ? "No changes" : summarizeSnapshot(git),
-    });
-    if (finished.taskId) {
-      const task = this.store.getTask(finished.taskId);
-      if (task && task.runIds[task.runIds.length - 1] === finished.id) {
-        const status = syncTaskWithRun(task, finished.status);
-        if (status !== task.status) this.store.writeTask({ ...task, status, updatedAt: this.now().toISOString() });
-      }
-    }
-    this.notifyFinished(finished);
-    try {
-      this.options.host.finished?.({
-        runId: finished.id,
-        origin: finished.origin,
-        outcome: finished.status === "stopped" ? "stopped" : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0) ? "failed" : "ok",
-      });
-    } catch {
-      /* a sound is never worth failing a run over */
-    }
-    this.emit("runs", "live", "tasks", "chats", "routines");
-  }
-
-  private notifyFinished(run: RunMeta): void {
-    if (run.notifiedAt) return;
-    if (run.origin !== "routine" && run.origin !== "task") return;
-    const settings = this.store.readSettings();
-    if (!settings.notify) return;
-    if (run.origin === "routine") {
-      const routine = run.routineId ? this.store.getRoutine(run.routineId) : null;
-      if (routine && !routine.notify) return;
-    }
-    const outcome =
-      run.status === "stopped"
-        ? "stopped"
-        : run.exitCode && run.exitCode !== 0
-          ? `exited with code ${run.exitCode}`
-          : "finished";
-    try {
-      this.options.host.notify({
-        title: run.title,
-        body: [outcome, run.changes].filter(Boolean).join(" · "),
-        runId: run.id,
-      });
-    } catch {
-      return;
-    }
-    this.store.saveRun({ ...run, notifiedAt: this.now().toISOString() });
-  }
-
-  private async settleOrphans(orphans: RunMeta[]): Promise<void> {
-    for (const run of orphans) {
-      const dir = run.dir;
-      let changes = run.changes;
-      if (dir && run.cwd && isDirectory(dir)) {
-        if (!fs.existsSync(path.join(dir, RUN_FILES.git))) {
-          changes = summarizeSnapshot(await this.writeSnapshot(run));
-        }
-        // The exit that should have frozen the patch never arrived. This is the tree now.
-        if (!fs.existsSync(path.join(dir, RUN_FILES.patch))) await this.writePatch(run, LATE_PATCH_NOTE);
-      }
-      this.store.saveRun({
-        ...run,
-        status: "stopped",
-        endedAt: run.endedAt ?? this.now().toISOString(),
-        error: run.error ?? "VibeForge closed while this run was going.",
-        changes,
-      });
-      if (run.taskId) {
-        // Only when this orphan is still the task's run: an Execute during settling owns it now.
-        const task = this.store.getTask(run.taskId);
-        if (task?.status === "running" && task.runIds.at(-1) === run.id) this.store.writeTask({ ...task, status: "review" });
-      }
-    }
-    if (orphans.length) this.emit("runs", "tasks");
-  }
-
-  /** Status summary for git.txt. The string returned is the one compared with the snapshot from start. */
-  private async writeSnapshot(run: RunMeta): Promise<string> {
-    let git = "not a git repo\n";
-    try {
-      git = await this.options.host.snapshotGit(run.cwd, run.gitStart);
-    } catch {
-      git = "not a git repo\n";
-    }
-    this.writeRunFile(run, RUN_FILES.git, git.endsWith("\n") ? git : `${git}\n`);
-    return git;
-  }
-
-  /**
-   * Freeze diff.patch. The first write wins, so a later pass cannot replace the tree from
-   * the moment the run ended with whatever the folder looks like afterwards.
-   * `preface` marks a patch taken on the next open, when the exit itself never wrote one.
-   */
-  private async writePatch(run: RunMeta, preface = ""): Promise<void> {
-    if (!run.dir || !isDirectory(run.dir)) return;
-    const file = path.join(run.dir, RUN_FILES.patch);
-    if (fs.existsSync(file)) return;
-    let patch = "";
-    try {
-      patch = await diffSince(run.cwd, run.gitStart);
-    } catch {
-      return;
-    }
-    const body = preface + patch;
-    this.writeRunFile(run, RUN_FILES.patch, body.length === 0 || body.endsWith("\n") ? body : `${body}\n`);
-  }
-
-  private writeRunFile(run: RunMeta, name: string, text: string): void {
-    if (!run.dir || !isDirectory(run.dir)) return;
-    try {
-      writeFileAtomic(path.join(run.dir, name), text);
-    } catch {
-      /* the run folder can vanish if the human deletes it */
-    }
-  }
-
-  /** Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped". */
-  prepareShutdown(): void {
-    for (const session of this.live.values()) {
-      if (!session.runId) continue;
-      const run = this.store.getRun(session.runId);
-      if (run && run.status === "running" && !run.stopRequested) this.store.saveRun({ ...run, stopRequested: true });
-    }
-  }
-
-  /** Resolves when every exit already reported has finished writing its run. */
-  async whenIdle(): Promise<void> {
-    while (this.finishing.size) await Promise.allSettled([...this.finishing]);
-  }
-
-  /** Last step before quitting: anything the PTY host never reported is recorded as stopped now. */
-  shutdown(): string[] {
-    const ended = this.now().toISOString();
-    for (const session of this.live.values()) {
-      if (!session.runId) continue;
-      const run = this.store.getRun(session.runId);
-      if (!run || run.status !== "running") continue;
-      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit." });
-      if (run.taskId) {
-        const task = this.store.getTask(run.taskId);
-        if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });
-      }
-    }
-    return [...this.live.keys()];
-  }
-
-  // ---------------------------------------------------------------- helpers
-
-  private firstPlace(places: readonly string[]): string | null {
-    for (const place of places) if (isDirectory(place)) return path.resolve(place);
-    return null;
+    return this.shellRuns.onPtyActivity(ptyId, working);
   }
 }

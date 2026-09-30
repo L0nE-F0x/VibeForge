@@ -7,8 +7,10 @@ import { call, pathForFile, useAppInfo, useQuery, useSettings } from "../api.js"
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
-import { Button, Empty, Kbd, StatusChip, TimeAgo } from "./ui.js";
+import { Button, Empty, StatusChip, TimeAgo } from "./ui.js";
 import { useT } from "../i18n/index.js";
+import { Rich } from "../i18n/Rich.js";
+import { coreText } from "../core-text.js";
 import { expectAnswer, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
 
 // ------------------------------------------------------------------ composer
@@ -21,7 +23,7 @@ export function Composer({
   hint,
   leading,
   autoFocus,
-  sendLabel = "Send",
+  sendLabel,
   voiceLabel,
   voiceScope,
   voicePty,
@@ -171,13 +173,13 @@ export function Composer({
           }}
         />
         <MicButton target={dictation.target} disabled={disabled} />
-        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel })}>
-          {sendLabel}
+        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel ?? t("common.send") })}>
+          {sendLabel ?? t("common.send")}
         </Button>
       </div>
       <div className="composer-hint">
         <span>
-          <Kbd>Enter</Kbd> send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line · <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>Space</Kbd> dictate · drop files to insert paths
+          <Rich text={t("session.keys")} />
         </span>
         <span className="grow" />
         {hint}
@@ -190,10 +192,11 @@ export function Composer({
 
 /** The final screen of a finished run, loaded from its run folder. */
 function RunReplay({ runId }: { runId: string }) {
+  const t = useT();
   const bundle = useQuery(`run:${runId}`, ["runs"], () => call("runs.get", runId));
   const files = bundle.data?.files;
   if (!bundle.loaded) return <div className="term" />;
-  return <ReplayTerminal ansi={files?.screen || files?.scrollback || ""} emptyText="This session left no transcript." />;
+  return <ReplayTerminal ansi={files?.screen || files?.scrollback || ""} emptyText={t("session.noTranscript")} />;
 }
 
 export function SessionPane({
@@ -243,21 +246,23 @@ export function SessionPane({
     }
     const result = await call("chats.send", target.id, text, size());
     setPending({ chatId: target.id, ptyId: result.ptyId });
-    if (result.note) push("info", result.note);
+    if (result.note) push("info", coreText(result.note));
     return true;
-  }, "Could not send");
+  }, t("session.sendFailed"));
 
   const [resume, resuming] = useAction(async () => {
     if (!chat) return;
     const result = await call("chats.continue", chat.id, size());
     setPending({ chatId: chat.id, ptyId: result.ptyId });
-  }, "Could not continue the session");
+  }, t("session.continueFailed"));
 
   const [stop, stopping] = useAction(async () => {
     if (chat) await call("chats.stop", chat.id);
-  }, "Could not stop the session");
+  }, t("session.stopFailed"));
 
   const last = chat?.lastRun ?? null;
+  // The sentence around the time, which keeps itself up to date.
+  const ended = t("session.ended", { when: "\u0000" }).split("\u0000");
 
   return (
     <div className="session" ref={root}>
@@ -274,10 +279,10 @@ export function SessionPane({
           <div className="session-bar">
             <span className="dot running" />
             <span className="grow truncate muted">
-              Live in <span className="mono">{tildify(chat?.cwd ?? "", home)}</span> — type in the terminal, or use the box below.
+              {t("session.liveIn", { path: tildify(chat?.cwd ?? "", home) })}
             </span>
             <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
-              Stop
+              {t("tasks.stop")}
             </Button>
           </div>
         </>
@@ -287,14 +292,16 @@ export function SessionPane({
           <div className="session-bar">
             <StatusChip status={last.status} exitCode={last.exitCode} />
             <span className="grow truncate muted">
-              Session ended <TimeAgo iso={last.endedAt ?? last.startedAt} />
-              {last.changes ? ` · ${last.changes}` : ""}. Sending a message picks it up again.
+              {ended[0]}
+              <TimeAgo iso={last.endedAt ?? last.startedAt} />
+              {ended[1]}
+              {last.changes ? ` · ${last.changes}` : ""}. {t("session.pickUp")}
             </span>
             <Button size="sm" icon={History} onClick={() => go({ view: "runs", runId: last.id })}>
-              Review
+              {t("session.review")}
             </Button>
             <Button size="sm" variant="primary" icon={RotateCcw} busy={resuming} onClick={() => void resume()}>
-              Continue session
+              {t("session.continue")}
             </Button>
           </div>
         </>
@@ -318,11 +325,11 @@ export function SessionPane({
         hint={
           livePty ? (
             <span className="hstack">
-              <TerminalSquare size={12} /> pasted into the session
+              <TerminalSquare size={12} /> {t("session.pasted")}
             </span>
           ) : (
             <span className="hstack">
-              <Play size={12} /> starts {chat ? "the engine" : "a new session"}
+              <Play size={12} /> {chat ? t("session.startsEngine") : t("session.startsNew")}
             </span>
           )
         }

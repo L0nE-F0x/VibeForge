@@ -1,0 +1,278 @@
+/* ------------------------------------------------------------------ overlays */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--scrim);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  animation: fade-in 0.12s ease-out;
+}
+
+.modal {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: var(--shadow);
+  animation: pop-in 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.modal.wide {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 680;
+  letter-spacing: -0.015em;
+}
+
+.modal-body {
+  padding: 14px 18px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* Ctrl+K: the switcher sits high, like a command palette, so the list grows downward. */
+.switcher-scrim {
+  place-items: start center;
+  padding-top: 12vh;
+}
+
+.switcher {
+  width: min(620px, calc(100vw - 48px));
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  border: 1px solid transparent;
+  box-shadow: var(--shadow);
+  animation: pop-in 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.switcher-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.switcher-input input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--fs-lg);
+}
+
+.switcher-list {
+  overflow: auto;
+  padding: 6px;
+}
+
+.switcher-list .row {
+  cursor: pointer;
+  padding: 7px 10px;
+}
+
+.switcher-kind {
+  flex: none;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.switcher-empty {
+  padding: 14px 10px;
+}
+
+.switcher-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+button.rail-logo {
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+button.rail-logo:hover,
+button.rail-logo:focus-visible {
+  border-color: var(--sel-line);
+}
+
+.sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: color-mix(in srgb, var(--bg-deep) 45%, transparent);
+  animation: fade-in 0.12s ease-out;
+}
+
+.sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 56;
+  width: min(820px, calc(100vw - 120px));
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -30px 0 80px -30px rgba(0, 0, 0, 0.8);
+  animation: slide-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.sheet::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2) 50%, transparent);
+}
+
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  animation: toast-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  line-height: 1.45;
+}
+
+.toast .toast-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.toast.error {
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+}
+
+.toast.error .toast-icon {
+  color: var(--red);
+}
+
+.toast.success .toast-icon {
+  color: var(--green);
+}
+
+.toast.info .toast-icon {
+  color: var(--accent);
+}
+
+.toast-title {
+  font-weight: 620;
+}
+
+.toast-body {
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  word-break: break-word;
+}
+
+.popover {
+  position: fixed;
+  z-index: 70;
+  min-width: 260px;
+  max-width: 420px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 0;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  border: 1px solid transparent;
+  box-shadow: var(--shadow);
+  animation: pop-in 0.12s ease-out;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 0;
+  color: var(--fg-2);
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.menu-item:hover {
+  background: var(--hover-fill);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.menu-item:focus-visible,
+.menu-item[data-active="true"] {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+  color: var(--fg);
+}
+
+/* The one item worth noticing, such as an available update: sits in the accent at rest. */
+.menu-item.accent {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.menu-item.accent:hover {
+  color: var(--accent);
+  background: var(--sel-fill);
+}
+
+.menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 2px;
+}

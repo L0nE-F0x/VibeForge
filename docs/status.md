@@ -1,4 +1,4 @@
-# Status — 2026-09-26
+# Status — 2026-09-30
 
 VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name, new UI, and a rewritten core. It runs from `npm start` (dev) and from the `vibeforge` launcher / app-menu entry (after `npm run build`).
 
@@ -207,6 +207,25 @@ A read of the whole codebase and a pass through the built app before 1.0.0, on t
 - **Closing to a tray that isn't there**: the main process asks the session bus whether `org.kde.StatusNotifierWatcher` has an owner (`dbus-send`, at start and whenever the window gains focus). With none, closing quits as usual, and a `--hidden` start waits up to 10 s for the bar before showing the window. Checked under `dbus-run-session`, a private bus with no watcher: closing the window quit it, and a `--hidden` start logged showing the window after 10 s. The real session bus answers true.
 - `npm test`: 148 tests (a half-edited settings.json, release notes).
 
+### 1.3.0: upkeep, copies and the Code mic (2026-09-30)
+
+Fourteen items from a review of the whole app (docs/todo.md has the list), plus a mic in Code's toolbar that works as a click.
+
+- **The service is split by subject.** `src/core/team-service.ts` (1,807 lines) is now a thin `TeamService` over `src/core/service/`: `core.ts` (shared state, launching, exits), `library.ts` (agents, skills), `workspaces.ts` (workspaces, layouts, Code terminals), `routines.ts`, `tasks.ts`, `chats.ts`, `runs.ts` and `shell-runs.ts`. The public API is unchanged and every existing test passed before anything else changed. `src/ui/styles/app.css` is fifteen files imported in the old order; the built CSS was compared and is byte-identical.
+- **Run storage**: ended runs' `scrollback.txt` and `diff.patch` are gzipped (`src/core/run-storage.ts`; readers go through `readRunText`). On the founder's 56 runs that is 86 MB → about 15 MB. Settings → Storage shows sizes and can keep runs for a time or under a size (keep-everything by default); the inbox and each chat's and task's latest run are never removed. Upkeep runs 2 minutes after start and every 6 hours.
+- **Search**: an FTS5 table (`run_text` in index.sqlite) holds each ended run's title, prompt and transcript (first and last 100k characters); older runs are indexed on the first search or upkeep. Checked in Electron 44's SQLite, which has FTS5.
+- **Task copies** (`src/core/worktrees.ts`): tested against real git in `service.test.ts` (commit plus uncommitted work, a new file, a clean apply, a conflict with markers, discard, a non-repo refusal). The user's git config had `diff.mnemonicPrefix`, which changed patch headers to `c/`/`i/`; the module pins plain prefixes like vcs.ts does.
+- **Translations**: everything the renderer shows, plus the main process's messages through `src/ui/core-text.ts` (their English text is the pattern; a test fails when a new `throw new Error` has no translation). Other languages load on demand: the main bundle went from 1,166 kB (1.2.0) to 915 kB with the new text.
+- **The log**: 243 of 717 lines were `ResizeObserver loop completed…`, from xterm's own device-pixel observer. It is dropped, and repeats of one page error within 10 s become one line with a count.
+- **Checked in the built app** on the hidden test window (scratch HOME, config and data; a stand-in CLI; the founder's Voxtype whisper model linked in; `ffmpeg` playing a Piper-spoken sentence as the microphone):
+  - the Code toolbar mic: a 90 ms click kept it listening (still recording at 3 s, with "Click the mic or Stop" in the bar), a second click finished, and whisper's words ("Please run the test suite and tell me what failed.") were in the focused shell with the keyboard back in the terminal
+  - an isolated task from the Tasks sheet: the card showed "Own copy", the run worked in `data/worktrees/<task>`, the workspace stayed untouched, the sheet offered Apply and Discard, Apply left `M math.js` and `?? NOTES.md` uncommitted, removed the copy and the branch, and moved the task to Done
+  - search in Runs (the matched word marked in the snippet) and in Ctrl+K (a "Run" result)
+  - Ctrl+K from a chat, Ctrl+Shift+K from inside a terminal, and Ctrl+K inside a terminal left to the program
+  - Settings → Storage, and Agents, Tasks and Settings in German
+  - `scripts/smoke.mjs`, the new CI job, passed attached to that window and on its own with `SMOKE_HEADLESS=1` (Chromium's headless Ozone: no window at all); a deliberate page error made it fail. It has not run under `xvfb-run` on GitHub yet.
+- `npm test`: 173 tests.
+
 ## Not verified yet
 
 - **Plan limits over a long day**: the day's line and "full in" were checked with tests, not by watching a real window climb; nor has an expired Claude or Grok sign-in been seen in the real popover (Kimi's 15-minute sign-in will show it first when Kimi isn't running and the Omarchy widget isn't renewing it).
@@ -224,6 +243,8 @@ A read of the whole codebase and a pass through the built app before 1.0.0, on t
 - A routine firing on its own at a real cron time (the scheduler is covered by tests, not by waiting).
 - Desktop notifications were sent (one reached the desktop during testing), but clicking one to open its run was not tried.
 - The dock's still-for-live swap, seen on screen. The checks ran on a hidden workspace, where nothing paints, so the swap was confirmed from the page's own screenshots and the view's state, not by eye.
+- **The CI smoke job and the release workflow** have not run on GitHub yet: the smoke test ran here attached to a hidden window and headless, not under `xvfb-run`, and `release.yml` was only checked by extracting the 1.0.0–1.2.0 notes, which match the published releases.
+- **Plan alerts** are checked with tests, not by a real window reaching 80%.
 - **Restart VibeForge** after an update was not clicked (the relaunched window would open on the desktop in use), and what Copy diagnostics puts on the clipboard was not read back: Wayland only takes a clipboard change from a window that received real input, which a hidden test window never does.
 
 ## Known limits

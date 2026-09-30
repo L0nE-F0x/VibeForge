@@ -1,0 +1,647 @@
+/* ------------------------------------------------------------------ home */
+/* The first screen of the day, in Omarchy's manner: a pixel wordmark with pixels drifting in
+   from the edge, a status line, square actions, and stats set in Geist with block charts. */
+
+.home-page {
+  position: relative;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.home-hero {
+  position: relative;
+  padding: 34px 0 30px;
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.home-drift {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  pointer-events: none;
+  opacity: 0.55;
+  mask-image: linear-gradient(90deg, transparent, #000 45%);
+}
+
+/* A year of contributions where the decorative drift used to be, newest week on the right. */
+.home-graph {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  width: min(630px, 44%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.home-graph .graph {
+  width: 100%;
+  height: auto;
+  mask-image: linear-gradient(90deg, transparent, #000 30%);
+}
+
+.home-graph rect {
+  animation: graph-in 0.5s ease-out both;
+}
+
+.home-graph rect.px-none {
+  fill: color-mix(in srgb, var(--fg-3) 16%, transparent);
+}
+
+.home-graph rect:hover {
+  stroke: var(--accent-2);
+  stroke-width: 1.5px;
+}
+
+.home-graph-caption {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+}
+
+.home-graph-caption button {
+  color: var(--fg-2);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.home-graph-caption button:hover {
+  color: var(--accent);
+}
+
+@keyframes graph-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .home-graph {
+    display: none;
+  }
+}
+
+.home-hero .wordmark {
+  display: block;
+  position: relative;
+}
+
+.home-when {
+  position: relative;
+  margin: 18px 0 0;
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+}
+
+.home-when b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.home-status {
+  position: relative;
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 560;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+}
+
+.home-status strong {
+  font-weight: inherit;
+  color: var(--accent);
+}
+
+.home-actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.home-actions .btn {
+  height: 34px;
+  padding: 0 14px;
+}
+
+.home-actions .btn kbd {
+  margin-left: 6px;
+  padding: 0 5px;
+  font: 500 10px/16px var(--font-mono);
+  border: 1px solid currentColor;
+  opacity: 0.55;
+}
+
+/* Four stats in one bordered strip, divided by hairlines. */
+/* One line under the hero: the runs of the last two weeks, as a block chart. */
+.home-activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 26px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.home-activity:hover {
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+}
+
+.home-activity:focus-visible {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.home-activity .value {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-activity .label {
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+
+.home-activity .block-bars {
+  width: min(340px, 45%);
+  margin: 0;
+  padding: 0;
+}
+
+/* Block charts: columns of squares, like the pledge and download charts on omarchy.org. */
+.block-bars {
+  display: grid;
+  gap: 3px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.block-col {
+  display: grid;
+  gap: 2px;
+}
+
+.block-col i {
+  display: block;
+  height: 4px;
+  background: color-mix(in srgb, var(--fg-3) 18%, transparent);
+}
+
+.block-col i.on {
+  background: var(--accent);
+}
+
+.block-col.today i.on {
+  background: var(--accent-2);
+}
+
+/* Usage: squares under the rail's live button; plan limits and tokens in its popover. */
+.usage-meter {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.usage-meter i {
+  width: 4px;
+  height: 4px;
+  background: color-mix(in srgb, var(--fg-3) 22%, transparent);
+}
+
+.usage-meter i.on {
+  background: var(--accent);
+}
+
+.usage-meter.warm i.on {
+  background: var(--accent-2);
+}
+
+.usage-meter.full i.on {
+  background: var(--red);
+}
+
+.usage-panel {
+  width: 330px;
+  padding-bottom: 4px;
+}
+
+.usage-source {
+  padding: 7px 9px 8px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage-head b {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.usage-sub {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.usage-sub .block-bars {
+  width: 84px;
+  flex: none;
+  padding-top: 4px;
+  gap: 2px;
+}
+
+.usage-sub .block-col i {
+  height: 3px;
+}
+
+.usage-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.usage-title .segmented button {
+  padding: 2px 8px;
+  font-size: var(--fs-xs);
+}
+
+.usage-track {
+  height: 5px;
+  background: color-mix(in srgb, var(--fg-3) 18%, transparent);
+}
+
+.usage-track i {
+  display: block;
+  height: 100%;
+  background: var(--fg-2);
+}
+
+/* One block per plan: mark, percentage, countdown, bar, the day's line, then each window. */
+.plan {
+  --plan: var(--accent);
+  padding: 8px 9px 9px;
+  border-top: 1px solid var(--line);
+}
+
+.plan.warm {
+  --plan: var(--accent-2);
+}
+
+.plan.full {
+  --plan: var(--red);
+}
+
+.plan.hot {
+  background: color-mix(in srgb, var(--plan) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--plan);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.plan-mark {
+  flex: none;
+  fill: var(--plan);
+}
+
+.plan-pct {
+  min-width: 3.4ch;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--plan);
+}
+
+.plan-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.plan-title {
+  color: var(--fg);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.plan-title .faint {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.plan-sub {
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+}
+
+.plan.stale .plan-sub {
+  color: var(--accent-2);
+}
+
+.plan.stale .plan-pct,
+.plan.stale .plan-bar i {
+  opacity: 0.55;
+}
+
+.plan-tag {
+  flex: none;
+  color: var(--plan);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.plan-bar {
+  height: 4px;
+  margin-top: 8px;
+  background: color-mix(in srgb, var(--fg-3) 18%, transparent);
+}
+
+.plan-bar i {
+  display: block;
+  height: 100%;
+  background: var(--plan);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--plan) 45%, transparent);
+}
+
+.plan-spark {
+  display: block;
+  width: 100%;
+  height: 18px;
+  margin-top: 3px;
+}
+
+.plan-spark polygon {
+  fill: color-mix(in srgb, var(--plan) 10%, transparent);
+}
+
+.plan-spark polyline {
+  fill: none;
+  stroke: color-mix(in srgb, var(--plan) 75%, transparent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.plan-window {
+  display: grid;
+  grid-template-columns: minmax(0, 88px) minmax(40px, 1fr) 4ch;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-2);
+}
+
+.plan-window > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-window.warm .usage-track i {
+  background: var(--accent-2);
+}
+
+.plan-window.full .usage-track i {
+  background: var(--red);
+}
+
+.plan-credits {
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+}
+
+.plan-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.usage-note {
+  padding: 6px 9px 4px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 30px;
+  margin-top: 30px;
+}
+
+/* Setup steps, numbered like a manual. */
+.home-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  margin-top: 26px;
+}
+
+.home-step {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  text-align: left;
+  border-right: 1px solid var(--line);
+  transition: background 0.12s;
+}
+
+.home-step:last-child {
+  border-right: 0;
+}
+
+.home-step:hover {
+  background: var(--hover-fill);
+}
+
+.home-step:focus-visible {
+  background: var(--focus-fill);
+}
+
+.home-step .num {
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+.home-step.done .num {
+  color: var(--green);
+}
+
+.home-step h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 580;
+  letter-spacing: -0.01em;
+}
+
+.home-step p {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.home-step .go {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+
+.home-step:hover .go {
+  color: var(--accent);
+  text-decoration-color: var(--hover-line);
+}
+
+/* A quiet placeholder where a list would be. */
+.home-empty {
+  padding: 12px 14px;
+  border: 1px dashed var(--line-2);
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+}
+
+/* The CLIs on this machine, one chip each; the path is in the tooltip. */
+.cli-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cli-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+}
+
+.cli-chip .pixel {
+  width: 6px;
+  height: 6px;
+  background: var(--green);
+}
+
+.workspace-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px;
+}
+
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--fill);
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.run-row:hover {
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+}
+
+.run-row:focus-visible {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.run-row[aria-selected="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+.run-row .title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.run-row .meta {
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+/* Search: the words around a match, the matched words in the accent. */
+.snippet {
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.snippet mark {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.list-compact .run-row {
+  border-color: transparent;
+  background: transparent;
+  padding: 8px 9px;
+}
+
+.list-compact .run-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.list-compact .run-row[aria-selected="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+.engine-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

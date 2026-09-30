@@ -1,0 +1,582 @@
+/* ------------------------------------------------------------------ terminals & panes */
+
+.term {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--term-bg);
+  padding: 6px 2px 2px 10px;
+  display: flex;
+  /* xterm's canvases keep their size until the next fit; they must not spill over what's below. */
+  overflow: hidden;
+}
+
+.term-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.term .xterm {
+  height: 100%;
+}
+
+.term .xterm-viewport {
+  background-color: transparent !important;
+}
+
+.term .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.term.drop-target::after {
+  content: "Drop to insert the path";
+  position: absolute;
+  inset: 8px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--hover-line);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.term-status {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 3;
+}
+
+.session {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--term-bg);
+}
+
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--gradient-soft);
+  font-size: var(--fs-sm);
+  flex: none;
+}
+
+.composer {
+  flex: none;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-dark);
+}
+
+.composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 0;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--bg-deep) 70%, transparent);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.composer-box:hover {
+  border-color: var(--hover-line);
+}
+
+.composer-box:focus-within {
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-fill);
+}
+
+.composer-box.dragging {
+  border-color: var(--hover-line);
+  background: var(--hover-fill);
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  line-height: 1.5;
+  padding: 4px 0;
+  max-height: 220px;
+  user-select: text;
+}
+
+.composer-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+.code-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.code-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-work {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  min-width: 0;
+}
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  display: flex;
+}
+
+.split {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split.dir-col {
+  flex-direction: column;
+}
+
+.split > .split-cell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.divider {
+  flex: 0 0 10px;
+  position: relative;
+  cursor: col-resize;
+}
+
+/* A faint grip so the gap reads as something you can grab. */
+.divider::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 0;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.split.dir-row > .divider::before {
+  width: 2px;
+  height: 28px;
+  background: radial-gradient(circle, var(--fg-3) 1px, transparent 1.5px) 0 0 / 2px 6px;
+}
+
+.split.dir-col > .divider::before {
+  width: 28px;
+  height: 2px;
+  background: radial-gradient(circle, var(--fg-3) 1px, transparent 1.5px) 0 0 / 6px 2px;
+}
+
+.divider:hover::before,
+.divider.dragging::before {
+  opacity: 0;
+}
+
+.split.dir-col > .divider {
+  cursor: row-resize;
+}
+
+.divider::after {
+  content: "";
+  position: absolute;
+  border-radius: 0;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.split.dir-row > .divider::after {
+  top: 12%;
+  bottom: 12%;
+  left: 4px;
+  width: 2px;
+}
+
+.split.dir-col > .divider::after {
+  left: 12%;
+  right: 12%;
+  top: 4px;
+  height: 2px;
+}
+
+.divider:hover::after,
+.divider.dragging::after {
+  background: var(--accent);
+}
+
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--term-bg);
+  overflow: hidden;
+  position: relative;
+  transition: border-color 0.12s, box-shadow 0.15s;
+}
+
+.pane.focused {
+  border-color: var(--sel-line);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent), 0 0 30px -18px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.pane.focused::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--gradient);
+  z-index: 2;
+}
+
+/* In a split, the terminals you're not typing in step back a little; hovering one brings it forward. */
+.term-host {
+  transition: opacity 0.2s ease-out;
+}
+
+.split .pane:not(.focused) .term-host {
+  opacity: 0.72;
+}
+
+.split .pane:not(.focused):hover .term-host {
+  opacity: 0.9;
+}
+
+.pane-head {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 5px 0 11px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+  min-width: 0;
+}
+
+.pane-head .pane-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.pane-head .pane-sub {
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+}
+
+/* Quiet until wanted: the focused pane shows its two buttons, the others on hover. */
+.pane-head .pane-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.pane:hover .pane-head .pane-actions,
+.pane.focused .pane-head .pane-actions,
+.pane-head .pane-actions:focus-within {
+  opacity: 1;
+}
+
+.pane-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  color: var(--fg-3);
+  text-align: center;
+}
+
+.pane-idle .launchers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  max-width: 460px;
+}
+
+.pane-exit {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-dark);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+
+.code-toolbar {
+  height: 48px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+.side-panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--bg-dark);
+  min-height: 0;
+  position: relative;
+}
+
+.side-resize {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.side-resize:hover::after,
+.side-resize.dragging::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.side-tabs {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 6px 16px;
+  font-size: var(--fs-sm);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 24px;
+  padding-right: 6px;
+  border-radius: 0;
+  color: var(--fg-2);
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.tree-row:hover {
+  background: var(--hover-fill);
+  color: var(--fg);
+}
+
+.tree-row:focus-visible {
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.tree-row.quiet {
+  color: var(--fg-3);
+}
+
+.tree-row .tree-actions {
+  margin-left: auto;
+  display: none;
+  gap: 1px;
+}
+
+.tree-row:hover .tree-actions {
+  display: flex;
+}
+
+.dock-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dock-bar .input {
+  height: 26px;
+  font-size: var(--fs-sm);
+}
+
+.dock-view {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-deep);
+}
+
+/* Stands in for the page while a menu or dialog covers it (the live page is a native view). */
+.dock-view .dock-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.dock-view .dock-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  text-align: center;
+  color: var(--fg-3);
+}
+
+.workspace-row.is-dragging {
+  opacity: 0.45;
+}
+
+.workspace-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.workspace-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.rail-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid transparent;
+}
+
+.rail-setting:hover {
+  background: var(--hover-fill);
+}
+
+/* Settings → Storage: one hairline row per kind of file, sizes flush right. */
+.storage-bars {
+  display: flex;
+  flex-direction: column;
+}
+
+.storage-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.storage-row:last-child {
+  border-bottom: none;
+}
+
+/* A workspace's terminals as one pixel: open, working, waiting for you, finished. */
+.ws-state {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  margin: 0 3px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.ws-state.working {
+  background: var(--accent);
+  box-shadow: var(--work-lit);
+  animation: ember-work 2.4s ease-in-out infinite;
+}
+
+.ws-state.waiting {
+  width: 9px;
+  height: 9px;
+  margin: 0 2px;
+  background: var(--ember-core);
+  box-shadow: var(--ember-lit);
+  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
+}
+
+.ws-state.done {
+  background: var(--green);
+  box-shadow: var(--done-rest);
+  animation: afterglow 2.6s ease-out;
+}
+
+.ws-state.in-strip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  margin: 0;
+  outline: 2px solid var(--bg-dark);
+}

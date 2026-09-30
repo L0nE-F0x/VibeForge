@@ -63,18 +63,18 @@ npm run build       # production build
 | **Agents** | Named teammates with a brief, memory, skills and allowed folders. Chats with an agent are real terminals. Switch its engine from Claude to Codex to Grok and the teammate stays the same. |
 | **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser beside them: click an http(s) link in a terminal (your dev server's, say) and it opens there, each workspace keeping its own page. Type `claude`, `codex` or any CLI in a terminal: its title bar says so, and from the moment it starts until you're back at the prompt it is recorded as a run (transcript and git diff). A workspace whose CLI goes quiet or finishes while you're looking elsewhere glows like an ember until you open it, and so does Code's icon in the rail. In a split, the terminals you aren't typing in dim a little. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. Layouts are remembered per workspace. |
 | **Chat** | Throwaway conversations in an empty scratch folder. |
-| **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. |
+| **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. Turn on **Work in a separate copy** and the agent works in its own git worktree on a `vibeforge/<task>` branch, so it never touches the folder you or another agent are in; **Apply** brings its changes into the workspace as uncommitted edits (conflicts are marked, as a merge would) and removes the copy. |
 | **Routines** | Cron or interval schedules that open a fresh agent run while VibeForge is open. Missed slots are shown, never replayed. |
 | **Skills** | Reusable `SKILL.md` procedures you install on agents. |
-| **Runs** | Every CLI you typed into a terminal and every process VibeForge started, a day at a time: final screen, transcript, prompt, and the full diff since it began, saved the moment it ended so later edits stay out of it. **Continue** reopens the exact session. |
+| **Runs** | Every CLI you typed into a terminal and every process VibeForge started, a day at a time: final screen, transcript, prompt, and the full diff since it began, saved the moment it ended so later edits stay out of it. **Continue** reopens the exact session. Search finds a run by what it said, not only its title: the words around the match are shown, and <kbd>Ctrl</kbd>+<kbd>K</kbd> lists those runs too. |
 
 The pulse at the bottom of the rail counts the terminals running and, underneath, six squares that follow whichever coding plan is closest to its limit. Click it for **plan limits**: each plan's windows (Claude's 5-hour and 7-day, Grok's credits by product, Kimi's weekly and 5-hour, Codex's from its logs) with the time until they reset, the last day as a line, and when you'll run out at the current pace. The **Tokens** tab has each CLI's tokens today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI already keep on this machine; nothing is sent anywhere for those.
 
-Plan limits for Claude, Grok and Kimi are off until you turn them on in Settings → Usage and activity. VibeForge then asks Anthropic, xAI and Moonshot for them, at most every 3 minutes, with the sign-in each CLI already saved on this machine. It reads that sign-in for each request and never renews, rewrites or keeps it; when one has expired, the last numbers stay up until you next open that CLI. Only the percentages are saved (`~/.local/share/vibeforge/plans.json`).
+Plan limits for Claude, Grok and Kimi are off until you turn them on in Settings → Usage and activity. VibeForge then asks Anthropic, xAI and Moonshot for them, at most every 3 minutes, with the sign-in each CLI already saved on this machine. It reads that sign-in for each request and never renews, rewrites or keeps it; when one has expired, the last numbers stay up until you next open that CLI. Only the percentages are saved (`~/.local/share/vibeforge/plans.json`). Settings can also notify you as a window passes 80%, 95% and 100%, once per step until it resets; that's off, since Omarchy's own usage widget may already tell you.
 
 The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
-It keeps your place. Each view reopens where you left it, the same agent, chat or task with its list scrolled where it was, including after a restart. A half-written message or an unsaved brief, task or skill waits for you until you send it, save it or press **Discard**. <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the logo at the top of the rail) jumps to any agent, chat, workspace, task, routine or skill by typing part of its name. Deleting a chat, task, skill or routine happens at once, with **Undo** on the toast (or <kbd>Ctrl</kbd>+<kbd>Z</kbd>) for a few seconds; only one that is still running asks first.
+It keeps your place. Each view reopens where you left it, the same agent, chat or task with its list scrolled where it was, including after a restart. A half-written message or an unsaved brief, task or skill waits for you until you send it, save it or press **Discard**. <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the logo at the top of the rail) jumps to any agent, chat, workspace, task, routine or skill by typing part of its name, or to a run by something it said. Deleting a chat, task, skill or routine happens at once, with **Undo** on the toast (or <kbd>Ctrl</kbd>+<kbd>Z</kbd>) for a few seconds; only one that is still running asks first.
 
 When an agent or CLI goes quiet while you're looking elsewhere, it glows until you look: the workspace in Code, the agent and its chat in Agents, with a dot on the rail. Short tones, made on your machine, say the same: two soft knocks when it's your turn, a rising chime when a task, routine or typed CLI finishes, a lower one when it fails, and a chirp when dictation starts and stops. By default they play only while VibeForge is in the background, never while Omarchy's Do Not Disturb is on (voice aside), and each one can be turned off or previewed in **Settings → Sounds**.
 
@@ -82,7 +82,7 @@ It lives in the tray, next to Steam and the rest in Omarchy's bar (right-click t
 
 It looks like the rest of Omarchy: square corners, JetBrains Mono with Geist headings, flat panels and pixel art, with light kept for what's alive: a working CLI is a slow ember, and one waiting for you glows. It wears your Omarchy theme: colours come from the active theme (`colors.toml` plus the ghostty palette for terminals) and change live when you switch themes, pixel wordmark included.
 
-It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language unless you pick one in Settings. The tour, menus, tooltips and empty screens are translated so far; some other text is still English. Translations live in `src/ui/i18n/`, one file per language, and the typecheck fails if one is missing a line.
+It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 and 简体中文, following your system language unless you pick one in Settings. The whole window is translated, errors included; the tray menu, desktop notifications, schedule descriptions and git's own summaries are still English. Translations live in `src/ui/i18n/`, one file per language, and the typecheck fails if one is missing a line.
 
 ## Works with
 
@@ -117,7 +117,7 @@ sudo pacman -S whisper-cpp      # listening
 uv tool install piper-tts       # talking back (or the AUR's piper-tts-bin)
 ```
 
-**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go (<kbd>Esc</kbd> drops it). The words land in the message box or terminal that has focus, and wait there for you to read and press Enter. Message boxes also have a mic button: hold it, then let go.
+**Dictate.** Hold <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> and speak, then let go (<kbd>Esc</kbd> drops it). The words land in the message box or terminal that has focus, and wait there for you to read and press Enter. Message boxes and Code's toolbar also have a mic: click it, speak for as long as you like, and click it again (or hold it and let go). Code's mic types into the terminal that has focus and hands the keyboard back to it, so Enter sends.
 
 **Hear the answer.** After you send a message you dictated, the first paragraph of the reply is read aloud, in that agent's voice (its Settings tab). Claude Code and Codex answers come from their own session logs. Hold the dictate key to cut an answer short. Settings → Voice can turn this off.
 
@@ -142,6 +142,8 @@ o.bind("SUPER + ALT + V", "VibeForge: stop talking", "vibeforge --voice stop", {
   engines.json  settings.json  workspaces.json  layouts/
 ~/.local/share/vibeforge/
   runs/<stamp>_<slug>/          meta.json, preamble.md, terminal.ansi, transcript.txt, scrollback.txt, git.txt, diff.patch
+                                (the last two gzipped once the run has ended; Settings → Storage says how long runs are kept)
+  worktrees/<task>/             separate copies for tasks that work in one, until Apply or Discard
   trash/                        deleted chats, tasks, skills and routines, kept 30 s for Undo
   scratch/<chat>/               Chat mode working folders
   models/  voices/              whisper models and Piper voices downloaded in Settings → Voice
@@ -160,6 +162,8 @@ In Code, drag a pane by its title bar onto another pane: the middle swaps them, 
 ```bash
 npm test            # unit tests + the real PTY host driven with /bin/bash (never a model CLI)
 npm run typecheck
+npm run build && npm run smoke    # the built app: every view, a language switch, Ctrl+K and a shell
+                                  # (SMOKE_HEADLESS=1 draws no window; CI runs it under xvfb)
 ```
 
 The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.

@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
@@ -8,6 +8,7 @@ import { checkedAt, installText, showUpdate, updateStatus } from "../components/
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
 import { SoundsCard } from "../components/SoundsCard.js";
+import { StorageCard } from "../components/StorageCard.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
@@ -24,6 +25,7 @@ function toRow(engine: Engine | EngineRow): EngineRow {
 }
 
 function EngineEditor({ engine, onSave, onCancel, isNew }: { engine: EngineRow; onSave: (row: EngineRow) => void; onCancel: () => void; isNew?: boolean }) {
+  const t = useT();
   const [id, setId] = useState(engine.id);
   const [label, setLabel] = useState(engine.label);
   const [bin, setBin] = useState(engine.bin);
@@ -36,27 +38,27 @@ function EngineEditor({ engine, onSave, onCancel, isNew }: { engine: EngineRow; 
     <div className="card vstack" style={{ gap: 12, borderColor: "var(--sel-line)" }}>
       <div className="form-grid">
         {isNew && (
-          <Field label="Id" hint="Short and unique, used in agent files.">
+          <Field label={t("engine.id")} hint={t("engine.idHint")}>
             <Input autoFocus value={id} placeholder="aider" onChange={(event) => setId(event.target.value.trim())} />
           </Field>
         )}
-        <Field label="Label">
+        <Field label={t("engine.label")}>
           <Input value={label} onChange={(event) => setLabel(event.target.value)} />
         </Field>
-        <Field label="Binary" hint="A name on PATH or an absolute path.">
+        <Field label={t("engine.binary")} hint={t("engine.binaryHint")}>
           <Input className="mono" value={bin} onChange={(event) => setBin(event.target.value)} />
         </Field>
-        <Field label="Extra arguments" hint="Always passed, e.g. a model flag.">
+        <Field label={t("engine.args")} hint={t("engine.argsHint")}>
           <Input className="mono" value={args} onChange={(event) => setArgs(event.target.value)} />
         </Field>
         <Field
-          label="Starting prompt"
-          hint={badPrompt ? undefined : "How the first message is passed, with {prompt} where it goes. Empty: VibeForge pastes it once the CLI is ready."}
-          error={badPrompt ? "Include {prompt} somewhere." : undefined}
+          label={t("engine.prompt")}
+          hint={badPrompt ? undefined : t("engine.promptHint", { prompt: "{prompt}" })}
+          error={badPrompt ? t("engine.promptMissing", { prompt: "{prompt}" }) : undefined}
         >
           <Input className="mono" value={promptArgs} placeholder="{prompt}" onChange={(event) => setPromptArgs(event.target.value)} />
         </Field>
-        <Field label="Continue session" hint="Arguments that reopen the CLI's latest session in the same folder, e.g. --continue.">
+        <Field label={t("engine.continue")} hint={t("engine.continueHint")}>
           <Input className="mono" value={continueArgs} placeholder="--continue" onChange={(event) => setContinueArgs(event.target.value)} />
         </Field>
       </div>
@@ -76,10 +78,10 @@ function EngineEditor({ engine, onSave, onCancel, isNew }: { engine: EngineRow; 
             })
           }
         >
-          {isNew ? "Add engine" : "Save engine"}
+          {isNew ? t("engine.add") : t("engine.save")}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </div>
@@ -161,15 +163,15 @@ export function SettingsView() {
     setFont(current.terminalFontFamily);
   }, [current]);
 
-  const [patch] = useAction(async (next: Partial<Settings>) => call("settings.save", next), "Could not save settings");
+  const [patch] = useAction(async (next: Partial<Settings>) => call("settings.save", next), t("settings.saveFailed"));
   const [recheck, rechecking] = useAction(async () => {
     const found = await call("engines.recheck");
-    push("success", "CLIs rechecked", `${found.filter((engine) => engine.available).length} of ${found.length} found on PATH.`);
-  }, "Could not recheck");
+    push("success", t("settings.rechecked"), t("settings.recheckedBody", { found: found.filter((engine) => engine.available).length, total: found.length }));
+  }, t("settings.recheckFailed"));
   const [saveEngines] = useAction(async (next: EngineRow[]) => {
     await call("engines.save", next);
     setEditing(null);
-  }, "Could not save engines");
+  }, t("settings.enginesFailed"));
 
   if (!current) return null;
   const available = rows.filter((engine) => engine.available);
@@ -179,7 +181,7 @@ export function SettingsView() {
       <div className="page-head">
         <SettingsIcon size={17} className="accent-text" />
         <h1 className="grow">{t("settings.title")}</h1>
-        <span className="sub">Saved to {info?.configRoot ?? "…"}</span>
+        <span className="sub">{t("settings.savedTo", { path: info?.configRoot ?? "…" })}</span>
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 14, maxWidth: 940 }}>
@@ -197,21 +199,24 @@ export function SettingsView() {
                 ))}
               </Select>
             </Field>
-            <Field label="Colours" hint={current.theme === "omarchy" ? `Following Omarchy: ${palette?.source === "omarchy" ? palette.name : "no theme found, using Apex Forge"}. Switching themes restyles VibeForge live.` : "The built-in Apex Forge palette."}>
+            <Field
+              label={t("settings.colours")}
+              hint={current.theme === "omarchy" ? t("settings.coloursOmarchy", { name: palette?.source === "omarchy" ? palette.name : t("settings.noOmarchyTheme") }) : t("settings.coloursBuiltin")}
+            >
               <Segmented
                 value={current.theme}
                 onChange={(theme) => void patch({ theme })}
                 options={[
-                  { value: "omarchy", label: "Follow Omarchy theme" },
-                  { value: "builtin", label: "Built-in Apex Forge" },
+                  { value: "omarchy", label: t("settings.followOmarchy") },
+                  { value: "builtin", label: t("settings.builtin") },
                 ]}
               />
             </Field>
             <div className="form-grid">
-              <Field label="Terminal font">
+              <Field label={t("settings.font")}>
                 <Input value={font} onChange={(event) => setFont(event.target.value)} onBlur={() => font.trim() && font !== current.terminalFontFamily && void patch({ terminalFontFamily: font.trim() })} />
               </Field>
-              <Field label="Terminal font size">
+              <Field label={t("settings.fontSize")}>
                 <div className="hstack">
                   <Button icon={Minus} tip={t("settings.smaller")} disabled={current.terminalFontSize <= 8} onClick={() => void patch({ terminalFontSize: current.terminalFontSize - 1 })} />
                   <strong style={{ width: 36, textAlign: "center" }}>{current.terminalFontSize}px</strong>
@@ -230,17 +235,17 @@ export function SettingsView() {
             <SquareTerminal size={13} /> {t("settings.defaults")}
           </div>
           <div className="card form-grid">
-            <Field label="Default engine" hint="Preselected for new agents and chats.">
+            <Field label={t("settings.defaultEngine")} hint={t("settings.defaultEngineHint")}>
               <Select value={current.defaultEngine} onChange={(event) => void patch({ defaultEngine: event.target.value })}>
                 {rows.map((engine) => (
                   <option key={engine.id} value={engine.id}>
                     {engine.label}
-                    {engine.available ? "" : " (not on PATH)"}
+                    {engine.available ? "" : ` ${t("common.notOnPath")}`}
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Shell for plain terminals">
+            <Field label={t("settings.shell")}>
               <Input className="mono" value={shell} onChange={(event) => setShell(event.target.value)} onBlur={() => shell.trim() && shell !== current.defaultShell && void patch({ defaultShell: shell.trim() })} />
             </Field>
           </div>
@@ -255,10 +260,10 @@ export function SettingsView() {
           </div>
           <div className="card hstack">
             <span className="grow">
-              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label="Notify when a routine or task run finishes, or a CLI or agent is waiting, while VibeForge is in the background" />
+              <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label={t("settings.notify")} />
             </span>
-            <Button size="sm" onClick={() => new Notification("VibeForge", { body: "Notifications reach your desktop." })}>
-              Send a test
+            <Button size="sm" onClick={() => new Notification("VibeForge", { body: t("settings.testNotifyBody") })}>
+              {t("settings.testNotify")}
             </Button>
           </div>
 
@@ -282,6 +287,9 @@ export function SettingsView() {
             <Field hint={t("settings.planLimitsHint")}>
               <Toggle checked={current.planLimits} onChange={(planLimits) => void patch({ planLimits })} label={t("settings.planLimits")} />
             </Field>
+            <Field hint={current.notify ? t("settings.quotaAlertsHint") : t("settings.quotaAlertsNeedsNotify")}>
+              <Toggle checked={current.quotaAlerts} disabled={!current.notify} onChange={(quotaAlerts) => void patch({ quotaAlerts })} label={t("settings.quotaAlerts")} />
+            </Field>
             <Field label={t("settings.activity")} hint={t(`settings.activityHint.${current.activity}`)}>
               <Segmented
                 value={current.activity}
@@ -303,16 +311,13 @@ export function SettingsView() {
             </span>
             <span className="grow" />
             <Button size="sm" variant="ghost" icon={RefreshCw} busy={rechecking} onClick={() => void recheck()}>
-              Recheck CLIs
+              {t("settings.recheck")}
             </Button>
             <Button size="sm" variant="ghost" icon={Plus} onClick={() => setEditing("__new__")}>
-              Add
+              {t("settings.add")}
             </Button>
           </div>
-          <Notice>
-            VibeForge never holds model keys: each engine is a CLI on this machine, run with your own login. If a CLI isn't signed in, its own login flow
-            shows in the terminal.
-          </Notice>
+          <Notice>{t("settings.keysNote")}</Notice>
           {editing === "__new__" && (
             <EngineEditor
               isNew
@@ -320,7 +325,7 @@ export function SettingsView() {
               onCancel={() => setEditing(null)}
               onSave={(row) => {
                 if (rows.some((engine) => engine.id === row.id)) {
-                  push("error", "That id is taken");
+                  push("error", t("settings.idTaken"));
                   return;
                 }
                 void saveEngines([...rows.map(toRow), row]);
@@ -343,7 +348,7 @@ export function SettingsView() {
                     <span className="hstack">
                       <strong>{engine.label}</strong>
                       <span className="faint mono" style={{ fontSize: "var(--fs-xs)" }}>
-                        {engine.path ?? `${engine.bin} (not found)`}
+                        {engine.path ?? t("settings.notFound", { bin: engine.bin })}
                       </span>
                     </span>
                     <span className="faint mono" style={{ fontSize: "var(--fs-xs)" }}>
@@ -352,9 +357,9 @@ export function SettingsView() {
                     </span>
                   </span>
                   <Chip tone={engine.promptArgs?.length ? "ok" : "warn"} title={engine.promptArgs?.length ? t("settings.promptArg") : t("settings.promptPaste")}>
-                    {engine.promptArgs?.length ? "prompt as argument" : "prompt pasted"}
+                    {engine.promptArgs?.length ? t("settings.promptArgChip") : t("settings.promptPasteChip")}
                   </Chip>
-                  {engine.continueArgs?.length ? <Chip title={joinArgs(engine.continueArgs)}>continue</Chip> : null}
+                  {engine.continueArgs?.length ? <Chip title={joinArgs(engine.continueArgs)}>{t("settings.continueChip")}</Chip> : null}
                   <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(engine.id)} title={t("common.edit")} />
                   <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void saveEngines(rows.filter((item) => item.id !== engine.id).map(toRow))} title={t("common.remove")} />
                 </div>
@@ -367,8 +372,8 @@ export function SettingsView() {
           </div>
           <div className="card vstack" style={{ gap: 8 }}>
             {[
-              ["Config", info?.configRoot ?? "", "Agents, skills, routines, tasks, engines.json, settings. Plain YAML and Markdown you can edit anywhere; VibeForge picks up changes."],
-              ["Data", info?.dataRoot ?? "", "Runs (prompt, final screen, transcript, git snapshot), chat scratch folders and the run index."],
+              [t("settings.config"), info?.configRoot ?? "", t("settings.configHint")],
+              [t("settings.data"), info?.dataRoot ?? "", t("settings.dataHint")],
             ].map(([label, target, hint]) => (
               <div key={label} className="hstack">
                 <span className="vstack grow" style={{ gap: 1 }}>
@@ -381,16 +386,21 @@ export function SettingsView() {
                   </span>
                 </span>
                 <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", target)}>
-                  Open
+                  {t("common.open")}
                 </Button>
               </div>
             ))}
             {!info?.hostRunning && (
               <Notice tone="bad" icon={X}>
-                The terminal host is not running, so no terminal can start. Check that Node is on PATH and restart VibeForge.
+                {t("settings.hostDownNote")}
               </Notice>
             )}
           </div>
+
+          <div className="section-title" id="settings-storage">
+            <HardDrive size={13} /> {t("storage.title")}
+          </div>
+          <StorageCard />
 
           <div className="section-title">
             <Download size={13} /> {t("updates.title")}

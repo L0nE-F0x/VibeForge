@@ -12,6 +12,8 @@ export interface PreambleInput {
   prompt: string;
   /** A previous attempt's transcript, for engines that cannot reopen their own session. */
   priorTranscript?: string | null;
+  /** The run works in a separate git worktree (`path`) of the workspace (`of`). */
+  workingCopy?: { path: string; of: string } | null;
 }
 
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
@@ -20,11 +22,19 @@ export function memoryForPrompt(memory: string): string {
 }
 
 export function buildPreamble(input: PreambleInput): string {
+  const copy = input.workingCopy;
   const parts: string[] = [
     "# VibeForge run",
     `Agent: ${input.agentName}`,
     "Allowed folders (work only inside these):",
-    ...input.places.map((place) => `- ${place}`),
+    ...(copy ? [`- ${copy.path}`] : input.places.map((place) => `- ${place}`)),
+    ...(copy
+      ? [
+          "",
+          `This run works in its own git worktree of ${copy.of}, at ${copy.path}. Make every change there, not in ${copy.of}.`,
+          "You may commit in it or leave the changes uncommitted; either way they are reviewed and then brought into the workspace.",
+        ]
+      : []),
     "",
     "## Brief",
     input.brief.trim(),

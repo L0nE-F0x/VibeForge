@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Deleted, RunView } from "../shared/api.js";
 import { call, errorText } from "./api.js";
-import { useT } from "./i18n/index.js";
+import { t as translate, useT } from "./i18n/index.js";
 import { covers, sameBox, type Box, type Layer } from "./floating.js";
 
 // ------------------------------------------------------------------ routes
@@ -246,7 +246,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
-  const fail = useCallback((error: unknown, title = "That did not work") => push("error", title, errorText(error)), [push]);
+  const fail = useCallback((error: unknown, title = translate("common.failed")) => push("error", title, errorText(error)), [push]);
   const value = useMemo(() => ({ toasts, push, dismiss, fail }), [toasts, push, dismiss, fail]);
   return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
 }

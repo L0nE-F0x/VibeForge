@@ -66,3 +66,44 @@ export function describeError(error: unknown): string {
     .filter(Boolean);
   return frames.length ? `${error.message}\n${frames.join("\n")}` : error.message;
 }
+
+/**
+ * Chromium reports this when a resize observer changes layout and the rest of its notifications
+ * wait for the next frame. Nothing is lost, and xterm's own pixel-size observer triggers it
+ * whenever a terminal is resized, so it is not worth a line in the log.
+ */
+const BENIGN_PAGE_ERRORS = [/^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/];
+
+/**
+ * Page errors for the log, with bursts folded: the same message again within `windowMs` is
+ * counted instead of written, and the count lands on the next different message or when
+ * `flush` runs. Known-benign browser notices are dropped.
+ */
+export class PageErrors {
+  private last: { message: string; at: number; repeats: number } | null = null;
+
+  constructor(
+    private readonly write: (line: string) => void,
+    private readonly windowMs = 10_000,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  report(message: string): void {
+    if (BENIGN_PAGE_ERRORS.some((pattern) => pattern.test(message))) return;
+    const at = this.now();
+    if (this.last && this.last.message === message && at - this.last.at < this.windowMs) {
+      this.last.repeats += 1;
+      this.last.at = at;
+      return;
+    }
+    this.flush();
+    this.last = { message, at, repeats: 0 };
+    this.write(message);
+  }
+
+  /** Writes how many times the last message repeated, if it did. */
+  flush(): void {
+    if (this.last?.repeats) this.write(`${this.last.message} (repeated ${this.last.repeats} more time${this.last.repeats === 1 ? "" : "s"})`);
+    if (this.last) this.last.repeats = 0;
+  }
+}

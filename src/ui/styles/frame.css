@@ -1,0 +1,434 @@
+/* ------------------------------------------------------------------ app frame */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  height: 100vh;
+}
+
+.rail {
+  position: relative;
+  background: var(--bg-dark);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0 10px;
+  gap: 3px;
+  z-index: 2;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.rail-logo {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+}
+
+.rail-sep {
+  width: 28px;
+  height: 1px;
+  background: var(--line);
+  margin: 6px 0;
+}
+
+.rail-btn {
+  position: relative;
+  width: 54px;
+  padding: 7px 0 5px;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: var(--fg-3);
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.rail-btn span {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
+}
+
+/* Labels: translations vary in length, so the longest ones end in an ellipsis instead of spilling. */
+.rail-btn > span:not(.rail-badge):not(.rail-dot) {
+  max-width: 100%;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Full-width scripts: a touch smaller so the longest labels (エージェント) still fit. */
+:root:lang(ja) .rail-btn > span:not(.rail-badge):not(.rail-dot),
+:root:lang(zh) .rail-btn > span:not(.rail-badge):not(.rail-dot) {
+  padding: 0;
+  font-size: 9px;
+  letter-spacing: -0.03em;
+}
+
+.rail-btn:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+}
+
+.rail-btn:focus-visible {
+  color: var(--accent-2);
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.rail-btn[aria-current="page"] {
+  color: var(--fg);
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+/* The open view's edge: one marker that slides to whichever button is current (see Rail). */
+.rail-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  background: var(--gradient);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.rail-marker.glides {
+  transition: transform 0.24s cubic-bezier(0.2, 0.9, 0.3, 1), height 0.24s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.15s;
+}
+
+.rail-badge {
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 9.5px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+/* An update is waiting: a small ember dot on Help. */
+.rail-dot {
+  position: absolute;
+  top: 5px;
+  right: 14px;
+  width: 7px;
+  height: 7px;
+  border-radius: 0;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 2px var(--bg-dark);
+}
+
+.rail-dot.waiting {
+  background: var(--ember-core);
+  box-shadow: var(--ember-lit);
+  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
+}
+
+.rail-dot.done {
+  background: var(--green);
+  box-shadow: var(--done-rest);
+  animation: afterglow 2.6s ease-out;
+}
+
+/* The view's own icon lights up while something in it waits for you. */
+.rail-btn.wants-you > svg {
+  color: var(--accent-2);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent-2) 80%, transparent)) drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 45%, transparent));
+  animation: ember-icon 2.2s ease-in-out infinite;
+}
+
+.rail-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.live-pulse {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--accent);
+}
+
+.stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* Views cross-fade in. Opacity only: a transform would move what the browser dock measures. */
+.stage > :is(.view, .main) {
+  animation: view-in 0.14s ease-out;
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.view[hidden] {
+  display: none;
+}
+
+.view.split-list {
+  display: flex;
+}
+
+.view.split-list[hidden] {
+  display: none;
+}
+
+.list-panel {
+  position: relative;
+  flex: none;
+  background: var(--bg-dark);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  transition: width 0.18s ease;
+}
+
+.list-panel.is-resizing {
+  transition: none;
+  user-select: none;
+}
+
+.list-head {
+  height: 56px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.list-head h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.list-label {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  padding: 12px 8px 4px;
+}
+
+/* The highlight on its way from one row to the next (SidePanel's selection glide). */
+.sel-glide-frame {
+  position: fixed;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.sel-glide {
+  position: absolute;
+  background: var(--sel-fill);
+  border: 1px solid var(--sel-line);
+}
+
+[data-gliding][aria-selected="true"] {
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+
+/* Stand-ins while something loads (ui.tsx Skeleton). Invisible for the first moment, then a slow
+   sweep of light across flat blocks, so a long read looks alive and a short one shows nothing. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  animation: skeleton-in 0.2s ease-out 0.15s both;
+}
+
+.skeleton.is-page {
+  padding: 22px 24px;
+  gap: 12px;
+}
+
+.skeleton-head {
+  width: 38%;
+  height: 18px;
+  margin-bottom: 10px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 0;
+}
+
+.skeleton-pixel {
+  width: 7px;
+  height: 7px;
+  flex: none;
+}
+
+.skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton-lines > span {
+  height: 8px;
+}
+
+.skeleton-head,
+.skeleton-pixel,
+.skeleton-lines > span {
+  display: block;
+  background: linear-gradient(90deg, var(--fill-2) 0%, color-mix(in srgb, var(--accent) 9%, var(--fill-2)) 50%, var(--fill-2) 100%);
+  background-size: 300% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* A day in a long list. It stays at the top while its runs scroll under it. */
+.list-day {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: 0 -10px;
+  padding: 10px 18px 5px;
+  background: var(--bg-dark);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.list-day:not(:first-child) {
+  margin-top: 6px;
+}
+
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.page-head {
+  height: 58px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 22px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.page-head h1 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.page-head .sub {
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+}
+
+.page-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 22px 28px;
+}
+
+.page-narrow {
+  max-width: 860px;
+  margin-inline: auto;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 10px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.section-title .count {
+  color: var(--accent);
+}

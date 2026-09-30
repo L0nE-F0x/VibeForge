@@ -7,8 +7,10 @@ import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
 import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from "./runs.js";
 import { isSafeId, slugify } from "./slug.js";
+import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../shared/text.js";
 import { TASK_STATUSES } from "./tasks.js";
 import type { WorkspaceFile } from "./workspaces.js";
+import type { WorkingCopy } from "./worktrees.js";
 import type {
   Agent,
   ChatRecord,
@@ -75,6 +77,24 @@ export interface RunQuery {
   limit?: number;
 }
 
+/** How much of a transcript is indexed: its start (the ask) and its end (how it went). */
+const INDEXED_CHARS = 100_000;
+
+function searchableText(text: string): string {
+  const clean = text.replace(/[\u0000-\u0008\u000b-\u001f]/g, " ");
+  return clean.length <= INDEXED_CHARS * 2 ? clean : `${clean.slice(0, INDEXED_CHARS)}\n…\n${clean.slice(-INDEXED_CHARS)}`;
+}
+
+/** Typed words as an FTS5 query: every word must appear, each matching the start of a word. */
+export function matchExpression(text: string): string | null {
+  const words = text.match(/[\p{L}\p{N}_]+/gu);
+  if (!words?.length) return null;
+  return words
+    .slice(0, 12)
+    .map((word) => `"${word}"*`)
+    .join(" ");
+}
+
 export function defaultSettings(): Settings {
   return {
     defaultEngine: "claude",
@@ -92,9 +112,16 @@ export function defaultSettings(): Settings {
     closeToTray: true,
     usage: true,
     planLimits: false,
+    quotaAlerts: false,
     activity: "git",
     rail: { order: [], hidden: [] },
+    keepRuns: { days: 0, maxMb: 0 },
   };
+}
+
+/** A whole number from 0 to `max`; anything else is `fallback`. */
+function count(value: unknown, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), max) : fallback;
 }
 
 function str(value: unknown, fallback = ""): string {
@@ -240,9 +267,19 @@ function normalizeTask(id: string, value: unknown): Task | null {
     agentId: strOrNull(record.agentId),
     workspaceId: strOrNull(record.workspaceId),
     runIds: strList(record.runIds),
+    isolated: record.isolated === true,
+    copy: workingCopy(record.copy),
     createdAt: str(record.createdAt),
     updatedAt: str(record.updatedAt),
   };
+}
+
+function workingCopy(value: unknown): WorkingCopy | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const [copyPath, branch, base, repo] = [record.path, record.branch, record.base, record.repo].map((item) => str(item));
+  if (!path.isAbsolute(copyPath) || !path.isAbsolute(repo) || !/^vibeforge\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{7,64}$/.test(base)) return null;
+  return { path: copyPath, branch, base, repo };
 }
 
 function normalizeChat(value: unknown): ChatRecord | null {
@@ -335,6 +372,10 @@ export class Store {
       this.db.exec("CREATE INDEX runs_status ON runs(status)");
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
+    // What a run said, for search. Filled as runs end, and for older runs by `indexMissingText`.
+    this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS run_text USING fts5(
+      id UNINDEXED, title, prompt, transcript, tokenize = 'unicode61 remove_diacritics 2'
+    )`);
     this.reindex();
   }
 
@@ -414,9 +455,61 @@ export class Store {
       .filter((run): run is RunMeta => run !== null);
   }
 
+  /** Make a finished run findable by its words. `transcript` is the text the terminal showed. */
+  indexRunText(meta: RunMeta, transcript: string): void {
+    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(meta.id);
+    this.db.prepare("INSERT INTO run_text (id, title, prompt, transcript) VALUES (?, ?, ?, ?)").run(meta.id, meta.title, meta.prompt, searchableText(transcript));
+  }
+
+  /** Finished runs not in the search index yet, newest first: older runs, and runs from before search. */
+  runsMissingText(limit: number): RunMeta[] {
+    return (
+      this.db
+        .prepare(`SELECT * FROM runs WHERE status != 'running' AND id NOT IN (SELECT id FROM run_text) ORDER BY startedAt DESC LIMIT ${Math.max(1, Math.floor(limit))}`)
+        .all() as unknown[]
+    )
+      .map((row) => normalizeRun(row))
+      .filter((run): run is RunMeta => run !== null);
+  }
+
+  /**
+   * Runs whose title, prompt, transcript or folder hold every word typed (each as a word start),
+   * best match first, with a snippet of the text around the match. Matches are wrapped in
+   * SNIPPET_OPEN and SNIPPET_CLOSE.
+   */
+  searchRuns(text: string, limit = 50): Array<{ run: RunMeta; snippet: string }> {
+    const match = matchExpression(text);
+    if (!match) return [];
+    const cap = Math.max(1, Math.min(Math.floor(limit), 500));
+    const rows = this.db
+      .prepare(
+        `SELECT runs.*, snippet(run_text, -1, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 14) AS snippet
+         FROM run_text JOIN runs ON runs.id = run_text.id
+         WHERE run_text MATCH ? ORDER BY rank LIMIT ${cap}`,
+      )
+      .all(match) as Array<Record<string, unknown>>;
+    const found = rows.flatMap((row) => {
+      const run = normalizeRun(row);
+      return run ? [{ run, snippet: typeof row.snippet === "string" ? row.snippet : "" }] : [];
+    });
+    if (found.length >= cap) return found;
+    // A folder is a path, not words: those still match as typed.
+    const seen = new Set(found.map((item) => item.run.id));
+    const byFolder = this.queryRuns({ search: text, limit: cap - found.length }).filter((run) => !seen.has(run.id));
+    return [...found, ...byFolder.map((run) => ({ run, snippet: "" }))];
+  }
+
+  /** Every run in the index, newest first, with no limit: for tidying up, not for showing. */
+  allRuns(): RunMeta[] {
+    return (this.db.prepare("SELECT * FROM runs ORDER BY startedAt DESC").all() as unknown[])
+      .map((row) => normalizeRun(row))
+      .filter((run): run is RunMeta => run !== null);
+  }
+
   /** Forget a run entirely: its index row and its folder. */
   deleteRun(run: RunMeta): void {
     this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
+    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
     if (run.dir) fs.rmSync(run.dir, { recursive: true, force: true });
   }
 
@@ -455,10 +548,15 @@ export class Store {
       closeToTray: bool(raw.closeToTray, defaults.closeToTray),
       usage: bool(raw.usage, defaults.usage),
       planLimits: bool(raw.planLimits, defaults.planLimits),
+      quotaAlerts: bool(raw.quotaAlerts, defaults.quotaAlerts),
       activity: raw.activity === "off" || raw.activity === "github" ? raw.activity : defaults.activity,
       rail: {
         order: names(raw.rail?.order),
         hidden: names(raw.rail?.hidden),
+      },
+      keepRuns: {
+        days: count(raw.keepRuns?.days, 36500, defaults.keepRuns.days),
+        maxMb: count(raw.keepRuns?.maxMb, 1_000_000, defaults.keepRuns.maxMb),
       },
     };
   }

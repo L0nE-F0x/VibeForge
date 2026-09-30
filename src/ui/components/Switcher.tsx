@@ -1,8 +1,10 @@
-import { Bot, CalendarClock, Keyboard, KanbanSquare, MessagesSquare, Mic, Power, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessagesSquare, Mic, Power, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
-import { useAgents, useAppInfo, useChats, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
+import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
+import { runLabel } from "../views/Home.js";
+import { Snippet } from "./Snippet.js";
 import { fuzzyScore } from "../fuzzy.js";
 import { useT, type Key } from "../i18n/index.js";
 import { railViews } from "../rail.js";
@@ -19,12 +21,17 @@ interface Item {
   id: string;
   title: string;
   sub?: string;
+  /** For a run found by its words: the text around the match. */
+  snippet?: string;
   kind: Key;
   icon: LucideIcon;
   act: () => void;
 }
 
 const LIMIT = 60;
+/** Runs are searched by what they said once this much is typed, and this many are listed. */
+const RUN_SEARCH_MIN = 3;
+const RUN_HITS = 8;
 
 export function Switcher({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -37,7 +44,10 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const tasks = useTasks().data;
   const routines = useRoutines().data;
   const skills = useSkills().data;
+  const engines = useEngines().data;
   const [query, setQuery] = useState("");
+  const words = useDebounced(query.trim(), 140);
+  const runHits = useQuery(words.length >= RUN_SEARCH_MIN ? `switcher:runs:${words}` : null, ["runs"], () => call("runs.search", words, RUN_HITS)).data;
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   useOverlay(true);
@@ -109,6 +119,16 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       .map((entry) => entry.item);
   }, [items, query]);
 
+  // Runs found by their words follow the names; they're a different kind of match, not ranked with them.
+  const listed = useMemo<Item[]>(() => {
+    if (!query.trim() || words !== query.trim() || !runHits?.length) return shown;
+    const runs = runHits.slice(0, RUN_HITS).map((run): Item => {
+      const { title, kind } = runLabel(run, engines?.find((engine) => engine.id === run.engine)?.label ?? null);
+      return { id: `run:${run.id}`, title, sub: kind, snippet: run.snippet, kind: "switcher.run", icon: History, act: () => go({ view: "runs", runId: run.id, filter: "all" }) };
+    });
+    return [...shown.slice(0, LIMIT - runs.length), ...runs];
+  }, [shown, runHits, words, query, engines, go]);
+
   useEffect(() => setActive(0), [query]);
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
@@ -127,13 +147,13 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       onClose();
     } else if (event.key === "ArrowDown" || (event.ctrlKey && event.key === "n")) {
       event.preventDefault();
-      setActive((index) => (shown.length ? (index + 1) % shown.length : 0));
+      setActive((index) => (listed.length ? (index + 1) % listed.length : 0));
     } else if (event.key === "ArrowUp" || (event.ctrlKey && event.key === "p")) {
       event.preventDefault();
-      setActive((index) => (shown.length ? (index - 1 + shown.length) % shown.length : 0));
+      setActive((index) => (listed.length ? (index - 1 + listed.length) % listed.length : 0));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      choose(shown[active]);
+      choose(listed[active]);
     }
   };
 
@@ -151,12 +171,12 @@ export function Switcher({ onClose }: { onClose: () => void }) {
             role="combobox"
             aria-expanded
             aria-controls="switcher-list"
-            aria-activedescendant={shown[active] ? `switcher-${active}` : undefined}
+            aria-activedescendant={listed[active] ? `switcher-${active}` : undefined}
           />
         </div>
         <div className="switcher-list" id="switcher-list" role="listbox" ref={list}>
-          {shown.length === 0 && <div className="faint switcher-empty">{t("switcher.nothing")}</div>}
-          {shown.map((item, index) => (
+          {listed.length === 0 && <div className="faint switcher-empty">{t("switcher.nothing")}</div>}
+          {listed.map((item, index) => (
             <div
               key={item.id}
               id={`switcher-${index}`}
@@ -170,7 +190,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
               <item.icon size={15} className={index === active ? "accent-text" : "faint"} />
               <span className="vstack grow" style={{ gap: 0, minWidth: 0 }}>
                 <span className="row-title truncate">{item.title}</span>
-                {item.sub && <span className="row-sub truncate">{item.sub}</span>}
+                {item.snippet ? <Snippet text={item.snippet} className="row-sub truncate" /> : item.sub && <span className="row-sub truncate">{item.sub}</span>}
               </span>
               <span className="switcher-kind">{t(item.kind)}</span>
             </div>
