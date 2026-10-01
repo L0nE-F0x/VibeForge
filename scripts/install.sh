@@ -91,7 +91,7 @@ latest_release_tag() {
 }
 
 # The latest release, or a branch when one was asked for. Without an answer from GitHub, the
-# newest version tag; without any tag, main.
+# newest version tag. Never main by accident: unreleased work only when VIBEFORGE_BRANCH asks.
 if [[ -n "$BRANCH" ]]; then
   git -C "$DEST" fetch --quiet origin "$BRANCH"
   target="origin/$BRANCH"
@@ -100,7 +100,7 @@ else
   if [[ -z "$target" ]] || ! git -C "$DEST" rev-parse --quiet --verify "refs/tags/$target" >/dev/null; then
     target=$(git -C "$DEST" tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
     [[ -n "$target" ]] && note "Could not ask GitHub for the latest release; using the newest tag, $target"
-    target="${target:-origin/main}"
+    [[ -n "$target" ]] || die "Could not find a VibeForge release. Set VIBEFORGE_BRANCH=main to install the main branch on purpose."
   fi
 fi
 git -C "$DEST" checkout --quiet --force --detach "$target"
