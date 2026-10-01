@@ -8,7 +8,6 @@
 
 - [ ] **The Code mic with your microphone, leaning back**: click it, talk, click again, press Enter. Then the same in a chat box.
 - [x] **A real task in its own copy**, with Claude Code (2026-10-01, headless): no trust question for a worktree of a trusted repository; Apply and a conflict both worked. Still worth one try on a repository Claude hasn't trusted yet.
-- [ ] **2.0 at your desk**: the tray menu's waiter rows on the real bar (each should open where it waits), a notification click while VibeForge is in the background, and a routine due while an agent is busy in its folder.
 - [ ] **Settings → Storage on your real runs**: the first upkeep, 2 minutes after start, compresses them (86 MB → about 15 MB expected). Pick a keep rule only if you want old runs gone.
 - [ ] **The CI smoke job** on the first push (xvfb on GitHub's runner). If it's reliable, consider making it a required check.
 
