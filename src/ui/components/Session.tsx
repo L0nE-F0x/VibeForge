@@ -3,11 +3,12 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefOb
 import type { ChatView } from "../../shared/api.js";
 import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote, tildify } from "../../shared/text.js";
-import { call, pathForFile, useAppInfo, useQuery, useSettings } from "../api.js";
+import { call, pathForFile, useAgents, useAppInfo, useLive, useQuery, useSettings } from "../api.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
 import { Button, Empty, StatusChip, TimeAgo } from "./ui.js";
+import { writerNames } from "./Occupancy.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { coreText } from "../core-text.js";
@@ -230,6 +231,8 @@ export function SessionPane({
   const terminal = useRef<TerminalHandle>(null);
 
   const livePty = pending && pending.chatId === chat?.id ? pending.ptyId : chat?.live ? chat.ptyId : null;
+  const agents = useAgents().data ?? [];
+  const alsoHere = useLive().data?.find((session) => session.ptyId === livePty)?.alsoHere ?? [];
   // A chat made by this send has its terminal before the view has the chat itself.
   const livePtyRef = useRef(livePty);
   livePtyRef.current = livePty ?? pending?.ptyId ?? null;
@@ -280,6 +283,7 @@ export function SessionPane({
             <span className="dot running" />
             <span className="grow truncate muted">
               {t("session.liveIn", { path: tildify(chat?.cwd ?? "", home) })}
+              {alsoHere.length > 0 && ` · ${t("occupancy.alsoHere", { names: writerNames(alsoHere, agents) })}`}
             </span>
             <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
               {t("tasks.stop")}

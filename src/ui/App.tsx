@@ -16,7 +16,7 @@ import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton,
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
-import { ConfirmProvider, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
+import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
 import { CodeView } from "./views/Code.js";
 import { HomeView } from "./views/Home.js";
 
@@ -106,6 +106,10 @@ function Shell() {
     window.addEventListener("mouseup", onMouse, true);
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
     const offWorkspace = on("open-workspace", ({ workspaceId }) => go({ view: "code", workspaceId }));
+    // A waiter picked in the tray, or a notification clicked: the place this page named itself.
+    const offRoute = on("open-route", ({ route }) => {
+      if (isRoute(route)) go(route);
+    });
     const offCrash = on("host-crash", (message) => push("error", translateNow("app.hostProblem"), coreText(message)));
     // A host that failed before this page was listening (it starts alongside the window).
     void call("app.info")
@@ -116,6 +120,7 @@ function Shell() {
     return () => {
       window.removeEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
       offSwitcher();
+      offRoute();
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onMouse, true);
       window.removeEventListener("mouseup", onMouse, true);

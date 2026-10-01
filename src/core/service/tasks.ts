@@ -1,16 +1,24 @@
+import fs from "node:fs";
 import path from "node:path";
+import { handoffBody, handoffTitle } from "../handoff.js";
+import { readRunText } from "../run-storage.js";
+import { RUN_FILES } from "../runs.js";
 import { isDirectory } from "../fsx.js";
 import { taskPrompt } from "../preamble.js";
 import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace } from "../types.js";
 import { isSafeId } from "../slug.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, ownedCopyPath, removeCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
-import { BLOCKER_TEXT, type Deleted, type Launched, type TaskInput, type TaskView, type TermSize } from "./types.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, ownedCopyPath, patchFiles, removeCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
+import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
+import type { FolderTurns } from "./turns.js";
 
 /** Tasks: a title and a body an agent executes in a workspace, then waits for review. */
 export class TaskDesk {
-  constructor(private readonly core: ServiceCore) {}
+  constructor(
+    private readonly core: ServiceCore,
+    private readonly turns: FolderTurns,
+  ) {}
 
   listTasks(): TaskView[] {
     return this.core.store.listTasks().map((task) => this.taskView(task));
@@ -20,7 +28,16 @@ export class TaskDesk {
     const lastId = task.runIds[task.runIds.length - 1];
     const last = lastId ? this.core.store.getRun(lastId) : null;
     const copyOwned = task.copy ? Boolean(ownedCopyPath(this.owner(task.id), task.copy.path)) : true;
-    return { ...task, lastRun: last ? this.core.view(last) : null, blocker: this.taskBlocker(task), copyOwned };
+    const workspace = task.isolated ? null : this.core.workspaceById(task.workspaceId);
+    const own = new Set(this.livePty(task) ? [this.livePty(task)!] : []);
+    return {
+      ...task,
+      lastRun: last ? this.core.view(last) : null,
+      blocker: this.taskBlocker(task),
+      copyOwned,
+      writers: workspace ? this.turns.writersNow(workspace.path, own) : [],
+      waiting: this.turns.waiting("task", task.id),
+    };
   }
 
   private owner(taskId: string): CopyOwner {
@@ -53,9 +70,10 @@ export class TaskDesk {
           agentId: input.agentId === undefined ? existing.agentId : input.agentId || null,
           workspaceId: input.workspaceId === undefined ? existing.workspaceId : input.workspaceId || null,
           isolated: typeof input.isolated === "boolean" ? input.isolated : existing.isolated,
+          shareCheckout: typeof input.shareCheckout === "boolean" ? input.shareCheckout : existing.shareCheckout,
           updatedAt: now.toISOString(),
         }
-      : createTask({ title, body: input.body, agentId: input.agentId || null, workspaceId: input.workspaceId || null, isolated: input.isolated === true, now });
+      : createTask({ title, body: input.body, agentId: input.agentId || null, workspaceId: input.workspaceId || null, isolated: input.isolated === true, shareCheckout: input.shareCheckout === true, now });
     if (existing?.copy && existing.workspaceId !== task.workspaceId) throw new Error("Apply or discard the task's copy before moving it to another workspace.");
     this.core.store.writeTask(task);
     this.core.emit("tasks");
@@ -67,6 +85,7 @@ export class TaskDesk {
     const file = this.core.store.pathOf("task", id);
     if (!task || !file) throw new Error("That task no longer exists.");
     if (task.status === "running") await this.stopTask(id);
+    this.turns.cancel("task", id);
     // Its copy goes with it, and comes back on Undo; the branch goes once Undo has passed. A copy
     // path that isn't this task's own worktree stays where it is: it could be someone's real work.
     const copy = task.copy;
@@ -81,14 +100,67 @@ export class TaskDesk {
     return copy && !owned ? { ...deleted, copyLeft: true } : deleted;
   }
 
-  async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
+  /**
+   * Execute a task. In the workspace itself it takes its turn: while another coding CLI is busy
+   * there it waits, and starts on its own once that one is quiet, unless `now` or the task's
+   * `shareCheckout` says to start anyway. A task in its own copy, or a Continue, starts at once.
+   */
+  async executeTask(id: string, size: TermSize = {}, continueSession = false, now = false): Promise<Launched | Queued> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
+    const task = this.ready(id);
+    const workspace = this.core.workspaceById(task.workspaceId)!;
+    if (task.isolated || continueSession) {
+      this.turns.cancel("task", id);
+      return this.launchTask(task, size, continueSession);
+    }
+    return this.turns.withFolderLock(workspace.path, async () => {
+      const current = this.ready(id);
+      const busy = now || current.shareCheckout || current.isolated ? [] : await this.turns.busyIn(workspace.path);
+      if (busy.length) {
+        this.turns.enqueue({
+          kind: "task",
+          id,
+          folder: workspace.path,
+          start: () => this.executeTask(id, size),
+          failed: (message) => this.core.options.host.notify({ title: current.title, body: message, taskId: id }),
+        });
+        this.core.emit("tasks");
+        return { queued: true, behind: busy.map((writer) => writer.label) };
+      }
+      this.turns.cancel("task", id);
+      return this.launchTask(current, size, false);
+    });
+  }
+
+  /** Stop waiting for the workspace. */
+  cancelWait(id: string): TaskView {
+    const task = this.core.store.getTask(id);
+    if (!task) throw new Error("That task no longer exists.");
+    this.turns.cancel("task", id);
+    this.core.emit("tasks");
+    return this.taskView(task);
+  }
+
+  /** A Continue of the task's last run: a person is there, so it never waits. */
+  async continueTask(id: string, size: TermSize = {}): Promise<Launched> {
+    await this.core.settled;
+    this.turns.cancel("task", id);
+    return this.launchTask(this.ready(id), size, true);
+  }
+
+  /** The task, if it can start: it exists, isn't running, and has an agent, a workspace and an engine. */
+  private ready(id: string): Task {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (task.status === "running" && this.taskLive(task)) throw new Error("This task is already running.");
     const blocker = this.taskBlocker(task);
     if (blocker) throw new Error(BLOCKER_TEXT[blocker]);
+    return task;
+  }
+
+  private async launchTask(task: Task, size: TermSize, continueSession: boolean): Promise<Launched> {
+    const id = task.id;
     const agent = this.core.store.getAgent(task.agentId!)!;
     const workspace = this.core.workspaceById(task.workspaceId)!;
     const engine = this.core.requireEngine(agent.engine);
@@ -127,6 +199,7 @@ export class TaskDesk {
   async stopTask(id: string): Promise<TaskView> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
+    this.turns.cancel("task", id);
     const runId = task.runIds[task.runIds.length - 1];
     if (runId) await this.core.stopRun(runId);
     const next = { ...markStopped(this.core.store.getTask(id) ?? task), updatedAt: this.core.now().toISOString() };
@@ -144,6 +217,38 @@ export class TaskDesk {
     this.core.store.writeTask(next);
     this.core.emit("tasks");
     return this.taskView(next);
+  }
+
+  /**
+   * Hand a finished run to another agent: a To do task whose body says what the run did and where
+   * its record is. Nothing starts until you Execute it.
+   */
+  handOff(runId: string, agentId: string): TaskView {
+    const run = this.core.store.getRun(runId);
+    if (!run) throw new Error("That run no longer exists.");
+    if (!this.core.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
+    const from = run.agentId ? this.core.store.getAgent(run.agentId) : null;
+    const workspace = this.core.workspaceById(run.workspaceId);
+    const patchPath = run.dir && fs.existsSync(path.join(run.dir, RUN_FILES.patch)) ? path.join(run.dir, RUN_FILES.patch) : null;
+    const patch = run.dir ? safeRead(() => readRunText(run.dir, RUN_FILES.patch)) : "";
+    const body = handoffBody({
+      runId: run.id,
+      title: run.title,
+      agentName: from?.name ?? null,
+      engine: this.core.resolveEngine(run.engine)?.row.label ?? run.engine,
+      workspacePath: workspace?.path ?? null,
+      sourceCwd: run.cwd,
+      changes: run.changes,
+      files: patchFiles(patch),
+      transcript: run.dir ? safeRead(() => readRunText(run.dir, RUN_FILES.transcript)) : "",
+      transcriptPath: this.core.transcriptPath(run),
+      patchPath: patchPath ?? (run.dir && fs.existsSync(`${path.join(run.dir, RUN_FILES.patch)}.gz`) ? `${path.join(run.dir, RUN_FILES.patch)}.gz` : null),
+    });
+    const task = createTask({ title: handoffTitle(run.title), body, agentId, workspaceId: workspace?.id ?? null, sourceRunId: run.id, now: this.core.now() });
+    // Written as is: saving through saveTask would treat it as new input and drop `sourceRunId`.
+    this.core.store.writeTask(task);
+    this.core.emit("tasks");
+    return this.taskView(task);
   }
 
   /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
@@ -192,7 +297,19 @@ export class TaskDesk {
   }
 
   private taskLive(task: Task): boolean {
+    return Boolean(this.livePty(task));
+  }
+
+  private livePty(task: Task): string | null {
     const runId = task.runIds[task.runIds.length - 1];
-    return Boolean(runId && this.core.ptyByRun.has(runId));
+    return (runId && this.core.ptyByRun.get(runId)) || null;
+  }
+}
+
+function safeRead(read: () => string): string {
+  try {
+    return read();
+  } catch {
+    return "";
   }
 }

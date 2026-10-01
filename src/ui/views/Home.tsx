@@ -1,21 +1,25 @@
-import { Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
+import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Hourglass, KanbanSquare, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useActivity, useAgents, useAppInfo, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useWorkspaces } from "../api.js";
+import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_KEY } from "../components/RunDetail.js";
 import { Button, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
-import { useAttention } from "../attention.js";
+import { useAttention, usePtyAttention } from "../attention.js";
+import { writerNames } from "../components/Occupancy.js";
+import { markWhere, markWho } from "../watch.js";
 import { t as translate, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
-import { useAction, useNav } from "../state.js";
+import { routeForMark, useAction, useNav } from "../state.js";
 import { railKey, type RailView } from "../rail.js";
 
 const DAYS = 14;
+/** Waiting rows painted on Home before "and N more"; eight is the point, this is a backstop. */
+const WAITING_ROWS = 24;
 
 export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
   const engines = useEngines().data ?? [];
@@ -99,6 +103,15 @@ export function HomeView() {
   };
   const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const attention = useAttention();
+  const marks = usePtyAttention();
+  const tasks = useTasks().data ?? [];
+  const chats = useChats(undefined).data ?? [];
+  const waiting = [...marks.values()].filter((mark) => mark.attention === "waiting").sort((a, b) => a.since - b.since);
+  const present = new Set(live.map((session) => session.ptyId));
+  const inLine = [
+    ...tasks.filter((task) => task.waiting).map((task) => ({ key: `task:${task.id}`, title: task.title, behind: task.waiting!.behind, since: task.waiting!.since, icon: KanbanSquare, to: { view: "tasks" as const, taskId: task.id } })),
+    ...routines.filter((routine) => routine.waiting).map((routine) => ({ key: `routine:${routine.id}`, title: routine.name, behind: routine.waiting!.behind, since: routine.waiting!.since, icon: CalendarClock, to: { view: "routines" as const, routineId: routine.id } })),
+  ].sort((a, b) => a.since.localeCompare(b.since));
   const contributions = useActivity().data;
   const graph = contributions && !contributions.error && contributions.days.length ? contributions : null;
   const number = (value: number) => value.toLocaleString(t.language);
@@ -237,6 +250,46 @@ export function HomeView() {
             </div>
 
             <div>
+              {waiting.length > 0 && (
+                <>
+                  <div className="section-title">
+                    <BellRing size={13} /> {t("home.waiting.title")}
+                  </div>
+                  <div className="vstack" style={{ gap: 6 }}>
+                    {waiting.slice(0, WAITING_ROWS).map((mark) => (
+                      <button key={mark.ptyId} type="button" className="run-row needs-you" onClick={() => go(routeForMark(mark, present.has(mark.ptyId)))}>
+                        <BellRing size={14} className="accent-text" />
+                        <span className="vstack grow" style={{ gap: 1 }}>
+                          <span className="title truncate">{markWho(mark, { agents })}</span>
+                          <span className="meta truncate">{markWhere(mark, { chats, tasks, workspaces }) || mark.label}</span>
+                        </span>
+                        <span className="meta">
+                          <TimeAgo iso={new Date(mark.since).toISOString()} />
+                        </span>
+                      </button>
+                    ))}
+                    {waiting.length > WAITING_ROWS && <div className="faint">{t("home.waiting.more", { count: waiting.length - WAITING_ROWS })}</div>}
+                  </div>
+                </>
+              )}
+              {inLine.length > 0 && (
+                <>
+                  <div className="section-title">
+                    <Hourglass size={13} /> {t("home.turns.title")}
+                  </div>
+                  <div className="vstack" style={{ gap: 6 }}>
+                    {inLine.map((item) => (
+                      <button key={item.key} type="button" className="run-row" onClick={() => go(item.to)}>
+                        <item.icon size={14} className="accent-text" />
+                        <span className="vstack grow" style={{ gap: 1 }}>
+                          <span className="title truncate">{item.title}</span>
+                          <span className="meta truncate">{t("turns.waitingShort", { names: writerNames(item.behind, agents) || t("turns.someone") })}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               {live.length > 0 && (
                 <div className="section-title">
                   <TerminalSquare size={13} /> {t("home.live.title")}
@@ -247,7 +300,7 @@ export function HomeView() {
                   <button
                     key={session.ptyId}
                     type="button"
-                    className="run-row"
+                    className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
                     onClick={() => {
                       if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
                       else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
@@ -266,6 +319,7 @@ export function HomeView() {
                       <span className="meta truncate">
                         {session.program ? `${session.title} · ` : ""}
                         {tildify(session.cwd, home)}
+                        {session.alsoHere?.length ? ` · ${t("occupancy.alsoHere", { names: writerNames(session.alsoHere, agents) })}` : ""}
                       </span>
                     </span>
                     <span className="meta">{duration(session.startedAt, null, now)}</span>

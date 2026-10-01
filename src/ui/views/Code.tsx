@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api.js";
 import { isDockUrl } from "../../shared/dock-url.js";
 import { shellQuote, tildify } from "../../shared/text.js";
-import { call, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
+import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
@@ -33,7 +33,7 @@ import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
-import { setWorkspaceInView, useAttention } from "../attention.js";
+import { setPtyInView, setWorkspaceInView, useAttention, usePtyAttention } from "../attention.js";
 
 interface Runtime {
   ptyId: string | null;
@@ -85,6 +85,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const confirm = useConfirm();
   const file = useWorkspaces();
   const engines = useEngines().data ?? [];
+  const agents = useAgents().data ?? [];
   const settings = useSettings().data;
   const live = useLive().data ?? [];
   const home = useAppInfo().data?.home ?? "";
@@ -116,6 +117,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const fontSizeRef = useRef(13);
   fontSizeRef.current = settings?.terminalFontSize ?? 13;
   const attention = useAttention();
+  const ptyAttention = usePtyAttention();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
   const browserUrl = current ? (pendingDock?.id === current.id ? pendingDock.url : current.dockUrl) : "";
@@ -149,6 +151,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   // The shell's session watch flags CLIs that go quiet out of sight; it needs to know what's shown.
   useEffect(() => setWorkspaceInView(active ? (current?.id ?? null) : null), [active, current?.id]);
   useEffect(() => () => setWorkspaceInView(null), []);
+  // Only the focused pane counts as looked at: the others in the workspace keep their glow.
+  const focusedPty = active && current ? (runtime[focus[current.id] ?? ""]?.ptyId ?? null) : null;
+  useEffect(() => setPtyInView("code", focusedPty), [focusedPty]);
+  useEffect(() => () => setPtyInView("code", null), []);
 
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => undefined);
   useEffect(() => {
@@ -681,6 +687,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             runtime={runtime[pane.id]}
                             runId={runId}
                             program={session?.program ?? null}
+                            needsYou={ptyAttention.get(runtime[pane.id]?.ptyId ?? "")?.attention === "waiting"}
+                            alsoHere={(session?.alsoHere ?? []).map((other) => agents.find((agent) => agent.id === other.agentId)?.name ?? other.label)}
                             engines={engines}
                             active={active && visible}
                             focused={focus[workspace.id] === pane.id}
@@ -756,6 +764,8 @@ function PaneView({
   runtime,
   runId,
   program,
+  needsYou,
+  alsoHere,
   engines,
   active,
   focused,
@@ -780,6 +790,10 @@ function PaneView({
   runId: string | null;
   /** What a shell is running in its foreground, when it isn't at its prompt. */
   program: string | null;
+  /** Its CLI went quiet out of sight and waits for you. */
+  needsYou: boolean;
+  /** The other coding CLIs working in the same folder. */
+  alsoHere: string[];
   engines: Engine[];
   active: boolean;
   focused: boolean;
@@ -809,7 +823,7 @@ function PaneView({
   return (
     <div className={`pane${focused ? " focused" : ""}${zoomed ? " is-zoomed" : ""}${dragging === pane.id ? " is-dragging" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
       <div
-        className={`pane-head${canMove ? " can-move" : ""}`}
+        className={`pane-head${canMove ? " can-move" : ""}${needsYou ? " needs-you" : ""}`}
         draggable={canMove}
         onDragStart={(event) => {
           event.dataTransfer.setData(PANE_MIME, pane.id);
@@ -836,6 +850,11 @@ function PaneView({
         )}
         <span className="pane-title truncate">{shown}</span>
         {shown !== title && <span className="pane-sub truncate">{title}</span>}
+        {alsoHere.length > 0 && (
+          <span className="pane-sub truncate" {...tipProps(t("occupancy.paneTip"))}>
+            {t("occupancy.alsoHere", { names: alsoHere.join(", ") })}
+          </span>
+        )}
         {runId && (
           <button type="button" className="pane-run-link" onClick={onReview} {...tipProps(t("pane.openRun"))}>
             {t("pane.run")}

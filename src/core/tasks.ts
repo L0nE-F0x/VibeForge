@@ -10,6 +10,8 @@ export interface CreateTaskInput {
   agentId?: string | null;
   workspaceId?: string | null;
   isolated?: boolean;
+  shareCheckout?: boolean;
+  sourceRunId?: string | null;
   now?: Date;
 }
 
@@ -38,6 +40,8 @@ export function createTask(input: CreateTaskInput): Task {
     runIds: [],
     isolated: input.isolated ?? false,
     copy: null,
+    shareCheckout: input.shareCheckout ?? false,
+    sourceRunId: input.sourceRunId ?? null,
     createdAt: now,
     updatedAt: now,
   };

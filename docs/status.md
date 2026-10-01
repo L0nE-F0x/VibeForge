@@ -1,4 +1,20 @@
-# Status — 2026-09-30
+# Status — 2026-10-01
+
+## 2.0: agents take turns, and every waiter has a name (2026-10-01)
+
+Planned in `docs/design-2.0.md` (written with Grok, reviewed and adjusted by Claude; the differences are listed at the end of this section).
+
+- **1.3.1, a task's copy is confined.** Discard, Apply, Execute and delete only stage or remove `<data>/worktrees/<task id>`, by name and after following symlinks (`ownedCopyPath` in `src/core/worktrees.ts`). Any other copy path loads, shows on the task sheet as untrusted with **Forget it**, and is never touched. Tested with real git: the path pointing at the checkout, a symlink at the right name, and a copy already gone.
+- **The site's privacy card** now says the release check goes online; the installer stops instead of falling back to `main`.
+- **Waiting is per terminal** (`src/ui/attention.ts`). Looking at one pane leaves the others glowing; workspace and chat glows are derived. A CLI that sits on its first screen for 12 s (a trust or sign-in question) counts as waiting: probing the real CLIs through `electron/pty-host.cjs` showed Claude Code's trust prompt (whose default answer is "No, exit") and Codex's sign-in screen never went "working", so they were never flagged before. Home lists every waiter, the tray menu names up to eight and opens each where it waits (`open-route`), and one notification covers everyone who started waiting at once.
+- **Agents take turns in a folder** (`src/core/checkout.ts`, `src/core/service/turns.ts`). A non-isolated Execute, Run now, or a due routine waits while another coding CLI in the same checkout (same folder, or parent/child in one repository) is working, went quiet less than 30 s ago, or started less than 30 s ago. It starts on its own once that has passed (checked every 3 s); a due slot is used up only when it starts. Idle CLIs, bare shells and vim don't hold a folder. Code terminals and chats never wait. `shareCheckout: true` in a task or routine file (the **Take turns** switch, on by default) opts out; the sheet offers **Start now in a copy** and **Start now anyway**. Waiting lives in memory: quitting drops it, and the slot is then missed as before.
+- **Who else is here** shows on Code panes, chats, Home's live rows, the task sheet and the routine row.
+- **Hand off** on a finished run makes a To do task for another agent (`src/core/handoff.ts`, 8 KB cap, the transcript's end, the files, the run id). Nothing starts.
+- One git job at a time per repository for task copies (`withRepoLock`).
+- Checked: `npm test` 189, typecheck, the smoke test headless. The built app was driven headless with **real Claude Code**: Claude's trust question in a Code pane was listed as waiting after 12 s; a task executed while Claude was writing waited and started 32 s after Claude went quiet, then did its edit. A task in its own copy with real Claude: no trust question (it seems to accept a worktree of a repository already trusted), Apply brought the edit in and removed the copy and branch, and a conflicting copy applied with markers that Discard left in place. Real Grok and Gemini went working and quiet as expected through the PTY host; Codex isn't signed in on this machine. Stand-in CLIs covered two panes in one workspace (only the unfocused one glows, both show "Also here"), Home's Waiting lists, the waiting task sheet and the waiting routine.
+
+**Differences from the design document.** Busy folders wait instead of refusing (the founder asked for smooth over "are you sure?"), and only a CLI with its turn holds a folder, since an agent is open in the founder's projects almost all the time. Update pinning to tags was left out: the founder's VibeForge runs from this checkout, where it would refuse to update, and clones follow `main` by choice. So there is no 1.3.2 or 1.4.0; 2.0.0 carries the queue, occupancy, turns and handoff. A waiting mark that ends becomes "done"; a waiting CLI that gets busy again loses its mark; and a CLI flickering between the two knocks at most once a minute.
+
 
 VibeForge (formerly ForgeDesk) was rebuilt on top of Grok's first pass: new name, new UI, and a rewritten core. It runs from `npm start` (dev) and from the `vibeforge` launcher / app-menu entry (after `npm run build`).
 

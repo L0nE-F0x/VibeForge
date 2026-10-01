@@ -6,12 +6,14 @@ import { TaskDesk } from "./service/tasks.js";
 import { ChatDesk } from "./service/chats.js";
 import { RunDesk } from "./service/runs.js";
 import { ShellRecorder } from "./service/shell-runs.js";
+import { FolderTurns } from "./service/turns.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
-import type { Agent, LayoutNode, Routine, Schedule, Skill, TaskStatus } from "./types.js";
+import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { ApplyResult } from "./worktrees.js";
-import type { AgentInput, ChatView, Deleted, Launched, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
+import type { Writer } from "./checkout.js";
+import type { AgentInput, ChatView, Deleted, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -22,11 +24,17 @@ export * from "./service/types.js";
 export class TeamService extends ServiceCore {
   private readonly library = new LibraryDesk(this);
   private readonly workspaces = new WorkspaceDesk(this);
-  private readonly routines = new RoutineDesk(this);
-  private readonly tasks = new TaskDesk(this);
+  private readonly turns = new FolderTurns(this);
+  private readonly routines = new RoutineDesk(this, this.turns);
+  private readonly tasks = new TaskDesk(this, this.turns);
   private readonly chats = new ChatDesk(this);
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
+
+  override close(): void {
+    this.turns.close();
+    super.close();
+  }
 
   // ---------------------------------------------------------------- library
 
@@ -138,8 +146,12 @@ export class TeamService extends ServiceCore {
     return this.routines.setRoutineEnabled(id, enabled);
   }
 
-  runRoutineNow(id: string, size: TermSize = {}): Promise<Launched> {
-    return this.routines.runRoutineNow(id, size);
+  runRoutineNow(id: string, size: TermSize = {}, now = false): Promise<Launched | Queued> {
+    return this.routines.runRoutineNow(id, size, now);
+  }
+
+  cancelRoutineWait(id: string): void {
+    return this.routines.cancelWait(id);
   }
 
   tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
@@ -160,8 +172,35 @@ export class TeamService extends ServiceCore {
     return this.tasks.deleteTask(id);
   }
 
-  executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
-    return this.tasks.executeTask(id, size, continueSession);
+  executeTask(id: string, size: TermSize = {}, now = false): Promise<Launched | Queued> {
+    return this.tasks.executeTask(id, size, false, now);
+  }
+
+  continueTask(id: string, size: TermSize = {}): Promise<Launched> {
+    return this.tasks.continueTask(id, size);
+  }
+
+  cancelTaskWait(id: string): TaskView {
+    return this.tasks.cancelWait(id);
+  }
+
+  handOff(runId: string, agentId: string): TaskView {
+    return this.tasks.handOff(runId, agentId);
+  }
+
+  /** Start whatever is waiting for a folder that has come free (also every few seconds on its own). */
+  checkWaiting(): Promise<void> {
+    return this.turns.check();
+  }
+
+  /** The live sessions for the window, each with who else is in its folder. */
+  liveForView(): LiveSession[] {
+    return this.turns.withNeighbours();
+  }
+
+  /** The coding CLIs in a folder right now, for "also in this folder". */
+  writersIn(folder: string): Promise<Writer[]> {
+    return this.turns.writers(folder);
   }
 
   stopTask(id: string): Promise<TaskView> {

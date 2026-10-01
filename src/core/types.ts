@@ -42,6 +42,8 @@ export interface Routine {
   notify: boolean;
   lastFiredAt: string | null;
   lastMissedAt: string | null;
+  /** Start even while another coding CLI is busy in the agent's folder, instead of waiting a turn. */
+  shareCheckout: boolean;
 }
 
 export interface Task {
@@ -56,6 +58,10 @@ export interface Task {
   isolated: boolean;
   /** That worktree, once Execute has made it; gone again after Apply or Discard. */
   copy: WorkingCopy | null;
+  /** Start even while another coding CLI is busy in the workspace, instead of waiting a turn. */
+  shareCheckout: boolean;
+  /** The run this task was handed off from, when it was. */
+  sourceRunId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -214,6 +220,7 @@ export interface LiveSession {
   chatId: string | null;
   taskId: string | null;
   workspaceId: string | null;
+  routineId?: string | null;
   /** What a shell is running in its foreground right now ("vim", or an engine's label), if anything. */
   program?: string | null;
   /** The engine behind `program`, when it is one of the coding CLIs. */
@@ -222,6 +229,12 @@ export interface LiveSession {
   programCwd?: string | null;
   /** A coding CLI here is busy (its output keeps coming); false once it has gone quiet. */
   working?: boolean;
+  /** When the coding CLI here started: the run's start, or when it was typed into a shell. */
+  cliSince?: string | null;
+  /** When it last went quiet after working. */
+  quietAt?: string | null;
+  /** The other coding CLIs in the same folder (filled in for the window, not stored). */
+  alsoHere?: Array<{ ptyId: string; label: string; agentId: string | null }>;
 }
 
 export type Topic =

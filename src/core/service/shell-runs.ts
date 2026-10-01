@@ -20,7 +20,9 @@ export class ShellRecorder {
     // The host only reports a change. A CLI that starts working at once was already "working" while
     // its command line was typed, so it takes that state over from the shell.
     const working = programEngineId ? (this.core.hostWorking.get(ptyId) ?? session.working) : false;
-    this.core.live.set(ptyId, { ...session, program, programEngineId, programCwd, working });
+    const cliSince = !programEngineId ? null : session.programEngineId === programEngineId ? (session.cliSince ?? null) : this.core.now().toISOString();
+    const quietAt = session.programEngineId === programEngineId ? (session.quietAt ?? null) : null;
+    this.core.live.set(ptyId, { ...session, program, programEngineId, programCwd, working, cliSince, quietAt });
     this.core.emit("live");
     if (argv) this.core.shellArgv.set(ptyId, argv);
     if (session.programEngineId !== programEngineId) this.queueRecording(ptyId);
@@ -33,7 +35,7 @@ export class ShellRecorder {
     if (session.kind === "shell") this.core.hostWorking.set(ptyId, working);
     if (session.kind === "shell" && !session.programEngineId && working) return;
     if (Boolean(session.working) === working) return;
-    this.core.live.set(ptyId, { ...session, working });
+    this.core.live.set(ptyId, { ...session, working, quietAt: working ? (session.quietAt ?? null) : this.core.now().toISOString() });
     this.core.emit("live");
   }
 

@@ -64,6 +64,27 @@ function git(args: readonly string[], cwd: string, input?: string): Promise<GitR
   });
 }
 
+const chains = new Map<string, Promise<unknown>>();
+
+/**
+ * This process's git work on one repository, one job at a time, so two copies being made,
+ * applied or removed together don't trip over git's index lock. A failed job doesn't hold up
+ * the next one. Git run by anything else (your shell, the agent) can still take the lock.
+ */
+export function withRepoLock<T>(repo: string, job: () => Promise<T>): Promise<T> {
+  const key = path.resolve(repo);
+  const run = (chains.get(key) ?? Promise.resolve()).then(job, job);
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  chains.set(key, settled);
+  void settled.then(() => {
+    if (chains.get(key) === settled) chains.delete(key);
+  });
+  return run;
+}
+
 function failure(what: string, run: GitRun): Error {
   const detail = run.stderr.trim().split("\n").filter(Boolean).slice(-3).join(" ");
   return new Error(detail ? `${what}: ${detail}` : what);
@@ -142,6 +163,10 @@ export async function repoRoot(folder: string): Promise<string | null> {
 export async function createCopy(folder: string, target: string, branch: string): Promise<WorkingCopy> {
   const repo = await repoRoot(folder);
   if (!repo) throw new Error("A separate copy needs the workspace to be a git repository.");
+  return withRepoLock(repo, () => makeCopy(repo, target, branch));
+}
+
+async function makeCopy(repo: string, target: string, branch: string): Promise<WorkingCopy> {
   const head = await git(["rev-parse", "--verify", "-q", "HEAD"], repo);
   const base = head.stdout.trim();
   if (head.code !== 0 || !base) throw new Error("A separate copy needs at least one commit in the workspace.");
@@ -167,12 +192,14 @@ export function folderInCopy(copy: WorkingCopy, folder: string): string {
 export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<string> {
   // `git add -A` in a folder that isn't the task's copy would stage someone's real work.
   if (!ownedCopyPath(owner, copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-  // Staging in the copy is the copy's own business; it makes new files part of the diff.
-  const staged = await git(["add", "-A"], copy.path);
-  if (staged.code !== 0) throw failure("Could not read the copy's changes", staged);
-  const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path);
-  if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
-  return diff.stdout;
+  return withRepoLock(copy.repo, async () => {
+    // Staging in the copy is the copy's own business; it makes new files part of the diff.
+    const staged = await git(["add", "-A"], copy.path);
+    if (staged.code !== 0) throw failure("Could not read the copy's changes", staged);
+    const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path);
+    if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
+    return diff.stdout;
+  });
 }
 
 /** The files a patch touches, from its `diff --git` headers. */
@@ -187,7 +214,11 @@ export function patchFiles(patch: string): string[] {
  * the workspace has changed the same lines since, a three-way apply leaves conflict markers to
  * resolve, as a merge would. Nothing is committed. Throws when the changes can't go in at all.
  */
-export async function applyToWorkspace(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
+export function applyToWorkspace(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
+  return withRepoLock(copy.repo, () => applyPatch(copy, patch));
+}
+
+async function applyPatch(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
   const files = patchFiles(patch);
   if (!patch.trim()) return { files: [], conflicts: [] };
   const clean = await git(["apply", "--whitespace=nowarn", "-"], copy.repo, patch);
@@ -205,11 +236,13 @@ export async function applyToWorkspace(copy: WorkingCopy, patch: string): Promis
 export async function removeCopy(copy: WorkingCopy, owner: CopyOwner): Promise<void> {
   const owned = ownedCopyPath(owner, copy.path);
   if (!owned) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-  if (owned.real) {
-    const removed = await git(["worktree", "remove", "--force", owned.real], copy.repo);
-    if (removed.code !== 0) fs.rmSync(owned.real, { recursive: true, force: true });
-  }
-  await retireBranch(copy, owner.taskId);
+  await withRepoLock(copy.repo, async () => {
+    if (owned.real) {
+      const removed = await git(["worktree", "remove", "--force", owned.real], copy.repo);
+      if (removed.code !== 0) fs.rmSync(owned.real, { recursive: true, force: true });
+    }
+    await retireBranch(copy, owner.taskId);
+  });
 }
 
 /** Drop the copy's branch, only when it is this task's branch in the repository the copy names. */

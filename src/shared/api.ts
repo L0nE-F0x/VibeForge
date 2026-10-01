@@ -6,6 +6,7 @@ import type {
   AgentInput,
   ChatView,
   Launched,
+  Queued,
   RoutineInput,
   RoutineView,
   RunBundle,
@@ -60,6 +61,7 @@ export type {
   FileNode,
   LayoutNode,
   Launched,
+  Queued,
   LiveSession,
   Palette,
   Routine,
@@ -248,14 +250,16 @@ export interface DeskMethods {
   /** The contribution graph for Home, or null when Settings turn it off. `fresh` skips the cache. */
   "activity.get": (fresh?: boolean) => Activity | null;
   /** A desktop notification (when Settings allow them) that opens the chat or workspace when clicked. */
-  "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null }) => void;
+  /** `route` is where a click on it goes, handed back as it was in "open-route". */
+  "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null; route?: unknown }) => void;
   /** Omarchy's Do Not Disturb is on. */
   "app.doNotDisturb": () => boolean;
   /** "Start at login, in the tray": whether the autostart entry is there, and setting it. */
   "app.autostart": () => boolean;
   "app.setAutostart": (on: boolean) => boolean;
   /** How many CLIs and chats are waiting for you, for the tray icon's dot. */
-  "app.attention": (waiting: number) => void;
+  /** The CLIs and chats waiting for you, for the tray: how many, and each one's name and place. */
+  "app.attention": (state: { count: number; waiters: TrayWaiter[] }) => void;
   /** The last lines of VibeForge's own log, oldest first. */
   "app.logTail": (lines: number) => string[];
 
@@ -295,13 +299,19 @@ export interface DeskMethods {
   "routines.save": (input: RoutineInput) => Routine;
   "routines.delete": (id: string) => Deleted;
   "routines.setEnabled": (id: string, enabled: boolean) => Routine;
-  "routines.runNow": (id: string, size?: TermSize) => Launched;
+  /** Waits its turn (Queued) while another coding CLI is busy in the folder, unless `now`. */
+  "routines.runNow": (id: string, size?: TermSize, now?: boolean) => Launched | Queued;
+  "routines.cancelWait": (id: string) => void;
   "routines.preview": (schedule: Schedule) => SchedulePreview;
 
   "tasks.list": () => TaskView[];
   "tasks.save": (input: TaskInput) => TaskView;
   "tasks.delete": (id: string) => Deleted;
-  "tasks.execute": (id: string, size?: TermSize) => Launched;
+  /** Waits its turn (Queued) while another coding CLI is busy in the workspace, unless `now`. */
+  "tasks.execute": (id: string, size?: TermSize, now?: boolean) => Launched | Queued;
+  "tasks.cancelWait": (id: string) => TaskView;
+  /** A finished run as a To do task for another agent. Nothing starts until Execute. */
+  "tasks.handOff": (runId: string, agentId: string) => TaskView;
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
   "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
@@ -378,6 +388,12 @@ export interface DeskMethods {
   "dock.command": (command: "back" | "forward" | "reload" | "stop" | "devtools") => void;
 }
 
+/** One waiting CLI or chat in the tray's menu; `route` comes back in "open-route" when it's picked. */
+export interface TrayWaiter {
+  label: string;
+  route: unknown;
+}
+
 export interface DeskEvents {
   changed: Topic[];
   "pty-data": { ptyId: string; data: string; first: number; seq: number };
@@ -387,6 +403,8 @@ export interface DeskEvents {
   "open-run": { runId: string };
   "open-workspace": { workspaceId: string };
   "open-chat": { chatId: string; agentId: string | null };
+  /** Somewhere the page asked to be taken back to: a waiter in the tray or a notification. */
+  "open-route": { route: unknown };
   /** From the tray menu. */
   "open-view": { view: "settings" };
   "open-switcher": true;

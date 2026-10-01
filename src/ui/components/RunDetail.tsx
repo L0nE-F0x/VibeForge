@@ -1,10 +1,12 @@
 import {
   ArrowUpRight,
+  Bot,
   CheckCheck,
   Copy,
   FileDiff,
   FileText,
   FolderOpen,
+  Forward,
   GitCompare,
   Info,
   ListRestart,
@@ -17,8 +19,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
-import { call, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
+import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
+import { setPtyInView } from "../attention.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
@@ -146,6 +149,13 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
     push("success", t("run.continued"), t("run.continuedBody"));
   }, t("tasks.continueFailed"));
   const [stop, stopping] = useAction(async () => run && call("runs.stop", run.id), t("run.stopFailed"));
+  const agents = useAgents().data ?? [];
+  const [handOff, handingOff] = useAction(async (agentId: string) => {
+    if (!run) return;
+    const task = await call("tasks.handOff", run.id, agentId);
+    go({ view: "tasks", taskId: task.id });
+    push("success", t("handoff.done", { agent: agents.find((agent) => agent.id === agentId)?.name ?? "" }), t("handoff.doneBody"));
+  }, t("handoff.failed"));
 
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
@@ -178,6 +188,17 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
           <Button size="sm" icon={ArrowUpRight} onClick={() => go(place)}>
             {t(place.view === "agents" ? "run.openIn.agents" : place.view === "chat" ? "run.openIn.chat" : place.view === "tasks" ? "run.openIn.tasks" : "run.openIn.code")}
           </Button>
+        )}
+        {run.status !== "running" && agents.length > 0 && (
+          <MenuButton
+            size="sm"
+            icon={Forward}
+            busy={handingOff}
+            tip={t("handoff.tip")}
+            items={agents.map((agent) => ({ label: agent.id === run.agentId ? t("handoff.again", { agent: agent.name }) : agent.name, icon: Bot, onSelect: () => void handOff(agent.id) }))}
+          >
+            {t("handoff.button")}
+          </MenuButton>
         )}
         {run.status === "running" ? (
           <Button size="sm" icon={Square} busy={stopping} onClick={() => void stop()}>
@@ -223,6 +244,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
           <Notice tone={run.status === "failed" ? "bad" : "warn"}>{coreText(run.error)}</Notice>
         </div>
       )}
+      <PtyInView ptyId={tab === "session" && run.live ? run.ptyId : null} />
       {tab === "session" &&
         (run.live && run.ptyId ? (
           <LiveTerminal key={run.ptyId} ptyId={run.ptyId} autoFocus />
@@ -290,4 +312,13 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
       )}
     </div>
   );
+}
+
+/** Tells the session watch which run terminal is in front of you, so its glow clears. */
+function PtyInView({ ptyId }: { ptyId: string | null }) {
+  useEffect(() => {
+    setPtyInView("run", ptyId);
+    return () => setPtyInView("run", null);
+  }, [ptyId]);
+  return null;
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, History, Pencil, Play, Plus, Save, Trash2, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, History, Hourglass, Pencil, Play, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RoutineView, Schedule, SchedulePreview } from "../../shared/api.js";
 import { clockTime } from "../../shared/text.js";
@@ -9,6 +9,7 @@ import { useAction, useDeleted, useNav, useToast, type Route } from "../state.js
 import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
+import { writerNames } from "../components/Occupancy.js";
 
 const CRON_PRESETS: Array<{ label: Key; expr: string }> = [
   { label: "routines.preset.weekdays", expr: "0 9 * * 1-5" },
@@ -32,11 +33,13 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
     document.getElementById(`routine-${route.routineId}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [route.routineId, list.length]);
 
-  const [runNow] = useAction(async (routine: RoutineView) => {
-    const launched = await call("routines.runNow", routine.id);
-    push("success", t("routines.started", { name: routine.name }), t("routines.startedBody"));
-    return launched;
+  const [runNow] = useAction(async (routine: RoutineView, now: boolean = false) => {
+    const result = await call("routines.runNow", routine.id, undefined, now);
+    if ("queued" in result) push("info", t("turns.queued", { names: result.behind.join(", ") }), t("turns.queuedBody"));
+    else push("success", t("routines.started", { name: routine.name }), t("routines.startedBody"));
+    return result;
   }, t("routines.runFailed"));
+  const [stopWaiting] = useAction(async (routine: RoutineView) => call("routines.cancelWait", routine.id), t("routines.changeFailed"));
   const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), t("routines.changeFailed"));
   const [remove] = useAction(async (routine: RoutineView) => {
     deleted(t("routines.deleted", { name: routine.name }), await call("routines.delete", routine.id));
@@ -92,6 +95,26 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 </div>
                 <Toggle checked={routine.enabled} onChange={(on) => void toggle(routine, on)} />
               </div>
+              {routine.waiting && (
+                <div style={{ marginTop: 10 }}>
+                  <Notice tone="accent" icon={Hourglass}>
+                    <div className="hstack wrap">
+                      <span className="grow">{t("turns.routineWaiting", { names: writerNames(routine.waiting.behind, agents) || t("turns.someone") })}</span>
+                      <Button size="sm" icon={Play} tip={t("turns.anywayTip")} onClick={() => void runNow(routine, true)}>
+                        {t("turns.anyway")}
+                      </Button>
+                      <Button size="sm" variant="ghost" icon={X} onClick={() => void stopWaiting(routine)}>
+                        {t("turns.stopWaiting")}
+                      </Button>
+                    </div>
+                  </Notice>
+                </div>
+              )}
+              {!routine.waiting && !routine.stillRunning && routine.writers.length > 0 && (
+                <div className="faint" style={{ marginTop: 8, fontSize: "var(--fs-sm)" }}>
+                  {t(routine.shareCheckout ? "turns.routineShares" : "turns.routineWillWait", { names: writerNames(routine.writers, agents) })}
+                </div>
+              )}
               {(routine.issues.length > 0 || routine.lastMissedAt) && (
                 <div className="vstack" style={{ gap: 6, marginTop: 10 }}>
                   {routine.issues.map((issue) => (
@@ -107,7 +130,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 </div>
               )}
               <div className="hstack wrap" style={{ marginTop: 12 }}>
-                <Button size="sm" icon={Play} disabled={routine.stillRunning} onClick={() => void runNow(routine)}>
+                <Button size="sm" icon={Play} disabled={routine.stillRunning || Boolean(routine.waiting)} onClick={() => void runNow(routine)}>
                   {t("routines.runNow")}
                 </Button>
                 <Button size="sm" icon={Pencil} onClick={() => setEditing(routine)}>
@@ -150,8 +173,11 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
     prompt: routine?.prompt ?? "",
     notify: routine?.notify ?? true,
     enabled: routine?.enabled ?? true,
+    shareCheckout: routine?.shareCheckout ?? false,
   });
   const { name, agentId, schedule, prompt, notify, enabled } = form;
+  // A draft kept before 2.0 has no `shareCheckout`.
+  const shareCheckout = form.shareCheckout ?? false;
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setAgentId = (next: string) => setForm((prev) => ({ ...prev, agentId: next }));
   const setSchedule = (next: Schedule) => setForm((prev) => ({ ...prev, schedule: next }));
@@ -175,7 +201,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
   }, [schedule]);
 
   const [save, saving] = useAction(async () => {
-    await call("routines.save", { id: routine?.id, name, agentId, schedule, prompt, notify, enabled });
+    await call("routines.save", { id: routine?.id, name, agentId, schedule, prompt, notify, enabled, shareCheckout });
     forgetDraft(draftKey);
     push("success", routine ? t("routines.saved") : t("routines.created"), preview?.next[0] ? t("routines.nextToast", { time: clockTime(preview.next[0]) }) : undefined);
     onClose();
@@ -266,6 +292,9 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
           <Toggle checked={enabled} onChange={setEnabled} label={t("routines.enabled")} />
           <Toggle checked={notify} onChange={setNotify} label={t("routines.notify")} />
         </div>
+        <Field hint={t("turns.takeTurnsHint")}>
+          <Toggle checked={!shareCheckout} onChange={(on) => setForm((prev) => ({ ...prev, shareCheckout: !on }))} label={t("turns.takeTurns")} />
+        </Field>
         <div className="hstack">
           <Button variant="primary" icon={Save} busy={saving} disabled={!ready} onClick={() => void save()}>
             {routine ? t("routines.save") : t("routines.create")}
