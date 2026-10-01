@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-01
+
+**2.0: agents take turns in a folder, and everyone waiting for you has a name.**
+
+- **Agents take turns.** A task you Execute in its workspace, a routine you Run now, and a routine that comes due now wait while another coding CLI is busy in the same folder (or a folder inside it, in the same repository), and start on their own once it has been quiet for half a minute. An agent that's just sitting idle doesn't hold anything up, and your own Code terminals and chats never wait. The task sheet says who it's waiting for, with **Start now in a copy**, **Start now anyway** and **Stop waiting**. Home has a **Waiting their turn** list.
+- **Every waiter has a name.** Home's new **Waiting for you** list shows each CLI that went quiet out of sight, by agent or CLI and where it is, and opens right there: the pane in Code, the chat, the task or the run. The tray menu lists them too, and one notification covers everyone who started waiting at once.
+- **Each terminal glows on its own.** Looking at one pane no longer clears the others in the same workspace; the workspace keeps its glow until every terminal in it has been seen.
+- **A CLI asking something when it starts counts as waiting.** Claude Code asking to trust a folder, or a CLI asking you to sign in, sat there unnoticed before. After 12 seconds on that first screen it glows like any other waiter.
+- **Who else is in this folder.** Code panes, chats, Home's live list, the task sheet and the routine list name the other coding CLIs working in the same folder.
+- **Hand off.** On a finished run, **Hand off** makes a To do task for another agent, with the run's notes: what changed, how it ended, and where the full transcript and diff are. Nothing starts until you Execute it.
+- **Separate copies, said plainly.** The hint now says a copy has your committed files only (no `node_modules`), isn't a sandbox, and shares the workspace's ports. Copies of one repository are made, applied and removed one at a time.
+
+**Why 2.0.** Execute and routines used to start whenever the agent, folder and engine were fine. Now they can wait. Existing tasks and routines are unchanged and still start at once when nobody else is busy in their folder. To keep the old always-start behaviour for one of them, turn off **Take turns with other agents in this folder** in its form, or set `shareCheckout: true` in its file. Waiting happens while VibeForge is running, including in the tray. If you quit, a routine slot that was waiting counts as missed, as before, and a waiting task stays in To do. Nothing in your config is rewritten, and 1.3 still reads it (it ignores the new field).
+
 ## [1.3.1] - 2026-10-01
 
 **1.3.1: a task's copy can't take your real folder with it.**
@@ -221,7 +235,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.0.0
 [1.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.1
 [1.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.0
 [1.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.2.0
