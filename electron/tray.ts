@@ -8,6 +8,8 @@ import { Menu, nativeImage, Tray, type NativeImage } from "electron";
 export interface TrayState {
   live: number;
   waiting: number;
+  /** Who is waiting, by name, at most a few: each opens where it waits. */
+  waiters: string[];
   sounds: boolean;
   notify: boolean;
   autostart: boolean;
@@ -16,6 +18,7 @@ export interface TrayState {
 export interface TrayActions {
   open(): void;
   goAnywhere(): void;
+  openWaiter(index: number): void;
   settings(): void;
   setSounds(on: boolean): void;
   setNotify(on: boolean): void;
@@ -109,6 +112,7 @@ export class TrayIcon {
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: "Open VibeForge", click: () => this.actions.open() },
+        ...state.waiters.map((label, index) => ({ label, click: () => this.actions.openWaiter(index) })),
         { label: status(state), enabled: false },
         { label: "Go to anything…", accelerator: "Ctrl+K", click: () => this.actions.goAnywhere() },
         { type: "separator" },

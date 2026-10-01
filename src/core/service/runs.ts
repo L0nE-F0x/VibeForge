@@ -95,7 +95,7 @@ export class RunDesk {
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
     }
     if (run.taskId && this.core.store.getTask(run.taskId)) {
-      const launched = await this.tasks.executeTask(run.taskId, size, true);
+      const launched = await this.tasks.continueTask(run.taskId, size);
       return { ...launched, chatId: null, taskId: run.taskId };
     }
     const engine = this.core.requireEngine(run.engine);

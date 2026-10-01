@@ -2,6 +2,8 @@ import path from "node:path";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
 import type { Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
+import type { Writer } from "../checkout.js";
+import type { Waiting } from "./turns.js";
 
 // ------------------------------------------------------------------ host contract
 
@@ -24,7 +26,7 @@ export interface DeskHost {
   /** Record a shell's terminal into a run folder from now on, or (null) stop and write its files. */
   record(ptyId: string, runDir: string | null): Promise<void>;
   resolveBin(bin: string): string | null;
-  notify(note: { title: string; body: string; runId: string }): void;
+  notify(note: { title: string; body: string; runId?: string; taskId?: string; routineId?: string }): void;
   /** Every run that ends, for the finished and failed sounds. */
   finished?(run: { runId: string; origin: RunOrigin; outcome: "ok" | "failed" | "stopped" }): void;
   snapshotGit(cwd: string, startHead: string | null): Promise<string>;
@@ -68,6 +70,8 @@ export interface RoutineInput {
   schedule: Schedule;
   prompt?: string;
   notify?: boolean;
+  /** Start even while another coding CLI is busy in the agent's folder. */
+  shareCheckout?: boolean;
 }
 
 export interface TaskInput {
@@ -78,6 +82,8 @@ export interface TaskInput {
   workspaceId?: string | null;
   /** Work in a separate git worktree of the workspace. */
   isolated?: boolean;
+  /** Start even while another coding CLI is busy in the workspace. */
+  shareCheckout?: boolean;
 }
 
 export interface TermSize {
@@ -97,6 +103,10 @@ export interface RoutineView extends Routine {
   description: string;
   nextFires: string[];
   lastRun: RunView | null;
+  /** Other coding CLIs in the routine's folder right now. */
+  writers: Writer[];
+  /** A due slot or Run now waiting for the folder, and who it waits for. */
+  waiting: Waiting | null;
 }
 
 export interface TaskView extends Task {
@@ -104,6 +114,10 @@ export interface TaskView extends Task {
   blocker: ExecuteBlocker | "engine-missing" | null;
   /** False when the task file points its copy somewhere other than its own worktree. */
   copyOwned: boolean;
+  /** Other coding CLIs in the task's workspace right now (none for a task in its own copy). */
+  writers: Writer[];
+  /** Execute waiting for the workspace, and who it waits for. */
+  waiting: Waiting | null;
 }
 
 export interface ChatView extends ChatRecord {
@@ -120,6 +134,13 @@ export interface RunBundle {
 export interface Launched {
   runId: string;
   ptyId: string;
+}
+
+/** Execute or Run now found another coding CLI busy in the folder: it starts once that one is quiet. */
+export interface Queued {
+  queued: true;
+  /** Who it waits for. */
+  behind: string[];
 }
 
 export interface SendResult extends Launched {

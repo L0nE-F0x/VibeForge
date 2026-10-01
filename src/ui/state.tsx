@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Deleted, RunView } from "../shared/api.js";
+import type { AttentionMark } from "./attention.js";
 import { call, errorText } from "./api.js";
 import { t as translate, useT } from "./i18n/index.js";
 import { covers, sameBox, type Box, type Layer } from "./floating.js";
@@ -44,8 +45,11 @@ function pushRoute(prev: Route[], route: Route): Route[] {
 const VIEWS: ViewName[] = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "settings"];
 const NAV_KEY = "vf.nav";
 
-function isRoute(value: unknown): value is Route {
-  return Boolean(value) && typeof value === "object" && VIEWS.includes((value as Route).view);
+/** A route this page could have made: a saved one, or one handed back by the tray or a notification. */
+export function isRoute(value: unknown): value is Route {
+  if (!value || typeof value !== "object") return false;
+  const route = value as Record<string, unknown>;
+  return VIEWS.includes(route.view as ViewName) && Object.entries(route).every(([key, item]) => key === "view" || item === undefined || typeof item === "string");
 }
 
 /** Where the last session was: the open view and where each view was left. */
@@ -127,6 +131,16 @@ export function routeForRun(run: Pick<RunView, "id" | "origin" | "agentId" | "ch
   if (run.origin === "task" && run.taskId) return { view: "tasks", taskId: run.taskId };
   if (run.origin === "code" && run.live && run.workspaceId) return { view: "code", workspaceId: run.workspaceId, ptyId: run.ptyId ?? undefined };
   return { view: "runs", runId: run.id };
+}
+
+/** Where a terminal that wants you is: its chat, its task, its pane in Code, or its run. */
+export function routeForMark(mark: AttentionMark, stillLive: boolean): Route {
+  if (mark.origin === "agent-chat" && mark.agentId && mark.chatId) return { view: "agents", agentId: mark.agentId, tab: "chats", chatId: mark.chatId };
+  if (mark.origin === "chat" && mark.chatId) return { view: "chat", chatId: mark.chatId };
+  if (mark.origin === "task" && mark.taskId) return { view: "tasks", taskId: mark.taskId };
+  if (mark.workspaceId && (mark.origin === null || mark.origin === "code")) return { view: "code", workspaceId: mark.workspaceId, ptyId: stillLive ? mark.ptyId : undefined };
+  if (mark.runId) return { view: "runs", runId: mark.runId };
+  return mark.workspaceId ? { view: "code", workspaceId: mark.workspaceId } : { view: "home" };
 }
 
 // ------------------------------------------------------------------ floating layers

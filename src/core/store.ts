@@ -252,6 +252,7 @@ function normalizeRoutine(id: string, value: unknown): Routine | null {
     notify: bool(record.notify, true),
     lastFiredAt: strOrNull(record.lastFiredAt),
     lastMissedAt: strOrNull(record.lastMissedAt),
+    shareCheckout: record.shareCheckout === true,
   };
 }
 
@@ -269,6 +270,8 @@ function normalizeTask(id: string, value: unknown): Task | null {
     runIds: strList(record.runIds),
     isolated: record.isolated === true,
     copy: workingCopy(record.copy),
+    shareCheckout: record.shareCheckout === true,
+    sourceRunId: strOrNull(record.sourceRunId),
     createdAt: str(record.createdAt),
     updatedAt: str(record.updatedAt),
   };

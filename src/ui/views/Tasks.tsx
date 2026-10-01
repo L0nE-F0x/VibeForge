@@ -1,11 +1,13 @@
-import { CheckCircle2, FolderPlus, GitBranch, GitMerge, KanbanSquare, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { useEffect, useState, type DragEvent } from "react";
+import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
 import { Button, Chip, Field, Input, Notice, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useConfirm, useDeleted, useNav, useToast, type Route } from "../state.js";
+import { writerNames } from "../components/Occupancy.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
@@ -105,6 +107,12 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
                         {task.isolated && <Chip icon={GitBranch} tone={task.copy ? "accent" : undefined} title={task.copy?.branch}>{t("tasks.copyChip")}</Chip>}
                       </span>
                       {task.status === "todo" && task.blocker && <span style={{ color: "var(--yellow)", fontSize: "var(--fs-sm)" }}>{t(blockerKey(task.blocker))}</span>}
+                      {task.waiting && (
+                        <span className="hstack accent-text" style={{ fontSize: "var(--fs-sm)" }}>
+                          <Hourglass size={12} />
+                          <span className="truncate">{t("turns.waitingShort", { names: writerNames(task.waiting.behind, agents) || t("turns.someone") })}</span>
+                        </span>
+                      )}
                       {task.lastRun && (
                         <span className="hstack faint" style={{ fontSize: "var(--fs-sm)" }}>
                           <span className={`dot ${task.lastRun.status}`} />
@@ -160,22 +168,31 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     agentId: task ? (task.agentId ?? "") : (agents[0]?.id ?? ""),
     workspaceId: task ? (task.workspaceId ?? "") : (workspaces[0]?.id ?? ""),
     isolated: task?.isolated ?? false,
+    shareCheckout: task?.shareCheckout ?? false,
   });
   const { title, body, agentId, workspaceId } = form;
   // A draft kept before copies existed has no `isolated`.
   const isolated = form.isolated ?? false;
   const setIsolated = (next: boolean) => setForm((prev) => ({ ...prev, isolated: next }));
+  // A draft kept before 2.0 has no `shareCheckout`.
+  const shareCheckout = form.shareCheckout ?? false;
+  const setShareCheckout = (next: boolean) => setForm((prev) => ({ ...prev, shareCheckout: next }));
   const setTitle = (next: string) => setForm((prev) => ({ ...prev, title: next }));
   const setBody = (next: string) => setForm((prev) => ({ ...prev, body: next }));
   const setAgentId = (next: string) => setForm((prev) => ({ ...prev, agentId: next }));
   const setWorkspaceId = (next: string) => setForm((prev) => ({ ...prev, workspaceId: next }));
 
   const dirty =
-    !task || title !== task.title || body !== task.body || (agentId || null) !== task.agentId || (workspaceId || null) !== task.workspaceId || isolated !== task.isolated;
-  const fields = () => ({ title, body, agentId: agentId || null, workspaceId: workspaceId || null, isolated });
+    !task || title !== task.title || body !== task.body || (agentId || null) !== task.agentId || (workspaceId || null) !== task.workspaceId || isolated !== task.isolated || shareCheckout !== task.shareCheckout;
+  const fields = () => ({ title, body, agentId: agentId || null, workspaceId: workspaceId || null, isolated, shareCheckout });
   const agent = agents.find((item) => item.id === agentId);
   const workspace = workspaces.find((item) => item.id === workspaceId);
   const live = task?.lastRun?.live ? task.lastRun : null;
+  // The task's terminal is in front of you while the sheet is open.
+  useEffect(() => {
+    setPtyInView("task", live?.ptyId ?? null);
+    return () => setPtyInView("task", null);
+  }, [live?.ptyId]);
 
   const [save, saving] = useAction(async () => {
     const saved = await call("tasks.save", { id: task?.id, ...fields() });
@@ -185,11 +202,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     } else push("success", t("tasks.saved"));
     return saved;
   }, t("tasks.saveFailed"));
-  const [execute, executing] = useAction(async () => {
+  const [execute, executing] = useAction(async (now: boolean = false, inCopy: boolean = false) => {
     if (!task) return;
-    if (dirty) await call("tasks.save", { id: task.id, ...fields() });
-    await call("tasks.execute", task.id, termSize());
+    if (dirty || inCopy) await call("tasks.save", { id: task.id, ...fields(), ...(inCopy ? { isolated: true } : {}) });
+    const result = await call("tasks.execute", task.id, termSize(), now);
+    if ("queued" in result) push("info", t("turns.queued", { names: result.behind.join(", ") }), t("turns.queuedBody"));
   }, t("tasks.executeFailed"));
+  const [stopWaiting] = useAction(async () => task && call("tasks.cancelWait", task.id), t("tasks.stopFailed"));
   const [cont, continuing] = useAction(async () => task && call("tasks.continue", task.id, termSize()), t("tasks.continueFailed"));
   const [stop, stopping] = useAction(async () => task && call("tasks.stop", task.id), t("tasks.stopFailed"));
   const [setStatus] = useAction(async (status: TaskStatus) => task && call("tasks.setStatus", task.id, status), t("tasks.moveFailed"));
@@ -243,7 +262,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
       <div className="page-body vstack" style={{ gap: 14 }}>
         <div className="hstack wrap">
           {task && (task.status === "todo" || task.status === "review" || task.status === "done") && !live && (
-            <Button variant="primary" icon={Play} busy={executing} disabled={Boolean(task.blocker) && !dirty} onClick={() => void execute()}>
+            <Button variant="primary" icon={Play} busy={executing} disabled={(Boolean(task.blocker) && !dirty) || Boolean(task.waiting)} onClick={() => void execute()}>
               {task.runIds.length ? t("tasks.runAgain") : t("tasks.execute")}
             </Button>
           )}
@@ -278,6 +297,31 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
           </Button>
           {task && <Button variant="danger" icon={Trash2} onClick={() => void remove()} title={t("tasks.delete")} />}
         </div>
+        {task?.waiting && !live && (
+          <Notice tone="accent" icon={Hourglass}>
+            <div className="vstack" style={{ gap: 8 }}>
+              <span>{t("turns.waitingNote", { names: writerNames(task.waiting.behind, agents) || t("turns.someone"), workspace: workspace?.name ?? "" })}</span>
+              <div className="hstack wrap">
+                {!task.isolated && (
+                  <Button size="sm" variant="primary" icon={GitBranch} busy={executing} tip={t("turns.inCopyTip")} onClick={() => void execute(true, true)}>
+                    {t("turns.inCopy")}
+                  </Button>
+                )}
+                <Button size="sm" icon={Play} busy={executing} tip={t("turns.anywayTip")} onClick={() => void execute(true)}>
+                  {t("turns.anyway")}
+                </Button>
+                <Button size="sm" variant="ghost" icon={X} onClick={() => void stopWaiting()}>
+                  {t("turns.stopWaiting")}
+                </Button>
+              </div>
+            </div>
+          </Notice>
+        )}
+        {task && !task.waiting && !live && !task.isolated && task.writers.length > 0 && (
+          <Notice icon={Hourglass}>
+            {t(task.writers.some((writer) => writer.busy) ? "turns.busyHere" : "turns.idleHere", { names: writerNames(task.writers, agents) })}
+          </Notice>
+        )}
         {task?.blocker && !live && task.status !== "running" && (
           <Notice tone="warn">
             <div className="hstack wrap">
@@ -354,6 +398,11 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
         <Field hint={t("tasks.isolatedHint")}>
           <Toggle checked={isolated} disabled={Boolean(task?.copy)} onChange={setIsolated} label={t("tasks.isolated")} />
         </Field>
+        {!isolated && (
+          <Field hint={t("turns.takeTurnsHint")}>
+            <Toggle checked={!shareCheckout} onChange={(on) => setShareCheckout(!on)} label={t("turns.takeTurns")} />
+          </Field>
+        )}
         {task && (runs.data?.length ?? 0) > 0 && (
           <>
             <div className="section-title">{t("runs.title")}</div>

@@ -6,8 +6,9 @@ import { describe, expect, it } from "vitest";
 import { allocateRunDir, normalizeRun, writeRunMeta } from "../../src/core/runs.js";
 import { matchExpression, Store } from "../../src/core/store.js";
 import { snippetParts } from "../../src/shared/text.js";
-import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
+import { TeamService, type DeskHost, type Launched, type Queued, type SpawnRequest } from "../../src/core/team-service.js";
 import type { RunMeta } from "../../src/core/types.js";
+import { TURN_GRACE_MS } from "../../src/core/checkout.js";
 import { gitHead, snapshotGit } from "../../src/core/vcs.js";
 
 function tempDir(): string {
@@ -16,8 +17,14 @@ function tempDir(): string {
 
 const INTERVAL = 5 * 60 * 1000;
 
+/** A start that went ahead, not one waiting for its folder. */
+function started(result: Launched | Queued): Launched {
+  if ("queued" in result) throw new Error(`Waiting for ${result.behind.join(", ")}`);
+  return result;
+}
+
 /** A PTY host that records what the service asks of it; tests end processes with `exit`. */
-function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: string } = {}) {
+function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: string; now?: () => Date } = {}) {
   const configRoot = opts.configRoot ?? tempDir();
   const dataRoot = opts.dataRoot ?? tempDir();
   const place = tempDir();
@@ -63,7 +70,7 @@ function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot?: stri
     snapshotGit: async () => "git status --short\n M a.txt\n\ngit diff --stat\n a.txt | 1 +\n 1 file changed, 1 insertion(+)\n",
     gitHead: async () => "abc1234",
   };
-  svc = new TeamService({ configRoot, dataRoot, appStartedAt: opts.appStartedAt ?? new Date(9 * INTERVAL), now: () => new Date(), host });
+  svc = new TeamService({ configRoot, dataRoot, appStartedAt: opts.appStartedAt ?? new Date(9 * INTERVAL), now: opts.now ?? (() => new Date()), host });
   const exit = (ptyId: string, code = 0) => svc.onPtyExit(ptyId, code, null);
   return { svc, host, spawns, sent, killed, notes, ended, recorded, place, configRoot, dataRoot, exit };
 }
@@ -326,7 +333,7 @@ describe("routines", () => {
     const agent = await agentIn(ctx);
     const routine = ctx.svc.saveRoutine({ name: "R", agentId: agent.id, schedule: { kind: "cron", expr: "0 9 * * 1-5" }, prompt: "p", enabled: false });
     const before = ctx.svc.store.getRoutine(routine.id)!.lastFiredAt;
-    const launched = await ctx.svc.runRoutineNow(routine.id);
+    const launched = started(await ctx.svc.runRoutineNow(routine.id));
     expect(ctx.svc.store.getRoutine(routine.id)!.lastFiredAt).toBe(before);
     await expect(ctx.svc.runRoutineNow(routine.id)).rejects.toThrow(/still going/);
     await ctx.exit(launched.ptyId);
@@ -334,6 +341,120 @@ describe("routines", () => {
     await expect(ctx.svc.runRoutineNow(routine.id)).rejects.toThrow(/does not allow routines/);
     expect(ctx.svc.listRoutines()[0].issues.join(" ")).toMatch(/does not allow routines/);
     expect(() => ctx.svc.saveRoutine({ name: "Bad", agentId: agent.id, schedule: { kind: "every", minutes: 2 }, prompt: "p" })).toThrow(/at least 5/);
+    ctx.svc.close();
+  });
+});
+
+describe("taking turns in a folder", () => {
+  /** A clock the test moves on by hand. */
+  const clock = () => {
+    let at = Date.parse("2026-10-01T09:00:00Z");
+    return { now: () => new Date(at), pass: (ms: number) => (at += ms) };
+  };
+
+  it("lets a task wait while another coding CLI is busy in its workspace, then starts it", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    // A coding CLI typed into a Code terminal in the same folder, working.
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(shell.ptyId, ["argy"], ctx.place);
+    ctx.svc.onPtyActivity(shell.ptyId, true);
+    await ctx.svc.writersIn(ctx.place);
+    const task = ctx.svc.saveTask({ title: "Dim lamp", agentId: agent.id, workspaceId: workspace.id });
+    expect(ctx.svc.listTasks()[0].writers.map((writer) => [writer.label, writer.busy])).toEqual([["Argy", true]]);
+
+    const result = await ctx.svc.executeTask(task.id);
+    expect(result).toEqual({ queued: true, behind: ["Argy"] });
+    expect(ctx.spawns).toHaveLength(1);
+    expect(ctx.svc.listTasks()[0]).toMatchObject({ status: "todo", waiting: { behind: [{ label: "Argy" }] } });
+    // Executing again keeps its place in line.
+    expect(await ctx.svc.executeTask(task.id)).toMatchObject({ queued: true });
+
+    // It went quiet, but a short pause doesn't hand the folder over.
+    ctx.svc.onPtyActivity(shell.ptyId, false);
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(1);
+    time.pass(TURN_GRACE_MS + 1000);
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(2);
+    expect(ctx.spawns[1].cwd).toBe(ctx.place);
+    expect(ctx.svc.listTasks()[0]).toMatchObject({ status: "running", waiting: null });
+    ctx.svc.close();
+  });
+
+  it("starts at once when asked to, or when the task shares its folder", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const first = ctx.svc.saveTask({ title: "One", agentId: agent.id, workspaceId: workspace.id });
+    expect(await ctx.svc.executeTask(first.id)).toMatchObject({ queued: true });
+    // "Start anyway".
+    expect(await ctx.svc.executeTask(first.id, {}, true)).toMatchObject({ runId: expect.any(String) });
+    expect(ctx.svc.listTasks().find((task) => task.id === first.id)!.waiting).toBeNull();
+    const shared = ctx.svc.saveTask({ title: "Two", agentId: agent.id, workspaceId: workspace.id, shareCheckout: true });
+    expect(await ctx.svc.executeTask(shared.id)).toMatchObject({ runId: expect.any(String) });
+    // The CLI only just started, so it still has its turn.
+    const third = ctx.svc.saveTask({ title: "Three", agentId: agent.id, workspaceId: workspace.id });
+    expect(await ctx.svc.executeTask(third.id)).toMatchObject({ queued: true });
+    ctx.svc.cancelTaskWait(third.id);
+    expect(ctx.svc.listTasks().find((task) => task.id === third.id)!.waiting).toBeNull();
+    ctx.svc.close();
+  });
+
+  it("keeps a due routine's slot while it waits, and lets Code and chats in", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now, appStartedAt: new Date(time.now().getTime() - INTERVAL) });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "p" });
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(routine.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * INTERVAL).toISOString() });
+    const lastFired = ctx.svc.store.getRoutine(routine.id)!.lastFiredAt;
+
+    await ctx.svc.tick(time.now());
+    expect(ctx.spawns).toHaveLength(1);
+    expect(ctx.svc.store.getRoutine(routine.id)!.lastFiredAt).toBe(lastFired);
+    expect(ctx.svc.listRoutines()[0].waiting?.behind).toHaveLength(1);
+    await ctx.svc.tick(new Date(time.now().getTime() + 30_000));
+    expect(ctx.spawns).toHaveLength(1);
+    // A person in Code is never made to wait.
+    await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    expect(ctx.spawns).toHaveLength(2);
+
+    await ctx.exit(busy.ptyId);
+    await ctx.exit("pty-2");
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(3);
+    expect(ctx.svc.store.getRoutine(routine.id)!.lastFiredAt).not.toBe(lastFired);
+    expect(ctx.svc.listRoutines()[0].waiting).toBeNull();
+    ctx.svc.close();
+  });
+});
+
+describe("hand off", () => {
+  it("makes a To do task for another agent from a finished run, and starts nothing", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const other = await ctx.svc.saveAgent({ name: "Reviewer", brief: "Review.", engine: "argy", places: [ctx.place] });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Dim lamp", agentId: agent.id, workspaceId: workspace.id });
+    const launched = started(await ctx.svc.executeTask(task.id));
+    await ctx.exit(launched.ptyId);
+    const spawned = ctx.spawns.length;
+
+    const handed = ctx.svc.handOff(launched.runId, other.id);
+    expect(handed).toMatchObject({ status: "todo", agentId: other.id, workspaceId: workspace.id, sourceRunId: launched.runId, title: "Hand off: Dim lamp" });
+    expect(handed.body).toContain(`Run: ${launched.runId}`);
+    expect(handed.body).toContain(`Work in: ${ctx.place}`);
+    expect(ctx.spawns).toHaveLength(spawned);
+    // It survives a later edit.
+    ctx.svc.saveTask({ id: handed.id, title: "Hand off: Dim lamp, check it" });
+    expect(ctx.svc.listTasks().find((item) => item.id === handed.id)!.sourceRunId).toBe(launched.runId);
+    expect(() => ctx.svc.handOff(launched.runId, "nobody")).toThrow(/agent no longer exists/);
     ctx.svc.close();
   });
 });
@@ -348,7 +469,7 @@ describe("tasks", () => {
     expect(task.status).toBe("todo");
     expect(task.blocker).toBeNull();
 
-    const launched = await ctx.svc.executeTask(task.id);
+    const launched = started(await ctx.svc.executeTask(task.id));
     expect(ctx.spawns[0].argv[2]).toContain("# This run\nTask: Dim lamp\n\nWarm it");
     expect(ctx.svc.listTasks()[0]).toMatchObject({ status: "running" });
     await expect(ctx.svc.executeTask(task.id)).rejects.toThrow(/already running/);
@@ -358,7 +479,7 @@ describe("tasks", () => {
     expect(done.lastRun).toMatchObject({ status: "exited", changes: "1 file changed, 1 insertion(+)" });
     expect(fs.readFileSync(path.join(done.lastRun!.dir, "git.txt"), "utf8")).toContain("git status --short");
 
-    const again = await ctx.svc.executeTask(task.id);
+    const again = started(await ctx.svc.executeTask(task.id));
     await ctx.svc.stopTask(task.id);
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(ctx.svc.getRun(again.runId).run.status).toBe("stopped");
@@ -503,7 +624,7 @@ describe("runs", () => {
     const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id, isolated: true });
     expect(task.isolated).toBe(true);
 
-    const launched = await ctx.svc.executeTask(task.id);
+    const launched = started(await ctx.svc.executeTask(task.id));
     const copy = ctx.svc.listTasks().find((item) => item.id === task.id)!.copy!;
     expect(copy.path).toBe(path.join(ctx.dataRoot, "worktrees", task.id));
     expect(ctx.spawns[0].cwd).toBe(copy.path);
@@ -531,7 +652,7 @@ describe("runs", () => {
     // Another copy, while the workspace changes the same line: a conflict to resolve, copy kept.
     git(repo, "commit", "-qam", "took the change");
     const second = ctx.svc.saveTask({ title: "Again", agentId: agent.id, workspaceId: workspace.id, isolated: true });
-    const again = await ctx.svc.executeTask(second.id);
+    const again = started(await ctx.svc.executeTask(second.id));
     const secondCopy = ctx.svc.listTasks().find((item) => item.id === second.id)!.copy!;
     fs.writeFileSync(path.join(secondCopy.path, "a.txt"), "one\nfrom the copy\n");
     await ctx.exit(again.ptyId);
@@ -641,7 +762,7 @@ describe("runs", () => {
     const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "Keep notes.", engine: "argy", places: [repo] });
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id });
-    const launched = await ctx.svc.executeTask(task.id);
+    const launched = started(await ctx.svc.executeTask(task.id));
     fs.writeFileSync(path.join(repo, "a.txt"), "one\nsession-line-two\n");
     fs.writeFileSync(path.join(repo, "new.txt"), "brand-new-file\n");
 
@@ -681,7 +802,7 @@ describe("runs", () => {
     };
     const stamp = new Date().toISOString();
     const task = (id: string, runIds: string[]) =>
-      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, isolated: false, copy: null, createdAt: stamp, updatedAt: stamp });
+      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, isolated: false, copy: null, shareCheckout: false, sourceRunId: null, createdAt: stamp, updatedAt: stamp });
     task("crashed", [orphan("crashed")]);
     // Its latest run is a newer one, as after an Execute that raced the settling.
     task("restarted", [orphan("restarted"), "a-newer-run"]);

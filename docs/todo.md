@@ -1,13 +1,13 @@
 # To do
 
-1.3.0 (2026-09-30): the Code mic as a click, task copies (git worktrees), run search, run storage and Settings → Storage, plan alerts, the rest of the UI translated, keyboard focus, a quieter log, the service split up, a CI smoke test and releases from tags; see `CHANGELOG.md` and `status.md`. Updated for 1.2.0 (2026-09-30): the ember glow, runs by day, a quieter run header, sliding selection, dimmed split panes, loading placeholders and Undo instead of "are you sure?"; see `CHANGELOG.md`. The X post and video for it are in `~/Pictures/VibeForge 1.2/`. Before that, 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the side browser, and two fixes.
+2.0.0 (2026-10-01): agents take turns in a folder, every waiter has a name on Home and in the tray, Hand off, and task copies that can only ever delete themselves (1.3.1); see `CHANGELOG.md` and `status.md`. Updated for 1.3.0 (2026-09-30): the Code mic as a click, task copies (git worktrees), run search, run storage and Settings → Storage, plan alerts, the rest of the UI translated, keyboard focus, a quieter log, the service split up, a CI smoke test and releases from tags; see `CHANGELOG.md` and `status.md`. Updated for 1.2.0 (2026-09-30): the ember glow, runs by day, a quieter run header, sliding selection, dimmed split panes, loading placeholders and Undo instead of "are you sure?"; see `CHANGELOG.md`. The X post and video for it are in `~/Pictures/VibeForge 1.2/`. Before that, 1.1.0 (2026-09-29): a run keeps its diff, Code links open in the side browser, and two fixes.
 
 ## Next up
 
 **Try for real** (from the 2026-09-30 pass; everything else was checked on the hidden test window):
 
 - [ ] **The Code mic with your microphone, leaning back**: click it, talk, click again, press Enter. Then the same in a chat box.
-- [ ] **A real task in its own copy**, with Claude Code: it will ask to trust the new folder (`~/.local/share/vibeforge/worktrees/<task>`) once. Apply it, and try a conflict.
+- [x] **A real task in its own copy**, with Claude Code (2026-10-01, headless): no trust question for a worktree of a trusted repository; Apply and a conflict both worked. Still worth one try on a repository Claude hasn't trusted yet.
 - [ ] **Settings → Storage on your real runs**: the first upkeep, 2 minutes after start, compresses them (86 MB → about 15 MB expected). Pick a keep rule only if you want old runs gone.
 - [ ] **The CI smoke job** on the first push (xvfb on GitHub's runner). If it's reliable, consider making it a required check.
 

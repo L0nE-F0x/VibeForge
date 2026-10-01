@@ -128,7 +128,7 @@ export function describeSchedule(schedule: Schedule): string {
   }
 }
 
-function firedAtOrAfter(lastFiredAt: string | null, slot: Date): boolean {
+export function firedAtOrAfter(lastFiredAt: string | null, slot: Date): boolean {
   if (!lastFiredAt) return false;
   const ms = Date.parse(lastFiredAt);
   if (Number.isNaN(ms)) return false;

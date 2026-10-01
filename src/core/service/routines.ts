@@ -1,19 +1,25 @@
 import path from "node:path";
-import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, firedAtOrAfter, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, Schedule } from "../types.js";
-import type { Deleted, Launched, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
+import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
+import type { FolderTurns } from "./turns.js";
 
 /** Routines: scheduled prompts for an agent, fired by `tick`. */
 export class RoutineDesk {
-  constructor(private readonly core: ServiceCore) {}
+  constructor(
+    private readonly core: ServiceCore,
+    private readonly turns: FolderTurns,
+  ) {}
 
   listRoutines(): RoutineView[] {
     const now = this.core.now();
     return this.core.store.listRoutines().map((routine) => {
       const agent = routine.agentId ? this.core.store.getAgent(routine.agentId) : null;
       const last = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0] ?? null;
+      const folder = agent ? this.core.firstPlace(agent.places) : null;
+      const own = new Set(this.core.listLive().filter((session) => session.routineId === routine.id).map((session) => session.ptyId));
       return {
         ...routine,
         agentName: agent?.name ?? null,
@@ -22,6 +28,8 @@ export class RoutineDesk {
         description: describeSchedule(routine.schedule),
         nextFires: routine.enabled ? nextFireTimes(routine.schedule, now, 3).map((date) => date.toISOString()) : [],
         lastRun: last ? this.core.view(last) : null,
+        writers: folder ? this.turns.writersNow(folder, own) : [],
+        waiting: this.turns.waiting("routine", routine.id),
       };
     });
   }
@@ -58,6 +66,7 @@ export class RoutineDesk {
       notify: typeof input.notify === "boolean" ? input.notify : (existing?.notify ?? true),
       lastFiredAt: existing?.lastFiredAt ?? null,
       lastMissedAt: existing?.lastMissedAt ?? null,
+      shareCheckout: typeof input.shareCheckout === "boolean" ? input.shareCheckout : (existing?.shareCheckout ?? false),
     };
     // A new or rescheduled routine starts counting from now, not from a slot in the past.
     const scheduleChanged = !existing || JSON.stringify(existing.schedule) !== JSON.stringify(schedule);
@@ -74,6 +83,7 @@ export class RoutineDesk {
     const file = this.core.store.pathOf("routine", id);
     if (!file) throw new Error("That routine no longer exists.");
     const bin = this.core.trash.stash([file]);
+    this.turns.cancel("routine", id);
     this.core.emit("routines");
     return this.core.keepForUndo(bin, () => this.core.emit("routines"));
   }
@@ -88,7 +98,11 @@ export class RoutineDesk {
     return next;
   }
 
-  async runRoutineNow(id: string, size: TermSize = {}): Promise<Launched> {
+  /**
+   * Run a routine now. Like a due slot, it waits its turn while another coding CLI is busy in the
+   * agent's folder, unless `now` or the routine's `shareCheckout` says to start anyway.
+   */
+  async runRoutineNow(id: string, size: TermSize = {}, now = false): Promise<Launched | Queued> {
     await this.core.settled;
     const routine = this.core.store.getRoutine(id);
     if (!routine) throw new Error("That routine no longer exists.");
@@ -109,7 +123,59 @@ export class RoutineDesk {
             : "The previous run of this routine is still going.",
       );
     }
-    return this.launchRoutine(routine, agent, size);
+    return this.fire(routine.id, null, size, now);
+  }
+
+  /** Stop a routine waiting for its folder. A due slot that was waiting is let go, as if missed. */
+  cancelWait(id: string): void {
+    const waited = this.turns.waiting("routine", id);
+    this.turns.cancel("routine", id);
+    const routine = this.core.store.getRoutine(id);
+    if (waited && routine) this.core.store.writeRoutine({ ...routine, lastFiredAt: this.core.now().toISOString() });
+    this.core.emit("routines");
+  }
+
+  /**
+   * Start a routine in the agent's first folder, taking its turn there: with another coding CLI
+   * busy, it waits in line and starts once that one is quiet. A due slot (`scheduledAt`) is only
+   * used up when the run actually starts, so it isn't missed while it waits.
+   */
+  private async fire(id: string, scheduledAt: string | null, size: TermSize, now = false): Promise<Launched | Queued> {
+    const found = this.core.store.getRoutine(id);
+    const agent = found ? this.core.store.getAgent(found.agentId) : null;
+    if (!found || !agent) throw new Error("That routine no longer exists.");
+    const cwd = this.core.firstPlace(agent.places);
+    if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
+    return this.turns.withFolderLock(cwd, async () => {
+      const routine = this.core.store.getRoutine(id) ?? found;
+      if (scheduledAt && firedAtOrAfter(routine.lastFiredAt, new Date(scheduledAt))) return { queued: true, behind: [] };
+      const busy = now || routine.shareCheckout ? [] : await this.turns.busyIn(cwd);
+      if (busy.length) {
+        this.turns.enqueue({
+          kind: "routine",
+          id,
+          folder: cwd,
+          start: () => this.fire(id, scheduledAt, size),
+          failed: (message) => this.failedStart(routine, agent, message, scheduledAt),
+        });
+        this.core.emit("routines");
+        return { queued: true, behind: busy.map((writer) => writer.label) };
+      }
+      this.turns.cancel("routine", id);
+      // Use up the slot first so a failed start never hot-loops on every tick.
+      if (scheduledAt) this.core.store.writeRoutine({ ...routine, lastFiredAt: scheduledAt });
+      return this.launchRoutine(routine, agent, size);
+    });
+  }
+
+  /** A start that failed with nobody watching: a failed run for a due slot, a notification for Run now. */
+  private failedStart(routine: Routine, agent: Agent, message: string, scheduledAt: string | null): void {
+    if (!scheduledAt) {
+      this.core.options.host.notify({ title: routine.name, body: message, routineId: routine.id });
+      return;
+    }
+    const latest = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0];
+    if (!latest || latest.startedAt < scheduledAt) this.recordFailedStart(routine, agent, message);
   }
 
   async tick(now: Date = this.core.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
@@ -135,16 +201,19 @@ export class RoutineDesk {
           this.core.emit("routines");
         }
       } else if (decision.action === "fire" && agent) {
-        // Consume the slot first so a failed start never hot-loops on every tick.
-        this.core.store.writeRoutine({ ...routine, lastFiredAt: decision.scheduledAt });
+        // Already in line for its folder: it starts from there.
+        if (this.turns.waiting("routine", routine.id)) continue;
         const runsBefore = new Set(this.core.store.queryRuns({ routineId: routine.id, limit: 5 }).map((run) => run.id));
         try {
-          await this.launchRoutine(routine, agent, {});
+          await this.fire(routine.id, decision.scheduledAt, {});
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           results[results.length - 1].error = message;
           // A spawn failure has already recorded its run; a missing folder or CLI fails before
           // there is one, so record it here or the slot would pass with nothing to show for it.
+          if (this.core.store.getRoutine(routine.id)?.lastFiredAt !== decision.scheduledAt) {
+            this.core.store.writeRoutine({ ...(this.core.store.getRoutine(routine.id) ?? routine), lastFiredAt: decision.scheduledAt });
+          }
           const recorded = this.core.store.queryRuns({ routineId: routine.id, limit: 5 }).some((run) => !runsBefore.has(run.id));
           if (!recorded) this.recordFailedStart(routine, agent, message);
         }

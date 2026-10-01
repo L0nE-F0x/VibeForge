@@ -369,6 +369,7 @@ export class ServiceCore {
       chatId: meta.chatId,
       taskId: meta.taskId,
       workspaceId: meta.workspaceId,
+      routineId: meta.routineId,
     });
     if (input.chatId) {
       const chat = this.store.getChat(input.chatId);

@@ -18,7 +18,7 @@ import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
-import type { DeskEvents, Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
 import { TrayIcon, type TrayState } from "./tray.js";
@@ -55,8 +55,9 @@ let quitting = false;
 let shutdownDone = false;
 /** Started by the login autostart entry: stay in the tray until opened. */
 const startHidden = process.argv.includes(HIDDEN_ARG);
-/** CLIs and chats waiting for you, as the page counts them. */
+/** CLIs and chats waiting for you, as the page counts and names them. */
 let waiting = 0;
+let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
 const notifications = new Set<Notification>();
 
@@ -135,7 +136,17 @@ function omarchyDoNotDisturb(): boolean {
 }
 
 /** A desktop notification; clicking it brings VibeForge up on the run or workspace it is about. */
-function notify(note: { title: string; body: string; runId?: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null }): void {
+function notify(note: {
+  title: string;
+  body: string;
+  runId?: string;
+  taskId?: string;
+  routineId?: string;
+  workspaceId?: string | null;
+  chatId?: string | null;
+  agentId?: string | null;
+  route?: unknown;
+}): void {
   if (Notification.isSupported()) {
     // VibeForge plays its own sounds, so the desktop's would be a second one for the same moment.
     const silent = Boolean(service?.getSettings().sounds.on);
@@ -143,7 +154,10 @@ function notify(note: { title: string; body: string; runId?: string; workspaceId
     notifications.add(notification);
     notification.on("click", () => {
       focusWindow();
-      if (note.runId) send("open-run", { runId: note.runId });
+      if (note.route) send("open-route", { route: note.route });
+      else if (note.taskId) send("open-route", { route: { view: "tasks", taskId: note.taskId } });
+      else if (note.routineId) send("open-route", { route: { view: "routines", routineId: note.routineId } });
+      else if (note.runId) send("open-run", { runId: note.runId });
       else if (note.chatId) send("open-chat", { chatId: note.chatId, agentId: note.agentId ?? null });
       else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
     });
@@ -288,6 +302,11 @@ const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.
     focusWindow();
     send("open-switcher", true);
   },
+  openWaiter: (index) => {
+    const waiter = waiters[index];
+    focusWindow();
+    if (waiter) send("open-route", { route: waiter.route });
+  },
   settings: () => {
     focusWindow();
     send("open-view", { view: "settings" });
@@ -314,7 +333,7 @@ function setAutostart(on: boolean): void {
 
 function trayState(): TrayState {
   const settings = service!.getSettings();
-  return { live: service!.liveCount(), waiting, sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
+  return { live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
 }
 
 function syncTray(): void {
@@ -455,7 +474,7 @@ function handlers(): Handlers {
     "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
-      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId });
+      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
     "app.autostart": () => readAutostart(autostartPath),
@@ -464,10 +483,14 @@ function handlers(): Handlers {
       syncTray();
       return readAutostart(autostartPath);
     },
-    "app.attention": (count) => {
-      const next = Math.max(0, Math.floor(Number(count) || 0));
-      if (next === waiting) return;
+    "app.attention": (state) => {
+      const next = Math.max(0, Math.floor(Number(state?.count) || 0));
+      const named = Array.isArray(state?.waiters)
+        ? state.waiters.slice(0, 8).map((waiter) => ({ label: String(waiter?.label ?? "").slice(0, 80), route: waiter?.route ?? null }))
+        : [];
+      if (next === waiting && JSON.stringify(named) === JSON.stringify(waiters)) return;
       waiting = next;
+      waiters = named;
       syncTray();
     },
     "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
@@ -521,14 +544,17 @@ function handlers(): Handlers {
     "routines.save": (input) => s().saveRoutine(input),
     "routines.delete": (id) => s().deleteRoutine(id),
     "routines.setEnabled": (id, enabled) => s().setRoutineEnabled(id, enabled),
-    "routines.runNow": (id, size) => s().runRoutineNow(id, size),
+    "routines.runNow": (id, size, now) => s().runRoutineNow(id, size, now),
+    "routines.cancelWait": (id) => s().cancelRoutineWait(id),
     "routines.preview": (schedule) => s().previewSchedule(schedule),
 
     "tasks.list": () => s().listTasks(),
     "tasks.save": (input) => s().saveTask(input),
     "tasks.delete": (id) => s().deleteTask(id),
-    "tasks.execute": (id, size) => s().executeTask(id, size),
-    "tasks.continue": (id, size) => s().executeTask(id, size, true),
+    "tasks.execute": (id, size, now) => s().executeTask(id, size, now),
+    "tasks.continue": (id, size) => s().continueTask(id, size),
+    "tasks.cancelWait": (id) => s().cancelTaskWait(id),
+    "tasks.handOff": (runId, agentId) => s().handOff(runId, agentId),
     "tasks.stop": (id) => s().stopTask(id),
     "tasks.setStatus": (id, status) => s().setTaskStatus(id, status),
     "tasks.applyCopy": (id) => s().applyTaskCopy(id),
@@ -559,7 +585,7 @@ function handlers(): Handlers {
     "storage.summary": () => s().storageSummary(),
     "storage.tidy": () => s().maintainRuns(),
 
-    "live.list": () => s().listLive(),
+    "live.list": () => s().liveForView(),
 
     "voice.status": () => voice.status(),
     "voice.start": () => voice.start(),
