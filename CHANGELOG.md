@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-01
+
+**1.3.1: a task's copy can't take your real folder with it.**
+
+- **Discard, Apply and delete only touch a task's own copy.** A task file points at its copy by path, and that file is plain YAML you, or an agent, can edit. If that path named some other folder, such as the project itself, Discard or deleting the task could remove it. Now VibeForge only stages or removes a copy that sits in its own `worktrees/<task>` folder. Anything else is left exactly as it is, and the task sheet says so, with a button to forget the record.
+- **The conflict message says what Discard won't do.** When Apply leaves conflict markers, discarding the copy afterwards doesn't take them out of the workspace, and the message now says so.
+
 ## [1.3.0] - 2026-09-30
 
 **1.3: talk from your chair, let agents work in their own copy, and find any run by what it said.**
@@ -214,7 +221,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.1
 [1.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.0
 [1.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.2.0
 [1.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.1.0

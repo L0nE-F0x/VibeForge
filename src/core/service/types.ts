@@ -102,6 +102,8 @@ export interface RoutineView extends Routine {
 export interface TaskView extends Task {
   lastRun: RunView | null;
   blocker: ExecuteBlocker | "engine-missing" | null;
+  /** False when the task file points its copy somewhere other than its own worktree. */
+  copyOwned: boolean;
 }
 
 export interface ChatView extends ChatRecord {
@@ -146,6 +148,8 @@ export const UNDO_MS = 30_000;
 /** What a delete hands back: the token that undoes it. */
 export interface Deleted {
   undo: string;
+  /** A task's copy was left on disk because its path wasn't the task's own worktree. */
+  copyLeft?: boolean;
 }
 
 /** Written on a patch that could not be taken at exit, because the app was already gone. */

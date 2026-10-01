@@ -266,7 +266,7 @@ export function useDeleted(): (title: string, deleted: Deleted) => void {
   const { push, fail } = useToast();
   return useCallback(
     (title: string, deleted: Deleted) =>
-      push("info", title, undefined, {
+      push("info", title, deleted.copyLeft ? t("core.copyUntrusted") : undefined, {
         label: t("common.undo"),
         run: () => void call("undo.delete", deleted.undo).catch((error: unknown) => fail(error, t("common.undoFailed"))),
       }),

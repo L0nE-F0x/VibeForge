@@ -3,7 +3,8 @@ import { isDirectory } from "../fsx.js";
 import { taskPrompt } from "../preamble.js";
 import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace } from "../types.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, removeCopy, type ApplyResult } from "../worktrees.js";
+import { isSafeId } from "../slug.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, ownedCopyPath, removeCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 
@@ -18,7 +19,12 @@ export class TaskDesk {
   private taskView(task: Task): TaskView {
     const lastId = task.runIds[task.runIds.length - 1];
     const last = lastId ? this.core.store.getRun(lastId) : null;
-    return { ...task, lastRun: last ? this.core.view(last) : null, blocker: this.taskBlocker(task) };
+    const copyOwned = task.copy ? Boolean(ownedCopyPath(this.owner(task.id), task.copy.path)) : true;
+    return { ...task, lastRun: last ? this.core.view(last) : null, blocker: this.taskBlocker(task), copyOwned };
+  }
+
+  private owner(taskId: string): CopyOwner {
+    return { dataRoot: this.core.options.dataRoot, taskId };
   }
 
   private taskBlocker(task: Task): TaskView["blocker"] {
@@ -61,15 +67,18 @@ export class TaskDesk {
     const file = this.core.store.pathOf("task", id);
     if (!task || !file) throw new Error("That task no longer exists.");
     if (task.status === "running") await this.stopTask(id);
-    // Its copy goes with it, and comes back on Undo; the branch goes once Undo has passed.
+    // Its copy goes with it, and comes back on Undo; the branch goes once Undo has passed. A copy
+    // path that isn't this task's own worktree stays where it is: it could be someone's real work.
     const copy = task.copy;
-    const bin = this.core.trash.stash(copy ? [file, copy.path] : [file]);
+    const owned = copy ? ownedCopyPath(this.owner(id), copy.path) : null;
+    const bin = this.core.trash.stash(owned?.real ? [file, owned.real] : [file]);
     this.core.emit("tasks");
-    return this.core.keepForUndo(
+    const deleted = this.core.keepForUndo(
       bin,
       () => this.core.emit("tasks"),
-      copy ? () => void removeCopy(copy).catch(() => undefined) : undefined,
+      copy && owned ? () => void removeCopy(copy, this.owner(id)).catch(() => undefined) : undefined,
     );
+    return copy && !owned ? { ...deleted, copyLeft: true } : deleted;
   }
 
   async executeTask(id: string, size: TermSize = {}, continueSession = false): Promise<Launched> {
@@ -139,7 +148,11 @@ export class TaskDesk {
 
   /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
   private async copyFor(task: Task, workspace: Workspace): Promise<string> {
-    if (task.copy && isDirectory(task.copy.path)) return folderInCopy(task.copy, workspace.path);
+    if (task.copy && isDirectory(task.copy.path)) {
+      if (!ownedCopyPath(this.owner(task.id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+      return folderInCopy(task.copy, workspace.path);
+    }
+    if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
     const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id));
     const current = this.core.store.getTask(task.id) ?? task;
     this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
@@ -155,10 +168,10 @@ export class TaskDesk {
     if (!task) throw new Error("That task no longer exists.");
     if (!task.copy) throw new Error("This task has no separate copy.");
     if (this.taskLive(task)) throw new Error("Stop the task before applying its changes.");
-    const patch = await copyPatch(task.copy);
+    const patch = await copyPatch(task.copy, this.owner(id));
     const result = await applyToWorkspace(task.copy, patch);
     if (result.files.length && !result.conflicts.length) {
-      await removeCopy(task.copy);
+      await removeCopy(task.copy, this.owner(id));
       const current = this.core.store.getTask(id) ?? task;
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });
     }
@@ -166,12 +179,12 @@ export class TaskDesk {
     return result;
   }
 
-  /** Throw a task's copy away, changes and all. */
+  /** Throw a task's copy away, changes and all. A copy that isn't the task's own is only forgotten. */
   async discardCopy(id: string): Promise<TaskView> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (this.taskLive(task)) throw new Error("Stop the task before discarding its copy.");
-    if (task.copy) await removeCopy(task.copy);
+    if (task.copy && ownedCopyPath(this.owner(id), task.copy.path)) await removeCopy(task.copy, this.owner(id));
     const next = { ...(this.core.store.getTask(id) ?? task), copy: null, updatedAt: this.core.now().toISOString() };
     this.core.store.writeTask(next);
     this.core.emit("tasks");
