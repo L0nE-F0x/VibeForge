@@ -554,6 +554,78 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("never stages, applies or deletes a copy path that isn't the task's own worktree", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    git(repo, "branch", "vibeforge/keep");
+    // Someone's real work, uncommitted.
+    fs.writeFileSync(path.join(repo, "work.txt"), "precious\n");
+
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const file = (id: string) => path.join(ctx.configRoot, "tasks", `${id}.yaml`);
+    // As if someone, or an agent, edited the task file by hand.
+    const pointAt = (id: string, copyPath: string, branch = `vibeforge/${id}`) => {
+      const yaml = fs.readFileSync(file(id), "utf8").replace(/^copy:.*\n(?:  .*\n)*/m, "");
+      fs.writeFileSync(file(id), `${yaml}copy:\n  path: ${copyPath}\n  branch: ${branch}\n  base: ${git(repo, "rev-parse", "HEAD").trim()}\n  repo: ${repo}\n`);
+    };
+
+    // The task file points its copy at the real checkout.
+    const task = ctx.svc.saveTask({ title: "Hostile", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    pointAt(task.id, repo, "vibeforge/keep");
+    const view = ctx.svc.listTasks().find((item) => item.id === task.id)!;
+    expect(view.copy?.path).toBe(repo);
+    expect(view.copyOwned).toBe(false);
+    await expect(ctx.svc.applyTaskCopy(task.id)).rejects.toThrow(/left alone/);
+    expect(git(repo, "status", "--porcelain")).toBe("?? work.txt\n");
+    await expect(ctx.svc.executeTask(task.id)).rejects.toThrow(/left alone/);
+    expect(ctx.spawns).toHaveLength(0);
+    // Discard only forgets the record.
+    await ctx.svc.discardTaskCopy(task.id);
+    expect(ctx.svc.listTasks().find((item) => item.id === task.id)!.copy).toBeNull();
+    expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
+    expect(git(repo, "branch", "--list", "vibeforge/keep").trim()).not.toBe("");
+
+    // Delete takes the task file and leaves the folder it pointed at.
+    pointAt(task.id, repo, "vibeforge/keep");
+    const deleted = await ctx.svc.deleteTask(task.id);
+    expect(deleted.copyLeft).toBe(true);
+    expect(fs.existsSync(file(task.id))).toBe(false);
+    expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
+    ctx.svc.undoDelete(deleted.undo);
+    expect(fs.existsSync(file(task.id))).toBe(true);
+
+    // A symlink where the worktree should be, pointing at the real checkout, isn't the copy either.
+    const second = ctx.svc.saveTask({ title: "Linked", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const linked = path.join(ctx.dataRoot, "worktrees", second.id);
+    fs.mkdirSync(path.dirname(linked), { recursive: true });
+    fs.symlinkSync(repo, linked);
+    pointAt(second.id, linked);
+    expect(ctx.svc.listTasks().find((item) => item.id === second.id)!.copyOwned).toBe(false);
+    await expect(ctx.svc.applyTaskCopy(second.id)).rejects.toThrow(/left alone/);
+    const gone = await ctx.svc.deleteTask(second.id);
+    expect(gone.copyLeft).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
+    expect(git(repo, "status", "--porcelain")).toBe("?? work.txt\n");
+
+    // The right path, already gone: discarding tidies the task's own branch and nothing else.
+    const third = ctx.svc.saveTask({ title: "Gone", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    git(repo, "branch", `vibeforge/${third.id}`);
+    pointAt(third.id, path.join(ctx.dataRoot, "worktrees", third.id));
+    expect(ctx.svc.listTasks().find((item) => item.id === third.id)!.copyOwned).toBe(true);
+    await ctx.svc.discardTaskCopy(third.id);
+    expect(git(repo, "branch", "--list", `vibeforge/${third.id}`).trim()).toBe("");
+    expect(git(repo, "branch", "--list", "vibeforge/keep").trim()).not.toBe("");
+    expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
+    ctx.svc.close();
+  });
+
   it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
     const repo = tempDir();
     const git = (...args: string[]) =>

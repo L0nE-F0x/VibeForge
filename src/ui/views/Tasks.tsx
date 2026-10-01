@@ -205,6 +205,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     const ok = await confirm({ title: t("tasks.discardCopyTitle", { title: task.title }), body: t("tasks.discardCopyBody"), confirm: t("tasks.discardCopy"), danger: true });
     if (ok) await call("tasks.discardCopy", task.id);
   }, t("tasks.discardFailed"));
+  const [forgetCopy] = useAction(async () => task && call("tasks.discardCopy", task.id), t("tasks.discardFailed"));
   const [allowFolder, allowing] = useAction(async () => {
     if (!agent || !workspace) return;
     await call("agents.save", { ...agent, places: [...agent.places, workspace.path] });
@@ -289,7 +290,21 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             </div>
           </Notice>
         )}
-        {task?.copy && (
+        {task?.copy && !task.copyOwned && (
+          <Notice tone="warn" icon={GitBranch}>
+            <div className="hstack wrap">
+              <span className="grow">
+                <Rich text={t("tasks.copyUntrusted", { path: task.copy.path })} />
+              </span>
+              {!live && (
+                <Button size="sm" variant="ghost" icon={X} busy={discarding} onClick={() => void forgetCopy()}>
+                  {t("tasks.forgetCopy")}
+                </Button>
+              )}
+            </div>
+          </Notice>
+        )}
+        {task?.copy && task.copyOwned && (
           <Notice tone="accent" icon={GitBranch}>
             <div className="hstack wrap">
               <span className="grow">

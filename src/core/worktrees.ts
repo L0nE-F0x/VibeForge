@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isPathInside } from "./places.js";
+import { isSafeId } from "./slug.js";
 
 /**
  * A task's own copy of its repository: a git worktree on a `vibeforge/<task>` branch, so an agent
@@ -67,6 +69,61 @@ function failure(what: string, run: GitRun): Error {
   return new Error(detail ? `${what}: ${detail}` : what);
 }
 
+/** Which task a copy belongs to, so only that task's own worktree is ever staged or removed. */
+export interface CopyOwner {
+  dataRoot: string;
+  taskId: string;
+}
+
+/** The only folder a task's copy may be: `<dataRoot>/worktrees/<taskId>`. */
+export function expectedCopyPath(dataRoot: string, taskId: string): string | null {
+  if (!isSafeId(taskId)) return null;
+  const root = path.join(path.resolve(dataRoot), "worktrees");
+  const expected = path.join(root, taskId);
+  return path.dirname(expected) === root && isPathInside(root, expected) ? expected : null;
+}
+
+/**
+ * Whether `copyPath` is this task's own worktree. Task files are YAML anyone can edit, so the path
+ * in one is never trusted on its own: it has to be the expected folder by name, and once symlinks
+ * are followed it still has to be. `real` is the folder on disk, or null when it is already gone
+ * (enough to tidy the branch, never to delete anything).
+ */
+export function ownedCopyPath(owner: CopyOwner, copyPath: string): { real: string | null } | null {
+  const expected = expectedCopyPath(owner.dataRoot, owner.taskId);
+  if (!expected || path.resolve(copyPath) !== expected) return null;
+  const realExpected = realTail(expected);
+  if (!realExpected) return null;
+  try {
+    fs.lstatSync(expected);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? { real: null } : null;
+  }
+  try {
+    const real = fs.realpathSync(expected);
+    return real === realExpected ? { real } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `target` with its deepest existing folder resolved through symlinks and the rest joined back on. */
+function realTail(target: string): string | null {
+  let existing = path.dirname(target);
+  const tail = [path.basename(target)];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(existing), ...tail);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+      const parent = path.dirname(existing);
+      if (parent === existing) return null;
+      tail.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
 /** The branch a task's copy lives on. */
 export function copyBranch(taskId: string): string {
   return `vibeforge/${taskId}`;
@@ -107,7 +164,9 @@ export function folderInCopy(copy: WorkingCopy, folder: string): string {
  * Everything the copy changed since it was made, commits and uncommitted edits alike, new and
  * binary files included, as one patch against the base commit.
  */
-export async function copyPatch(copy: WorkingCopy): Promise<string> {
+export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<string> {
+  // `git add -A` in a folder that isn't the task's copy would stage someone's real work.
+  if (!ownedCopyPath(owner, copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
   // Staging in the copy is the copy's own business; it makes new files part of the diff.
   const staged = await git(["add", "-A"], copy.path);
   if (staged.code !== 0) throw failure("Could not read the copy's changes", staged);
@@ -139,12 +198,24 @@ export async function applyToWorkspace(copy: WorkingCopy, patch: string): Promis
   throw failure("The changes don't apply to the workspace", merged.stderr.trim() ? merged : clean);
 }
 
-/** Remove the copy and its branch. Safe to call when either is already gone. */
-export async function removeCopy(copy: WorkingCopy): Promise<void> {
-  if (fs.existsSync(copy.path)) {
-    const removed = await git(["worktree", "remove", "--force", copy.path], copy.repo);
-    if (removed.code !== 0) fs.rmSync(copy.path, { recursive: true, force: true });
+/**
+ * Remove the copy and its branch. Safe to call when either is already gone. Throws, touching
+ * nothing, when the copy isn't this task's own worktree.
+ */
+export async function removeCopy(copy: WorkingCopy, owner: CopyOwner): Promise<void> {
+  const owned = ownedCopyPath(owner, copy.path);
+  if (!owned) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+  if (owned.real) {
+    const removed = await git(["worktree", "remove", "--force", owned.real], copy.repo);
+    if (removed.code !== 0) fs.rmSync(owned.real, { recursive: true, force: true });
   }
+  await retireBranch(copy, owner.taskId);
+}
+
+/** Drop the copy's branch, only when it is this task's branch in the repository the copy names. */
+async function retireBranch(copy: WorkingCopy, taskId: string): Promise<void> {
+  if (copy.branch !== copyBranch(taskId)) return;
+  if ((await repoRoot(copy.repo)) !== path.resolve(copy.repo)) return;
   await git(["worktree", "prune"], copy.repo);
   await git(["branch", "-D", copy.branch], copy.repo);
 }
