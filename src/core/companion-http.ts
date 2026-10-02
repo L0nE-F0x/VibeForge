@@ -16,9 +16,10 @@ export interface SessionPayload {
   state: "working" | "waiting" | "done";
   changes: string | null;
   screen: string;
-  /** False when the session has ended and there is nothing to type into yet. */
+  /** False when nothing can pick this up: the session ended and left no run behind. */
   canSend: boolean;
-  canStop: boolean;
+  /** "end" closes a run's own terminal; "interrupt" stops a CLI's turn in a shell and leaves the shell open. */
+  stop: "end" | "interrupt" | null;
 }
 
 export interface LaunchResult {
@@ -29,13 +30,14 @@ export interface LaunchResult {
 export interface CompanionActions {
   desk(): DeskPayload;
   session(query: { ptyId: string; runId: string }): Promise<SessionPayload>;
-  /** Types into a live session. `working` means it was refused until the phone asks again. */
-  send(ptyId: string, text: string, force: boolean): Promise<{ working: true } | { working: false }>;
+  /**
+   * The next instruction. A live CLI gets it typed in (`working` means refused until the phone asks
+   * again); a finished one is picked back up with it. It never lands in a shell with no CLI.
+   */
+  send(input: { ptyId: string; runId: string; text: string; force: boolean }): Promise<{ working: true } | ({ working: false } & LaunchResult)>;
   stop(ptyId: string): Promise<void>;
-  launch(input: { workspaceId: string; agentId: string; prompt: string }): Promise<LaunchResult>;
-  /** Picks a finished run back up. `text` is the next instruction, when there is one. */
-  continue(runId: string, text: string): Promise<LaunchResult>;
-  saveNudges(nudges: string[]): string[];
+  /** Start an agent, or a CLI on its own, in a workspace. */
+  launch(input: { workspaceId: string; agentId: string; engineId: string; prompt: string }): Promise<LaunchResult>;
 }
 
 export class CompanionHttpError extends Error {
@@ -160,21 +162,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     sendJson(res, 200, await opts.actions.session({ ptyId: url.searchParams.get("ptyId") || "", runId: url.searchParams.get("runId") || "" }));
     return;
   }
-  if (method === "PUT" && url.pathname === "/api/nudges") {
-    const body = (await readBody(req)) as { nudges?: unknown };
-    if (!Array.isArray(body.nudges)) throw new CompanionHttpError("Nudges are a list.", 400);
-    sendJson(res, 200, { nudges: opts.actions.saveNudges(body.nudges.filter((item): item is string => typeof item === "string")) });
-    return;
-  }
   if (method !== "POST") throw new CompanionHttpError("Not found.", 404);
-  const body = (await readBody(req)) as { ptyId?: unknown; runId?: unknown; text?: unknown; force?: unknown; workspaceId?: unknown; agentId?: unknown; prompt?: unknown };
+  const body = (await readBody(req)) as { ptyId?: unknown; runId?: unknown; text?: unknown; force?: unknown; workspaceId?: unknown; agentId?: unknown; engineId?: unknown; prompt?: unknown };
   if (url.pathname === "/api/send") {
     const ptyId = text(body.ptyId, 80);
+    const runId = text(body.runId, 200);
     const prompt = text(body.text, COMPANION_PROMPT_MAX);
-    if (!ptyId || !prompt) throw new CompanionHttpError("Type something to send.", 400);
-    const result = await opts.actions.send(ptyId, prompt, body.force === true);
+    if (!prompt) throw new CompanionHttpError("Type something to send.", 400);
+    if (!ptyId && !runId) throw new CompanionHttpError("That session is gone.", 400);
+    const result = await opts.actions.send({ ptyId, runId, text: prompt, force: body.force === true });
     if (result.working) throw new CompanionHttpError("Still working.", 409, { working: true });
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { ptyId: result.ptyId, runId: result.runId });
     return;
   }
   if (url.pathname === "/api/stop") {
@@ -187,14 +185,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (url.pathname === "/api/launch") {
     const workspaceId = text(body.workspaceId, 80);
     const agentId = text(body.agentId, 80);
-    if (!workspaceId || !agentId) throw new CompanionHttpError("Choose a workspace and an agent.", 400);
-    sendJson(res, 200, await opts.actions.launch({ workspaceId, agentId, prompt: text(body.prompt, COMPANION_PROMPT_MAX) }));
-    return;
-  }
-  if (url.pathname === "/api/continue") {
-    const runId = text(body.runId, 80);
-    if (!runId) throw new CompanionHttpError("That run is gone.", 400);
-    sendJson(res, 200, await opts.actions.continue(runId, text(body.text, COMPANION_PROMPT_MAX)));
+    const engineId = text(body.engineId, 80);
+    if (!workspaceId || (!agentId && !engineId)) throw new CompanionHttpError("Choose a workspace and who to start.", 400);
+    sendJson(res, 200, await opts.actions.launch({ workspaceId, agentId, engineId, prompt: text(body.prompt, COMPANION_PROMPT_MAX) }));
     return;
   }
   throw new CompanionHttpError("Not found.", 404);

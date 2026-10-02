@@ -900,7 +900,6 @@ export const zh: Catalog = {
   "core.agentAlreadyRunning": "{name} 已在 {workspace} 中运行。",
   "core.chatNotSaved": "聊天未能保存。",
   "core.sessionGone": "该会话已不存在。",
-  "core.sessionEndedSend": "该会话已结束。再次发送即可继续。",
   // ---------------------------------------------------------------- runs and shared pieces
   "status.running": "运行中",
   "status.exited": "已完成",

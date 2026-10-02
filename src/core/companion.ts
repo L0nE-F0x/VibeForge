@@ -118,6 +118,8 @@ export interface DeskAgent {
 export interface DeskPayload {
   nudges: string[];
   agents: DeskAgent[];
+  /** The coding CLIs installed here, for starting one without an agent. */
+  engines: Array<{ id: string; label: string }>;
   workspaces: DeskWorkspace[];
 }
 
@@ -137,11 +139,16 @@ export interface DeskRun {
 export interface DeskInput {
   workspaces: Array<{ id: string; name: string; path: string }>;
   agents: Array<{ id: string; name: string; engine: string; places: string[] }>;
-  engines: Array<{ id: string; label: string }>;
+  engines: Array<{ id: string; label: string; available?: boolean }>;
   live: LiveSession[];
   recent: DeskRun[];
   nudges: string[];
   now: number;
+}
+
+/** A coding CLI's session: a run's own terminal, or a shell with a CLI in its foreground. A bare shell is not one. */
+export function isCodingSession(session: Pick<LiveSession, "kind" | "programEngineId">): boolean {
+  return session.kind === "run" || Boolean(session.programEngineId);
 }
 
 const STATE_RANK: Record<DeskState, number> = { working: 0, waiting: 1, done: 2 };
@@ -184,8 +191,7 @@ export function buildDesk(input: DeskInput): DeskPayload {
   };
 
   for (const session of input.live) {
-    const coding = session.kind === "run" || Boolean(session.programEngineId);
-    if (!coding) continue;
+    if (!isCodingSession(session)) continue;
     if (session.runId) liveRunIds.add(session.runId);
     const agent = session.agentId ? agentName.get(session.agentId) : undefined;
     const title = agent || session.program || session.title;
@@ -257,5 +263,6 @@ export function buildDesk(input: DeskInput): DeskPayload {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  return { nudges: input.nudges, agents, workspaces };
+  const engines = input.engines.filter((engine) => engine.available !== false).map((engine) => ({ id: engine.id, label: engine.label }));
+  return { nudges: input.nudges, agents, engines, workspaces };
 }

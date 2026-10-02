@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDesk, bearerToken, defaultCompanion, newCompanionToken, normalizeCompanion, normalizeNudges, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
+import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
 import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
 import type { LiveSession } from "../../src/core/types.js";
@@ -106,6 +106,14 @@ describe("phone desk", () => {
     expect(desk.agents.find((agent) => agent.id === "mina")?.workspaceIds).toEqual(["notes", "web"]);
   });
 
+  it("offers each installed CLI, and never counts a bare shell as a session", () => {
+    const desk = buildDesk(deskInput({ engines: [{ id: "claude", label: "Claude", available: true }, { id: "kimi", label: "Kimi", available: false }] }));
+    expect(desk.engines).toEqual([{ id: "claude", label: "Claude" }]);
+    expect(isCodingSession({ kind: "shell", programEngineId: null })).toBe(false);
+    expect(isCodingSession({ kind: "shell", programEngineId: "claude" })).toBe(true);
+    expect(isCodingSession({ kind: "run", programEngineId: null })).toBe(true);
+  });
+
   it("puts a session outside every workspace at the end", () => {
     const desk = buildDesk(deskInput({ live: [live({ ptyId: "p", title: "Claude", cwd: "/other", working: false })] }));
     expect(desk.workspaces.at(-1)?.name).toBe("Elsewhere");
@@ -115,13 +123,11 @@ describe("phone desk", () => {
 
 function actions(patch: Partial<CompanionActions> = {}): CompanionActions {
   return {
-    desk: () => ({ nudges: ["Keep going."], agents: [], workspaces: [] }),
-    session: async () => ({ ptyId: "p", runId: "r", title: "Atlas", detail: "Claude", state: "waiting", changes: null, screen: "hello", canSend: true, canStop: true }),
-    send: async () => ({ working: false }),
+    desk: () => ({ nudges: ["Keep going."], agents: [], engines: [], workspaces: [] }),
+    session: async () => ({ ptyId: "p", runId: "r", title: "Atlas", detail: "Claude", state: "waiting", changes: null, screen: "hello", canSend: true, stop: "end" }),
+    send: async () => ({ working: false, ptyId: "p", runId: "r" }),
     stop: async () => undefined,
     launch: async () => ({ ptyId: "p2", runId: "r2" }),
-    continue: async () => ({ ptyId: "p3", runId: "r3" }),
-    saveNudges: (nudges) => nudges,
     ...patch,
   };
 }
@@ -167,7 +173,7 @@ describe("phone page server", () => {
       token,
       root: tempDir(),
       icon: null,
-      actions: actions({ send: async (_pty, _text, force) => ({ working: !force }) }),
+      actions: actions({ send: async ({ force }) => (force ? { working: false, ptyId: "p", runId: "r" } : { working: true }) }),
     });
     const base = `http://127.0.0.1:${server.port}`;
     try {
@@ -183,6 +189,13 @@ describe("phone page server", () => {
         body: JSON.stringify({ ptyId: "p", text: "go", force: true }),
       });
       expect(forced.status).toBe(200);
+      expect(await forced.json()).toEqual({ ptyId: "p", runId: "r" });
+      const nobody = await fetch(`${base}/api/launch`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: "w" }),
+      });
+      expect(nobody.status).toBe(400);
     } finally {
       await server.close();
     }
@@ -196,7 +209,12 @@ function service() {
   fs.mkdirSync(configRoot, { recursive: true });
   fs.writeFileSync(
     path.join(configRoot, "engines.json"),
-    JSON.stringify({ engines: [{ id: "argy", label: "Argy", bin: "argy", args: [], promptArgs: ["{prompt}"] }] }),
+    JSON.stringify({
+      engines: [
+        { id: "argy", label: "Argy", bin: "argy", args: [], promptArgs: ["{prompt}"] },
+        { id: "cony", label: "Cony", bin: "cony", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
+      ],
+    }),
   );
   const spawns: SpawnRequest[] = [];
   let n = 0;
@@ -216,7 +234,7 @@ function service() {
     async record() {
       return undefined;
     },
-    resolveBin: (bin) => (bin === "argy" ? "/usr/bin/argy" : null),
+    resolveBin: (bin) => (bin === "argy" || bin === "cony" ? `/usr/bin/${bin}` : null),
     notify: () => undefined,
     snapshotGit: async () => "not a git repo\n",
     gitHead: async () => null,
@@ -250,5 +268,35 @@ describe("launching an agent from the phone", () => {
     expect(off.companion.enabled).toBe(false);
     expect(off.companion.token).toBe(on.companion.token);
     expect(off.companion.nudges).toEqual(defaultCompanion().nudges);
+  });
+});
+
+describe("picking a finished run back up from the phone", () => {
+  it("continues a task in the task's place, as its agent, with the next instruction", async () => {
+    const ctx = service();
+    const agent = ctx.svc.saveAgent({ name: "Notes", brief: "Keep notes.", engine: "argy", places: [ctx.place] });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Door", body: "Fix the door.", agentId: agent.id, workspaceId: workspace.id });
+    const first = await ctx.svc.executeTask(task.id, {}, true);
+    if (!("runId" in first)) throw new Error("the task was queued");
+    await ctx.svc.onPtyExit(first.ptyId, 0, null);
+    await ctx.svc.continueRun(first.runId, {}, "Now oil the hinges.");
+    const next = ctx.spawns.at(-1)!;
+    expect(next.cwd).toBe(ctx.place);
+    expect(next.argv.join(" ")).toContain("Keep notes.");
+    expect(next.argv.join(" ")).toContain("Now oil the hinges.");
+    expect(ctx.svc.store.getTask(task.id)?.runIds).toHaveLength(2);
+  });
+
+  it("types the next instruction once a CLI that continues on its own is ready", async () => {
+    const ctx = service();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "cony", prompt: "Look around." });
+    await ctx.svc.onPtyExit(first.ptyId, 0, null);
+    await ctx.svc.continueRun(first.runId, {}, "Now tidy up.");
+    const next = ctx.spawns.at(-1)!;
+    expect(next.argv).toContain("--continue");
+    expect(next.argv.join(" ")).not.toContain("Now tidy up.");
+    expect(next.pasteInput).toBe("Now tidy up.");
   });
 });

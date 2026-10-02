@@ -86,8 +86,11 @@ export class RunDesk {
   }
 
 
-  /** Start the next attempt of a finished run, in the same place it belongs to. */
-  async continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+  /**
+   * Start the next attempt of a finished run, in the same place it belongs to. `followUp` is the
+   * next instruction, when there is one: it is typed in once a picked-up session is ready.
+   */
+  async continueRun(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched & { chatId: string | null; taskId: string | null }> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const run = this.core.store.getRun(id);
@@ -95,11 +98,11 @@ export class RunDesk {
     const livePty = this.core.ptyByRun.get(id);
     if (livePty) return { runId: id, ptyId: livePty, chatId: run.chatId, taskId: run.taskId };
     if (run.chatId && this.core.store.getChat(run.chatId)) {
-      const result = await this.chats.continueChat(run.chatId, size);
+      const result = followUp ? await this.chats.sendChat(run.chatId, followUp, size) : await this.chats.continueChat(run.chatId, size);
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
     }
     if (run.taskId && this.core.store.getTask(run.taskId)) {
-      const launched = await this.tasks.continueTask(run.taskId, size);
+      const launched = await this.tasks.continueTask(run.taskId, size, followUp);
       return { ...launched, chatId: null, taskId: run.taskId };
     }
     const engine = this.core.requireEngine(run.engine);
@@ -107,14 +110,15 @@ export class RunDesk {
     const nativeContinue = resume.native;
     const agent = run.agentId ? this.core.store.getAgent(run.agentId) : null;
     const prior = nativeContinue ? null : this.core.transcriptPath(run);
-    const followUp = "Continue where the previous attempt stopped.";
+    const next = followUp || run.prompt || "Continue where the previous attempt stopped.";
     const launched = await this.core.launch({
       origin: run.origin,
       title: run.title,
       engine,
       cwd: run.cwd,
       prompt: run.prompt,
-      promptText: nativeContinue ? null : agent ? this.core.preambleFor(agent, run.prompt || followUp, prior) : plainPrompt(run.prompt || followUp, prior),
+      promptText: nativeContinue ? null : agent ? this.core.preambleFor(agent, next, prior) : plainPrompt(next, prior),
+      pasteAfter: nativeContinue ? followUp : null,
       continueSession: nativeContinue,
       resumeArgs: resume.resumeArgs,
       agentId: run.agentId,

@@ -899,7 +899,6 @@ export const pt: Catalog = {
   "core.agentAlreadyRunning": "{name} já está em execução em {workspace}.",
   "core.chatNotSaved": "O chat não foi salvo.",
   "core.sessionGone": "Essa sessão sumiu.",
-  "core.sessionEndedSend": "Essa sessão terminou. Envie de novo para retomá-la.",
   // ---------------------------------------------------------------- runs and shared pieces
   "status.running": "Rodando",
   "status.exited": "Concluída",

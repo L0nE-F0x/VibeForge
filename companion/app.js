@@ -7,12 +7,14 @@ let desk = null;
 let session = null;
 let sessionQuery = { ptyId: "", runId: "" };
 let launchWorkspace = "";
-let launchAgent = "";
 let error = "";
 let busy = false;
 let known = new Map();
 let primed = false;
 let timer = 0;
+let ticket = 0;
+/** The nodes of the page on show that a poll updates in place. Inputs are never rebuilt by a poll. */
+let parts = {};
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -63,6 +65,10 @@ async function call(path, options = {}) {
   return body;
 }
 
+function post(path, body) {
+  return call(path, { method: "POST", body: JSON.stringify(body) });
+}
+
 function forget() {
   token = "";
   localStorage.removeItem(TOKEN_KEY);
@@ -108,16 +114,23 @@ function watch(payload) {
 
 async function refresh() {
   if (!token || view === "pair") return;
+  const mine = ++ticket;
+  const shown = view;
   try {
     const payload = await call("/api/desk");
+    const next = view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`) : null;
+    // A newer poll, or a change of page, has already replaced what this one would show.
+    if (mine !== ticket) return;
     watch(payload);
     desk = payload;
+    if (view === "session") session = next;
     error = "";
-    if (view === "session") session = await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`);
   } catch (err) {
+    if (mine !== ticket) return;
     error = err.message;
   }
-  draw();
+  if (view !== shown) show();
+  else update();
 }
 
 function schedule() {
@@ -126,41 +139,47 @@ function schedule() {
   timer = window.setInterval(() => void refresh(), 2000);
 }
 
-async function withBusy(task, clearPrompt) {
+/** Runs one action with the buttons held. Returns what the action returned, or false when it failed. */
+async function withBusy(task) {
   busy = true;
   error = "";
-  draw();
+  update();
+  let result = false;
   try {
-    await task();
-    busy = false;
-    if (clearPrompt) {
-      const box = document.querySelector("#prompt");
-      if (box) box.value = "";
-    }
-    await refresh();
+    result = await task();
   } catch (err) {
     error = err.message;
-    busy = false;
-    draw();
   }
+  busy = false;
+  update();
+  void refresh();
+  return result;
 }
 
-function draw() {
-  const prompt = document.querySelector("#prompt");
-  const draft = prompt ? { value: prompt.value, start: prompt.selectionStart, focused: document.activeElement === prompt } : null;
-  app.replaceChildren(banner(), page());
-  const next = document.querySelector("#prompt");
-  if (draft && next) {
-    next.value = draft.value;
-    if (draft.focused) {
-      next.focus();
-      next.setSelectionRange(draft.start, draft.start);
-    }
-  }
+// ---------------------------------------------------------------- pages
+
+/** Builds the page for the current view from scratch. Only a change of view does this. */
+function show() {
+  ticket += 1;
+  parts = { banner: el("div", { class: "banner", hidden: true }) };
+  app.replaceChildren(parts.banner, page());
+  update();
 }
 
-function banner() {
-  return error ? el("div", { class: "banner" }, error) : null;
+/** Brings the page on show up to date without touching what is being typed. */
+function update() {
+  parts.banner.hidden = !error;
+  parts.banner.textContent = error;
+  if (view === "desk") updateDesk();
+  else if (view === "launch") updateLaunch();
+  else if (view === "session") updateSession();
+  else if (view === "pair" && parts.pair) parts.pair.disabled = busy;
+}
+
+function setView(next) {
+  view = next;
+  show();
+  void refresh();
 }
 
 function page() {
@@ -171,65 +190,78 @@ function page() {
 }
 
 function pairPage() {
-  const input = el("input", { id: "code", autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: "vf_…" });
+  const input = el("input", {
+    id: "code",
+    autocapitalize: "off",
+    autocorrect: "off",
+    spellcheck: "false",
+    placeholder: "vf_…",
+    onkeydown: (event) => {
+      if (event.key === "Enter") void pair(input.value);
+    },
+  });
+  parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, "Continue");
   return el(
     "section",
     {},
     el("div", { class: "top" }, el("h1", {}, "VibeForge")),
     el("p", { class: "muted" }, "Enter the pairing code from Settings → Phone on the computer."),
-    el("div", { class: "card stack" }, el("label", {}, "Pairing code", input), el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, "Continue")),
+    el("div", { class: "card stack" }, el("label", {}, "Pairing code", input), parts.pair),
   );
 }
 
 async function pair(code) {
+  const given = code.trim();
   busy = true;
   error = "";
-  draw();
+  update();
   try {
     const response = await fetch("/api/pair", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: code.trim() }),
+      body: JSON.stringify({ token: given }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || "That code did not match.");
-    token = code.trim();
+    token = given;
     localStorage.setItem(TOKEN_KEY, token);
-    view = "desk";
     busy = false;
     primed = false;
     known = new Map();
-    await refresh();
     schedule();
+    setView("desk");
   } catch (err) {
     error = err.message;
     busy = false;
-    draw();
+    update();
   }
 }
 
 function deskPage() {
-  const workspaces = desk?.workspaces ?? [];
-  const allowBuzz = typeof Notification !== "undefined" && Notification.permission === "default";
-  return el(
-    "section",
-    {},
-    el(
-      "div",
-      { class: "top" },
-      el("h1", { class: "grow" }, "Desk"),
-      allowBuzz ? el("button", { class: "ghost", type: "button", onclick: () => void Notification.requestPermission().then(() => draw()) }, "Buzz me") : null,
-    ),
-    workspaces.length
-      ? workspaces.map((workspace) => workspaceCard(workspace))
-      : el("div", { class: "card muted" }, "No workspaces yet. Add one on the computer."),
+  parts.buzz = el(
+    "button",
+    { class: "ghost", type: "button", hidden: true, onclick: () => void Notification.requestPermission().then(() => update()) },
+    "Buzz me",
+  );
+  parts.list = el("div", {});
+  parts.listKey = null;
+  return el("section", {}, el("div", { class: "top" }, el("h1", { class: "grow" }, "Desk"), parts.buzz), parts.list);
+}
+
+function updateDesk() {
+  parts.buzz.hidden = !(typeof Notification !== "undefined" && Notification.permission === "default");
+  if (!desk) return;
+  // The list has no inputs, so it is redrawn whole, but only when something on it changed (or a minute passed).
+  const key = JSON.stringify([desk.workspaces, Math.floor(Date.now() / 60000)]);
+  if (key === parts.listKey) return;
+  parts.listKey = key;
+  parts.list.replaceChildren(
+    ...(desk.workspaces.length ? desk.workspaces.map((workspace) => workspaceCard(workspace)) : [el("div", { class: "card muted" }, "No workspaces yet. Add one on the computer.")]),
   );
 }
 
 function workspaceCard(workspace) {
-  const start = workspace.id
-    ? el("button", { class: "ghost", type: "button", onclick: () => openLaunch(workspace.id) }, "Start")
-    : null;
+  const start = workspace.id ? el("button", { class: "ghost", type: "button", onclick: () => openLaunch(workspace.id) }, "Start") : null;
   return el(
     "article",
     { class: "card" },
@@ -244,152 +276,176 @@ function sessionButton(item) {
     {
       class: "session",
       type: "button",
-      onclick: () => {
-        sessionQuery = { ptyId: item.ptyId || "", runId: item.runId || "" };
-        view = "session";
-        session = null;
-        void refresh();
-      },
+      onclick: () => openSession({ ptyId: item.ptyId || "", runId: item.runId || "" }),
     },
-    el(
-      "div",
-      { class: "row" },
-      el("div", { class: "grow title" }, item.title),
-      el("span", { class: `pill ${item.state}` }, stateLabel(item.state)),
-    ),
-    el(
-      "div",
-      { class: "small muted" },
-      [item.detail, ago(item.endedAt || item.startedAt), item.changes].filter(Boolean).join(" · "),
-    ),
+    el("div", { class: "row" }, el("div", { class: "grow title" }, item.title), el("span", { class: `pill ${item.state}` }, stateLabel(item.state))),
+    el("div", { class: "small muted" }, [item.detail, ago(item.endedAt || item.startedAt), item.changes].filter(Boolean).join(" · ")),
     item.alsoHere?.length ? el("div", { class: "small faint" }, `Also here: ${item.alsoHere.join(", ")}`) : null,
   );
 }
 
+function openSession(query) {
+  sessionQuery = query;
+  session = null;
+  setView(query.ptyId || query.runId ? "session" : "desk");
+}
+
 function openLaunch(workspaceId) {
   launchWorkspace = workspaceId;
-  const allowed = (desk?.agents ?? []).filter((agent) => agent.workspaceIds.includes(workspaceId));
-  launchAgent = allowed[0]?.id || "";
-  view = "launch";
-  draw();
+  setView("launch");
+}
+
+/** Agents allowed in the workspace, then each CLI on its own. Values are "agent:<id>" or "engine:<id>". */
+function launchChoices() {
+  const agents = (desk?.agents ?? []).filter((agent) => agent.workspaceIds.includes(launchWorkspace));
+  const engines = desk?.engines ?? [];
+  return { agents, engines };
 }
 
 function launchPage() {
   const workspace = (desk?.workspaces ?? []).find((item) => item.id === launchWorkspace);
-  const allowed = (desk?.agents ?? []).filter((agent) => agent.workspaceIds.includes(launchWorkspace));
+  const { agents, engines } = launchChoices();
+  const back = el("button", { class: "back", type: "button", onclick: () => setView("desk") }, "Desk");
+  const top = el("div", { class: "top" }, back, el("h1", {}, workspace?.name || "Start"));
+  if (!agents.length && !engines.length) {
+    return el("section", {}, top, el("div", { class: "card muted" }, "No coding CLI was found on the computer, and no agent is allowed here."));
+  }
   const select = el(
     "select",
-    {
-      id: "agent",
-      onchange: (event) => {
-        launchAgent = event.target.value;
-      },
-    },
-    allowed.map((agent) => el("option", { value: agent.id, selected: agent.id === launchAgent }, `${agent.name}${agent.engine ? ` · ${agent.engine}` : ""}`)),
+    { id: "who" },
+    agents.length ? el("optgroup", { label: "Agents" }, agents.map((agent) => el("option", { value: `agent:${agent.id}` }, `${agent.name}${agent.engine ? ` · ${agent.engine}` : ""}`))) : null,
+    engines.length ? el("optgroup", { label: "CLIs" }, engines.map((engine) => el("option", { value: `engine:${engine.id}` }, engine.label))) : null,
   );
   const prompt = el("textarea", { id: "prompt", placeholder: "What should they do? Leave this empty to start and wait." });
+  parts.start = el("button", { class: "btn", type: "button", onclick: () => void startAgent(select.value, prompt) }, "Start");
   return el(
     "section",
     {},
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { view = "desk"; draw(); } }, "Desk"), el("h1", {}, workspace?.name || "Start")),
-    allowed.length
-      ? el(
-          "div",
-          { class: "card stack" },
-          el("label", {}, "Agent", select),
-          el("label", {}, "First prompt", prompt),
-          el("button", { class: "btn", type: "button", disabled: busy, onclick: () => void startAgent(prompt.value) }, busy ? "Starting…" : "Start"),
-        )
-      : el("div", { class: "card muted" }, "No agent is allowed in this workspace. Add the folder to an agent on the computer."),
+    top,
+    el("div", { class: "card stack" }, el("label", {}, "Who", select), el("label", {}, "First prompt", prompt), parts.start),
+    agents.length ? null : el("p", { class: "small faint" }, "No agent is allowed in this folder, so only a CLI on its own can start here."),
   );
 }
 
-async function startAgent(prompt) {
-  await withBusy(async () => {
-    const result = await call("/api/launch", {
-      method: "POST",
-      body: JSON.stringify({ workspaceId: launchWorkspace, agentId: launchAgent, prompt }),
-    });
-    sessionQuery = { ptyId: result.ptyId, runId: result.runId };
-    view = "session";
-    session = null;
-  }, true);
+function updateLaunch() {
+  if (!parts.start) return;
+  parts.start.disabled = busy;
+  parts.start.textContent = busy ? "Starting…" : "Start";
+}
+
+async function startAgent(choice, box) {
+  const [kind, id] = [choice.slice(0, choice.indexOf(":")), choice.slice(choice.indexOf(":") + 1)];
+  if (!id) return;
+  const result = await withBusy(() =>
+    post("/api/launch", {
+      workspaceId: launchWorkspace,
+      agentId: kind === "agent" ? id : "",
+      engineId: kind === "engine" ? id : "",
+      prompt: box.value,
+    }),
+  );
+  if (result) openSession({ ptyId: result.ptyId || "", runId: result.runId || "" });
 }
 
 function sessionPage() {
-  if (!session) return el("section", {}, el("div", { class: "top" }, el("h1", {}, "Session")), el("p", { class: "muted" }, "Loading…"));
-  const prompt = el("textarea", { id: "prompt", placeholder: session.state === "done" ? "What should they do next?" : "Tell them what to do next" });
-  const nudges = (desk?.nudges ?? []).map((nudge) =>
-    el("button", { class: "nudge", type: "button", disabled: busy, onclick: () => void sendText(nudge, false) }, nudge),
-  );
+  parts.title = el("h1", { class: "grow" }, "Session");
+  parts.pill = el("span", { class: "pill", hidden: true });
+  parts.meta = el("p", { class: "small muted", hidden: true });
+  parts.screen = el("pre", { class: "screen" }, "Loading…");
+  parts.stick = true;
+  parts.prompt = el("textarea", { id: "prompt", placeholder: "Tell them what to do next" });
+  parts.nudges = el("div", { class: "actions", hidden: true });
+  parts.nudgesKey = null;
+  parts.send = el("button", { class: "btn", type: "button", onclick: () => void sendText(parts.prompt.value, true) }, "Send");
+  parts.stop = el("button", { class: "ghost", type: "button", hidden: true, onclick: () => void stopSession() }, "Stop");
+  // Follow the end of the screen unless the person scrolled up to read.
+  parts.screen.addEventListener("scroll", () => {
+    const pre = parts.screen;
+    parts.stick = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+  });
   return el(
     "section",
     {},
-    el(
-      "div",
-      { class: "top" },
-      el("button", { class: "back", type: "button", onclick: () => { view = "desk"; session = null; draw(); } }, "Desk"),
-      el("h1", { class: "grow" }, session.title),
-      el("span", { class: `pill ${session.state}` }, stateLabel(session.state)),
-    ),
-    session.detail || session.changes ? el("p", { class: "small muted" }, [session.detail, session.changes].filter(Boolean).join(" · ")) : null,
-    el("pre", { class: "screen" }, session.screen || "Nothing on screen yet."),
-    el(
-      "div",
-      { class: "card stack" },
-      prompt,
-      nudges.length ? el("div", { class: "actions" }, ...nudges) : null,
-      el(
-        "div",
-        { class: "actions" },
-        el("button", { class: "btn", type: "button", disabled: busy || !session.canSend, onclick: () => void sendText(prompt.value, false) }, busy ? "Sending…" : "Send"),
-        session.canStop
-          ? el("button", { class: "ghost", type: "button", disabled: busy, onclick: () => void stopSession() }, "Stop")
-          : null,
-      ),
-    ),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, "Desk"), parts.title, parts.pill),
+    parts.meta,
+    parts.screen,
+    el("div", { class: "card stack" }, parts.prompt, parts.nudges, el("div", { class: "actions" }, parts.send, parts.stop)),
   );
 }
 
-async function sendText(text, force) {
+function updateSession() {
+  const nudges = desk?.nudges ?? [];
+  const nudgesKey = JSON.stringify([nudges, busy]);
+  if (nudgesKey !== parts.nudgesKey) {
+    parts.nudgesKey = nudgesKey;
+    parts.nudges.hidden = !nudges.length;
+    parts.nudges.replaceChildren(...nudges.map((nudge) => el("button", { class: "nudge", type: "button", disabled: busy, onclick: () => void sendText(nudge, false) }, nudge)));
+  }
+  parts.send.disabled = busy || !session?.canSend;
+  parts.send.textContent = busy ? "Sending…" : "Send";
+  if (!session) return;
+  parts.title.textContent = session.title;
+  parts.pill.hidden = false;
+  parts.pill.className = `pill ${session.state}`;
+  parts.pill.textContent = stateLabel(session.state);
+  const meta = [session.detail, session.changes].filter(Boolean).join(" · ");
+  parts.meta.hidden = !meta;
+  parts.meta.textContent = meta;
+  parts.prompt.placeholder = session.state === "done" ? "What should they do next?" : "Tell them what to do next";
+  parts.stop.hidden = !session.stop;
+  parts.stop.disabled = busy;
+  parts.stop.textContent = session.stop === "interrupt" ? "Interrupt" : "Stop";
+  const screen = session.screen || "Nothing on screen yet.";
+  if (parts.screen.textContent !== screen) {
+    parts.screen.textContent = screen;
+    if (parts.stick) parts.screen.scrollTop = parts.screen.scrollHeight;
+  }
+}
+
+/** Sends the next instruction. The draft in the box is cleared only when it was the box that was sent. */
+async function sendText(text, fromBox) {
   const words = text.trim();
   if (!words || !session) return;
-  if (session.state === "working" && !force && !window.confirm("Still working. Send anyway?")) return;
-  await withBusy(async () => {
-    if (session.ptyId && session.state !== "done") {
-      try {
-        await call("/api/send", { method: "POST", body: JSON.stringify({ ptyId: session.ptyId, text: words, force: force || session.state === "working" }) });
-      } catch (err) {
-        if (err.working && !force) {
-          if (!window.confirm("Still working. Send anyway?")) return;
-          await call("/api/send", { method: "POST", body: JSON.stringify({ ptyId: session.ptyId, text: words, force: true }) });
-          return;
-        }
-        throw err;
-      }
-      return;
+  let force = false;
+  if (session.state === "working") {
+    if (!window.confirm("Still working. Send anyway?")) return;
+    force = true;
+  }
+  const query = { ptyId: session.ptyId || "", runId: session.runId || "" };
+  const sent = await withBusy(async () => {
+    let result;
+    try {
+      result = await post("/api/send", { ...query, text: words, force });
+    } catch (err) {
+      // It started working again between the last look and the send.
+      if (!err.working) throw err;
+      if (!window.confirm("Still working. Send anyway?")) return false;
+      result = await post("/api/send", { ...query, text: words, force: true });
     }
-    const result = await call("/api/continue", { method: "POST", body: JSON.stringify({ runId: session.runId, text: words }) });
-    sessionQuery = { ptyId: result.ptyId, runId: result.runId };
-  }, true);
+    sessionQuery = { ptyId: result.ptyId || "", runId: result.runId || query.runId };
+    parts.stick = true;
+    return true;
+  });
+  if (sent && fromBox && parts.prompt) parts.prompt.value = "";
 }
 
 async function stopSession() {
-  if (!session?.ptyId || !window.confirm("Stop this session?")) return;
-  await withBusy(() => call("/api/stop", { method: "POST", body: JSON.stringify({ ptyId: session.ptyId }) }));
+  if (!session?.ptyId) return;
+  const ask = session.stop === "interrupt" ? "Interrupt what it is doing? The terminal stays open." : "Stop this session?";
+  if (!window.confirm(ask)) return;
+  const ptyId = session.ptyId;
+  await withBusy(() => post("/api/stop", { ptyId }));
 }
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data?.type !== "open") return;
-    sessionQuery = { ptyId: event.data.ptyId || "", runId: event.data.runId || "" };
-    view = sessionQuery.ptyId || sessionQuery.runId ? "session" : "desk";
-    void refresh();
+    openSession({ ptyId: event.data.ptyId || "", runId: event.data.runId || "" });
   });
   void navigator.serviceWorker.register("/sw.js");
 }
 
-draw();
+show();
 if (token) {
   schedule();
   void refresh();

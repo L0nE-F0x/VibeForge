@@ -185,8 +185,8 @@ export class TeamService extends ServiceCore {
     return this.tasks.executeTask(id, size, false, now);
   }
 
-  continueTask(id: string, size: TermSize = {}): Promise<Launched> {
-    return this.tasks.continueTask(id, size);
+  continueTask(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched> {
+    return this.tasks.continueTask(id, size, followUp);
   }
 
   cancelTaskWait(id: string): TaskView {
@@ -299,8 +299,8 @@ export class TeamService extends ServiceCore {
     return this.runs.markAllOpened();
   }
 
-  continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
-    return this.runs.continueRun(id, size);
+  continueRun(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+    return this.runs.continueRun(id, size, followUp);
   }
 
   runDiff(id: string, source: "saved" | "now" = "saved"): Promise<string> {

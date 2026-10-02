@@ -442,7 +442,8 @@ function recentText(session, maxLines) {
   for (let index = start; index < end; index += 1) {
     const line = buffer.getLine(index);
     if (!line) continue;
-    const text = line.translateToString(true);
+    // A row that wraps onto the next keeps its trailing blanks, or the words either side of the wrap run together.
+    const text = line.translateToString(!buffer.getLine(index + 1)?.isWrapped);
     if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += text;
     else lines.push(text);
   }

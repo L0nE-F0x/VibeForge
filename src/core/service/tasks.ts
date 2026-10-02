@@ -143,10 +143,11 @@ export class TaskDesk {
   }
 
   /** A Continue of the task's last run: a person is there, so it never waits. */
-  async continueTask(id: string, size: TermSize = {}): Promise<Launched> {
+  /** Pick the task's last session back up. `followUp` is typed in once it is ready, when given. */
+  async continueTask(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched> {
     await this.core.settled;
     this.turns.cancel("task", id);
-    return this.launchTask(this.ready(id), size, true);
+    return this.launchTask(this.ready(id), size, true, followUp);
   }
 
   /** The task, if it can start: it exists, isn't running, and has an agent, a workspace and an engine. */
@@ -159,7 +160,7 @@ export class TaskDesk {
     return task;
   }
 
-  private async launchTask(task: Task, size: TermSize, continueSession: boolean): Promise<Launched> {
+  private async launchTask(task: Task, size: TermSize, continueSession: boolean, followUp: string | null = null): Promise<Launched> {
     const id = task.id;
     const agent = this.core.store.getAgent(task.agentId!)!;
     const workspace = this.core.workspaceById(task.workspaceId)!;
@@ -176,7 +177,8 @@ export class TaskDesk {
       engine,
       cwd,
       prompt,
-      promptText: canContinue ? null : this.core.preambleFor(agent, prompt, prior, task.isolated ? { path: cwd, of: workspace.path } : null),
+      promptText: canContinue ? null : this.core.preambleFor(agent, followUp ? `${prompt}\n\n${followUp}` : prompt, prior, task.isolated ? { path: cwd, of: workspace.path } : null),
+      pasteAfter: canContinue ? followUp : null,
       continueSession: canContinue,
       resumeArgs: resume.resumeArgs,
       agentId: agent.id,

@@ -900,7 +900,6 @@ export const ja: Catalog = {
   "core.agentAlreadyRunning": "{name} は {workspace} で既に動いています。",
   "core.chatNotSaved": "チャットを保存できませんでした。",
   "core.sessionGone": "そのセッションはなくなりました。",
-  "core.sessionEndedSend": "そのセッションは終了しています。もう一度送ると続きから始まります。",
   // ---------------------------------------------------------------- runs and shared pieces
   "status.running": "実行中",
   "status.exited": "完了",

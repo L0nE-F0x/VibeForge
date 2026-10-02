@@ -912,7 +912,6 @@ export const en = {
   "core.agentAlreadyRunning": "{name} is already running in {workspace}.",
   "core.chatNotSaved": "The chat was not saved.",
   "core.sessionGone": "That session is gone.",
-  "core.sessionEndedSend": "That session has ended. Send again to pick it up.",
   // ---------------------------------------------------------------- runs and shared pieces
   "status.running": "Running",
   "status.exited": "Finished",

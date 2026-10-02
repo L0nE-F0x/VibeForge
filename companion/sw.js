@@ -14,9 +14,3 @@ self.addEventListener("notificationclick", (event) => {
     })(),
   );
 });
-
-self.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || data.type !== "notify") return;
-  event.waitUntil(self.registration.showNotification(data.title || "VibeForge", { body: data.body || "", tag: data.tag, renotify: true, data: data.data || {} }));
-});
