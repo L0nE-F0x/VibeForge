@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs } from "../../shared/text.js";
@@ -7,6 +7,7 @@ import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnos
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
+import { CompanionCard } from "../components/CompanionCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
 import { StorageCard } from "../components/StorageCard.js";
 import { TrayCard } from "../components/TrayCard.js";
@@ -266,6 +267,11 @@ export function SettingsView() {
               {t("settings.testNotify")}
             </Button>
           </div>
+
+          <div className="section-title" id="settings-phone">
+            <Smartphone size={13} /> {t("companion.title")}
+          </div>
+          <CompanionCard />
 
           <div className="section-title" id="settings-tray">
             <Power size={13} /> {t("tray.title")}

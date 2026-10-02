@@ -254,6 +254,11 @@ export class TeamService extends ServiceCore {
     return this.chats.sendChat(id, text, size);
   }
 
+  /** Start an agent in a workspace it is allowed to use, with its brief. */
+  launchAgent(workspaceId: string, agentId: string, prompt: string | null, size: TermSize = {}): Promise<SendResult> {
+    return this.chats.launchAgent(workspaceId, agentId, prompt, size);
+  }
+
   continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
     return this.chats.continueChat(id, size);
   }
@@ -266,6 +271,12 @@ export class TeamService extends ServiceCore {
 
   listRuns(query: RunQuery = {}): RunView[] {
     return this.runs.listRuns(query);
+  }
+
+  /** One run's index row, without reading its transcript or patch. */
+  findRun(id: string): RunView | null {
+    const run = this.store.getRun(id);
+    return run ? this.view(run) : null;
   }
 
   inbox(now: Date = this.now()): RunView[] {

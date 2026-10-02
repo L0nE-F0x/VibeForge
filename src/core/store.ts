@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse, stringify } from "yaml";
+import { defaultCompanion, normalizeCompanion } from "./companion.js";
 import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
 import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
@@ -116,6 +117,7 @@ export function defaultSettings(): Settings {
     activity: "git",
     rail: { order: [], hidden: [] },
     keepRuns: { days: 0, maxMb: 0 },
+    companion: defaultCompanion(),
   };
 }
 
@@ -561,6 +563,7 @@ export class Store {
         days: count(raw.keepRuns?.days, 36500, defaults.keepRuns.days),
         maxMb: count(raw.keepRuns?.maxMb, 1_000_000, defaults.keepRuns.maxMb),
       },
+      companion: normalizeCompanion(raw.companion),
     };
   }
 

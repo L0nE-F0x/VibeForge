@@ -29,7 +29,7 @@
 
 ## Parked
 
-- [ ] **A phone companion** (on the roadmap): a PWA served by VibeForge over Tailscale only, off by default, to see who's waiting, the runs inbox and plan limits (then maybe reply, Continue or Stop). Parked 2026-09-29 while the founder reads up on Tailscale. Open questions: Tailscale or not, a desktop that stays on or a laptop that suspends, and see-only or drive.
+- [ ] **A phone companion** (prototype, 2026-10-03): Settings → Phone serves a page on 127.0.0.1 only, off by default. The page lists workspaces, shows the screen, launches an agent that is allowed in that folder, and sends the next prompt. The computer stays on. Tailscale Serve (`tailscale serve --bg --https=443 http://127.0.0.1:4737`) is how a phone reaches it. A buzz works while the page is open. A buzz on a locked phone is still to build. Plan limits are not on the page.
 - [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
 
 ## Known rough edges

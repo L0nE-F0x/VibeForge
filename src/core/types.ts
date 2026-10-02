@@ -150,6 +150,16 @@ export interface Settings {
   rail: { order: string[]; hidden: string[] };
   /** How long finished runs are kept, and how much room they may take. Zeros keep everything. */
   keepRuns: { days: number; maxMb: number };
+  /** The phone page served on this machine. Off until turned on. */
+  companion: CompanionSettings;
+}
+
+/** The phone page. `token` is empty until the page is turned on. */
+export interface CompanionSettings {
+  enabled: boolean;
+  port: number;
+  token: string;
+  nudges: string[];
 }
 
 /** Short tones, made in the app, for moments worth hearing about. */

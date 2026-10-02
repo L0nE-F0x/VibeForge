@@ -201,8 +201,17 @@ export interface Dictation {
   empty: "short" | "silent" | "nothing" | null;
 }
 
+export interface CompanionStatus {
+  listening: boolean;
+  /** http://127.0.0.1:port while the page is up. */
+  url: string | null;
+  error: string | null;
+}
+
 export interface PtySnapshot {
   ansi: string;
+  /** The screen as text, for the phone. The window keeps using `ansi`. */
+  plain: string;
   seq: number;
   cols: number;
   rows: number;
@@ -271,6 +280,8 @@ export interface DeskMethods {
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;
+  /** Whether the phone page is listening, and why not when it failed to bind. */
+  "companion.status": () => CompanionStatus;
   "engines.list": () => Engine[];
   "engines.recheck": () => Engine[];
   "engines.save": (rows: EngineRow[]) => Engine[];

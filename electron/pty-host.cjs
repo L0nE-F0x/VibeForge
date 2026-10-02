@@ -405,6 +405,7 @@ async function handle(msg) {
           reply(msg.reqId, {
             ok: true,
             ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
+            plain: recentText(session, 160),
             seq,
             cols: session.cols,
             rows: session.rows,
@@ -431,6 +432,23 @@ async function handle(msg) {
 }
 
 // ------------------------------------------------------------------ working or quiet
+
+/** The last lines a person would read, including a little of what scrolled off the screen. */
+function recentText(session, maxLines) {
+  const buffer = session.mirror.buffer.active;
+  const end = buffer.baseY + session.rows;
+  const start = Math.max(0, end - maxLines);
+  const lines = [];
+  for (let index = start; index < end; index += 1) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
+  while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop();
+  return lines.join("\n");
+}
 
 function screenRows(session) {
   const buffer = session.mirror.buffer.active;

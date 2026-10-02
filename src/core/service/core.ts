@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { newCompanionToken, normalizeCompanion } from "../companion.js";
 import { planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, summarizeSnapshot } from "../vcs.js";
@@ -125,8 +126,15 @@ export class ServiceCore {
     return this.store.readSettings();
   }
 
-  saveSettings(patch: Partial<Settings>): Settings {
-    const next = { ...this.store.readSettings(), ...patch };
+  saveSettings(patch: Partial<Omit<Settings, "companion">> & { companion?: Partial<Settings["companion"]> }): Settings {
+    const current = this.store.readSettings();
+    const { companion: companionPatch, ...rest } = patch;
+    const next: Settings = { ...current, ...rest };
+    // A partial phone-page patch must not drop the pairing code or the saved nudges.
+    if (companionPatch) {
+      next.companion = normalizeCompanion({ ...current.companion, ...companionPatch });
+      if (next.companion.enabled && !next.companion.token) next.companion.token = newCompanionToken();
+    }
     this.store.writeSettings(next);
     this.emit("settings");
     return this.store.readSettings();

@@ -27,6 +27,7 @@ import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg } from "../src/core/control.js";
 import { listenControl } from "./control.js";
+import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
 
@@ -513,6 +514,7 @@ function handlers(): Handlers {
       if (patch.theme) refreshPalette();
       return next;
     },
+    "companion.status": () => companionStatus(),
     "engines.list": () => s().listEngines(),
     "engines.recheck": async () => {
       await adoptShellPath();
@@ -831,7 +833,18 @@ supervisor.onCrash.add((message) => {
   setTimeout(() => void startHost(), 1000);
 });
 
+function companionWire() {
+  return {
+    service: svc(),
+    supervisor,
+    root: path.join(appRoot(), "companion"),
+    icon: iconPath(),
+    log: (line: string) => log.info(line),
+  };
+}
+
 async function shutdown(): Promise<void> {
+  await stopCompanion();
   talk.dispose();
   voice.dispose();
   if (!service) return;
@@ -870,8 +883,10 @@ if (!app.requestSingleInstanceLock()) {
     service.onChange((topics) => {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) syncTray();
+      if (topics.includes("settings")) syncCompanion(companionWire());
     });
     palette = resolvePalette(service.getSettings().theme);
+    syncCompanion(companionWire());
     guardPermissions();
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);

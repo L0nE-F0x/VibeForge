@@ -32,6 +32,7 @@ export interface PtyActivity {
 
 export interface PtySnapshot {
   ansi: string;
+  plain: string;
   seq: number;
   cols: number;
   rows: number;
@@ -184,6 +185,7 @@ export class PtySupervisor {
     const result = await this.request({ op: "snapshot", ptyId });
     return {
       ansi: String(result.ansi ?? ""),
+      plain: String(result.plain ?? ""),
       seq: Number(result.seq ?? 0),
       cols: Number(result.cols ?? 0),
       rows: Number(result.rows ?? 0),

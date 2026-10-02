@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectory } from "../fsx.js";
-import { isPathInside } from "../places.js";
+import { cwdAllowed, isPathInside } from "../places.js";
 import { plainPrompt } from "../preamble.js";
 import { RUN_FILES } from "../runs.js";
 import { runFilePaths } from "../run-storage.js";
@@ -158,6 +158,37 @@ export class ChatDesk {
     if (lastId && livePty) return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
     const launched = await this.startChatRun(chat, { prompt: null, continueSession: Boolean(lastId), size });
     return { ...launched, chatId: chat.id, started: true, note: null };
+  }
+
+  /**
+   * Start this agent in a workspace, with its brief, or type `prompt` into the session it already
+   * has there. The workspace folder has to be one of the agent's allowed folders.
+   */
+  async launchAgent(workspaceId: string, agentId: string, prompt: string | null, size: TermSize = {}): Promise<SendResult> {
+    await this.core.settled;
+    const workspace = this.core.workspaceById(workspaceId);
+    if (!workspace) throw new Error("That workspace is gone.");
+    if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
+    const agent = this.core.store.getAgent(agentId);
+    if (!agent) throw new Error("That agent no longer exists.");
+    if (!cwdAllowed(workspace.path, agent.places)) throw new Error(`${agent.name} is not allowed in ${workspace.name}.`);
+    const cwd = path.resolve(workspace.path);
+    const already = this.core.listLive().find((session) => {
+      if (session.agentId !== agent.id) return false;
+      return session.workspaceId === workspace.id || path.resolve(session.cwd) === cwd;
+    });
+    if (already) throw new Error(`${agent.name} is already running in ${workspace.name}.`);
+    let chat = this.core.store.listChats().find((item) => item.agentId === agent.id && path.resolve(item.cwd) === cwd) ?? null;
+    if (!chat) {
+      const created = this.createChat({ agentId });
+      const stored = this.core.store.getChat(created.id);
+      if (!stored) throw new Error("The chat was not saved.");
+      chat = path.resolve(stored.cwd) === cwd ? stored : { ...stored, cwd };
+      if (chat !== stored) this.core.store.writeChat(chat);
+    }
+    const text = prompt?.trim() ?? "";
+    if (text) return this.sendChat(chat.id, text, size);
+    return this.continueChat(chat.id, size);
   }
 
   async stopChat(id: string): Promise<void> {
