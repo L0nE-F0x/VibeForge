@@ -1,4 +1,16 @@
-# Status — 2026-10-01
+# Status — 2026-10-03
+
+## The phone page (2026-10-03, unreleased, branch `feat/phone-companion`)
+
+Grok built the prototype; Claude reviewed it and fixed what the review found.
+
+- **What it is.** Settings → Phone serves `companion/` (plain HTML, CSS and JS, no build step) and a small JSON API from the main process (`src/core/companion-http.ts`, wired in `electron/companion.ts`) on `127.0.0.1:4737`, off by default. A 128-bit pairing code (`vf_…` in settings.json) goes in an `Authorization` header, so there is no cookie to forge; the page has a strict CSP. Tailscale Serve is how a phone reaches it.
+- **Starting.** A workspace's Start lists the agents allowed there (`launchAgent`, through the agent's chat) and every installed CLI on its own (`startEngine`, an origin-`code` run that Code adopts when opened).
+- **Sending.** `/api/send` types into a live coding session only (`isCodingSession`: a run's own terminal, or a shell with a CLI in its foreground). When the CLI has quit, even back to its shell, the run is picked back up with the text as the next instruction: `continueRun(id, size, followUp)` and `continueTask(id, size, followUp)` paste it after a native continue, or put it in the preamble otherwise. So a task resumes in its own copy, as its agent, in its own session.
+- **Stopping.** A run's terminal is stopped; a CLI typed into a shell gets <kbd>Esc</kbd> and the shell stays.
+- **The page** builds each view once and patches it on each 2 s poll, so a draft keeps focus and caret, and the screen follows its end unless scrolled up. Plan limits come from the same `planSummary` as the desktop (so the same Settings switch and the providers' 3-minute cache), asked once a minute.
+- **Words.** The page's text is `phone.*` in the app's catalogs (plus the existing `plans.*`), served by `/api/text` in the language setting, or the phone's `Accept-Language` when the setting is "system". Server refusals are `phone.*` keys; the service's own sentences are translated with the same `core.*` matching as the window (`src/ui/core-match.ts`, now free of React). The other catalogs are separate chunks of the main bundle, loaded when a phone asks.
+- Checked: `npm test` 205, typecheck, and a scratch build run headless with a stand-in CLI and the page in a phone-sized headless Chrome (19 checks: pairing, plan card, starting a CLI and an agent, drafts and scroll across polls, nudges, send, stop and continue, a CLI typed into a shell interrupted and then quitting, with text sent afterwards reaching a resumed CLI and not bash, wrapped lines, and a German phone).
 
 ## 2.0: agents take turns, and every waiter has a name (2026-10-01)
 
@@ -262,6 +274,8 @@ Fourteen items from a review of the whole app (docs/todo.md has the list), plus 
 - **The CI smoke job and the release workflow** have not run on GitHub yet: the smoke test ran here attached to a hidden window and headless, not under `xvfb-run`, and `release.yml` was only checked by extracting the 1.0.0–1.2.0 notes, which match the published releases.
 - **Plan alerts** are checked with tests, not by a real window reaching 80%.
 - **Restart VibeForge** after an update was not clicked (the relaunched window would open on the desktop in use), and what Copy diagnostics puts on the clipboard was not read back: Wayland only takes a clipboard change from a window that received real input, which a hidden test window never does.
+
+- **The phone page on a real phone over Tailscale**: checked in headless Chrome at phone size on loopback, not through Tailscale Serve on an actual phone; buzzes and adding the page to a home screen weren't tried.
 
 ## Known limits
 

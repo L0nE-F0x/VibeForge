@@ -29,7 +29,7 @@
 
 ## Parked
 
-- [ ] **A phone companion** (prototype, 2026-10-03): Settings → Phone serves a page on 127.0.0.1 only, off by default. The page lists workspaces, shows the screen, starts an agent that is allowed in that folder or any CLI on its own, sends the next prompt (picking a finished session back up when needed), and stops or interrupts it. The computer stays on. Tailscale Serve (`tailscale serve --bg --https=443 http://127.0.0.1:4737`) is how a phone reaches it. A buzz works while the page is open. A buzz on a locked phone is still to build. Plan limits are not on the page.
+- [ ] **A phone companion** (prototype, 2026-10-03): Settings → Phone serves a page on 127.0.0.1 only, off by default. The page lists workspaces, shows the screen, starts an agent that is allowed in that folder or any CLI on its own, sends the next prompt (picking a finished session back up when needed), and stops or interrupts it. The computer stays on. Tailscale Serve (`tailscale serve --bg --https=443 http://127.0.0.1:4737`) is how a phone reaches it. Plan limits are on the page, and it speaks the app's language. A buzz works while the page is open. A buzz on a locked phone is still to build.
 - [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
 
 ## Known rough edges

@@ -4,6 +4,7 @@ import { describeError } from "../src/core/log.js";
 import { readRunText } from "../src/core/run-storage.js";
 import { RUN_FILES } from "../src/core/runs.js";
 import type { TeamService } from "../src/core/team-service.js";
+import type { PlanSummary } from "../src/core/plans.js";
 import type { LiveSession, RunMeta } from "../src/core/types.js";
 import type { CompanionStatus } from "../src/shared/api.js";
 import type { PtySupervisor } from "./supervisor.js";
@@ -18,6 +19,8 @@ export interface CompanionWire {
   root: string;
   icon: string | null;
   log: (line: string) => void;
+  /** Plan limits as the desktop's live popover reads them (null when Settings leave them off). */
+  plans: () => Promise<PlanSummary | null>;
 }
 
 let server: CompanionHttp | null = null;
@@ -79,6 +82,7 @@ async function apply(wire: CompanionWire): Promise<void> {
       root: wire.root,
       icon: wire.icon,
       actions: actionsFor(wire),
+      language: () => wire.service.getSettings().language,
     });
     boundToken = settings.token;
     status = { listening: true, url, error: null };
@@ -109,6 +113,7 @@ function actionsFor(wire: CompanionWire): CompanionActions {
         : await service.startEngine({ workspaceId: input.workspaceId, engineId: input.engineId, prompt: input.prompt, ...PHONE_SIZE });
       return { ptyId: result.ptyId, runId: result.runId };
     },
+    plans: () => wire.plans(),
   };
 }
 

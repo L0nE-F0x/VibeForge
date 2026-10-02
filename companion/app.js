@@ -13,6 +13,13 @@ let known = new Map();
 let primed = false;
 let timer = 0;
 let ticket = 0;
+/** The page's words in the phone's language, from the app's own catalogs (GET /api/text). */
+let words = {};
+let language = "en";
+let plans = null;
+let plansAt = 0;
+const PLANS_EVERY_MS = 60_000;
+const PLAN_NAMES = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi" };
 /** The nodes of the page on show that a poll updates in place. Inputs are never rebuilt by a poll. */
 let parts = {};
 
@@ -31,20 +38,50 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+function t(key, vars) {
+  const text = words[key] ?? key;
+  return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match)) : text;
+}
+
+function unit(value, name) {
+  return new Intl.NumberFormat(language, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value);
+}
+
+/** How long, the way the desktop's plan limits say it: "45m", "3h 20m", "2d 4h". */
+function span(ms) {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return unit(minutes, "minute");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return minutes % 60 ? `${unit(hours, "hour")} ${unit(minutes % 60, "minute")}` : unit(hours, "hour");
+  return hours % 24 ? `${unit(Math.floor(hours / 24), "day")} ${unit(hours % 24, "hour")}` : unit(hours / 24, "day");
+}
+
 function ago(iso) {
   if (!iso) return "";
   const seconds = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
   if (!Number.isFinite(seconds)) return "";
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
+  if (seconds < 60) return t("plans.justNow");
+  if (seconds < 3600) return unit(Math.floor(seconds / 60), "minute");
+  if (seconds < 86400) return unit(Math.floor(seconds / 3600), "hour");
+  return unit(Math.floor(seconds / 86400), "day");
 }
 
 function stateLabel(state) {
-  if (state === "working") return "Working";
-  if (state === "waiting") return "Waiting";
-  return "Finished";
+  if (state === "working") return t("phone.working");
+  if (state === "waiting") return t("phone.waiting");
+  return t("phone.finished");
+}
+
+/** The words for the phone's language. Before they arrive (or if they can't), keys stand in. */
+async function loadWords() {
+  try {
+    const body = await (await fetch("/api/text")).json();
+    words = body.words || {};
+    language = body.language || "en";
+    document.documentElement.lang = language;
+  } catch {
+    words = { "phone.offline": "The computer is not serving the page." };
+  }
 }
 
 async function call(path, options = {}) {
@@ -54,14 +91,14 @@ async function call(path, options = {}) {
   try {
     response = await fetch(path, { method: options.method || "GET", headers, body: options.body });
   } catch {
-    throw Object.assign(new Error("The computer is not serving the page."), { offline: true });
+    throw Object.assign(new Error(t("phone.offline")), { offline: true });
   }
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 && path !== "/api/pair") {
     forget();
-    throw new Error(body.error || "Enter the pairing code from Settings on the computer.");
+    throw new Error(body.error || t("phone.pairLead"));
   }
-  if (!response.ok) throw Object.assign(new Error(body.error || "Something went wrong."), { working: body.working === true });
+  if (!response.ok) throw Object.assign(new Error(body.error || t("phone.error.failed")), { working: body.working === true });
   return body;
 }
 
@@ -98,14 +135,14 @@ function watch(payload) {
       next.set(key, item);
       const previous = known.get(key);
       if (!primed || !previous || previous.state === item.state) continue;
-      if (item.state === "waiting" && previous.state === "working") void buzz(`${item.title} is waiting`, { key, ptyId: item.ptyId || "", runId: item.runId || "" });
-      if (item.state === "done") void buzz(`${item.title} finished${item.changes ? ` · ${item.changes}` : ""}`, { key, ptyId: "", runId: item.runId || "" });
+      if (item.state === "waiting" && previous.state === "working") void buzz(t("phone.buzzWaiting", { name: item.title }), { key, ptyId: item.ptyId || "", runId: item.runId || "" });
+      if (item.state === "done") void buzz(`${t("phone.buzzFinished", { name: item.title })}${item.changes ? ` · ${item.changes}` : ""}`, { key, ptyId: "", runId: item.runId || "" });
     }
   }
   if (primed) {
     for (const [key, previous] of known) {
       if (next.has(key) || previous.state === "done") continue;
-      void buzz(`${previous.title} finished`, { key, ptyId: "", runId: previous.runId || "" });
+      void buzz(t("phone.buzzFinished", { name: previous.title }), { key, ptyId: "", runId: previous.runId || "" });
     }
   }
   known = next;
@@ -118,6 +155,11 @@ async function refresh() {
   const shown = view;
   try {
     const payload = await call("/api/desk");
+    // Plan limits move slowly, and reading them may ask the providers: once a minute is plenty.
+    if (Date.now() - plansAt > PLANS_EVERY_MS) {
+      plansAt = Date.now();
+      plans = (await call("/api/plans").catch(() => ({ plans }))).plans ?? null;
+    }
     const next = view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`) : null;
     // A newer poll, or a change of page, has already replaced what this one would show.
     if (mine !== ticket) return;
@@ -200,13 +242,13 @@ function pairPage() {
       if (event.key === "Enter") void pair(input.value);
     },
   });
-  parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, "Continue");
+  parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, t("phone.continue"));
   return el(
     "section",
     {},
     el("div", { class: "top" }, el("h1", {}, "VibeForge")),
-    el("p", { class: "muted" }, "Enter the pairing code from Settings → Phone on the computer."),
-    el("div", { class: "card stack" }, el("label", {}, "Pairing code", input), parts.pair),
+    el("p", { class: "muted" }, t("phone.pairLead")),
+    el("div", { class: "card stack" }, el("label", {}, t("phone.code"), input), parts.pair),
   );
 }
 
@@ -222,7 +264,7 @@ async function pair(code) {
       body: JSON.stringify({ token: given }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || "That code did not match.");
+    if (!response.ok) throw new Error(body.error || t("phone.codeWrong"));
     token = given;
     localStorage.setItem(TOKEN_KEY, token);
     busy = false;
@@ -241,32 +283,39 @@ function deskPage() {
   parts.buzz = el(
     "button",
     { class: "ghost", type: "button", hidden: true, onclick: () => void Notification.requestPermission().then(() => update()) },
-    "Buzz me",
+    t("phone.buzz"),
   );
+  parts.plans = el("div", {});
+  parts.plansKey = null;
   parts.list = el("div", {});
   parts.listKey = null;
-  return el("section", {}, el("div", { class: "top" }, el("h1", { class: "grow" }, "Desk"), parts.buzz), parts.list);
+  return el("section", {}, el("div", { class: "top" }, el("h1", { class: "grow" }, t("phone.desk")), parts.buzz), parts.plans, parts.list);
 }
 
 function updateDesk() {
   parts.buzz.hidden = !(typeof Notification !== "undefined" && Notification.permission === "default");
+  const plansKey = JSON.stringify([plans, Math.floor(Date.now() / 60000)]);
+  if (plansKey !== parts.plansKey) {
+    parts.plansKey = plansKey;
+    parts.plans.replaceChildren(...(plans?.providers?.length ? [plansCard(plans)] : []));
+  }
   if (!desk) return;
   // The list has no inputs, so it is redrawn whole, but only when something on it changed (or a minute passed).
   const key = JSON.stringify([desk.workspaces, Math.floor(Date.now() / 60000)]);
   if (key === parts.listKey) return;
   parts.listKey = key;
   parts.list.replaceChildren(
-    ...(desk.workspaces.length ? desk.workspaces.map((workspace) => workspaceCard(workspace)) : [el("div", { class: "card muted" }, "No workspaces yet. Add one on the computer.")]),
+    ...(desk.workspaces.length ? desk.workspaces.map((workspace) => workspaceCard(workspace)) : [el("div", { class: "card muted" }, t("phone.noWorkspaces"))]),
   );
 }
 
 function workspaceCard(workspace) {
-  const start = workspace.id ? el("button", { class: "ghost", type: "button", onclick: () => openLaunch(workspace.id) }, "Start") : null;
+  const start = workspace.id ? el("button", { class: "ghost", type: "button", onclick: () => openLaunch(workspace.id) }, t("phone.start")) : null;
   return el(
     "article",
     { class: "card" },
-    el("div", { class: "row" }, el("div", { class: "grow" }, el("div", { class: "title" }, workspace.name), workspace.folder ? el("div", { class: "small faint" }, workspace.folder) : null), start),
-    workspace.sessions.length ? workspace.sessions.map((item) => sessionButton(item)) : el("p", { class: "small faint" }, "Nothing running."),
+    el("div", { class: "row" }, el("div", { class: "grow" }, el("div", { class: "title" }, workspace.id ? workspace.name : t("phone.elsewhere")), workspace.folder ? el("div", { class: "small faint" }, workspace.folder) : null), start),
+    workspace.sessions.length ? workspace.sessions.map((item) => sessionButton(item)) : el("p", { class: "small faint" }, t("phone.nothingRunning")),
   );
 }
 
@@ -280,7 +329,63 @@ function sessionButton(item) {
     },
     el("div", { class: "row" }, el("div", { class: "grow title" }, item.title), el("span", { class: `pill ${item.state}` }, stateLabel(item.state))),
     el("div", { class: "small muted" }, [item.detail, ago(item.endedAt || item.startedAt), item.changes].filter(Boolean).join(" · ")),
-    item.alsoHere?.length ? el("div", { class: "small faint" }, `Also here: ${item.alsoHere.join(", ")}`) : null,
+    item.alsoHere?.length ? el("div", { class: "small faint" }, t("phone.alsoHere", { names: item.alsoHere.join(", ") })) : null,
+  );
+}
+
+function level(percent) {
+  if (percent === null || percent === undefined || percent < 80) return "quiet";
+  return percent < 100 ? "warm" : "full";
+}
+
+function bar(percent, className) {
+  const fill = el("i");
+  // CSSOM, not a style attribute: the page's CSP has no 'unsafe-inline'.
+  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  return el("span", { class: className }, fill);
+}
+
+/** Plan limits, as the desktop's live popover shows them: each plan's busiest window first. */
+function plansCard(summary) {
+  const now = Date.now();
+  return el(
+    "article",
+    { class: "card plans" },
+    el("div", { class: "title" }, t("plans.title")),
+    summary.providers.map((provider) => {
+      const name = PLAN_NAMES[provider.id] || provider.id;
+      let sub;
+      if (provider.problem) sub = t(`plans.problem.${provider.problem}`, { cli: name });
+      else if (provider.percent === null) sub = t("plans.asking");
+      else {
+        const parts = [];
+        if (provider.resetsAt && Date.parse(provider.resetsAt) > now) parts.push(t("plans.resetsIn", { time: span(Date.parse(provider.resetsAt) - now) }));
+        if (provider.fullAt) parts.push(t("plans.fullIn", { time: span(Date.parse(provider.fullAt) - now) }));
+        sub = parts.join(" · ");
+      }
+      // One window that is the headline number already says everything.
+      const only = provider.windows.length === 1 && provider.windows[0].name === provider.limiter && provider.windows[0].percent === provider.percent;
+      const rows = only ? [] : provider.windows;
+      const credits = provider.credits > 0
+        ? t("plans.credits", { amount: new Intl.NumberFormat(language, { style: "currency", currency: "USD" }).format(provider.credits) })
+        : "";
+      return el(
+        "div",
+        { class: `plan ${level(provider.percent)}${provider.problem ? " stale" : ""}` },
+        el(
+          "div",
+          { class: "row" },
+          el("span", { class: "grow title" }, name, provider.limiter && rows.length ? el("span", { class: "faint" }, ` · ${provider.limiter}`) : null),
+          el("b", { class: "plan-pct" }, provider.percent === null ? "—" : `${Math.round(provider.percent)}%`),
+        ),
+        provider.percent === null ? null : bar(provider.percent, "plan-bar"),
+        sub ? el("div", { class: "small muted" }, sub) : null,
+        rows.map((window) =>
+          el("div", { class: `plan-window ${level(window.percent)}` }, el("span", { class: "small" }, window.name), bar(window.percent, "plan-track"), el("span", { class: "small" }, `${Math.round(window.percent)}%`)),
+        ),
+        credits ? el("div", { class: "small faint" }, credits) : null,
+      );
+    }),
   );
 }
 
@@ -305,32 +410,32 @@ function launchChoices() {
 function launchPage() {
   const workspace = (desk?.workspaces ?? []).find((item) => item.id === launchWorkspace);
   const { agents, engines } = launchChoices();
-  const back = el("button", { class: "back", type: "button", onclick: () => setView("desk") }, "Desk");
-  const top = el("div", { class: "top" }, back, el("h1", {}, workspace?.name || "Start"));
+  const back = el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.desk"));
+  const top = el("div", { class: "top" }, back, el("h1", {}, workspace?.name || t("phone.start")));
   if (!agents.length && !engines.length) {
-    return el("section", {}, top, el("div", { class: "card muted" }, "No coding CLI was found on the computer, and no agent is allowed here."));
+    return el("section", {}, top, el("div", { class: "card muted" }, t("phone.nobodyHere")));
   }
   const select = el(
     "select",
     { id: "who" },
-    agents.length ? el("optgroup", { label: "Agents" }, agents.map((agent) => el("option", { value: `agent:${agent.id}` }, `${agent.name}${agent.engine ? ` · ${agent.engine}` : ""}`))) : null,
-    engines.length ? el("optgroup", { label: "CLIs" }, engines.map((engine) => el("option", { value: `engine:${engine.id}` }, engine.label))) : null,
+    agents.length ? el("optgroup", { label: t("phone.agents") }, agents.map((agent) => el("option", { value: `agent:${agent.id}` }, `${agent.name}${agent.engine ? ` · ${agent.engine}` : ""}`))) : null,
+    engines.length ? el("optgroup", { label: t("phone.clis") }, engines.map((engine) => el("option", { value: `engine:${engine.id}` }, engine.label))) : null,
   );
-  const prompt = el("textarea", { id: "prompt", placeholder: "What should they do? Leave this empty to start and wait." });
-  parts.start = el("button", { class: "btn", type: "button", onclick: () => void startAgent(select.value, prompt) }, "Start");
+  const prompt = el("textarea", { id: "prompt", placeholder: t("phone.firstPromptHint") });
+  parts.start = el("button", { class: "btn", type: "button", onclick: () => void startAgent(select.value, prompt) }, t("phone.start"));
   return el(
     "section",
     {},
     top,
-    el("div", { class: "card stack" }, el("label", {}, "Who", select), el("label", {}, "First prompt", prompt), parts.start),
-    agents.length ? null : el("p", { class: "small faint" }, "No agent is allowed in this folder, so only a CLI on its own can start here."),
+    el("div", { class: "card stack" }, el("label", {}, t("phone.who"), select), el("label", {}, t("phone.firstPrompt"), prompt), parts.start),
+    agents.length ? null : el("p", { class: "small faint" }, t("phone.cliOnly")),
   );
 }
 
 function updateLaunch() {
   if (!parts.start) return;
   parts.start.disabled = busy;
-  parts.start.textContent = busy ? "Starting…" : "Start";
+  parts.start.textContent = busy ? t("phone.starting") : t("phone.start");
 }
 
 async function startAgent(choice, box) {
@@ -348,16 +453,16 @@ async function startAgent(choice, box) {
 }
 
 function sessionPage() {
-  parts.title = el("h1", { class: "grow" }, "Session");
+  parts.title = el("h1", { class: "grow" }, t("phone.session"));
   parts.pill = el("span", { class: "pill", hidden: true });
   parts.meta = el("p", { class: "small muted", hidden: true });
-  parts.screen = el("pre", { class: "screen" }, "Loading…");
+  parts.screen = el("pre", { class: "screen" }, t("phone.loading"));
   parts.stick = true;
-  parts.prompt = el("textarea", { id: "prompt", placeholder: "Tell them what to do next" });
+  parts.prompt = el("textarea", { id: "prompt", placeholder: t("phone.next") });
   parts.nudges = el("div", { class: "actions", hidden: true });
   parts.nudgesKey = null;
-  parts.send = el("button", { class: "btn", type: "button", onclick: () => void sendText(parts.prompt.value, true) }, "Send");
-  parts.stop = el("button", { class: "ghost", type: "button", hidden: true, onclick: () => void stopSession() }, "Stop");
+  parts.send = el("button", { class: "btn", type: "button", onclick: () => void sendText(parts.prompt.value, true) }, t("phone.send"));
+  parts.stop = el("button", { class: "ghost", type: "button", hidden: true, onclick: () => void stopSession() }, t("phone.stop"));
   // Follow the end of the screen unless the person scrolled up to read.
   parts.screen.addEventListener("scroll", () => {
     const pre = parts.screen;
@@ -366,7 +471,7 @@ function sessionPage() {
   return el(
     "section",
     {},
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, "Desk"), parts.title, parts.pill),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.desk")), parts.title, parts.pill),
     parts.meta,
     parts.screen,
     el("div", { class: "card stack" }, parts.prompt, parts.nudges, el("div", { class: "actions" }, parts.send, parts.stop)),
@@ -382,7 +487,7 @@ function updateSession() {
     parts.nudges.replaceChildren(...nudges.map((nudge) => el("button", { class: "nudge", type: "button", disabled: busy, onclick: () => void sendText(nudge, false) }, nudge)));
   }
   parts.send.disabled = busy || !session?.canSend;
-  parts.send.textContent = busy ? "Sending…" : "Send";
+  parts.send.textContent = busy ? t("phone.sending") : t("phone.send");
   if (!session) return;
   parts.title.textContent = session.title;
   parts.pill.hidden = false;
@@ -391,11 +496,11 @@ function updateSession() {
   const meta = [session.detail, session.changes].filter(Boolean).join(" · ");
   parts.meta.hidden = !meta;
   parts.meta.textContent = meta;
-  parts.prompt.placeholder = session.state === "done" ? "What should they do next?" : "Tell them what to do next";
+  parts.prompt.placeholder = session.state === "done" ? t("phone.nextDone") : t("phone.next");
   parts.stop.hidden = !session.stop;
   parts.stop.disabled = busy;
-  parts.stop.textContent = session.stop === "interrupt" ? "Interrupt" : "Stop";
-  const screen = session.screen || "Nothing on screen yet.";
+  parts.stop.textContent = session.stop === "interrupt" ? t("phone.interrupt") : t("phone.stop");
+  const screen = session.screen || t("phone.emptyScreen");
   if (parts.screen.textContent !== screen) {
     parts.screen.textContent = screen;
     if (parts.stick) parts.screen.scrollTop = parts.screen.scrollHeight;
@@ -408,7 +513,7 @@ async function sendText(text, fromBox) {
   if (!words || !session) return;
   let force = false;
   if (session.state === "working") {
-    if (!window.confirm("Still working. Send anyway?")) return;
+    if (!window.confirm(t("phone.sendAnyway"))) return;
     force = true;
   }
   const query = { ptyId: session.ptyId || "", runId: session.runId || "" };
@@ -419,7 +524,7 @@ async function sendText(text, fromBox) {
     } catch (err) {
       // It started working again between the last look and the send.
       if (!err.working) throw err;
-      if (!window.confirm("Still working. Send anyway?")) return false;
+      if (!window.confirm(t("phone.sendAnyway"))) return false;
       result = await post("/api/send", { ...query, text: words, force: true });
     }
     sessionQuery = { ptyId: result.ptyId || "", runId: result.runId || query.runId };
@@ -431,7 +536,7 @@ async function sendText(text, fromBox) {
 
 async function stopSession() {
   if (!session?.ptyId) return;
-  const ask = session.stop === "interrupt" ? "Interrupt what it is doing? The terminal stays open." : "Stop this session?";
+  const ask = session.stop === "interrupt" ? t("phone.askInterrupt") : t("phone.askStop");
   if (!window.confirm(ask)) return;
   const ptyId = session.ptyId;
   await withBusy(() => post("/api/stop", { ptyId }));
@@ -445,8 +550,10 @@ if ("serviceWorker" in navigator) {
   void navigator.serviceWorker.register("/sw.js");
 }
 
-show();
-if (token) {
-  schedule();
-  void refresh();
-}
+void loadWords().then(() => {
+  show();
+  if (token) {
+    schedule();
+    void refresh();
+  }
+});

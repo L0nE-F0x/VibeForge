@@ -2,6 +2,11 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { bearerToken, tokenMatches, type DeskPayload } from "./companion.js";
+import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
+import type { PlanSummary } from "./plans.js";
+import type { en } from "../ui/i18n/en.js";
+
+type PhoneKey = Extract<keyof typeof en, `phone.${string}`>;
 
 /** A prompt the phone may send. Longer than this is a paste, not a nudge. */
 export const COMPANION_PROMPT_MAX = 8000;
@@ -38,15 +43,18 @@ export interface CompanionActions {
   stop(ptyId: string): Promise<void>;
   /** Start an agent, or a CLI on its own, in a workspace. */
   launch(input: { workspaceId: string; agentId: string; engineId: string; prompt: string }): Promise<LaunchResult>;
+  /** Plan limits as the desktop shows them, or null when Settings leave them off. */
+  plans(): Promise<PlanSummary | null>;
 }
 
+/** A refusal the phone shows: a `phone.*` sentence, sent in the phone's language. */
 export class CompanionHttpError extends Error {
   constructor(
-    message: string,
+    readonly key: PhoneKey,
     readonly status: number,
     readonly extra?: Record<string, unknown>,
   ) {
-    super(message);
+    super(key);
   }
 }
 
@@ -67,6 +75,8 @@ export interface CompanionHttpOptions {
   /** App icon, or null when there isn't one beside the page. */
   icon: string | null;
   actions: CompanionActions;
+  /** The language setting ("system" or a code). The phone's own languages fill in for "system". */
+  language?: () => string;
 }
 
 export interface CompanionHttp {
@@ -84,14 +94,14 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
-    if (size > BODY_MAX) throw new CompanionHttpError("That is too large.", 413);
+    if (size > BODY_MAX) throw new CompanionHttpError("phone.error.tooLarge", 413);
     chunks.push(buf);
   }
   if (size === 0) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
   } catch {
-    throw new CompanionHttpError("That was not valid.", 400);
+    throw new CompanionHttpError("phone.error.invalid", 400);
   }
 }
 
@@ -117,7 +127,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
   if (method === "GET" && url.pathname === "/icon.png") {
-    if (!opts.icon) throw new CompanionHttpError("No icon.", 404);
+    if (!opts.icon) throw new CompanionHttpError("phone.error.notFound", 404);
     const icon = fs.readFileSync(opts.icon);
     res.writeHead(200, {
       "Content-Type": "image/png",
@@ -131,7 +141,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const page = method === "GET" ? PAGES[url.pathname] : undefined;
   if (page) {
     const file = pagePath(opts.root, page.name);
-    if (!file) throw new CompanionHttpError("Not found.", 404);
+    if (!file) throw new CompanionHttpError("phone.error.notFound", 404);
     const body = fs.readFileSync(file);
     res.writeHead(200, {
       "Content-Type": page.type,
@@ -144,40 +154,50 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     res.end(body);
     return;
   }
-  if (!url.pathname.startsWith("/api/")) throw new CompanionHttpError("Not found.", 404);
+  if (!url.pathname.startsWith("/api/")) throw new CompanionHttpError("phone.error.notFound", 404);
+  // The page's words, before pairing too: the pairing page needs them.
+  if (method === "GET" && url.pathname === "/api/text") {
+    const language = languageOf(req, opts);
+    sendJson(res, 200, { language, words: await phoneWords(language) });
+    return;
+  }
   if (method === "POST" && url.pathname === "/api/pair") {
     const body = (await readBody(req)) as { token?: unknown };
-    if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("That code is not the one on this computer.", 401);
+    if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
     sendJson(res, 200, { ok: true });
     return;
   }
   if (!tokenMatches(opts.token, bearerToken(req.headers.authorization))) {
-    throw new CompanionHttpError("Open Settings on the computer and enter the pairing code.", 401);
+    throw new CompanionHttpError("phone.pairLead", 401);
   }
   if (method === "GET" && url.pathname === "/api/desk") {
     sendJson(res, 200, opts.actions.desk());
+    return;
+  }
+  if (method === "GET" && url.pathname === "/api/plans") {
+    sendJson(res, 200, { plans: await opts.actions.plans() });
     return;
   }
   if (method === "GET" && url.pathname === "/api/session") {
     sendJson(res, 200, await opts.actions.session({ ptyId: url.searchParams.get("ptyId") || "", runId: url.searchParams.get("runId") || "" }));
     return;
   }
-  if (method !== "POST") throw new CompanionHttpError("Not found.", 404);
+  if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   const body = (await readBody(req)) as { ptyId?: unknown; runId?: unknown; text?: unknown; force?: unknown; workspaceId?: unknown; agentId?: unknown; engineId?: unknown; prompt?: unknown };
   if (url.pathname === "/api/send") {
     const ptyId = text(body.ptyId, 80);
     const runId = text(body.runId, 200);
     const prompt = text(body.text, COMPANION_PROMPT_MAX);
-    if (!prompt) throw new CompanionHttpError("Type something to send.", 400);
-    if (!ptyId && !runId) throw new CompanionHttpError("That session is gone.", 400);
+    if (!prompt) throw new CompanionHttpError("phone.error.empty", 400);
+    if (!ptyId && !runId) throw new CompanionHttpError("phone.error.gone", 400);
     const result = await opts.actions.send({ ptyId, runId, text: prompt, force: body.force === true });
-    if (result.working) throw new CompanionHttpError("Still working.", 409, { working: true });
+    if (result.working) throw new CompanionHttpError("phone.error.working", 409, { working: true });
     sendJson(res, 200, { ptyId: result.ptyId, runId: result.runId });
     return;
   }
   if (url.pathname === "/api/stop") {
     const ptyId = text(body.ptyId, 80);
-    if (!ptyId) throw new CompanionHttpError("That session is gone.", 400);
+    if (!ptyId) throw new CompanionHttpError("phone.error.gone", 400);
     await opts.actions.stop(ptyId);
     sendJson(res, 200, { ok: true });
     return;
@@ -186,28 +206,37 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     const workspaceId = text(body.workspaceId, 80);
     const agentId = text(body.agentId, 80);
     const engineId = text(body.engineId, 80);
-    if (!workspaceId || (!agentId && !engineId)) throw new CompanionHttpError("Choose a workspace and who to start.", 400);
+    if (!workspaceId || (!agentId && !engineId)) throw new CompanionHttpError("phone.error.choose", 400);
     sendJson(res, 200, await opts.actions.launch({ workspaceId, agentId, engineId, prompt: text(body.prompt, COMPANION_PROMPT_MAX) }));
     return;
   }
-  throw new CompanionHttpError("Not found.", 404);
+  throw new CompanionHttpError("phone.error.notFound", 404);
+}
+
+function languageOf(req: http.IncomingMessage, opts: CompanionHttpOptions): PhoneLanguage {
+  return phoneLanguage(opts.language?.() ?? "system", req.headers["accept-language"]);
+}
+
+/** What went wrong, in the phone's language. A service's sentence is translated when the app knows it. */
+async function errorText(error: unknown, language: PhoneLanguage): Promise<string> {
+  if (error instanceof CompanionHttpError) return phoneSay(language, error.key);
+  const message = error instanceof Error && error.message ? error.message.split("\n")[0].slice(0, 300) : "";
+  return message ? phoneCoreText(language, message) : phoneSay(language, "phone.error.failed");
 }
 
 /** The phone page and its API, on loopback. The caller binds the address. */
 export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string }): Promise<CompanionHttp> {
   const server = http.createServer((req, res) => {
-    handle(req, res, opts).catch((error: unknown) => {
+    handle(req, res, opts).catch(async (error: unknown) => {
       if (res.headersSent) {
         res.destroy();
         return;
       }
-      if (error instanceof CompanionHttpError) {
-        sendJson(res, error.status, { error: error.message, ...error.extra });
-        return;
-      }
       // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply.
-      const message = error instanceof Error && error.message ? error.message.split("\n")[0] : "Something went wrong.";
-      sendJson(res, 400, { error: message.slice(0, 300) });
+      const status = error instanceof CompanionHttpError ? error.status : 400;
+      const extra = error instanceof CompanionHttpError ? error.extra : undefined;
+      const text = await errorText(error, languageOf(req, opts)).catch(() => "Something went wrong.");
+      if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });
   });
   const host = opts.host ?? "127.0.0.1";

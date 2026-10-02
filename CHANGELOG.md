@@ -15,9 +15,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Muse in Settings → Engines.** An engines list saved before Muse existed gains a Muse row, once. Removing that row keeps it removed.
 - **Muse in Runs.** Typing `muse` in a workspace is recorded and labeled Muse, on the desk and on the phone, including when its launcher has swapped in `muse-bin-<version>`. The Prompts tab reads what you typed from Muse's own session log.
 
+**A phone page: check your workspaces and tell a CLI what to do next, from your phone.**
+
+- **Settings → Phone** serves a small page, off until you turn it on and listening on this computer only (`127.0.0.1:4737`). Pair it once with the code in Settings; reach it from your phone through Tailscale Serve (the README has the one command).
+- **See what's happening.** Each workspace with the coding CLIs working, waiting or recently finished in it, the plan limits the desktop shows, and a CLI's screen, which opens at its end and follows new output.
+- **Start and steer.** Start an agent allowed in a workspace, or any installed CLI on its own, with an optional first prompt. Send the next prompt, pick a finished run back up with your next instruction (a task resumes in its own copy, as its agent), and stop it. A CLI typed into a terminal is interrupted instead, so the terminal stays, and a message never lands in a terminal whose CLI has quit.
+- **Buzzes** while the page is open, when a CLI starts waiting or finishes. A buzz on a locked phone is still to come.
+- **In your language.** The page speaks the language VibeForge does, errors included.
+- **The same look as the desk.** Square corners, JetBrains Mono with Geist headings, flat panels, the pixel plan marks, a slow ember while a CLI is working, and an amber glow when one is waiting. Plan limits start closed; Show in that panel opens them.
+- **Installs onto the phone.** The first visit on a phone offers to install the page. Installed from that offer, it fills the screen.
+- **The keyboard.** Tapping a text box shrinks the page to the space above the phone's keyboard. The box and its button stay on screen, and the terminal gives up the room.
+- **A follow-up as a CLI leaves a shell.** Send looks at the terminal at that moment, so the second after a CLI quits is not typed into the shell. If the run is still closing, the follow-up waits and then resumes the session. A wrong pairing code during Send, Stop or Start brings the code form back.
+
 **Open another branch without moving the folder you already have.**
 
 - **Its own workspace.** In Code, a workspace's menu has **Open another branch**. This folder stays on its branch. The branch you pick is checked out beside the project and added as its own workspace, named with the repository and the branch. A branch that is already checked out opens that folder instead of making a second copy. Removing the workspace later leaves the folder on disk.
+
+**A git checkout opens the code on this computer.**
+
+- **`vibeforge` builds when the checkout is newer.** Opening the app from a clone builds first when that code is newer than the last build, then opens the window. Quit and open it again to load code that changed while the window was open. The installed copy still updates through the installer.
 
 **A tiled window can pan.**
 

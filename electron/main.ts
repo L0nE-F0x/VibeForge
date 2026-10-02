@@ -840,6 +840,7 @@ function companionWire() {
     root: path.join(appRoot(), "companion"),
     icon: iconPath(),
     log: (line: string) => log.info(line),
+    plans: () => planSummary(false),
   };
 }
 

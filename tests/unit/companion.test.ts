@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
 import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
+import { phoneCoreText, phoneLanguage, phoneWords } from "../../src/core/companion-text.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
 import type { LiveSession } from "../../src/core/types.js";
 
@@ -128,6 +129,7 @@ function actions(patch: Partial<CompanionActions> = {}): CompanionActions {
     send: async () => ({ working: false, ptyId: "p", runId: "r" }),
     stop: async () => undefined,
     launch: async () => ({ ptyId: "p2", runId: "r2" }),
+    plans: async () => null,
     ...patch,
   };
 }
@@ -298,5 +300,64 @@ describe("picking a finished run back up from the phone", () => {
     expect(next.argv).toContain("--continue");
     expect(next.argv.join(" ")).not.toContain("Now tidy up.");
     expect(next.pasteInput).toBe("Now tidy up.");
+  });
+});
+
+describe("the phone page's words", () => {
+  it("follows the language setting, else the phone's own languages, else English", () => {
+    expect(phoneLanguage("fr", "de-DE,de;q=0.9")).toBe("fr");
+    expect(phoneLanguage("system", "nl-NL, de;q=0.8, en;q=0.5")).toBe("de");
+    expect(phoneLanguage("system", undefined)).toBe("en");
+    expect(phoneLanguage("xx", "de")).toBe("en");
+  });
+
+  it("serves the page's words and the plan words from the app's catalogs", async () => {
+    const de = await phoneWords("de");
+    expect(de["phone.send"]).toBe("Senden");
+    expect(de["plans.title"]).toBeTruthy();
+    expect(Object.keys(de).some((key) => !key.startsWith("phone.") && !key.startsWith("plans."))).toBe(false);
+  });
+
+  it("translates what the service says, values and all", async () => {
+    expect(await phoneCoreText("de", "That session has ended.")).not.toBe("That session has ended.");
+    expect(await phoneCoreText("de", "Atlas is not allowed in Notes.")).toContain("Atlas");
+    expect(await phoneCoreText("de", "Something nobody wrote down")).toBe("Something nobody wrote down");
+  });
+
+  it("sends refusals in the phone's language and keeps plan limits behind the code", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root: tempDir(),
+      icon: null,
+      language: () => "system",
+      actions: actions({
+        send: async () => {
+          throw new Error("That session has ended.");
+        },
+        plans: async () => ({ providers: [], checkedAt: "2026-10-03T00:00:00.000Z" }),
+      }),
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    const german = { "Accept-Language": "de-DE,de;q=0.9" };
+    try {
+      const text = await (await fetch(`${base}/api/text`, { headers: german })).json();
+      expect(text.language).toBe("de");
+      expect(text.words["phone.continue"]).toBe("Weiter");
+      const wrong = await (await fetch(`${base}/api/pair`, { method: "POST", headers: { ...german, "Content-Type": "application/json" }, body: JSON.stringify({ token: "nope" }) })).json();
+      expect(wrong.error).toBe(text.words["phone.error.wrongCode"]);
+      const ended = await fetch(`${base}/api/send`, {
+        method: "POST",
+        headers: { ...german, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ptyId: "p", text: "go" }),
+      });
+      expect(ended.status).toBe(400);
+      expect((await ended.json()).error).not.toBe("That session has ended.");
+      expect((await fetch(`${base}/api/plans`)).status).toBe(401);
+      expect(await (await fetch(`${base}/api/plans`, { headers: { Authorization: `Bearer ${token}` } })).json()).toEqual({ plans: { providers: [], checkedAt: "2026-10-03T00:00:00.000Z" } });
+    } finally {
+      await server.close();
+    }
   });
 });
