@@ -873,7 +873,6 @@ export const ja: Catalog = {
   "core.openBranchFailed": "{branch} を開けませんでした：{detail}",
   "core.gitMissing": "PATH に git がありません。",
   "core.branchesUnreadable": "このフォルダーのブランチを読めませんでした：{detail}",
-  "core.workspaceMissing": "そのワークスペースはなくなりました。",
   "core.copyGit": "別のコピーを作るには、ワークスペースが git リポジトリである必要があります。",
   "core.copyCommit": "別のコピーを作るには、ワークスペースにコミットが 1 つ以上必要です。",
   "core.copyMove": "別のワークスペースへ移す前に、タスクのコピーを適用するか破棄してください。",

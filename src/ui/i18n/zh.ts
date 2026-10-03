@@ -873,7 +873,6 @@ export const zh: Catalog = {
   "core.openBranchFailed": "无法打开 {branch}：{detail}",
   "core.gitMissing": "在 PATH 上找不到 git。",
   "core.branchesUnreadable": "无法读取此文件夹的分支：{detail}",
-  "core.workspaceMissing": "该工作区已不存在。",
   "core.copyGit": "单独副本要求工作区是一个 git 仓库。",
   "core.copyCommit": "单独副本要求工作区中至少有一个提交。",
   "core.copyMove": "将任务移到其他工作区前，请先应用或丢弃它的副本。",

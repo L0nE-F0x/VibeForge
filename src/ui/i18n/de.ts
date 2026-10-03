@@ -872,7 +872,6 @@ export const de: Catalog = {
   "core.openBranchFailed": "{branch} ließ sich nicht öffnen: {detail}",
   "core.gitMissing": "git wurde nicht auf PATH gefunden.",
   "core.branchesUnreadable": "Die Branches dieses Ordners konnten nicht gelesen werden: {detail}",
-  "core.workspaceMissing": "Dieser Arbeitsbereich ist weg.",
   "core.copyGit": "Eine eigene Kopie braucht einen Arbeitsbereich, der ein Git-Repository ist.",
   "core.copyCommit": "Eine eigene Kopie braucht mindestens einen Commit im Arbeitsbereich.",
   "core.copyMove": "Übernimm oder verwirf die Kopie der Aufgabe, bevor du sie in einen anderen Arbeitsbereich verschiebst.",

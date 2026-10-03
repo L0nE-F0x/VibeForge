@@ -872,7 +872,6 @@ export const pt: Catalog = {
   "core.openBranchFailed": "Não foi possível abrir {branch}: {detail}",
   "core.gitMissing": "git não foi encontrado no PATH.",
   "core.branchesUnreadable": "Não foi possível ler os branches desta pasta: {detail}",
-  "core.workspaceMissing": "Esse espaço de trabalho sumiu.",
   "core.copyGit": "Uma cópia separada precisa que o espaço de trabalho seja um repositório git.",
   "core.copyCommit": "Uma cópia separada precisa de pelo menos um commit no espaço de trabalho.",
   "core.copyMove": "Aplique ou descarte a cópia da tarefa antes de movê-la para outro espaço de trabalho.",

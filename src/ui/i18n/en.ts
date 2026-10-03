@@ -885,7 +885,6 @@ export const en = {
   "core.openBranchFailed": "Could not open {branch}: {detail}",
   "core.gitMissing": "git was not found on PATH.",
   "core.branchesUnreadable": "Could not read this folder's branches: {detail}",
-  "core.workspaceMissing": "That workspace is gone.",
   "core.copyGit": "A separate copy needs the workspace to be a git repository.",
   "core.copyCommit": "A separate copy needs at least one commit in the workspace.",
   "core.copyMove": "Apply or discard the task's copy before moving it to another workspace.",
