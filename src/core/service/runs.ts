@@ -5,7 +5,7 @@ import { plainPrompt } from "../preamble.js";
 import { readRunFiles, RUN_FILES, type RunFiles } from "../runs.js";
 import { repairBlankCapture } from "../restore-screen.js";
 import { compressRun, folderBytes, hasRunFile, planCleanup, readRunText } from "../run-storage.js";
-import { grokHome, readGrokPrompts } from "../session-prompts.js";
+import { grokHome, museHome, readGrokPrompts, readMusePrompts } from "../session-prompts.js";
 import type { RunQuery } from "../store.js";
 import { type Launched, REVIEW_ORIGINS, type RunBundle, type RunHit, type RunUpkeep, type RunView, type StorageSummary, type TermSize, TWO_DAYS_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
@@ -46,7 +46,7 @@ export class RunDesk {
     return { run: this.core.view(run), files };
   }
 
-  /** The run plus its screen, transcript and, for a typed Grok, the prompts it was given. */
+  /** The run plus its screen, transcript and, for a typed Grok or Muse, the prompts it was given. */
   async loadRun(id: string): Promise<RunBundle> {
     const bundle = this.getRun(id);
     let files = bundle.files;
@@ -57,9 +57,13 @@ export class RunDesk {
         /* the stored files still open */
       }
     }
-    if (!files.preamble.trim() && bundle.run.engine === "grok" && bundle.run.cwd) {
+    if (!files.preamble.trim() && bundle.run.cwd && (bundle.run.engine === "grok" || bundle.run.engine === "muse")) {
       try {
-        files = { ...files, prompts: readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt) };
+        const prompts =
+          bundle.run.engine === "grok"
+            ? readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt)
+            : readMusePrompts(museHome(), bundle.run.cwd, bundle.run.startedAt);
+        if (prompts) files = { ...files, prompts };
       } catch {
         /* the prompt tab explains that none was handed over */
       }

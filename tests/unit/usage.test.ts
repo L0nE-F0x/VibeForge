@@ -63,6 +63,35 @@ describe("usage", () => {
     expect(by("grok").days[4]).toBe(5000);
     expect(by("gemini").today).toEqual({ total: 105, cached: 10, output: 25 });
 
+    const museAt = new Date(at(0)).getTime() * 1000;
+    const museCall = (id: string, stream: string) =>
+      JSON.stringify({
+        id,
+        stream: { id: stream },
+        recorded_at: museAt,
+        payload: { event: { kind: "model_completed", model: "muse-spark-1.3", usage: { input_tokens: 100, cache_read_tokens: 80, cache_write_tokens: 5, output_tokens: 20, reasoning_tokens: 7 } } },
+      });
+    const museDir = path.join(home, ".local", "share", "muse", "sessions", "2026", "09", "26", "sess");
+    write(
+      path.join(museDir, "session.jsonl"),
+      [
+        museCall("a", "sess"),
+        museCall("a", "sess"),
+        JSON.stringify({
+          id: "lim",
+          recorded_at: museAt,
+          payload: { event: { kind: "note", subscription: { window: { used_percent: 10, window_duration_mins: 300, resets_at: NOW.getTime() / 1000 + 3600 }, weekly: { used_percent: 4, resets_at: NOW.getTime() / 1000 - 5 } } } },
+        }),
+        "",
+      ].join("\n"),
+    );
+    write(path.join(museDir, "subagent", "child", "session.jsonl"), `${museCall("b", "child")}\n`);
+    const withMuse = await new UsageScanner(home, () => NOW, {}).scan();
+    const muse = withMuse.sources.find((source) => source.id === "muse")!;
+    expect(muse.today).toEqual({ total: 250, cached: 160, output: 40 });
+    expect(muse.models).toEqual([{ model: "muse-spark-1.3", total: 250 }]);
+    expect(muse.limits).toEqual([{ windowMinutes: 300, usedPercent: 10, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString() }]);
+
     // A log that grows is read from where the last pass stopped.
     fs.appendFileSync(session, `${claudeLine("m4", at(0), { input_tokens: 1, output_tokens: 1 })}\n`);
     const second = await scanner.scan();

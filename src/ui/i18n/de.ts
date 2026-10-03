@@ -79,7 +79,7 @@ export const de: Catalog = {
   "plans.updated": "Aktualisiert {when}",
   "plans.justNow": "gerade eben",
   "plans.refresh": "Aktualisieren",
-  "plans.none": "Keine Anmeldung bei Claude Code, Grok oder Kimi auf diesem Rechner.",
+  "plans.none": "Kein angemeldetes Coding-Abo auf diesem Rechner.",
   "plans.offNote": "Claude, Grok und Kimi: Optionen → Nutzung und Aktivität.",
   "crash.title": "In dieser Ansicht ist ein Fehler aufgetreten",
 
@@ -314,7 +314,7 @@ export const de: Catalog = {
   "settings.usage": "Token-Nutzung in der Leiste zeigen",
   "settings.usageHint": "Zählt zusammen, was Claude Code, Codex, Grok Build und Gemini CLI in ihren eigenen Logs auf diesem Rechner festhalten. Nichts wird irgendwohin gesendet.",
   "settings.planLimits": "Abo-Limits zeigen",
-  "settings.planLimitsHint": "Fragt Anthropic, xAI und Moonshot höchstens alle 3 Minuten, wie viel deiner Claude-, Grok- und Kimi-Abos genutzt ist, mit der Anmeldung, die jede CLI auf diesem Rechner gespeichert hat. VibeForge erneuert oder behält diese Anmeldungen nie. Die Limits von Codex stammen aus seinen eigenen Logs.",
+  "settings.planLimitsHint": "Zeigt jedes Coding-Abo, bei dem dieser Rechner angemeldet ist, und lässt die anderen weg. Fragt Anthropic, xAI, Moonshot, OpenAI und Meta höchstens alle 3 Minuten mit der Anmeldung, die diese CLI schon gespeichert hat, und erneuert oder behält sie nie. Codex zeigt seine Limits auch aus den eigenen Logs.",
   "settings.activity": "Beitragsgrafik auf der Startseite",
   "settings.activity.off": "Aus",
   "settings.activity.git": "Meine Commits",

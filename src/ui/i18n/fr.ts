@@ -80,7 +80,7 @@ export const fr: Catalog = {
   "plans.updated": "Mis à jour {when}",
   "plans.justNow": "à l'instant",
   "plans.refresh": "Actualiser",
-  "plans.none": "Aucune connexion à Claude Code, Grok ou Kimi sur cette machine.",
+  "plans.none": "Aucun forfait de code connecté sur cette machine.",
   "plans.offNote": "Claude, Grok et Kimi : Réglages → Utilisation et activité.",
   "crash.title": "Cette vue a rencontré un problème",
 
@@ -315,7 +315,7 @@ export const fr: Catalog = {
   "settings.usage": "Afficher l'utilisation des tokens dans la barre",
   "settings.usageHint": "Additionne ce que Claude Code, Codex, Grok Build et Gemini CLI notent dans leurs propres journaux sur cette machine. Rien n'est envoyé nulle part.",
   "settings.planLimits": "Afficher les limites des forfaits",
-  "settings.planLimitsHint": "Demande à Anthropic, xAI et Moonshot quelle part de vos forfaits Claude, Grok et Kimi est utilisée, au plus toutes les 3 minutes, avec la connexion que chaque CLI a enregistrée sur cette machine. VibeForge ne renouvelle ni ne conserve jamais ces connexions. Les limites de Codex viennent de ses propres journaux.",
+  "settings.planLimitsHint": "Affiche chaque forfait de code auquel cette machine est connectée, et laisse les autres de côté. Demande à Anthropic, xAI, Moonshot, OpenAI et Meta au plus toutes les 3 minutes, avec la connexion que cette CLI a déjà enregistrée, et ne la renouvelle ni ne la conserve. Codex s'affiche aussi depuis ses propres journaux.",
   "settings.activity": "Graphe des contributions sur l'accueil",
   "settings.activity.off": "Désactivé",
   "settings.activity.git": "Mes commits",

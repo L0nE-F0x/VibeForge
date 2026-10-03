@@ -3,8 +3,10 @@ import path from "node:path";
 import type { Engine, EngineRow } from "./types.js";
 
 /**
- * Seed rows for the CLIs VibeForge knows how to hand a prompt to. The human owns
- * engines.json after the first launch; these only fill a missing file.
+ * Seed rows for the CLIs VibeForge knows how to hand a prompt to. A missing
+ * engines.json is filled with these. A file that already exists keeps the
+ * person's own edits; a CLI added in a later version is appended once
+ * ({@link mergeEngineRows}) and stays gone if they remove it after that.
  */
 export function seedEngines(): EngineRow[] {
   return [
@@ -16,10 +18,44 @@ export function seedEngines(): EngineRow[] {
     { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
     { id: "copilot", label: "Copilot", bin: "copilot", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--continue"] },
     { id: "kimi", label: "Kimi", bin: "kimi", args: [], continueArgs: ["--continue"] },
+    { id: "muse", label: "Muse", bin: "muse", args: [], promptArgs: ["{prompt}"], continueArgs: ["resume", "--last"] },
     { id: "crush", label: "Crush", bin: "crush", args: [], continueArgs: ["--continue"] },
     { id: "pi", label: "Pi", bin: "pi", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
     { id: "hermes", label: "Hermes", bin: "hermes", args: [], continueArgs: ["--continue"] },
   ];
+}
+
+/**
+ * How far {@link mergeEngineRows} has caught an existing engines.json up.
+ * Bump it when a new seed row should appear for people who already have a file,
+ * and name that row's id in `SEED_ADDED`.
+ */
+export const ENGINE_SEED_REVISION = 2;
+
+/** Seed ids introduced at each revision after 1, which is the original list. */
+const SEED_ADDED: Record<number, readonly string[]> = {
+  2: ["muse"],
+};
+
+/**
+ * Append seed rows introduced since `revision`, without touching rows already
+ * in the file and without putting back a row removed after it was introduced.
+ */
+export function mergeEngineRows(saved: readonly EngineRow[], revision: number): { rows: EngineRow[]; revision: number; changed: boolean } {
+  const seeds = seedEngines();
+  const from = Number.isFinite(revision) && revision >= 1 ? revision : 1;
+  let rows = [...saved];
+  let changed = from !== ENGINE_SEED_REVISION;
+  for (let rev = from + 1; rev <= ENGINE_SEED_REVISION; rev += 1) {
+    for (const id of SEED_ADDED[rev] ?? []) {
+      if (rows.some((row) => row.id === id)) continue;
+      const seed = seeds.find((row) => row.id === id);
+      if (!seed) continue;
+      rows = [...rows, seed];
+      changed = true;
+    }
+  }
+  return { rows, revision: ENGINE_SEED_REVISION, changed };
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -120,8 +156,15 @@ export function programOf(argv: readonly string[], rows: readonly EngineRow[]): 
   // Look past an interpreter to the script it runs; later arguments are only the CLI's own.
   const script = argv.slice(1).find((arg) => !arg.startsWith("-"));
   const names = INTERPRETERS.test(name(argv[0])) ? [name(argv[0]), name(script)] : [name(argv[0])];
-  for (const row of rows) {
-    if (names.includes(path.basename(row.bin))) return { label: row.label, engineId: row.id };
+  // Longer names first, so `cursor-agent` wins over a shorter bin that is its prefix.
+  const ranked = [...rows].sort((a, b) => path.basename(b.bin).length - path.basename(a.bin).length);
+  for (const base of names) {
+    const row = ranked.find((item) => {
+      const bin = path.basename(item.bin);
+      // Launchers exec `muse-bin-1.4.2` while the command the person typed is `muse`.
+      return base === bin || base.startsWith(`${bin}-bin-`);
+    });
+    if (row) return { label: row.label, engineId: row.id };
   }
   return { label: names.at(-1) || names[0], engineId: null };
 }

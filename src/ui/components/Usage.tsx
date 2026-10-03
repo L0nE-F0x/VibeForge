@@ -15,7 +15,7 @@ import { Button } from "./ui.js";
 
 const METER = 6;
 
-export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi" };
+export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi", muse: "Muse" };
 
 export function compactTokens(value: number, language: string): string {
   return new Intl.NumberFormat(language, { notation: "compact", maximumFractionDigits: value >= 1e9 ? 2 : 1 }).format(value);
@@ -241,7 +241,7 @@ function SourceRow({ source, label }: { source: UsageSource; label: string }) {
 export function UsagePanel({ summary, switcher }: { summary: UsageSummary; switcher?: ReactNode }) {
   const t = useT();
   const engines = useEngines().data ?? [];
-  const label = (id: string) => engines.find((engine) => engine.id === id)?.label ?? id;
+  const label = (id: string) => engines.find((engine) => engine.id === id)?.label ?? (id in PLAN_NAMES ? PLAN_NAMES[id as keyof typeof PLAN_NAMES] : id);
   const sources = summary.sources.filter((source) => source.week.total > 0);
   return (
     <div className="usage-panel">

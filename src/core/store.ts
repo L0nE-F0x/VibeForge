@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse, stringify } from "yaml";
-import { normalizeEngineRows, seedEngines } from "./engines.js";
+import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
 import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
 import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from "./runs.js";
@@ -572,14 +572,22 @@ export class Store {
     const file = path.join(this.configRoot, "engines.json");
     if (!fs.existsSync(file)) {
       const seeded = seedEngines();
-      writeJson(file, { engines: seeded });
+      writeJson(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION });
       return seeded;
     }
-    return normalizeEngineRows(readJson<unknown>(file, { engines: [] }));
+    const raw = readJson<{ engines?: unknown; seedRevision?: unknown } | unknown[]>(file, { engines: [] });
+    const saved = normalizeEngineRows(raw);
+    const revision = raw && !Array.isArray(raw) && typeof raw.seedRevision === "number" ? raw.seedRevision : 1;
+    const merged = mergeEngineRows(saved, revision);
+    if (merged.changed) writeJson(file, { engines: merged.rows, seedRevision: merged.revision });
+    return merged.rows;
   }
 
   writeEngineRows(rows: EngineRow[]): void {
-    writeJson(path.join(this.configRoot, "engines.json"), { engines: normalizeEngineRows(rows) });
+    const file = path.join(this.configRoot, "engines.json");
+    const raw = readJson<{ seedRevision?: unknown }>(file, {});
+    const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
+    writeJson(file, { engines: normalizeEngineRows(rows), seedRevision: revision });
   }
 
   // ---------------------------------------------------------------- workspaces & layouts

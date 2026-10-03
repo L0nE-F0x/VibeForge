@@ -122,6 +122,10 @@ describe("engines", () => {
     expect(programOf(["node", "--no-warnings", "/home/me/.npm/bin/codex.js", "resume"], rows)).toEqual({ label: "Codex", engineId: "codex" });
     expect(programOf(["/usr/bin/grok", "--continue"], rows)).toEqual({ label: "Grok Build", engineId: "grok" });
     expect(programOf(["/home/me/.local/share/claude/versions/2.1.283", "--resume"], rows)).toEqual({ label: "Claude Code", engineId: "claude" });
+    expect(programOf(["/home/me/.local/bin/muse"], rows)).toEqual({ label: "Muse", engineId: "muse" });
+    expect(programOf(["bash", "/home/me/.local/bin/muse"], rows)).toEqual({ label: "Muse", engineId: "muse" });
+    expect(programOf(["/home/me/.local/bin/muse-bin-1.4.2-R4684.1"], rows)).toEqual({ label: "Muse", engineId: "muse" });
+    expect(programOf(["/usr/bin/museum"], rows)).toEqual({ label: "museum", engineId: null });
     expect(programOf(["npm exec vitest tests/unit/core.test.ts"], rows)).toEqual({ label: "vitest", engineId: null });
     expect(programOf(["npx", "--yes", "@openai/codex"], rows)).toEqual({ label: "Codex", engineId: "codex" });
     expect(programOf(["npm run dev"], rows)).toEqual({ label: "npm run dev", engineId: null });
@@ -387,9 +391,22 @@ describe("store", () => {
   it("seeds engines.json and settings.json on first read", () => {
     const store = new Store(tempDir(), tempDir());
     expect(store.readEngineRows().map((row) => row.id)).toContain("claude");
+    expect(store.readEngineRows().map((row) => row.id)).toContain("muse");
     expect(fs.existsSync(path.join(store.configRoot, "engines.json"))).toBe(true);
     expect(store.readSettings().theme).toBe("omarchy");
     expect(store.readSettings().tourDone).toBe(false);
+    store.close();
+  });
+
+  it("adds Muse to an engines file from before Muse, and leaves it gone once removed", () => {
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "engines.json");
+    const older = seedEngines().filter((row) => row.id !== "muse");
+    fs.writeFileSync(file, JSON.stringify({ engines: older }));
+    expect(store.readEngineRows().map((row) => row.id)).toContain("muse");
+    expect(store.readEngineRows().filter((row) => row.id === "muse")).toHaveLength(1);
+    store.writeEngineRows(store.readEngineRows().filter((row) => row.id !== "muse"));
+    expect(store.readEngineRows().map((row) => row.id)).not.toContain("muse");
     store.close();
   });
 

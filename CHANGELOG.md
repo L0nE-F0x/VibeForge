@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+**The usage meter follows the plans this computer is signed in to.**
+
+- **Whoever is signed in.** Claude, Codex, Grok, Kimi and Muse each appear when that CLI's own sign-in is on this machine, and stay off the list when it isn't. Signing in to another one shows it on the next refresh, in the desktop usage tab and on the phone page.
+- **Muse.** Its 5-hour and weekly windows come from the sign-in check Meta already uses. The extra key in that answer is thrown away and never saved. Token totals come from Muse's own session logs, on this machine.
+- **Codex from the sign-in too.** Its bar still comes from its logs, and also from the usage Codex itself asks for when `~/.codex/auth.json` holds a ChatGPT login. An API-key login adds no plan.
+- **The newer reading wins.** Between refreshes, Codex and Muse keep whichever is newer: the last answer from the provider, or the line in that CLI's own log. The time on the bar is when that reading was taken.
+- **Muse in Settings → Engines.** An engines list saved before Muse existed gains a Muse row, once. Removing that row keeps it removed.
+- **Muse in Runs.** Typing `muse` in a workspace is recorded and labeled Muse, on the desk and on the phone, including when its launcher has swapped in `muse-bin-<version>`. The Prompts tab reads what you typed from Muse's own session log.
+
 **Open another branch without moving the folder you already have.**
 
 - **Its own workspace.** In Code, a workspace's menu has **Open another branch**. This folder stays on its branch. The branch you pick is checked out beside the project and added as its own workspace, named with the repository and the branch. A branch that is already checked out opens that folder instead of making a second copy. Removing the workspace later leaves the folder on disk.

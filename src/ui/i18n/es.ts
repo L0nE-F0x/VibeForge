@@ -79,7 +79,7 @@ export const es: Catalog = {
   "plans.updated": "Actualizado {when}",
   "plans.justNow": "ahora mismo",
   "plans.refresh": "Actualizar",
-  "plans.none": "No hay sesión de Claude Code, Grok ni Kimi en este equipo.",
+  "plans.none": "No hay ningún plan de código con sesión en este equipo.",
   "plans.offNote": "Claude, Grok y Kimi: Ajustes → Uso y actividad.",
   "crash.title": "Esta vista ha tenido un problema",
 
@@ -314,7 +314,7 @@ export const es: Catalog = {
   "settings.usage": "Mostrar el uso de tokens en la barra",
   "settings.usageHint": "Suma lo que Claude Code, Codex, Grok Build y Gemini CLI anotan en sus propios registros en este equipo. No se envía nada a ningún sitio.",
   "settings.planLimits": "Mostrar los límites del plan",
-  "settings.planLimitsHint": "Pregunta a Anthropic, xAI y Moonshot cuánto has usado de tus planes de Claude, Grok y Kimi, como mucho cada 3 minutos, con la sesión que cada CLI guardó en este equipo. VibeForge nunca renueva ni guarda esas sesiones. Los límites de Codex salen de sus propios registros.",
+  "settings.planLimitsHint": "Muestra cada plan de código con sesión en este equipo y omite los demás. Pregunta a Anthropic, xAI, Moonshot, OpenAI y Meta como mucho cada 3 minutos, con la sesión que esa CLI ya guardó, y nunca la renueva ni la guarda. Codex también muestra sus límites desde sus propios registros.",
   "settings.activity": "Gráfico de contribuciones en Inicio",
   "settings.activity.off": "No",
   "settings.activity.git": "Mis commits",

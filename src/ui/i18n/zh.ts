@@ -80,7 +80,7 @@ export const zh: Catalog = {
   "plans.updated": "更新于{when}",
   "plans.justNow": "刚刚",
   "plans.refresh": "刷新",
-  "plans.none": "本机没有 Claude Code、Grok 或 Kimi 的登录。",
+  "plans.none": "本机没有已登录的编程套餐。",
   "plans.offNote": "Claude、Grok 和 Kimi：设置 → 用量与活动。",
   "crash.title": "此视图出现问题",
 
@@ -315,7 +315,7 @@ export const zh: Catalog = {
   "settings.usage": "在侧栏显示 token 用量",
   "settings.usageHint": "汇总 Claude Code、Codex、Grok Build 和 Gemini CLI 在本机自己日志中的记录。不会发送到任何地方。",
   "settings.planLimits": "显示套餐额度",
-  "settings.planLimitsHint": "使用各 CLI 在本机保存的登录，最多每 3 分钟向 Anthropic、xAI 和 Moonshot 查询一次 Claude、Grok 和 Kimi 套餐的用量。VibeForge 从不续期或保存这些登录。Codex 的额度来自它自己的日志。",
+  "settings.planLimitsHint": "只显示本机已登录的编程套餐。最多每 3 分钟，用该 CLI 已保存的登录向 Anthropic、xAI、Moonshot、OpenAI 和 Meta 查询一次，从不续期或保存这些登录。Codex 的额度也会从它自己的日志读取。",
   "settings.activity": "首页的贡献图",
   "settings.activity.off": "关闭",
   "settings.activity.git": "我的提交",

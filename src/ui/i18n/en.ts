@@ -82,7 +82,7 @@ export const en = {
   "plans.updated": "Updated {when}",
   "plans.justNow": "just now",
   "plans.refresh": "Refresh",
-  "plans.none": "No Claude Code, Grok or Kimi sign-in on this machine.",
+  "plans.none": "No signed-in coding plan on this machine.",
   "plans.offNote": "Claude, Grok and Kimi: Settings → Usage and activity.",
   "crash.title": "This view hit a problem",
 
@@ -324,7 +324,7 @@ export const en = {
   "settings.usage": "Show token usage in the rail",
   "settings.usageHint": "Adds up what Claude Code, Codex, Grok Build and Gemini CLI record in their own logs on this machine. Nothing is sent anywhere.",
   "settings.planLimits": "Show plan limits",
-  "settings.planLimitsHint": "Asks Anthropic, xAI and Moonshot how much of your Claude, Grok and Kimi plans is used, at most every 3 minutes, with the sign-in each CLI saved on this machine. VibeForge never renews or keeps those sign-ins. Codex's limits come from its own logs.",
+  "settings.planLimitsHint": "Shows each coding plan this machine is signed in to, and leaves the others out. Asks Anthropic, xAI, Moonshot, OpenAI and Meta at most every 3 minutes, with the sign-in that CLI already saved, and never renews or keeps it. Codex also shows from its own logs.",
   "settings.activity": "Contribution graph on Home",
   "settings.activity.off": "Off",
   "settings.activity.git": "My commits",

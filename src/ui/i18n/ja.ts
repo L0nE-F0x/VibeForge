@@ -80,7 +80,7 @@ export const ja: Catalog = {
   "plans.updated": "更新: {when}",
   "plans.justNow": "たった今",
   "plans.refresh": "更新",
-  "plans.none": "このマシンには Claude Code、Grok、Kimi のログインがありません。",
+  "plans.none": "このマシンにはログイン済みのコーディングプランがありません。",
   "plans.offNote": "Claude、Grok、Kimi: 設定 → 使用量とアクティビティ。",
   "crash.title": "この画面で問題が発生しました",
 
@@ -315,7 +315,7 @@ export const ja: Catalog = {
   "settings.usage": "レールにトークン使用量を表示",
   "settings.usageHint": "Claude Code、Codex、Grok Build、Gemini CLI がこのマシンに残す自身のログを集計します。どこにも送信しません。",
   "settings.planLimits": "プランの上限を表示",
-  "settings.planLimitsHint": "各 CLI がこのマシンに保存したログインを使い、Claude、Grok、Kimi のプランの使用量を Anthropic、xAI、Moonshot に最大 3 分ごとに問い合わせます。VibeForge がこれらのログインを更新・保存することはありません。Codex の上限は自身のログから読みます。",
+  "settings.planLimitsHint": "このマシンでログインしているコーディングプランだけを表示します。各 CLI が保存したログインで、Anthropic、xAI、Moonshot、OpenAI、Meta に最大 3 分ごとに問い合わせ、そのログインを更新・保存することはありません。Codex の上限は自身のログからも読みます。",
   "settings.activity": "ホームのコントリビューショングラフ",
   "settings.activity.off": "オフ",
   "settings.activity.git": "自分のコミット",

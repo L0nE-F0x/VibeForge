@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexReading, fullAt, parseClaude, parseGrok, parseKimi, PlanWatcher } from "../../src/core/plans.js";
+import { codexReading, fullAt, parseClaude, parseCodexWham, parseGrok, parseKimi, parseMuse, PlanWatcher } from "../../src/core/plans.js";
 
 const NOW = Date.parse("2026-09-27T12:00:00Z");
 const TOKEN = "t".repeat(40);
@@ -100,7 +100,7 @@ describe("plan limits", () => {
     const network = fakeNetwork();
     const watcher = new PlanWatcher({ home, file, now: () => NOW, fetch: network.fetch, env: {} });
 
-    const summary = await watcher.summary({ network: true, codex: [] });
+    const summary = await watcher.summary({ network: true, local: [] });
     expect(summary.providers.map((provider) => [provider.id, provider.percent])).toEqual([
       ["claude", 99],
       ["grok", 77],
@@ -116,13 +116,13 @@ describe("plan limits", () => {
     expect(saved).not.toContain("Bearer");
 
     // Within a few minutes nothing is asked again, unless a Refresh forces it.
-    await watcher.summary({ network: true, codex: [] });
+    await watcher.summary({ network: true, local: [] });
     expect(network.calls).toHaveLength(3);
 
     // Off: nothing is asked, and nothing but Codex is shown.
     const off = await new PlanWatcher({ home, file, now: () => NOW, fetch: network.fetch, env: {} }).summary({
       network: false,
-      codex: [{ windowMinutes: 300, usedPercent: 12, resetsAt: inHours(1) }],
+      local: [{ id: "codex", limits: [{ windowMinutes: 300, usedPercent: 12, resetsAt: inHours(1) }] }],
     });
     expect(off.providers.map((provider) => provider.id)).toEqual(["codex"]);
     expect(network.calls).toHaveLength(3);
@@ -134,12 +134,12 @@ describe("plan limits", () => {
     let now = NOW;
     const network = fakeNetwork((host) => (host === "cli-chat-proxy.grok.com" && now > NOW ? 401 : 200));
     const watcher = new PlanWatcher({ home, file, now: () => now, fetch: network.fetch, env: {} });
-    await watcher.summary({ network: true, codex: [] });
+    await watcher.summary({ network: true, local: [] });
     const credentials = fs.readFileSync(path.join(home, ".claude", ".credentials.json"), "utf8");
 
     // Two and a half hours on: Claude's token has expired, Grok's is refused, and Kimi's 5-hour window has reset.
     now = NOW + 2.5 * 3600_000;
-    const later = await watcher.summary({ network: true, codex: [] });
+    const later = await watcher.summary({ network: true, local: [] });
     const claude = later.providers.find((provider) => provider.id === "claude");
     const grok = later.providers.find((provider) => provider.id === "grok");
     const kimi = later.providers.find((provider) => provider.id === "kimi");
@@ -154,8 +154,96 @@ describe("plan limits", () => {
     expect(fs.readFileSync(path.join(home, ".claude", ".credentials.json"), "utf8")).toBe(credentials);
 
     // The last numbers survive a restart.
-    const reopened = await new PlanWatcher({ home, file, now: () => now, fetch: network.fetch, env: {} }).summary({ network: true, codex: [] });
+    const reopened = await new PlanWatcher({ home, file, now: () => now, fetch: network.fetch, env: {} }).summary({ network: true, local: [] });
     expect(reopened.providers.find((provider) => provider.id === "claude")?.percent).toBe(99);
+  });
+
+  it("shows Muse and Codex only when this machine is signed in to them", async () => {
+    const muse = parseMuse({
+      api_key: `LLM|${"k".repeat(40)}`,
+      subs_usage: { window: { used_percent: 15, window_duration_mins: 300, resets_at: NOW / 1000 + 3600 }, weekly: { used_percent: 40, resets_at: NOW / 1000 + 86_400 } },
+    });
+    expect(muse?.windows.map((window) => [window.name, window.percent])).toEqual([
+      ["5-hour", 15],
+      ["7-day", 40],
+    ]);
+    expect(parseMuse({ is_subs_active: false })).toBeNull();
+    expect(parseMuse({ subs_usage: { window: { used_percent: 110, window_duration_mins: 300 } } })?.percent).toBe(100);
+
+    const codex = parseCodexWham({
+      rate_limit: {
+        primary_window: { used_percent: 25, limit_window_seconds: 18_000, reset_at: NOW / 1000 + 1000 },
+        secondary_window: { used_percent: 8, limit_window_seconds: 604_800, reset_at: NOW / 1000 + 50_000 },
+      },
+    });
+    expect(codex?.windows.map((window) => window.name)).toEqual(["5-hour", "7-day"]);
+    expect(codex?.percent).toBe(25);
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    const museAuth = path.join(home, ".config", "muse", "auth.json");
+    write(museAuth, { providers: { meta: { access_token: `dca:${TOKEN}`, api_key: `LLM|${"k".repeat(40)}` } } });
+    const before = fs.readFileSync(museAuth, "utf8");
+    write(path.join(home, ".codex", "auth.json"), { auth_mode: "chatgpt", tokens: { access_token: jwt(NOW / 1000 + 3600), account_id: "acct-1" } });
+    const network = fakeNetwork();
+    network.fetch = async (url: string, init: { method?: string; headers: Record<string, string>; body?: string }) => {
+      const host = new URL(url).host;
+      network.calls.push({ host, headers: init.headers });
+      const body =
+        host === "api.meta.ai"
+          ? { api_key: `LLM|${"n".repeat(40)}`, subs_usage: { window: { used_percent: 15, window_duration_mins: 300, resets_at: NOW / 1000 + 3600 }, weekly: { used_percent: 40, resets_at: NOW / 1000 + 86_400 } } }
+          : { rate_limit: { primary_window: { used_percent: 25, limit_window_seconds: 18_000, reset_at: NOW / 1000 + 1000 }, secondary_window: { used_percent: 8, limit_window_seconds: 604_800, reset_at: NOW / 1000 + 50_000 } } };
+      expect(host === "api.meta.ai" ? init.method : "GET").toBe(host === "api.meta.ai" ? "POST" : "GET");
+      return { status: 200, text: async () => JSON.stringify(body) };
+    };
+    const file = path.join(home, "plans.json");
+    const summary = await new PlanWatcher({ home, file, now: () => NOW, fetch: network.fetch, env: {} }).summary({ network: true });
+    expect(summary.providers.map((provider) => [provider.id, provider.percent])).toEqual([
+      ["codex", 25],
+      ["muse", 40],
+    ]);
+    expect(network.calls.map((call) => call.host).sort()).toEqual(["api.meta.ai", "chatgpt.com"]);
+    expect(network.calls.find((call) => call.host === "chatgpt.com")?.headers["ChatGPT-Account-Id"]).toBe("acct-1");
+    expect(fs.readFileSync(museAuth, "utf8")).toBe(before);
+    const saved = fs.readFileSync(file, "utf8");
+    expect(saved).not.toContain(TOKEN);
+    expect(saved).not.toContain("LLM|");
+    expect(saved).not.toContain("dca:");
+
+    // Pay-as-you-go: signed in, no subscription, so no card.
+    write(museAuth, { providers: { meta: { access_token: `dca:${TOKEN}` } } });
+    const empty = fakeNetwork();
+    const quiet = await new PlanWatcher({
+      home,
+      file: path.join(home, "empty.json"),
+      now: () => NOW,
+      fetch: async (url, init) => {
+        empty.calls.push({ host: new URL(url).host, headers: init.headers });
+        return { status: 200, text: async () => JSON.stringify({ is_subs_active: false }) };
+      },
+      env: {},
+    }).summary({ network: true });
+    // Codex's auth.json is still there, so Codex stays. Muse does not.
+    expect(quiet.providers.map((provider) => provider.id)).toEqual(["codex"]);
+  });
+
+  it("keeps a plan from the CLI's log when asking is off, and lets a fresh answer replace it", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    write(path.join(home, ".codex", "auth.json"), { auth_mode: "chatgpt", tokens: { access_token: jwt(NOW / 1000 + 3600), account_id: "acct-1" } });
+    const limits = [{ windowMinutes: 300, usedPercent: 12, resetsAt: inHours(1) }];
+    const off = await new PlanWatcher({ home, file: path.join(home, "a.json"), now: () => NOW, fetch: async () => { throw new Error("no network"); }, env: {} }).summary({
+      network: false,
+      local: [{ id: "codex", limits }],
+    });
+    expect(off.providers.map((provider) => [provider.id, provider.percent])).toEqual([["codex", 12]]);
+
+    const on = await new PlanWatcher({
+      home,
+      file: path.join(home, "b.json"),
+      now: () => NOW,
+      fetch: async () => ({ status: 200, text: async () => JSON.stringify({ rate_limit: { primary_window: { used_percent: 60, limit_window_seconds: 18_000, reset_at: NOW / 1000 + 1000 } } }) }),
+      env: {},
+    }).summary({ network: true, local: [{ id: "codex", limits }] });
+    expect(on.providers.find((provider) => provider.id === "codex")?.percent).toBe(60);
   });
 
   it("works out when a window fills at the recent pace", () => {
