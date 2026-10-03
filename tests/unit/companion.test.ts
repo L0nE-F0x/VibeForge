@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
+import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, shellForegroundEngine, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
+import { PLAN_MARKS } from "../../src/shared/pixel.js";
 import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 import { phoneCoreText, phoneLanguage, phoneWords } from "../../src/core/companion-text.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
@@ -290,6 +291,33 @@ describe("picking a finished run back up from the phone", () => {
     expect(ctx.svc.store.getTask(task.id)?.runIds).toHaveLength(2);
   });
 
+  it("does not drop a follow-up while a shell run is still closing", async () => {
+    const ctx = service();
+    let snap = "git status --short\n\n\ngit diff --stat\n";
+    ctx.svc.options.host.snapshotGit = async () => snap;
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const { ptyId } = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(ptyId, ["/usr/bin/argy"], ctx.place);
+    const runId = await waitFor(() => ctx.svc.listLive()[0]?.runId);
+    await expect(ctx.svc.continueRun(runId, {}, "Too soon.")).rejects.toThrow("That session is still closing.");
+    expect(ctx.spawns).toHaveLength(1);
+
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    ctx.svc.options.host.record = () => gate;
+    snap = "git status --short\n M door.txt\n\ngit diff --stat\n door.txt | 1 +\n";
+    ctx.svc.onPtyProgram(ptyId, null);
+    const pending = ctx.svc.continueRun(runId, {}, "Oil the hinges.");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(ctx.spawns).toHaveLength(1);
+    release();
+    const resumed = await pending;
+    expect(resumed.runId).not.toBe(runId);
+    expect(ctx.spawns.at(-1)?.argv.join(" ")).toContain("Oil the hinges.");
+  });
+
   it("types the next instruction once a CLI that continues on its own is ready", async () => {
     const ctx = service();
     const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
@@ -300,6 +328,38 @@ describe("picking a finished run back up from the phone", () => {
     expect(next.argv).toContain("--continue");
     expect(next.argv.join(" ")).not.toContain("Now tidy up.");
     expect(next.pasteInput).toBe("Now tidy up.");
+  });
+});
+
+function waitFor<T>(read: () => T | null | undefined | false, attempts = 50): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const tick = (left: number) => {
+      const value = read();
+      if (value) resolve(value);
+      else if (left <= 0) reject(new Error("timed out"));
+      else setTimeout(() => tick(left - 1), 10);
+    };
+    tick(attempts);
+  });
+}
+
+describe("a shell's foreground, read at the moment of sending", () => {
+  const rows = [{ id: "claude", label: "Claude Code", bin: "claude", args: [] }];
+
+  it("tells a CLI from the shell, and a failed read from either", () => {
+    expect(shellForegroundEngine({ known: true, argv: ["/usr/bin/claude"] }, rows)).toBe("cli");
+    expect(shellForegroundEngine({ known: true, argv: null }, rows)).toBe("shell");
+    expect(shellForegroundEngine({ known: true, argv: ["vim", "notes.md"] }, rows)).toBe("shell");
+    expect(shellForegroundEngine({ known: false, argv: ["/usr/bin/claude"] }, rows)).toBe("unknown");
+  });
+});
+
+describe("the phone page's plan marks", () => {
+  it("draws the same pixels as the desktop", () => {
+    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+    for (const rows of Object.values(PLAN_MARKS)) {
+      for (const row of rows) expect(page).toContain(JSON.stringify(row));
+    }
   });
 });
 

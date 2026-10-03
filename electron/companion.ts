@@ -1,4 +1,4 @@
-import { buildDesk, COMPANION_RECENT_MS, isCodingSession, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
+import { buildDesk, COMPANION_RECENT_MS, isCodingSession, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
 import { startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type SessionPayload } from "../src/core/companion-http.js";
 import { describeError } from "../src/core/log.js";
 import { readRunText } from "../src/core/run-storage.js";
@@ -104,8 +104,16 @@ function actionsFor(wire: CompanionWire): CompanionActions {
       const live = codingSession(service, ptyId);
       if (!live) throw new Error("That session has ended.");
       // A run's terminal is its own; a shell is the person's, so only the CLI's turn is stopped there.
-      if (live.kind === "run") await service.killPty(ptyId);
-      else await wire.supervisor.write(ptyId, "\x1b");
+      if (live.kind === "run") {
+        await service.killPty(ptyId);
+        return;
+      }
+      const seen = await shellNow(service, wire.supervisor, ptyId);
+      if (seen.where !== "cli") {
+        if (seen.where === "shell") service.onPtyProgram(ptyId, seen.argv, seen.cwd);
+        throw new Error("That session has ended.");
+      }
+      await wire.supervisor.write(ptyId, "\x1b");
     },
     launch: async (input) => {
       const result = input.agentId
@@ -189,12 +197,31 @@ async function sessionOf(service: TeamService, supervisor: PtySupervisor, query:
   };
 }
 
+/** The shell's foreground right now, not the host's last poll. "unknown" means the read failed. */
+async function shellNow(
+  service: TeamService,
+  supervisor: PtySupervisor,
+  ptyId: string,
+): Promise<{ where: "cli" | "shell" | "unknown"; argv: string[] | null; cwd: string | null }> {
+  const seen = await supervisor.foreground(ptyId);
+  return { where: shellForegroundEngine(seen, service.store.readEngineRows()), argv: seen.argv, cwd: seen.cwd };
+}
+
 async function sendTo(
   service: TeamService,
   supervisor: PtySupervisor,
   input: { ptyId: string; runId: string; text: string; force: boolean },
 ): Promise<{ working: true } | ({ working: false } & LaunchResult)> {
-  const live = codingSession(service, input.ptyId) ?? codingSession(service, input.runId ? service.ptyByRun.get(input.runId) : null);
+  let live = codingSession(service, input.ptyId) ?? codingSession(service, input.runId ? service.ptyByRun.get(input.runId) : null);
+  if (live?.kind === "shell") {
+    const seen = await shellNow(service, supervisor, live.ptyId);
+    if (seen.where === "unknown") throw new Error("That session is still closing.");
+    if (seen.where !== "cli") {
+      // The poll can still say the CLI is here for a second after it has returned to the shell.
+      service.onPtyProgram(live.ptyId, seen.argv, seen.cwd);
+      live = undefined;
+    }
+  }
   if (live) {
     if (live.working && !input.force) return { working: true };
     if (live.chatId) await service.sendChat(live.chatId, input.text, PHONE_SIZE);

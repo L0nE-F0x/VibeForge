@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import path from "node:path";
+import { programOf } from "./engines.js";
 import { cwdAllowed, isPathInside } from "./places.js";
-import type { CompanionSettings, LiveSession } from "./types.js";
+import type { CompanionSettings, EngineRow, LiveSession } from "./types.js";
 
 /** Loopback port the phone page uses. Tailscale Serve publishes this, the app does not. */
 export const COMPANION_PORT = 4737;
@@ -149,6 +150,19 @@ export interface DeskInput {
 /** A coding CLI's session: a run's own terminal, or a shell with a CLI in its foreground. A bare shell is not one. */
 export function isCodingSession(session: Pick<LiveSession, "kind" | "programEngineId">): boolean {
   return session.kind === "run" || Boolean(session.programEngineId);
+}
+
+/**
+ * What a shell is actually running, from a read taken at the moment of Send or Stop.
+ * The host's poll can be a second behind, and that second is long enough to type into bash.
+ */
+export function shellForegroundEngine(
+  seen: { known: boolean; argv: readonly string[] | null },
+  rows: readonly EngineRow[],
+): "cli" | "shell" | "unknown" {
+  if (!seen.known) return "unknown";
+  if (!seen.argv || seen.argv.length === 0) return "shell";
+  return programOf(seen.argv, rows).engineId ? "cli" : "shell";
 }
 
 const STATE_RANK: Record<DeskState, number> = { working: 0, waiting: 1, done: 2 };

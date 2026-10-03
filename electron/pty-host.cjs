@@ -422,6 +422,20 @@ async function handle(msg) {
         ptys: [...sessions.values()].map((session) => ({ ptyId: session.id, pid: session.pid, cwd: session.cwd, argv: session.argv })),
       });
       return;
+    case "foreground": {
+      const session = sessions.get(msg.ptyId);
+      if (!session || session.exited) {
+        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+        return;
+      }
+      try {
+        const found = readForeground(session);
+        reply(msg.reqId, { ok: true, known: true, argv: found ? found.argv : null, cwd: found ? found.cwd : null });
+      } catch {
+        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+      }
+      return;
+    }
     case "shutdown":
       await shutdown();
       reply(msg.reqId, { ok: true });
@@ -505,21 +519,25 @@ setInterval(() => {
  * The command line of whatever holds the terminal's foreground, when that isn't the process
  * VibeForge started: `claude` typed into a shell, say. Linux only (/proc); null elsewhere.
  */
+function readForeground(session) {
+  const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
+  // Fields after the command name: state ppid pgrp session tty_nr tpgid ...
+  const tpgid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[5]);
+  if (!(tpgid > 0) || tpgid === session.pid) return null;
+  const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
+  if (!argv.length) return null;
+  let cwd = null;
+  try {
+    cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
+  } catch {
+    /* gone already */
+  }
+  return { argv, cwd };
+}
+
 function foreground(session) {
   try {
-    const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
-    // Fields after the command name: state ppid pgrp session tty_nr tpgid ...
-    const tpgid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[5]);
-    if (!(tpgid > 0) || tpgid === session.pid) return null;
-    const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
-    if (!argv.length) return null;
-    let cwd = null;
-    try {
-      cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
-    } catch {
-      /* gone already */
-    }
-    return { argv, cwd };
+    return readForeground(session);
   } catch {
     return null;
   }

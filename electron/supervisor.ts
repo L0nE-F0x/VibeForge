@@ -168,6 +168,13 @@ export class PtySupervisor {
     await this.request({ op: "send", ptyId, text });
   }
 
+  /** The foreground program right now. `known: false` means the read failed, not that the shell is back. */
+  async foreground(ptyId: string): Promise<{ known: boolean; argv: string[] | null; cwd: string | null }> {
+    const result = await this.request({ op: "foreground", ptyId });
+    const argv = Array.isArray(result.argv) ? result.argv.filter((arg): arg is string => typeof arg === "string" && arg.length > 0) : null;
+    return { known: result.known === true, argv: argv && argv.length > 0 ? argv : null, cwd: typeof result.cwd === "string" ? result.cwd : null };
+  }
+
   async resize(ptyId: string, cols: number, rows: number): Promise<void> {
     await this.request({ op: "resize", ptyId, cols, rows });
   }

@@ -4,7 +4,8 @@
   "description": "Check workspaces and tell an agent what to do next.",
   "start_url": "/",
   "scope": "/",
-  "display": "standalone",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
   "background_color": "#09090b",
   "theme_color": "#09090b",
   "icons": [{ "src": "/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]

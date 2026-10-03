@@ -1,4 +1,6 @@
 const TOKEN_KEY = "vibeforge-phone";
+const PLANS_KEY = "vibeforge-plans-open";
+const INSTALL_KEY = "vibeforge-install-dismissed";
 const app = document.querySelector("#app");
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -20,6 +22,13 @@ let plans = null;
 let plansAt = 0;
 const PLANS_EVERY_MS = 60_000;
 const PLAN_NAMES = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi" };
+/** The desktop's plan marks (`PLAN_MARKS` in src/shared/pixel.ts). One colour, eleven pixels square. */
+const PLAN_MARKS = {
+  grok: ["....###...#", "..##...###.", ".#......##.", "#......#..#", "#.....#...#", "#....#....#", "#...#.....#", ".#.#.....#.", "..##...##..", ".#..###....", "#.........."],
+  claude: [".....#.....", ".....#.....", "..#..#..#..", "...#.#.#...", "....###....", "##.#####.##", "....###....", "...#.#.#...", "..#..#..#..", ".....#.....", ".....#....."],
+  kimi: ["##.......##", "##......##.", "##.....##..", "##....##...", "##...##....", "##..##.....", "##.##......", "##..##.....", "##...##....", "##....##...", "##.....##.."],
+  codex: ["...........", "##.........", ".##........", "..##.......", "...##......", "....##.....", "...##......", "..##.......", ".##........", "##...######", "..........."],
+};
 /** The nodes of the page on show that a poll updates in place. Inputs are never rebuilt by a poll. */
 let parts = {};
 
@@ -38,8 +47,20 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+/** English for the new sentences, until a rebuilt app serves them in /api/text. */
+const EXTRA = {
+  "phone.installTitle": "Install this as an app on your phone",
+  "phone.installBody": "It then fills the whole screen.",
+  "phone.install": "Install",
+  "phone.installLater": "Not now",
+  "phone.installIos": "Tap Share, then Add to Home Screen.",
+  "phone.installMenu": "Open the browser menu and choose Install app.",
+  "phone.plansShow": "Show",
+  "phone.plansHide": "Hide",
+};
+
 function t(key, vars) {
-  const text = words[key] ?? key;
+  const text = words[key] || EXTRA[key] || key;
   return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match)) : text;
 }
 
@@ -109,9 +130,14 @@ function post(path, body) {
 function forget() {
   token = "";
   localStorage.removeItem(TOKEN_KEY);
-  view = "pair";
   desk = null;
   session = null;
+  window.clearInterval(timer);
+  timer = 0;
+  if (view !== "pair") {
+    view = "pair";
+    show();
+  }
 }
 
 async function buzz(body, data) {
@@ -183,6 +209,7 @@ function schedule() {
 
 /** Runs one action with the buttons held. Returns what the action returned, or false when it failed. */
 async function withBusy(task) {
+  const shown = view;
   busy = true;
   error = "";
   update();
@@ -193,7 +220,8 @@ async function withBusy(task) {
     error = err.message;
   }
   busy = false;
-  update();
+  if (view !== shown) show();
+  else update();
   void refresh();
   return result;
 }
@@ -323,11 +351,11 @@ function sessionButton(item) {
   return el(
     "button",
     {
-      class: "session",
+      class: `session ${item.state}`,
       type: "button",
       onclick: () => openSession({ ptyId: item.ptyId || "", runId: item.runId || "" }),
     },
-    el("div", { class: "row" }, el("div", { class: "grow title" }, item.title), el("span", { class: `pill ${item.state}` }, stateLabel(item.state))),
+    el("div", { class: "row" }, el("span", { class: `px ${item.state}`, "aria-hidden": "true" }), el("div", { class: "grow title" }, item.title), el("span", { class: `pill ${item.state}` }, stateLabel(item.state))),
     el("div", { class: "small muted" }, [item.detail, ago(item.endedAt || item.startedAt), item.changes].filter(Boolean).join(" · ")),
     item.alsoHere?.length ? el("div", { class: "small faint" }, t("phone.alsoHere", { names: item.alsoHere.join(", ") })) : null,
   );
@@ -338,6 +366,30 @@ function level(percent) {
   return percent < 100 ? "warm" : "full";
 }
 
+function planMark(id) {
+  const rows = PLAN_MARKS[id];
+  if (!rows) return null;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "plan-mark");
+  svg.setAttribute("viewBox", `0 0 ${rows[0].length} ${rows.length}`);
+  svg.setAttribute("width", String(rows[0].length * 2));
+  svg.setAttribute("height", String(rows.length * 2));
+  svg.setAttribute("shape-rendering", "crispEdges");
+  svg.setAttribute("aria-hidden", "true");
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] !== "#") continue;
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(y));
+      rect.setAttribute("width", "1");
+      rect.setAttribute("height", "1");
+      svg.append(rect);
+    }
+  });
+  return svg;
+}
+
 function bar(percent, className) {
   const fill = el("i");
   // CSSOM, not a style attribute: the page's CSP has no 'unsafe-inline'.
@@ -345,13 +397,35 @@ function bar(percent, className) {
   return el("span", { class: className }, fill);
 }
 
-/** Plan limits, as the desktop's live popover shows them: each plan's busiest window first. */
+function plansOpen() {
+  return localStorage.getItem(PLANS_KEY) === "1";
+}
+
+/** Plan limits, as the desktop's live popover shows them: each plan's busiest window first. Closed until opened. */
 function plansCard(summary) {
   const now = Date.now();
+  const open = plansOpen();
+  const toggle = el(
+    "button",
+    {
+      class: "ghost plans-toggle",
+      type: "button",
+      "aria-expanded": String(open),
+      onclick: () => {
+        const next = !plansOpen();
+        localStorage.setItem(PLANS_KEY, next ? "1" : "0");
+        const card = toggle.closest(".plans");
+        if (card) card.classList.toggle("collapsed", !next);
+        toggle.textContent = next ? t("phone.plansHide") : t("phone.plansShow");
+        toggle.setAttribute("aria-expanded", String(next));
+      },
+    },
+    open ? t("phone.plansHide") : t("phone.plansShow"),
+  );
   return el(
     "article",
-    { class: "card plans" },
-    el("div", { class: "title" }, t("plans.title")),
+    { class: open ? "card plans" : "card plans collapsed" },
+    el("div", { class: "row plans-head" }, el("div", { class: "grow title" }, t("plans.title")), toggle),
     summary.providers.map((provider) => {
       const name = PLAN_NAMES[provider.id] || provider.id;
       let sub;
@@ -375,6 +449,7 @@ function plansCard(summary) {
         el(
           "div",
           { class: "row" },
+          planMark(provider.id),
           el("span", { class: "grow title" }, name, provider.limiter && rows.length ? el("span", { class: "faint" }, ` · ${provider.limiter}`) : null),
           el("b", { class: "plan-pct" }, provider.percent === null ? "—" : `${Math.round(provider.percent)}%`),
         ),
@@ -454,14 +529,13 @@ async function startAgent(choice, box) {
 
 function sessionPage() {
   parts.title = el("h1", { class: "grow" }, t("phone.session"));
+  parts.px = el("span", { class: "px", hidden: true, "aria-hidden": "true" });
   parts.pill = el("span", { class: "pill", hidden: true });
   parts.meta = el("p", { class: "small muted", hidden: true });
   parts.screen = el("pre", { class: "screen" }, t("phone.loading"));
   parts.stick = true;
   parts.prompt = el("textarea", { id: "prompt", placeholder: t("phone.next") });
-  parts.nudges = el("div", { class: "actions", hidden: true });
-  parts.nudgesKey = null;
-  parts.send = el("button", { class: "btn", type: "button", onclick: () => void sendText(parts.prompt.value, true) }, t("phone.send"));
+  parts.send = el("button", { class: "btn", type: "button", onclick: () => void sendText(parts.prompt.value) }, t("phone.send"));
   parts.stop = el("button", { class: "ghost", type: "button", hidden: true, onclick: () => void stopSession() }, t("phone.stop"));
   // Follow the end of the screen unless the person scrolled up to read.
   parts.screen.addEventListener("scroll", () => {
@@ -471,25 +545,20 @@ function sessionPage() {
   return el(
     "section",
     {},
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.desk")), parts.title, parts.pill),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.desk")), parts.title, parts.px, parts.pill),
     parts.meta,
     parts.screen,
-    el("div", { class: "card stack" }, parts.prompt, parts.nudges, el("div", { class: "actions" }, parts.send, parts.stop)),
+    el("div", { class: "card stack" }, parts.prompt, el("div", { class: "actions" }, parts.send, parts.stop)),
   );
 }
 
 function updateSession() {
-  const nudges = desk?.nudges ?? [];
-  const nudgesKey = JSON.stringify([nudges, busy]);
-  if (nudgesKey !== parts.nudgesKey) {
-    parts.nudgesKey = nudgesKey;
-    parts.nudges.hidden = !nudges.length;
-    parts.nudges.replaceChildren(...nudges.map((nudge) => el("button", { class: "nudge", type: "button", disabled: busy, onclick: () => void sendText(nudge, false) }, nudge)));
-  }
   parts.send.disabled = busy || !session?.canSend;
   parts.send.textContent = busy ? t("phone.sending") : t("phone.send");
   if (!session) return;
   parts.title.textContent = session.title;
+  parts.px.hidden = false;
+  parts.px.className = `px ${session.state}`;
   parts.pill.hidden = false;
   parts.pill.className = `pill ${session.state}`;
   parts.pill.textContent = stateLabel(session.state);
@@ -507,8 +576,8 @@ function updateSession() {
   }
 }
 
-/** Sends the next instruction. The draft in the box is cleared only when it was the box that was sent. */
-async function sendText(text, fromBox) {
+/** Sends the next instruction, and clears the box once it has gone through. */
+async function sendText(text) {
   const words = text.trim();
   if (!words || !session) return;
   let force = false;
@@ -531,7 +600,7 @@ async function sendText(text, fromBox) {
     parts.stick = true;
     return true;
   });
-  if (sent && fromBox && parts.prompt) parts.prompt.value = "";
+  if (sent && parts.prompt) parts.prompt.value = "";
 }
 
 async function stopSession() {
@@ -541,6 +610,68 @@ async function stopSession() {
   const ptyId = session.ptyId;
   await withBusy(() => post("/api/stop", { ptyId }));
 }
+
+let installEvent = null;
+
+function installedApp() {
+  return window.matchMedia("(display-mode: fullscreen)").matches || window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+
+function offerInstall() {
+  const card = document.querySelector(".install");
+  const touch = window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+  const narrow = window.matchMedia("(max-width: 640px)").matches;
+  const phone = touch || narrow || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (installedApp() || localStorage.getItem(INSTALL_KEY) === "1" || !phone) {
+    card?.remove();
+    return;
+  }
+  if (card) return;
+  const ios = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const copy = el("p", {}, ios ? t("phone.installIos") : t("phone.installBody"));
+  const install = ios
+    ? null
+    : el("button", { class: "btn", type: "button", onclick: () => void acceptInstall(copy) }, t("phone.install"));
+  const later = el("button", { class: "ghost", type: "button", onclick: dismissInstall }, t("phone.installLater"));
+  document.body.append(
+    el(
+      "div",
+      { class: "install", role: "dialog", "aria-label": t("phone.installTitle") },
+      el("div", { class: "install-title" }, t("phone.installTitle")),
+      copy,
+      el("div", { class: "actions" }, install, later),
+    ),
+  );
+}
+
+async function acceptInstall(copy) {
+  if (!installEvent) {
+    copy.textContent = t("phone.installMenu");
+    return;
+  }
+  const event = installEvent;
+  installEvent = null;
+  await event.prompt();
+  const choice = await event.userChoice;
+  if (choice?.outcome === "accepted") document.querySelector(".install")?.remove();
+}
+
+function dismissInstall() {
+  localStorage.setItem(INSTALL_KEY, "1");
+  document.querySelector(".install")?.remove();
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installEvent = event;
+  offerInstall();
+});
+
+window.addEventListener("appinstalled", () => {
+  installEvent = null;
+  localStorage.setItem(INSTALL_KEY, "1");
+  document.querySelector(".install")?.remove();
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
@@ -552,6 +683,7 @@ if ("serviceWorker" in navigator) {
 
 void loadWords().then(() => {
   show();
+  offerInstall();
   if (token) {
     schedule();
     void refresh();

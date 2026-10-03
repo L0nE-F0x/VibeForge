@@ -96,7 +96,14 @@ export class RunDesk {
     const run = this.core.store.getRun(id);
     if (!run) throw new Error("That run no longer exists.");
     const livePty = this.core.ptyByRun.get(id);
-    if (livePty) return { runId: id, ptyId: livePty, chatId: run.chatId, taskId: run.taskId };
+    // A shell run stays in the map until its recording finishes closing. A follow-up in that
+    // window used to come back as delivered and then be dropped. Wait the close out first.
+    if (livePty && followUp) await this.waitForShellClose(livePty);
+    const still = this.core.ptyByRun.get(id);
+    if (still) {
+      if (followUp) throw new Error("That session is still closing.");
+      return { runId: id, ptyId: still, chatId: run.chatId, taskId: run.taskId };
+    }
     if (run.chatId && this.core.store.getChat(run.chatId)) {
       const result = followUp ? await this.chats.sendChat(run.chatId, followUp, size) : await this.chats.continueChat(run.chatId, size);
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
@@ -128,6 +135,14 @@ export class RunDesk {
       ...size,
     });
     return { ...launched, chatId: null, taskId: null };
+  }
+
+  /** A shell whose CLI has already left, and whose run is still being closed. */
+  private async waitForShellClose(ptyId: string): Promise<void> {
+    const session = this.core.live.get(ptyId);
+    if (!session || session.kind !== "shell" || session.programEngineId) return;
+    const pending = this.core.recordings.get(ptyId);
+    if (pending) await pending;
   }
 
   /**

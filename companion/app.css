@@ -1,16 +1,70 @@
+/* The phone page, in the desk's voice: square corners, JetBrains Mono for text, Geist for
+   headings, flat panels, and the same ember (working) and amber (waiting) light.
+   Latin fonts are the OFL files in fonts/ (Geist, JetBrains Mono). Japanese and Chinese
+   fall through to the phone's own fonts. */
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   color-scheme: dark;
   --bg: #09090b;
+  --bg-deep: #050506;
   --card: #151518;
   --fg: #ffffff;
   --muted: #a1a1aa;
   --faint: #71717a;
-  --line: #232326;
+  --line: color-mix(in srgb, var(--faint) 24%, transparent);
   --accent: #ff6b35;
   --amber: #fca311;
+  --on-accent: #09090b;
   --green: #34d399;
   --bad: #ff4d6d;
-  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --hover-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  --hover-line: color-mix(in srgb, var(--accent) 55%, transparent);
+  --focus-line: color-mix(in srgb, var(--amber) 65%, transparent);
+  --ember-core: color-mix(in srgb, var(--amber) 70%, #ffffff);
+  --ember-lit: 0 0 0 1px color-mix(in srgb, var(--amber) 90%, transparent), 0 0 8px 2px color-mix(in srgb, var(--amber) 75%, transparent), 0 0 20px 5px color-mix(in srgb, var(--accent) 45%, transparent);
+  --ember-low: 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent), 0 0 4px 0 color-mix(in srgb, var(--amber) 40%, transparent), 0 0 10px 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  --work-lit: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 6px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  --work-low: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 0 2px 0 color-mix(in srgb, var(--accent) 25%, transparent);
+  --done-rest: 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent), 0 0 5px 0 color-mix(in srgb, var(--green) 30%, transparent);
+  --font-mono: "JetBrains Mono Variable", "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Geist Variable", "Geist", system-ui, sans-serif;
+  font-family: var(--font-mono);
 }
 
 * { box-sizing: border-box; }
@@ -25,11 +79,21 @@ html, body {
 
 body {
   min-height: 100dvh;
+  font: 12.5px/1.5 var(--font-mono);
+  -webkit-font-smoothing: antialiased;
 }
 
-button, input, textarea { font: inherit; color: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; }
 
 button { cursor: pointer; }
+
+h1 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 620;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
 
 #app {
   max-width: 640px;
@@ -39,30 +103,22 @@ button { cursor: pointer; }
 
 .top {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 16px;
 }
 
-.top h1 {
-  font-size: 22px;
-  font-weight: 620;
-  margin: 0;
-  letter-spacing: -0.02em;
-}
-
-.grow { flex: 1; }
+.grow { flex: 1; min-width: 0; }
 
 .muted { color: var(--muted); }
 
 .faint { color: var(--faint); }
 
-.small { font-size: 13px; line-height: 1.4; }
+.small { font-size: 11.5px; line-height: 1.4; }
 
 .card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 16px;
   padding: 14px;
   margin-bottom: 12px;
 }
@@ -85,44 +141,82 @@ button { cursor: pointer; }
 
 .card .session:first-of-type { border-top: 0; margin-top: 4px; }
 
+.session.waiting {
+  border-color: var(--focus-line);
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--amber) 14%, transparent), transparent 70%);
+  box-shadow: inset 2px 0 0 var(--ember-core);
+}
+
 .title { font-weight: 600; }
 
+.px {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.px.working {
+  background: var(--accent);
+  box-shadow: var(--work-lit);
+  animation: ember-work 2.4s ease-in-out infinite;
+}
+
+.px.waiting {
+  width: 9px;
+  height: 9px;
+  background: var(--ember-core);
+  box-shadow: var(--ember-lit);
+  animation: ember-breathe 2.2s ease-in-out infinite;
+}
+
+.px.done {
+  background: var(--green);
+  box-shadow: var(--done-rest);
+}
+
 .pill {
+  font-family: var(--font-display);
   font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.02em;
-  border-radius: 999px;
-  padding: 3px 8px;
-  background: var(--line);
+  font-weight: 560;
+  padding: 2px 0 2px 8px;
+  background: transparent;
   color: var(--muted);
 }
 
-.pill.working { color: var(--green); background: #12352c; }
-.pill.waiting { color: var(--amber); background: #3a2c12; }
+.pill.working { color: var(--accent); }
+.pill.waiting { color: var(--amber); }
 .pill.done { color: var(--faint); }
 
 .stack { display: flex; flex-direction: column; gap: 10px; }
 
-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--muted); }
 
 input, textarea, select {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 0;
   padding: 12px;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--focus-line);
 }
 
 textarea { min-height: 88px; resize: vertical; }
 
 .btn, .ghost {
   border: 0;
-  border-radius: 12px;
+  border-radius: 0;
   padding: 12px 14px;
   background: var(--accent);
-  color: #1a0d07;
-  font-weight: 680;
+  color: var(--on-accent);
+  font-weight: 650;
 }
+
+.btn:hover, .btn:focus-visible { background: var(--amber); }
 
 .ghost {
   background: transparent;
@@ -130,26 +224,22 @@ textarea { min-height: 88px; resize: vertical; }
   border: 1px solid var(--line);
 }
 
+.ghost:hover, .ghost:focus-visible {
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+  color: var(--accent);
+}
+
 .btn:disabled, .ghost:disabled { opacity: 0.5; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
-.nudge {
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 8px 12px;
-  color: var(--fg);
-}
-
 .screen {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
-  line-height: 1.45;
+  font: 12px/1.45 var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
-  background: #050506;
-  border-radius: 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
   padding: 12px;
   min-height: 160px;
   max-height: 46dvh;
@@ -160,7 +250,7 @@ textarea { min-height: 88px; resize: vertical; }
 .banner {
   background: #3a1420;
   color: #ffd0da;
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
   padding: 10px 12px;
   margin-bottom: 12px;
 }
@@ -170,29 +260,60 @@ textarea { min-height: 88px; resize: vertical; }
   border: 0;
   color: var(--accent);
   padding: 0;
-  font-weight: 650;
+  font-family: var(--font-display);
+  font-weight: 600;
 }
 
-code {
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
+code { font-family: inherit; }
+
+.install {
+  position: fixed;
+  z-index: 5;
+  left: 16px;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  max-width: 420px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  padding: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 
+.install-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+}
+
+.install p { margin: 0 0 12px; color: var(--muted); }
+
+.plans-toggle { padding: 4px 8px; font-size: 11.5px; font-weight: 600; }
+.plans.collapsed .plan { display: none; }
 .plans .plan { padding-top: 12px; margin-top: 10px; border-top: 1px solid var(--line); }
 .plans .plan:first-of-type { border-top: 0; margin-top: 4px; }
-.plan-pct { font-variant-numeric: tabular-nums; }
+.plan { --plan: var(--accent); }
+.plan.warm { --plan: var(--amber); }
+.plan.full { --plan: var(--bad); }
+.plan-mark { flex: none; fill: var(--plan); }
+.plan-pct {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--plan);
+}
 .plan-bar, .plan-track {
   display: block;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--line);
+  height: 5px;
+  background: color-mix(in srgb, var(--faint) 18%, transparent);
   overflow: hidden;
   margin: 8px 0 6px;
 }
 .plan-track { margin: 0; flex: 1; height: 4px; }
-.plan-bar i, .plan-track i { display: block; height: 100%; background: var(--green); }
-.warm .plan-bar i, .plan-window.warm .plan-track i { background: var(--amber); }
-.full .plan-bar i, .plan-window.full .plan-track i { background: var(--bad); }
+.plan-bar i, .plan-track i { display: block; height: 100%; background: var(--plan); }
 .plan.stale { opacity: 0.7; }
 .plan-window {
   display: grid;
@@ -203,3 +324,17 @@ code {
   color: var(--muted);
 }
 .plan-window span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+@keyframes ember-breathe {
+  0%, 100% { box-shadow: var(--ember-lit); }
+  50% { box-shadow: var(--ember-low); }
+}
+
+@keyframes ember-work {
+  0%, 100% { box-shadow: var(--work-lit); }
+  50% { box-shadow: var(--work-low); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .px { animation: none; }
+}

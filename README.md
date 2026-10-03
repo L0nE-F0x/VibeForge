@@ -132,7 +132,7 @@ o.bind("SUPER + ALT + V", "VibeForge: stop talking", "vibeforge --voice stop", {
 
 ## Phone
 
-**Settings → Phone** serves a small page for your phone: each workspace and the coding CLIs in it, your plan limits, a CLI's screen, and a box to tell it what to do next. From there you can start an agent, or any CLI on its own, in a workspace; send a prompt or one of your saved nudges; pick a finished session back up with your next instruction; and stop it. A CLI you typed into a terminal is only interrupted (<kbd>Esc</kbd>), so the terminal stays open, and nothing from the phone is ever typed into a terminal that has no CLI running in it.
+**Settings → Phone** serves a small page for your phone: each workspace and the coding CLIs in it, your plan limits, a CLI's screen, and a box to tell it what to do next. From there you can start an agent, or any CLI on its own, in a workspace; send a prompt; pick a finished session back up with your next instruction; and stop it. A CLI you typed into a terminal is only interrupted (<kbd>Esc</kbd>), so the terminal stays open, and nothing from the phone is ever typed into a terminal that has no CLI running in it.
 
 It is off until you turn it on, and then it listens on `127.0.0.1:4737` only. The page asks once for the pairing code shown in Settings (it's kept in `settings.json`) and remembers it in the phone's browser; **New code** signs every phone out. To reach it from your phone, run [Tailscale](https://tailscale.com) Serve once on this computer:
 
@@ -140,7 +140,7 @@ It is off until you turn it on, and then it listens on `127.0.0.1:4737` only. Th
 tailscale serve --bg --https=443 http://127.0.0.1:4737
 ```
 
-then open the https address it prints on your phone, signed in to the same tailnet, and add the page to the home screen. Serve keeps the page inside your tailnet; `tailscale funnel` would put it on the internet, so don't use that. The computer has to stay on and awake with VibeForge running (the tray is enough). While the page is open it buzzes when a CLI starts waiting or finishes; a buzz on a locked phone isn't built yet. Plan limits on the phone are the same numbers as the desktop's and follow the same Settings switch. The page speaks the language VibeForge does, or your phone's when VibeForge follows the system.
+then open the https address it prints on your phone, signed in to the same tailnet. The page offers to install itself, and the installed page fills the screen. Serve keeps the page inside your tailnet; `tailscale funnel` would put it on the internet, so don't use that. The computer has to stay on and awake with VibeForge running (the tray is enough). While the page is open it buzzes when a CLI starts waiting or finishes; a buzz on a locked phone isn't built yet. Plan limits on the phone are the same numbers as the desktop's and follow the same Settings switch. The page speaks the language VibeForge does, or your phone's when VibeForge follows the system.
 
 ## Your files
 

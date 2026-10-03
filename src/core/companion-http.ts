@@ -65,6 +65,10 @@ const PAGES: Record<string, { name: string; type: string }> = {
   "/app.js": { name: "app.js", type: "text/javascript; charset=utf-8" },
   "/sw.js": { name: "sw.js", type: "text/javascript; charset=utf-8" },
   "/manifest.webmanifest": { name: "manifest.webmanifest", type: "application/manifest+json" },
+  "/fonts/geist-latin-wght-normal.woff2": { name: "fonts/geist-latin-wght-normal.woff2", type: "font/woff2" },
+  "/fonts/geist-latin-ext-wght-normal.woff2": { name: "fonts/geist-latin-ext-wght-normal.woff2", type: "font/woff2" },
+  "/fonts/jetbrains-mono-latin-wght-normal.woff2": { name: "fonts/jetbrains-mono-latin-wght-normal.woff2", type: "font/woff2" },
+  "/fonts/jetbrains-mono-latin-ext-wght-normal.woff2": { name: "fonts/jetbrains-mono-latin-ext-wght-normal.woff2", type: "font/woff2" },
 };
 
 export interface CompanionHttpOptions {

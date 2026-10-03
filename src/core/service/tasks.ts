@@ -142,8 +142,7 @@ export class TaskDesk {
     return this.taskView(task);
   }
 
-  /** A Continue of the task's last run: a person is there, so it never waits. */
-  /** Pick the task's last session back up. `followUp` is typed in once it is ready, when given. */
+  /** Pick the task's last session back up. A person is there, so it never waits. `followUp` is typed in once it is ready. */
   async continueTask(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched> {
     await this.core.settled;
     this.turns.cancel("task", id);
