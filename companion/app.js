@@ -501,10 +501,10 @@ function launchPage() {
   parts.start = el("button", { class: "btn", type: "button", onclick: () => void startAgent(select.value, prompt) }, t("phone.start"));
   return el(
     "section",
-    {},
+    { class: "fit" },
     top,
-    el("div", { class: "card stack" }, el("label", {}, t("phone.who"), select), el("label", {}, t("phone.firstPrompt"), prompt), parts.start),
     agents.length ? null : el("p", { class: "small faint" }, t("phone.cliOnly")),
+    el("div", { class: "card stack composer" }, el("label", {}, t("phone.who"), select), el("label", {}, t("phone.firstPrompt"), prompt), parts.start),
   );
 }
 
@@ -545,11 +545,11 @@ function sessionPage() {
   });
   return el(
     "section",
-    {},
+    { class: "fit" },
     el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.desk")), parts.title, parts.px, parts.pill),
     parts.meta,
     parts.screen,
-    el("div", { class: "card stack" }, parts.prompt, el("div", { class: "actions" }, parts.send, parts.stop)),
+    el("div", { class: "card stack composer" }, parts.prompt, el("div", { class: "actions" }, parts.send, parts.stop)),
   );
 }
 
@@ -673,6 +673,46 @@ window.addEventListener("appinstalled", () => {
   localStorage.setItem(INSTALL_KEY, "1");
   document.querySelector(".install")?.remove();
 });
+
+/**
+ * Keep the page inside the visible screen while the phone keyboard is open.
+ * The layout viewport stays full height on iOS; the visual viewport is the part
+ * the keyboard has not covered. Chrome also honours interactive-widget on the
+ * viewport tag, and then this inset is zero.
+ */
+function followKeyboard() {
+  const vv = window.visualViewport;
+  const height = vv && vv.height > 0 ? vv.height : window.innerHeight;
+  const top = vv ? vv.offsetTop : 0;
+  if (!(height > 0)) return;
+  const keyboard = Math.max(0, window.innerHeight - top - height);
+  const root = document.documentElement;
+  root.style.setProperty("--vv-top", `${top}px`);
+  root.style.setProperty("--vv-height", `${height}px`);
+  root.style.setProperty("--keyboard", `${keyboard}px`);
+  const opened = keyboard > 60;
+  root.classList.toggle("keyboard", opened);
+  if (opened !== keyboardWasOpen) {
+    keyboardWasOpen = opened;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement || focused instanceof HTMLSelectElement) {
+      focused.scrollIntoView({ block: "nearest" });
+    }
+  }
+}
+
+let keyboardWasOpen = false;
+
+if (window.visualViewport) {
+  let frame = 0;
+  const trackKeyboard = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(followKeyboard);
+  };
+  visualViewport.addEventListener("resize", trackKeyboard);
+  visualViewport.addEventListener("scroll", trackKeyboard);
+}
+followKeyboard();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {

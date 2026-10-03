@@ -73,12 +73,13 @@
 
 html, body {
   margin: 0;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--fg);
 }
 
 body {
-  min-height: 100dvh;
   font: 12.5px/1.5 var(--font-mono);
   -webkit-font-smoothing: antialiased;
 }
@@ -95,11 +96,46 @@ h1 {
   letter-spacing: -0.02em;
 }
 
+/* Sized to the visible screen. --vv-top and --vv-height follow the phone keyboard
+   (see followKeyboard in app.js), so the page shrinks instead of sliding under it. */
 #app {
+  position: fixed;
+  top: var(--vv-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--vv-height, 100dvh);
   max-width: 640px;
-  margin: 0 auto;
-  padding: calc(16px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom));
 }
+
+html.keyboard #app { padding-bottom: 12px; }
+
+#app > .banner { flex: none; }
+
+#app > section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+#app > section > * { flex: none; }
+
+/* A page with a text box keeps that box on screen. The terminal, when there is one, gives up the room. */
+#app > section.fit .screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+#app > section.fit .composer { flex: none; margin-top: 0; }
+
+#app > section.fit:not(:has(.screen)) .composer { margin-top: auto; }
 
 .top {
   display: flex;
@@ -200,12 +236,19 @@ input, textarea, select {
   padding: 12px;
 }
 
+/* A field under 16px makes iOS zoom the page in when it is focused, which shoves the box under the keyboard. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px; }
+}
+
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--focus-line);
 }
 
 textarea { min-height: 88px; resize: vertical; }
+
+html.keyboard textarea { min-height: 44px; max-height: 7em; }
 
 .btn, .ghost {
   border: 0;
@@ -271,7 +314,7 @@ code { font-family: inherit; }
   z-index: 5;
   left: 16px;
   right: 16px;
-  bottom: calc(16px + env(safe-area-inset-bottom));
+  bottom: calc(16px + env(safe-area-inset-bottom) + var(--keyboard, 0px));
   max-width: 420px;
   margin: 0 auto;
   background: var(--card);
