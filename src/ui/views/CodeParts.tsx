@@ -308,9 +308,18 @@ export function DockPanel({
     const observer = new ResizeObserver(() => place());
     observer.observe(node);
     window.addEventListener("resize", place);
+    // Panning the desk moves the placeholder. Fold a burst of scroll events into one frame.
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
+    };
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       observer.disconnect();
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [place]);
 

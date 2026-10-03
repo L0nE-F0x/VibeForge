@@ -19,6 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 - **Its own workspace.** In Code, a workspace's menu has **Open another branch**. This folder stays on its branch. The branch you pick is checked out beside the project and added as its own workspace, named with the repository and the branch. A branch that is already checked out opens that folder instead of making a second copy. Removing the workspace later leaves the folder on disk.
 
+**A tiled window can pan.**
+
+- When other windows share the workspace, VibeForge shrinks to the tile instead of leaving the right side off the screen. Code, Chat, Agents, Runs and Skills stay wide enough to read, and a bar along the bottom of the window slides across whatever the tile cuts off. The list column gives a little of its width back while the tile is narrow. The side browser is cut to the part of the page still on screen, so panning it does not draw over the bar on the left.
+
 ## [2.0.0] - 2026-10-01
 
 **2.0: agents take turns in a folder, and everyone waiting for you has a name.**

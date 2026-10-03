@@ -703,8 +703,11 @@ async function createWindow(): Promise<void> {
   win = new BrowserWindow({
     width: 1480,
     height: 920,
-    minWidth: 980,
-    minHeight: 620,
+    // A tiling window manager will give this window whatever slice is left. These floors stay
+    // under a quarter of a laptop screen so the page actually becomes that size. The desk then
+    // pans sideways (see --screen-floor) instead of drawing past the edge of the tile.
+    minWidth: 280,
+    minHeight: 220,
     title: "VibeForge",
     backgroundColor: palette.background,
     icon: icon.isEmpty() ? undefined : icon,
