@@ -11,6 +11,7 @@ import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
+import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
 import type { AgentInput, ChatView, Deleted, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
@@ -102,6 +103,14 @@ export class TeamService extends ServiceCore {
 
   updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
     return this.workspaces.updateWorkspace(id, patch);
+  }
+
+  listBranches(id: string): Promise<BranchList> {
+    return this.workspaces.listBranches(id);
+  }
+
+  openBranch(id: string, branch: string): Promise<WorkspaceFile> {
+    return this.workspaces.openBranch(id, branch);
   }
 
   getLayout(workspaceId: string): LayoutNode | null {

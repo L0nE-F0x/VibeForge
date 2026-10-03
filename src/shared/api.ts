@@ -44,10 +44,11 @@ import type { PlanSummary } from "../core/plans.js";
 import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
+import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
-export type { ApplyResult, WorkingCopy };
+export type { ApplyResult, WorkingCopy, BranchList };
 import type { Deleted } from "../core/team-service.js";
 
 export type { Deleted };
@@ -280,6 +281,10 @@ export interface DeskMethods {
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
   "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
+  /** Local branches of a workspace's repository. An empty repo means the folder is not one. */
+  "workspaces.branches": (id: string) => BranchList;
+  /** Check a branch out beside this workspace. The workspace folder stays on its current branch. */
+  "workspaces.openBranch": (id: string, branch: string) => WorkspaceFile;
   "layouts.get": (workspaceId: string) => LayoutNode | null;
   "layouts.save": (workspaceId: string, layout: LayoutNode | null) => void;
   "files.list": (dir: string) => FileNode[];

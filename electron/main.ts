@@ -525,6 +525,8 @@ function handlers(): Handlers {
     "workspaces.select": (id) => s().selectWorkspace(id),
     "workspaces.move": (id, toIndex) => s().moveWorkspace(id, toIndex),
     "workspaces.update": (id, patch) => s().updateWorkspace(id, patch),
+    "workspaces.branches": (id) => s().listBranches(id),
+    "workspaces.openBranch": (id, branch) => s().openBranch(id, branch),
     "layouts.get": (id) => s().getLayout(id),
     "layouts.save": (id, layout) => s().saveLayout(id, layout),
     "files.list": (dir) => listDir(dir),

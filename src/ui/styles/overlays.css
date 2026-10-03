@@ -58,6 +58,12 @@
   border-top: 1px solid var(--line);
 }
 
+.branch-list {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}
+
 /* Ctrl+K: the switcher sits high, like a command palette, so the list grows downward. */
 .switcher-scrim {
   place-items: start center;

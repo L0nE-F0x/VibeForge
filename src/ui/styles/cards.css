@@ -143,6 +143,12 @@
   color: var(--fg);
 }
 
+.row:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+}
+
 .row .row-title {
   font-weight: 560;
   color: inherit;

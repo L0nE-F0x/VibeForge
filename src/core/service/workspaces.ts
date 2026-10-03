@@ -1,4 +1,5 @@
 import path from "node:path";
+import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
 import { isDirectory } from "../fsx.js";
 import type { LayoutNode } from "../types.js";
 import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
@@ -42,6 +43,32 @@ export class WorkspaceDesk {
     this.core.store.writeWorkspaces(next);
     this.core.emit("workspaces");
     return next;
+  }
+
+  /** Local branches of this workspace's repository. The folder's own branch is marked current. */
+  listBranches(id: string): Promise<BranchList> {
+    const workspace = this.workspace(id);
+    return readBranches(workspace.path);
+  }
+
+  /**
+   * Open `branch` as its own workspace folder. This workspace's checkout is not moved. A folder
+   * that already has the branch is added, or selected when it is already a workspace.
+   */
+  async openBranch(id: string, branch: string): Promise<WorkspaceFile> {
+    const workspace = this.workspace(id);
+    const opened = await openBranchCheckout(workspace.path, branch);
+    const known = this.core.store.readWorkspaces().workspaces.some((item) => path.resolve(item.path) === path.resolve(opened.path));
+    let next = this.addWorkspace(opened.path);
+    if (!known && next.lastWorkspaceId) next = this.updateWorkspace(next.lastWorkspaceId, { name: `${opened.repoName} · ${opened.branch}` });
+    return next;
+  }
+
+  private workspace(id: string) {
+    const workspace = this.core.workspaceById(id);
+    if (!workspace) throw new Error("That workspace is gone.");
+    if (!isDirectory(workspace.path)) throw new Error("That folder does not exist any more.");
+    return workspace;
   }
 
   updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
