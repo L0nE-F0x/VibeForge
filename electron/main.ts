@@ -219,7 +219,7 @@ const quotaAlerts = new QuotaAlerts(path.join(roots.dataRoot, "quota-alerts.json
 async function planSummary(fresh: boolean) {
   const settings = svc().getSettings();
   const local = settings.usage
-    ? (await usage.scan()).sources.filter((source) => source.limits.length).map((source) => ({ id: source.id, limits: source.limits }))
+    ? (await usage.scan()).sources.filter((source) => source.limits.length).map((source) => ({ id: source.id, limits: source.limits, at: source.limitsAt }))
     : [];
   if (!settings.planLimits && !local.length) return null;
   const summary = await plans.summary({ network: settings.planLimits, local, fresh });

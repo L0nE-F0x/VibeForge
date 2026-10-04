@@ -474,6 +474,19 @@ export function fullAt(history: readonly PlanPoint[], percent: number | null, no
 
 // ------------------------------------------------------------------ the watcher
 
+/** Limits a CLI already wrote into its own log, and when that line was written. */
+interface LocalLimits {
+  id: string;
+  limits: readonly UsageLimit[];
+  at?: string | null;
+}
+
+function stamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? null : time;
+}
+
 interface Kept {
   reading: Reading | null;
   readAt: string | null;
@@ -521,17 +534,17 @@ export class PlanWatcher {
   /**
    * The plans this machine is signed in to. `network` allows asking the providers. `local`
    * is limits a CLI already wrote into its own log (Codex, and Muse when a turn recorded
-   * them); those show even while asking is off. A fresh answer replaces the log. Only one
-   * pass runs at a time.
+   * them); those show even while asking is off. The newer of the log and a provider answer
+   * wins, by the log's own time. Only one pass runs at a time.
    */
-  summary(options: { network: boolean; local?: readonly { id: string; limits: readonly UsageLimit[] }[]; fresh?: boolean }): Promise<PlanSummary> {
+  summary(options: { network: boolean; local?: readonly LocalLimits[]; fresh?: boolean }): Promise<PlanSummary> {
     this.pass ??= this.summaryNow(options).finally(() => {
       this.pass = null;
     });
     return this.pass;
   }
 
-  private async summaryNow({ network, local = [], fresh }: { network: boolean; local?: readonly { id: string; limits: readonly UsageLimit[] }[]; fresh?: boolean }): Promise<PlanSummary> {
+  private async summaryNow({ network, local = [], fresh }: { network: boolean; local?: readonly LocalLimits[]; fresh?: boolean }): Promise<PlanSummary> {
     const now = this.now();
     const shown: PlanId[] = [];
     const hidden = new Set<PlanId>();
@@ -565,16 +578,20 @@ export class PlanWatcher {
       await Promise.all(asks);
     }
 
-    // A log's limits fill in whatever this pass didn't already read from the provider.
+    // A log fills in a plan this pass did not already hear, when the log is the newer of the two.
+    // An older session line must not replace an online reading, or label itself as read just now.
     for (const entry of local) {
       if (!PLAN_ORDER.includes(entry.id as PlanId)) continue;
       const id = entry.id as PlanId;
       const reading = codexReading(entry.limits);
       if (!reading) continue;
       const kept = this.kept.get(id);
-      if (kept?.reading && kept.askedAt === now && !kept.problem) continue;
-      this.kept.set(id, { reading, readAt: new Date(now).toISOString(), problem: null, askedAt: kept?.askedAt ?? 0 });
-      dirty = this.remember(id, reading.percent, now) || dirty;
+      const logAt = stamp(entry.at);
+      const keptAt = stamp(kept?.readAt);
+      if (kept?.reading && (logAt === null || (keptAt !== null && logAt <= keptAt))) continue;
+      const when = logAt ?? now;
+      this.kept.set(id, { reading, readAt: new Date(when).toISOString(), problem: null, askedAt: kept?.askedAt ?? 0 });
+      dirty = this.remember(id, reading.percent, when) || dirty;
       hidden.delete(id);
       include(id);
     }

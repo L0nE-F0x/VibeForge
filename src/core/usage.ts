@@ -35,6 +35,8 @@ export interface UsageSource {
   /** This week's total per model, largest first. */
   models: Array<{ model: string; total: number }>;
   limits: UsageLimit[];
+  /** When the CLI wrote `limits`, if that log line said. Null when `limits` is empty. */
+  limitsAt: string | null;
   /** When the newest counted call happened. */
   lastAt: string | null;
 }
@@ -368,7 +370,8 @@ export class UsageScanner {
         }
       }
       const perDay = dayKeys.map((day) => [...(days.get(day)?.values() ?? [])].reduce((sum, tokens) => sum + tokens.total, 0));
-      if (!perDay.some(Boolean) && !limits) continue;
+      const liveLimits = (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime());
+      if (!perDay.some(Boolean) && !liveLimits.length) continue;
       const week = zero();
       const todayTokens = zero();
       const models = new Map<string, number>();
@@ -386,7 +389,8 @@ export class UsageScanner {
         days: perDay,
         models: [...models].map(([model, total]) => ({ model, total })).sort((a, b) => b.total - a.total),
         // A limit that has reset since it was written says nothing any more.
-        limits: (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime()),
+        limits: liveLimits,
+        limitsAt: liveLimits.length ? (limits?.at ?? null) : null,
         lastAt: lastAt ? new Date(lastAt).toISOString() : null,
       });
     }

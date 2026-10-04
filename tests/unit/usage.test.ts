@@ -60,6 +60,7 @@ describe("usage", () => {
     expect(by("codex")).toMatchObject({ today: { total: 340, cached: 200, output: 40 }, models: [{ model: "gpt-5-codex", total: 340 }] });
     // The weekly limit already reset, so only the 5-hour one is left.
     expect(by("codex").limits).toEqual([{ windowMinutes: 300, usedPercent: 42, resetsAt: new Date(Date.parse(at(0)) + 36_000_000).toISOString() }]);
+    expect(by("codex").limitsAt).toBe(at(0));
     expect(by("grok").days[4]).toBe(5000);
     expect(by("gemini").today).toEqual({ total: 105, cached: 10, output: 25 });
 
@@ -91,6 +92,7 @@ describe("usage", () => {
     expect(muse.today).toEqual({ total: 250, cached: 160, output: 40 });
     expect(muse.models).toEqual([{ model: "muse-spark-1.3", total: 250 }]);
     expect(muse.limits).toEqual([{ windowMinutes: 300, usedPercent: 10, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString() }]);
+    expect(muse.limitsAt).toBe(at(0));
 
     // A log that grows is read from where the last pass stopped.
     fs.appendFileSync(session, `${claudeLine("m4", at(0), { input_tokens: 1, output_tokens: 1 })}\n`);

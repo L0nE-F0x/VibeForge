@@ -246,6 +246,35 @@ describe("plan limits", () => {
     expect(on.providers.find((provider) => provider.id === "codex")?.percent).toBe(60);
   });
 
+  it("keeps the newer of an online reading and a CLI log, and labels the log with its own time", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    write(path.join(home, ".codex", "auth.json"), { auth_mode: "chatgpt", tokens: { access_token: jwt(NOW / 1000 + 3600), account_id: "acct-1" } });
+    let now = NOW;
+    const watcher = new PlanWatcher({
+      home,
+      file: path.join(home, "plans.json"),
+      now: () => now,
+      fetch: async () => ({ status: 200, text: async () => JSON.stringify({ rate_limit: { primary_window: { used_percent: 60, limit_window_seconds: 18_000, reset_at: NOW / 1000 + 1000 } } }) }),
+      env: {},
+    });
+    const older = [{ windowMinutes: 300, usedPercent: 12, resetsAt: inHours(1) }];
+    const loggedAt = new Date(NOW - 3600_000).toISOString();
+    await watcher.summary({ network: true, local: [{ id: "codex", limits: older, at: loggedAt }] });
+
+    // Still inside the few minutes where the provider is not asked again. The older log must not take over.
+    now = NOW + 60_000;
+    const held = await watcher.summary({ network: true, local: [{ id: "codex", limits: older, at: loggedAt }] });
+    expect(held.providers.find((provider) => provider.id === "codex")).toMatchObject({ percent: 60, readAt: new Date(NOW).toISOString() });
+
+    // A log written after that answer is the one to show, at the time the CLI wrote it.
+    const loggedLater = new Date(NOW + 30_000).toISOString();
+    const followed = await watcher.summary({
+      network: true,
+      local: [{ id: "codex", limits: [{ windowMinutes: 300, usedPercent: 80, resetsAt: inHours(1) }], at: loggedLater }],
+    });
+    expect(followed.providers.find((provider) => provider.id === "codex")).toMatchObject({ percent: 80, readAt: loggedLater });
+  });
+
   it("works out when a window fills at the recent pace", () => {
     const points = [0, 1, 2, 3].map((step) => ({ t: new Date(NOW - (3 - step) * 3600_000).toISOString(), percent: 40 + step * 10 }));
     // 70% now, climbing 10% an hour: full in three hours.
