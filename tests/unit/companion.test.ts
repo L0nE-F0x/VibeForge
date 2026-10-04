@@ -396,6 +396,8 @@ describe("the phone page's words", () => {
 
   it("explains the page before the desk, in every language", async () => {
     const keys = [
+      "phone.homeKind",
+      "phone.homeBlurb",
       "phone.homeLead",
       "phone.homeHowTitle",
       "phone.homeHow",
@@ -412,8 +414,11 @@ describe("the phone page's words", () => {
       "phone.homeEnter",
       "phone.homeReturn",
       "phone.homeMark",
+      "phone.homeClose",
       "phone.back",
     ];
+    expect((await phoneWords("en"))["phone.homeKind"]).toBe("Mobile companion");
+    expect((await phoneWords("en"))["phone.homeSettings"]).toBe("Settings");
     expect((await phoneWords("en"))["phone.homeEnter"]).toBe("Enter");
     expect((await phoneWords("en"))["phone.back"]).toBe("Back");
     for (const language of ["en", "de", "es", "fr", "pt", "ja", "zh"] as const) {

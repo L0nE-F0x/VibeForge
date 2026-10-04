@@ -80,11 +80,13 @@ const EXTRA = {
   "phone.plansShow": "Show",
   "phone.plansHide": "Hide",
   "phone.credit": "Created by {name}",
+  "phone.homeKind": "Mobile companion",
+  "phone.homeBlurb": "Your work, from your phone.",
   "phone.homeLead": "See who is working on your computer, who is waiting for you, and tell them what to do next. The computer stays on, with VibeForge open.",
   "phone.homeHowTitle": "How it works",
   "phone.homeHow": "Each project lists whoever is working or waiting. Open one to read the screen, send the next step, or stop. Start begins someone new.",
   "phone.homeReach": "Your phone reaches the computer through Tailscale, a private link between your own devices. The computer has to stay awake.",
-  "phone.homeSettings": "Make it yours",
+  "phone.homeSettings": "Settings",
   "phone.homeBuzz": "Tell me when someone is waiting",
   "phone.homeBuzzHint": "Also when they finish. This page has to stay open.",
   "phone.homeBuzzBlocked": "Notifications are blocked for this page. Allow them in the phone's settings.",
@@ -97,6 +99,7 @@ const EXTRA = {
   "phone.homeEnter": "Enter",
   "phone.homeReturn": "Tap VibeForge to come back here.",
   "phone.homeMark": "About this page",
+  "phone.homeClose": "Close",
 };
 
 function t(key, vars) {
@@ -417,47 +420,90 @@ async function onBuzz(want, button) {
   }
 }
 
+/** A panel over the landing. Closing it shows the three buttons again; the page is not rebuilt. */
+function sheet(title, ...nodes) {
+  let opener = null;
+  const close = () => {
+    panel.hidden = true;
+    panel.parentElement?.querySelector(".home-hero")?.removeAttribute("inert");
+    if (opener instanceof HTMLElement) opener.focus();
+    opener = null;
+  };
+  const panel = el(
+    "div",
+    { class: "sheet", hidden: true, role: "dialog", "aria-modal": "true", "aria-label": title },
+    el("div", { class: "top sheet-bar" }, el("button", { class: "back sheet-close", type: "button", onclick: close }, t("phone.homeClose")), el("h2", {}, title)),
+    el("div", { class: "sheet-body" }, ...nodes),
+  );
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || panel.hidden) return;
+    event.preventDefault();
+    close();
+  });
+  panel.open = () => {
+    opener = document.activeElement;
+    const home = panel.parentElement;
+    for (const other of home?.querySelectorAll(":scope > .sheet") || []) {
+      if (other !== panel) other.hidden = true;
+    }
+    home?.querySelector(".home-hero")?.setAttribute("inert", "");
+    panel.hidden = false;
+    panel.querySelector(".sheet-close")?.focus();
+  };
+  return panel;
+}
+
 function homePage() {
   const blocked = typeof Notification !== "undefined" && Notification.permission === "denied";
   parts.buzzNote = el("p", { class: "small faint home-note", hidden: !blocked }, t("phone.homeBuzzBlocked"));
+  const how = sheet(
+    t("phone.homeHowTitle"),
+    el("p", { class: "muted lede" }, t("phone.homeLead")),
+    el("p", { class: "how" }, t("phone.homeHow")),
+    el("p", { class: "small muted reach" }, t("phone.homeReach")),
+    el("p", { class: "small faint home-return" }, t("phone.homeReturn")),
+  );
+  const settings = sheet(
+    t("phone.homeSettings"),
+    el(
+      "article",
+      { class: "card home-settings" },
+      prefSwitch(t("phone.homeBuzz"), t("phone.homeBuzzHint"), buzzShownOn(), onBuzz),
+      parts.buzzNote,
+      prefSwitch(t("phone.homePlans"), t("phone.homePlansHint"), plansOpen(), (on, button) => {
+        localStorage.setItem(PLANS_KEY, on ? "1" : "0");
+        paintSwitch(button, on);
+      }),
+      prefSwitch(t("phone.homeTuck"), t("phone.homeTuckHint"), tuckFinished(), (on, button) => {
+        localStorage.setItem(TUCK_KEY, on ? "1" : "0");
+        paintSwitch(button, on);
+      }),
+      prefSwitch(t("phone.homeText"), "", textLarge(), (on, button) => {
+        localStorage.setItem(TEXT_KEY, on ? "1" : "0");
+        document.documentElement.classList.toggle("large", on);
+        paintSwitch(button, on);
+      }),
+    ),
+  );
   return el(
     "section",
     { class: "home" },
     el(
       "div",
-      { class: "home-scroll" },
+      { class: "home-hero" },
       el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
-      el("p", { class: "muted lede" }, t("phone.homeLead")),
-      el("div", { class: "home-kicker" }, t("phone.homeHowTitle")),
-      el("p", { class: "how" }, t("phone.homeHow")),
-      el("p", { class: "small muted reach" }, t("phone.homeReach")),
+      el("p", { class: "home-kind" }, t("phone.homeKind")),
+      el("p", { class: "muted home-blurb" }, t("phone.homeBlurb")),
       el(
-        "article",
-        { class: "card home-settings" },
-        el("div", { class: "title" }, t("phone.homeSettings")),
-        prefSwitch(t("phone.homeBuzz"), t("phone.homeBuzzHint"), buzzShownOn(), onBuzz),
-        parts.buzzNote,
-        prefSwitch(t("phone.homePlans"), t("phone.homePlansHint"), plansOpen(), (on, button) => {
-          localStorage.setItem(PLANS_KEY, on ? "1" : "0");
-          paintSwitch(button, on);
-        }),
-        prefSwitch(t("phone.homeTuck"), t("phone.homeTuckHint"), tuckFinished(), (on, button) => {
-          localStorage.setItem(TUCK_KEY, on ? "1" : "0");
-          paintSwitch(button, on);
-        }),
-        prefSwitch(t("phone.homeText"), "", textLarge(), (on, button) => {
-          localStorage.setItem(TEXT_KEY, on ? "1" : "0");
-          document.documentElement.classList.toggle("large", on);
-          paintSwitch(button, on);
-        }),
+        "div",
+        { class: "home-actions" },
+        el("button", { class: "ghost home-action", type: "button", onclick: () => how.open() }, t("phone.homeHowTitle")),
+        el("button", { class: "ghost home-action", type: "button", onclick: () => settings.open() }, t("phone.homeSettings")),
+        el("button", { class: "btn home-enter", type: "button", onclick: () => setView("desk") }, t("phone.homeEnter")),
       ),
     ),
-    el(
-      "div",
-      { class: "home-go" },
-      el("button", { class: "btn home-enter", type: "button", onclick: () => setView("desk") }, t("phone.homeEnter")),
-      el("p", { class: "small faint home-return" }, t("phone.homeReturn")),
-    ),
+    how,
+    settings,
   );
 }
 

@@ -100,7 +100,8 @@ html.large .small,
 html.large .switch .hint { font-size: 13.5px; }
 html.large .screen { font-size: 14.5px; }
 html.large .credit { font-size: 13px; }
-html.large .home-kicker { font-size: 18px; }
+html.large .home-kind { font-size: 19px; }
+html.large .sheet-bar h2 { font-size: 22px; }
 html.large input, html.large textarea, html.large select { font-size: 18px; }
 
 button, input, textarea, select { font: inherit; color: inherit; }
@@ -241,29 +242,61 @@ html.keyboard #app { padding-bottom: 12px; }
   clip-path: inset(50%);
 }
 
-.home .brand { padding: 4px 0 12px; gap: 12px; }
+/* The landing is a launch screen: the name, one line, three buttons. Panels cover it. */
+.home .brand {
+  align-items: center;
+  padding: 0;
+  gap: 0;
+}
 
-/* The explanation scrolls. Enter stays on screen, above the credit. */
-#app > section.home { overflow: hidden; }
+.home .brand .wordmark {
+  width: min(260px, 78%);
+  max-width: 260px;
+}
 
-#app > section.home > .home-scroll {
+#app > section.home {
+  position: relative;
+  overflow: hidden;
+}
+
+#app > section.home > .home-hero {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 0;
 }
 
-.home-go {
-  flex: none;
-  padding-top: 10px;
-  background: var(--bg);
-}
-
-.home-kicker {
+.home-kind {
+  margin: 14px 0 0;
+  text-align: center;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 620;
   letter-spacing: -0.02em;
-  margin: 2px 0 6px;
+}
+
+.home-blurb {
+  margin: 6px auto 0;
+  max-width: 22em;
+  text-align: center;
+}
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 32px;
+}
+
+.home-actions .home-action,
+.home-actions .home-enter {
+  width: 100%;
+  min-height: 52px;
+  font-size: 1.12em;
 }
 
 .home .how, .home .reach, .home-note, .home-return { margin: 0; }
@@ -272,11 +305,40 @@ html.keyboard #app { padding-bottom: 12px; }
 
 .home .reach { margin-bottom: 14px; }
 
-.home-return { margin-top: 10px; text-align: center; }
+.home-return { margin-top: 16px; }
 
-.home-enter { width: 100%; }
+.sheet .home-return { text-align: start; }
 
-.home-settings .title { margin-bottom: 2px; }
+.home-settings .home-note { margin: 4px 0 2px; }
+
+/* A panel over the landing. The credit stays under it, at the bottom of the page. */
+.sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.sheet-bar h2 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
 
 .switch {
   display: flex;
@@ -761,5 +823,5 @@ html.keyboard .credit { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .px, .session.waiting::before, .install { animation: none; }
+  .px, .session.waiting::before, .install, .sheet { animation: none; }
 }
