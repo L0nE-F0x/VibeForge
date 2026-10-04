@@ -6,14 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
-**The usage meter follows the plans this computer is signed in to.**
+## [2.1.0] - 2026-10-04
 
-- **Whoever is signed in.** Claude, Codex, Grok, Kimi and Muse each appear when that CLI's own sign-in is on this machine, and stay off the list when it isn't. Signing in to another one shows it on the next refresh, in the desktop usage tab and on the phone page.
-- **Muse.** Its 5-hour and weekly windows come from the sign-in check Meta already uses. The extra key in that answer is thrown away and never saved. Token totals come from Muse's own session logs, on this machine.
-- **Codex from the sign-in too.** Its bar still comes from its logs, and also from the usage Codex itself asks for when `~/.codex/auth.json` holds a ChatGPT login. An API-key login adds no plan.
-- **The newer reading wins.** Between refreshes, Codex and Muse keep whichever is newer: the last answer from the provider, or the line in that CLI's own log. The time on the bar is when that reading was taken.
-- **Muse in Settings → Engines.** An engines list saved before Muse existed gains a Muse row, once. Removing that row keeps it removed.
-- **Muse in Runs.** Typing `muse` in a workspace is recorded and labeled Muse, on the desk and on the phone, including when its launcher has swapped in `muse-bin-<version>`. The Prompts tab reads what you typed from Muse's own session log.
+**2.1: your desk on your phone, plan limits for whoever is signed in, and another branch beside the folder you have.**
 
 **A phone page: check your workspaces and tell a CLI what to do next, from your phone.**
 
@@ -26,6 +21,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Installs onto the phone.** The first visit on a phone offers to install the page. Installed from that offer, it fills the screen.
 - **The keyboard.** Tapping a text box shrinks the page to the space above the phone's keyboard. The box and its button stay on screen, and the terminal gives up the room.
 - **A follow-up as a CLI leaves a shell.** Send looks at the terminal at that moment, so the second after a CLI quits is not typed into the shell. If the run is still closing, the follow-up waits and then resumes the session. A wrong pairing code during Send, Stop or Start brings the code form back.
+
+**The usage meter follows the plans this computer is signed in to.**
+
+- **Whoever is signed in.** Claude, Codex, Grok, Kimi and Muse each appear when that CLI's own sign-in is on this machine, and stay off the list when it isn't. Signing in to another one shows it on the next refresh, in the desktop usage tab and on the phone page.
+- **Muse.** Its 5-hour and weekly windows come from the sign-in check Meta already uses. The extra key in that answer is thrown away and never saved. Token totals come from Muse's own session logs, on this machine.
+- **Codex from the sign-in too.** Its bar still comes from its logs, and also from the usage Codex itself asks for when `~/.codex/auth.json` holds a ChatGPT login. An API-key login adds no plan.
+- **The newer reading wins.** Between refreshes, Codex and Muse keep whichever is newer: the last answer from the provider, or the line in that CLI's own log. The time on the bar is when that reading was taken.
+- **Muse in Settings → Engines.** An engines list saved before Muse existed gains a Muse row, once. Removing that row keeps it removed.
+- **Muse in Runs.** Typing `muse` in a workspace is recorded and labeled Muse, on the desk and on the phone, including when its launcher has swapped in `muse-bin-<version>`. The Prompts tab reads what you typed from Muse's own session log.
 
 **Open another branch without moving the folder you already have.**
 
@@ -268,7 +272,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.0
 [2.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.0.0
 [1.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.1
 [1.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.0

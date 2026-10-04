@@ -1,6 +1,6 @@
-# Status — 2026-10-03
+# Status — 2026-10-04
 
-## The phone page (2026-10-03, unreleased, branch `feat/phone-companion`)
+## The phone page (2.1.0, 2026-10-04)
 
 Grok built the prototype; Claude reviewed it and fixed what the review found.
 
