@@ -412,8 +412,10 @@ describe("the phone page's words", () => {
       "phone.homeEnter",
       "phone.homeReturn",
       "phone.homeMark",
+      "phone.back",
     ];
-    expect((await phoneWords("en"))["phone.homeEnter"]).toBe("Enter the desk");
+    expect((await phoneWords("en"))["phone.homeEnter"]).toBe("Enter");
+    expect((await phoneWords("en"))["phone.back"]).toBe("Back");
     for (const language of ["en", "de", "es", "fr", "pt", "ja", "zh"] as const) {
       const words = await phoneWords(language);
       for (const key of keys) expect(words[key], `${language} ${key}`).toBeTruthy();

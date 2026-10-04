@@ -93,8 +93,9 @@ const EXTRA = {
   "phone.homeTuck": "Keep finished work tucked away",
   "phone.homeTuckHint": "A project that is only finished starts closed. One that is working or waiting stays open.",
   "phone.homeText": "Larger text",
-  "phone.homeEnter": "Enter the desk",
-  "phone.homeReturn": "On the desk, tap VibeForge to come back here.",
+  "phone.back": "Back",
+  "phone.homeEnter": "Enter",
+  "phone.homeReturn": "Tap VibeForge to come back here.",
   "phone.homeMark": "About this page",
 };
 
@@ -460,11 +461,12 @@ function homePage() {
   );
 }
 
-/** The name on the desk returns to the landing page. The picture stays unlabeled; the button carries the name. */
+/** The mark and the name, as one button back to the landing page. */
 function deskWordmark() {
   return el(
     "button",
     { class: "wordmark-home", type: "button", "aria-label": t("phone.homeMark"), onclick: () => setView("home") },
+    brandMark(),
     wordmark(),
   );
 }
@@ -482,13 +484,7 @@ function deskPage() {
   return el(
     "section",
     {},
-    el(
-      "div",
-      { class: "top brand-top" },
-      el("div", { class: "brand-side" }, brandMark(), el("h1", { class: "lock" }, t("phone.desk"))),
-      deskWordmark(),
-      el("div", { class: "brand-side end" }, parts.buzz),
-    ),
+    el("div", { class: "top brand-top" }, deskWordmark(), parts.buzz),
     parts.plans,
     parts.list,
   );
@@ -750,7 +746,7 @@ function launchChoices() {
 function launchPage() {
   const workspace = (desk?.workspaces ?? []).find((item) => item.id === launchWorkspace);
   const { agents, engines } = launchChoices();
-  const back = el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.desk"));
+  const back = el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.back"));
   const top = el("div", { class: "top" }, back, el("h1", {}, workspace?.name || t("phone.start")));
   if (!agents.length && !engines.length) {
     return el("section", {}, top, el("div", { class: "card muted" }, t("phone.nobodyHere")));
@@ -810,7 +806,7 @@ function sessionPage() {
   return el(
     "section",
     { class: "fit" },
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.desk")), parts.title, parts.px, parts.pill),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.back")), parts.title, parts.px, parts.pill),
     parts.meta,
     parts.screen,
     el("div", { class: "card stack composer" }, parts.prompt, el("div", { class: "actions" }, parts.send, parts.stop)),

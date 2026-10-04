@@ -184,44 +184,27 @@ html.keyboard #app { padding-bottom: 12px; }
   white-space: nowrap;
 }
 
-/* Shrink a long translation instead of painting it over the wordmark. */
-.top h1.lock { flex: 1 1 auto; }
+.top .mark { flex: none; }
 
-.top .mark { margin-right: 2px; }
+/* The website's lockup: the V, then VibeForge. Buzz sits at the end of the bar. */
+.top.brand-top { display: flex; }
 
-/* Desk on the left, the pixel wordmark in the middle, Buzz on the right. */
-.top.brand-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  column-gap: 8px;
-}
+.brand-top > .ghost { margin-left: auto; flex: none; }
 
-.brand-side {
+.wordmark-home {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.brand-side.end { justify-content: flex-end; }
-
-/* The wordmark is a button back to the landing page. Its box is what the grid centers. */
-.wordmark-home {
-  justify-self: center;
-  width: min(156px, 40vw);
+  gap: 10px;
   min-width: 0;
   min-height: 44px;
   margin: 0;
-  padding: 6px 0;
+  padding: 4px 0;
   border: 0;
   background: transparent;
-  display: flex;
-  align-items: center;
 }
 
 .wordmark-home .wordmark {
-  width: 100%;
+  width: min(168px, 46vw);
   height: auto;
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 16%, transparent));
 }
