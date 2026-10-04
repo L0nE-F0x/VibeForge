@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, shellForegroundEngine, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
-import { PLAN_MARKS } from "../../src/shared/pixel.js";
+import { GLYPHS, MARK, PLAN_MARKS } from "../../src/shared/pixel.js";
 import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 import { phoneCoreText, phoneLanguage, phoneWords } from "../../src/core/companion-text.js";
 import { TeamService, type DeskHost, type SpawnRequest } from "../../src/core/team-service.js";
@@ -354,12 +354,18 @@ describe("a shell's foreground, read at the moment of sending", () => {
   });
 });
 
-describe("the phone page's plan marks", () => {
-  it("draws the same pixels as the desktop", () => {
-    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+describe("the phone page's pixel art", () => {
+  const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+
+  it("draws the same plan marks as the desktop", () => {
     for (const rows of Object.values(PLAN_MARKS)) {
       for (const row of rows) expect(page).toContain(JSON.stringify(row));
     }
+  });
+
+  it("draws the same mark and wordmark letters as the desktop", () => {
+    expect(page).toContain(`const MARK = [${MARK.map((row) => JSON.stringify(row)).join(", ")}];`);
+    for (const char of "VIBEFORGE") expect(page).toContain(`${char}: [${GLYPHS[char].map((row) => JSON.stringify(row)).join(", ")}]`);
   });
 });
 

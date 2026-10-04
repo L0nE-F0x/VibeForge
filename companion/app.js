@@ -30,6 +30,18 @@ const PLAN_MARKS = {
   codex: ["...........", "##.........", ".##........", "..##.......", "...##......", "....##.....", "...##......", "..##.......", ".##........", "##...######", "..........."],
   muse: ["#.#.....#.#", "##.#...#.##", "#.#.#.#.#.#", "#.#..#..#.#", "#.#.....#.#", "#.#.....#.#", "#.#.....#.#", "#.#.....#.#", "#.#.....#.#", "#.#.....#.#", "#.#.....#.#"],
 };
+/** The brand's pixel art (`MARK` and `GLYPHS` in src/shared/pixel.ts): the V-and-spark mark and the wordmark's letters. */
+const MARK = [".....#.....", "....###....", ".....#.....", "##.......##", "##.......##", ".##.....##.", ".##.....##.", "..##...##..", "..##...##..", "...##.##...", "....###...."];
+const GLYPHS = {
+  V: ["##..##", "##..##", "##..##", "##..##", ".####.", ".####.", "..##.."],
+  I: ["######", "..##..", "..##..", "..##..", "..##..", "..##..", "######"],
+  B: ["#####.", "##..##", "##..##", "#####.", "##..##", "##..##", "#####."],
+  E: ["######", "##....", "##....", "#####.", "##....", "##....", "######"],
+  F: ["######", "##....", "##....", "#####.", "##....", "##....", "##...."],
+  O: [".####.", "##..##", "##..##", "##..##", "##..##", "##..##", ".####."],
+  R: ["#####.", "##..##", "##..##", "#####.", "##.##.", "##..##", "##..##"],
+  G: [".####.", "##..##", "##....", "##.###", "##..##", "##..##", ".#####"],
+};
 /** The nodes of the page on show that a poll updates in place. Inputs are never rebuilt by a poll. */
 let parts = {};
 
@@ -275,8 +287,8 @@ function pairPage() {
   return el(
     "section",
     {},
-    el("div", { class: "top" }, el("h1", {}, "VibeForge")),
-    el("p", { class: "muted" }, t("phone.pairLead")),
+    el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
+    el("p", { class: "muted lede" }, t("phone.pairLead")),
     el("div", { class: "card stack" }, el("label", {}, t("phone.code"), input), parts.pair),
   );
 }
@@ -318,7 +330,7 @@ function deskPage() {
   parts.plansKey = null;
   parts.list = el("div", {});
   parts.listKey = null;
-  return el("section", {}, el("div", { class: "top" }, el("h1", { class: "grow" }, t("phone.desk")), parts.buzz), parts.plans, parts.list);
+  return el("section", {}, el("div", { class: "top" }, brandMark(), el("h1", { class: "grow" }, t("phone.desk")), parts.buzz), parts.plans, parts.list);
 }
 
 function updateDesk() {
@@ -367,14 +379,20 @@ function level(percent) {
   return percent < 100 ? "warm" : "full";
 }
 
-function planMark(id) {
-  const rows = PLAN_MARKS[id];
-  if (!rows) return null;
+/** Which of four shades a row gets, lightest at the top (`shade` in src/shared/pixel.ts). */
+function shade(y, height) {
+  const at = height <= 1 ? 0 : y / (height - 1);
+  return at <= 0.2 ? 0 : at < 0.45 ? 1 : at < 0.75 ? 2 : 3;
+}
+
+/** Pixel art from rows of "#", `scale` screen pixels per cell. Shaded art takes the brand's four bands; plain art takes one colour. */
+function pixels(rows, className, scale, shaded = false) {
+  const width = rows[0].length;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "plan-mark");
-  svg.setAttribute("viewBox", `0 0 ${rows[0].length} ${rows.length}`);
-  svg.setAttribute("width", String(rows[0].length * 2));
-  svg.setAttribute("height", String(rows.length * 2));
+  svg.setAttribute("class", className);
+  svg.setAttribute("viewBox", `0 0 ${width} ${rows.length}`);
+  svg.setAttribute("width", String(width * scale));
+  svg.setAttribute("height", String(rows.length * scale));
   svg.setAttribute("shape-rendering", "crispEdges");
   svg.setAttribute("aria-hidden", "true");
   rows.forEach((row, y) => {
@@ -385,10 +403,27 @@ function planMark(id) {
       rect.setAttribute("y", String(y));
       rect.setAttribute("width", "1");
       rect.setAttribute("height", "1");
+      if (shaded) rect.setAttribute("class", `shade-${shade(y, rows.length)}`);
       svg.append(rect);
     }
   });
   return svg;
+}
+
+function planMark(id) {
+  const rows = PLAN_MARKS[id];
+  return rows ? pixels(rows, "plan-mark", 2) : null;
+}
+
+function brandMark() {
+  return pixels(MARK, "pixels mark", 2, true);
+}
+
+/** "VIBEFORGE" in the seven-row pixel font, one blank column between letters (`wordmark` in src/shared/pixel.ts). */
+function wordmark() {
+  const letters = [..."VIBEFORGE"].map((char) => GLYPHS[char]);
+  const rows = Array.from({ length: 7 }, (_, y) => letters.map((glyph) => glyph[y]).join("."));
+  return pixels(rows, "pixels wordmark", 5, true);
 }
 
 function bar(percent, className) {
@@ -452,7 +487,7 @@ function plansCard(summary) {
           { class: "row" },
           planMark(provider.id),
           el("span", { class: "grow title" }, name, provider.limiter && rows.length ? el("span", { class: "faint" }, ` · ${provider.limiter}`) : null),
-          el("b", { class: "plan-pct" }, provider.percent === null ? "—" : `${Math.round(provider.percent)}%`),
+          el("b", { class: provider.percent === null ? "plan-pct none" : "plan-pct" }, provider.percent === null ? "—" : `${Math.round(provider.percent)}%`),
         ),
         provider.percent === null ? null : bar(provider.percent, "plan-bar"),
         sub ? el("div", { class: "small muted" }, sub) : null,
@@ -563,6 +598,7 @@ function updateSession() {
   parts.pill.hidden = false;
   parts.pill.className = `pill ${session.state}`;
   parts.pill.textContent = stateLabel(session.state);
+  parts.screen.className = `screen ${session.state}`;
   const meta = [session.detail, session.changes].filter(Boolean).join(" · ");
   parts.meta.hidden = !meta;
   parts.meta.textContent = meta;

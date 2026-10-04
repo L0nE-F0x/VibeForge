@@ -48,6 +48,7 @@
   --muted: #a1a1aa;
   --faint: #71717a;
   --line: color-mix(in srgb, var(--faint) 24%, transparent);
+  --line-2: color-mix(in srgb, var(--faint) 38%, transparent);
   --accent: #ff6b35;
   --amber: #fca311;
   --on-accent: #09090b;
@@ -56,6 +57,14 @@
   --hover-fill: color-mix(in srgb, var(--accent) 12%, transparent);
   --hover-line: color-mix(in srgb, var(--accent) 55%, transparent);
   --focus-line: color-mix(in srgb, var(--amber) 65%, transparent);
+  --focus-fill: color-mix(in srgb, var(--amber) 10%, transparent);
+  --press-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --gradient: linear-gradient(90deg, var(--accent), var(--amber));
+  /* Pixel-art shades, lightest to deepest (Omarchy's stepped wordmark bands), as on the desk. */
+  --px-0: color-mix(in srgb, var(--amber) 42%, #ffffff);
+  --px-1: var(--amber);
+  --px-2: var(--accent);
+  --px-3: color-mix(in srgb, var(--accent) 52%, #000000);
   --ember-core: color-mix(in srgb, var(--amber) 70%, #ffffff);
   --ember-lit: 0 0 0 1px color-mix(in srgb, var(--amber) 90%, transparent), 0 0 8px 2px color-mix(in srgb, var(--amber) 75%, transparent), 0 0 20px 5px color-mix(in srgb, var(--accent) 45%, transparent);
   --ember-low: 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent), 0 0 4px 0 color-mix(in srgb, var(--amber) 40%, transparent), 0 0 10px 1px color-mix(in srgb, var(--accent) 16%, transparent);
@@ -86,7 +95,18 @@ body {
 
 button, input, textarea, select { font: inherit; color: inherit; }
 
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Pixel art (the mark, the wordmark, the plan marks): four shades, top to bottom. */
+.pixels { flex: none; display: block; }
+.pixels .shade-0 { fill: var(--px-0); }
+.pixels .shade-1 { fill: var(--px-1); }
+.pixels .shade-2 { fill: var(--px-2); }
+.pixels .shade-3 { fill: var(--px-3); }
 
 h1 {
   font-family: var(--font-display);
@@ -126,6 +146,8 @@ html.keyboard #app { padding-bottom: 12px; }
 
 #app > section > * { flex: none; }
 
+#app > section > p.small { margin: -6px 0 10px; }
+
 /* A page with a text box keeps that box on screen. The terminal, when there is one, gives up the room. */
 #app > section.fit .screen {
   flex: 1 1 auto;
@@ -141,8 +163,45 @@ html.keyboard #app { padding-bottom: 12px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
+  min-height: 44px;
+  margin-bottom: 14px;
 }
+
+.top h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top .mark { margin-right: 2px; }
+
+/* The pairing page opens on the pixel wordmark, as the website's hero does. */
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 28px 0 22px;
+}
+
+.brand .wordmark {
+  width: 100%;
+  max-width: 310px;
+  height: auto;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
+}
+
+.brand h1 {
+  /* The wordmark says the name; the heading stays for screen readers. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.lede { margin: 0 0 16px; max-width: 34em; }
 
 .grow { flex: 1; min-width: 0; }
 
@@ -153,10 +212,46 @@ html.keyboard #app { padding-bottom: 12px; }
 .small { font-size: 11.5px; line-height: 1.4; }
 
 .card {
+  --tick: var(--line-2);
+  position: relative;
   background: var(--card);
   border: 1px solid var(--line);
   padding: 14px;
   margin-bottom: 12px;
+  transition: border-color 0.2s;
+}
+
+/* Corner brackets, the website's card ticks: ash at rest, the accent where something runs,
+   and lit amber where something waits for you or you are typing. */
+.card::after,
+.install::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--tick), var(--tick)) top left / 10px 2px,
+    linear-gradient(var(--tick), var(--tick)) top left / 2px 10px,
+    linear-gradient(var(--tick), var(--tick)) top right / 10px 2px,
+    linear-gradient(var(--tick), var(--tick)) top right / 2px 10px,
+    linear-gradient(var(--tick), var(--tick)) bottom left / 10px 2px,
+    linear-gradient(var(--tick), var(--tick)) bottom left / 2px 10px,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 10px 2px,
+    linear-gradient(var(--tick), var(--tick)) bottom right / 2px 10px;
+  background-repeat: no-repeat;
+}
+
+.card:has(.session.working) { --tick: color-mix(in srgb, var(--accent) 70%, transparent); }
+
+.card:has(.session.waiting),
+.card.composer:focus-within {
+  --tick: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+}
+
+.card:has(.session.waiting)::after,
+.card.composer:focus-within::after {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--amber) 80%, transparent));
 }
 
 .row {
@@ -165,25 +260,52 @@ html.keyboard #app { padding-bottom: 12px; }
   gap: 10px;
 }
 
+/* A session row runs to the card's inner edge, so its text lines up with the card's own. */
 .session {
-  width: 100%;
+  position: relative;
+  display: block;
+  width: calc(100% + 16px);
   text-align: left;
   background: transparent;
   border: 0;
   border-top: 1px solid var(--line);
-  padding: 12px 0 2px;
-  margin-top: 10px;
+  padding: 11px 8px 9px;
+  margin: 8px -8px 0;
+  transition: background-color 0.12s;
 }
 
-.card .session:first-of-type { border-top: 0; margin-top: 4px; }
+.card .session:first-of-type { border-top-color: transparent; margin-top: 2px; }
 
+.session:active { background-color: var(--press-fill); }
+
+.session:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+
+.session > * + * { margin-top: 2px; }
+
+.session > .row + * { margin-top: 4px; }
+
+/* A row that waits for you: warmth from its left edge, and an edge that is itself lit (the desk's .needs-you). */
 .session.waiting {
-  border-color: var(--focus-line);
-  background-image: linear-gradient(90deg, color-mix(in srgb, var(--amber) 14%, transparent), transparent 70%);
-  box-shadow: inset 2px 0 0 var(--ember-core);
+  border-top-color: var(--focus-line);
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--amber) 14%, transparent), color-mix(in srgb, var(--amber) 4%, transparent) 55%, transparent);
 }
 
-.title { font-weight: 600; }
+.card .session.waiting:first-of-type { border-top-color: var(--focus-line); }
+
+.session.waiting::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  bottom: 0;
+  width: 2px;
+  background: var(--ember-core);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--amber) 70%, transparent), 0 0 14px 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: ember-edge 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.title { font-weight: 600; overflow-wrap: anywhere; }
 
 .px {
   width: 7px;
@@ -199,8 +321,10 @@ html.keyboard #app { padding-bottom: 12px; }
 }
 
 .px.waiting {
+  /* Bigger and brighter, without pushing the title out of line. */
   width: 9px;
   height: 9px;
+  margin: -1px;
   background: var(--ember-core);
   box-shadow: var(--ember-lit);
   animation: ember-breathe 2.2s ease-in-out infinite;
@@ -212,6 +336,7 @@ html.keyboard #app { padding-bottom: 12px; }
 }
 
 .pill {
+  flex: none;
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 560;
@@ -230,11 +355,28 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; colo
 
 input, textarea, select {
   width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--bg-deep);
+  border: 1px solid var(--line-2);
   border-radius: 0;
   padding: 12px;
+  transition: border-color 0.12s, background-color 0.12s;
 }
+
+input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
+
+/* The native arrow is round and grey; this one is two square pixels' worth of chevron. */
+select {
+  appearance: none;
+  padding-right: 36px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(-45deg, transparent 50%, var(--muted) 50%);
+  background-position: right 18px center, right 13px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+select optgroup, select option { background: var(--card); color: var(--fg); }
 
 /* A field under 16px makes iOS zoom the page in when it is focused, which shoves the box under the keyboard. */
 @media (pointer: coarse) {
@@ -244,38 +386,62 @@ input, textarea, select {
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--focus-line);
+  background-color: color-mix(in srgb, var(--amber) 4%, var(--bg-deep));
 }
 
 textarea { min-height: 88px; resize: vertical; }
 
 html.keyboard textarea { min-height: 44px; max-height: 7em; }
 
+/* Omarchy's primary button in Apex Forge: solid accent, warming to amber. Ghosts recede until touched. */
 .btn, .ghost {
-  border: 0;
+  min-height: 44px;
+  border: 1px solid var(--accent);
   border-radius: 0;
-  padding: 12px 14px;
+  padding: 10px 16px;
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 650;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
 
-.btn:hover, .btn:focus-visible { background: var(--amber); }
+.btn:not(:disabled):hover, .btn:not(:disabled):active { background: var(--amber); border-color: var(--amber); }
+
+.btn:focus-visible {
+  outline: 1px solid var(--focus-line);
+  outline-offset: 2px;
+}
 
 .ghost {
   background: transparent;
   color: var(--fg);
-  border: 1px solid var(--line);
+  border-color: var(--line-2);
 }
 
-.ghost:hover, .ghost:focus-visible {
+.ghost:not(:disabled):hover {
   background: var(--hover-fill);
   border-color: var(--hover-line);
   color: var(--accent);
 }
 
-.btn:disabled, .ghost:disabled { opacity: 0.5; }
+.ghost:focus-visible {
+  outline: none;
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+  color: var(--amber);
+}
+
+.ghost:not(:disabled):active {
+  background: var(--press-fill);
+  border-color: var(--hover-line);
+  color: var(--accent);
+}
+
+.btn:disabled, .ghost:disabled { opacity: 0.5; cursor: default; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.actions .btn { flex: 1 1 auto; }
 
 .screen {
   font: 12px/1.45 var(--font-mono);
@@ -287,25 +453,68 @@ html.keyboard textarea { min-height: 44px; max-height: 7em; }
   min-height: 160px;
   max-height: 46dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   margin: 0 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
 }
 
+/* A live terminal gets the desk's focused-pane edge along its top: the accent while it works, amber while it waits. */
+.screen.working, .screen.waiting {
+  background-image: var(--gradient);
+  background-size: 100% 2px;
+  background-repeat: no-repeat;
+  border-top-color: transparent;
+}
+
+.screen.waiting { background-image: linear-gradient(90deg, var(--amber), var(--ember-core)); }
+
 .banner {
-  background: #3a1420;
-  color: #ffd0da;
+  position: relative;
+  background: color-mix(in srgb, var(--bad) 10%, var(--bg));
+  color: color-mix(in srgb, var(--bad) 70%, var(--fg));
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
-  padding: 10px 12px;
+  padding: 10px 12px 10px 14px;
   margin-bottom: 12px;
 }
 
+.banner::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--bad);
+}
+
+/* Back to the desk: a pixel chevron and the word, with a full-height touch target. */
 .back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
   background: transparent;
   border: 0;
   color: var(--accent);
-  padding: 0;
+  padding: 0 6px 0 2px;
   font-family: var(--font-display);
   font-weight: 600;
 }
+
+.back::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.back:active, .back:hover { color: var(--amber); }
+
+.back:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 0; }
 
 code { font-family: inherit; }
 
@@ -317,10 +526,23 @@ code { font-family: inherit; }
   bottom: calc(16px + env(safe-area-inset-bottom) + var(--keyboard, 0px));
   max-width: 420px;
   margin: 0 auto;
+  --tick: var(--line-2);
   background: var(--card);
   border: 1px solid var(--line);
-  padding: 14px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  padding: 16px 14px 14px;
+  box-shadow: 0 24px 70px -24px rgba(0, 0, 0, 0.75), 0 0 30px -18px color-mix(in srgb, var(--accent) 80%, transparent);
+  animation: rise 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+/* A floating thing keeps the accent gradient along its edge, as the Omarchy shell draws it. */
+.install::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--gradient);
 }
 
 .install-title {
@@ -333,7 +555,8 @@ code { font-family: inherit; }
 
 .install p { margin: 0 0 12px; color: var(--muted); }
 
-.plans-toggle { padding: 4px 8px; font-size: 11.5px; font-weight: 600; }
+.plans-toggle { min-height: 32px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+.plans-head { min-height: 32px; }
 .plans.collapsed .plan { display: none; }
 .plans .plan { padding-top: 12px; margin-top: 10px; border-top: 1px solid var(--line); }
 .plans .plan:first-of-type { border-top: 0; margin-top: 4px; }
@@ -341,6 +564,7 @@ code { font-family: inherit; }
 .plan.warm { --plan: var(--amber); }
 .plan.full { --plan: var(--bad); }
 .plan-mark { flex: none; fill: var(--plan); }
+.plan.stale .plan-mark, .plan-pct.none { fill: var(--faint); color: var(--faint); }
 .plan-pct {
   font-family: var(--font-display);
   font-size: 19px;
@@ -357,6 +581,7 @@ code { font-family: inherit; }
 }
 .plan-track { margin: 0; flex: 1; height: 4px; }
 .plan-bar i, .plan-track i { display: block; height: 100%; background: var(--plan); }
+.plan.full .plan-bar i { box-shadow: 0 0 8px color-mix(in srgb, var(--bad) 60%, transparent); }
 .plan.stale { opacity: 0.7; }
 .plan-window {
   display: grid;
@@ -373,11 +598,19 @@ code { font-family: inherit; }
   50% { box-shadow: var(--ember-low); }
 }
 
+@keyframes ember-edge {
+  50% { opacity: 0.55; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
 @keyframes ember-work {
   0%, 100% { box-shadow: var(--work-lit); }
   50% { box-shadow: var(--work-low); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .px { animation: none; }
+  .px, .session.waiting::before, .install { animation: none; }
 }
