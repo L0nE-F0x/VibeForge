@@ -93,6 +93,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The landing page's larger-text switch. Coarse inputs stay at least 16px so iOS does not zoom. */
+html.large body { font-size: 15.5px; }
+html.large h1 { font-size: 26px; }
+html.large .small,
+html.large .switch .hint { font-size: 13.5px; }
+html.large .screen { font-size: 14.5px; }
+html.large .credit { font-size: 13px; }
+html.large .home-kicker { font-size: 18px; }
+html.large input, html.large textarea, html.large select { font-size: 18px; }
+
 button, input, textarea, select { font: inherit; color: inherit; }
 
 button {
@@ -174,7 +184,8 @@ html.keyboard #app { padding-bottom: 12px; }
   white-space: nowrap;
 }
 
-.top h1.lock { flex: 0 0 auto; }
+/* Shrink a long translation instead of painting it over the wordmark. */
+.top h1.lock { flex: 1 1 auto; }
 
 .top .mark { margin-right: 2px; }
 
@@ -190,17 +201,35 @@ html.keyboard #app { padding-bottom: 12px; }
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .brand-side.end { justify-content: flex-end; }
 
-.top.brand-top .wordmark {
+/* The wordmark is a button back to the landing page. Its box is what the grid centers. */
+.wordmark-home {
+  justify-self: center;
   width: min(156px, 40vw);
   min-width: 0;
-  height: auto;
+  min-height: 44px;
   margin: 0;
-  justify-self: center;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+}
+
+.wordmark-home .wordmark {
+  width: 100%;
+  height: auto;
   filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 16%, transparent));
+}
+
+.wordmark-home:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+.wordmark-home:active .wordmark {
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 40%, transparent));
 }
 
 /* The pairing page opens on the pixel wordmark, as the website's hero does. */
@@ -214,7 +243,8 @@ html.keyboard #app { padding-bottom: 12px; }
 
 .brand .wordmark {
   width: 100%;
-  max-width: 310px;
+  max-width: min(310px, 100%);
+  min-width: 0;
   height: auto;
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 22%, transparent));
 }
@@ -227,6 +257,100 @@ html.keyboard #app { padding-bottom: 12px; }
   overflow: hidden;
   clip-path: inset(50%);
 }
+
+.home .brand { padding: 4px 0 12px; gap: 12px; }
+
+/* The explanation scrolls. Enter stays on screen, above the credit. */
+#app > section.home { overflow: hidden; }
+
+#app > section.home > .home-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.home-go {
+  flex: none;
+  padding-top: 10px;
+  background: var(--bg);
+}
+
+.home-kicker {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  margin: 2px 0 6px;
+}
+
+.home .how, .home .reach, .home-note, .home-return { margin: 0; }
+
+.home .how { margin-bottom: 8px; }
+
+.home .reach { margin-bottom: 14px; }
+
+.home-return { margin-top: 10px; text-align: center; }
+
+.home-enter { width: 100%; }
+
+.home-settings .title { margin-bottom: 2px; }
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.home-settings .switch:first-of-type { border-top: 0; }
+
+.switch .copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.switch .hint { color: var(--faint); font-size: 11.5px; line-height: 1.35; }
+
+.switch:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+.switch:active { color: var(--accent); }
+
+.knob {
+  flex: none;
+  width: 40px;
+  height: 22px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-deep);
+  position: relative;
+}
+
+.knob::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: var(--faint);
+}
+
+.switch.on .knob {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg));
+}
+
+.switch.on .knob::after { left: 21px; background: var(--accent); }
 
 .lede { margin: 0 0 16px; max-width: 34em; }
 

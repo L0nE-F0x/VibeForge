@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Buzzes** while the page is open, when a CLI starts waiting or finishes. A buzz on a locked phone is still to come.
 - **In your language.** The page speaks the language VibeForge does, errors included.
 - **The same look as the desk.** Square corners, JetBrains Mono with Geist headings, flat panels, the pixel plan marks, a slow ember while a CLI is working, and an amber glow when one is waiting. Plan limits start closed; Show in that panel opens them. The same pixel VibeForge as the website sits in the top bar.
+- **Before the desk.** A paired phone opens on a short page first: what this is, how it works, and switches for buzzes, plan limits, finished work, and larger text. Enter opens the desk. Tap the VibeForge name there to come back. A phone that is not paired still starts on the code.
 - **A shorter list.** Each workspace has Show and Hide for its runs. One that is only finished starts hidden, so more workspaces fit on the screen. One that is working or waiting stays open until you hide it.
 - **Created by ApexForge**, along the bottom, the same line as the desk and the website.
 - **Installs onto the phone.** The first visit on a phone offers to install the page. Installed from that offer, it fills the screen.

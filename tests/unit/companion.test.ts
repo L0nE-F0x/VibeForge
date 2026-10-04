@@ -368,6 +368,10 @@ describe("the phone page's pixel art", () => {
     for (const char of "VIBEFORGE") expect(page).toContain(`${char}: [${GLYPHS[char].map((row) => JSON.stringify(row)).join(", ")}]`);
     expect(page).toContain("https://ame-apexforge.org/");
     expect(page).toContain("vibeforge-runs-open");
+    expect(page).toContain("vibeforge-buzz");
+    expect(page).toContain("vibeforge-tuck-finished");
+    expect(page).toContain("vibeforge-large-text");
+    expect(page).toContain('setView("home")');
   });
 });
 
@@ -387,6 +391,32 @@ describe("the phone page's words", () => {
     expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
     for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {
       expect((await phoneWords(language))["phone.credit"]).toContain("{name}");
+    }
+  });
+
+  it("explains the page before the desk, in every language", async () => {
+    const keys = [
+      "phone.homeLead",
+      "phone.homeHowTitle",
+      "phone.homeHow",
+      "phone.homeReach",
+      "phone.homeSettings",
+      "phone.homeBuzz",
+      "phone.homeBuzzHint",
+      "phone.homeBuzzBlocked",
+      "phone.homePlans",
+      "phone.homePlansHint",
+      "phone.homeTuck",
+      "phone.homeTuckHint",
+      "phone.homeText",
+      "phone.homeEnter",
+      "phone.homeReturn",
+      "phone.homeMark",
+    ];
+    expect((await phoneWords("en"))["phone.homeEnter"]).toBe("Enter the desk");
+    for (const language of ["en", "de", "es", "fr", "pt", "ja", "zh"] as const) {
+      const words = await phoneWords(language);
+      for (const key of keys) expect(words[key], `${language} ${key}`).toBeTruthy();
     }
   });
 

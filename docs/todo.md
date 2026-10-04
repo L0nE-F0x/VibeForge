@@ -26,7 +26,7 @@
 - [ ] **Token usage from more CLIs**: Kimi's session logs weren't read (its plan limits are in 0.7.0), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush weren't looked at.
 - [x] **Translate the rest of the UI.** Done for the window and the main process's messages (`src/ui/core-text.ts`). Still English: the tray menu, native dialogs, desktop notifications, cronstrue's schedule descriptions and git's change summaries.
 - [x] **Release notes on each tag.** Pushing `vX.Y.Z` runs `.github/workflows/release.yml`, which publishes the CHANGELOG section (`scripts/release-notes.mjs`). Watch the first one go through.
-- [x] **The phone page** ships in 2.1.0 (Settings → Phone, Tailscale Serve, plan limits, the desk's look). See `CHANGELOG.md` and `status.md`.
+- [x] **The phone page** ships in 2.1.0 (Settings → Phone, Tailscale Serve, plan limits, the desk's look, a short page before the desk). See `CHANGELOG.md` and `status.md`.
 - [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A buzz on a locked phone is still to build.
 
 ## Parked

@@ -2,12 +2,18 @@ const TOKEN_KEY = "vibeforge-phone";
 const PLANS_KEY = "vibeforge-plans-open";
 const RUNS_KEY = "vibeforge-runs-open";
 const INSTALL_KEY = "vibeforge-install-dismissed";
+/** Chosen on the landing page. Absent buzz keeps an already-allowed notification. Absent tuck keeps finished work closed. */
+const BUZZ_KEY = "vibeforge-buzz";
+const TUCK_KEY = "vibeforge-tuck-finished";
+const TEXT_KEY = "vibeforge-large-text";
 /** The same page the desk and the website credit. */
 const APEXFORGE = "https://ame-apexforge.org/";
 const app = document.querySelector("#app");
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
-let view = token ? "desk" : "pair";
+/** A paired phone opens here. Enter reaches the desk; the name on the desk comes back. */
+let view = token ? "home" : "pair";
+if (localStorage.getItem(TEXT_KEY) === "1") document.documentElement.classList.add("large");
 let desk = null;
 let session = null;
 let sessionQuery = { ptyId: "", runId: "" };
@@ -74,6 +80,22 @@ const EXTRA = {
   "phone.plansShow": "Show",
   "phone.plansHide": "Hide",
   "phone.credit": "Created by {name}",
+  "phone.homeLead": "See who is working on your computer, who is waiting for you, and tell them what to do next. The computer stays on, with VibeForge open.",
+  "phone.homeHowTitle": "How it works",
+  "phone.homeHow": "Each project lists whoever is working or waiting. Open one to read the screen, send the next step, or stop. Start begins someone new.",
+  "phone.homeReach": "Your phone reaches the computer through Tailscale, a private link between your own devices. The computer has to stay awake.",
+  "phone.homeSettings": "Make it yours",
+  "phone.homeBuzz": "Tell me when someone is waiting",
+  "phone.homeBuzzHint": "Also when they finish. This page has to stay open.",
+  "phone.homeBuzzBlocked": "Notifications are blocked for this page. Allow them in the phone's settings.",
+  "phone.homePlans": "Show plan limits",
+  "phone.homePlansHint": "How much of each plan is left, open when you arrive.",
+  "phone.homeTuck": "Keep finished work tucked away",
+  "phone.homeTuckHint": "A project that is only finished starts closed. One that is working or waiting stays open.",
+  "phone.homeText": "Larger text",
+  "phone.homeEnter": "Enter the desk",
+  "phone.homeReturn": "On the desk, tap VibeForge to come back here.",
+  "phone.homeMark": "About this page",
 };
 
 function t(key, vars) {
@@ -158,6 +180,7 @@ function forget() {
 }
 
 async function buzz(body, data) {
+  if (!buzzWanted()) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   const note = { body, tag: data.key, renotify: true, data };
   try {
@@ -271,6 +294,7 @@ function setView(next) {
 
 function page() {
   if (view === "pair" || !token) return pairPage();
+  if (view === "home") return homePage();
   if (view === "launch") return launchPage();
   if (view === "session") return sessionPage();
   return deskPage();
@@ -316,12 +340,133 @@ async function pair(code) {
     primed = false;
     known = new Map();
     schedule();
-    setView("desk");
+    setView("home");
   } catch (err) {
     error = err.message;
     busy = false;
     update();
   }
+}
+
+/** Off is stored. No choice buzzes only when the phone already allowed it, so an existing buzz keeps going. */
+function buzzWanted() {
+  const saved = localStorage.getItem(BUZZ_KEY);
+  if (saved === "0") return false;
+  if (saved === "1") return true;
+  return typeof Notification !== "undefined" && Notification.permission === "granted";
+}
+
+function buzzShownOn() {
+  return buzzWanted() && typeof Notification !== "undefined" && Notification.permission === "granted";
+}
+
+function textLarge() {
+  return localStorage.getItem(TEXT_KEY) === "1";
+}
+
+/** Finished-only projects start closed, unless the landing page said to leave them open. */
+function tuckFinished() {
+  return localStorage.getItem(TUCK_KEY) !== "0";
+}
+
+function paintSwitch(button, on) {
+  button.classList.toggle("on", on);
+  button.setAttribute("aria-checked", on ? "true" : "false");
+}
+
+function prefSwitch(label, hint, on, change) {
+  const button = el(
+    "button",
+    {
+      class: on ? "switch on" : "switch",
+      type: "button",
+      role: "switch",
+      "aria-checked": on ? "true" : "false",
+    },
+    el("span", { class: "copy" }, el("span", { class: "label" }, label), hint ? el("span", { class: "hint" }, hint) : null),
+    el("span", { class: "knob", "aria-hidden": "true" }),
+  );
+  button.addEventListener("click", () => {
+    const next = button.getAttribute("aria-checked") !== "true";
+    void change(next, button);
+  });
+  return button;
+}
+
+let askingBuzz = false;
+
+async function onBuzz(want, button) {
+  if (askingBuzz) return;
+  if (!want) {
+    localStorage.setItem(BUZZ_KEY, "0");
+    paintSwitch(button, false);
+    return;
+  }
+  if (typeof Notification === "undefined") return;
+  askingBuzz = true;
+  try {
+    let permission = Notification.permission;
+    if (permission === "default") permission = await Notification.requestPermission();
+    const granted = permission === "granted";
+    localStorage.setItem(BUZZ_KEY, granted ? "1" : "0");
+    paintSwitch(button, granted);
+    if (parts.buzzNote) parts.buzzNote.hidden = permission !== "denied";
+  } finally {
+    askingBuzz = false;
+  }
+}
+
+function homePage() {
+  const blocked = typeof Notification !== "undefined" && Notification.permission === "denied";
+  parts.buzzNote = el("p", { class: "small faint home-note", hidden: !blocked }, t("phone.homeBuzzBlocked"));
+  return el(
+    "section",
+    { class: "home" },
+    el(
+      "div",
+      { class: "home-scroll" },
+      el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
+      el("p", { class: "muted lede" }, t("phone.homeLead")),
+      el("div", { class: "home-kicker" }, t("phone.homeHowTitle")),
+      el("p", { class: "how" }, t("phone.homeHow")),
+      el("p", { class: "small muted reach" }, t("phone.homeReach")),
+      el(
+        "article",
+        { class: "card home-settings" },
+        el("div", { class: "title" }, t("phone.homeSettings")),
+        prefSwitch(t("phone.homeBuzz"), t("phone.homeBuzzHint"), buzzShownOn(), onBuzz),
+        parts.buzzNote,
+        prefSwitch(t("phone.homePlans"), t("phone.homePlansHint"), plansOpen(), (on, button) => {
+          localStorage.setItem(PLANS_KEY, on ? "1" : "0");
+          paintSwitch(button, on);
+        }),
+        prefSwitch(t("phone.homeTuck"), t("phone.homeTuckHint"), tuckFinished(), (on, button) => {
+          localStorage.setItem(TUCK_KEY, on ? "1" : "0");
+          paintSwitch(button, on);
+        }),
+        prefSwitch(t("phone.homeText"), "", textLarge(), (on, button) => {
+          localStorage.setItem(TEXT_KEY, on ? "1" : "0");
+          document.documentElement.classList.toggle("large", on);
+          paintSwitch(button, on);
+        }),
+      ),
+    ),
+    el(
+      "div",
+      { class: "home-go" },
+      el("button", { class: "btn home-enter", type: "button", onclick: () => setView("desk") }, t("phone.homeEnter")),
+      el("p", { class: "small faint home-return" }, t("phone.homeReturn")),
+    ),
+  );
+}
+
+/** The name on the desk returns to the landing page. The picture stays unlabeled; the button carries the name. */
+function deskWordmark() {
+  return el(
+    "button",
+    { class: "wordmark-home", type: "button", "aria-label": t("phone.homeMark"), onclick: () => setView("home") },
+    wordmark(),
+  );
 }
 
 function deskPage() {
@@ -341,7 +486,7 @@ function deskPage() {
       "div",
       { class: "top brand-top" },
       el("div", { class: "brand-side" }, brandMark(), el("h1", { class: "lock" }, t("phone.desk"))),
-      wordmark("VibeForge"),
+      deskWordmark(),
       el("div", { class: "brand-side end" }, parts.buzz),
     ),
     parts.plans,
@@ -350,7 +495,8 @@ function deskPage() {
 }
 
 function updateDesk() {
-  parts.buzz.hidden = !(typeof Notification !== "undefined" && Notification.permission === "default");
+  const ask = typeof Notification !== "undefined" && Notification.permission === "default" && localStorage.getItem(BUZZ_KEY) !== "0";
+  parts.buzz.hidden = !ask;
   const plansKey = JSON.stringify([plans, Math.floor(Date.now() / 60000)]);
   if (plansKey !== parts.plansKey) {
     parts.plansKey = plansKey;
@@ -375,11 +521,12 @@ function readRuns() {
   }
 }
 
-/** A workspace with someone working or waiting starts open. One that is only finished starts hidden. */
+/** A workspace with someone working or waiting starts open. One that is only finished starts hidden. A saved Show or Hide wins, and the landing page can leave finished work open. */
 function runsAreOpen(workspace) {
   const saved = readRuns()[workspace.id || "elsewhere"];
   if (saved === "0") return false;
   if (saved === "1") return true;
+  if (!tuckFinished()) return true;
   return workspace.sessions.some((item) => item.state === "working" || item.state === "waiting");
 }
 
