@@ -174,7 +174,19 @@ html.keyboard #app { padding-bottom: 12px; }
   white-space: nowrap;
 }
 
+.top h1.lock { flex: 0 0 auto; }
+
 .top .mark { margin-right: 2px; }
+
+/* The website's pixel wordmark, in the slot beside Desk. It shrinks before the title does. */
+.top .wordmark {
+  width: min(210px, 52vw);
+  min-width: 0;
+  height: auto;
+  margin-left: auto;
+  flex: 0 1 auto;
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 20%, transparent));
+}
 
 /* The pairing page opens on the pixel wordmark, as the website's hero does. */
 .brand {
@@ -555,7 +567,22 @@ code { font-family: inherit; }
 
 .install p { margin: 0 0 12px; color: var(--muted); }
 
-.plans-toggle { min-height: 32px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+.plans-toggle, .runs-toggle { min-height: 32px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+.workspace.collapsed .session { display: none; }
+
+.credit {
+  flex: none;
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+}
+
+.credit a { color: var(--muted); text-decoration: none; }
+.credit a:hover, .credit a:focus-visible { color: var(--accent); }
+
+html.keyboard .credit { display: none; }
 .plans-head { min-height: 32px; }
 .plans.collapsed .plan { display: none; }
 .plans .plan { padding-top: 12px; margin-top: 10px; border-top: 1px solid var(--line); }

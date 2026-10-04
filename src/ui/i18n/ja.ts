@@ -1076,6 +1076,7 @@ export const ja: Catalog = {
   "phone.installMenu": "ブラウザのメニューから「アプリをインストール」を選びます。",
   "phone.plansShow": "開く",
   "phone.plansHide": "閉じる",
+  "phone.credit": "制作：{name}",
   "settings.testNotify": "テスト送信",
   "settings.testNotifyBody": "通知はデスクトップに届きます。",
   "settings.recheck": "CLI を再確認",

@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
-## [2.1.0] - 2026-10-04
+## [2.1.0] - 2026-10-05
 
 **2.1: your desk on your phone, plan limits for whoever is signed in, and another branch beside the folder you have.**
 
@@ -17,7 +17,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Start and steer.** Start an agent allowed in a workspace, or any installed CLI on its own, with an optional first prompt. Send the next prompt, pick a finished run back up with your next instruction (a task resumes in its own copy, as its agent), and stop it. A CLI typed into a terminal is interrupted instead, so the terminal stays, and a message never lands in a terminal whose CLI has quit.
 - **Buzzes** while the page is open, when a CLI starts waiting or finishes. A buzz on a locked phone is still to come.
 - **In your language.** The page speaks the language VibeForge does, errors included.
-- **The same look as the desk.** Square corners, JetBrains Mono with Geist headings, flat panels, the pixel plan marks, a slow ember while a CLI is working, and an amber glow when one is waiting. Plan limits start closed; Show in that panel opens them.
+- **The same look as the desk.** Square corners, JetBrains Mono with Geist headings, flat panels, the pixel plan marks, a slow ember while a CLI is working, and an amber glow when one is waiting. Plan limits start closed; Show in that panel opens them. The same pixel VibeForge as the website sits in the top bar.
+- **A shorter list.** Each workspace has Show and Hide for its runs. One that is only finished starts hidden, so more workspaces fit on the screen. One that is working or waiting stays open until you hide it.
+- **Created by ApexForge**, along the bottom, the same line as the desk and the website.
 - **Installs onto the phone.** The first visit on a phone offers to install the page. Installed from that offer, it fills the screen.
 - **The keyboard.** Tapping a text box shrinks the page to the space above the phone's keyboard. The box and its button stay on screen, and the terminal gives up the room.
 - **A follow-up as a CLI leaves a shell.** Send looks at the terminal at that moment, so the second after a CLI quits is not typed into the shell. If the run is still closing, the follow-up waits and then resumes the session. A wrong pairing code during Send, Stop or Start brings the code form back.

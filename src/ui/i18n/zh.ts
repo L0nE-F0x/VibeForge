@@ -1076,6 +1076,7 @@ export const zh: Catalog = {
   "phone.installMenu": "打开浏览器菜单，选择安装应用。",
   "phone.plansShow": "展开",
   "phone.plansHide": "收起",
+  "phone.credit": "由 {name} 打造",
   "settings.testNotify": "发送测试",
   "settings.testNotifyBody": "通知会显示在你的桌面上。",
   "settings.recheck": "重新检查 CLI",

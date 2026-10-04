@@ -1075,6 +1075,7 @@ export const de: Catalog = {
   "phone.installMenu": "Öffne das Browsermenü und wähle App installieren.",
   "phone.plansShow": "Zeigen",
   "phone.plansHide": "Ausblenden",
+  "phone.credit": "Erstellt von {name}",
   "settings.testNotify": "Test senden",
   "settings.testNotifyBody": "Benachrichtigungen erreichen deinen Desktop.",
   "settings.recheck": "CLIs neu prüfen",

@@ -1,6 +1,9 @@
 const TOKEN_KEY = "vibeforge-phone";
 const PLANS_KEY = "vibeforge-plans-open";
+const RUNS_KEY = "vibeforge-runs-open";
 const INSTALL_KEY = "vibeforge-install-dismissed";
+/** The same page the desk and the website credit. */
+const APEXFORGE = "https://ame-apexforge.org/";
 const app = document.querySelector("#app");
 
 let token = localStorage.getItem(TOKEN_KEY) || "";
@@ -70,6 +73,7 @@ const EXTRA = {
   "phone.installMenu": "Open the browser menu and choose Install app.",
   "phone.plansShow": "Show",
   "phone.plansHide": "Hide",
+  "phone.credit": "Created by {name}",
 };
 
 function t(key, vars) {
@@ -245,7 +249,7 @@ async function withBusy(task) {
 function show() {
   ticket += 1;
   parts = { banner: el("div", { class: "banner", hidden: true }) };
-  app.replaceChildren(parts.banner, page());
+  app.replaceChildren(parts.banner, page(), credit());
   update();
 }
 
@@ -330,7 +334,13 @@ function deskPage() {
   parts.plansKey = null;
   parts.list = el("div", {});
   parts.listKey = null;
-  return el("section", {}, el("div", { class: "top" }, brandMark(), el("h1", { class: "grow" }, t("phone.desk")), parts.buzz), parts.plans, parts.list);
+  return el(
+    "section",
+    {},
+    el("div", { class: "top" }, brandMark(), el("h1", { class: "lock" }, t("phone.desk")), wordmark("VibeForge"), parts.buzz),
+    parts.plans,
+    parts.list,
+  );
 }
 
 function updateDesk() {
@@ -350,13 +360,59 @@ function updateDesk() {
   );
 }
 
+function readRuns() {
+  try {
+    const value = JSON.parse(localStorage.getItem(RUNS_KEY) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A workspace with someone working or waiting starts open. One that is only finished starts hidden. */
+function runsAreOpen(workspace) {
+  const saved = readRuns()[workspace.id || "elsewhere"];
+  if (saved === "0") return false;
+  if (saved === "1") return true;
+  return workspace.sessions.some((item) => item.state === "working" || item.state === "waiting");
+}
+
 function workspaceCard(workspace) {
+  const key = workspace.id || "elsewhere";
+  const hasSessions = workspace.sessions.length > 0;
+  const open = !hasSessions || runsAreOpen(workspace);
   const start = workspace.id ? el("button", { class: "ghost", type: "button", onclick: () => openLaunch(workspace.id) }, t("phone.start")) : null;
+  const toggle = hasSessions
+    ? el(
+        "button",
+        {
+          class: "ghost runs-toggle",
+          type: "button",
+          "aria-expanded": String(open),
+          onclick: () => {
+            const next = toggle.getAttribute("aria-expanded") !== "true";
+            const saved = readRuns();
+            saved[key] = next ? "1" : "0";
+            localStorage.setItem(RUNS_KEY, JSON.stringify(saved));
+            toggle.closest(".workspace")?.classList.toggle("collapsed", !next);
+            toggle.textContent = next ? t("phone.plansHide") : t("phone.plansShow");
+            toggle.setAttribute("aria-expanded", String(next));
+          },
+        },
+        open ? t("phone.plansHide") : t("phone.plansShow"),
+      )
+    : null;
   return el(
     "article",
-    { class: "card" },
-    el("div", { class: "row" }, el("div", { class: "grow" }, el("div", { class: "title" }, workspace.id ? workspace.name : t("phone.elsewhere")), workspace.folder ? el("div", { class: "small faint" }, workspace.folder) : null), start),
-    workspace.sessions.length ? workspace.sessions.map((item) => sessionButton(item)) : el("p", { class: "small faint" }, t("phone.nothingRunning")),
+    { class: hasSessions && !open ? "card workspace collapsed" : "card workspace" },
+    el(
+      "div",
+      { class: "row" },
+      el("div", { class: "grow" }, el("div", { class: "title" }, workspace.id ? workspace.name : t("phone.elsewhere")), workspace.folder ? el("div", { class: "small faint" }, workspace.folder) : null),
+      toggle,
+      start,
+    ),
+    hasSessions ? workspace.sessions.map((item) => sessionButton(item)) : el("p", { class: "small faint" }, t("phone.nothingRunning")),
   );
 }
 
@@ -420,10 +476,30 @@ function brandMark() {
 }
 
 /** "VIBEFORGE" in the seven-row pixel font, one blank column between letters (`wordmark` in src/shared/pixel.ts). */
-function wordmark() {
+function wordmark(label) {
   const letters = [..."VIBEFORGE"].map((char) => GLYPHS[char]);
   const rows = Array.from({ length: 7 }, (_, y) => letters.map((glyph) => glyph[y]).join("."));
-  return pixels(rows, "pixels wordmark", 5, true);
+  const svg = pixels(rows, "pixels wordmark", 5, true);
+  if (label) {
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", label);
+    svg.removeAttribute("aria-hidden");
+    svg.setAttribute("width", "210");
+    svg.setAttribute("height", "24");
+  }
+  return svg;
+}
+
+/** "Created by ApexForge", the same credit as the desk and the website. */
+function credit() {
+  const [before, after = ""] = t("phone.credit").split("{name}");
+  return el(
+    "p",
+    { class: "credit" },
+    before,
+    el("a", { href: APEXFORGE, target: "_blank", rel: "noopener noreferrer" }, "ApexForge"),
+    after,
+  );
 }
 
 function bar(percent, className) {

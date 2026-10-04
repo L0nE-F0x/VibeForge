@@ -1088,6 +1088,7 @@ export const en = {
   "phone.installMenu": "Open the browser menu and choose Install app.",
   "phone.plansShow": "Show",
   "phone.plansHide": "Hide",
+  "phone.credit": "Created by {name}",
   "settings.testNotify": "Send a test",
   "settings.testNotifyBody": "Notifications reach your desktop.",
   "settings.recheck": "Recheck CLIs",

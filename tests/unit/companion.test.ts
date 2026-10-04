@@ -366,6 +366,8 @@ describe("the phone page's pixel art", () => {
   it("draws the same mark and wordmark letters as the desktop", () => {
     expect(page).toContain(`const MARK = [${MARK.map((row) => JSON.stringify(row)).join(", ")}];`);
     for (const char of "VIBEFORGE") expect(page).toContain(`${char}: [${GLYPHS[char].map((row) => JSON.stringify(row)).join(", ")}]`);
+    expect(page).toContain("https://ame-apexforge.org/");
+    expect(page).toContain("vibeforge-runs-open");
   });
 });
 
@@ -382,6 +384,10 @@ describe("the phone page's words", () => {
     expect(de["phone.send"]).toBe("Senden");
     expect(de["plans.title"]).toBeTruthy();
     expect(Object.keys(de).some((key) => !key.startsWith("phone.") && !key.startsWith("plans."))).toBe(false);
+    expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
+    for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {
+      expect((await phoneWords(language))["phone.credit"]).toContain("{name}");
+    }
   });
 
   it("translates what the service says, values and all", async () => {
