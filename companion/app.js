@@ -337,7 +337,13 @@ function deskPage() {
   return el(
     "section",
     {},
-    el("div", { class: "top" }, brandMark(), el("h1", { class: "lock" }, t("phone.desk")), wordmark("VibeForge"), parts.buzz),
+    el(
+      "div",
+      { class: "top brand-top" },
+      el("div", { class: "brand-side" }, brandMark(), el("h1", { class: "lock" }, t("phone.desk"))),
+      wordmark("VibeForge"),
+      el("div", { class: "brand-side end" }, parts.buzz),
+    ),
     parts.plans,
     parts.list,
   );

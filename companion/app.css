@@ -178,14 +178,29 @@ html.keyboard #app { padding-bottom: 12px; }
 
 .top .mark { margin-right: 2px; }
 
-/* The website's pixel wordmark, in the slot beside Desk. It shrinks before the title does. */
-.top .wordmark {
-  width: min(210px, 52vw);
+/* Desk on the left, the pixel wordmark in the middle, Buzz on the right. */
+.top.brand-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  column-gap: 8px;
+}
+
+.brand-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand-side.end { justify-content: flex-end; }
+
+.top.brand-top .wordmark {
+  width: min(156px, 40vw);
   min-width: 0;
   height: auto;
-  margin-left: auto;
-  flex: 0 1 auto;
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--accent) 20%, transparent));
+  margin: 0;
+  justify-self: center;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent) 16%, transparent));
 }
 
 /* The pairing page opens on the pixel wordmark, as the website's hero does. */
