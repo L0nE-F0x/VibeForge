@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { covers, overlaps, placeTip, toastRight, type Box } from "../../src/ui/floating.js";
+import { clipBox, covers, overlaps, placeTip, toastRight, type Box } from "../../src/ui/floating.js";
 
 // The default window with the browser dock open in a 420px side panel, above the launch bar.
 const view = { width: 1480, height: 920 };
@@ -23,6 +23,13 @@ describe("floating layers", () => {
     expect(covers(["window"], null)).toBe(false);
     expect(covers([{ left: 64, top: 600, right: 330, bottom: 860 }], dock)).toBe(false);
     expect(covers([{ left: 64, top: 600, right: 330, bottom: 860 }, { left: 1000, top: 300, right: 1200, bottom: 400 }], dock)).toBe(true);
+  });
+
+  it("clips a box to the frame it sits in", () => {
+    const frame = { left: 72, top: 0, right: 400, bottom: 800 };
+    expect(clipBox({ left: 20, top: 40, right: 300, bottom: 500 }, frame)).toEqual({ left: 72, top: 40, right: 300, bottom: 500 });
+    expect(clipBox({ left: 500, top: 40, right: 800, bottom: 500 }, frame)).toBeNull();
+    expect(clipBox({ left: 0, top: 0, right: 72, bottom: 100 }, frame)).toBeNull();
   });
 });
 

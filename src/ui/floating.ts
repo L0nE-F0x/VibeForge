@@ -24,6 +24,16 @@ export function boxOf(rect: Box): Box {
   return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
 }
 
+/** The part of `box` inside `frame`. Null when they miss or only share an edge. */
+export function clipBox(box: Box, frame: Box): Box | null {
+  const left = Math.max(box.left, frame.left);
+  const top = Math.max(box.top, frame.top);
+  const right = Math.min(box.right, frame.right);
+  const bottom = Math.min(box.bottom, frame.bottom);
+  if (right <= left || bottom <= top) return null;
+  return { left, top, right, bottom };
+}
+
 export function sameBox(a: Box | null, b: Box | null): boolean {
   if (!a || !b) return a === b;
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;

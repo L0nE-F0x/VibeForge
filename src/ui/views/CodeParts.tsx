@@ -22,7 +22,7 @@ import { call, errorText, on, useAppInfo } from "../api.js";
 import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Skeleton } from "../components/ui.js";
-import { boxOf } from "../floating.js";
+import { boxOf, clipBox } from "../floating.js";
 import { t as translate, useT } from "../i18n/index.js";
 import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
 
@@ -292,12 +292,23 @@ export function DockPanel({
       return;
     }
     const rect = node.getBoundingClientRect();
-    setDockArea(boxOf(rect));
+    // The native view is not clipped by the stage's overflow. Pan can push this panel under the
+    // rail or past the tile; only the part inside the stage should be drawn.
+    const stage = node.closest(".stage");
+    const frame = stage instanceof HTMLElement ? stage.getBoundingClientRect() : null;
+    const visibleBox = frame ? clipBox(boxOf(rect), boxOf(frame)) : boxOf(rect);
+    setDockArea(visibleBox);
+    const width = visibleBox ? visibleBox.right - visibleBox.left : 0;
+    const height = visibleBox ? visibleBox.bottom - visibleBox.top : 0;
+    if (!visibleBox || width < 8 || height < 8) {
+      void call("dock.hide", workspaceId).catch(() => undefined);
+      return;
+    }
     // While covered, the view stays hidden behind its still and comes back at the latest size.
     // Ask the registry, not `covered`: publishing the area can itself make the dock covered.
     if (!dockCovered()) {
       const target = reported.current || url;
-      void call("dock.show", { x: rect.left, y: rect.top, width: rect.width, height: rect.height }, target, workspaceId).catch(() => undefined);
+      void call("dock.show", { x: visibleBox.left, y: visibleBox.top, width, height }, target, workspaceId).catch(() => undefined);
     }
   }, [visible, url, workspaceId, covered, mine?.error]);
 
