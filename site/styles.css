@@ -350,7 +350,7 @@ svg.mark {
   top: 58px;
   right: 16px;
   z-index: 50;
-  width: 300px;
+  width: min(300px, calc(100vw - 32px));
   max-height: min(580px, calc(100vh - 80px));
   overflow: auto;
   padding: 8px;
@@ -735,6 +735,7 @@ h1 {
   color: var(--fg-2);
   scrollbar-width: none;
   text-align: left;
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
 
 .copy {
@@ -1619,6 +1620,7 @@ h1 {
 
 .engines-title {
   margin: 0 0 18px;
+  text-wrap: balance;
   font: 600 12px var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -2100,7 +2102,7 @@ h2 {
 
 .art-tiles {
   gap: 7px;
-  height: 128px;
+  min-height: 128px;
 }
 
 .tile {
@@ -2199,7 +2201,7 @@ h2 {
 /* board */
 
 .art-board {
-  height: 128px;
+  min-height: 128px;
   gap: 7px;
 }
 
@@ -2858,6 +2860,7 @@ h2 {
   padding: 10px 12px;
   font: 11px/1.7 var(--mono);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow: hidden;
   color: var(--fg);
 }
@@ -3538,6 +3541,14 @@ kbd.big {
     margin-top: 100px;
     padding: 90px 20px 120px;
   }
+
+  .tp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tp-rail {
+    display: none;
+  }
 }
 
 @media (max-width: 420px) {
@@ -3547,6 +3558,64 @@ kbd.big {
 
   .tour-tabs button {
     padding: 0 12px;
+  }
+
+  .cta {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .cta .btn {
+    width: min(100%, 300px);
+  }
+
+  .lang-codes span {
+    width: 30px;
+  }
+}
+
+/* Fingers, not a cursor: the bar, the version and the footer links get room to be tapped. */
+@media (pointer: coarse) {
+  .bar {
+    height: 52px;
+  }
+
+  .bar-item {
+    height: 42px;
+    min-width: 42px;
+    justify-content: center;
+  }
+
+  .btn.xs {
+    height: 38px;
+  }
+
+  .theme-menu {
+    top: 68px;
+  }
+
+  .copy {
+    width: 40px;
+    height: 40px;
+  }
+
+  .part {
+    padding: 4px 9px;
+  }
+
+  .footer nav {
+    gap: 0 10px;
+  }
+
+  .bar .brand {
+    min-width: 42px;
+    min-height: 42px;
+  }
+
+  .footer nav a,
+  .credit a {
+    display: inline-block;
+    padding: 10px 0;
   }
 }
 
@@ -3627,6 +3696,7 @@ kbd.big {
 .v-to {
   color: var(--fg-3);
   flex: 1;
+  white-space: nowrap;
 }
 
 .v-clock {
