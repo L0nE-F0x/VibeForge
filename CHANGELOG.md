@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings → Phone reads like a released feature.** The "not part of this prototype" line is gone, and the buzz is in the opening line. The Tailscale command has its own line with a Copy button, and the card says to use serve rather than funnel. The pairing code stays hidden until you show it, so a screenshot of Settings doesn't give it away, and its hint says that New code signs every phone out. **Open** tries the page on this computer.
+- **Text that had fallen behind the app.** Routines say they fire while VibeForge is running, in the tray too, not only while its window is open. Runs' empty page says typed CLIs are recorded too. Muse is named where its token logs and plan limits are read, and in the CLIs the README and website list. Settings → Language says what is still English (the tray menu, some notifications, schedule descriptions) instead of "some other text", the Settings tooltip lists voice and phone, the data folder's description includes task copies, voice models and the log, and the plan panel says how to turn the rest of the plans on.
+- **The phone page's first page** says VibeForge has to be running, not open, and that Start sets a new agent or CLI going. Its leftover English copy of its own sentences is gone; the app has served them all since 2.1.0.
+
 ## [2.1.0] - 2026-10-05
 
 **2.1: your desk on your phone, plan limits for whoever is signed in, and another branch beside the folder you have.**

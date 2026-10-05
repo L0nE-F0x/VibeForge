@@ -1,7 +1,7 @@
 {
   "name": "VibeForge",
   "short_name": "VibeForge",
-  "description": "Check workspaces and tell an agent what to do next.",
+  "description": "See who is working or waiting on your computer, and tell them what to do next.",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
