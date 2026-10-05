@@ -56,6 +56,7 @@
       <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
       <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+      <symbol id="i-smartphone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2"/><path d="M12 18h.01"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
       <symbol id="i-message-square-plus" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M12 8v6"/><path d="M9 11h6"/></symbol>
       <symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol>
@@ -288,6 +289,27 @@
         </div>
 
         <div class="bento">
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-smartphone" /></svg></span>
+              <h3>Your desk, on your phone</h3>
+              <p>Turn on <b>Settings → Phone</b> and open it through Tailscale Serve. See who is working and who is waiting for you, read a CLI's screen, and send the next step or stop it. Start an agent, or any CLI on its own, from the couch.</p>
+              <p>It listens on this computer only, asks for a pairing code once, and stays off until you turn it on.</p>
+            </div>
+            <div class="art art-phone" aria-hidden="true">
+              <div class="ph-frame">
+                <div class="ph-top"><b>VibeForge</b><span>Buzz me</span></div>
+                <div class="ph-ws">landing-page <span>~/projects/landing-page</span></div>
+                <div class="em-row wants"><i class="em-px lit"></i><b>Claude Code</b><span>waiting</span></div>
+                <div class="em-row"><i class="em-px work"></i><b>Codex</b><span>working</span></div>
+                <div class="ph-box">Tell them what to do next</div>
+                <div class="ph-send"><span class="m-primary">Send</span><span class="ph-stop">Stop</span></div>
+              </div>
+              <pre class="ph-serve"><span class="t-dim">$</span> tailscale serve --bg \
+    --https=443 http://127.0.0.1:4737</pre>
+            </div>
+          </article>
+
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-bot" /></svg></span>

@@ -1983,6 +1983,106 @@ h2 {
   }
 }
 
+/* phone: the phone page, as a paired phone shows the desk (companion/app.css) */
+
+.card.full {
+  grid-column: 1 / -1;
+}
+
+.art-phone {
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+}
+
+.ph-frame {
+  display: flex;
+  flex: 0 0 248px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 10px 14px;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  box-shadow: 0 0 34px -14px var(--halo);
+}
+
+.ph-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+}
+
+.ph-top b {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ph-top span,
+.ph-send .ph-stop {
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+}
+
+.ph-ws {
+  padding: 2px 2px 4px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.ph-ws span {
+  display: block;
+  color: var(--fg-3);
+  font-weight: 400;
+  font-size: 10.5px;
+}
+
+.art-phone .em-row {
+  padding: 8px 10px;
+}
+
+.ph-box {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+  background: color-mix(in srgb, var(--bg-dark) 70%, transparent);
+}
+
+.ph-send {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.ph-send .m-primary {
+  justify-content: center;
+}
+
+.ph-send .ph-stop {
+  display: grid;
+  place-items: center;
+}
+
+.ph-serve {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-2);
+  font: 11.5px/1.6 var(--mono);
+  white-space: pre;
+}
+
+@media (max-width: 1080px) {
+  .ph-serve {
+    display: none;
+  }
+}
+
 /* undo: the toast that replaced "are you sure?" */
 
 .art-undo {
