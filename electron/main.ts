@@ -27,6 +27,7 @@ import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg } from "../src/core/control.js";
 import { listenControl } from "./control.js";
+import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
 
@@ -218,9 +219,11 @@ const quotaAlerts = new QuotaAlerts(path.join(roots.dataRoot, "quota-alerts.json
 
 async function planSummary(fresh: boolean) {
   const settings = svc().getSettings();
-  const codex = settings.usage ? ((await usage.scan()).sources.find((source) => source.id === "codex")?.limits ?? []) : [];
-  if (!settings.planLimits && !codex.length) return null;
-  const summary = await plans.summary({ network: settings.planLimits, codex, fresh });
+  const local = settings.usage
+    ? (await usage.scan()).sources.filter((source) => source.limits.length).map((source) => ({ id: source.id, limits: source.limits, at: source.limitsAt }))
+    : [];
+  if (!settings.planLimits && !local.length) return null;
+  const summary = await plans.summary({ network: settings.planLimits, local, fresh });
   if (settings.quotaAlerts && settings.notify) {
     for (const alert of quotaAlerts.check(summary)) {
       log.info(`Plan alert: ${alert.plan} ${alert.window} at ${Math.floor(alert.percent)}%`);
@@ -511,6 +514,7 @@ function handlers(): Handlers {
       if (patch.theme) refreshPalette();
       return next;
     },
+    "companion.status": () => companionStatus(),
     "engines.list": () => s().listEngines(),
     "engines.recheck": async () => {
       await adoptShellPath();
@@ -525,6 +529,8 @@ function handlers(): Handlers {
     "workspaces.select": (id) => s().selectWorkspace(id),
     "workspaces.move": (id, toIndex) => s().moveWorkspace(id, toIndex),
     "workspaces.update": (id, patch) => s().updateWorkspace(id, patch),
+    "workspaces.branches": (id) => s().listBranches(id),
+    "workspaces.openBranch": (id, branch) => s().openBranch(id, branch),
     "layouts.get": (id) => s().getLayout(id),
     "layouts.save": (id, layout) => s().saveLayout(id, layout),
     "files.list": (dir) => listDir(dir),
@@ -699,8 +705,11 @@ async function createWindow(): Promise<void> {
   win = new BrowserWindow({
     width: 1480,
     height: 920,
-    minWidth: 980,
-    minHeight: 620,
+    // A tiling window manager will give this window whatever slice is left. These floors stay
+    // under a quarter of a laptop screen so the page actually becomes that size. The desk then
+    // pans sideways (see --screen-floor) instead of drawing past the edge of the tile.
+    minWidth: 280,
+    minHeight: 220,
     title: "VibeForge",
     backgroundColor: palette.background,
     icon: icon.isEmpty() ? undefined : icon,
@@ -824,7 +833,19 @@ supervisor.onCrash.add((message) => {
   setTimeout(() => void startHost(), 1000);
 });
 
+function companionWire() {
+  return {
+    service: svc(),
+    supervisor,
+    root: path.join(appRoot(), "companion"),
+    icon: iconPath(),
+    log: (line: string) => log.info(line),
+    plans: () => planSummary(false),
+  };
+}
+
 async function shutdown(): Promise<void> {
+  await stopCompanion();
   talk.dispose();
   voice.dispose();
   if (!service) return;
@@ -863,8 +884,10 @@ if (!app.requestSingleInstanceLock()) {
     service.onChange((topics) => {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) syncTray();
+      if (topics.includes("settings")) syncCompanion(companionWire());
     });
     palette = resolvePalette(service.getSettings().theme);
+    syncCompanion(companionWire());
     guardPermissions();
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);

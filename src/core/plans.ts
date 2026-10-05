@@ -2,14 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import type { UsageLimit } from "./usage.js";
 
-// How much of each coding plan's windows is used: Claude's 5-hour and 7-day, Grok's credits,
-// Kimi's weekly and 5-hour. Codex writes its limits into its own logs; the others are asked,
-// with the sign-in their CLI already saved on this machine. That sign-in is read fresh for each
-// call and never refreshed, rewritten or kept, so VibeForge can't race a CLI over a rotating
-// refresh token. When a sign-in has expired, the last numbers stay up, marked with their age,
-// until the CLI renews it.
+// How much of each coding plan's windows is used. A plan is listed only when this machine is
+// signed in to that CLI (or, for a CLI that writes its limits into a log, when that log has
+// them). Claude, Grok, Kimi, Muse and Codex are asked with the sign-in their CLI already saved
+// here. That sign-in is read fresh for each call and never refreshed, rewritten or kept, so
+// VibeForge can't race a CLI over a rotating refresh token. Muse's answer arrives from the same
+// sign-in check Meta uses, and the extra key in that answer is thrown away. When a sign-in has
+// expired, the last numbers stay up, marked with their age, until the CLI renews it.
 
-export type PlanId = "claude" | "codex" | "grok" | "kimi";
+export type PlanId = "claude" | "codex" | "grok" | "kimi" | "muse";
+
+/** The order a signed-in plan is shown in. One that isn't signed in is left out. */
+export const PLAN_ORDER: readonly PlanId[] = ["claude", "codex", "grok", "kimi", "muse"];
+
+export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi", muse: "Muse" };
 
 export interface PlanWindow {
   /** As the provider names it: "5-hour", "7-day", "Weekly", "GrokBuild". */
@@ -58,11 +64,13 @@ interface Reading {
   credits: number | null;
 }
 
-type Fetch = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
+type Fetch = (url: string, init: { method?: string; headers: Record<string, string>; body?: string; signal: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
 
 interface Asked {
   url: string;
+  method?: "GET" | "POST";
   headers: Record<string, string>;
+  body?: string;
   timeoutMs: number;
   parse: (data: Record<string, unknown>) => Reading | null;
 }
@@ -261,33 +269,90 @@ export function codexReading(limits: readonly UsageLimit[]): Reading | null {
   return fromWindows(windows, (label) => label.endsWith("-hour") || label.endsWith("-min"));
 }
 
+function limitOf(row: Record<string, unknown> | null, fallbackMinutes: number | null): UsageLimit | null {
+  if (!row) return null;
+  const percent = num(row.used_percent);
+  const seconds = num(row.limit_window_seconds, row.window_seconds);
+  const minutes = seconds !== null && seconds > 0 ? Math.round(seconds / 60) : (num(row.window_minutes, row.window_duration_mins) ?? fallbackMinutes);
+  if (percent === null || minutes === null || minutes <= 0) return null;
+  return { windowMinutes: minutes, usedPercent: clamp(percent), resetsAt: isoTime(row.reset_at ?? row.resets_at) };
+}
+
+/**
+ * Codex's `wham/usage` answer: a primary and a secondary window, each with a used percentage.
+ * A window that isn't there is left out, so an API-key login with no plan adds nothing.
+ */
+export function parseCodexWham(data: Record<string, unknown>): Reading | null {
+  const rate = record(data.rate_limit) ?? {};
+  const limits = [
+    limitOf(record(rate.primary_window) ?? record(rate.primary) ?? record(data.five_hour), null),
+    limitOf(record(rate.secondary_window) ?? record(rate.secondary) ?? record(data.weekly), null),
+  ].filter((item): item is UsageLimit => item !== null);
+  return codexReading(limits);
+}
+
+/** A Muse window. Some answers give what is left instead of what is used. */
+function museLimit(row: Record<string, unknown> | null, fallbackMinutes: number): UsageLimit | null {
+  if (!row) return null;
+  if (num(row.used_percent) === null) {
+    const left = num(row.remaining_percent, row.remaining);
+    if (left !== null) row = { ...row, used_percent: 100 - left };
+  }
+  return limitOf(row, fallbackMinutes);
+}
+
+/**
+ * Muse's subscription, either from Meta's sign-in answer (`subs_usage`) or from the
+ * `subscription` frame a turn carries. `is_subs_active: false` means this login has no subscription.
+ * An active plan with no windows yet is at 0%: Meta leaves `subs_usage` out until a window has
+ * usage to report, and reading that as a failure kept showing a window that had already reset.
+ */
+export function parseMuse(data: Record<string, unknown>): Reading | null {
+  if (data.is_subs_active === false) return null;
+  const usage = record(data.subs_usage) ?? record(data.subscription) ?? (record(data.window) || record(data.weekly) ? data : null);
+  const limits = usage ? [museLimit(record(usage.window), 300), museLimit(record(usage.weekly), 7 * 24 * 60)].filter((item): item is UsageLimit => item !== null) : [];
+  if (!limits.length && data.is_subs_active === true) return codexReading([{ windowMinutes: 300, usedPercent: 0, resetsAt: null }]);
+  return codexReading(limits);
+}
+
 // ------------------------------------------------------------------ the sign-ins
 
 interface Provider {
-  id: Exclude<PlanId, "codex">;
+  id: PlanId;
+  /**
+   * A signed-in CLI with no plan stays off the meter. Muse can be pay-as-you-go, so a login
+   * by itself is not a subscription.
+   */
+  hideWithoutPlan?: boolean;
   /** Null when this machine isn't signed in to it. */
   signIn: (now: number) => SignIn | null;
+}
+
+function token(value: unknown): string | null {
+  return typeof value === "string" && value.length >= 20 ? value : null;
 }
 
 function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provider[] {
   const base = { Accept: "application/json", "User-Agent": agent };
   const claudeDirs = env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR.split(",").map((dir) => dir.trim()) : [path.join(home, ".claude")];
   const kimiDirs = [path.join(home, ".kimi-code"), path.join(home, ".kimi")];
+  const configHome = env.XDG_CONFIG_HOME || path.join(home, ".config");
+  const codexHome = env.CODEX_HOME || path.join(home, ".codex");
   return [
     {
       id: "claude",
       signIn: (now) => {
         const creds = claudeDirs.map((dir) => readJson(path.join(dir, ".credentials.json"))).find(Boolean);
         const oauth = record(creds?.claudeAiOauth);
-        const token = oauth?.accessToken ?? oauth?.access_token;
-        if (typeof token !== "string" || token.length < 20) return null;
+        const access = token(oauth?.accessToken ?? oauth?.access_token);
+        if (!access) return null;
         const expires = num(oauth?.expiresAt, oauth?.expires_at);
         if (expires !== null && expires <= now) return { expired: true };
         return {
           expired: false,
           ask: {
             url: "https://api.anthropic.com/api/oauth/usage",
-            headers: { ...base, Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
+            headers: { ...base, Authorization: `Bearer ${access}`, "anthropic-beta": "oauth-2025-04-20" },
             timeoutMs: 10_000,
             parse: parseClaude,
           },
@@ -301,8 +366,8 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
         const entry = Object.values(auth ?? {})
           .map(record)
           .find((item) => item && (item.key || item.access_token));
-        const token = entry?.key ?? entry?.access_token;
-        if (typeof token !== "string" || token.length < 20) return null;
+        const access = token(entry?.key ?? entry?.access_token);
+        if (!access) return null;
         const expires = isoTime(entry?.expires_at);
         if (expires && Date.parse(expires) <= now) return { expired: true };
         return {
@@ -311,7 +376,7 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
             url: "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
             headers: {
               ...base,
-              Authorization: `Bearer ${token}`,
+              Authorization: `Bearer ${access}`,
               "x-grok-client-surface": "grok-build",
               "x-xai-token-auth": "xai-grok-cli",
               "x-grok-client-version": "1",
@@ -328,11 +393,11 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
         const dir = kimiDirs.find((candidate) => fs.existsSync(path.join(candidate, "credentials", "kimi-code.json")));
         if (!dir) return null;
         const creds = readJson(path.join(dir, "credentials", "kimi-code.json"));
-        const token = creds?.access_token ?? creds?.accessToken;
-        if (typeof token !== "string" || token.length < 20) return null;
-        const expires = jwtExpiry(token) ?? num(creds?.expires_at);
+        const access = token(creds?.access_token ?? creds?.accessToken);
+        if (!access) return null;
+        const expires = jwtExpiry(access) ?? num(creds?.expires_at);
         if (expires !== null && expires * 1000 <= now) return { expired: true };
-        const headers: Record<string, string> = { ...base, Authorization: `Bearer ${token}`, "X-Msh-Platform": "kimi_cli" };
+        const headers: Record<string, string> = { ...base, Authorization: `Bearer ${access}`, "X-Msh-Platform": "kimi_cli" };
         try {
           const device = fs.readFileSync(path.join(dir, "device_id"), "utf8").trim();
           if (device && /^[\x20-\x7e]+$/.test(device)) headers["X-Msh-Device-Id"] = device;
@@ -340,6 +405,44 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
           /* optional */
         }
         return { expired: false, ask: { url: "https://api.kimi.com/coding/v1/usages", headers, timeoutMs: 6_000, parse: parseKimi } };
+      },
+    },
+    {
+      id: "codex",
+      signIn: (now) => {
+        const auth = readJson(path.join(codexHome, "auth.json"));
+        const tokens = record(auth?.tokens) ?? auth;
+        const access = token(tokens?.access_token);
+        // An API-key login has no ChatGPT plan behind it.
+        if (!access || auth?.auth_mode === "apikey") return null;
+        const expires = jwtExpiry(access);
+        if (expires !== null && expires * 1000 <= now) return { expired: true };
+        const headers: Record<string, string> = { ...base, Authorization: `Bearer ${access}` };
+        const account = tokens?.account_id;
+        if (typeof account === "string" && account.length > 0 && /^[\x20-\x7e]+$/.test(account)) headers["ChatGPT-Account-Id"] = account;
+        return { expired: false, ask: { url: "https://chatgpt.com/backend-api/wham/usage", headers, timeoutMs: 8_000, parse: parseCodexWham } };
+      },
+    },
+    {
+      id: "muse",
+      hideWithoutPlan: true,
+      signIn: () => {
+        const auth = readJson(path.join(configHome, "muse", "auth.json"));
+        const meta = record(record(auth?.providers)?.meta) ?? record(auth?.meta) ?? auth;
+        // The device token. The LLM key beside it is for inference, and this call is not one.
+        const access = token(meta?.access_token ?? meta?.dca_token);
+        if (!access) return null;
+        return {
+          expired: false,
+          ask: {
+            url: "https://api.meta.ai/muse-code/key",
+            method: "POST",
+            headers: { ...base, Authorization: `Bearer ${access}`, "Content-Type": "application/json", "x-api-version": "1.0.0" },
+            body: "{}",
+            timeoutMs: 8_000,
+            parse: parseMuse,
+          },
+        };
       },
     },
   ];
@@ -383,6 +486,19 @@ export function fullAt(history: readonly PlanPoint[], percent: number | null, no
 }
 
 // ------------------------------------------------------------------ the watcher
+
+/** Limits a CLI already wrote into its own log, and when that line was written. */
+interface LocalLimits {
+  id: string;
+  limits: readonly UsageLimit[];
+  at?: string | null;
+}
+
+function stamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? null : time;
+}
 
 interface Kept {
   reading: Reading | null;
@@ -429,37 +545,45 @@ export class PlanWatcher {
   }
 
   /**
-   * The plans this machine is signed in to. `network` allows asking the providers; Codex's
-   * limits come from its logs either way. Only one pass runs at a time.
+   * The plans this machine is signed in to. `network` allows asking the providers. `local`
+   * is limits a CLI already wrote into its own log (Codex, and Muse when a turn recorded
+   * them); those show even while asking is off. The newer of the log and a provider answer
+   * wins, by the log's own time. Only one pass runs at a time.
    */
-  summary(options: { network: boolean; codex: readonly UsageLimit[]; fresh?: boolean }): Promise<PlanSummary> {
+  summary(options: { network: boolean; local?: readonly LocalLimits[]; fresh?: boolean }): Promise<PlanSummary> {
     this.pass ??= this.summaryNow(options).finally(() => {
       this.pass = null;
     });
     return this.pass;
   }
 
-  private async summaryNow({ network, codex, fresh }: { network: boolean; codex: readonly UsageLimit[]; fresh?: boolean }): Promise<PlanSummary> {
+  private async summaryNow({ network, local = [], fresh }: { network: boolean; local?: readonly LocalLimits[]; fresh?: boolean }): Promise<PlanSummary> {
     const now = this.now();
     const shown: PlanId[] = [];
+    const hidden = new Set<PlanId>();
     let dirty = false;
-
-    const fromCodex = codexReading(codex);
-    if (fromCodex) {
-      this.kept.set("codex", { reading: fromCodex, readAt: new Date(now).toISOString(), problem: null, askedAt: now });
-      dirty = this.remember("codex", fromCodex.percent, now) || dirty;
-      shown.push("codex");
-    }
+    const include = (id: PlanId) => {
+      if (!shown.includes(id)) shown.push(id);
+    };
 
     if (network) {
       const asks = this.providers.map(async (provider) => {
         const signIn = provider.signIn(now);
         if (!signIn) return;
-        shown.push(provider.id);
         const kept = this.kept.get(provider.id);
+        if (signIn.expired) {
+          this.kept.set(provider.id, { reading: kept?.reading ?? null, readAt: kept?.readAt ?? null, problem: "signin", askedAt: kept?.askedAt ?? 0 });
+          include(provider.id);
+          return;
+        }
+        include(provider.id);
         const age = now - (kept?.askedAt ?? 0);
         if (age < (fresh ? FORCE_MS : FRESH_MS)) return;
         const next = await this.ask(signIn);
+        if (provider.hideWithoutPlan && !next.reading && !kept?.reading) {
+          hidden.add(provider.id);
+          return;
+        }
         const reading = next.reading ?? kept?.reading ?? null;
         this.kept.set(provider.id, { reading, readAt: next.reading ? new Date(now).toISOString() : (kept?.readAt ?? null), problem: next.problem, askedAt: now });
         if (next.reading) dirty = this.remember(provider.id, next.reading.percent, now) || dirty;
@@ -467,10 +591,27 @@ export class PlanWatcher {
       await Promise.all(asks);
     }
 
+    // A log fills in a plan this pass did not already hear, when the log is the newer of the two.
+    // An older session line must not replace an online reading, or label itself as read just now.
+    for (const entry of local) {
+      if (!PLAN_ORDER.includes(entry.id as PlanId)) continue;
+      const id = entry.id as PlanId;
+      const reading = codexReading(entry.limits);
+      if (!reading) continue;
+      const kept = this.kept.get(id);
+      const logAt = stamp(entry.at);
+      const keptAt = stamp(kept?.readAt);
+      if (kept?.reading && (logAt === null || (keptAt !== null && logAt <= keptAt))) continue;
+      const when = logAt ?? now;
+      this.kept.set(id, { reading, readAt: new Date(when).toISOString(), problem: null, askedAt: kept?.askedAt ?? 0 });
+      dirty = this.remember(id, reading.percent, when) || dirty;
+      hidden.delete(id);
+      include(id);
+    }
+
     if (dirty) this.save();
-    const order: PlanId[] = ["claude", "codex", "grok", "kimi"];
     return {
-      providers: order.filter((id) => shown.includes(id)).map((id) => this.view(id, now)),
+      providers: PLAN_ORDER.filter((id) => shown.includes(id) && !hidden.has(id)).map((id) => this.view(id, now)),
       checkedAt: new Date(now).toISOString(),
     };
   }
@@ -479,7 +620,7 @@ export class PlanWatcher {
     if (signIn.expired) return { reading: null, problem: "signin" };
     const { ask } = signIn;
     try {
-      const response = await this.fetch(ask.url, { headers: ask.headers, signal: AbortSignal.timeout(ask.timeoutMs) });
+      const response = await this.fetch(ask.url, { method: ask.method, headers: ask.headers, body: ask.body, signal: AbortSignal.timeout(ask.timeoutMs) });
       if (response.status === 401 || response.status === 403) return { reading: null, problem: "signin" };
       if (response.status === 429) return { reading: null, problem: "limited" };
       if (response.status < 200 || response.status >= 300) return { reading: null, problem: "offline" };
@@ -540,7 +681,7 @@ export class PlanWatcher {
   private save(): void {
     const last: Saved["last"] = {};
     for (const [id, kept] of this.kept) {
-      if (id !== "codex" && kept.reading && kept.readAt) last[id] = { reading: kept.reading, readAt: kept.readAt };
+      if (kept.reading && kept.readAt) last[id] = { reading: kept.reading, readAt: kept.readAt };
     }
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

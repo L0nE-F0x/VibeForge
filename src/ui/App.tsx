@@ -101,7 +101,17 @@ function Shell() {
     const showSwitcher = () => setSwitcher(true);
     window.addEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
     const offSwitcher = on("open-switcher", showSwitcher);
+    // Shift+wheel slides the desk sideways when a tile is narrower than the page.
+    const onWheel = (event: WheelEvent) => {
+      if (!event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+      const stage = document.querySelector(".stage");
+      if (!(stage instanceof HTMLElement) || stage.scrollWidth <= stage.clientWidth) return;
+      stage.scrollLeft += event.deltaY || event.deltaX;
+      event.preventDefault();
+      event.stopPropagation();
+    };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("wheel", onWheel, { capture: true, passive: false });
     window.addEventListener("mousedown", onMouse, true);
     window.addEventListener("mouseup", onMouse, true);
     const offRun = on("open-run", ({ runId }) => go({ view: "runs", runId }));
@@ -122,6 +132,7 @@ function Shell() {
       offSwitcher();
       offRoute();
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("wheel", onWheel, { capture: true });
       window.removeEventListener("mousedown", onMouse, true);
       window.removeEventListener("mouseup", onMouse, true);
       offRun();

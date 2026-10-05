@@ -114,6 +114,23 @@ describe("pty host", () => {
     await host.until(async () => (await host.screen(pty)).includes("FOLLOW-6"));
   });
 
+  it("reads the foreground program at once, including the moment it leaves", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
+    const idle = await host.request({ op: "foreground", ptyId: pty });
+    expect(idle).toMatchObject({ ok: true, known: true, argv: null });
+    await host.request({ op: "write", ptyId: pty, data: "sleep 30\r" });
+    await host.until(async () => {
+      const now = await host.request({ op: "foreground", ptyId: pty });
+      return Array.isArray(now.argv) && now.argv.some((arg) => String(arg).includes("sleep"));
+    });
+    await host.request({ op: "write", ptyId: pty, data: "\x03" });
+    await host.until(async () => {
+      const now = await host.request({ op: "foreground", ptyId: pty });
+      return now.known === true && now.argv === null;
+    });
+  });
+
   it("hangs up the whole process group and leaves the run's terminal files behind", async () => {
     const host = await startHost();
     const dir = tempDir();

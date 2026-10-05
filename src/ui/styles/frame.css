@@ -178,6 +178,32 @@
   min-width: 0;
   min-height: 0;
   display: flex;
+  /* Readable width of Code and the list views. Wider than the tile, the stage pans. */
+  --screen-floor: 920px;
+  container: stage / inline-size;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-color: color-mix(in srgb, var(--accent) 55%, transparent) var(--bg-dark);
+}
+
+.stage::-webkit-scrollbar:horizontal {
+  height: 12px;
+}
+
+.stage::-webkit-scrollbar-thumb:horizontal {
+  background-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+/* The tile is often narrower than a desk you can read. Stay at the floor and let the bar
+   at the bottom of the window slide across the rest. A wide window keeps width: 100%. */
+.stage > .view:has(.code-view),
+.stage > .view.split-list {
+  flex: 1 0 auto;
+  width: max(100%, var(--screen-floor));
+  min-width: max(100%, var(--screen-floor));
 }
 
 .view {
@@ -220,6 +246,14 @@
   min-height: 0;
   min-width: 0;
   transition: width 0.18s ease;
+}
+
+/* On a narrow tile, give the work area the pixels. The saved width comes back when the
+   window is wide again. While dragging, the handle follows the pointer. */
+@container stage (max-width: 1000px) {
+  .list-panel:not(.is-collapsed):not(.is-resizing) {
+    max-width: min(220px, 36cqw);
+  }
 }
 
 .list-panel.is-resizing {

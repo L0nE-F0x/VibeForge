@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 // Token usage read from the logs the coding CLIs already keep on this machine. Nothing is sent
-// anywhere and no API is called: Claude Code, Codex, Grok Build and Gemini CLI each write what
-// every model call used, and this adds it up per day. Append-only logs are read from where the
-// last pass stopped, so a rescan costs only what was written since.
+// anywhere and no API is called: Claude Code, Codex, Grok Build, Gemini CLI and Muse Code each
+// write what every model call used, and this adds it up per day. Append-only logs are read from
+// where the last pass stopped, so a rescan costs only what was written since.
 
 /** How far back usage is kept, in days, today included. */
 export const USAGE_DAYS = 7;
@@ -35,6 +35,8 @@ export interface UsageSource {
   /** This week's total per model, largest first. */
   models: Array<{ model: string; total: number }>;
   limits: UsageLimit[];
+  /** When the CLI wrote `limits`, if that log line said. Null when `limits` is empty. */
+  limitsAt: string | null;
   /** When the newest counted call happened. */
   lastAt: string | null;
 }
@@ -203,6 +205,65 @@ function grokFile(state: FileState, text: string): void {
   }
 }
 
+/** Microseconds, milliseconds or seconds since the epoch, as ISO. */
+function museTime(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const ms = value > 1e14 ? value / 1000 : value > 1e11 ? value : value * 1000;
+  const time = new Date(ms);
+  return Number.isNaN(time.getTime()) ? null : time.toISOString();
+}
+
+function museLimit(minutes: number, row: Record<string, unknown> | null): UsageLimit | null {
+  if (!row || typeof row.used_percent !== "number" || !Number.isFinite(row.used_percent) || minutes <= 0) return null;
+  let resetsAt: string | null = null;
+  const resets = row.resets_at;
+  if (typeof resets === "number" && resets > 10_000) resetsAt = new Date(resets > 1e12 ? resets : resets * 1000).toISOString();
+  else if (typeof resets === "string" && !Number.isNaN(Date.parse(resets))) resetsAt = new Date(resets).toISOString();
+  return { windowMinutes: minutes, usedPercent: Math.min(100, Math.max(0, row.used_percent)), resetsAt };
+}
+
+/**
+ * Muse Code: one `model_completed` event per model call in session.jsonl. `input_tokens` already
+ * includes cache reads. A subscription frame in the same log, when Muse wrote one, carries the
+ * plan's windows. Child sessions count too; the same record is counted once.
+ */
+function museLine(state: FileState, line: string, seen: Set<string>): void {
+  if (!line.includes('"model_completed"') && !line.includes('"subscription"') && !line.includes('"subs_usage"')) return;
+  let record: { id?: string; recorded_at?: number; stream?: { id?: string }; payload?: { event?: Record<string, unknown> } };
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const event = record.payload?.event;
+  if (!event) return;
+  const subscription = (event.subscription ?? event.subs_usage) as Record<string, unknown> | undefined;
+  if (subscription && typeof subscription === "object") {
+    const window = subscription.window as Record<string, unknown> | undefined;
+    const weekly = subscription.weekly as Record<string, unknown> | undefined;
+    const minutes = typeof window?.window_duration_mins === "number" ? window.window_duration_mins : 300;
+    const found = [museLimit(minutes, window && typeof window === "object" ? window : null), museLimit(7 * 24 * 60, weekly && typeof weekly === "object" ? weekly : null)].filter(
+      (item): item is UsageLimit => item !== null,
+    );
+    const at = museTime(record.recorded_at);
+    if (found.length && at) state.limits = { at, limits: found };
+  }
+  if (event.kind !== "model_completed") return;
+  const usage = event.usage as Record<string, unknown> | undefined;
+  if (!usage) return;
+  const key = `${record.stream?.id ?? ""}:${record.id ?? ""}`;
+  if (key !== ":" && seen.has(key)) return;
+  if (key !== ":") {
+    seen.add(key);
+    state.keys.add(key);
+  }
+  const cached = num(usage.cache_read_tokens);
+  const output = num(usage.output_tokens);
+  const total = num(usage.input_tokens) + num(usage.cache_write_tokens) + output;
+  const model = typeof event.model === "string" && event.model ? event.model : "muse";
+  count(state.tally, museTime(record.recorded_at), model, { total, cached, output });
+}
+
 /** Gemini CLI: a chat file per session, whose answers carry their tokens. */
 function geminiFile(state: FileState, text: string): void {
   let record: { messages?: Array<{ type?: string; timestamp?: string; model?: string; tokens?: Record<string, unknown> }> };
@@ -236,6 +297,8 @@ export class UsageScanner {
   private readonly files = new Map<string, FileState>();
   /** Claude Code message ids counted so far, across files. */
   private readonly claudeSeen = new Set<string>();
+  /** Muse record ids counted so far, across a session and its child sessions. */
+  private readonly museSeen = new Set<string>();
   private readonly sources: Source[];
   private readonly now: () => Date;
 
@@ -249,6 +312,13 @@ export class UsageScanner {
       { id: "codex", roots: [path.join(env.CODEX_HOME || path.join(home, ".codex"), "sessions")], pattern: /\.jsonl$/, depth: 4, lines: codexLine },
       { id: "grok", roots: [path.join(home, ".grok", "sessions")], pattern: /^usage\.json$/, depth: 2, whole: grokFile },
       { id: "gemini", roots: [path.join(env.GEMINI_CLI_HOME || home, ".gemini", "tmp")], pattern: /^session-.*\.json$/, depth: 2, whole: geminiFile },
+      {
+        id: "muse",
+        roots: [path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "muse", "sessions")],
+        pattern: /^session\.jsonl$/,
+        depth: 6,
+        lines: (state, line) => museLine(state, line, this.museSeen),
+      },
     ];
   }
 
@@ -300,7 +370,8 @@ export class UsageScanner {
         }
       }
       const perDay = dayKeys.map((day) => [...(days.get(day)?.values() ?? [])].reduce((sum, tokens) => sum + tokens.total, 0));
-      if (!perDay.some(Boolean) && !limits) continue;
+      const liveLimits = (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime());
+      if (!perDay.some(Boolean) && !liveLimits.length) continue;
       const week = zero();
       const todayTokens = zero();
       const models = new Map<string, number>();
@@ -318,7 +389,8 @@ export class UsageScanner {
         days: perDay,
         models: [...models].map(([model, total]) => ({ model, total })).sort((a, b) => b.total - a.total),
         // A limit that has reset since it was written says nothing any more.
-        limits: (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime()),
+        limits: liveLimits,
+        limitsAt: liveLimits.length ? (limits?.at ?? null) : null,
         lastAt: lastAt ? new Date(lastAt).toISOString() : null,
       });
     }
@@ -326,7 +398,10 @@ export class UsageScanner {
     // Forget files that fell out of the window.
     for (const [file, state] of this.files) {
       if (live.has(file)) continue;
-      for (const key of state.keys) this.claudeSeen.delete(key);
+      for (const key of state.keys) {
+        this.claudeSeen.delete(key);
+        this.museSeen.delete(key);
+      }
       this.files.delete(file);
     }
     return { sources, scannedAt: now.toISOString() };
@@ -337,7 +412,10 @@ export class UsageScanner {
     if (state && state.size === stat.size && state.mtimeMs === stat.mtimeMs) return state;
     const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, rest: "", tally: new Map(), keys: new Set(), model: "", limits: null });
     if (!state || source.whole || stat.size < state.offset) {
-      for (const key of state?.keys ?? []) this.claudeSeen.delete(key);
+      for (const key of state?.keys ?? []) {
+        this.claudeSeen.delete(key);
+        this.museSeen.delete(key);
+      }
       state = fresh();
     }
     try {

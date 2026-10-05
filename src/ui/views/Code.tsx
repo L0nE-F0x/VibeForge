@@ -3,6 +3,7 @@ import {
   FolderOpen,
   FolderPlus,
   FolderTree,
+  GitBranch,
   Globe,
   GripVertical,
   Maximize2,
@@ -19,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Engine, LayoutNode, PaneLaunch, Workspace } from "../../shared/api.js";
+import type { Engine, LayoutNode, PaneLaunch, Workspace, WorkspaceFile } from "../../shared/api.js";
 import { isDockUrl } from "../../shared/dock-url.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
@@ -31,6 +32,7 @@ import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "
 import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
+import { BranchDialog } from "./BranchDialog.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { setPtyInView, setWorkspaceInView, useAttention, usePtyAttention } from "../attention.js";
@@ -104,6 +106,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [dragPane, setDragPane] = useState<string | null>(null);
   const [dragWorkspace, setDragWorkspace] = useState<{ id: string; over: number | null } | null>(null);
   const [workspaceMenu, setWorkspaceMenu] = useState<{ workspace: Workspace; anchor: HTMLElement } | null>(null);
+  const [branchFor, setBranchFor] = useState<Workspace | null>(null);
   const terminals = useRef(new Map<string, TerminalHandle>());
   const starting = useRef(new Set<string>());
   const layoutsRef = useRef(layouts);
@@ -467,6 +470,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (route?.workspaceId && route.workspaceId !== workspace.id) go({ view: "code", workspaceId: workspace.id });
   }
 
+  function openedBranch(file: WorkspaceFile) {
+    setBranchFor(null);
+    const id = file.lastWorkspaceId;
+    if (!id) return;
+    const workspace = file.workspaces.find((item) => item.id === id);
+    if (workspace) select(workspace);
+  }
+
   // ---------------------------------------------------------------- side panel resize
 
   const startSideResize = (event: React.PointerEvent) => {
@@ -493,6 +504,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
+    { label: t("code.openBranch"), icon: GitBranch, onSelect: () => setBranchFor(workspace) },
     { label: t("common.rename"), icon: Pencil, onSelect: () => setRenaming(workspace.id) },
     "sep",
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void removeWorkspace(workspace) },
@@ -755,6 +767,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
           </div>
         )}
       </div>
+      {branchFor && <BranchDialog workspace={branchFor} onClose={() => setBranchFor(null)} onOpened={openedBranch} />}
     </div>
   );
 }

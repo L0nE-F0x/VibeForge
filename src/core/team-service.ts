@@ -11,6 +11,7 @@ import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
+import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
 import type { AgentInput, ChatView, Deleted, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
@@ -104,6 +105,14 @@ export class TeamService extends ServiceCore {
     return this.workspaces.updateWorkspace(id, patch);
   }
 
+  listBranches(id: string): Promise<BranchList> {
+    return this.workspaces.listBranches(id);
+  }
+
+  openBranch(id: string, branch: string): Promise<WorkspaceFile> {
+    return this.workspaces.openBranch(id, branch);
+  }
+
   getLayout(workspaceId: string): LayoutNode | null {
     return this.workspaces.getLayout(workspaceId);
   }
@@ -176,8 +185,8 @@ export class TeamService extends ServiceCore {
     return this.tasks.executeTask(id, size, false, now);
   }
 
-  continueTask(id: string, size: TermSize = {}): Promise<Launched> {
-    return this.tasks.continueTask(id, size);
+  continueTask(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched> {
+    return this.tasks.continueTask(id, size, followUp);
   }
 
   cancelTaskWait(id: string): TaskView {
@@ -245,6 +254,11 @@ export class TeamService extends ServiceCore {
     return this.chats.sendChat(id, text, size);
   }
 
+  /** Start an agent in a workspace it is allowed to use, with its brief. */
+  launchAgent(workspaceId: string, agentId: string, prompt: string | null, size: TermSize = {}): Promise<SendResult> {
+    return this.chats.launchAgent(workspaceId, agentId, prompt, size);
+  }
+
   continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
     return this.chats.continueChat(id, size);
   }
@@ -257,6 +271,12 @@ export class TeamService extends ServiceCore {
 
   listRuns(query: RunQuery = {}): RunView[] {
     return this.runs.listRuns(query);
+  }
+
+  /** One run's index row, without reading its transcript or patch. */
+  findRun(id: string): RunView | null {
+    const run = this.store.getRun(id);
+    return run ? this.view(run) : null;
   }
 
   inbox(now: Date = this.now()): RunView[] {
@@ -279,8 +299,8 @@ export class TeamService extends ServiceCore {
     return this.runs.markAllOpened();
   }
 
-  continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
-    return this.runs.continueRun(id, size);
+  continueRun(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+    return this.runs.continueRun(id, size, followUp);
   }
 
   runDiff(id: string, source: "saved" | "now" = "saved"): Promise<string> {

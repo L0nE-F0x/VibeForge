@@ -1,12 +1,10 @@
 import { readJson, writeJson } from "./fsx.js";
-import type { PlanId, PlanSummary } from "./plans.js";
+import { PLAN_NAMES, type PlanId, type PlanSummary } from "./plans.js";
 
 /** The shares of a plan window worth a notification. */
 export const QUOTA_STEPS = [80, 95, 100] as const;
 /** A reading older than this is last session's news, not something to announce. */
 const FRESH_MS = 15 * 60 * 1000;
-
-export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi" };
 
 export interface QuotaAlert {
   plan: PlanId;

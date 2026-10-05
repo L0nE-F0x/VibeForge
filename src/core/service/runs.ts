@@ -5,7 +5,7 @@ import { plainPrompt } from "../preamble.js";
 import { readRunFiles, RUN_FILES, type RunFiles } from "../runs.js";
 import { repairBlankCapture } from "../restore-screen.js";
 import { compressRun, folderBytes, hasRunFile, planCleanup, readRunText } from "../run-storage.js";
-import { grokHome, readGrokPrompts } from "../session-prompts.js";
+import { grokHome, museHome, readGrokPrompts, readMusePrompts } from "../session-prompts.js";
 import type { RunQuery } from "../store.js";
 import { type Launched, REVIEW_ORIGINS, type RunBundle, type RunHit, type RunUpkeep, type RunView, type StorageSummary, type TermSize, TWO_DAYS_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
@@ -46,7 +46,7 @@ export class RunDesk {
     return { run: this.core.view(run), files };
   }
 
-  /** The run plus its screen, transcript and, for a typed Grok, the prompts it was given. */
+  /** The run plus its screen, transcript and, for a typed Grok or Muse, the prompts it was given. */
   async loadRun(id: string): Promise<RunBundle> {
     const bundle = this.getRun(id);
     let files = bundle.files;
@@ -57,9 +57,13 @@ export class RunDesk {
         /* the stored files still open */
       }
     }
-    if (!files.preamble.trim() && bundle.run.engine === "grok" && bundle.run.cwd) {
+    if (!files.preamble.trim() && bundle.run.cwd && (bundle.run.engine === "grok" || bundle.run.engine === "muse")) {
       try {
-        files = { ...files, prompts: readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt) };
+        const prompts =
+          bundle.run.engine === "grok"
+            ? readGrokPrompts(grokHome(), bundle.run.cwd, bundle.run.startedAt)
+            : readMusePrompts(museHome(), bundle.run.cwd, bundle.run.startedAt);
+        if (prompts) files = { ...files, prompts };
       } catch {
         /* the prompt tab explains that none was handed over */
       }
@@ -82,20 +86,30 @@ export class RunDesk {
   }
 
 
-  /** Start the next attempt of a finished run, in the same place it belongs to. */
-  async continueRun(id: string, size: TermSize = {}): Promise<Launched & { chatId: string | null; taskId: string | null }> {
+  /**
+   * Start the next attempt of a finished run, in the same place it belongs to. `followUp` is the
+   * next instruction, when there is one: it is typed in once a picked-up session is ready.
+   */
+  async continueRun(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched & { chatId: string | null; taskId: string | null }> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const run = this.core.store.getRun(id);
     if (!run) throw new Error("That run no longer exists.");
     const livePty = this.core.ptyByRun.get(id);
-    if (livePty) return { runId: id, ptyId: livePty, chatId: run.chatId, taskId: run.taskId };
+    // A shell run stays in the map until its recording finishes closing. A follow-up in that
+    // window used to come back as delivered and then be dropped. Wait the close out first.
+    if (livePty && followUp) await this.waitForShellClose(livePty);
+    const still = this.core.ptyByRun.get(id);
+    if (still) {
+      if (followUp) throw new Error("That session is still closing.");
+      return { runId: id, ptyId: still, chatId: run.chatId, taskId: run.taskId };
+    }
     if (run.chatId && this.core.store.getChat(run.chatId)) {
-      const result = await this.chats.continueChat(run.chatId, size);
+      const result = followUp ? await this.chats.sendChat(run.chatId, followUp, size) : await this.chats.continueChat(run.chatId, size);
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };
     }
     if (run.taskId && this.core.store.getTask(run.taskId)) {
-      const launched = await this.tasks.continueTask(run.taskId, size);
+      const launched = await this.tasks.continueTask(run.taskId, size, followUp);
       return { ...launched, chatId: null, taskId: run.taskId };
     }
     const engine = this.core.requireEngine(run.engine);
@@ -103,14 +117,15 @@ export class RunDesk {
     const nativeContinue = resume.native;
     const agent = run.agentId ? this.core.store.getAgent(run.agentId) : null;
     const prior = nativeContinue ? null : this.core.transcriptPath(run);
-    const followUp = "Continue where the previous attempt stopped.";
+    const next = followUp || run.prompt || "Continue where the previous attempt stopped.";
     const launched = await this.core.launch({
       origin: run.origin,
       title: run.title,
       engine,
       cwd: run.cwd,
       prompt: run.prompt,
-      promptText: nativeContinue ? null : agent ? this.core.preambleFor(agent, run.prompt || followUp, prior) : plainPrompt(run.prompt || followUp, prior),
+      promptText: nativeContinue ? null : agent ? this.core.preambleFor(agent, next, prior) : plainPrompt(next, prior),
+      pasteAfter: nativeContinue ? followUp : null,
       continueSession: nativeContinue,
       resumeArgs: resume.resumeArgs,
       agentId: run.agentId,
@@ -120,6 +135,14 @@ export class RunDesk {
       ...size,
     });
     return { ...launched, chatId: null, taskId: null };
+  }
+
+  /** A shell whose CLI has already left, and whose run is still being closed. */
+  private async waitForShellClose(ptyId: string): Promise<void> {
+    const session = this.core.live.get(ptyId);
+    if (!session || session.kind !== "shell" || session.programEngineId) return;
+    const pending = this.core.recordings.get(ptyId);
+    if (pending) await pending;
   }
 
   /**

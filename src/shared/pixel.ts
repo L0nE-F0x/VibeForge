@@ -43,7 +43,7 @@ export const MARK = [
 
 /**
  * The coding plans' marks, eleven pixels square and drawn in one colour, for the usage panel:
- * Grok's slashed circle, Claude's starburst, Kimi's K and a prompt for Codex.
+ * Grok's slashed circle, Claude's starburst, Kimi's K, a prompt for Codex and Muse's M.
  */
 export const PLAN_MARKS: Record<string, string[]> = {
   grok: [
@@ -97,6 +97,19 @@ export const PLAN_MARKS: Record<string, string[]> = {
     ".##........",
     "##...######",
     "...........",
+  ],
+  muse: [
+    "#.#.....#.#",
+    "##.#...#.##",
+    "#.#.#.#.#.#",
+    "#.#..#..#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
+    "#.#.....#.#",
   ],
 };
 

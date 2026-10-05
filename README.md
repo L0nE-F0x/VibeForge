@@ -49,8 +49,8 @@ git clone https://github.com/L0nE-F0x/VibeForge.git
 cd VibeForge
 npm install
 npm start           # development: Vite + Electron with hot reload
-npm run build       # production build
-./scripts/vibeforge # run the build
+npm run build       # production build, when you want it now
+./scripts/vibeforge # builds when this checkout is newer, then opens the window
 ```
 
 </details>
@@ -61,16 +61,16 @@ npm run build       # production build
 | --- | --- |
 | **Home** | Who is waiting for you, by name, and what is waiting its turn; what's live, what finished and needs review, what fires next, and a year of your commits drawn in pixels. |
 | **Agents** | Named teammates with a brief, memory, skills and allowed folders. Chats with an agent are real terminals. Switch its engine from Claude to Codex to Grok and the teammate stays the same. |
-| **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser beside them: click an http(s) link in a terminal (your dev server's, say) and it opens there, each workspace keeping its own page. Type `claude`, `codex` or any CLI in a terminal: its title bar says so, and from the moment it starts until you're back at the prompt it is recorded as a run (transcript and git diff). A terminal whose CLI goes quiet or finishes while you're looking elsewhere glows like an ember until you focus it, and so do its workspace and Code's icon in the rail. Looking at one terminal leaves the others glowing. Each title bar says which other coding CLIs are in the same folder. In a split, the terminals you aren't typing in dim a little. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. Layouts are remembered per workspace. |
+| **Code** | A workspace with tiled terminals that you can split, drag to rearrange and maximize, a file tree that inserts paths, and a browser beside them: click an http(s) link in a terminal (your dev server's, say) and it opens there, each workspace keeping its own page. Type `claude`, `codex` or any CLI in a terminal: its title bar says so, and from the moment it starts until you're back at the prompt it is recorded as a run (transcript and git diff). A terminal whose CLI goes quiet or finishes while you're looking elsewhere glows like an ember until you focus it, and so do its workspace and Code's icon in the rail. Looking at one terminal leaves the others glowing. Each title bar says which other coding CLIs are in the same folder. In a split, the terminals you aren't typing in dim a little. Drag workspaces to reorder them and jump between them with <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd>. **Open another branch**, on a workspace's menu, checks that branch out beside the project and opens it as its own workspace. The folder you already have stays on its branch, and removing the new workspace later leaves its folder on disk. Layouts are remembered per workspace. |
 | **Chat** | Throwaway conversations in an empty scratch folder. |
 | **Tasks** | A board. Writing or assigning a task starts nothing; **Execute** does. A finished run lands in Review with its diff. Turn on **Work in a separate copy** and the agent works in its own git worktree on a `vibeforge/<task>` branch, so it never touches the folder you or another agent are in; **Apply** brings its changes into the workspace as uncommitted edits (conflicts are marked, as a merge would) and removes the copy. In the workspace itself, a task takes turns: while another coding CLI is busy in that folder, Execute waits and starts on its own once that CLI has been quiet for half a minute (or start it now, in a copy or anyway). **Hand off**, on a finished run, makes a To do task for another agent from it. |
 | **Routines** | Cron or interval schedules that open a fresh agent run while VibeForge is open. A due routine takes turns like a task: it waits while another coding CLI is busy in its folder. Missed slots are shown, never replayed. |
 | **Skills** | Reusable `SKILL.md` procedures you install on agents. |
 | **Runs** | Every CLI you typed into a terminal and every process VibeForge started, a day at a time: final screen, transcript, prompt, and the full diff since it began, saved the moment it ended so later edits stay out of it. **Continue** reopens the exact session. Search finds a run by what it said, not only its title: the words around the match are shown, and <kbd>Ctrl</kbd>+<kbd>K</kbd> lists those runs too. |
 
-The pulse at the bottom of the rail counts the terminals running and, underneath, six squares that follow whichever coding plan is closest to its limit. Click it for **plan limits**: each plan's windows (Claude's 5-hour and 7-day, Grok's credits by product, Kimi's weekly and 5-hour, Codex's from its logs) with the time until they reset, the last day as a line, and when you'll run out at the current pace. The **Tokens** tab has each CLI's tokens today and this week, read from the logs Claude Code, Codex, Grok Build and Gemini CLI already keep on this machine; nothing is sent anywhere for those.
+The pulse at the bottom of the rail counts the terminals running and, underneath, six squares that follow whichever coding plan is closest to its limit. Click it for **plan limits**: each signed-in plan's windows (Claude's 5-hour and 7-day, Grok's credits by product, Kimi's weekly and 5-hour, Codex's and Muse's 5-hour and weekly) with the time until they reset, the last day as a line, and when you'll run out at the current pace. A plan you aren't signed in to stays off the list, and one you sign in to appears on the next refresh. The **Tokens** tab has each CLI's tokens today and this week, read from the logs Claude Code, Codex, Grok Build, Gemini CLI and Muse Code already keep on this machine; nothing is sent anywhere for those.
 
-Plan limits for Claude, Grok and Kimi are off until you turn them on in Settings → Usage and activity. VibeForge then asks Anthropic, xAI and Moonshot for them, at most every 3 minutes, with the sign-in each CLI already saved on this machine. It reads that sign-in for each request and never renews, rewrites or keeps it; when one has expired, the last numbers stay up until you next open that CLI. Only the percentages are saved (`~/.local/share/vibeforge/plans.json`). Settings can also notify you as a window passes 80%, 95% and 100%, once per step until it resets; that's off, since Omarchy's own usage widget may already tell you.
+Plan limits are off until you turn them on in Settings → Usage and activity. VibeForge then asks Anthropic, xAI, Moonshot, OpenAI and Meta, at most every 3 minutes, with the sign-in each CLI already saved on this machine. It reads that sign-in for each request and never renews, rewrites or keeps it; when one has expired, the last numbers stay up until you next open that CLI. Codex's limits also come from its own logs, with no network. Only the percentages are saved (`~/.local/share/vibeforge/plans.json`). Settings can also notify you as a window passes 80%, 95% and 100%, once per step until it resets; that's off, since Omarchy's own usage widget may already tell you.
 
 The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
@@ -129,6 +129,18 @@ o.bind("SUPER + ALT + V", "VibeForge: stop talking", "vibeforge --voice stop", {
 ```
 
 `vibeforge --voice start|stop|cancel` reaches the running window over a local socket in a few milliseconds; a short tone marks the start and end while it's in the background. Models (`base.en` is quick, `large-v3-turbo` hears best and knows many languages) and voices download from Hugging Face in Settings → Voice, and ones Omarchy's Voxtype or the AUR's `piper-voices` packages installed are found too. Whisper is told the names of your agents, routines, CLIs and workspace files, so it spells them right.
+
+## Phone
+
+**Settings → Phone** serves a small page for your phone: each workspace and the coding CLIs in it, your plan limits, a CLI's screen, and a box to tell it what to do next. From there you can start an agent, or any CLI on its own, in a workspace; send a prompt; pick a finished session back up with your next instruction; and stop it. A CLI you typed into a terminal is only interrupted (<kbd>Esc</kbd>), so the terminal stays open, and nothing from the phone is ever typed into a terminal that has no CLI running in it.
+
+It is off until you turn it on, and then it listens on `127.0.0.1:4737` only. The page asks once for the pairing code shown in Settings (it's kept in `settings.json`) and remembers it in the phone's browser; **New code** signs every phone out. To reach it from your phone, run [Tailscale](https://tailscale.com) Serve once on this computer:
+
+```sh
+tailscale serve --bg --https=443 http://127.0.0.1:4737
+```
+
+then open the https address it prints on your phone, signed in to the same tailnet. The page offers to install itself, and the installed page fills the screen. Serve keeps the page inside your tailnet; `tailscale funnel` would put it on the internet, so don't use that. The computer has to stay on and awake with VibeForge running (the tray is enough). While the page is open it buzzes when a CLI starts waiting or finishes; a buzz on a locked phone isn't built yet. Plan limits on the phone are the same numbers as the desktop's and follow the same Settings switch. The page speaks the language VibeForge does, or your phone's when VibeForge follows the system.
 
 ## Your files
 

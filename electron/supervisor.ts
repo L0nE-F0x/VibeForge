@@ -32,6 +32,7 @@ export interface PtyActivity {
 
 export interface PtySnapshot {
   ansi: string;
+  plain: string;
   seq: number;
   cols: number;
   rows: number;
@@ -167,6 +168,13 @@ export class PtySupervisor {
     await this.request({ op: "send", ptyId, text });
   }
 
+  /** The foreground program right now. `known: false` means the read failed, not that the shell is back. */
+  async foreground(ptyId: string): Promise<{ known: boolean; argv: string[] | null; cwd: string | null }> {
+    const result = await this.request({ op: "foreground", ptyId });
+    const argv = Array.isArray(result.argv) ? result.argv.filter((arg): arg is string => typeof arg === "string" && arg.length > 0) : null;
+    return { known: result.known === true, argv: argv && argv.length > 0 ? argv : null, cwd: typeof result.cwd === "string" ? result.cwd : null };
+  }
+
   async resize(ptyId: string, cols: number, rows: number): Promise<void> {
     await this.request({ op: "resize", ptyId, cols, rows });
   }
@@ -184,6 +192,7 @@ export class PtySupervisor {
     const result = await this.request({ op: "snapshot", ptyId });
     return {
       ansi: String(result.ansi ?? ""),
+      plain: String(result.plain ?? ""),
       seq: Number(result.seq ?? 0),
       cols: Number(result.cols ?? 0),
       rows: Number(result.rows ?? 0),

@@ -350,7 +350,7 @@ svg.mark {
   top: 58px;
   right: 16px;
   z-index: 50;
-  width: 300px;
+  width: min(300px, calc(100vw - 32px));
   max-height: min(580px, calc(100vh - 80px));
   overflow: auto;
   padding: 8px;
@@ -735,6 +735,7 @@ h1 {
   color: var(--fg-2);
   scrollbar-width: none;
   text-align: left;
+  mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
 }
 
 .copy {
@@ -1619,6 +1620,7 @@ h1 {
 
 .engines-title {
   margin: 0 0 18px;
+  text-wrap: balance;
   font: 600 12px var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1981,6 +1983,106 @@ h2 {
   }
 }
 
+/* phone: the phone page, as a paired phone shows the desk (companion/app.css) */
+
+.card.full {
+  grid-column: 1 / -1;
+}
+
+.art-phone {
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+}
+
+.ph-frame {
+  display: flex;
+  flex: 0 0 248px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 10px 14px;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  box-shadow: 0 0 34px -14px var(--halo);
+}
+
+.ph-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+}
+
+.ph-top b {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ph-top span,
+.ph-send .ph-stop {
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+}
+
+.ph-ws {
+  padding: 2px 2px 4px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.ph-ws span {
+  display: block;
+  color: var(--fg-3);
+  font-weight: 400;
+  font-size: 10.5px;
+}
+
+.art-phone .em-row {
+  padding: 8px 10px;
+}
+
+.ph-box {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+  background: color-mix(in srgb, var(--bg-dark) 70%, transparent);
+}
+
+.ph-send {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
+.ph-send .m-primary {
+  justify-content: center;
+}
+
+.ph-send .ph-stop {
+  display: grid;
+  place-items: center;
+}
+
+.ph-serve {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-2);
+  font: 11.5px/1.6 var(--mono);
+  white-space: pre;
+}
+
+@media (max-width: 1080px) {
+  .ph-serve {
+    display: none;
+  }
+}
+
 /* undo: the toast that replaced "are you sure?" */
 
 .art-undo {
@@ -2100,7 +2202,7 @@ h2 {
 
 .art-tiles {
   gap: 7px;
-  height: 128px;
+  min-height: 128px;
 }
 
 .tile {
@@ -2199,7 +2301,7 @@ h2 {
 /* board */
 
 .art-board {
-  height: 128px;
+  min-height: 128px;
   gap: 7px;
 }
 
@@ -2858,6 +2960,7 @@ h2 {
   padding: 10px 12px;
   font: 11px/1.7 var(--mono);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow: hidden;
   color: var(--fg);
 }
@@ -3538,6 +3641,14 @@ kbd.big {
     margin-top: 100px;
     padding: 90px 20px 120px;
   }
+
+  .tp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tp-rail {
+    display: none;
+  }
 }
 
 @media (max-width: 420px) {
@@ -3547,6 +3658,64 @@ kbd.big {
 
   .tour-tabs button {
     padding: 0 12px;
+  }
+
+  .cta {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .cta .btn {
+    width: min(100%, 300px);
+  }
+
+  .lang-codes span {
+    width: 30px;
+  }
+}
+
+/* Fingers, not a cursor: the bar, the version and the footer links get room to be tapped. */
+@media (pointer: coarse) {
+  .bar {
+    height: 52px;
+  }
+
+  .bar-item {
+    height: 42px;
+    min-width: 42px;
+    justify-content: center;
+  }
+
+  .btn.xs {
+    height: 38px;
+  }
+
+  .theme-menu {
+    top: 68px;
+  }
+
+  .copy {
+    width: 40px;
+    height: 40px;
+  }
+
+  .part {
+    padding: 4px 9px;
+  }
+
+  .footer nav {
+    gap: 0 10px;
+  }
+
+  .bar .brand {
+    min-width: 42px;
+    min-height: 42px;
+  }
+
+  .footer nav a,
+  .credit a {
+    display: inline-block;
+    padding: 10px 0;
   }
 }
 
@@ -3627,6 +3796,7 @@ kbd.big {
 .v-to {
   color: var(--fg-3);
   flex: 1;
+  white-space: nowrap;
 }
 
 .v-clock {

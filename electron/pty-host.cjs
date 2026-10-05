@@ -405,6 +405,7 @@ async function handle(msg) {
           reply(msg.reqId, {
             ok: true,
             ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
+            plain: recentText(session, 160),
             seq,
             cols: session.cols,
             rows: session.rows,
@@ -421,6 +422,20 @@ async function handle(msg) {
         ptys: [...sessions.values()].map((session) => ({ ptyId: session.id, pid: session.pid, cwd: session.cwd, argv: session.argv })),
       });
       return;
+    case "foreground": {
+      const session = sessions.get(msg.ptyId);
+      if (!session || session.exited) {
+        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+        return;
+      }
+      try {
+        const found = readForeground(session);
+        reply(msg.reqId, { ok: true, known: true, argv: found ? found.argv : null, cwd: found ? found.cwd : null });
+      } catch {
+        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+      }
+      return;
+    }
     case "shutdown":
       await shutdown();
       reply(msg.reqId, { ok: true });
@@ -431,6 +446,24 @@ async function handle(msg) {
 }
 
 // ------------------------------------------------------------------ working or quiet
+
+/** The last lines a person would read, including a little of what scrolled off the screen. */
+function recentText(session, maxLines) {
+  const buffer = session.mirror.buffer.active;
+  const end = buffer.baseY + session.rows;
+  const start = Math.max(0, end - maxLines);
+  const lines = [];
+  for (let index = start; index < end; index += 1) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+    // A row that wraps onto the next keeps its trailing blanks, or the words either side of the wrap run together.
+    const text = line.translateToString(!buffer.getLine(index + 1)?.isWrapped);
+    if (line.isWrapped && lines.length > 0) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
+  while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop();
+  return lines.join("\n");
+}
 
 function screenRows(session) {
   const buffer = session.mirror.buffer.active;
@@ -486,21 +519,25 @@ setInterval(() => {
  * The command line of whatever holds the terminal's foreground, when that isn't the process
  * VibeForge started: `claude` typed into a shell, say. Linux only (/proc); null elsewhere.
  */
+function readForeground(session) {
+  const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
+  // Fields after the command name: state ppid pgrp session tty_nr tpgid ...
+  const tpgid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[5]);
+  if (!(tpgid > 0) || tpgid === session.pid) return null;
+  const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
+  if (!argv.length) return null;
+  let cwd = null;
+  try {
+    cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
+  } catch {
+    /* gone already */
+  }
+  return { argv, cwd };
+}
+
 function foreground(session) {
   try {
-    const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
-    // Fields after the command name: state ppid pgrp session tty_nr tpgid ...
-    const tpgid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[5]);
-    if (!(tpgid > 0) || tpgid === session.pid) return null;
-    const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
-    if (!argv.length) return null;
-    let cwd = null;
-    try {
-      cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
-    } catch {
-      /* gone already */
-    }
-    return { argv, cwd };
+    return readForeground(session);
   } catch {
     return null;
   }
