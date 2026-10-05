@@ -69,41 +69,8 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-/** English for the new sentences, until a rebuilt app serves them in /api/text. */
-const EXTRA = {
-  "phone.installTitle": "Install this as an app on your phone",
-  "phone.installBody": "It then fills the whole screen.",
-  "phone.install": "Install",
-  "phone.installLater": "Not now",
-  "phone.installIos": "Tap Share, then Add to Home Screen.",
-  "phone.installMenu": "Open the browser menu and choose Install app.",
-  "phone.plansShow": "Show",
-  "phone.plansHide": "Hide",
-  "phone.credit": "Created by {name}",
-  "phone.homeKind": "Mobile companion",
-  "phone.homeBlurb": "Your work, from your phone.",
-  "phone.homeLead": "See who is working on your computer, who is waiting for you, and tell them what to do next. The computer stays on, with VibeForge open.",
-  "phone.homeHowTitle": "How it works",
-  "phone.homeHow": "Each project lists whoever is working or waiting. Open one to read the screen, send the next step, or stop. Start begins someone new.",
-  "phone.homeReach": "Your phone reaches the computer through Tailscale, a private link between your own devices. The computer has to stay awake.",
-  "phone.homeSettings": "Settings",
-  "phone.homeBuzz": "Tell me when someone is waiting",
-  "phone.homeBuzzHint": "Also when they finish. This page has to stay open.",
-  "phone.homeBuzzBlocked": "Notifications are blocked for this page. Allow them in the phone's settings.",
-  "phone.homePlans": "Show plan limits",
-  "phone.homePlansHint": "How much of each plan is left, open when you arrive.",
-  "phone.homeTuck": "Keep finished work tucked away",
-  "phone.homeTuckHint": "A project that is only finished starts closed. One that is working or waiting stays open.",
-  "phone.homeText": "Larger text",
-  "phone.back": "Back",
-  "phone.homeEnter": "Enter",
-  "phone.homeReturn": "Tap VibeForge to come back here.",
-  "phone.homeMark": "About this page",
-  "phone.homeClose": "Close",
-};
-
 function t(key, vars) {
-  const text = words[key] || EXTRA[key] || key;
+  const text = words[key] || key;
   return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match)) : text;
 }
 
