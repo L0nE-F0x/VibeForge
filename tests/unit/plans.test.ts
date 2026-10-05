@@ -169,6 +169,11 @@ describe("plan limits", () => {
     ]);
     expect(parseMuse({ is_subs_active: false })).toBeNull();
     expect(parseMuse({ subs_usage: { window: { used_percent: 110, window_duration_mins: 300 } } })?.percent).toBe(100);
+    // An active plan with nothing used yet: Meta sends no subs_usage. That is 0%, not an unreadable answer.
+    const idle = parseMuse({ is_subs_active: true, api_key: `LLM|${"k".repeat(40)}` });
+    expect([idle?.limiter, idle?.percent, idle?.resetsAt]).toEqual(["5-hour", 0, null]);
+    expect(parseMuse({ is_subs_active: true, subs_usage: { window: { remaining_percent: 70, window_duration_mins: 300 } } })?.percent).toBe(30);
+    expect(parseMuse({})).toBeNull();
 
     const codex = parseCodexWham({
       rate_limit: {
@@ -224,6 +229,20 @@ describe("plan limits", () => {
     }).summary({ network: true });
     // Codex's auth.json is still there, so Codex stays. Muse does not.
     expect(quiet.providers.map((provider) => provider.id)).toEqual(["codex"]);
+  });
+
+  it("replaces an old Muse reading with 0% once its window resets and Meta stops sending usage", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    write(path.join(home, ".config", "muse", "auth.json"), { providers: { meta: { access_token: `dca:${TOKEN}` } } });
+    const file = path.join(home, "plans.json");
+    let now = NOW;
+    let answer: Record<string, unknown> = { is_subs_active: true, subs_usage: { window: { used_percent: 64, window_duration_mins: 300, resets_at: NOW / 1000 + 600 } } };
+    const watcher = new PlanWatcher({ home, file, now: () => now, fetch: async () => ({ status: 200, text: async () => JSON.stringify(answer) }), env: {} });
+    expect((await watcher.summary({ network: true })).providers.map((p) => [p.id, p.percent])).toEqual([["muse", 64]]);
+    now += 9 * 3600e3;
+    answer = { is_subs_active: true };
+    const later = (await watcher.summary({ network: true })).providers.find((p) => p.id === "muse");
+    expect([later?.percent, later?.problem, later?.readAt]).toEqual([0, null, new Date(now).toISOString()]);
   });
 
   it("keeps a plan from the CLI's log when asking is off, and lets a fresh answer replace it", async () => {

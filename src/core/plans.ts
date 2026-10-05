@@ -291,14 +291,27 @@ export function parseCodexWham(data: Record<string, unknown>): Reading | null {
   return codexReading(limits);
 }
 
+/** A Muse window. Some answers give what is left instead of what is used. */
+function museLimit(row: Record<string, unknown> | null, fallbackMinutes: number): UsageLimit | null {
+  if (!row) return null;
+  if (num(row.used_percent) === null) {
+    const left = num(row.remaining_percent, row.remaining);
+    if (left !== null) row = { ...row, used_percent: 100 - left };
+  }
+  return limitOf(row, fallbackMinutes);
+}
+
 /**
  * Muse's subscription, either from Meta's sign-in answer (`subs_usage`) or from the
- * `subscription` frame a turn carries. No windows means this login has no subscription.
+ * `subscription` frame a turn carries. `is_subs_active: false` means this login has no subscription.
+ * An active plan with no windows yet is at 0%: Meta leaves `subs_usage` out until a window has
+ * usage to report, and reading that as a failure kept showing a window that had already reset.
  */
 export function parseMuse(data: Record<string, unknown>): Reading | null {
+  if (data.is_subs_active === false) return null;
   const usage = record(data.subs_usage) ?? record(data.subscription) ?? (record(data.window) || record(data.weekly) ? data : null);
-  if (!usage) return null;
-  const limits = [limitOf(record(usage.window), 300), limitOf(record(usage.weekly), 7 * 24 * 60)].filter((item): item is UsageLimit => item !== null);
+  const limits = usage ? [museLimit(record(usage.window), 300), museLimit(record(usage.weekly), 7 * 24 * 60)].filter((item): item is UsageLimit => item !== null) : [];
+  if (!limits.length && data.is_subs_active === true) return codexReading([{ windowMinutes: 300, usedPercent: 0, resetsAt: null }]);
   return codexReading(limits);
 }
 

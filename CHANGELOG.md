@@ -28,7 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 **The usage meter follows the plans this computer is signed in to.**
 
 - **Whoever is signed in.** Claude, Codex, Grok, Kimi and Muse each appear when that CLI's own sign-in is on this machine, and stay off the list when it isn't. Signing in to another one shows it on the next refresh, in the desktop usage tab and on the phone page.
-- **Muse.** Its 5-hour and weekly windows come from the sign-in check Meta already uses. The extra key in that answer is thrown away and never saved. Token totals come from Muse's own session logs, on this machine.
+- **Muse.** Its 5-hour and weekly windows come from the sign-in check Meta already uses. The extra key in that answer is thrown away and never saved. A plan with nothing used yet in its window shows 0%: Meta leaves the usage out of its answer until there is some, and VibeForge used to call that unreadable and keep showing the last window's numbers. Token totals come from Muse's own session logs, on this machine.
 - **Codex from the sign-in too.** Its bar still comes from its logs, and also from the usage Codex itself asks for when `~/.codex/auth.json` holds a ChatGPT login. An API-key login adds no plan.
 - **The newer reading wins.** Between refreshes, Codex and Muse keep whichever is newer: the last answer from the provider, or the line in that CLI's own log. The time on the bar is when that reading was taken.
 - **Muse in Settings → Engines.** An engines list saved before Muse existed gains a Muse row, once. Removing that row keeps it removed.
