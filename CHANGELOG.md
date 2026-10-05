@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings → Phone reads like a released feature.** The "not part of this prototype" line is gone, and the buzz is in the opening line. The Tailscale command has its own line with a Copy button, and the card says to use serve rather than funnel. The pairing code stays hidden until you show it, so a screenshot of Settings doesn't give it away, and its hint says that New code signs every phone out. **Open** tries the page on this computer.
+
 ## [2.1.0] - 2026-10-05
 
 **2.1: your desk on your phone, plan limits for whoever is signed in, and another branch beside the folder you have.**
