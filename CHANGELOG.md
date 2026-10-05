@@ -21,7 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **A first page.** A paired phone opens on the name, one line, and three buttons: How it works, Settings, and Enter. How it works and Settings each open a panel. Settings holds the switches for buzzes, plan limits, finished work, and larger text. Enter opens the workspaces. Tap VibeForge there to come back. A phone that is not paired still starts on the code.
 - **A shorter list.** Each workspace has Show and Hide for its runs. One that is only finished starts hidden, so more workspaces fit on the screen. One that is working or waiting stays open until you hide it.
 - **Created by ApexForge**, along the bottom, the same line as the desk and the website.
-- **Installs onto the phone.** The first visit on a phone offers to install the page. Installed from that offer, it fills the screen.
+- **Installs onto the phone.** The first visit on a phone offers to install the page, on the code and the first page only, so the offer never covers a text box. Installed from that offer, it fills the screen.
 - **The keyboard.** Tapping a text box shrinks the page to the space above the phone's keyboard. The box and its button stay on screen, and the terminal gives up the room.
 - **A follow-up as a CLI leaves a shell.** Send looks at the terminal at that moment, so the second after a CLI quits is not typed into the shell. If the run is still closing, the follow-up waits and then resumes the session. A wrong pairing code during Send, Stop or Start brings the code form back.
 

@@ -751,6 +751,11 @@ code { font-family: inherit; }
 
 .install p { margin: 0 0 12px; color: var(--muted); }
 
+/* Offered on the code and the landing page only: elsewhere it would sit over the Send box. */
+body:not([data-view="pair"]):not([data-view="home"]) .install,
+body:has(.sheet:not([hidden])) .install,
+.keyboard .install { display: none; }
+
 .plans-toggle, .runs-toggle { min-height: 32px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
 .workspace.collapsed .session { display: none; }
 

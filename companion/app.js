@@ -275,6 +275,8 @@ async function withBusy(task) {
 /** Builds the page for the current view from scratch. Only a change of view does this. */
 function show() {
   ticket += 1;
+  // The install offer only shows on the code and the landing page (app.css), never over a text box.
+  document.body.dataset.view = token ? view : "pair";
   parts = { banner: el("div", { class: "banner", hidden: true }) };
   app.replaceChildren(parts.banner, page(), credit());
   update();
