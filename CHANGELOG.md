@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-05
+
+**2.1.1: the words catch up with the app.**
+
 ### Fixed
 
 - **Settings → Phone reads like a released feature.** The "not part of this prototype" line is gone, and the buzz is in the opening line. The Tailscale command has its own line with a Copy button, and the card says to use serve rather than funnel. The pairing code stays hidden until you show it, so a screenshot of Settings doesn't give it away, and its hint says that New code signs every phone out. **Open** tries the page on this computer.
@@ -281,7 +285,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.1
 [2.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.0
 [2.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.0.0
 [1.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v1.3.1
