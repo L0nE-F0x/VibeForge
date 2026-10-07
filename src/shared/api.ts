@@ -361,6 +361,8 @@ export interface DeskMethods {
   "runs.search": (text: string, limit?: number) => RunHit[];
   /** `saved` is the patch frozen when the run ended. `now` reads the folder as it is. */
   "runs.diff": (id: string, source?: "saved" | "now") => string;
+  /** A finished run as Markdown for an issue or a pull request (src/core/run-markdown.ts). */
+  "runs.markdown": (id: string) => string;
 
   /** Where VibeForge's disk space goes. */
   "storage.summary": () => StorageSummary;

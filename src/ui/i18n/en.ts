@@ -314,6 +314,10 @@ export const en = {
   "runs.more": "More for this run",
   "runs.markReviewed": "Mark as reviewed",
   "runs.unreview": "Put it back in Needs review",
+  "runs.copyMarkdown": "Copy as Markdown",
+  "runs.markdownCopied": "Copied as Markdown",
+  "runs.markdownCopiedBody": "The prompt, how it ended and its changes, ready for an issue or a pull request.",
+  "runs.markdownFailed": "Could not copy the run",
 
   // ---------------------------------------------------------------- settings
   "settings.title": "Settings",
@@ -801,6 +805,7 @@ export const en = {
   "routines.missingAgent": "Missing agent",
   "routines.nextAt": "next {time}",
   "routines.missed": "Missed while closed: {when}. It was not replayed.",
+  "routines.failing": "Its last {count} runs failed. Last run shows why.",
   "routines.runNow": "Run now",
   "routines.lastRun": "Last run",
   "routines.saved": "Routine saved",
@@ -890,6 +895,7 @@ export const en = {
   "core.copyMove": "Apply or discard the task's copy before moving it to another workspace.",
   "core.noCopy": "This task has no separate copy.",
   "core.copyUntrusted": "This task's copy is not in VibeForge's worktrees folder, so it was left alone.",
+  "core.copyOtherRepo": "This task's copy names another repository, so it was left alone.",
   "core.stopBeforeApply": "Stop the task before applying its changes.",
   "core.stopBeforeDiscard": "Stop the task before discarding its copy.",
   "core.stillStarting": "VibeForge is still starting.",

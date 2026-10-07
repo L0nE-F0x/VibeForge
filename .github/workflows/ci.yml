@@ -12,7 +12,7 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Node 22 is the current LTS and satisfies the README's Node 20+ floor.
+# Node 22 is the current LTS and satisfies the README's Node floor (20.19+ or 22.12+, from Vite).
 # The Electron binary is not used by npm test or npm run typecheck.
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: "1"

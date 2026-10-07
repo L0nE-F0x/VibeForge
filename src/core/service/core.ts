@@ -9,6 +9,7 @@ import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile } from "../run-storage.js";
 import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
+import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, Workspace } from "../types.js";
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
@@ -472,10 +473,13 @@ export class ServiceCore {
         : run.exitCode && run.exitCode !== 0
           ? `exited with code ${run.exitCode}`
           : "finished";
+    // Said once, on the run that makes it a streak; Routines and Home keep it lit after that.
+    const streak = run.routineId ? failStreak(this.store.queryRuns({ routineId: run.routineId, limit: ROUTINE_FAILING + 1 })) : 0;
+    const failing = streak === ROUTINE_FAILING ? `failed ${streak} times in a row` : null;
     try {
       this.options.host.notify({
         title: run.title,
-        body: [outcome, run.changes].filter(Boolean).join(" · "),
+        body: [outcome, run.changes, failing].filter(Boolean).join(" · "),
         runId: run.id,
       });
     } catch {

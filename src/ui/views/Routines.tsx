@@ -79,7 +79,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
             </Empty>
           )}
           {list.map((routine) => (
-            <div key={routine.id} id={`routine-${routine.id}`} className="card" style={route.routineId === routine.id ? { borderColor: "var(--sel-line)" } : undefined}>
+            <div key={routine.id} id={`routine-${routine.id}`} className={`card${routine.failing ? " needs-you" : ""}`} style={route.routineId === routine.id ? { borderColor: "var(--sel-line)" } : undefined}>
               <div className="hstack">
                 <CalendarClock size={16} className={routine.enabled ? "accent-text" : "faint"} />
                 <div className="vstack grow" style={{ gap: 1 }}>
@@ -115,8 +115,13 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   {t(routine.shareCheckout ? "turns.routineShares" : "turns.routineWillWait", { names: writerNames(routine.writers, agents) })}
                 </div>
               )}
-              {(routine.issues.length > 0 || routine.lastMissedAt) && (
+              {(routine.issues.length > 0 || routine.lastMissedAt || routine.failing) && (
                 <div className="vstack" style={{ gap: 6, marginTop: 10 }}>
+                  {routine.failing && (
+                    <Notice tone="bad" icon={AlertTriangle}>
+                      {t("routines.failing", { count: routine.failStreak })}
+                    </Notice>
+                  )}
                   {routine.issues.map((issue) => (
                     <Notice key={issue} tone="bad" icon={AlertTriangle}>
                       {coreText(issue)}

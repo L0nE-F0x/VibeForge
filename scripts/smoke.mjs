@@ -50,6 +50,12 @@ fs.writeFileSync(
   }),
 );
 
+// A stand-in CLI that prints a line and fails, so a real run is recorded without any model CLI.
+fs.writeFileSync(
+  path.join(config, "engines.json"),
+  JSON.stringify({ engines: [{ id: "smoke", label: "Smoke CLI", bin: "/bin/sh", args: ["-c", "echo SMOKE-RUN; sleep 1; exit 3"] }] }),
+);
+
 const attach = process.env.SMOKE_ATTACH === "1";
 for (const file of attach ? [] : ["dist/index.html", "dist-electron/main.js"]) {
   if (!fs.existsSync(path.join(root, file))) {
@@ -198,12 +204,24 @@ async function main() {
   await until(`!document.querySelector(".switcher")`, "the switcher to close");
 
   step("a workspace and a real shell");
-  await call("workspaces.add", workspace);
+  const added = await call("workspaces.add", workspace);
   const shell = await call("code.shell", { cwd: workspace, cols: 100, rows: 30 });
   await sleep(500);
   await call("pty.write", shell.ptyId, "echo SMOKE-$((20+22))\r");
   await until(`window.vibeforge.call("pty.snapshot", ${JSON.stringify(shell.ptyId)}).then((snap) => snap.ansi.includes("SMOKE-42"))`, "the shell to answer", 15_000);
   await call("pty.kill", shell.ptyId);
+
+  // An attached window has its own config, without the stand-in CLI.
+  if (!attach) {
+    step("a finished run copies as Markdown");
+    const workspaceId = added.workspaces.find((item) => item.path === workspace)?.id;
+    const run = await call("code.engine", { workspaceId, engineId: "smoke", cols: 100, rows: 30 });
+    await until(`window.vibeforge.call("runs.get", ${JSON.stringify(run.runId)}).then((bundle) => bundle.run.status !== "running")`, "the stand-in CLI to finish", 15_000);
+    const markdown = await call("runs.markdown", run.runId);
+    for (const part of ["- **CLI:** Smoke CLI", "exited with code 3", "SMOKE-RUN"]) {
+      if (!String(markdown).includes(part)) fail(`runs.markdown is missing "${part}"`);
+    }
+  }
 
   step("storage and search answer");
   const storage = await call("storage.summary");

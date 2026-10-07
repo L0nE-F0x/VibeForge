@@ -1,9 +1,25 @@
 import { CronExpressionParser } from "cron-parser";
 import cronstrue from "cronstrue";
-import type { Schedule } from "./types.js";
+import type { RunMeta, Schedule } from "./types.js";
 
 export const TICK_MS = 30_000;
 export const MIN_INTERVAL_MINUTES = 5;
+/** Failed runs in a row before a routine glows on Routines and Home, and its notification says so. */
+export const ROUTINE_FAILING = 3;
+
+/**
+ * How many of a routine's latest runs failed in a row, newest first: a start that failed, or a CLI
+ * that exited with an error. A run still going is skipped; one that finished, or was stopped, ends it.
+ */
+export function failStreak(runs: ReadonlyArray<Pick<RunMeta, "status" | "exitCode">>): number {
+  let streak = 0;
+  for (const run of runs) {
+    if (run.status === "running") continue;
+    if (run.status === "failed" || (run.status === "exited" && run.exitCode !== null && run.exitCode !== 0)) streak += 1;
+    else break;
+  }
+  return streak;
+}
 
 export type TickSkipReason =
   | "invalid-schedule"

@@ -66,8 +66,10 @@ if ! command -v node >/dev/null 2>&1; then
     die "Node.js is missing. On Omarchy: mise use -g node@lts (or sudo pacman -S nodejs npm)"
   fi
 fi
-node_major=$(node -p 'process.versions.node.split(".")[0]')
-((node_major >= 20)) || die "VibeForge needs Node 20 or newer (found $(node --version)). Try: mise use -g node@lts"
+# Vite, which builds the app, needs Node 20.19+ or 22.12+.
+read -r node_major node_minor < <(node -p 'process.versions.node.split(".").slice(0, 2).join(" ")')
+((node_major > 22 || (node_major == 22 && node_minor >= 12) || (node_major == 20 && node_minor >= 19))) ||
+  die "VibeForge needs Node 20.19+ or 22.12+ (found $(node --version)). Try: mise use -g node@lts"
 command -v npm >/dev/null 2>&1 || die "npm is missing next to node."
 
 if [[ -d "$DEST/.git" ]]; then

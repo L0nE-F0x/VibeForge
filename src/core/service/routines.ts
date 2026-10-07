@@ -1,5 +1,5 @@
 import path from "node:path";
-import { decideRoutineTick, decideRunNow, describeSchedule, firedAtOrAfter, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, firedAtOrAfter, isScheduleValid, mostRecentSlot, nextFireTimes, ROUTINE_FAILING, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, Schedule } from "../types.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
@@ -17,7 +17,9 @@ export class RoutineDesk {
     const now = this.core.now();
     return this.core.store.listRoutines().map((routine) => {
       const agent = routine.agentId ? this.core.store.getAgent(routine.agentId) : null;
-      const last = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0] ?? null;
+      const recent = this.core.store.queryRuns({ routineId: routine.id, limit: 20 });
+      const last = recent[0] ?? null;
+      const streak = failStreak(recent);
       const folder = agent ? this.core.firstPlace(agent.places) : null;
       const own = new Set(this.core.listLive().filter((session) => session.routineId === routine.id).map((session) => session.ptyId));
       return {
@@ -28,6 +30,8 @@ export class RoutineDesk {
         description: describeSchedule(routine.schedule),
         nextFires: routine.enabled ? nextFireTimes(routine.schedule, now, 3).map((date) => date.toISOString()) : [],
         lastRun: last ? this.core.view(last) : null,
+        failStreak: streak,
+        failing: streak >= ROUTINE_FAILING,
         writers: folder ? this.turns.writersNow(folder, own) : [],
         waiting: this.turns.waiting("routine", routine.id),
       };
@@ -155,8 +159,8 @@ export class RoutineDesk {
           kind: "routine",
           id,
           folder: cwd,
-          start: () => this.fire(id, scheduledAt, size),
-          failed: (message) => this.failedStart(routine, agent, message, scheduledAt),
+          start: () => this.fire(id, scheduledAt && this.slotAfterWait(id, scheduledAt), size),
+          failed: (message) => this.failedStart(routine, agent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
         });
         this.core.emit("routines");
         return { queued: true, behind: busy.map((writer) => writer.label) };
@@ -166,6 +170,16 @@ export class RoutineDesk {
       if (scheduledAt) this.core.store.writeRoutine({ ...routine, lastFiredAt: scheduledAt });
       return this.launchRoutine(routine, agent, size);
     });
+  }
+
+  /**
+   * The slot a routine that waited for its folder stands for once it starts: the newest one due by
+   * then. A wait that ran past the next slot is one run, not one for each slot it waited through.
+   */
+  private slotAfterWait(id: string, lined: string): string {
+    const routine = this.core.store.getRoutine(id);
+    const latest = routine ? mostRecentSlot(routine.schedule, this.core.now())?.toISOString() : undefined;
+    return latest && latest > lined ? latest : lined;
   }
 
   /** A start that failed with nobody watching: a failed run for a due slot, a notification for Run now. */

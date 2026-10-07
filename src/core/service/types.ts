@@ -103,6 +103,10 @@ export interface RoutineView extends Routine {
   description: string;
   nextFires: string[];
   lastRun: RunView | null;
+  /** Its latest runs that failed in a row. */
+  failStreak: number;
+  /** Failed often enough in a row (ROUTINE_FAILING) to glow on Routines and Home. */
+  failing: boolean;
   /** Other coding CLIs in the routine's folder right now. */
   writers: Writer[];
   /** A due slot or Run now waiting for the folder, and who it waits for. */
