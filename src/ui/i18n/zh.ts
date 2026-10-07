@@ -878,6 +878,7 @@ export const zh: Catalog = {
   "core.copyMove": "将任务移到其他工作区前，请先应用或丢弃它的副本。",
   "core.noCopy": "此任务没有单独副本。",
   "core.copyUntrusted": "此任务的副本不在 VibeForge 的 worktrees 文件夹中，因此没有动它。",
+  "core.copyOtherRepo": "此任务的副本指向另一个仓库，因此没有动它。",
   "core.stopBeforeApply": "应用改动前请先停止任务。",
   "core.stopBeforeDiscard": "丢弃副本前请先停止任务。",
   "core.stillStarting": "VibeForge 仍在启动。",

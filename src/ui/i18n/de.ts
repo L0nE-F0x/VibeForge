@@ -877,6 +877,7 @@ export const de: Catalog = {
   "core.copyMove": "Übernimm oder verwirf die Kopie der Aufgabe, bevor du sie in einen anderen Arbeitsbereich verschiebst.",
   "core.noCopy": "Diese Aufgabe hat keine eigene Kopie.",
   "core.copyUntrusted": "Die Kopie dieser Aufgabe liegt nicht in VibeForges Worktree-Ordner und wurde deshalb nicht angerührt.",
+  "core.copyOtherRepo": "Die Kopie dieser Aufgabe nennt ein anderes Repository und wurde deshalb nicht angerührt.",
   "core.stopBeforeApply": "Stoppe die Aufgabe, bevor du ihre Änderungen übernimmst.",
   "core.stopBeforeDiscard": "Stoppe die Aufgabe, bevor du ihre Kopie verwirfst.",
   "core.stillStarting": "VibeForge startet noch.",

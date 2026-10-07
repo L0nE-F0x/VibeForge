@@ -231,11 +231,16 @@ async function applyPatch(copy: WorkingCopy, patch: string): Promise<ApplyResult
 
 /**
  * Remove the copy and its branch. Safe to call when either is already gone. Throws, touching
- * nothing, when the copy isn't this task's own worktree.
+ * nothing, when the copy isn't this task's own worktree. With `repoTrusted` false (the task file
+ * names some other repository) only the copy's own folder goes; git is never run in that one.
  */
-export async function removeCopy(copy: WorkingCopy, owner: CopyOwner): Promise<void> {
+export async function removeCopy(copy: WorkingCopy, owner: CopyOwner, repoTrusted = true): Promise<void> {
   const owned = ownedCopyPath(owner, copy.path);
   if (!owned) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+  if (!repoTrusted) {
+    if (owned.real) fs.rmSync(owned.real, { recursive: true, force: true });
+    return;
+  }
   await withRepoLock(copy.repo, async () => {
     if (owned.real) {
       const removed = await git(["worktree", "remove", "--force", owned.real], copy.repo);

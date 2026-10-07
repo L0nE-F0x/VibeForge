@@ -890,6 +890,7 @@ export const en = {
   "core.copyMove": "Apply or discard the task's copy before moving it to another workspace.",
   "core.noCopy": "This task has no separate copy.",
   "core.copyUntrusted": "This task's copy is not in VibeForge's worktrees folder, so it was left alone.",
+  "core.copyOtherRepo": "This task's copy names another repository, so it was left alone.",
   "core.stopBeforeApply": "Stop the task before applying its changes.",
   "core.stopBeforeDiscard": "Stop the task before discarding its copy.",
   "core.stillStarting": "VibeForge is still starting.",
