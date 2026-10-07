@@ -19,7 +19,8 @@ What changed:
 - **Copy as Markdown (#24).** `src/core/run-markdown.ts` (pure) → `runs.markdown` → the run's ⋯ menu, copied through `app.copyText`: `navigator.clipboard` refuses in a window without focus.
 - **Failing routines (#24).** `failStreak` / `ROUTINE_FAILING` (3) in `src/core/routines.ts`. `RoutineView.failing` lights the Routines card and Home's Up next row with `needs-you`; the third failure's notification says so once.
 - Checked: `npm run coverage` 251/251 with the floor met, typecheck, lint, `vite build`, and `SMOKE_HEADLESS=1 scripts/smoke.mjs` (which now also makes a real run with a stand-in `/bin/sh` CLI and checks its Markdown). The built app was driven headless: three failed runs of a routine lit its card and Home row (screenshots), and the run menu's Copy as Markdown showed its toast without touching the real clipboard. The four PRs were merge-simulated together first. They landed as #22, #23 and #24; #21 was closed because #24 already carried it.
-- Not done: the `muse-code/key` mint/rotate check, and adding `lint`/`smoke` to the required checks. Claude Code isn't allowed to do either.
+- **Required checks.** "Protect main" now requires `test`, `typecheck`, `lint` and `smoke`. The founder applied the change Claude prepared; Claude Code isn't allowed to edit rulesets itself.
+- **Muse's plan check leaves its login alone.** Checked with the founder's real Muse login: `sha256sum ~/.config/muse/auth.json` was the same before and after a plan refresh VibeForge made on its own (15:12:33, with no Muse session in between). Afterwards `muse exec "say hi"` (1.4.3) answered: "Hi. How can I help?" is in its session log, though `exec` printed nothing. Whether Meta records each key it hands out can't be seen from this machine.
 
 
 ## The phone page (2.1.0, 2026-10-05)
