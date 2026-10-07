@@ -17,8 +17,29 @@ export function readJson<T>(file: string, fallback: T): T {
   }
 }
 
+/**
+ * Write a JSON file. One that is there and doesn't parse (a hand edit half done) is moved aside to
+ * `<name>.broken` first, so saving from the app never loses what its author wrote.
+ */
 export function writeJson(file: string, value: unknown): void {
+  setAsideBroken(file);
   writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function setAsideBroken(file: string): void {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return;
+  }
+  if (!text.trim()) return;
+  try {
+    JSON.parse(text);
+  } catch {
+    const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
+    fs.renameSync(file, aside);
+  }
 }
 
 export function readText(file: string): string {

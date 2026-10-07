@@ -882,6 +882,7 @@ export const es: Catalog = {
   "core.copyMove": "Aplica o descarta la copia de la tarea antes de moverla a otro espacio de trabajo.",
   "core.noCopy": "Esta tarea no tiene copia aparte.",
   "core.copyUntrusted": "La copia de esta tarea no está en la carpeta de worktrees de VibeForge, así que no se tocó.",
+  "core.copyOtherRepo": "La copia de esta tarea indica otro repositorio, así que no se tocó.",
   "core.stopBeforeApply": "Detén la tarea antes de aplicar sus cambios.",
   "core.stopBeforeDiscard": "Detén la tarea antes de descartar su copia.",
   "core.stillStarting": "VibeForge todavía se está iniciando.",

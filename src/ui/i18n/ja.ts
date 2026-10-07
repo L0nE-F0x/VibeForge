@@ -883,6 +883,7 @@ export const ja: Catalog = {
   "core.copyMove": "別のワークスペースへ移す前に、タスクのコピーを適用するか破棄してください。",
   "core.noCopy": "このタスクには別のコピーがありません。",
   "core.copyUntrusted": "このタスクのコピーは VibeForge の worktrees フォルダーの外にあるため、手を付けませんでした。",
+  "core.copyOtherRepo": "このタスクのコピーは別のリポジトリを指しているため、手を付けませんでした。",
   "core.stopBeforeApply": "変更を適用する前にタスクを停止してください。",
   "core.stopBeforeDiscard": "コピーを破棄する前にタスクを停止してください。",
   "core.stillStarting": "VibeForge はまだ起動中です。",

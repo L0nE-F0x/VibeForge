@@ -454,6 +454,36 @@ describe("taking turns in a folder", () => {
     expect(ctx.svc.listRoutines()[0].waiting).toBeNull();
     ctx.svc.close();
   });
+
+  it("starts a routine once after a wait that ran past its next slot", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now, appStartedAt: new Date(time.now().getTime() - INTERVAL) });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "p" });
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(routine.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * INTERVAL).toISOString() });
+
+    await ctx.svc.tick(time.now());
+    expect(ctx.svc.listRoutines()[0].waiting).not.toBeNull();
+    // Two more slots open while it is in line.
+    for (let step = 0; step < 2; step += 1) {
+      time.pass(INTERVAL);
+      await ctx.svc.tick(time.now());
+    }
+    expect(ctx.spawns).toHaveLength(1);
+
+    await ctx.exit(busy.ptyId);
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(2);
+    expect(ctx.svc.store.getRoutine(routine.id)!.lastFiredAt).toBe(new Date(Math.floor(time.now().getTime() / INTERVAL) * INTERVAL).toISOString());
+    await ctx.exit("pty-2");
+    time.pass(30_000);
+    await ctx.svc.tick(time.now());
+    expect(ctx.spawns).toHaveLength(2);
+    ctx.svc.close();
+  });
 });
 
 describe("hand off", () => {
@@ -765,6 +795,29 @@ describe("runs", () => {
     expect(git(repo, "branch", "--list", `vibeforge/${third.id}`).trim()).toBe("");
     expect(git(repo, "branch", "--list", "vibeforge/keep").trim()).not.toBe("");
     expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
+
+    // The task's own worktree, with `repo` naming some other repository: git is never run there.
+    const other = tempDir();
+    git(other, "init", "-q");
+    fs.writeFileSync(path.join(other, "a.txt"), "theirs\n");
+    git(other, "add", "a.txt");
+    git(other, "commit", "-qm", "init");
+    const fourth = ctx.svc.saveTask({ title: "Elsewhere", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    git(other, "branch", `vibeforge/${fourth.id}`);
+    const own = path.join(ctx.dataRoot, "worktrees", fourth.id);
+    git(repo, "worktree", "add", "-q", "-b", `vibeforge/${fourth.id}`, own);
+    fs.writeFileSync(path.join(own, "a.txt"), "changed\n");
+    const base = git(repo, "rev-parse", "HEAD").trim();
+    const yaml = fs.readFileSync(file(fourth.id), "utf8").replace(/^copy:.*\n(?:  .*\n)*/m, "");
+    fs.writeFileSync(file(fourth.id), `${yaml}copy:\n  path: ${own}\n  branch: vibeforge/${fourth.id}\n  base: ${base}\n  repo: ${other}\n`);
+    expect(ctx.svc.listTasks().find((item) => item.id === fourth.id)!.copyOwned).toBe(true);
+    await expect(ctx.svc.applyTaskCopy(fourth.id)).rejects.toThrow(/another repository/);
+    await expect(ctx.svc.executeTask(fourth.id)).rejects.toThrow(/another repository/);
+    await ctx.svc.discardTaskCopy(fourth.id);
+    expect(fs.existsSync(own)).toBe(false);
+    expect(fs.readFileSync(path.join(other, "a.txt"), "utf8")).toBe("theirs\n");
+    expect(git(other, "status", "--porcelain")).toBe("");
+    expect(git(other, "branch", "--list", `vibeforge/${fourth.id}`).trim()).not.toBe("");
     ctx.svc.close();
   });
 
