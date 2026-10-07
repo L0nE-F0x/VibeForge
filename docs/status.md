@@ -1,4 +1,26 @@
-# Status — 2026-10-04
+# Status — 2026-10-07
+
+## 2.2.0: an outside audit, checked and worked through (2026-10-07)
+
+Muse Code wrote an audit of the tree (`AUDIT.md`, untracked). Claude checked each claim against the code before acting:
+
+- **Wrong or overstated.** "Rewording an error silently breaks translation": `tests/unit/core-text.test.ts` already failed on any untranslated `throw new Error`. "The service layer has no tests": nothing imported `src/core/service/` directly, but `TeamService` drove it to about 89% of lines. "Errors leave no trail": page errors reach `vibeforge.log` through `console-message`. The companion tests it called failing passed (223). Its error-code migration and big file splits were left out on purpose.
+- **Missed.** Both medium items from `docs/audit.md` (2026-10-01) were still open. They are fixed now.
+
+What changed:
+
+- **Routines (#24 via #21).** A queued start stamps the newest due slot when it actually starts (`slotAfterWait`), so a wait across later slots is one run. Tested by waiting across two intervals.
+- **Task copies.** `TaskDesk.repoTrusted` requires `copy.repo` to be `repoRoot(workspace)` before Apply, Execute, Discard or Delete run git. Otherwise Apply and Execute refuse (`core.copyOtherRepo`), and Discard and Delete remove only the owned worktree folder (`removeCopy(…, repoTrusted)`). The hostile-copy test gains "own worktree, other repo".
+- **Config files.** `writeJson` moves a file that doesn't parse to `<name>.broken` (or `.broken-<ms>`) before writing (`tests/unit/fsx.test.ts`).
+- **Installer.** `scripts/install.sh` checks for Node 20.19+ or 22.12+ (Vite 7's engines). The README notes that `scripts/brand.ts` needs 22.18+.
+- **Translations (#22).** The guard reads every `new Error(…)`, thrown or rejected, including ternaries and fallbacks, plus `BLOCKER_TEXT`. It found five terminal-host errors and the crash-loop sentence shown in English. They are now `core.host*` in all 7 catalogs.
+- **Tests (#22).** `tests/unit/fixtures/service-harness.ts` is shared; `service-desks.test.ts` covers the `TeamService` calls nothing reached (continuing runs and tasks, `launchAgent`, chat rename and engine, task moves, routine pause and cancel, workspace move, update and remove). `basics.test.ts` covers ids, the config folders and the trash.
+- **Guard rails (#23).** `npm run lint` (Biome 2; correctness and suspicious rules minus ANSI regexes and hook deps; formatter off) and a CI `lint` job. The full recommended set gave about 270 findings and no bugs. `npm run coverage` (v8) with an 85% line floor on `src/core/**`; the CI `test` job runs it. `src/core` is at 91%, the window and main process about 5% (the smoke test covers those).
+- **Copy as Markdown (#24).** `src/core/run-markdown.ts` (pure) → `runs.markdown` → the run's ⋯ menu, copied through `app.copyText`: `navigator.clipboard` refuses in a window without focus.
+- **Failing routines (#24).** `failStreak` / `ROUTINE_FAILING` (3) in `src/core/routines.ts`. `RoutineView.failing` lights the Routines card and Home's Up next row with `needs-you`; the third failure's notification says so once.
+- Checked: `npm run coverage` 251/251 with the floor met, typecheck, lint, `vite build`, and `SMOKE_HEADLESS=1 scripts/smoke.mjs` (which now also makes a real run with a stand-in `/bin/sh` CLI and checks its Markdown). The built app was driven headless: three failed runs of a routine lit its card and Home row (screenshots), and the run menu's Copy as Markdown showed its toast without touching the real clipboard. The four PRs were merge-simulated together first. They landed as #22, #23 and #24; #21 was closed because #24 already carried it.
+- Not done: the `muse-code/key` mint/rotate check, and adding `lint`/`smoke` to the required checks. Claude Code isn't allowed to do either.
+
 
 ## The phone page (2.1.0, 2026-10-05)
 

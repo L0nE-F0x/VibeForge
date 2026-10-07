@@ -6,12 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-07
+
+**2.2: copy a run into an issue, see the routine that keeps failing, and a round of fixes from an outside audit.**
+
+### Added
+
+- **Copy as Markdown.** A finished run's ⋯ menu copies it ready for an issue or a pull request: the CLI and agent, the folder, when it ran and how it ended, the prompt, the end of its transcript and its patch (a long patch is cut after a whole file, and says how many more changed).
+- **A routine that keeps failing glows.** When a routine's last three runs failed, its card on Routines and its row on Home glow, with a line saying so, until a run succeeds. The notification for the third failure says "failed 3 times in a row", once.
+
 ### Fixed
 
 - **A routine that waited its turn runs once.** A routine on a short schedule that waited for another coding CLI past its next slot used to run again as soon as the first run ended. It now counts as the newest slot due when it starts, so one run covers the whole wait.
 - **A task's copy only touches its own repository.** Apply, Discard, Execute and Delete check that the repository named in the task file is the workspace's own. If it names another one, Apply refuses, and Discard and Delete remove only VibeForge's own worktree folder, without running git in that other repository.
 - **A settings file you were editing is kept.** A JSON file in the config folder that doesn't parse, such as `settings.json` with a hand edit half done, is moved to `settings.json.broken` before VibeForge saves over it. Before, the next change in Settings replaced it.
 - **The installer checks for the Node the build needs.** Node 20.19+ or 22.12+, which Vite asks for, instead of any Node 20. An older one used to pass the check and then fail the build.
+- **Terminal host problems in your language.** When the terminal host can't start, stops, or keeps stopping, the message is now translated like the rest of the window. It was English in every language.
 
 ## [2.1.1] - 2026-10-05
 
@@ -292,7 +302,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.2.0
 [2.1.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.1
 [2.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.0
 [2.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.0.0
