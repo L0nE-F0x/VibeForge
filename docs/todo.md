@@ -27,5 +27,4 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 - A routine whose third failure in a row is a failed *start* (folder or CLI gone) glows, but gets no notification: failed starts don't send a finish notification.
 
-- Restart after an update relaunches with the same arguments and environment. Worth a real click on an installer copy after the next release.
 - `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).
