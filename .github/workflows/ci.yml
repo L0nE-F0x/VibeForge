@@ -29,7 +29,22 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      # The tests, with the core's coverage floor (vitest.config.ts).
+      - run: npm run coverage
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Bug-shaped rules only (biome.json); nothing is reformatted.
+      - run: npm run lint
 
   typecheck:
     name: typecheck

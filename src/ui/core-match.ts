@@ -13,7 +13,7 @@ interface Pattern {
   regex: RegExp;
 }
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const PATTERNS: Pattern[] = (Object.keys(en) as Array<keyof typeof en>)
   .filter((key): key is CoreKey => key.startsWith("core."))
@@ -22,7 +22,7 @@ const PATTERNS: Pattern[] = (Object.keys(en) as Array<keyof typeof en>)
     const source = en[key]
       .split(/\{(\w+)\}/g)
       .map((part, index) => {
-        if (index % 2 === 0) return escape(part);
+        if (index % 2 === 0) return escapeRegex(part);
         names.push(part);
         return "(.+?)";
       })

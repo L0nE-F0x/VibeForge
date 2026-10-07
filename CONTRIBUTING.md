@@ -15,6 +15,8 @@ npm install
 npm start            # Vite + Electron, with hot reload
 npm test             # unit tests and the real PTY host, driven with /bin/bash
 npm run typecheck
+npm run lint         # Biome, bug-shaped rules only; nothing is reformatted
+npm run coverage     # the tests again, with a floor on src/core (CI runs this one)
 npm run build && npm run smoke   # the built app, driven over DevTools (SMOKE_HEADLESS=1: no window)
 ```
 

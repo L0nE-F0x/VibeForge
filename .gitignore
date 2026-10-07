@@ -7,3 +7,4 @@ dist-electron/
 .DS_Store
 .netlify/
 .vibeforge-installer
+coverage/
