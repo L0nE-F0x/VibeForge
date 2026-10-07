@@ -33,7 +33,7 @@ export function Composer({
   keepKey,
 }: {
   placeholder: string;
-  onSend: (text: string) => Promise<boolean | void>;
+  onSend: (text: string) => Promise<boolean | undefined>;
   busy?: boolean;
   disabled?: boolean;
   hint?: ReactNode;

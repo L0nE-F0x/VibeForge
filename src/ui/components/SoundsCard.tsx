@@ -35,7 +35,9 @@ export function SoundsCard() {
   }, t("sounds.saveFailed"));
   if (!sounds) return null;
 
-  const hear = (cues: Cue[]) => cues.forEach((name, index) => setTimeout(() => previewCue(name, sounds.volume), index * 650));
+  const hear = (cues: Cue[]) => {
+    for (const [index, name] of cues.entries()) setTimeout(() => previewCue(name, sounds.volume), index * 650);
+  };
 
   return (
     <div className="card vstack" style={{ gap: 12 }}>

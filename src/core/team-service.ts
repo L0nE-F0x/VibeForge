@@ -52,7 +52,7 @@ export class TeamService extends ServiceCore {
   }
 
   deleteAgent(id: string, confirmName: string): void {
-    return this.library.deleteAgent(id, confirmName);
+    this.library.deleteAgent(id, confirmName);
   }
 
   readMemory(agentId: string): string {
@@ -60,7 +60,7 @@ export class TeamService extends ServiceCore {
   }
 
   writeMemory(agentId: string, text: string): void {
-    return this.library.writeMemory(agentId, text);
+    this.library.writeMemory(agentId, text);
   }
 
   listSkills(): Skill[] {
@@ -76,7 +76,7 @@ export class TeamService extends ServiceCore {
   }
 
   setSkillAgents(skillId: string, agentIds: string[]): void {
-    return this.library.setSkillAgents(skillId, agentIds);
+    this.library.setSkillAgents(skillId, agentIds);
   }
 
   // ---------------------------------------------------------------- workspaces
@@ -94,7 +94,7 @@ export class TeamService extends ServiceCore {
   }
 
   selectWorkspace(id: string): void {
-    return this.workspaces.selectWorkspace(id);
+    this.workspaces.selectWorkspace(id);
   }
 
   moveWorkspace(id: string, toIndex: number): WorkspaceFile {
@@ -118,7 +118,7 @@ export class TeamService extends ServiceCore {
   }
 
   saveLayout(workspaceId: string, layout: LayoutNode | null): void {
-    return this.workspaces.saveLayout(workspaceId, layout);
+    this.workspaces.saveLayout(workspaceId, layout);
   }
 
   startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
@@ -160,7 +160,7 @@ export class TeamService extends ServiceCore {
   }
 
   cancelRoutineWait(id: string): void {
-    return this.routines.cancelWait(id);
+    this.routines.cancelWait(id);
   }
 
   tick(now: Date = this.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
@@ -292,11 +292,11 @@ export class TeamService extends ServiceCore {
   }
 
   markRunOpened(id: string, opened = true): void {
-    return this.runs.markRunOpened(id, opened);
+    this.runs.markRunOpened(id, opened);
   }
 
   markAllOpened(): void {
-    return this.runs.markAllOpened();
+    this.runs.markAllOpened();
   }
 
   continueRun(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched & { chatId: string | null; taskId: string | null }> {
@@ -322,10 +322,10 @@ export class TeamService extends ServiceCore {
   // ---------------------------------------------------------------- shell runs
 
   onPtyProgram(ptyId: string, argv: string[] | null, cwd: string | null = null): void {
-    return this.shellRuns.onPtyProgram(ptyId, argv, cwd);
+    this.shellRuns.onPtyProgram(ptyId, argv, cwd);
   }
 
   onPtyActivity(ptyId: string, working: boolean): void {
-    return this.shellRuns.onPtyActivity(ptyId, working);
+    this.shellRuns.onPtyActivity(ptyId, working);
   }
 }

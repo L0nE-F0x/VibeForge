@@ -17,8 +17,7 @@ export function listenControl(socketPath: string, log: LogFile, onVoice: (action
     socket.on("data", (chunk: string) => {
       buffer += chunk;
       if (buffer.length > 4096) socket.destroy();
-      let newline: number;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
+      for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
         const action = parseControl(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         if (action) onVoice(action);

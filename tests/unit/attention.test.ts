@@ -22,7 +22,10 @@ const session = (ptyId: string, workspaceId: string, patch: Partial<LiveSession>
 const claude = { program: "Claude Code", programEngineId: "claude" };
 const look = (ptys: string[] = [], workspaceId: string | null = null, chatId: string | null = null): Looking => ({ ptys: new Set(ptys), chatId, workspaceId });
 let now = 0;
-const track = (live: LiveSession[], looking: Looking | null) => trackLive(live, looking, (now += 1000));
+const track = (live: LiveSession[], looking: Looking | null) => {
+  now += 1000;
+  return trackLive(live, looking, now);
+};
 const names = (marks: Array<{ ptyId: string; attention: string }>) => marks.map((mark) => `${mark.ptyId}:${mark.attention}`);
 
 beforeEach(() => {
