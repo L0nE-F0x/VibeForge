@@ -817,6 +817,12 @@ export const zh: Catalog = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "已经来不及撤销了。",
   "core.engineMissing": "{label}（{bin}）不在 PATH 中。",
+  "core.hostSlowStart": "终端主机未能在 10 秒内启动。",
+  "core.hostExitedAtStart": "终端主机在启动时退出（代码 {code}）。",
+  "core.hostStopped": "终端主机已停止。",
+  "core.hostRequestFailed": "终端请求失败。",
+  "core.hostNotRunning": "终端主机没有运行。请重启 VibeForge。",
+  "core.hostCrashLoop": "{message} 它在五分钟内停止了 {count} 次，因此保持关闭：请重启 VibeForge。",
   "core.noEngine": "没有名为“{id}”的引擎。",
   "core.engineNotConfigured": "引擎“{id}”未配置。",
   "core.folderMustExist": "请选择一个存在的文件夹。",

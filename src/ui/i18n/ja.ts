@@ -817,6 +817,12 @@ export const ja: Catalog = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "もう元に戻せません。",
   "core.engineMissing": "{label}（{bin}）が PATH にありません。",
+  "core.hostSlowStart": "ターミナルホストが 10 秒以内に起動しませんでした。",
+  "core.hostExitedAtStart": "ターミナルホストが起動中に終了しました（コード {code}）。",
+  "core.hostStopped": "ターミナルホストが停止しました。",
+  "core.hostRequestFailed": "ターミナルへのリクエストが失敗しました。",
+  "core.hostNotRunning": "ターミナルホストが動いていません。VibeForge を再起動してください。",
+  "core.hostCrashLoop": "{message} 5 分間に {count} 回停止したため、停止したままにしています。VibeForge を再起動してください。",
   "core.noEngine": "「{id}」というエンジンはありません。",
   "core.engineNotConfigured": "エンジン「{id}」は設定されていません。",
   "core.folderMustExist": "存在するフォルダーを選んでください。",
