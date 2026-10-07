@@ -37,7 +37,7 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Add `--uninstall` to remove the launcher (your data stays).
 
-The installer needs `git`, Node 20+ (Omarchy ships mise: `mise use -g node@lts`) and `base-devel` + `python` to build the terminal engine. It clones into `~/.local/share/vibeforge-app`, checks out the newest [release](https://github.com/L0nE-F0x/VibeForge/releases), and adds `~/.local/bin/vibeforge` and a desktop entry. Set `VIBEFORGE_BRANCH=main` to follow the main branch instead.
+The installer needs `git`, Node 20.19+ or 22.12+ (Omarchy ships mise: `mise use -g node@lts`) and `base-devel` + `python` to build the terminal engine. It clones into `~/.local/share/vibeforge-app`, checks out the newest [release](https://github.com/L0nE-F0x/VibeForge/releases), and adds `~/.local/bin/vibeforge` and a desktop entry. Set `VIBEFORGE_BRANCH=main` to follow the main branch instead.
 
 **Updating.** VibeForge asks GitHub for the newest release number when it starts and every six hours (nothing else is sent; turn it off in Settings → Updates). When one is out, Help in the rail gets a dot: **Update** shows the release notes, runs the installer in a terminal you can watch, then restarts. Running the install command again does the same.
 
@@ -178,7 +178,7 @@ npm run build && npm run smoke    # the built app: every view, a language switch
                                   # (SMOKE_HEADLESS=1 draws no window; CI runs it under xvfb)
 ```
 
-The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
+The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` (Node 22.18+, which runs TypeScript as is) regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
 
 ---
 
