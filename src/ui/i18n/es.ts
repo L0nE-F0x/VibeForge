@@ -305,6 +305,10 @@ export const es: Catalog = {
   "runs.more": "Más opciones de esta ejecución",
   "runs.markReviewed": "Marcar como revisada",
   "runs.unreview": "Devolver a Pendiente de revisión",
+  "runs.copyMarkdown": "Copiar como Markdown",
+  "runs.markdownCopied": "Copiado como Markdown",
+  "runs.markdownCopiedBody": "El prompt, cómo terminó y sus cambios, listo para un issue o un pull request.",
+  "runs.markdownFailed": "No se pudo copiar la ejecución",
 
   "settings.title": "Ajustes",
   "settings.appearance": "Apariencia",

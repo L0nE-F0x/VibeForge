@@ -306,6 +306,10 @@ export const zh: Catalog = {
   "runs.more": "此运行的更多操作",
   "runs.markReviewed": "标记为已审阅",
   "runs.unreview": "放回待审阅",
+  "runs.copyMarkdown": "复制为 Markdown",
+  "runs.markdownCopied": "已复制为 Markdown",
+  "runs.markdownCopiedBody": "提示词、结束情况和改动，可直接贴进 issue 或拉取请求。",
+  "runs.markdownFailed": "无法复制这次运行",
 
   "settings.title": "设置",
   "settings.appearance": "外观",

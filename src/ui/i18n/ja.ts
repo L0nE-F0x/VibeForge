@@ -306,6 +306,10 @@ export const ja: Catalog = {
   "runs.more": "この実行のその他の操作",
   "runs.markReviewed": "レビュー済みにする",
   "runs.unreview": "レビュー待ちに戻す",
+  "runs.copyMarkdown": "Markdown でコピー",
+  "runs.markdownCopied": "Markdown でコピーしました",
+  "runs.markdownCopiedBody": "プロンプト、終わり方、変更点を issue やプルリクエストにそのまま貼れます。",
+  "runs.markdownFailed": "実行をコピーできませんでした",
 
   "settings.title": "設定",
   "settings.appearance": "外観",

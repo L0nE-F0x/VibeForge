@@ -306,6 +306,10 @@ export const fr: Catalog = {
   "runs.more": "Plus pour cette exécution",
   "runs.markReviewed": "Marquer comme relue",
   "runs.unreview": "Remettre dans À relire",
+  "runs.copyMarkdown": "Copier en Markdown",
+  "runs.markdownCopied": "Copié en Markdown",
+  "runs.markdownCopiedBody": "Le prompt, la fin et les changements, prêts pour une issue ou une pull request.",
+  "runs.markdownFailed": "Impossible de copier l'exécution",
 
   "settings.title": "Réglages",
   "settings.appearance": "Apparence",

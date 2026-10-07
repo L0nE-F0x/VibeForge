@@ -314,6 +314,10 @@ export const en = {
   "runs.more": "More for this run",
   "runs.markReviewed": "Mark as reviewed",
   "runs.unreview": "Put it back in Needs review",
+  "runs.copyMarkdown": "Copy as Markdown",
+  "runs.markdownCopied": "Copied as Markdown",
+  "runs.markdownCopiedBody": "The prompt, how it ended and its changes, ready for an issue or a pull request.",
+  "runs.markdownFailed": "Could not copy the run",
 
   // ---------------------------------------------------------------- settings
   "settings.title": "Settings",

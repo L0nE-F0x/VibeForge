@@ -305,6 +305,10 @@ export const de: Catalog = {
   "runs.more": "Mehr zu diesem Lauf",
   "runs.markReviewed": "Als geprüft markieren",
   "runs.unreview": "Wieder zur Prüfung legen",
+  "runs.copyMarkdown": "Als Markdown kopieren",
+  "runs.markdownCopied": "Als Markdown kopiert",
+  "runs.markdownCopiedBody": "Prompt, Ende und Änderungen, bereit für ein Issue oder einen Pull Request.",
+  "runs.markdownFailed": "Der Lauf konnte nicht kopiert werden",
 
   "settings.title": "Einstellungen",
   "settings.appearance": "Darstellung",

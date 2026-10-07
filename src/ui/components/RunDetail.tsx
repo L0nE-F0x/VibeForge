@@ -149,6 +149,11 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
     push("success", t("run.continued"), t("run.continuedBody"));
   }, t("tasks.continueFailed"));
   const [stop, stopping] = useAction(async () => run && call("runs.stop", run.id), t("run.stopFailed"));
+  const [copyMarkdown] = useAction(async () => {
+    if (!run) return;
+    await call("app.copyText", await call("runs.markdown", run.id));
+    push("success", t("runs.markdownCopied"), t("runs.markdownCopiedBody"));
+  }, t("runs.markdownFailed"));
   const agents = useAgents().data ?? [];
   const [handOff, handingOff] = useAction(async (agentId: string) => {
     if (!run) return;
@@ -219,6 +224,7 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
             ...(run.status === "running"
               ? []
               : [
+                  { label: t("runs.copyMarkdown"), icon: Copy, onSelect: () => void copyMarkdown() },
                   {
                     label: run.openedAt ? t("runs.unreview") : t("runs.markReviewed"),
                     icon: run.openedAt ? ListRestart : CheckCheck,

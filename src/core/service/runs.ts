@@ -1,9 +1,11 @@
+import os from "node:os";
 import path from "node:path";
 import { isDirectory } from "../fsx.js";
 import { diffSince } from "../vcs.js";
 import { plainPrompt } from "../preamble.js";
 import { readRunFiles, RUN_FILES, type RunFiles } from "../runs.js";
 import { repairBlankCapture } from "../restore-screen.js";
+import { runMarkdown } from "../run-markdown.js";
 import { compressRun, folderBytes, hasRunFile, planCleanup, readRunText } from "../run-storage.js";
 import { grokHome, museHome, readGrokPrompts, readMusePrompts } from "../session-prompts.js";
 import type { RunQuery } from "../store.js";
@@ -156,6 +158,23 @@ export class RunDesk {
       if (hasRunFile(run.dir, RUN_FILES.patch)) return readRunText(run.dir, RUN_FILES.patch);
     }
     return diffSince(run.cwd, run.gitStart);
+  }
+
+  /** A finished run as Markdown for an issue or a pull request: the prompt, how it ended, its patch. */
+  async runMarkdown(id: string): Promise<string> {
+    const { run, files } = await this.loadRun(id);
+    const patch = run.dir && run.status !== "running" && hasRunFile(run.dir, RUN_FILES.patch) ? readRunText(run.dir, RUN_FILES.patch) : "";
+    const agent = run.agentId ? this.core.store.getAgent(run.agentId) : null;
+    return runMarkdown({
+      run,
+      engineLabel: this.core.store.readEngineRows().find((row) => row.id === run.engine)?.label ?? null,
+      agentName: agent?.name ?? null,
+      typedPrompts: files.prompts,
+      transcript: files.transcript || files.scrollback,
+      patch,
+      gitSummary: files.git,
+      home: os.homedir(),
+    });
   }
 
   /** Runs matching the words typed, in their title, prompt, transcript or folder; best first. */

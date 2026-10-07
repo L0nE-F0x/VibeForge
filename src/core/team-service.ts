@@ -307,6 +307,10 @@ export class TeamService extends ServiceCore {
     return this.runs.runDiff(id, source);
   }
 
+  runMarkdown(id: string): Promise<string> {
+    return this.runs.runMarkdown(id);
+  }
+
   searchRuns(text: string, limit?: number): RunHit[] {
     return this.runs.searchRuns(text, limit);
   }

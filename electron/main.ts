@@ -588,6 +588,7 @@ function handlers(): Handlers {
     "runs.continue": (id, size) => s().continueRun(id, size),
     "runs.search": (text, limit) => s().searchRuns(String(text ?? "").slice(0, 200), typeof limit === "number" ? limit : undefined),
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
+    "runs.markdown": (id) => s().runMarkdown(id),
     "storage.summary": () => s().storageSummary(),
     "storage.tidy": () => s().maintainRuns(),
 
