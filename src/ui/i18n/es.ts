@@ -821,6 +821,12 @@ export const es: Catalog = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "Ya es tarde para deshacerlo.",
   "core.engineMissing": "{label} ({bin}) no está en el PATH.",
+  "core.hostSlowStart": "El host de terminales no arrancó en 10 segundos.",
+  "core.hostExitedAtStart": "El host de terminales se cerró al arrancar (código {code}).",
+  "core.hostStopped": "El host de terminales se detuvo.",
+  "core.hostRequestFailed": "La petición al terminal falló.",
+  "core.hostNotRunning": "El host de terminales no está en marcha. Reinicia VibeForge.",
+  "core.hostCrashLoop": "{message} Se detuvo {count} veces en cinco minutos, así que se queda apagado: reinicia VibeForge.",
   "core.noEngine": "No hay ningún motor llamado «{id}».",
   "core.engineNotConfigured": "El motor «{id}» no está configurado.",
   "core.folderMustExist": "Elige una carpeta que exista.",

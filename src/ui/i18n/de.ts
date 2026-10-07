@@ -821,6 +821,12 @@ export const de: Catalog = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "Dafür ist es zu spät zum Rückgängigmachen.",
   "core.engineMissing": "{label} ({bin}) ist nicht im PATH.",
+  "core.hostSlowStart": "Der Terminal-Host ist nicht innerhalb von 10 Sekunden gestartet.",
+  "core.hostExitedAtStart": "Der Terminal-Host hat sich beim Start beendet (Code {code}).",
+  "core.hostStopped": "Der Terminal-Host wurde beendet.",
+  "core.hostRequestFailed": "Die Terminal-Anfrage ist fehlgeschlagen.",
+  "core.hostNotRunning": "Der Terminal-Host läuft nicht. Starte VibeForge neu.",
+  "core.hostCrashLoop": "{message} Er wurde in fünf Minuten {count}-mal beendet und bleibt deshalb aus: Starte VibeForge neu.",
   "core.noEngine": "Es gibt keine Engine namens „{id}“.",
   "core.engineNotConfigured": "Die Engine „{id}“ ist nicht eingerichtet.",
   "core.folderMustExist": "Wähle einen Ordner, der existiert.",

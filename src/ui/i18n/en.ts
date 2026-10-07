@@ -834,6 +834,12 @@ export const en = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "It is too late to undo that.",
   "core.engineMissing": "{label} ({bin}) is not on PATH.",
+  "core.hostSlowStart": "The terminal host did not start within 10 seconds.",
+  "core.hostExitedAtStart": "The terminal host exited during start (code {code}).",
+  "core.hostStopped": "The terminal host stopped.",
+  "core.hostRequestFailed": "Terminal request failed.",
+  "core.hostNotRunning": "The terminal host is not running. Restart VibeForge.",
+  "core.hostCrashLoop": "{message} It stopped {count} times in five minutes, so it stays off: restart VibeForge.",
   "core.noEngine": "There is no engine called \"{id}\".",
   "core.engineNotConfigured": "The engine \"{id}\" is not configured.",
   "core.folderMustExist": "Choose a folder that exists.",

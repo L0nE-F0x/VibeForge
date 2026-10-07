@@ -821,6 +821,12 @@ export const pt: Catalog = {
   // ---------------------------------------------------------------- messages from the main process
   "core.tooLate": "Já é tarde para desfazer.",
   "core.engineMissing": "{label} ({bin}) não está no PATH.",
+  "core.hostSlowStart": "O host de terminais não iniciou em 10 segundos.",
+  "core.hostExitedAtStart": "O host de terminais saiu durante o início (código {code}).",
+  "core.hostStopped": "O host de terminais parou.",
+  "core.hostRequestFailed": "A solicitação ao terminal falhou.",
+  "core.hostNotRunning": "O host de terminais não está rodando. Reinicie o VibeForge.",
+  "core.hostCrashLoop": "{message} Ele parou {count} vezes em cinco minutos, então fica desligado: reinicie o VibeForge.",
   "core.noEngine": "Não há motor chamado \"{id}\".",
   "core.engineNotConfigured": "O motor \"{id}\" não está configurado.",
   "core.folderMustExist": "Escolha uma pasta que exista.",
