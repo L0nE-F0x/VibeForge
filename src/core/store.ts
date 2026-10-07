@@ -530,7 +530,8 @@ export class Store {
     const defaults = defaultSettings();
     const raw = readJson<Partial<Settings> | null>(file, null);
     if (!raw) {
-      // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its author.
+      // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its
+      // author, and moved aside to settings.json.broken if the app saves settings before it is fixed.
       if (!fs.existsSync(file)) writeJson(file, defaults);
       return defaults;
     }
