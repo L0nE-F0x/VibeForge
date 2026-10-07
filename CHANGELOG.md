@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A routine that waited its turn runs once.** A routine on a short schedule that waited for another coding CLI past its next slot used to run again as soon as the first run ended. It now counts as the newest slot due when it starts, so one run covers the whole wait.
+- **A task's copy only touches its own repository.** Apply, Discard, Execute and Delete check that the repository named in the task file is the workspace's own. If it names another one, Apply refuses, and Discard and Delete remove only VibeForge's own worktree folder, without running git in that other repository.
+- **A settings file you were editing is kept.** A JSON file in the config folder that doesn't parse, such as `settings.json` with a hand edit half done, is moved to `settings.json.broken` before VibeForge saves over it. Before, the next change in Settings replaced it.
+- **The installer checks for the Node the build needs.** Node 20.19+ or 22.12+, which Vite asks for, instead of any Node 20. An older one used to pass the check and then fail the build.
+
 ## [2.1.1] - 2026-10-05
 
 **2.1.1: the words catch up with the app.**
