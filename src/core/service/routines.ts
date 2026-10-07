@@ -1,5 +1,5 @@
 import path from "node:path";
-import { decideRoutineTick, decideRunNow, describeSchedule, firedAtOrAfter, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, firedAtOrAfter, isScheduleValid, mostRecentSlot, nextFireTimes, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, Schedule } from "../types.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
@@ -155,8 +155,8 @@ export class RoutineDesk {
           kind: "routine",
           id,
           folder: cwd,
-          start: () => this.fire(id, scheduledAt, size),
-          failed: (message) => this.failedStart(routine, agent, message, scheduledAt),
+          start: () => this.fire(id, scheduledAt && this.slotAfterWait(id, scheduledAt), size),
+          failed: (message) => this.failedStart(routine, agent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
         });
         this.core.emit("routines");
         return { queued: true, behind: busy.map((writer) => writer.label) };
@@ -166,6 +166,16 @@ export class RoutineDesk {
       if (scheduledAt) this.core.store.writeRoutine({ ...routine, lastFiredAt: scheduledAt });
       return this.launchRoutine(routine, agent, size);
     });
+  }
+
+  /**
+   * The slot a routine that waited for its folder stands for once it starts: the newest one due by
+   * then. A wait that ran past the next slot is one run, not one for each slot it waited through.
+   */
+  private slotAfterWait(id: string, lined: string): string {
+    const routine = this.core.store.getRoutine(id);
+    const latest = routine ? mostRecentSlot(routine.schedule, this.core.now())?.toISOString() : undefined;
+    return latest && latest > lined ? latest : lined;
   }
 
   /** A start that failed with nobody watching: a failed run for a due slot, a notification for Run now. */
