@@ -174,6 +174,8 @@ In Code, drag a pane by its title bar onto another pane: the middle swaps them, 
 ```bash
 npm test            # unit tests + the real PTY host driven with /bin/bash (never a model CLI)
 npm run typecheck
+npm run lint        # Biome, bug-shaped rules only
+npm run coverage    # the tests with coverage; src/core keeps 85% of its lines covered
 npm run build && npm run smoke    # the built app: every view, a language switch, Ctrl+K and a shell
                                   # (SMOKE_HEADLESS=1 draws no window; CI runs it under xvfb)
 ```
