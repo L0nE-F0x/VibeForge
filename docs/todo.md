@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.1.0, 2026-10-05, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.2.0, 2026-10-07, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -8,7 +8,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.1.0, 2026-10-05, is the latest
 - [ ] **The last English in other languages.** The tray menu, the quit question, the "still running in the tray" notice and the core's run-finished notifications are still in English, and so are cronstrue's schedule descriptions and git's change summaries. The window and the phone page are translated.
 - [ ] **Gemini plan limits**, when the next Gemini Pro lands. Gemini CLI's `/stats` quota comes from the Code Assist API (`retrieveUserQuota`, per model, with a project from `loadCodeAssist`). Its Google access token lasts an hour and only Gemini CLI renews it, so a read-only approach would show "sign-in expired" unless Gemini CLI ran recently. Work out the request from Gemini CLI's own source before adding it.
 - [ ] **Token usage from more CLIs.** Kimi's session logs aren't read yet (its plan limits are), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at.
-- [ ] **Make the CI smoke job a required check.** It has passed on every pull request since 1.3.0.
+- [ ] **Make the `smoke` and `lint` CI jobs required checks** in the "Protect main" ruleset. `smoke` has passed on every pull request since 1.3.0 and `lint` since 2.2.0. Claude Code isn't allowed to edit the ruleset, so the founder does this one.
 
 ## Only checked with stand-ins
 
@@ -25,6 +25,9 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 - [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
 
 ## Known rough edges
+
+- Muse's plan limits ask `POST api.meta.ai/muse-code/key`, which also answers with an inference key (thrown away). Nobody has confirmed whether each call mints a new key; Muse kept working with Plan limits on since 2.1.0. Claude Code isn't allowed to read the CLI's sign-in to check it.
+- A routine whose third failure in a row is a failed *start* (folder or CLI gone) glows, but gets no notification: failed starts don't send a finish notification.
 
 - Restart after an update relaunches with the same arguments and environment. Worth a real click on an installer copy after the next release.
 - `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).
