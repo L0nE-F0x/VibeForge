@@ -792,6 +792,7 @@ export const de: Catalog = {
   "routines.missingAgent": "Agent fehlt",
   "routines.nextAt": "nächster {time}",
   "routines.missed": "Verpasst, während VibeForge geschlossen war: {when}. Nicht nachgeholt.",
+  "routines.failing": "Die letzten {count} Läufe sind fehlgeschlagen. „Letzter Lauf“ zeigt, warum.",
   "routines.runNow": "Jetzt ausführen",
   "routines.lastRun": "Letzter Lauf",
   "routines.saved": "Routine gespeichert",

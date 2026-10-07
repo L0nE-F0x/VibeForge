@@ -319,6 +319,27 @@ describe("routines", () => {
     ctx.svc.close();
   });
 
+  it("lights a routine whose last runs failed in a row, and says so once", async () => {
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Lint", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "p" });
+    const runOnce = async (code: number) => {
+      const run = started(await ctx.svc.runRoutineNow(routine.id));
+      await ctx.exit(run.ptyId, code);
+    };
+    await runOnce(1);
+    await runOnce(2);
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ failStreak: 2, failing: false });
+    await runOnce(1);
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ failStreak: 3, failing: true });
+    await runOnce(1);
+    expect(ctx.notes.map((note) => note.body.includes("failed 3 times in a row"))).toEqual([false, false, true, false]);
+    // One good run puts it out.
+    await runOnce(0);
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ failStreak: 0, failing: false });
+    ctx.svc.close();
+  });
+
   it("does not fire a slot that passed before the routine was saved", async () => {
     const ctx = setup({ appStartedAt: new Date(0) });
     const agent = await agentIn(ctx);

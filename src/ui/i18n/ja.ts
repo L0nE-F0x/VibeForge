@@ -793,6 +793,7 @@ export const ja: Catalog = {
   "routines.missingAgent": "エージェントがいません",
   "routines.nextAt": "次回 {time}",
   "routines.missed": "閉じている間に見送りました：{when}。再実行はしていません。",
+  "routines.failing": "直近 {count} 回の実行が失敗しました。「前回の実行」で理由を確認できます。",
   "routines.runNow": "今すぐ実行",
   "routines.lastRun": "前回の実行",
   "routines.saved": "ルーティンを保存しました",

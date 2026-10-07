@@ -793,6 +793,7 @@ export const zh: Catalog = {
   "routines.missingAgent": "智能体缺失",
   "routines.nextAt": "下次 {time}",
   "routines.missed": "关闭期间错过：{when}。未补跑。",
+  "routines.failing": "最近 {count} 次运行都失败了。“上次运行”里能看到原因。",
   "routines.runNow": "立即运行",
   "routines.lastRun": "上次运行",
   "routines.saved": "例行任务已保存",

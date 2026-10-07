@@ -793,6 +793,7 @@ export const fr: Catalog = {
   "routines.missingAgent": "Agent manquant",
   "routines.nextAt": "prochaine {time}",
   "routines.missed": "Manquée pendant la fermeture : {when}. Elle n'a pas été rejouée.",
+  "routines.failing": "Ses {count} dernières exécutions ont échoué. « Dernière exécution » montre pourquoi.",
   "routines.runNow": "Lancer maintenant",
   "routines.lastRun": "Dernière exécution",
   "routines.saved": "Routine enregistrée",

@@ -805,6 +805,7 @@ export const en = {
   "routines.missingAgent": "Missing agent",
   "routines.nextAt": "next {time}",
   "routines.missed": "Missed while closed: {when}. It was not replayed.",
+  "routines.failing": "Its last {count} runs failed. Last run shows why.",
   "routines.runNow": "Run now",
   "routines.lastRun": "Last run",
   "routines.saved": "Routine saved",

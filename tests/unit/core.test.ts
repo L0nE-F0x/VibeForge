@@ -7,7 +7,7 @@ import { normalizeEngineRows, planLaunch, programOf, resumeArgsFromTranscript, s
 import { listDir } from "../../src/core/files.js";
 import { cwdAllowed, isPathInside } from "../../src/core/places.js";
 import { buildPreamble, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
-import { decideRoutineTick, decideRunNow, describeSchedule, isScheduleValid, mostRecentSlot, nextFireTimes } from "../../src/core/routines.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, isScheduleValid, mostRecentSlot, nextFireTimes } from "../../src/core/routines.js";
 import { allocateRunDir, normalizeRun, runFolderStamp, writeRunMeta } from "../../src/core/runs.js";
 import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
 import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/tasks.js";
@@ -484,5 +484,15 @@ describe("day headings", () => {
     expect(dayHeading(at(8, 20), "en", now)).toBe("Sep 20");
     expect(dayHeading(at(11, 31, 10, 2025), "en", now)).toBe("Dec 31, 2025");
     expect(dayHeading(at(8, 28), "de", now)).toBe("Gestern");
+  });
+});
+
+describe("a routine's failures in a row", () => {
+  it("counts failed starts and error exits from the newest, skipping a live run", () => {
+    const run = (status: RunMeta["status"], exitCode: number | null = null) => ({ status, exitCode });
+    expect(failStreak([])).toBe(0);
+    expect(failStreak([run("running"), run("exited", 1), run("failed"), run("exited", 0), run("exited", 1)])).toBe(2);
+    expect(failStreak([run("stopped"), run("exited", 1)])).toBe(0);
+    expect(failStreak([run("exited", null), run("failed")])).toBe(0);
   });
 });

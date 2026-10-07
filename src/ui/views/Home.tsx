@@ -334,7 +334,7 @@ export function HomeView() {
               )}
               <div className="vstack" style={{ gap: 6 }}>
                 {upcoming.map(({ routine, at }) => (
-                  <button key={routine.id} type="button" className="run-row" onClick={() => go({ view: "routines", routineId: routine.id })}>
+                  <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
                     <CalendarClock size={14} className="accent-text" />
                     <span className="vstack grow" style={{ gap: 1 }}>
                       <span className="title truncate">{routine.name}</span>

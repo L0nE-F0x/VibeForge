@@ -1,5 +1,5 @@
 import path from "node:path";
-import { decideRoutineTick, decideRunNow, describeSchedule, firedAtOrAfter, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
+import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, firedAtOrAfter, ROUTINE_FAILING, isScheduleValid, nextFireTimes, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, Schedule } from "../types.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
@@ -17,7 +17,9 @@ export class RoutineDesk {
     const now = this.core.now();
     return this.core.store.listRoutines().map((routine) => {
       const agent = routine.agentId ? this.core.store.getAgent(routine.agentId) : null;
-      const last = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0] ?? null;
+      const recent = this.core.store.queryRuns({ routineId: routine.id, limit: 20 });
+      const last = recent[0] ?? null;
+      const streak = failStreak(recent);
       const folder = agent ? this.core.firstPlace(agent.places) : null;
       const own = new Set(this.core.listLive().filter((session) => session.routineId === routine.id).map((session) => session.ptyId));
       return {
@@ -28,6 +30,8 @@ export class RoutineDesk {
         description: describeSchedule(routine.schedule),
         nextFires: routine.enabled ? nextFireTimes(routine.schedule, now, 3).map((date) => date.toISOString()) : [],
         lastRun: last ? this.core.view(last) : null,
+        failStreak: streak,
+        failing: streak >= ROUTINE_FAILING,
         writers: folder ? this.turns.writersNow(folder, own) : [],
         waiting: this.turns.waiting("routine", routine.id),
       };

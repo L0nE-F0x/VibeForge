@@ -792,6 +792,7 @@ export const es: Catalog = {
   "routines.missingAgent": "Falta el agente",
   "routines.nextAt": "próxima {time}",
   "routines.missed": "Se perdió con VibeForge cerrado: {when}. No se repitió.",
+  "routines.failing": "Sus últimas {count} ejecuciones fallaron. «Última ejecución» muestra por qué.",
   "routines.runNow": "Ejecutar ahora",
   "routines.lastRun": "Última ejecución",
   "routines.saved": "Rutina guardada",
