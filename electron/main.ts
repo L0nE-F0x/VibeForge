@@ -212,7 +212,7 @@ const dock = new Dock(
   },
 );
 
-const usage = new UsageScanner(os.homedir());
+const usage = new UsageScanner(os.homedir(), { ledger: path.join(roots.dataRoot, "usage-days.json") });
 const plans = new PlanWatcher({ home: os.homedir(), file: path.join(roots.dataRoot, "plans.json"), agent: `VibeForge/${app.getVersion()}` });
 /** What was already announced about plan limits, so each step is told once per window. */
 const quotaAlerts = new QuotaAlerts(path.join(roots.dataRoot, "quota-alerts.json"));

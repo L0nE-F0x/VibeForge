@@ -276,6 +276,45 @@
   height: 3px;
 }
 
+/* The month's 30 days and all time's weeks: thin columns a pixel apart. */
+.usage-sub .block-bars.dense {
+  width: auto;
+  gap: 1px;
+}
+
+/* Today, week, month, all time: quiet tabs under the title, the chosen one underlined. */
+.usage-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  padding: 0 9px 6px;
+}
+
+.usage-periods button {
+  padding: 2px 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+}
+
+.usage-periods button:hover {
+  color: var(--accent);
+}
+
+.usage-periods button[aria-pressed="true"] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.usage-together .usage-head {
+  color: var(--fg-3);
+}
+
+.usage-together .usage-head b {
+  font-size: 15px;
+}
+
 .usage-title {
   display: flex;
   align-items: center;

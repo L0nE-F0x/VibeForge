@@ -48,21 +48,31 @@ describe("usage", () => {
       JSON.stringify({ messages: [{ type: "user" }, { type: "gemini", timestamp: at(0), model: "gemini-3-pro", tokens: { input: 80, output: 20, cached: 10, thoughts: 5, tool: 0, total: 105 } }] }),
     );
 
-    const scanner = new UsageScanner(home, () => NOW, {});
+    const scanner = new UsageScanner(home, { now: () => NOW, env: {} });
     const first = await scanner.scan();
     const by = (id: string) => first.sources.find((source) => source.id === id)!;
     expect(first.sources.map((source) => source.id)).toEqual(["claude", "codex", "grok", "gemini"]);
-    expect(by("claude").today).toEqual({ total: 1160, cached: 1000, output: 50 });
-    expect(by("claude").week.total).toBe(2320);
-    expect(by("claude").days).toEqual([0, 0, 0, 0, 0, 1160, 1160]);
-    expect(by("claude").models).toHaveLength(2);
-    expect(by("claude").models).toContainEqual({ model: "claude-opus-5", total: 1160 });
-    expect(by("codex")).toMatchObject({ today: { total: 340, cached: 200, output: 40 }, models: [{ model: "gpt-5-codex", total: 340 }] });
+    expect(by("claude").periods.today.tokens).toEqual({ total: 1160, cached: 1000, output: 50 });
+    expect(by("claude").periods.week.tokens.total).toBe(2320);
+    expect(by("claude").periods.week.bars).toEqual([0, 0, 0, 0, 0, 1160, 1160]);
+    expect(by("claude").periods.week.models).toHaveLength(2);
+    expect(by("claude").periods.week.models).toContainEqual({ model: "claude-opus-5", total: 1160 });
+    // m3, nine days ago, is in the month and all time but not the week.
+    expect(by("claude").periods.month.tokens.total).toBe(3480);
+    expect(by("claude").periods.month.bars).toHaveLength(30);
+    expect(by("claude").periods.month.bars.slice(-10)).toEqual([1160, 0, 0, 0, 0, 0, 0, 0, 1160, 1160]);
+    expect(by("claude").periods.all.tokens.total).toBe(3480);
+    expect(by("claude").periods.all.bars).toEqual([1160, 2320]);
+    expect(by("claude").since).toBe("2026-09-17");
+    expect(by("codex").periods.today).toMatchObject({ tokens: { total: 340, cached: 200, output: 40 }, models: [{ model: "gpt-5-codex", total: 340 }] });
     // The weekly limit already reset, so only the 5-hour one is left.
     expect(by("codex").limits).toEqual([{ windowMinutes: 300, usedPercent: 42, resetsAt: new Date(Date.parse(at(0)) + 36_000_000).toISOString() }]);
     expect(by("codex").limitsAt).toBe(at(0));
-    expect(by("grok").days[4]).toBe(5000);
-    expect(by("gemini").today).toEqual({ total: 105, cached: 10, output: 25 });
+    expect(by("grok").periods.week.bars[4]).toBe(5000);
+    // All time goes back to Claude's first week for every CLI, so the columns line up.
+    expect(by("grok").periods.all.bars).toEqual([0, 5000]);
+    expect(by("grok").since).toBe("2026-09-24");
+    expect(by("gemini").periods.today.tokens).toEqual({ total: 105, cached: 10, output: 25 });
 
     const museAt = new Date(at(0)).getTime() * 1000;
     const museCall = (id: string, stream: string) =>
@@ -87,16 +97,79 @@ describe("usage", () => {
       ].join("\n"),
     );
     write(path.join(museDir, "subagent", "child", "session.jsonl"), `${museCall("b", "child")}\n`);
-    const withMuse = await new UsageScanner(home, () => NOW, {}).scan();
+    const withMuse = await new UsageScanner(home, { now: () => NOW, env: {} }).scan();
     const muse = withMuse.sources.find((source) => source.id === "muse")!;
-    expect(muse.today).toEqual({ total: 250, cached: 160, output: 40 });
-    expect(muse.models).toEqual([{ model: "muse-spark-1.3", total: 250 }]);
+    expect(muse.periods.today.tokens).toEqual({ total: 250, cached: 160, output: 40 });
+    expect(muse.periods.today.models).toEqual([{ model: "muse-spark-1.3", total: 250 }]);
     expect(muse.limits).toEqual([{ windowMinutes: 300, usedPercent: 10, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString() }]);
     expect(muse.limitsAt).toBe(at(0));
 
     // A log that grows is read from where the last pass stopped.
     fs.appendFileSync(session, `${claudeLine("m4", at(0), { input_tokens: 1, output_tokens: 1 })}\n`);
     const second = await scanner.scan();
-    expect(second.sources.find((source) => source.id === "claude")!.today.total).toBe(1162);
+    expect(second.sources.find((source) => source.id === "claude")!.periods.today.tokens.total).toBe(1162);
+  });
+
+  it("keeps each day in its ledger after the CLI clears the log", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const ledger = path.join(home, "data", "usage-days.json");
+    const old = path.join(home, ".claude", "projects", "-p", "old.jsonl");
+    const call = { input_tokens: 100, output_tokens: 20 };
+    write(old, `${claudeLine("a", at(40), call)}\n${claudeLine("b", at(3), call)}\n`);
+    const scanner = () => new UsageScanner(home, { now: () => NOW, env: {}, ledger });
+
+    const first = (await scanner().scan()).sources[0];
+    expect(first.periods.all.tokens.total).toBe(240);
+    expect(first.periods.month.tokens.total).toBe(120);
+    expect(first.since).toBe("2026-08-17");
+    // A column per 7 days, back to the first week with tokens (40 days ago is in the sixth week back).
+    expect(first.periods.all.bars).toEqual([120, 0, 0, 0, 0, 120]);
+    const saved = JSON.parse(fs.readFileSync(ledger, "utf8"));
+    expect(saved.scanned).toBe("2026-09-26");
+    expect(saved.days.claude["2026-08-17"]["claude-opus-5-5"]).toEqual({ total: 120, cached: 0, output: 20 });
+
+    // Claude Code deletes the log; a new VibeForge still counts both days.
+    fs.rmSync(old);
+    const after = (await scanner().scan()).sources[0];
+    expect(after.periods.all.tokens.total).toBe(240);
+    expect(after.periods.week.tokens.total).toBe(120);
+  });
+
+  it("reads the days it missed while closed, and only the week once caught up", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const ledger = path.join(home, "usage-days.json");
+    const file = path.join(home, ".claude", "projects", "-p", "s.jsonl");
+    // Last opened 12 days ago; a session that ended 10 days ago was never seen.
+    write(ledger, JSON.stringify({ scanned: "2026-09-14", days: { claude: { "2026-09-14": { "claude-opus-5-5": { total: 5, cached: 0, output: 1 } } } } }));
+    write(file, `${claudeLine("x", at(10), { input_tokens: 50 })}\n`);
+    const ten = new Date(2026, 8, 16, 18).getTime() / 1000;
+    fs.utimesSync(file, ten, ten);
+    // A log older than the last pass isn't read again.
+    const stale = path.join(home, ".claude", "projects", "-p", "stale.jsonl");
+    write(stale, `${claudeLine("y", at(20), { input_tokens: 999 })}\n`);
+    const twenty = new Date(2026, 8, 6, 18).getTime() / 1000;
+    fs.utimesSync(stale, twenty, twenty);
+
+    const scanner = new UsageScanner(home, { now: () => NOW, env: {}, ledger });
+    const first = (await scanner.scan()).sources[0];
+    expect(first.periods.all.tokens.total).toBe(55);
+    expect(first.periods.month.bars.slice(-13, -9)).toEqual([5, 0, 50, 0]);
+
+    // Caught up: the next pass reads the week only, and the ledger keeps the rest.
+    fs.appendFileSync(file, `${claudeLine("z", at(0), { input_tokens: 7 })}\n`);
+    const second = (await scanner.scan()).sources[0];
+    expect(second.periods.all.tokens.total).toBe(62);
+    expect(second.periods.today.tokens.total).toBe(7);
+  });
+
+  it("starts over from a ledger it can't read", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const ledger = path.join(home, "usage-days.json");
+    write(ledger, JSON.stringify({ scanned: 12, days: { claude: { "not a day": {}, "2026-09-25": { m: { total: "lots" }, n: { total: 3 } } }, codex: null } }));
+    write(path.join(home, ".claude", "projects", "-p", "s.jsonl"), `${claudeLine("a", at(0), { input_tokens: 10 })}\n`);
+    const [claude] = (await new UsageScanner(home, { now: () => NOW, env: {}, ledger }).scan()).sources;
+    expect(claude.periods.all.tokens.total).toBe(13);
+    expect(claude.periods.all.models).toEqual([{ model: "claude-opus-5-5", total: 10 }, { model: "n", total: 3 }]);
+    expect(Object.keys(JSON.parse(fs.readFileSync(ledger, "utf8")).days.claude)).toEqual(["2026-09-25", "2026-09-26"]);
   });
 });

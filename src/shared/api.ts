@@ -94,7 +94,7 @@ export type {
   PlanSummary,
   Activity,
 };
-export type { UsageSource, UsageLimit, Tokens } from "../core/usage.js";
+export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
 export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
 

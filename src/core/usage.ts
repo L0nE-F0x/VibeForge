@@ -1,13 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
+import { readJson, writeJson } from "./fsx.js";
 
 // Token usage read from the logs the coding CLIs already keep on this machine. Nothing is sent
 // anywhere and no API is called: Claude Code, Codex, Grok Build, Gemini CLI and Muse Code each
 // write what every model call used, and this adds it up per day. Append-only logs are read from
 // where the last pass stopped, so a rescan costs only what was written since.
+//
+// The CLIs clear their own old logs (Claude Code after 30 days), so each day's count is also kept
+// in a small ledger of VibeForge's own. That is what the month and all time add up, and a day
+// stays counted after its logs are gone.
 
-/** How far back usage is kept, in days, today included. */
+/** How far back the logs are read on every pass, in days, today included. Older days come from the ledger. */
 export const USAGE_DAYS = 7;
+/** The days the month adds up, today included. */
+export const MONTH_DAYS = 30;
+/** At most this many weeks of bars for all time; the total still covers every day. */
+export const ALL_WEEKS = 16;
+
+export type UsagePeriod = "today" | "week" | "month" | "all";
 
 export interface Tokens {
   /** Everything the model read and wrote: fresh input, cache reads and writes, and output. */
@@ -25,15 +36,25 @@ export interface UsageLimit {
   resetsAt: string | null;
 }
 
-export interface UsageSource {
-  /** The engine it belongs to: claude, codex, grok or gemini. */
-  id: string;
-  today: Tokens;
-  week: Tokens;
-  /** Total tokens per day, oldest first, ending today. */
-  days: number[];
-  /** This week's total per model, largest first. */
+/** What one CLI used over a period. */
+export interface UsageSpan {
+  tokens: Tokens;
+  /** The period's total per model, largest first. */
   models: Array<{ model: string; total: number }>;
+  /**
+   * Totals for the bars, oldest first, the last one ending today: a column per day for today
+   * (the last 7 days, for scale), the week and the month; a column per 7 days for all time.
+   */
+  bars: number[];
+}
+
+export interface UsageSource {
+  /** The engine it belongs to: claude, codex, grok, gemini or muse. */
+  id: string;
+  /** Today; the last 7 days; the last 30 days; every day counted. */
+  periods: Record<UsagePeriod, UsageSpan>;
+  /** The first day with tokens, YYYY-MM-DD; null when there are none. */
+  since: string | null;
   limits: UsageLimit[];
   /** When the CLI wrote `limits`, if that log line said. Null when `limits` is empty. */
   limitsAt: string | null;
@@ -47,6 +68,13 @@ export interface UsageSummary {
 }
 
 type Tally = Map<string, Map<string, Tokens>>;
+
+/** VibeForge's own count: tokens per CLI, per day, per model. */
+interface Ledger {
+  /** The day of the last pass. Every day from then on is read from the logs on the next pass. */
+  scanned: string | null;
+  days: Record<string, Record<string, Record<string, Tokens>>>;
+}
 
 interface FileState {
   size: number;
@@ -281,6 +309,94 @@ function geminiFile(state: FileState, text: string): void {
   }
 }
 
+// ------------------------------------------------------------------ the ledger
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Midnight at the start of a YYYY-MM-DD day, local time. */
+function startOf(day: string): number {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(year, month - 1, date).getTime();
+}
+
+/** The `count` days ending on `now`'s, oldest first, as YYYY-MM-DD. */
+function lastDays(now: Date, count: number): string[] {
+  const days: string[] = [];
+  for (let back = count - 1; back >= 0; back -= 1) {
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - back);
+    days.push(dayOf(day));
+  }
+  return days;
+}
+
+/** A ledger file as read, keeping only well-formed days and numbers. */
+function cleanLedger(value: unknown): Ledger {
+  const ledger: Ledger = { scanned: null, days: {} };
+  if (!value || typeof value !== "object") return ledger;
+  const record = value as { scanned?: unknown; days?: unknown };
+  if (typeof record.scanned === "string" && DAY.test(record.scanned)) ledger.scanned = record.scanned;
+  if (!record.days || typeof record.days !== "object") return ledger;
+  for (const [id, days] of Object.entries(record.days as Record<string, unknown>)) {
+    if (!days || typeof days !== "object") continue;
+    const into: Ledger["days"][string] = {};
+    for (const [day, models] of Object.entries(days as Record<string, unknown>)) {
+      if (!DAY.test(day) || !models || typeof models !== "object") continue;
+      const kept: Record<string, Tokens> = {};
+      for (const [model, tokens] of Object.entries(models as Record<string, Record<string, unknown> | null>)) {
+        if (!tokens || typeof tokens !== "object" || !num(tokens.total)) continue;
+        kept[model] = { total: num(tokens.total), cached: num(tokens.cached), output: num(tokens.output) };
+      }
+      if (Object.keys(kept).length) into[day] = kept;
+    }
+    ledger.days[id] = into;
+  }
+  return ledger;
+}
+
+/** The first day with tokens in a CLI's ledger, or null. */
+function firstDay(kept: Ledger["days"][string]): string | null {
+  return (
+    Object.keys(kept)
+      .filter((day) => Object.values(kept[day]).some((tokens) => tokens.total > 0))
+      .sort()[0] ?? null
+  );
+}
+
+/** Weeks of bars for all time: back to the week of `since`, at most ALL_WEEKS. */
+function weeksSince(since: string | null, now: Date): number {
+  if (!since) return 1;
+  const spanDays = Math.round((startOf(dayOf(now)) - startOf(since)) / 86_400_000) + 1;
+  return Math.min(ALL_WEEKS, Math.max(1, Math.ceil(spanDays / 7)));
+}
+
+/** Each period's totals for one CLI, from its days in the ledger; all time in `weeks` columns. */
+function periodsOf(kept: Ledger["days"][string], now: Date, weeks: number): Record<UsagePeriod, UsageSpan> {
+  const dayTotal = (day: string) => Object.values(kept[day] ?? {}).reduce((sum, tokens) => sum + tokens.total, 0);
+  const span = (days: string[], bars: number[]): UsageSpan => {
+    const tokens = zero();
+    const models = new Map<string, number>();
+    for (const day of days) {
+      for (const [model, used] of Object.entries(kept[day] ?? {})) {
+        add(tokens, used);
+        models.set(model, (models.get(model) ?? 0) + used.total);
+      }
+    }
+    return { tokens, models: [...models].map(([model, total]) => ({ model, total })).sort((a, b) => b.total - a.total), bars };
+  };
+  const week = lastDays(now, USAGE_DAYS);
+  const month = lastDays(now, MONTH_DAYS);
+  const weekBars = week.map(dayTotal);
+  // A column per 7 days, the last one ending today.
+  const allDays = lastDays(now, weeks * 7).map(dayTotal);
+  const allBars = Array.from({ length: weeks }, (_, column) => allDays.slice(column * 7, column * 7 + 7).reduce((sum, value) => sum + value, 0));
+  return {
+    today: span(week.slice(-1), weekBars),
+    week: span(week, weekBars),
+    month: span(month, month.map(dayTotal)),
+    all: span(Object.keys(kept), allBars),
+  };
+}
+
 // ------------------------------------------------------------------ the scanner
 
 interface Source {
@@ -301,9 +417,13 @@ export class UsageScanner {
   private readonly museSeen = new Set<string>();
   private readonly sources: Source[];
   private readonly now: () => Date;
+  /** Where the ledger is kept; without one it lasts only as long as this scanner. */
+  private readonly ledgerFile: string | null;
+  private ledger: Ledger | null = null;
 
-  constructor(home: string, now: () => Date = () => new Date(), env: NodeJS.ProcessEnv = process.env) {
+  constructor(home: string, { now = () => new Date(), env = process.env, ledger = null }: { now?: () => Date; env?: NodeJS.ProcessEnv; ledger?: string | null } = {}) {
     this.now = now;
+    this.ledgerFile = ledger;
     const claudeRoots = (env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR.split(",") : [path.join(home, ".claude"), path.join(home, ".config", "claude")]).map((root) =>
       path.join(root.trim(), "projects"),
     );
@@ -332,21 +452,22 @@ export class UsageScanner {
     return this.pass;
   }
 
+  private loadLedger(): Ledger {
+    this.ledger ??= cleanLedger(this.ledgerFile ? readJson<unknown>(this.ledgerFile, null) : null);
+    return this.ledger;
+  }
+
   private async scanNow(): Promise<UsageSummary> {
     const now = this.now();
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (USAGE_DAYS - 1));
-    const since = start.getTime();
-    const dayKeys: string[] = [];
-    for (let index = 0; index < USAGE_DAYS; index += 1) {
-      const day = new Date(start);
-      day.setDate(start.getDate() + index);
-      dayKeys.push(dayOf(day));
-    }
-    const today = dayKeys[dayKeys.length - 1];
+    const today = dayOf(now);
+    const ledger = this.loadLedger();
+    const windowStart = startOf(lastDays(now, USAGE_DAYS)[0]);
+    // The days since the last pass may have grown while VibeForge was closed, so they are read
+    // again in full; the first pass of all reads every log the CLIs still keep.
+    const since = ledger.scanned ? Math.min(windowStart, startOf(ledger.scanned)) : 0;
+    let changed = ledger.scanned !== today;
     const live = new Set<string>();
-    const sources: UsageSource[] = [];
+    const found: Array<Omit<UsageSource, "periods">> = [];
 
     for (const source of this.sources) {
       const days = new Map<string, Map<string, Tokens>>();
@@ -369,33 +490,35 @@ export class UsageScanner {
           }
         }
       }
-      const perDay = dayKeys.map((day) => [...(days.get(day)?.values() ?? [])].reduce((sum, tokens) => sum + tokens.total, 0));
-      const liveLimits = (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime());
-      if (!perDay.some(Boolean) && !liveLimits.length) continue;
-      const week = zero();
-      const todayTokens = zero();
-      const models = new Map<string, number>();
-      for (const day of dayKeys) {
-        for (const [model, tokens] of days.get(day) ?? []) {
-          add(week, tokens);
-          if (day === today) add(todayTokens, tokens);
-          models.set(model, (models.get(model) ?? 0) + tokens.total);
+      ledger.days[source.id] ??= {};
+      const kept = ledger.days[source.id];
+      for (const [day, models] of days) {
+        kept[day] ??= {};
+        const into = kept[day];
+        for (const [model, tokens] of models) {
+          // A day's count only grows: a smaller one means its logs were cleared, not that tokens came back.
+          if (tokens.total <= (into[model]?.total ?? 0)) continue;
+          into[model] = { ...tokens };
+          changed = true;
         }
       }
-      sources.push({
+      const first = firstDay(kept);
+      const liveLimits = (limits?.limits ?? []).filter((limit) => !limit.resetsAt || Date.parse(limit.resetsAt) > now.getTime());
+      if (!first && !liveLimits.length) continue;
+      found.push({
         id: source.id,
-        today: todayTokens,
-        week,
-        days: perDay,
-        models: [...models].map(([model, total]) => ({ model, total })).sort((a, b) => b.total - a.total),
+        since: first,
         // A limit that has reset since it was written says nothing any more.
         limits: liveLimits,
         limitsAt: liveLimits.length ? (limits?.at ?? null) : null,
         lastAt: lastAt ? new Date(lastAt).toISOString() : null,
       });
     }
+    // Every CLI's all-time bars go back as far as the oldest one's, so their columns line up.
+    const weeks = weeksSince(found.map((source) => source.since).filter((day): day is string => day !== null).sort()[0] ?? null, now);
+    const sources: UsageSource[] = found.map((source) => ({ ...source, periods: periodsOf(ledger.days[source.id], now, weeks) }));
 
-    // Forget files that fell out of the window.
+    // Forget files that fell out of the window; their days are in the ledger.
     for (const [file, state] of this.files) {
       if (live.has(file)) continue;
       for (const key of state.keys) {
@@ -403,6 +526,14 @@ export class UsageScanner {
         this.museSeen.delete(key);
       }
       this.files.delete(file);
+    }
+    ledger.scanned = today;
+    if (changed && this.ledgerFile) {
+      try {
+        writeJson(this.ledgerFile, ledger);
+      } catch {
+        /* kept in memory; written on the next pass that can */
+      }
     }
     return { sources, scannedAt: now.toISOString() };
   }

@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
-import type { PlanId, PlanPoint, PlanProvider, PlanSummary, UsageSource, UsageSummary } from "../../shared/api.js";
+import type { PlanId, PlanPoint, PlanProvider, PlanSummary, UsagePeriod, UsageSource, UsageSummary } from "../../shared/api.js";
 import { planMark } from "../../shared/pixel.js";
 import { useEngines, useNow } from "../api.js";
 import { useT } from "../i18n/index.js";
@@ -23,7 +23,7 @@ export function compactTokens(value: number, language: string): string {
 
 /** Today's tokens across every CLI, and the busiest day of the week for scale. */
 export function usageToday(summary: UsageSummary | null | undefined): { today: number; peak: number } {
-  const days = summary?.sources.map((source) => source.days) ?? [];
+  const days = summary?.sources.map((source) => source.periods.week.bars) ?? [];
   const perDay = days.length ? days[0].map((_, index) => days.reduce((sum, row) => sum + (row[index] ?? 0), 0)) : [];
   return { today: perDay.at(-1) ?? 0, peak: Math.max(0, ...perDay) };
 }
@@ -214,9 +214,31 @@ export function PlanPanel({ plans, switcher, networkOn, onRefresh }: { plans: Pl
 
 // ------------------------------------------------------------------ tokens
 
-function SourceRow({ source, label }: { source: UsageSource; label: string }) {
+export const USAGE_PERIODS: UsagePeriod[] = ["today", "week", "month", "all"];
+
+/** Bars this many columns or more are drawn as thin columns, a pixel apart. */
+const DENSE = 11;
+
+function shortDate(day: string, language: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const when = new Date(year, month - 1, date);
+  return when.toLocaleDateString(language, { month: "short", day: "numeric", ...(year === new Date().getFullYear() ? {} : { year: "numeric" }) });
+}
+
+function SourceRow({ source, label, period }: { source: UsageSource; label: string; period: UsagePeriod }) {
   const t = useT();
-  const cached = source.today.total ? Math.round((source.today.cached / source.today.total) * 100) : 0;
+  const span = source.periods[period];
+  const total = span.tokens.total;
+  const cached = total ? Math.round((span.tokens.cached / total) * 100) : 0;
+  // A quiet day still says which model the week was spent on.
+  const model = (span.models[0] ?? source.periods.week.models[0])?.model;
+  const bars =
+    period === "all"
+      ? t("usage.bars.all", { total: compactTokens(total, t.language), date: source.since ? shortDate(source.since, t.language) : "" })
+      : period === "month"
+        ? t("usage.bars.month", { total: compactTokens(total, t.language) })
+        : t("usage.week", { total: compactTokens(source.periods.week.tokens.total, t.language) });
+  const dense = span.bars.length >= DENSE;
   return (
     <div className="usage-source">
       <div className="usage-head">
@@ -224,38 +246,71 @@ function SourceRow({ source, label }: { source: UsageSource; label: string }) {
           {label}
         </span>
         <span className="grow" />
-        <b>{compactTokens(source.today.total, t.language)}</b>
+        <b>{compactTokens(total, t.language)}</b>
       </div>
       <div className="usage-sub">
         <span className="truncate">
-          {source.today.total ? t("usage.cached", { percent: cached }) : t("usage.quietToday")}
-          {source.models[0] ? ` · ${source.models[0].model}` : ""}
+          {total ? t("usage.cached", { percent: cached }) : t("usage.quietToday")}
+          {model ? ` · ${model}` : ""}
         </span>
         <span className="grow" />
-        <BlockBars values={source.days} rows={4} label={t("usage.week", { total: compactTokens(source.week.total, t.language) })} />
+        <BlockBars values={span.bars} rows={4} label={bars} cell={dense ? 2 : undefined} className={dense ? "dense" : undefined} />
       </div>
     </div>
   );
 }
 
-export function UsagePanel({ summary, switcher }: { summary: UsageSummary; switcher?: ReactNode }) {
+export function UsagePanel({
+  summary,
+  switcher,
+  period,
+  onPeriod,
+}: {
+  summary: UsageSummary;
+  switcher?: ReactNode;
+  period: UsagePeriod;
+  onPeriod: (period: UsagePeriod) => void;
+}) {
   const t = useT();
   const engines = useEngines().data ?? [];
   const label = (id: string) => engines.find((engine) => engine.id === id)?.label ?? (id in PLAN_NAMES ? PLAN_NAMES[id as keyof typeof PLAN_NAMES] : id);
-  const sources = summary.sources.filter((source) => source.week.total > 0);
+  // Today lists every CLI used this week, so a quiet one still shows its 0.
+  const shownBy = period === "today" ? "week" : period;
+  const sources = summary.sources.filter((source) => source.periods[shownBy].tokens.total > 0);
+  const together = sources.reduce((sum, source) => sum + source.periods[period].tokens.total, 0);
+  const since = summary.sources
+    .map((source) => source.since)
+    .filter((day): day is string => day !== null)
+    .sort()[0];
   return (
     <div className="usage-panel">
       <div className="list-label usage-title">
-        <span className="grow">{t("usage.title")}</span>
+        <span className="grow">{period === "today" ? t("usage.title") : t(`usage.title.${period}`)}</span>
         {switcher}
       </div>
-      {sources.length === 0 && <div className="faint usage-note">{t("usage.none")}</div>}
-      {[...sources]
-        .sort((a, b) => b.today.total - a.today.total)
-        .map((source) => (
-          <SourceRow key={source.id} source={source} label={label(source.id)} />
+      <div className="usage-periods" role="group" aria-label={t("usage.periods")}>
+        {USAGE_PERIODS.map((value) => (
+          <button key={value} type="button" aria-pressed={period === value} onClick={() => onPeriod(value)}>
+            {t(`usage.period.${value}`)}
+          </button>
         ))}
-      <div className="faint usage-note">{t("usage.note")}</div>
+      </div>
+      {sources.length === 0 && <div className="faint usage-note">{period === "month" || period === "all" ? t(`usage.none.${period}`) : t("usage.none")}</div>}
+      {[...sources]
+        .sort((a, b) => b.periods[period].tokens.total - a.periods[period].tokens.total || b.periods.week.tokens.total - a.periods.week.tokens.total)
+        .map((source) => (
+          <SourceRow key={source.id} source={source} label={label(source.id)} period={period} />
+        ))}
+      {sources.length > 1 && (
+        <div className="usage-source usage-together">
+          <div className="usage-head">
+            <span className="truncate">{t("usage.together")}</span>
+            <span className="grow" />
+            <b>{compactTokens(together, t.language)}</b>
+          </div>
+        </div>
+      )}
+      <div className="faint usage-note">{period === "all" && since ? t("usage.since", { date: shortDate(since, t.language) }) : t("usage.note")}</div>
     </div>
   );
 }

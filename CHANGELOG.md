@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Tokens by week, month and all time.** The Tokens tab in the rail's usage popover now switches between today, the last 7 days, the last 30 days and all time, with a total for all your CLIs together. Coding CLIs clear their old logs (Claude Code after 30 days), so VibeForge keeps each day's count in `usage-days.json` in its data folder, and a day stays counted after its logs are gone. All time starts from the oldest log still on this machine the first time it runs. Nothing is sent anywhere.
+
 ## [2.2.0] - 2026-10-07
 
 **2.2: copy a run into an issue, see the routine that keeps failing, and a round of fixes from an outside audit.**
