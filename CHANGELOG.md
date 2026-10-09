@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-09
+
+**2.3: tokens by the week, the month and all time.**
+
 ### Added
 
 - **Tokens by week, month and all time.** The Tokens tab in the rail's usage popover now switches between today, the last 7 days, the last 30 days and all time, with a total for all your CLIs together. Coding CLIs clear their old logs (Claude Code after 30 days), so VibeForge keeps each day's count in `usage-days.json` in its data folder, and a day stays counted after its logs are gone. All time starts from the oldest log still on this machine the first time it runs. Nothing is sent anywhere.
@@ -306,7 +310,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.0
 [2.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.2.0
 [2.1.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.1
 [2.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.0
