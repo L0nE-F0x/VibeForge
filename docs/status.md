@@ -1,6 +1,6 @@
 # Status — 2026-10-09
 
-## Tokens by week, month and all time (2026-10-09, unreleased)
+## 2.3.0: tokens by week, month and all time (2026-10-09)
 
 The Tokens tab had today and a 7-day chart. It now has **Today · Week · Month · All time** under its title (remembered, like the Limits/Tokens tab), with the period's total per CLI, its share from cache and top model, and an **All CLIs** line when more than one CLI has tokens.
 
