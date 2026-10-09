@@ -3,7 +3,7 @@ import path from "node:path";
 import { readJson, writeJson } from "./fsx.js";
 
 // Token usage read from the logs the coding CLIs already keep on this machine. Nothing is sent
-// anywhere and no API is called: Claude Code, Codex, Grok Build, Gemini CLI and Muse Code each
+// anywhere and no API is called: Claude Code, Codex, Grok Build, Gemini CLI, Kimi Code and Muse Code each
 // write what every model call used, and this adds it up per day. Append-only logs are read from
 // where the last pass stopped, so a rescan costs only what was written since.
 //
@@ -49,7 +49,7 @@ export interface UsageSpan {
 }
 
 export interface UsageSource {
-  /** The engine it belongs to: claude, codex, grok, gemini or muse. */
+  /** The engine it belongs to: claude, codex, grok, gemini, kimi or muse. */
   id: string;
   /** Today; the last 7 days; the last 30 days; every day counted. */
   periods: Record<UsagePeriod, UsageSpan>;
@@ -71,8 +71,11 @@ type Tally = Map<string, Map<string, Tokens>>;
 
 /** VibeForge's own count: tokens per CLI, per day, per model. */
 interface Ledger {
-  /** The day of the last pass. Every day from then on is read from the logs on the next pass. */
-  scanned: string | null;
+  /**
+   * The day of the last pass, per CLI. Every day from then on is read from its logs on the next
+   * pass; a CLI with none (new to VibeForge) has all its logs read once.
+   */
+  scanned: Record<string, string>;
   days: Record<string, Record<string, Record<string, Tokens>>>;
 }
 
@@ -292,6 +295,27 @@ function museLine(state: FileState, line: string, seen: Set<string>): void {
   count(state.tally, museTime(record.recorded_at), model, { total, cached, output });
 }
 
+/**
+ * Kimi Code: a `usage.record` line per model call in each agent's wire.jsonl. Most are scoped to a
+ * turn; the few scoped to the session are calls outside a turn (such as squeezing the context),
+ * not a sum of the turns, so they count too.
+ */
+function kimiLine(state: FileState, line: string): void {
+  if (!line.includes('"usage.record"')) return;
+  let record: { type?: string; model?: string; time?: number; usage?: Record<string, unknown> };
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const usage = record.usage;
+  if (record.type !== "usage.record" || !usage) return;
+  const cached = num(usage.inputCacheRead);
+  const output = num(usage.output);
+  const total = num(usage.inputOther) + num(usage.inputCacheCreation) + cached + output;
+  count(state.tally, museTime(record.time), typeof record.model === "string" && record.model ? record.model : "kimi", { total, cached, output });
+}
+
 /** Gemini CLI: a chat file per session, whose answers carry their tokens. */
 function geminiFile(state: FileState, text: string): void {
   let record: { messages?: Array<{ type?: string; timestamp?: string; model?: string; tokens?: Record<string, unknown> }> };
@@ -331,11 +355,16 @@ function lastDays(now: Date, count: number): string[] {
 
 /** A ledger file as read, keeping only well-formed days and numbers. */
 function cleanLedger(value: unknown): Ledger {
-  const ledger: Ledger = { scanned: null, days: {} };
+  const ledger: Ledger = { scanned: {}, days: {} };
   if (!value || typeof value !== "object") return ledger;
   const record = value as { scanned?: unknown; days?: unknown };
-  if (typeof record.scanned === "string" && DAY.test(record.scanned)) ledger.scanned = record.scanned;
   if (!record.days || typeof record.days !== "object") return ledger;
+  if (typeof record.scanned === "string" && DAY.test(record.scanned)) {
+    // 2.3.0 kept one day for every CLI it read then, each of which has an entry in `days`.
+    for (const id of Object.keys(record.days)) ledger.scanned[id] = record.scanned;
+  } else if (record.scanned && typeof record.scanned === "object") {
+    for (const [id, day] of Object.entries(record.scanned)) if (typeof day === "string" && DAY.test(day)) ledger.scanned[id] = day;
+  }
   for (const [id, days] of Object.entries(record.days as Record<string, unknown>)) {
     if (!days || typeof days !== "object") continue;
     const into: Ledger["days"][string] = {};
@@ -432,6 +461,7 @@ export class UsageScanner {
       { id: "codex", roots: [path.join(env.CODEX_HOME || path.join(home, ".codex"), "sessions")], pattern: /\.jsonl$/, depth: 4, lines: codexLine },
       { id: "grok", roots: [path.join(home, ".grok", "sessions")], pattern: /^usage\.json$/, depth: 2, whole: grokFile },
       { id: "gemini", roots: [path.join(env.GEMINI_CLI_HOME || home, ".gemini", "tmp")], pattern: /^session-.*\.json$/, depth: 2, whole: geminiFile },
+      { id: "kimi", roots: [path.join(env.KIMI_CODE_HOME || path.join(home, ".kimi-code"), "sessions")], pattern: /^wire\.jsonl$/, depth: 5, lines: kimiLine },
       {
         id: "muse",
         roots: [path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "muse", "sessions")],
@@ -462,14 +492,17 @@ export class UsageScanner {
     const today = dayOf(now);
     const ledger = this.loadLedger();
     const windowStart = startOf(lastDays(now, USAGE_DAYS)[0]);
-    // The days since the last pass may have grown while VibeForge was closed, so they are read
-    // again in full; the first pass of all reads every log the CLIs still keep.
-    const since = ledger.scanned ? Math.min(windowStart, startOf(ledger.scanned)) : 0;
-    let changed = ledger.scanned !== today;
+    let changed = false;
     const live = new Set<string>();
     const found: Array<Omit<UsageSource, "periods">> = [];
 
     for (const source of this.sources) {
+      // The days since the last pass may have grown while VibeForge was closed, so they are read
+      // again in full; a CLI's first pass reads every log it still keeps.
+      const last = ledger.scanned[source.id];
+      const since = last ? Math.min(windowStart, startOf(last)) : 0;
+      if (last !== today) changed = true;
+      ledger.scanned[source.id] = today;
       const days = new Map<string, Map<string, Tokens>>();
       let limits: FileState["limits"] = null;
       let lastAt = 0;
@@ -527,7 +560,6 @@ export class UsageScanner {
       }
       this.files.delete(file);
     }
-    ledger.scanned = today;
     if (changed && this.ledgerFile) {
       try {
         writeJson(this.ledgerFile, ledger);

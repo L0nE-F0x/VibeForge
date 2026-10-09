@@ -240,6 +240,11 @@ button.rail-logo:focus-visible {
   animation: pop-in 0.12s ease-out;
 }
 
+/* The rail's usage popover: terminals, then plans or tokens, so it may take the window's height. */
+.popover.tall {
+  max-height: calc(100vh - 16px);
+}
+
 .menu-item {
   display: flex;
   align-items: center;

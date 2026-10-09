@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -423,13 +424,28 @@ export interface MenuItem {
   disabled?: boolean;
 }
 
-/** A small floating menu anchored to an element. */
-export function Popover({ anchor, onClose, children, align = "start" }: { anchor: HTMLElement; onClose: () => void; children: ReactNode; align?: "start" | "end" }) {
+/**
+ * A small floating menu anchored to an element. It moves to stay inside the window when its
+ * content grows or shrinks. `tall` lets it use the window's height instead of 60% of it.
+ */
+export function Popover({
+  anchor,
+  onClose,
+  children,
+  align = "start",
+  tall = false,
+}: {
+  anchor: HTMLElement;
+  onClose: () => void;
+  children: ReactNode;
+  align?: "start" | "end";
+  tall?: boolean;
+}) {
   useEscape(onClose);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<Box | null>(null);
   useLayer(pos);
-  useLayoutEffect(() => {
+  const place = useCallback(() => {
     const rect = anchor.getBoundingClientRect();
     const node = ref.current;
     const width = node?.offsetWidth ?? 260;
@@ -443,8 +459,16 @@ export function Popover({ anchor, onClose, children, align = "start" }: { anchor
       left = rect.right + 8;
       top = Math.min(rect.top, window.innerHeight - height - 8);
     }
-    setPos({ left, top, right: left + width, bottom: top + height });
+    setPos((was) => (was && was.left === left && was.top === top && was.right === left + width && was.bottom === top + height ? was : { left, top, right: left + width, bottom: top + height }));
   }, [anchor, align]);
+  useLayoutEffect(place, [place]);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => place());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [place]);
   useEffect(() => {
     const handler = (event: MouseEvent) => {
       if (ref.current?.contains(event.target as Node) || anchor.contains(event.target as Node)) return;
@@ -459,7 +483,7 @@ export function Popover({ anchor, onClose, children, align = "start" }: { anchor
     };
   }, [anchor, onClose]);
   return createPortal(
-    <div ref={ref} className="popover" style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}>
+    <div ref={ref} className={tall ? "popover tall" : "popover"} style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}>
       {children}
     </div>,
     document.body,

@@ -403,7 +403,7 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
     />
   ) : undefined;
   return (
-    <Popover anchor={anchor} onClose={onClose}>
+    <Popover anchor={anchor} onClose={onClose} tall>
       <div className="list-label" style={{ paddingTop: 6 }}>
         {t("live.title")}
       </div>

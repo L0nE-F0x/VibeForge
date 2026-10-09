@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kimi's tokens are counted.** Kimi Code showed in plan limits but never in the Tokens tab. Its session logs (`~/.kimi-code/sessions`, or `$KIMI_CODE_HOME`) are now read like the other CLIs', and its whole history still on this machine is counted the first time, so All time includes it from the start.
+- **The usage popover stays whole.** It placed itself once, from its height when it opened, so numbers that arrived a moment later could push it past the bottom of the window, and it scrolled past 60% of the window's height. It now moves as it grows, and may use the window's height.
+
 ## [2.3.0] - 2026-10-09
 
 **2.3: tokens by the week, the month and all time.**
