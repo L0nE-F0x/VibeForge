@@ -1,8 +1,9 @@
 import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import type { UsagePeriod } from "../shared/api.js";
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
-import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
+import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
 import { useAttention, useChatAttention, type Attention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
@@ -381,7 +382,11 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   const usage = useUsage().data;
   const plans = usePlans();
   const networkOn = useSettings().data?.planLimits ?? false;
-  const [tab, setTab] = useState<"limits" | "tokens">(() => (readTab() === "tokens" ? "tokens" : "limits"));
+  const [tab, setTab] = useState<"limits" | "tokens">(() => (readPref("vf.usageTab") === "tokens" ? "tokens" : "limits"));
+  const [period, setPeriod] = useState<UsagePeriod>(() => {
+    const saved = readPref("vf.usagePeriod");
+    return USAGE_PERIODS.find((value) => value === saved) ?? "today";
+  });
   const both = Boolean(plans.data && usage?.sources.length);
   const shown = plans.data && (tab === "limits" || !usage?.sources.length) ? "limits" : usage ? "tokens" : null;
   const switcher = both ? (
@@ -393,7 +398,7 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
       ]}
       onChange={(next) => {
         setTab(next);
-        writeTab(next);
+        writePref("vf.usageTab", next);
       }}
     />
   ) : undefined;
@@ -432,22 +437,32 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
         </button>
       ))}
       {shown === "limits" && plans.data && <PlanPanel plans={plans.data} switcher={switcher} networkOn={networkOn} onRefresh={plans.refresh} />}
-      {shown === "tokens" && usage && <UsagePanel summary={usage} switcher={switcher} />}
+      {shown === "tokens" && usage && (
+        <UsagePanel
+          summary={usage}
+          switcher={switcher}
+          period={period}
+          onPeriod={(next) => {
+            setPeriod(next);
+            writePref("vf.usagePeriod", next);
+          }}
+        />
+      )}
     </Popover>
   );
 }
 
-function readTab(): string | null {
+function readPref(key: string): string | null {
   try {
-    return localStorage.getItem("vf.usageTab");
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeTab(tab: string): void {
+function writePref(key: string, value: string): void {
   try {
-    localStorage.setItem("vf.usageTab", tab);
+    localStorage.setItem(key, value);
   } catch {
     /* only a preference */
   }

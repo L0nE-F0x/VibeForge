@@ -74,10 +74,16 @@ export function PixelField({ cols, rows, cell = 14, size = 8, from = "right", se
  * A bar chart built from squares, one column per value: the block charts on Omarchy's stats.
  * The newest column sits on the right and is drawn in the second accent.
  */
-export function BlockBars({ values, rows = 6, label }: { values: number[]; rows?: number; label?: string }) {
+/** `cell` fixes each column's width in pixels; without it the columns share the width. */
+export function BlockBars({ values, rows = 6, label, cell, className }: { values: number[]; rows?: number; label?: string; cell?: number; className?: string }) {
   const max = Math.max(1, ...values);
   return (
-    <div className="block-bars" role="img" aria-label={label} style={{ gridTemplateColumns: `repeat(${values.length}, 1fr)` }}>
+    <div
+      className={className ? `block-bars ${className}` : "block-bars"}
+      role="img"
+      aria-label={label}
+      style={{ gridTemplateColumns: `repeat(${values.length}, ${cell ? `${cell}px` : "1fr"})` }}
+    >
       {values.map((value, column) => {
         const lit = value === 0 ? 0 : Math.max(1, Math.round((value / max) * rows));
         return (
