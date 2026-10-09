@@ -110,6 +110,32 @@ describe("usage", () => {
     expect(second.sources.find((source) => source.id === "claude")!.periods.today.tokens.total).toBe(1162);
   });
 
+  it("counts Kimi Code's usage records, turn and session alike", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const record = (scope: string, when: string, usage: Record<string, number>, model = "kimi-code/k3") =>
+      JSON.stringify({ type: "usage.record", agentId: "main", model, usage, usageScope: scope, time: Date.parse(when) });
+    write(
+      path.join(home, ".kimi-code", "sessions", "wd_p_1", "session_a", "agents", "main", "wire.jsonl"),
+      [
+        JSON.stringify({ type: "token_counting.measured", agentId: "main", tokens: 999, time: Date.parse(at(0)) }),
+        JSON.stringify({ type: "context.append_loop_event", event: { type: "step.end", usage: { inputOther: 999, output: 999 } } }),
+        record("turn", at(0), { inputOther: 100, output: 20, inputCacheRead: 1000, inputCacheCreation: 5 }),
+        record("session", at(0), { inputOther: 50, output: 10, inputCacheRead: 0, inputCacheCreation: 0 }),
+        record("turn", at(1), { inputOther: 7, output: 3, inputCacheRead: 0, inputCacheCreation: 0 }, "kimi-code/kimi-for-coding"),
+        "",
+      ].join("\n"),
+    );
+    const [kimi] = (await new UsageScanner(home, { now: () => NOW, env: {} }).scan()).sources;
+    expect(kimi.id).toBe("kimi");
+    expect(kimi.periods.today.tokens).toEqual({ total: 1185, cached: 1000, output: 30 });
+    expect(kimi.periods.week.models).toEqual([
+      { model: "kimi-code/k3", total: 1185 },
+      { model: "kimi-code/kimi-for-coding", total: 10 },
+    ]);
+    // KIMI_CODE_HOME moves it.
+    expect((await new UsageScanner(home, { now: () => NOW, env: { KIMI_CODE_HOME: path.join(home, "elsewhere") } }).scan()).sources).toEqual([]);
+  });
+
   it("keeps each day in its ledger after the CLI clears the log", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
     const ledger = path.join(home, "data", "usage-days.json");
@@ -125,7 +151,7 @@ describe("usage", () => {
     // A column per 7 days, back to the first week with tokens (40 days ago is in the sixth week back).
     expect(first.periods.all.bars).toEqual([120, 0, 0, 0, 0, 120]);
     const saved = JSON.parse(fs.readFileSync(ledger, "utf8"));
-    expect(saved.scanned).toBe("2026-09-26");
+    expect(saved.scanned).toMatchObject({ claude: "2026-09-26", kimi: "2026-09-26" });
     expect(saved.days.claude["2026-08-17"]["claude-opus-5-5"]).toEqual({ total: 120, cached: 0, output: 20 });
 
     // Claude Code deletes the log; a new VibeForge still counts both days.
@@ -160,6 +186,26 @@ describe("usage", () => {
     const second = (await scanner.scan()).sources[0];
     expect(second.periods.all.tokens.total).toBe(62);
     expect(second.periods.today.tokens.total).toBe(7);
+  });
+
+  it("reads all of a CLI's logs once when 2.3.0's ledger hasn't seen it", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const ledger = path.join(home, "usage-days.json");
+    // 2.3.0 wrote one day for every CLI it read, and didn't read Kimi.
+    write(ledger, JSON.stringify({ scanned: "2026-09-26", days: { claude: { "2026-09-25": { "claude-opus-5-5": { total: 5, cached: 0, output: 1 } } } } }));
+    const old = new Date(2026, 8, 6, 18).getTime() / 1000;
+    const kimi = path.join(home, ".kimi-code", "sessions", "wd_p_1", "session_a", "agents", "main", "wire.jsonl");
+    write(kimi, `${JSON.stringify({ type: "usage.record", model: "kimi-code/k3", usage: { inputOther: 40 }, usageScope: "turn", time: Date.parse(at(20)) })}\n`);
+    fs.utimesSync(kimi, old, old);
+    const claude = path.join(home, ".claude", "projects", "-p", "s.jsonl");
+    write(claude, `${claudeLine("y", at(20), { input_tokens: 999 })}\n`);
+    fs.utimesSync(claude, old, old);
+
+    const sources = (await new UsageScanner(home, { now: () => NOW, env: {}, ledger }).scan()).sources;
+    expect(sources.find((source) => source.id === "kimi")!.periods.all.tokens.total).toBe(40);
+    // Claude's old log was already behind its last pass, so it isn't read again.
+    expect(sources.find((source) => source.id === "claude")!.periods.all.tokens.total).toBe(5);
+    expect(JSON.parse(fs.readFileSync(ledger, "utf8")).scanned).toMatchObject({ claude: "2026-09-26", kimi: "2026-09-26" });
   });
 
   it("starts over from a ledger it can't read", async () => {

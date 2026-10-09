@@ -7,7 +7,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.3.0, 2026-10-09, is the latest
 - [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A buzz on a locked phone is still to build.
 - [ ] **The last English in other languages.** The tray menu, the quit question, the "still running in the tray" notice and the core's run-finished notifications are still in English, and so are cronstrue's schedule descriptions and git's change summaries. The window and the phone page are translated.
 - [ ] **Gemini plan limits**, when the next Gemini Pro lands. Gemini CLI's `/stats` quota comes from the Code Assist API (`retrieveUserQuota`, per model, with a project from `loadCodeAssist`). Its Google access token lasts an hour and only Gemini CLI renews it, so a read-only approach would show "sign-in expired" unless Gemini CLI ran recently. Work out the request from Gemini CLI's own source before adding it.
-- [ ] **Token usage from more CLIs.** Kimi's session logs aren't read yet (its plan limits are), and OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at.
+- [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at.
 
 ## Only checked with stand-ins
 
