@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-09
+
+**2.3.1: Kimi joins the token meter.**
+
 ### Fixed
 
 - **Kimi's tokens are counted.** Kimi Code showed in plan limits but never in the Tokens tab. Its session logs (`~/.kimi-code/sessions`, or `$KIMI_CODE_HOME`) are now read like the other CLIs', and its whole history still on this machine is counted the first time, so All time includes it from the start.
@@ -315,7 +319,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.1
 [2.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.0
 [2.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.2.0
 [2.1.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.1.1
