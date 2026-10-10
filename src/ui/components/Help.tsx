@@ -183,6 +183,7 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
       { keys: "Ctrl+V", text: "shortcuts.paste" },
       { keys: "Ctrl+C", text: "shortcuts.interrupt" },
       { gesture: "shortcuts.dropFile", text: "shortcuts.drop" },
+      { keys: "Ctrl+Shift+Enter", text: "shortcuts.write" },
     ],
   },
   {

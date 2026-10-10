@@ -459,7 +459,9 @@ function setupDesk() {
   const desk = $(".desk");
   const term = $("[data-demo-term]");
   if (!desk || !term) return;
-  const bar = $("[data-demo-sessionbar]");
+  // The chat's pane: its terminal alone while the session runs; once it ends, the last screen
+  // dims behind the box that picks it up again, as in the app.
+  const session = $("[data-demo-session]");
   const toast = $("[data-demo-toast]");
   const badge = $("[data-demo-badge]");
   const reviewCount = $("[data-demo-review]");
@@ -468,19 +470,7 @@ function setupDesk() {
   const pulse = $("[data-demo-pulse]");
   const chatDot = $("[data-demo-chatdot]");
   const chatWhen = $("[data-demo-chatwhen]");
-  const placeholder = $("[data-demo-placeholder]");
-  const sendLabel = $("[data-demo-send]");
-  const hint = $("[data-demo-hint]");
-  // What the composer says while the session runs, and once it has ended, as in the app.
-  const running = { placeholder: placeholder?.textContent ?? "", send: sendLabel?.textContent ?? "", hint: hint?.innerHTML ?? "" };
-  const ended = { placeholder: "What should Release notes do?", send: "Continue", hint: '<svg><use href="#i-play"/></svg>starts the engine' };
-  const composer = (state) => {
-    if (placeholder) placeholder.textContent = state.placeholder;
-    if (sendLabel) sendLabel.textContent = state.send;
-    if (hint) hint.innerHTML = state.hint;
-  };
   const windows = $$("[data-win]", desk);
-  const barLive = bar?.innerHTML ?? "";
   let visible = false;
   let generation = 0;
 
@@ -499,10 +489,7 @@ function setupDesk() {
     const mine = ++generation;
     const alive = () => mine === generation;
     focus(0);
-    if (bar) {
-      bar.classList.remove("is-done");
-      bar.innerHTML = barLive;
-    }
+    session?.classList.remove("is-ended");
     toast?.classList.remove("is-shown");
     newRun?.classList.add("is-hidden");
     newRun?.classList.remove("is-arriving");
@@ -512,7 +499,6 @@ function setupDesk() {
     pulse?.classList.add("is-live");
     chatDot?.classList.replace("is-ok", "is-live");
     if (chatWhen) chatWhen.textContent = "now";
-    composer(running);
     term.replaceChildren();
     await sleep(700);
     for (const step of SESSION) {
@@ -537,17 +523,11 @@ function setupDesk() {
     addLine('<span class="acc">❯</span> <span class="caret"></span>');
     await sleep(900);
     if (!alive()) return;
-    if (bar) {
-      bar.classList.add("is-done");
-      bar.innerHTML =
-        '<span class="m-chip">Finished</span><span>Session ended just now · 1 file changed, 38 insertions(+), 4 deletions(-). Sending a message picks it up again.</span>' +
-        '<span class="m-ghost-btn m-hide-sm"><svg><use href="#i-history"/></svg>Review</span><span class="m-primary"><svg><use href="#i-rotate-ccw"/></svg>Continue session</span>';
-    }
+    session?.classList.add("is-ended");
     if (live) live.textContent = "Idle";
     pulse?.classList.remove("is-live");
     chatDot?.classList.replace("is-live", "is-ok");
     if (chatWhen) chatWhen.textContent = "just now";
-    composer(ended);
     toast?.classList.add("is-shown");
     if (newRun) {
       newRun.classList.remove("is-hidden");

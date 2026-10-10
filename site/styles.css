@@ -1247,6 +1247,43 @@ h1 {
   min-height: 0;
 }
 
+.m-sessionhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 35px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.m-sessionhead b {
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-grow {
+  flex: 1;
+}
+
+.m-ended,
+.m-session.is-ended .m-livebit {
+  display: none;
+}
+
+.m-session.is-ended .m-ended {
+  display: block;
+}
+
+.m-session.is-ended .m-term {
+  opacity: 0.55;
+  transition: opacity 0.3s;
+}
+
 .m-term {
   flex: 1;
   min-height: 0;
@@ -1431,17 +1468,6 @@ h1 {
   border: 1px solid color-mix(in srgb, var(--green) 45%, transparent);
   color: var(--green);
   font-weight: 600;
-}
-
-.m-sessionbar .m-primary {
-  height: 22px;
-  padding: 0 8px;
-  font-size: 10px;
-}
-
-.m-sessionbar .m-primary svg {
-  width: 10px;
-  height: 10px;
 }
 
 /* side windows */

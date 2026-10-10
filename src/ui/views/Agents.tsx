@@ -403,6 +403,8 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         newKey={agent.id}
         onCreated={(created) => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: created.id })}
         placeholder={t("agents.placeholder", { name: agent.name })}
+        slim
+        head={<span className="row-title truncate">{chat?.title ?? t("agents.newChat")}</span>}
         empty={{
           icon: Bot,
           title: t("agents.chatEmpty.title", { name: agent.name }),

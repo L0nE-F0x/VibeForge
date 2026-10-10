@@ -28,7 +28,8 @@ export class ChatDesk {
     return { ...chat, live: Boolean(ptyId), ptyId, lastRun: last ? this.core.view(last) : null };
   }
 
-  createChat(input: { agentId?: string | null; engine?: string }): ChatView {
+  /** `prompt`, the chat's first message, names its scratch folder; without one it is `chat`. */
+  createChat(input: { agentId?: string | null; engine?: string; prompt?: string }): ChatView {
     const now = this.core.now().toISOString();
     if (input.agentId) {
       const agent = this.core.store.getAgent(input.agentId);
@@ -51,13 +52,14 @@ export class ChatDesk {
     }
     const engineId = input.engine?.trim() || this.core.store.readSettings().defaultEngine;
     this.core.requireEngine(engineId);
-    const id = this.uniqueChatId("chat");
+    const scratchRoot = path.join(this.core.options.dataRoot, "scratch");
+    const id = this.uniqueChatId(input.prompt ? scratchName(input.prompt) : "chat", scratchRoot);
     const chat: ChatRecord = {
       id,
       title: DEFAULT_CHAT_TITLE,
       agentId: null,
       engine: engineId,
-      cwd: path.join(this.core.options.dataRoot, "scratch", id),
+      cwd: path.join(scratchRoot, id),
       runIds: [],
       createdAt: now,
       updatedAt: now,
@@ -239,12 +241,26 @@ export class ChatDesk {
     });
   }
 
-  private uniqueChatId(base: string): string {
-    const taken = new Set(this.core.store.listChats().map((chat) => chat.id));
+  /** A chat id no other chat has; with `folders`, also one with no folder of that name there. */
+  private uniqueChatId(base: string, folders?: string): string {
+    const ids = new Set(this.core.store.listChats().map((chat) => chat.id));
+    const taken = (id: string) => ids.has(id) || (folders !== undefined && fs.existsSync(path.join(folders, id)));
     const root = slugify(base, 40);
-    if (!taken.has(root)) return root;
+    if (!taken(root)) return root;
     let count = 2;
-    while (taken.has(`${root}-${count}`)) count += 1;
+    while (taken(`${root}-${count}`)) count += 1;
     return `${root}-${count}`;
   }
+}
+
+/** A scratch folder's name from a chat's first message: its first words, up to 32 characters. */
+export function scratchName(prompt: string): string {
+  const words = titleFromPrompt(prompt).toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  let name = "";
+  for (const word of words) {
+    const next = name ? `${name}-${word}` : word;
+    if (next.length > 32) break;
+    name = next;
+  }
+  return name || words[0]?.slice(0, 32) || "chat";
 }

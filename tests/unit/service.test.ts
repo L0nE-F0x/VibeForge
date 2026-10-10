@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { allocateRunDir, normalizeRun, writeRunMeta } from "../../src/core/runs.js";
 import { matchExpression, Store } from "../../src/core/store.js";
 import { snippetParts } from "../../src/shared/text.js";
+import { scratchName } from "../../src/core/service/chats.js";
 import type { RunMeta } from "../../src/core/types.js";
 import { TURN_GRACE_MS } from "../../src/core/checkout.js";
 import { gitHead, snapshotGit } from "../../src/core/vcs.js";
@@ -120,6 +121,21 @@ describe("chats", () => {
     expect(ctx.spawns[0].pasteInput).toBe("hello there");
     expect(ctx.spawns[0].cwd).toBe(path.join(ctx.dataRoot, "scratch", chat.id));
     expect(fs.existsSync(ctx.spawns[0].cwd)).toBe(true);
+    ctx.svc.close();
+  });
+
+  it("names a chat's scratch folder after its first message", async () => {
+    const ctx = setup();
+    const first = ctx.svc.createChat({ engine: "pasty", prompt: "Airbus X-Ray: a blueprint explorer for the A350\nwith layers" });
+    expect(first.id).toBe("airbus-x-ray-a-blueprint");
+    expect(first.cwd).toBe(path.join(ctx.dataRoot, "scratch", "airbus-x-ray-a-blueprint"));
+    // A folder left there (a deleted chat's, say) is not reused.
+    fs.mkdirSync(path.join(ctx.dataRoot, "scratch", "hello"), { recursive: true });
+    expect(ctx.svc.createChat({ engine: "pasty", prompt: "hello" }).id).toBe("hello-2");
+    expect(ctx.svc.createChat({ engine: "pasty", prompt: "hello" }).id).toBe("hello-3");
+    expect(ctx.svc.createChat({ engine: "pasty", prompt: "こんにちは" }).id).toBe("chat");
+    expect(ctx.svc.createChat({ engine: "pasty" }).id).toBe("chat-2");
+    expect(scratchName("Supercalifragilisticexpialidocious-and-then-some")).toBe("supercalifragilisticexpialidocio");
     ctx.svc.close();
   });
 

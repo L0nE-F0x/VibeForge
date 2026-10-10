@@ -234,7 +234,7 @@ export class TeamService extends ServiceCore {
     return this.chats.listChats(filter);
   }
 
-  createChat(input: { agentId?: string | null; engine?: string }): ChatView {
+  createChat(input: { agentId?: string | null; engine?: string; prompt?: string }): ChatView {
     return this.chats.createChat(input);
   }
 
