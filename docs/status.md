@@ -1,6 +1,6 @@
 # Status — 2026-10-10
 
-## Chat: one place to type (2026-10-10, unreleased)
+## 2.4.0: one place to type in a chat (2026-10-10)
 
 The founder found the chat pane counterintuitive: a running chat showed the CLI's own prompt and VibeForge's box under it, both looking ready for input (the terminal had focus), with two rows of key hints and a "type in the terminal, or use the box below" bar.
 

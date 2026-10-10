@@ -6,9 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-10
+
+**2.4: one place to type in a chat.**
+
 ### Changed
 
-- **One place to type in a chat.** A running chat used to show the CLI's own prompt and a VibeForge message box under it, with two rows of key hints and a sentence explaining both. Now, while a session runs, its terminal is where you type: dictation and dropped files go straight into it, as in Code. For a longer message, press **Write** in the header (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> in the terminal): a box opens under the terminal, <kbd>Enter</kbd> sends and closes it, and <kbd>Esc</kbd> closes it and keeps what you wrote. Agents' chats work the same way.
+- **One place to type in a chat.** A running chat used to show the CLI's own prompt and a VibeForge message box under it, with two rows of key hints and a sentence explaining both. Now, while a session runs, its terminal is where you type: dictation and dropped files go straight into it, as in Code. For a longer message, press **Write** in the header (or `Ctrl`+`Shift`+`Enter` in the terminal): a box opens under the terminal, `Enter` sends and closes it, and `Esc` closes it and keeps what you wrote. Agents' chats work the same way.
 - **Everything at the top.** The chat's name (click it to rename), its engine, its folder, Write, the mic and Stop now share one header, with a live dot beside the name.
 - **Starting and picking up.** A new chat opens on one box in the middle of the pane, with the engine picker inside it. An ended chat dims its last screen behind a box that picks the conversation back up when you send. That replaces the separate Continue session button.
 - **Scratch folders named after the chat.** A new chat's folder is named after its first message's first few words (`scratch/airbus-x-ray-a-blueprint`) instead of `scratch/chat-2`. Chats you already have keep their folders.
@@ -327,7 +331,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.4.0
 [2.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.1
 [2.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.0
 [2.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.2.0
