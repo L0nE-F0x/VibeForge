@@ -337,7 +337,7 @@ export interface DeskMethods {
   "tasks.discardCopy": (id: string) => TaskView;
 
   "chats.list": (filter?: { agentId?: string | null }) => ChatView[];
-  "chats.create": (input: { agentId?: string | null; engine?: string }) => ChatView;
+  "chats.create": (input: { agentId?: string | null; engine?: string; prompt?: string }) => ChatView;
   "chats.rename": (id: string, title: string) => ChatView;
   "chats.setEngine": (id: string, engine: string) => ChatView;
   "chats.delete": (id: string) => Deleted;

@@ -227,6 +227,7 @@ interface Controller {
   cancel: () => void;
   expectFromTarget: (target: DictationTarget, words: string) => void;
   expectPty: (ptyId: string, words: string) => void;
+  talkBack: () => boolean;
 }
 
 let controller: Controller | null = null;
@@ -234,6 +235,11 @@ let controller: Controller | null = null;
 /** A composer sent words that were dictated into it: listen for the answer. */
 export function expectAnswer(target: DictationTarget, words: string): void {
   controller?.expectFromTarget(target, words);
+}
+
+/** Dictated words were pasted into a terminal from elsewhere (the desktop key): its next Enter sends them. */
+export function expectOnEnter(target: DictationTarget, words: string): void {
+  if (controller?.talkBack()) armTerminal(target, words);
 }
 
 // ------------------------------------------------------------------ small helpers
@@ -513,6 +519,7 @@ export function VoiceLayer() {
       cancel,
       expectFromTarget,
       expectPty,
+      talkBack: talkBackOn,
     };
     return () => {
       controller = null;

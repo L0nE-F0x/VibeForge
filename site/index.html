@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=2.1.0" />
+    <link rel="stylesheet" href="styles.css?v=2.4.0" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
@@ -44,6 +44,7 @@
       <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8"/><path d="M4 16V4h12"/></symbol>
       <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
       <symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3"/></symbol>
+      <symbol id="i-square-pen" viewBox="0 0 24 24"><path d="M12 3H3v18h18v-9"/><path d="M18.4 2.6a2.1 2.1 0 1 1 3 3L12 15l-4 1 1-4Z"/></symbol>
       <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M12 19h8"/><path d="m4 17 6-6-6-6"/></symbol>
       <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/></symbol>
       <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 5v16"/><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"/></symbol>
@@ -202,22 +203,31 @@
                       <span class="m-row-text"><b>Notes for the 0.3 hotfix</b><i>2 days ago</i></span>
                     </div>
                   </aside>
-                  <div class="m-session">
-                    <div class="m-term" data-demo-term></div>
-                    <div class="m-sessionbar" data-demo-sessionbar>
-                      <span class="m-dot is-live"></span>
-                      <span>Live in <code>~/Projects/frontier-halls</code> — type in the terminal, or use the box below.</span>
-                      <span class="m-ghost-btn"><svg><use href="#i-square" /></svg>Stop</span>
+                  <div class="m-session" data-demo-session>
+                    <div class="m-sessionhead">
+                      <b>Draft release notes for what merged</b>
+                      <span class="m-dot is-live m-livebit"></span>
+                      <span class="m-grow"></span>
+                      <span class="m-ghost-btn m-hide-sm m-livebit"><svg><use href="#i-square-pen" /></svg>Write</span>
+                      <span class="m-ghost-btn m-livebit"><svg><use href="#i-square" /></svg>Stop</span>
                     </div>
-                    <div class="m-composer">
-                      <div class="m-composer-box">
-                        <span data-demo-placeholder>Message the running session…</span>
-                        <svg class="m-mic"><use href="#i-mic" /></svg>
-                        <span class="m-send"><svg><use href="#i-arrow-up" /></svg><b data-demo-send>Send</b></span>
+                    <div class="m-term" data-demo-term></div>
+                    <div class="m-ended">
+                      <div class="m-sessionbar is-done">
+                        <span class="m-chip">Finished</span>
+                        <span>Session ended just now · 1 file changed, 38 insertions(+), 4 deletions(-). Sending a message picks it up again.</span>
+                        <span class="m-ghost-btn m-hide-sm"><svg><use href="#i-history" /></svg>Review</span>
                       </div>
-                      <div class="m-composer-hint">
-                        <span><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
-                        <span data-demo-hint><svg><use href="#i-square-terminal" /></svg>pasted into the session</span>
+                      <div class="m-composer">
+                        <div class="m-composer-box">
+                          <span>Pick the conversation back up…</span>
+                          <svg class="m-mic"><use href="#i-mic" /></svg>
+                          <span class="m-send"><svg><use href="#i-arrow-up" /></svg><b>Continue</b></span>
+                        </div>
+                        <div class="m-composer-hint">
+                          <span><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+                          <span><svg><use href="#i-play" /></svg>starts the engine</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -736,6 +746,6 @@ npm run build && ./scripts/vibeforge</pre>
       </p>
     </footer>
 
-    <script src="main.js?v=1.2.0" defer></script>
+    <script src="main.js?v=2.4.0" defer></script>
   </body>
 </html>

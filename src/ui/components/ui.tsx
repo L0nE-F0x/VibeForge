@@ -17,7 +17,7 @@ import {
 import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
 import { mark, shade } from "../../shared/pixel.js";
-import { initials, timeAgo } from "../../shared/text.js";
+import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
@@ -271,6 +271,14 @@ export function TimeAgo({ iso, prefix }: { iso: string | null | undefined; prefi
       {timeAgo(iso, now, t.language)}
     </span>
   );
+}
+
+/** How long ago, as short as the language writes it ("16m"), for a narrow list. */
+export function ShortAgo({ iso }: { iso: string | null | undefined }) {
+  const t = useT();
+  const now = useNow(20_000);
+  if (!iso) return null;
+  return <span {...tipProps(new Date(iso).toLocaleString(t.language))}>{shortAgo(iso, now, t.language)}</span>;
 }
 
 export function SecretNote() {

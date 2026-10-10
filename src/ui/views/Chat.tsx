@@ -1,11 +1,13 @@
-import { FolderOpen, MessageSquarePlus, MessagesSquare, Pencil, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { FolderOpen, MessageSquarePlus, MessagesSquare, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { dayHeading, dayKey, tildify } from "../../shared/text.js";
 import { useChatAttention } from "../attention.js";
 import type { ChatView as Chat } from "../../shared/api.js";
-import { call, useChats, useEngines, useSettings } from "../api.js";
+import { call, useAppInfo, useChats, useEngines, useSettings } from "../api.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Button, Chip, Input, Skeleton, TimeAgo } from "../components/ui.js";
+import { Button, Chip, Input, ShortAgo, Skeleton } from "../components/ui.js";
+import { tipProps } from "../components/Tooltip.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
 import { useT } from "../i18n/index.js";
@@ -16,9 +18,15 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const confirm = useConfirm();
   const deleted = useDeleted();
   const chatList = useChats(null);
-  const chats = chatList.data ?? [];
+  // Live chats first, then the rest by when they were last used.
+  const chats = useMemo(
+    () => [...(chatList.data ?? [])].sort((a, b) => Number(b.live) - Number(a.live) || b.updatedAt.localeCompare(a.updatedAt)),
+    [chatList.data],
+  );
+  const group = (item: Chat) => (item.live ? "live" : dayKey(item.updatedAt));
   const engines = useEngines().data ?? [];
   const settings = useSettings().data;
+  const home = useAppInfo().data?.home ?? "";
   const [engine, setEngine] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
@@ -92,9 +100,10 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
         <div className="list-scroll">
           {!chatList.loaded && <Skeleton rows={5} />}
           {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
-          {chats.map((item) => (
+          {chats.map((item, index) => (
+            <Fragment key={item.id}>
+            {(index === 0 || group(chats[index - 1]) !== group(item)) && <div className="list-day">{item.live ? t("session.live") : dayHeading(item.updatedAt, t.language)}</div>}
             <div
-              key={item.id}
               className={`row${chatAttention.get(item.id)?.attention === "waiting" ? " needs-you" : ""}`}
               role="button"
               tabIndex={0}
@@ -106,52 +115,64 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{item.title}</span>
                 <span className="row-sub truncate">
-                  {engineLabel(item.engine)} · <TimeAgo iso={item.updatedAt} />
+                  {engineLabel(item.engine)} · <ShortAgo iso={item.updatedAt} />
                 </span>
               </span>
               <span className="row-actions">
                 <Button size="sm" variant="ghost" icon={Trash2} title={t("common.delete")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
               </span>
             </div>
+            </Fragment>
           ))}
         </div>
       </SidePanel>
       <div className="main">
-        <div className="page-head">
-          <MessagesSquare size={17} className="accent-text" />
-          {chat && renaming ? (
-            <Input
-              autoFocus
-              value={title}
-              style={{ maxWidth: 420 }}
-              onChange={(event) => setTitle(event.target.value)}
-              onBlur={() => void rename()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void rename();
-                if (event.key === "Escape") setRenaming(false);
-              }}
-            />
-          ) : (
-            <h1 className="truncate">{chat ? chat.title : t("agents.newChat")}</h1>
-          )}
-          {chat && !renaming && <Button size="sm" variant="ghost" icon={Pencil} title={t("common.rename")} onClick={() => setRenaming(true)} />}
-          <span className="grow" />
-          {chat?.live ? (
-            <Chip tone="accent">{engineLabel(chat.engine)}</Chip>
-          ) : (
-            <div style={{ width: 190 }}>
-              <EngineSelect engines={engines} value={chat?.engine ?? engine} onChange={(next) => void switchEngine(next)} allowMissing={chat?.engine} />
-            </div>
-          )}
-          {chat && <Button size="sm" icon={FolderOpen} title={t("chat.openScratch")} onClick={() => void call("app.openPath", chat.cwd)} />}
-        </div>
         <SessionPane
           key={chat?.id ?? "new"}
           chat={chat}
-          create={() => call("chats.create", { engine })}
+          create={(text) => call("chats.create", { engine, prompt: text })}
           newKey="chat"
           onCreated={(created) => go({ view: "chat", chatId: created.id })}
           placeholder={t("chat.placeholder", { engine: engineLabel(chat?.engine ?? engine) })}
+          head={
+            <>
+              <MessagesSquare size={17} className="accent-text" />
+              {chat && renaming ? (
+                <Input
+                  autoFocus
+                  value={title}
+                  style={{ maxWidth: 420 }}
+                  onChange={(event) => setTitle(event.target.value)}
+                  onBlur={() => void rename()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void rename();
+                    if (event.key === "Escape") setRenaming(false);
+                  }}
+                />
+              ) : chat ? (
+                <h1 className="truncate">
+                  <button type="button" className="head-title" {...tipProps(t("common.rename"))} onClick={() => setRenaming(true)}>
+                    {chat.title}
+                  </button>
+                </h1>
+              ) : (
+                <h1 className="truncate">{t("agents.newChat")}</h1>
+              )}
+            </>
+          }
+          tools={
+            chat && (
+              <>
+                {chat.live && <Chip tone="accent">{engineLabel(chat.engine)}</Chip>}
+                <Button size="sm" icon={FolderOpen} title={`${t("chat.openScratch")} · ${tildify(chat.cwd, home)}`} onClick={() => void call("app.openPath", chat.cwd)} />
+              </>
+            )
+          }
+          leading={
+            <div className="composer-engine">
+              <EngineSelect engines={engines} value={chat?.engine ?? engine} onChange={(next) => void switchEngine(next)} allowMissing={chat?.engine} />
+            </div>
+          }
           empty={{
             icon: MessagesSquare,
             title: t("chat.empty.title"),

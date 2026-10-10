@@ -51,6 +51,42 @@
   z-index: 3;
 }
 
+/* A chat: its header with every control, over the session. */
+.session-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-head.slim {
+  height: 44px;
+  padding-left: 16px;
+}
+
+.session-head .sub {
+  min-width: 0;
+}
+
+/* The chat's name, which renames it on click. */
+.head-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.head-title:hover {
+  text-decoration: underline dotted var(--fg-3);
+  text-underline-offset: 5px;
+}
+
 .session {
   flex: 1;
   min-height: 0;
@@ -58,6 +94,47 @@
   display: flex;
   flex-direction: column;
   background: var(--term-bg);
+}
+
+/* Nothing has run yet: the box sits in the middle, under what a chat is. */
+.session-start {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 24px 10vh;
+}
+
+.session-start .empty {
+  flex: none;
+  padding: 0 0 20px;
+}
+
+.session-start .composer {
+  width: min(760px, 100%);
+  border-top: 0;
+  background: none;
+  padding: 0;
+}
+
+/* An ended session's last screen, behind the box that picks it up again. */
+.session.ended > .term {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.session.ended > .term:hover {
+  opacity: 0.9;
+}
+
+.composer-engine {
+  flex: none;
+  width: 160px;
+  align-self: center;
+  margin-left: -6px;
 }
 
 .session-bar {

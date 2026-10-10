@@ -1,4 +1,15 @@
-# Status — 2026-10-09
+# Status — 2026-10-10
+
+## Chat: one place to type (2026-10-10, unreleased)
+
+The founder found the chat pane counterintuitive: a running chat showed the CLI's own prompt and VibeForge's box under it, both looking ready for input (the terminal had focus), with two rows of key hints and a "type in the terminal, or use the box below" bar.
+
+- **`SessionPane`** (`src/ui/components/Session.tsx`, used by Chat and by an agent's Chats tab) now owns the header: the caller passes `head` (the name), `tools` and `leading` (the engine picker, inside the box); `slim` gives agents a 44 px header under their own page head. While live there is no box: the terminal is the input, a dictation target of its own (pasted, sent by the next Enter, talk-back armed through `expectOnEnter` for the desktop key's words), and file drops already land on it (`useFileDrop`). **Write** or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> (`LiveTerminal`'s new `onCompose`, so Code terminals keep the key) opens the `Composer` under the terminal; Enter sends and returns focus to the terminal, Esc closes it, the draft stays under `chat:<id>`, and a chat with a draft opens with the box shown. Not live: a centred box for a new chat, or the dimmed last screen, the ended bar (Review only) and a "Pick the conversation back up…" box. The Continue session button is gone; sending picks it up as before.
+- **Scratch folders** are named by `scratchName(firstMessage)` (up to 32 characters of whole words, `chat` when there are none), and `uniqueChatId` also skips names whose folder already exists. `chats.create` takes `prompt`.
+- **The list**: live first, then `dayHeading` groups, `ShortAgo` (`shortAgo` in `src/shared/text.ts`, `Intl` narrow units, "16m", "3 h", "16分钟").
+- **Words**: `session.live`, `.write`, `.writeTip`, `.backToTerminal`, `.pickUpPlaceholder`, `shortcuts.write` in all 7 catalogs; `session.liveIn`, `.continue`, `.pasted`, `.continueFailed` removed; `agents.chatEmpty.body` no longer says "talk to it here".
+- **Site**: the hero desk's chat matches (header with Write and Stop, no box while running; dimmed screen, Review and a Continue box once it ends). Cache busters `?v=2.4.0`.
+- Checked: `npm test` (257), typecheck, lint, `SMOKE_HEADLESS=1 scripts/smoke.mjs`, and the scratch build driven headless with a stand-in CLI (25 checks, and no page errors: one centred box with the engine picker, the folder named after the first message, the CLI receiving it, no box under the live terminal, header controls, Live then Today in the list, Ctrl+Shift+Enter opening a focused box without reaching the CLI, Enter sending and refocusing the terminal, Esc keeping the draft, rename from the title, Stop to the dimmed pick-up box, picking up with a message, an agent's slim header without an engine picker). The site's demo was checked in headless Chrome at desktop and phone widths, running and ended.
 
 ## 2.3.0: tokens by week, month and all time (2026-10-09)
 

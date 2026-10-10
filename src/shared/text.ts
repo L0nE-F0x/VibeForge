@@ -49,6 +49,17 @@ export function timeAgo(iso: string | null | undefined, now = Date.now(), langua
   return future ? `in ${text}` : `${text} ago`;
 }
 
+/** "now", "16m", "3h", "2d": how long ago, as short as the language writes it, for a narrow list. */
+export function shortAgo(iso: string | null | undefined, now = Date.now(), language = "en"): string {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const s = Math.max(0, Math.round((now - then) / 1000));
+  if (s < 60) return new Intl.RelativeTimeFormat(language, { numeric: "auto" }).format(0, "second");
+  const [value, unit] = s < 3600 ? [s / 60, "minute"] : s < 86400 ? [s / 3600, "hour"] : s < 86400 * 7 ? [s / 86400, "day"] : [s / (86400 * 7), "week"];
+  return new Intl.NumberFormat(language, { style: "unit", unit, unitDisplay: "narrow" }).format(Math.floor(value));
+}
+
 export function duration(startIso: string, endIso: string | null, now = Date.now()): string {
   const start = Date.parse(startIso);
   const end = endIso ? Date.parse(endIso) : now;

@@ -131,10 +131,12 @@ interface LiveProps {
   onFocus?: () => void;
   /** An http(s) link was clicked. When omitted, the link opens in the system browser. */
   onLink?: (url: string) => void;
+  /** Ctrl+Shift+Enter: open a box for a longer message. Without it the key reaches the program. */
+  onCompose?: () => void;
 }
 
 /** A terminal attached to a live PTY in the host. */
-export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus, onLink }, ref) {
+export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus, onLink, onCompose }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -142,6 +144,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const onExitRef = useRef(onExit);
   const onFocusRef = useRef(onFocus);
   const onLinkRef = useRef(onLink);
+  const onComposeRef = useRef(onCompose);
+  onComposeRef.current = onCompose;
   onExitRef.current = onExit;
   onFocusRef.current = onFocus;
   onLinkRef.current = onLink;
@@ -206,6 +210,13 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
 
     term.attachCustomKeyEventHandler((event) => {
       if (isAppShortcut(event)) return false;
+      if (onComposeRef.current && event.key === "Enter" && event.ctrlKey && event.shiftKey && !event.altKey) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          onComposeRef.current();
+        }
+        return false;
+      }
       if (event.type !== "keydown") return true;
       const action = clipboardKey(event, term.hasSelection());
       if (!action) return true;
