@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   Bot,
   CheckCheck,
+  ChevronsRight,
   Copy,
   FileDiff,
   FileText,
@@ -16,7 +17,7 @@ import {
   Square,
   TerminalSquare,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
@@ -26,6 +27,7 @@ import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
+import { diffFiles } from "../diff-files.js";
 
 export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
   "agent-chat": "origin.agent-chat",
@@ -60,7 +62,7 @@ export function DiffView({ text }: { text: string }) {
                       ? "del"
                       : "";
           return (
-            <div key={index} className={kind}>
+            <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
               {line || " "}
             </div>
           );
@@ -86,24 +88,30 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   }, t("run.diffFailed"));
   const notRepo = snapshot.startsWith("not a git repo");
   const saved = run.status !== "running" && patchSaved;
+  // What a finished run changed is the point of reviewing it: its saved diff opens with the tab.
+  useEffect(() => {
+    if (saved && !notRepo) void load("saved");
+  }, [saved, notRepo, load]);
+  const files = useMemo(() => (diff ? diffFiles(diff.text) : []), [diff]);
+  const diffBox = useRef<HTMLDivElement>(null);
+  const showFile = (line: number) => diffBox.current?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
       {run.status === "running" && <Notice icon={Info}>{t("run.diffLater")}</Notice>}
-      {saved && !notRepo && <Notice icon={Info}>{t("run.diffKept")}</Notice>}
       {notRepo ? (
         <Notice>{t("run.notRepo", { path: run.cwd })}</Notice>
-      ) : snapshot ? (
-        <pre className="pre">{snapshot.trim()}</pre>
-      ) : run.status !== "running" ? (
+      ) : !snapshot && run.status !== "running" && !saved ? (
         <Notice>{t("run.noSnapshot")}</Notice>
       ) : null}
       {!notRepo && (
         <div className="vstack">
-          <div className="hstack">
-            <Button icon={GitCompare} busy={loading} onClick={() => void load(saved ? "saved" : "now")}>
-              {saved ? t("run.showSaved") : diff === null ? t("run.showFull") : t("run.refreshDiff")}
-            </Button>
-            {saved && (
+          <div className="hstack wrap">
+            {(!saved || diff?.source === "now") && (
+              <Button icon={GitCompare} busy={loading} onClick={() => void load(saved ? "saved" : "now")}>
+                {saved ? t("run.showSaved") : diff === null ? t("run.showFull") : t("run.refreshDiff")}
+              </Button>
+            )}
+            {saved && diff?.source !== "now" && (
               <Button variant="ghost" icon={GitCompare} busy={loading} onClick={() => void load("now")}>
                 {t("run.diffFolderNow")}
               </Button>
@@ -115,14 +123,31 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
             )}
             <span className="faint">{diffCaption(run, saved, diff?.source ?? null, t)}</span>
           </div>
-          {diff !== null && <DiffView text={diff.text} />}
+          {files.length > 0 && (
+            <div className="diff-files">
+              {files.map((file) => (
+                <button key={file.line} type="button" className="diff-file" onClick={() => showFile(file.line)}>
+                  <FileText size={13} className="faint" />
+                  <span className="mono truncate grow">{file.path}</span>
+                  {file.added > 0 && <span className="diff-count add">+{file.added}</span>}
+                  {file.removed > 0 && <span className="diff-count del">−{file.removed}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          {diff !== null && (
+            <div ref={diffBox}>
+              <DiffView text={diff.text} />
+            </div>
+          )}
+          {snapshot && (diff === null || !diff.text.trim()) && <pre className="pre">{snapshot.trim()}</pre>}
         </div>
       )}
     </div>
   );
 }
 
-export function RunDetail({ runId, embedded }: { runId: string; embedded?: boolean }) {
+export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded?: boolean; /** While reviewing: open the next run waiting. */ onNext?: () => void }) {
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
@@ -212,6 +237,11 @@ export function RunDetail({ runId, embedded }: { runId: string; embedded?: boole
         ) : (
           <Button size="sm" variant="primary" icon={RotateCcw} busy={continuing} onClick={() => void cont()}>
             {t("common.continue")}
+          </Button>
+        )}
+        {onNext && (
+          <Button size="sm" icon={ChevronsRight} tip={t("runs.nextTip")} kbd="J" onClick={onNext}>
+            {t("runs.next")}
           </Button>
         )}
         <MenuButton

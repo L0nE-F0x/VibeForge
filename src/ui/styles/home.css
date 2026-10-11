@@ -649,6 +649,11 @@
   color: var(--fg-3);
 }
 
+.run-row .meta.when {
+  flex: none;
+  font-size: var(--fs-xs);
+}
+
 /* Search: the words around a match, the matched words in the accent. */
 .snippet {
   font-size: var(--fs-sm);

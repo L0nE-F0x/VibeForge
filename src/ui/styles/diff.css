@@ -41,3 +41,42 @@
 .diff .meta {
   color: var(--fg-3);
 }
+
+/* The files a run changed, above its diff: click one to land on it. */
+.diff-files {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  background: var(--bg-dark);
+}
+
+.diff-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+
+.diff-file:first-child {
+  border-top: 0;
+}
+
+.diff-file:hover {
+  background: var(--hover-fill);
+}
+
+.diff-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.diff-count.add {
+  color: var(--green);
+}
+
+.diff-count.del {
+  color: var(--red);
+}

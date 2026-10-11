@@ -276,6 +276,10 @@ function Rail() {
     return [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (view === "agents")).map((mark) => mark.attention);
   };
 
+  /** What a badge counts, said in the tooltip: the two can't be told apart by the number alone. */
+  const badgeTip = (view: ViewName, count: number): string =>
+    view === "tasks" ? t.count("rail.tip.tasksReview", count, { count }) : t.count("home.status.review", count, { count }).replaceAll("**", "");
+
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
     if (view === "tasks") return review;
@@ -298,7 +302,7 @@ function Rail() {
             className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
-            {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
+            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
             onClick={() => open(item.view)}
             onContextMenu={(event) => {
               event.preventDefault();

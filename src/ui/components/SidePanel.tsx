@@ -157,9 +157,12 @@ export function SidePanel({
   primary = true,
   className,
   scrollKey = id,
+  quietTitle,
 }: {
   id: string;
   title: ReactNode;
+  /** The header's controls name the list well enough (Runs' Review/Live/All): the title is for screen readers only. */
+  quietTitle?: boolean;
   actions?: ReactNode;
   children: ReactNode;
   /** What the collapsed strip shows under its expand button: avatars, initials, a New button. */
@@ -311,8 +314,8 @@ export function SidePanel({
       ) : (
         <>
           <div className="list-head">
-            <h2 className="grow truncate">{title}</h2>
-            {actions}
+            <h2 className={quietTitle ? "visually-hidden" : "grow truncate"}>{title}</h2>
+            {quietTitle ? <span className="grow hstack">{actions}</span> : actions}
             <Button
               variant="ghost"
               size="sm"

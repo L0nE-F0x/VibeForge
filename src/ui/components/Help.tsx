@@ -143,6 +143,8 @@ interface ShortcutRow {
   keys?: string;
   /** A mouse gesture, shown as words. */
   gesture?: Key;
+  /** One of the desk's lights, drawn as it appears. */
+  mark?: "waiting" | "working" | "done" | "badge";
   text: Key;
 }
 
@@ -200,6 +202,22 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
       { keys: "Ctrl+Shift+I", text: "shortcuts.devtools" },
     ],
   },
+  {
+    group: "shortcuts.runs",
+    rows: [
+      { keys: "J", text: "shortcuts.nextRun" },
+      { keys: "K", text: "shortcuts.prevRun" },
+    ],
+  },
+  {
+    group: "shortcuts.marks",
+    rows: [
+      { mark: "waiting", text: "ws.waiting" },
+      { mark: "working", text: "ws.working" },
+      { mark: "done", text: "ws.done" },
+      { mark: "badge", text: "shortcuts.markBadge" },
+    ],
+  },
 ];
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
@@ -214,7 +232,15 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
               <div key={row.text} className="shortcut-row">
                 <span className="grow">{t(row.text)}</span>
                 <span className="tour-caps">
-                  {row.gesture ? <span className="faint">{t(row.gesture)}</span> : row.keys?.split("+").map((key) => <kbd key={key}>{key}</kbd>)}
+                  {row.mark === "badge" ? (
+                    <span className="legend-badge">2</span>
+                  ) : row.mark ? (
+                    <span className={`ws-state ${row.mark}`} aria-hidden />
+                  ) : row.gesture ? (
+                    <span className="faint">{t(row.gesture)}</span>
+                  ) : (
+                    row.keys?.split("+").map((key) => <kbd key={key}>{key}</kbd>)
+                  )}
                 </span>
               </div>
             ))}

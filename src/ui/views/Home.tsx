@@ -6,7 +6,7 @@ import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbo
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_KEY } from "../components/RunDetail.js";
-import { Button, StatusChip, TimeAgo } from "../components/ui.js";
+import { Button, ShortAgo, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { useAttention, usePtyAttention } from "../attention.js";
@@ -24,20 +24,36 @@ const WAITING_ROWS = 24;
 export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
   const engines = useEngines().data ?? [];
   const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
+  // The dot says how it went; a chip only for what didn't simply finish.
+  const clean = run.status === "exited" && !run.exitCode;
   return (
     <button type="button" className="run-row" aria-selected={selected} aria-current={selected || undefined} onClick={onClick}>
       <span className={`dot ${run.status}`} />
       <span className="vstack grow" style={{ gap: 1 }}>
-        <span className="title truncate">{title}</span>
+        {compact ? (
+          // A narrow list: the time stays on the first line, so the second can shrink first.
+          <span className="hstack" style={{ gap: 8 }}>
+            <span className="title truncate grow">{title}</span>
+            <span className="meta when">
+              <ShortAgo iso={run.endedAt ?? run.startedAt} />
+            </span>
+          </span>
+        ) : (
+          <span className="title truncate">{title}</span>
+        )}
         <span className="meta truncate">
           {kind}
           {run.changes ? ` · ${run.changes}` : ""}
-          {" · "}
-          <TimeAgo iso={run.endedAt ?? run.startedAt} />
+          {!compact && (
+            <>
+              {" · "}
+              <TimeAgo iso={run.endedAt ?? run.startedAt} />
+            </>
+          )}
         </span>
         {snippet && <Snippet text={snippet} className="truncate-2" />}
       </span>
-      {!compact && <StatusChip status={run.status} exitCode={run.exitCode} />}
+      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} />}
     </button>
   );
 }
