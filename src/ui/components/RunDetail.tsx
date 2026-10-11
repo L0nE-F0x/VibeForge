@@ -24,6 +24,7 @@ import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../ap
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { setPtyInView } from "../attention.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
+import { useNarrowStage } from "./SidePanel.js";
 import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
@@ -156,6 +157,8 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const [tab, setTab] = useState<Tab>("session");
+  // On a narrow tile the header's secondary buttons keep their icons and tooltips, so the title has room.
+  const narrow = useNarrowStage();
   const run = bundle.data?.run;
   const files = bundle.data?.files;
 
@@ -198,6 +201,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
 
   const engine = engines.find((item) => item.id === run.engine);
   const place = routeForRun(run);
+  const openLabel = t(place.view === "agents" ? "run.openIn.agents" : place.view === "chat" ? "run.openIn.chat" : place.view === "tasks" ? "run.openIn.tasks" : "run.openIn.code");
   const canOpenElsewhere = place.view !== "runs";
 
   return (
@@ -215,8 +219,8 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
           </div>
         </div>
         {canOpenElsewhere && !embedded && (
-          <Button size="sm" icon={ArrowUpRight} onClick={() => go(place)}>
-            {t(place.view === "agents" ? "run.openIn.agents" : place.view === "chat" ? "run.openIn.chat" : place.view === "tasks" ? "run.openIn.tasks" : "run.openIn.code")}
+          <Button size="sm" icon={ArrowUpRight} tip={narrow ? openLabel : undefined} onClick={() => go(place)}>
+            {narrow ? null : openLabel}
           </Button>
         )}
         {run.status !== "running" && agents.length > 0 && (
@@ -224,10 +228,10 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
             size="sm"
             icon={Forward}
             busy={handingOff}
-            tip={t("handoff.tip")}
+            tip={narrow ? t("handoff.button") : t("handoff.tip")}
             items={agents.map((agent) => ({ label: agent.id === run.agentId ? t("handoff.again", { agent: agent.name }) : agent.name, icon: Bot, onSelect: () => void handOff(agent.id) }))}
           >
-            {t("handoff.button")}
+            {narrow ? null : t("handoff.button")}
           </MenuButton>
         )}
         {run.status === "running" ? (
@@ -241,7 +245,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
         )}
         {onNext && (
           <Button size="sm" icon={ChevronsRight} tip={t("runs.nextTip")} kbd="J" onClick={onNext}>
-            {t("runs.next")}
+            {narrow ? null : t("runs.next")}
           </Button>
         )}
         <MenuButton
