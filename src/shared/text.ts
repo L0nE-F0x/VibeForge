@@ -70,18 +70,25 @@ export function duration(startIso: string, endIso: string | null, now = Date.now
   return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
-export function clockTime(iso: string | null | undefined): string {
+/**
+ * When something is due, in the language's own words and clock: "08:00", "tomorrow 03:00",
+ * "Wed 09:00", "Oct 20 09:00". A time with no day is today.
+ */
+export function fireTime(iso: string | null | undefined, language = "en", now = Date.now()): string {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-  if (sameDay) return time;
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  if (date.toDateString() === tomorrow.toDateString()) return `Tomorrow ${time}`;
-  return `${date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`;
+  const time = date.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" });
+  const start = (value: Date | number) => {
+    const copy = new Date(value);
+    copy.setHours(0, 0, 0, 0);
+    return copy.getTime();
+  };
+  const ahead = Math.round((start(date) - start(now)) / 86_400_000);
+  if (ahead === 0) return time;
+  if (ahead === 1) return `${new Intl.RelativeTimeFormat(language, { numeric: "auto" }).format(1, "day")} ${time}`;
+  if (ahead > 1 && ahead < 7) return `${date.toLocaleDateString(language, { weekday: "short" })} ${time}`;
+  return `${date.toLocaleDateString(language, { day: "numeric", month: "short" })} ${time}`;
 }
 
 export function tildify(target: string, home: string): string {

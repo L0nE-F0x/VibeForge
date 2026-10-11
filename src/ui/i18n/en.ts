@@ -419,7 +419,7 @@ export const en = {
   "home.status.live.other": "**{count}** terminals running",
   "home.status.review.one": "**{count}** run to review",
   "home.status.review.other": "**{count}** runs to review",
-  "home.status.next": "next routine at **{time}**",
+  "home.status.next": "next routine **{time}**",
   "home.action.workspace": "Open a workspace",
   "home.action.agent": "New agent",
   "home.action.chat": "Quick chat",

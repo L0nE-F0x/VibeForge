@@ -406,7 +406,7 @@ export const es: Catalog = {
   "home.status.live.other": "**{count}** terminales en ejecución",
   "home.status.review.one": "**{count}** ejecución por revisar",
   "home.status.review.other": "**{count}** ejecuciones por revisar",
-  "home.status.next": "próxima rutina a las **{time}**",
+  "home.status.next": "próxima rutina **{time}**",
   "home.action.workspace": "Abrir un espacio de trabajo",
   "home.action.agent": "Agente nuevo",
   "home.action.chat": "Chat rápido",

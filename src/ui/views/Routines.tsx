@@ -1,7 +1,7 @@
 import { AlertTriangle, CalendarClock, History, Hourglass, Pencil, Play, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RoutineView, Schedule, SchedulePreview } from "../../shared/api.js";
-import { clockTime } from "../../shared/text.js";
+import { fireTime } from "../../shared/text.js";
 import { call, useAgents, useRoutines } from "../api.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
@@ -90,7 +90,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   </div>
                   <span className="faint truncate">
                     {routine.agentName ?? t("routines.missingAgent")} · {routine.description}
-                    {routine.enabled && routine.nextFires[0] ? ` · ${t("routines.nextAt", { time: clockTime(routine.nextFires[0]) })}` : ""}
+                    {routine.enabled && routine.nextFires[0] ? ` · ${t("routines.nextAt", { time: fireTime(routine.nextFires[0], t.language) })}` : ""}
                   </span>
                 </div>
                 <Toggle checked={routine.enabled} onChange={(on) => void toggle(routine, on)} />
@@ -208,7 +208,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
   const [save, saving] = useAction(async () => {
     await call("routines.save", { id: routine?.id, name, agentId, schedule, prompt, notify, enabled, shareCheckout });
     forgetDraft(draftKey);
-    push("success", routine ? t("routines.saved") : t("routines.created"), preview?.next[0] ? t("routines.nextToast", { time: clockTime(preview.next[0]) }) : undefined);
+    push("success", routine ? t("routines.saved") : t("routines.created"), preview?.next[0] ? t("routines.nextToast", { time: fireTime(preview.next[0], t.language) }) : undefined);
     onClose();
   }, t("routines.saveFailed"));
   const ready = Boolean(name.trim() && agentId && prompt.trim() && preview?.valid);
@@ -280,7 +280,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
               {preview?.valid ? (
                 <div className="vstack" style={{ gap: 4 }}>
                   <strong>{preview.description}</strong>
-                  <span className="faint">{t("routines.nextList", { times: preview.next.map((when) => clockTime(when)).join("  ·  ") })}</span>
+                  <span className="faint">{t("routines.nextList", { times: preview.next.map((when) => fireTime(when, t.language)).join("  ·  ") })}</span>
                 </div>
               ) : (
                 <span style={{ color: "var(--red)" }}>{schedule.kind === "cron" ? t("routines.badCron") : t("routines.badEvery")}</span>

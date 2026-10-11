@@ -407,7 +407,7 @@ export const ja: Catalog = {
   "home.status.live.other": "**{count}** 個のターミナルが稼働中",
   "home.status.review.one": "レビュー待ちの実行が **{count}** 件",
   "home.status.review.other": "レビュー待ちの実行が **{count}** 件",
-  "home.status.next": "次のルーティンは **{time}**",
+  "home.status.next": "次のルーティン **{time}**",
   "home.action.workspace": "ワークスペースを開く",
   "home.action.agent": "新しいエージェント",
   "home.action.chat": "クイックチャット",

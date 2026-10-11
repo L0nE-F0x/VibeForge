@@ -1,7 +1,7 @@
 import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Hourglass, KanbanSquare, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
-import { duration, tildify } from "../../shared/text.js";
+import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
@@ -83,7 +83,7 @@ export function HomeView() {
   const recent = useQuery("home-activity", ["runs"], () => call("runs.list", { since, limit: 2000 })).data ?? [];
   const [markAll, marking] = useAction(() => call("runs.markAllOpened"));
 
-  const time = (iso: string) => new Date(iso).toLocaleTimeString(t.language, { hour: "2-digit", minute: "2-digit" });
+  const time = (iso: string) => fireTime(iso, t.language, now);
   const upcoming = routines
     .filter((routine) => routine.enabled && routine.nextFires.length)
     .map((routine) => ({ routine, at: routine.nextFires[0] }))

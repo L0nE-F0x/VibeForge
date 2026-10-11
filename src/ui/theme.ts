@@ -17,6 +17,19 @@ function contrast(a: string, b: string): number {
   return (light + 0.05) / (dark + 0.05);
 }
 
+function mixHex(from: string, to: string, amount: number): string {
+  const channel = (hex: string, index: number) => parseInt(hex.slice(index, index + 2), 16);
+  return `#${[1, 3, 5].map((index) => Math.round(channel(from, index) * (1 - amount) + channel(to, index) * amount).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Faint text is set small, so it must read on cards as well as the page: lifted toward the foreground until it does. */
+export function faintText(palette: Pick<Palette, "muted" | "foreground" | "background" | "lighterBackground">, minimum = 4.6): string {
+  const worst = (color: string) => Math.min(contrast(color, palette.background), contrast(color, palette.lighterBackground));
+  let color = palette.muted;
+  for (let amount = 0.05; worst(color) < minimum && amount <= 1; amount += 0.05) color = mixHex(palette.muted, palette.foreground, amount);
+  return color;
+}
+
 /** Text on the accent gradient: whichever of the theme's darkest and white reads better on both stops. */
 function onAccent(palette: Palette): string {
   const dark = palette.darkerBackground;
@@ -35,7 +48,7 @@ export function applyPalette(palette: Palette): void {
   set("--bg-raised", palette.lighterBackground);
   set("--fg", palette.foreground);
   set("--fg-2", palette.lightForeground);
-  set("--fg-3", palette.muted);
+  set("--fg-3", faintText(palette));
   set("--accent", palette.accent);
   set("--accent-2", palette.accent2);
   set("--on-accent", onAccent(palette));

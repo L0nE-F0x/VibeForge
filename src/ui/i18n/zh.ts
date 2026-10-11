@@ -407,7 +407,7 @@ export const zh: Catalog = {
   "home.status.live.other": "**{count}** 个终端正在运行",
   "home.status.review.one": "**{count}** 次运行待审阅",
   "home.status.review.other": "**{count}** 次运行待审阅",
-  "home.status.next": "下一个例行任务在 **{time}**",
+  "home.status.next": "下一个例行任务 **{time}**",
   "home.action.workspace": "打开工作区",
   "home.action.agent": "新建智能体",
   "home.action.chat": "快速聊天",

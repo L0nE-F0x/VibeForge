@@ -138,6 +138,11 @@
   opacity: 0.55;
 }
 
+.home-actions .btn.primary kbd {
+  color: var(--on-accent);
+  opacity: 0.75;
+}
+
 /* Four stats in one bordered strip, divided by hairlines. */
 /* One line under the hero: the runs of the last two weeks, as a block chart. */
 .home-activity {

@@ -407,7 +407,7 @@ export const fr: Catalog = {
   "home.status.live.other": "**{count}** terminaux en cours",
   "home.status.review.one": "**{count}** exécution à relire",
   "home.status.review.other": "**{count}** exécutions à relire",
-  "home.status.next": "prochaine routine à **{time}**",
+  "home.status.next": "prochaine routine **{time}**",
   "home.action.workspace": "Ouvrir un espace de travail",
   "home.action.agent": "Nouvel agent",
   "home.action.chat": "Chat rapide",

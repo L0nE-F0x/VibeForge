@@ -406,7 +406,7 @@ export const de: Catalog = {
   "home.status.live.other": "**{count}** Terminals laufen",
   "home.status.review.one": "**{count}** Lauf zu prüfen",
   "home.status.review.other": "**{count}** Läufe zu prüfen",
-  "home.status.next": "nächste Routine um **{time}**",
+  "home.status.next": "nächste Routine **{time}**",
   "home.action.workspace": "Arbeitsbereich öffnen",
   "home.action.agent": "Neuer Agent",
   "home.action.chat": "Schneller Chat",
