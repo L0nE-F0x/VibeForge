@@ -1,6 +1,6 @@
 # Status — 2026-10-12
 
-## A UI pass from an audit (2026-10-12, unreleased)
+## 2.5.0: a UI pass from an audit (2026-10-12)
 
 Claude wrote a UI audit of 2.4.0 (`docs/ui-audit-2026-10-12.md`, untracked: 5 high, 10 medium, 9 low findings, with screenshots in `~/Pictures/VibeForge UI audit 2026-10-12/`). The founder asked for all of it. Branch `feat/ui-audit`, one commit per area:
 
