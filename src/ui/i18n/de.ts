@@ -698,6 +698,7 @@ export const de: Catalog = {
   "common.save": "Speichern",
   "common.saveChanges": "Änderungen speichern",
   "common.saved": "Gespeichert",
+  "common.saving": "Wird gespeichert…",
   "common.unsaved": "Ungespeicherte Änderungen · Strg+S",
   "common.deleteNamed": "„{name}“ löschen?",
   "common.deletedNamed": "„{name}“ gelöscht",

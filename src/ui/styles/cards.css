@@ -180,8 +180,18 @@
   font-size: 11.5px;
   letter-spacing: 0.02em;
   color: var(--fg);
-  background: var(--bg-raised);
-  border: 1px solid transparent;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+}
+
+.avatar svg {
+  width: 20px;
+  height: 20px;
+}
+
+.avatar.lg svg {
+  width: 25px;
+  height: 25px;
 }
 
 .avatar.lg {

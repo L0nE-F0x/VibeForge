@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GLYPHS, MARK, mark, scatter, seeded, shade, wordmark } from "../../src/shared/pixel.js";
+import { GLYPHS, identicon, MARK, mark, scatter, seeded, shade, wordmark } from "../../src/shared/pixel.js";
 
 describe("pixel art", () => {
   it("draws every glyph on the same seven-row grid", () => {
@@ -31,5 +31,15 @@ describe("pixel art", () => {
     expect(a.length).toBeGreaterThan(40);
     expect(a.every((cell) => cell.x < 20 && cell.y < 10 && cell.strength > 0 && cell.strength <= 1)).toBe(true);
     expect(scatter(20, 10, () => 0)).toEqual([]);
+  });
+
+  it("gives each name the same mirrored face, and different names different faces", () => {
+    const art = identicon("API reviewer");
+    expect(identicon("API reviewer")).toEqual(art);
+    expect(identicon("Site builder")).not.toEqual(art);
+    const lit = new Set(art.cells.map((cell) => `${cell.x},${cell.y}`));
+    for (const cell of art.cells) expect(lit.has(`${4 - cell.x},${cell.y}`)).toBe(true);
+    expect(art.cells.length).toBeGreaterThanOrEqual(6);
+    expect(art.cells.length).toBeLessThanOrEqual(20);
   });
 });

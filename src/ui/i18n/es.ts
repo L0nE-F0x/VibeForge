@@ -698,6 +698,7 @@ export const es: Catalog = {
   "common.save": "Guardar",
   "common.saveChanges": "Guardar cambios",
   "common.saved": "Guardado",
+  "common.saving": "Guardando…",
   "common.unsaved": "Cambios sin guardar · Ctrl+S",
   "common.deleteNamed": "¿Eliminar «{name}»?",
   "common.deletedNamed": "«{name}» eliminado",

@@ -699,6 +699,7 @@ export const zh: Catalog = {
   "common.save": "保存",
   "common.saveChanges": "保存更改",
   "common.saved": "已保存",
+  "common.saving": "正在保存…",
   "common.unsaved": "有未保存的更改 · Ctrl+S",
   "common.deleteNamed": "删除“{name}”？",
   "common.deletedNamed": "已删除“{name}”",

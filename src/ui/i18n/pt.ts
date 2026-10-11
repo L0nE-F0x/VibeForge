@@ -698,6 +698,7 @@ export const pt: Catalog = {
   "common.save": "Salvar",
   "common.saveChanges": "Salvar alterações",
   "common.saved": "Salvo",
+  "common.saving": "Salvando…",
   "common.unsaved": "Alterações não salvas · Ctrl+S",
   "common.deleteNamed": "Excluir \"{name}\"?",
   "common.deletedNamed": "\"{name}\" excluído",

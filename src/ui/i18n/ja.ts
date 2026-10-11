@@ -699,6 +699,7 @@ export const ja: Catalog = {
   "common.save": "保存",
   "common.saveChanges": "変更を保存",
   "common.saved": "保存済み",
+  "common.saving": "保存中…",
   "common.unsaved": "未保存の変更 · Ctrl+S",
   "common.deleteNamed": "「{name}」を削除しますか？",
   "common.deletedNamed": "「{name}」を削除しました",

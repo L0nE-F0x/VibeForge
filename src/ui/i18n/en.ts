@@ -711,6 +711,7 @@ export const en = {
   "common.save": "Save",
   "common.saveChanges": "Save changes",
   "common.saved": "Saved",
+  "common.saving": "Saving…",
   "common.unsaved": "Unsaved changes · Ctrl+S",
   "common.deleteNamed": "Delete \"{name}\"?",
   "common.deletedNamed": "Deleted \"{name}\"",

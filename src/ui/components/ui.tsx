@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -16,7 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
-import { mark, shade } from "../../shared/pixel.js";
+import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
@@ -298,8 +299,18 @@ export function Skeleton({ rows = 4, page }: { rows?: number; page?: boolean }) 
   );
 }
 
+/** A teammate's pixel face (shared/pixel.ts identicon), shaded in the theme's accents like the logo. */
 export function Avatar({ name, size }: { name: string; size?: "lg" }) {
-  return <span className={cx("avatar", size)}>{initials(name)}</span>;
+  const art = useMemo(() => identicon(name), [name]);
+  return (
+    <span className={cx("avatar", size)} role="img" aria-label={initials(name)}>
+      <svg viewBox="0 0 5 5" shapeRendering="crispEdges" aria-hidden>
+        {art.cells.map((cell) => (
+          <rect key={`${cell.x}.${cell.y}`} x={cell.x} y={cell.y} width={1} height={1} className={`px-s${shade(cell.y, art.height)}`} />
+        ))}
+      </svg>
+    </span>
+  );
 }
 
 export function Empty({ icon: Icon, title, children, actions }: { icon: LucideIcon; title: ReactNode; children?: ReactNode; actions?: ReactNode }) {
