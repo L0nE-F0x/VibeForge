@@ -138,6 +138,11 @@
   opacity: 0.55;
 }
 
+.home-actions .btn.primary kbd {
+  color: var(--on-accent);
+  opacity: 0.75;
+}
+
 /* Four stats in one bordered strip, divided by hairlines. */
 /* One line under the hero: the runs of the last two weeks, as a block chart. */
 .home-activity {
@@ -642,6 +647,11 @@
 .run-row .meta {
   font-size: var(--fs-sm);
   color: var(--fg-3);
+}
+
+.run-row .meta.when {
+  flex: none;
+  font-size: var(--fs-xs);
 }
 
 /* Search: the words around a match, the matched words in the accent. */

@@ -1,7 +1,7 @@
 import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
-import { joinArgs, splitArgs } from "../../shared/text.js";
+import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
 import { call, useActivity, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnostics } from "../components/Help.js";
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
@@ -13,9 +13,11 @@ import { StorageCard } from "../components/StorageCard.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
+import { tipProps } from "../components/Tooltip.js";
 import { usePalette } from "../theme.js";
 import { PINNED, railViews, type RailView } from "../rail.js";
-import { useAction, useToast } from "../state.js";
+import { useAction, useNav, useToast, type Route } from "../state.js";
+import { SETTINGS_SECTIONS, sectionAnchor } from "../settings-sections.js";
 import { useT } from "../i18n/index.js";
 
 function toRow(engine: Engine | EngineRow): EngineRow {
@@ -143,8 +145,11 @@ function GithubStatus() {
   );
 }
 
-export function SettingsView() {
+export function SettingsView({ route }: { route: Extract<Route, { view: "settings" }> }) {
   const t = useT();
+  const { replace } = useNav();
+  const body = useRef<HTMLDivElement>(null);
+  const [here, setHere] = useState<string>(SETTINGS_SECTIONS[0].id);
   const { push } = useToast();
   const settings = useSettings();
   const engines = useEngines();
@@ -174,6 +179,36 @@ export function SettingsView() {
     setEditing(null);
   }, t("settings.enginesFailed"));
 
+  // A link to a section (Ctrl+K, the rail's menu, voice) lands on it once, then the page is yours.
+  const ready = Boolean(current);
+  useEffect(() => {
+    if (!ready || !route.section) return;
+    const target = document.getElementById(sectionAnchor(route.section));
+    if (target && body.current) body.current.scrollTop = target.offsetTop - 12;
+    setHere(route.section);
+    replace({ view: "settings" });
+  }, [ready, route.section, replace]);
+
+  // The section list follows the page: the last heading above the top third of the view.
+  const follow = () => {
+    const scroller = body.current;
+    if (!scroller) return;
+    const line = scroller.getBoundingClientRect().top + scroller.clientHeight / 3;
+    let current: string = SETTINGS_SECTIONS[0].id;
+    for (const section of SETTINGS_SECTIONS) {
+      const heading = document.getElementById(sectionAnchor(section.id));
+      if (heading && heading.getBoundingClientRect().top <= line) current = section.id;
+    }
+    // The bottom of the page: the last section, even when its heading can't reach the line.
+    if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4) current = SETTINGS_SECTIONS[SETTINGS_SECTIONS.length - 1].id;
+    setHere((prev) => (prev === current ? prev : current));
+  };
+  const jump = (id: string) => {
+    const target = document.getElementById(sectionAnchor(id));
+    if (target && body.current) body.current.scrollTo({ top: target.offsetTop - 12, behavior: "smooth" });
+    setHere(id);
+  };
+
   if (!current) return null;
   const available = rows.filter((engine) => engine.available);
 
@@ -182,11 +217,20 @@ export function SettingsView() {
       <div className="page-head">
         <SettingsIcon size={17} className="accent-text" />
         <h1 className="grow">{t("settings.title")}</h1>
-        <span className="sub">{t("settings.savedTo", { path: info?.configRoot ?? "…" })}</span>
+        <span className="sub truncate">{t("settings.savedTo", { path: info ? tildify(info.configRoot, info.home) : "…" })}</span>
       </div>
-      <div className="page-body">
-        <div className="vstack page-narrow" style={{ gap: 14, maxWidth: 940 }}>
-          <div className="section-title">
+      <div className="page-body settings-body" ref={body} onScroll={follow}>
+        <div className="settings-layout">
+        <nav className="settings-toc" aria-label={t("settings.sections")}>
+          {SETTINGS_SECTIONS.map((section) => (
+            <button key={section.id} type="button" aria-current={here === section.id ? "true" : undefined} onClick={() => jump(section.id)}>
+              <section.icon size={13} />
+              <span className="truncate">{t(section.label)}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="vstack settings-content" style={{ gap: 14 }}>
+          <div className="section-title" id="settings-appearance">
             <PaletteIcon size={13} /> {t("settings.appearance")}
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
@@ -227,12 +271,12 @@ export function SettingsView() {
             </div>
           </div>
 
-          <div className="section-title">
+          <div className="section-title" id="settings-rail">
             <PanelLeft size={13} /> {t("settings.rail")}
           </div>
           <RailCard rail={current.rail} onChange={(rail) => void patch({ rail })} />
 
-          <div className="section-title">
+          <div className="section-title" id="settings-defaults">
             <SquareTerminal size={13} /> {t("settings.defaults")}
           </div>
           <div className="card form-grid">
@@ -256,7 +300,7 @@ export function SettingsView() {
           </div>
           <VoiceCard />
 
-          <div className="section-title">
+          <div className="section-title" id="settings-notifications">
             <Bell size={13} /> {t("settings.notifications")}
           </div>
           <div className="card hstack">
@@ -283,7 +327,7 @@ export function SettingsView() {
           </div>
           <SoundsCard />
 
-          <div className="section-title">
+          <div className="section-title" id="settings-usage">
             <Activity size={13} /> {t("settings.insights")}
           </div>
           <div className="card vstack" style={{ gap: 12 }}>
@@ -310,7 +354,7 @@ export function SettingsView() {
             {current.activity === "github" && <GithubStatus />}
           </div>
 
-          <div className="section-title">
+          <div className="section-title" id="settings-engines">
             <SquareTerminal size={13} /> {t("settings.engines")}
             <span className="count">
               {available.length}/{rows.length}
@@ -351,18 +395,14 @@ export function SettingsView() {
                 <div key={engine.id} className="card hstack" style={{ padding: "9px 12px" }}>
                   <span className={`dot ${engine.available ? "exited" : ""}`} />
                   <span className="vstack grow" style={{ gap: 1 }}>
-                    <span className="hstack">
-                      <strong>{engine.label}</strong>
-                      <span className="faint mono" style={{ fontSize: "var(--fs-xs)" }}>
-                        {engine.path ?? t("settings.notFound", { bin: engine.bin })}
-                      </span>
-                    </span>
-                    <span className="faint mono" style={{ fontSize: "var(--fs-xs)" }}>
-                      {[engine.bin, ...engine.args].join(" ")}
+                    <strong className="truncate">{engine.label}</strong>
+                    <span className="faint mono truncate" style={{ fontSize: "var(--fs-xs)" }} {...tipProps(engine.path ? tildify(engine.path, info?.home ?? "") : undefined)}>
+                      {engine.available ? tildify(engine.path ?? engine.bin, info?.home ?? "") : t("settings.notFound", { bin: engine.bin })}
+                      {engine.args.length ? ` ${joinArgs(engine.args)}` : ""}
                       {engine.promptArgs?.length ? ` ${joinArgs(engine.promptArgs)}` : ""}
                     </span>
                   </span>
-                  <Chip tone={engine.promptArgs?.length ? "ok" : "warn"} title={engine.promptArgs?.length ? t("settings.promptArg") : t("settings.promptPaste")}>
+                  <Chip title={engine.promptArgs?.length ? t("settings.promptArg") : t("settings.promptPaste")}>
                     {engine.promptArgs?.length ? t("settings.promptArgChip") : t("settings.promptPasteChip")}
                   </Chip>
                   {engine.continueArgs?.length ? <Chip title={joinArgs(engine.continueArgs)}>{t("settings.continueChip")}</Chip> : null}
@@ -373,7 +413,7 @@ export function SettingsView() {
             )}
           </div>
 
-          <div className="section-title">
+          <div className="section-title" id="settings-files">
             <FolderOpen size={13} /> {t("settings.files")}
           </div>
           <div className="card vstack" style={{ gap: 8 }}>
@@ -408,7 +448,7 @@ export function SettingsView() {
           </div>
           <StorageCard />
 
-          <div className="section-title">
+          <div className="section-title" id="settings-updates">
             <Download size={13} /> {t("updates.title")}
           </div>
           <div className="card vstack" style={{ gap: 12 }}>
@@ -437,7 +477,7 @@ export function SettingsView() {
             )}
           </div>
 
-          <div className="section-title">
+          <div className="section-title" id="settings-help">
             <LifeBuoy size={13} /> {t("settings.help")}
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
@@ -473,6 +513,7 @@ export function SettingsView() {
           <div className="faint" style={{ fontSize: "var(--fs-sm)", marginTop: 6 }}>
             <Save size={11} /> {t("settings.footer", { version: info?.version ?? "" })} · <Credit />
           </div>
+        </div>
         </div>
       </div>
     </div>

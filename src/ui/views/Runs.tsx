@@ -1,5 +1,5 @@
 import { History, Search } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { dayHeading, dayKey } from "../../shared/text.js";
 import { call, useDebounced, useInbox, useQuery } from "../api.js";
@@ -12,7 +12,7 @@ import { useT } from "../i18n/index.js";
 
 export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> }) {
   const t = useT();
-  const { go } = useNav();
+  const { go, replace } = useNav();
   const [filter, setFilter] = useState<RunFilter>(route.filter ?? (route.runId ? "all" : "review"));
   const [search, setSearch] = useState("");
   const inbox = useInbox();
@@ -27,21 +27,59 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
 
   const selected = route.runId ?? null;
   let runs: RunView[] = [];
+  // Opening a run marks it reviewed. The ones reviewed during this visit stay in the list, in
+  // their places, so K can go back to them; the list starts fresh next time.
+  const reviewed = useRef(new Set<string>());
+  if (filter !== "review") reviewed.current.clear();
+  else if (selected) reviewed.current.add(selected);
   if (filter === "review") {
-    runs = inbox.data ?? [];
-    // Opening a run marks it reviewed; keep it in the list while it is on screen.
-    const open = selected ? (all.data ?? []).find((run) => run.id === selected) : undefined;
-    if (open && !runs.some((run) => run.id === open.id)) runs = [open, ...runs];
+    const pool = new Map([...(all.data ?? []), ...(inbox.data ?? [])].map((run) => [run.id, run]));
+    const ids = new Set([...(inbox.data ?? []).map((run) => run.id), ...reviewed.current]);
+    runs = [...ids]
+      .map((id) => pool.get(id))
+      .filter((run): run is RunView => Boolean(run))
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   } else if (filter === "live") runs = (all.data ?? []).filter((run) => run.live);
   else runs = searching ? (found.data ?? []) : (all.data ?? []);
   const snippets = new Map(searching ? (found.data ?? []).map((hit) => [hit.id, hit.snippet]) : []);
   const loaded = filter === "review" ? inbox.loaded : searching ? found.loaded : all.loaded;
+
+  // Coming to review: the first run waiting is already open.
+  const first = filter === "review" && loaded && !selected ? runs[0]?.id : undefined;
+  useEffect(() => {
+    if (first) replace({ view: "runs", runId: first, filter: "review" });
+  }, [first, replace]);
+
+  // The run after this one in the list, or before it at the end of the list.
+  const at = runs.findIndex((run) => run.id === selected);
+  const step = (by: number) => {
+    const next = runs[at + by] ?? (at < 0 ? runs[0] : undefined);
+    if (next) go({ view: "runs", runId: next.id, filter });
+  };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  // While reviewing, the next one waiting: below this one, else the first one above it.
+  const nextWaiting = filter === "review" ? (runs.slice(at + 1).find((run) => !run.openedAt) ?? runs.slice(0, Math.max(0, at)).find((run) => !run.openedAt)) : undefined;
+
+  // J and K step through the list from anywhere in the view, except while typing or in a terminal.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || (event.key !== "j" && event.key !== "k")) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
+      event.preventDefault();
+      stepRef.current(event.key === "j" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="view split-list">
       <SidePanel
         id="runs"
         title={t("runs.title")}
+        quietTitle
         actions={
           <>
             <Segmented
@@ -94,7 +132,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
         </div>
       </SidePanel>
       {selected ? (
-        <RunDetail key={selected} runId={selected} />
+        <RunDetail key={selected} runId={selected} onNext={nextWaiting ? () => go({ view: "runs", runId: nextWaiting.id, filter }) : undefined} />
       ) : (
         <Empty icon={History} title={t("runs.empty.title")}>
           {t("runs.empty.body")}

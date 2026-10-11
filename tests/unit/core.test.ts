@@ -15,7 +15,7 @@ import { BUILTIN_PALETTE, companionColor, contrast, paletteFromFiles, parseFlatT
 import type { RunMeta } from "../../src/core/types.js";
 import { diffSince, gitHead, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
-import { dayHeading, dayKey, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
+import { dayHeading, dayKey, fireTime, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
 
 function tempDir(prefix = "vibeforge-core-"): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -484,6 +484,20 @@ describe("day headings", () => {
     expect(dayHeading(at(8, 20), "en", now)).toBe("Sep 20");
     expect(dayHeading(at(11, 31, 10, 2025), "en", now)).toBe("Dec 31, 2025");
     expect(dayHeading(at(8, 28), "de", now)).toBe("Gestern");
+  });
+});
+
+describe("when a routine is due", () => {
+  const now = new Date(2026, 8, 29, 5, 0).getTime();
+  const at = (day: number, hour: number) => new Date(2026, 8, day, hour).toISOString();
+
+  it("gives the day before the time once it isn't today, in the language's own clock", () => {
+    expect(fireTime(at(29, 8), "en-US", now)).toBe("08:00 AM");
+    expect(fireTime(at(30, 3), "en-US", now)).toBe("tomorrow 03:00 AM");
+    expect(fireTime(at(30, 3), "de", now)).toBe("morgen 03:00");
+    expect(fireTime(at(30, 15), "en-GB", now)).toBe("tomorrow 15:00");
+    expect(fireTime(at(31, 9), "en-GB", now)).toMatch(/^Thu 09:00$/);
+    expect(fireTime(new Date(2026, 9, 20, 9).toISOString(), "en-GB", now)).toBe("20 Oct 09:00");
   });
 });
 

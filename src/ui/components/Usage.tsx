@@ -285,12 +285,13 @@ export function UsagePanel({
   return (
     <div className="usage-panel">
       <div className="list-label usage-title">
-        <span className="grow">{period === "today" ? t("usage.title") : t(`usage.title.${period}`)}</span>
+        {/* With the Limits/Tokens switch beside it the switch names the panel; the period buttons say which span. */}
+        <span className="grow">{switcher ? null : t("plans.tab.tokens")}</span>
         {switcher}
       </div>
       <div className="usage-periods" role="group" aria-label={t("usage.periods")}>
         {USAGE_PERIODS.map((value) => (
-          <button key={value} type="button" aria-pressed={period === value} onClick={() => onPeriod(value)}>
+          <button key={value} type="button" aria-pressed={period === value} onClick={() => onPeriod(value)} {...tipProps(value === "today" ? t("usage.title") : t(`usage.title.${value}`))}>
             {t(`usage.period.${value}`)}
           </button>
         ))}

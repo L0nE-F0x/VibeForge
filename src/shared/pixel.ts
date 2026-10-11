@@ -180,3 +180,31 @@ export function scatter(cols: number, rows: number, chance: (x: number, y: numbe
   }
   return out;
 }
+
+/**
+ * A teammate's mark: a five-by-five pixel face, mirrored left to right and drawn from the name,
+ * so each agent is told apart at a glance in the same pixel language as the logo.
+ */
+export function identicon(name: string): Art {
+  // FNV-1a over the name; each of the fifteen left-half cells takes one bit.
+  let hash = 0x811c9dc5;
+  for (const char of name.trim().toLowerCase()) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  const on = (x: number, y: number) => ((hash >>> (y * 3 + x)) & 1) === 1;
+  const count = () => {
+    let lit = 0;
+    for (let y = 0; y < 5; y += 1) for (let x = 0; x < 3; x += 1) if (on(x, y)) lit += 1;
+    return lit;
+  };
+  // Too few or too many pixels reads as a blot or a hole: stir the hash until it reads as a face.
+  for (let tries = 0; tries < 16 && (count() < 6 || count() > 10); tries += 1) hash = Math.imul(hash ^ (hash >>> 15), 0x2c1b3c6d) >>> 0;
+  const cells: Cell[] = [];
+  for (let y = 0; y < 5; y += 1) {
+    for (let x = 0; x < 5; x += 1) {
+      if (on(x < 3 ? x : 4 - x, y)) cells.push({ x, y });
+    }
+  }
+  return { cells, width: 5, height: 5 };
+}

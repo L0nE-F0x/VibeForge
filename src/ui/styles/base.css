@@ -24,7 +24,8 @@
   --bg-raised: #151518;
   --fg: #ffffff;
   --fg-2: #a1a1aa;
-  --fg-3: #71717a;
+  /* Faint text, lifted from the theme's muted colour until small text reads on cards (theme.ts faintText). */
+  --fg-3: #86868e;
   --accent: #ff6b35;
   --accent-2: #fca311;
   --on-accent: #09090b;
@@ -66,7 +67,7 @@
   --font-mono: "JetBrains Mono Variable", "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
   --font-ui: var(--font-mono);
   --font-display: "Geist Variable", "Geist", system-ui, sans-serif;
-  --fs-xs: 10.5px;
+  --fs-xs: 11px;
   --fs-sm: 11.5px;
   --fs: 12.5px;
   --fs-md: 13.5px;
@@ -159,6 +160,18 @@ button:disabled {
   opacity: 0.42;
 }
 
+/* Fewer moving parts for people who asked for that: views, sheets and glides land at once. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 ::selection {
   background: color-mix(in srgb, var(--accent) 34%, transparent);
 }
@@ -211,6 +224,15 @@ select:focus-visible,
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .selectable,

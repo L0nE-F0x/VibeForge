@@ -1,10 +1,11 @@
-import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   forwardRef,
   useCallback,
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -16,7 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
-import { mark, shade } from "../../shared/pixel.js";
+import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
@@ -72,24 +73,63 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
 // ------------------------------------------------------------------ form controls
 
+/**
+ * A long hint keeps its first sentence on the form and the rest behind a small mark, so a form
+ * reads as a form and not a manual. `more` puts its own text behind the mark.
+ */
+export function splitHint(text: string, longer = 110): { first: string; rest: string } | null {
+  if (text.length <= longer) return null;
+  for (let index = 0; index < text.length - 1; index += 1) {
+    const char = text[index];
+    const western = ".!?".includes(char) && text[index + 1] === " ";
+    const cjk = "。！？".includes(char);
+    if (!western && !cjk) continue;
+    const first = text.slice(0, index + 1);
+    const rest = text.slice(index + 1).trim();
+    return first.length >= 24 && rest ? { first, rest } : null;
+  }
+  return null;
+}
+
+export function HintMore({ text }: { text: string }) {
+  return (
+    <span className="hint-more" tabIndex={0} aria-label={text} {...tipProps(text)}>
+      <Info size={11} />
+    </span>
+  );
+}
+
 export function Field({
   label,
   hint,
   error,
+  more,
   children,
   className,
 }: {
   label?: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
+  /** More about the field, behind a small mark after the hint. */
+  more?: string;
   children: ReactNode;
   className?: string;
 }) {
+  const split = typeof hint === "string" && !more ? splitHint(hint) : null;
+  const shown = split ? split.first : hint;
+  const extra = more ?? split?.rest;
   return (
     <div className={cx("field", className)}>
       {label && <span className="field-label">{label}</span>}
       {children}
-      {error ? <span className="error">{error}</span> : hint ? <span className="hint">{hint}</span> : null}
+      {error ? (
+        <span className="error">{error}</span>
+      ) : shown || extra ? (
+        <span className="hint">
+          {shown}
+          {extra && <HintMore text={extra} />}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -129,21 +169,45 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  disabled,
 }: {
   value: T;
   options: Array<{ value: T; label: ReactNode; icon?: LucideIcon }>;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="segmented" role="group">
-      {options.map((option) => (
-        <button key={option.value} type="button" aria-pressed={value === option.value} onClick={() => onChange(option.value)}>
+    <div className="segmented" role="group" onKeyDown={(event) => moveChoice(event, options, value, onChange)}>
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          disabled={disabled}
+          tabIndex={value === option.value || (index === 0 && !options.some((item) => item.value === value)) ? 0 : -1}
+          onClick={() => onChange(option.value)}
+        >
           {option.icon && <option.icon size={13} />}
           {option.label}
         </button>
       ))}
     </div>
   );
+}
+
+/** ←/→ (and Home/End) move a tab row or a segmented choice, as the keyboard expects of both. */
+function moveChoice<T>(event: React.KeyboardEvent<HTMLElement>, options: Array<{ value: T }>, value: T, onChange: (value: T) => void): void {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const at = options.findIndex((option) => option.value === value);
+  const to =
+    event.key === "ArrowRight" ? Math.min(options.length - 1, at + 1) : event.key === "ArrowLeft" ? Math.max(0, at - 1) : event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : -1;
+  if (to < 0) return;
+  event.preventDefault();
+  if (to === at) return;
+  onChange(options[to].value);
+  const buttons = event.currentTarget.querySelectorAll<HTMLElement>(":scope > button");
+  buttons[to]?.focus();
+  buttons[to]?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 export function Tabs<T extends string>({
@@ -156,9 +220,9 @@ export function Tabs<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" onKeyDown={(event) => moveChoice(event, tabs, value, onChange)}>
       {tabs.map((tab) => (
-        <button key={tab.value} type="button" role="tab" className="tab" aria-selected={value === tab.value} onClick={() => onChange(tab.value)}>
+        <button key={tab.value} type="button" role="tab" className="tab" aria-selected={value === tab.value} tabIndex={value === tab.value ? 0 : -1} onClick={() => onChange(tab.value)}>
           {tab.icon && <tab.icon size={14} />}
           {tab.label}
           {tab.badge}
@@ -235,8 +299,18 @@ export function Skeleton({ rows = 4, page }: { rows?: number; page?: boolean }) 
   );
 }
 
+/** A teammate's pixel face (shared/pixel.ts identicon), shaded in the theme's accents like the logo. */
 export function Avatar({ name, size }: { name: string; size?: "lg" }) {
-  return <span className={cx("avatar", size)}>{initials(name)}</span>;
+  const art = useMemo(() => identicon(name), [name]);
+  return (
+    <span className={cx("avatar", size)} role="img" aria-label={initials(name)}>
+      <svg viewBox="0 0 5 5" shapeRendering="crispEdges" aria-hidden>
+        {art.cells.map((cell) => (
+          <rect key={`${cell.x}.${cell.y}`} x={cell.x} y={cell.y} width={1} height={1} className={`px-s${shade(cell.y, art.height)}`} />
+        ))}
+      </svg>
+    </span>
+  );
 }
 
 export function Empty({ icon: Icon, title, children, actions }: { icon: LucideIcon; title: ReactNode; children?: ReactNode; actions?: ReactNode }) {
@@ -281,12 +355,25 @@ export function ShortAgo({ iso }: { iso: string | null | undefined }) {
   return <span {...tipProps(new Date(iso).toLocaleString(t.language))}>{shortAgo(iso, now, t.language)}</span>;
 }
 
+/** A page's subtitle: its first sentence, and the rest behind a mark when it runs long. */
+export function PageSub({ text }: { text: string }) {
+  const split = splitHint(text, 90);
+  return (
+    <span className="sub truncate">
+      {split ? split.first : text}
+      {split && <HintMore text={split.rest} />}
+    </span>
+  );
+}
+
+/** Said once per form, quietly: what goes in the box is handed to a CLI as plain text. */
 export function SecretNote() {
   const t = useT();
   return (
-    <Notice tone="warn" icon={AlertTriangle}>
+    <span className="secret-note">
+      <KeyRound size={12} />
       {t("common.secretNote")}
-    </Notice>
+    </span>
   );
 }
 

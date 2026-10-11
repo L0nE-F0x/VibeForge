@@ -6,6 +6,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Review a morning's work with J and K.** Runs opens on the first run waiting for review. `J` and `K` step through the list from anywhere in the view, and **Next to review** in the run's header jumps to the next one waiting. Runs you reviewed during the visit stay in the list, so you can go back to them.
+- **The diff, right away.** A finished run's Changes tab opens with its saved diff, under a list of the files it touched with the lines added and removed. Click a file to land on it.
+- **Settings has a list of its sections.** A list beside the page follows the scroll and jumps to a section, and every section can be found by name in `Ctrl`+`K` ("engines", "sounds", "storage"…).
+- **Start a CLI from an empty workspace in one click.** Next to New terminal there is a button for each CLI found on this machine.
+- **Ctrl+K opens on what you were just in.** With nothing typed, it lists recent chats, workspaces, agents and open tasks before the views, and offers New chat, New task and New skill.
+- **Agents have pixel faces.** Each agent gets a small mirrored pixel face drawn from its name, shaded like the logo, in place of grey initials.
+- **What the lights mean.** The shortcuts sheet (`Ctrl`+`Shift`+`/`) now explains the waiting, working and finished marks and the review badges. The rail's tooltips say what each badge counts.
+
+### Changed
+
+- **A half-screen window fits.** On a narrow tile (half a laptop screen on Hyprland), list panels fold to their strip and open over the work area when you need them; picking a row puts them away again. Code's side panel steps aside, and the task board turns into two columns over two rows, instead of the whole view sliding sideways.
+- **Editors save themselves.** An agent's Brief, Memory and Settings, and an existing skill, save a moment after you stop typing, and when you leave. `Ctrl`+`S` still saves at once. A quiet line says Saving, Unsaved or Saved.
+- **Task and routine sheets lead with the next step.** A task's ember button is what usually comes next: Execute for a task to do, Mark done once it's been reviewed. Run again, Back to To do and Delete moved to the `⋯` menu, and the header shows one status chip. Save and Create sit in a footer that stays in reach.
+- **New tasks start ready to run.** A new task picks an agent and a workspace that agent may work in, and choosing another agent moves the workspace to one of its folders.
+- **Easier to read.** Faint text is lighter, so small grey text reads on cards and selected rows, and the smallest text size is now 11px.
+- **Forms say less.** A long hint keeps its first sentence, with the rest behind a small ⓘ. The "don't put keys here" warning is one quiet line, the chat box shows two key hints, and Claude Code's folder-trust note shows only when Claude Code is picked.
+- **Quieter lists.** A run that simply finished no longer carries a green Finished chip; the dot already says so. Chips show for runs that failed, stopped or exited with an error.
+- **Shells are numbered.** Two plain shells in one workspace read "Shell 1" and "Shell 2" in their panes and on Home.
+- **Home while setting up.** The numbered setup steps no longer repeat as buttons above them, and the 14-day strip waits for the first run.
+- **Smaller pieces.** Voice models and voices are picked from a list with one Download button, an engine's command line shows once, and Runs' header gives its Review/Live/All switch the room.
+
+### Fixed
+
+- **Routine times in your language.** "Tomorrow" was always in English, and times used a 24-hour clock in Routines but the language's own clock on Home. Both now use the language's words and clock, and Home's Up next says the day when it isn't today.
+- **Reduced motion is honoured everywhere.** With the system's reduced-motion setting on, views, sheets and glides now appear at once, not only the glowing marks.
+- **Keycaps on ember buttons** were nearly invisible; they now take the button's text colour.
+- **Start at login** said "in the tray" even with the tray off; its hint now says the window opens instead.
+- **Task cards** said "running" in English in every language.
+
 ## [2.4.0] - 2026-10-10
 
 **2.4: one place to type in a chat.**

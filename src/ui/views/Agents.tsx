@@ -9,14 +9,12 @@ import {
   MessageSquarePlus,
   MessagesSquare,
   Plus,
-  Save,
   Settings2,
   Sparkles,
   Trash2,
   X,
-  Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
@@ -43,6 +41,34 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [save, enabled]);
+}
+
+/**
+ * A page editor saves on its own a moment after typing stops, and on the way out; Ctrl+S saves at
+ * once. `value` is what is being edited, so each change restarts the wait.
+ */
+export function useAutosave(value: unknown, dirty: boolean, ready: boolean, save: () => void, delay = 800): void {
+  const latest = useRef({ save, dirty, ready });
+  latest.current = { save, dirty, ready };
+  const key = JSON.stringify(value);
+  useEffect(() => {
+    if (!dirty || !ready) return;
+    const timer = setTimeout(() => latest.current.save(), delay);
+    return () => clearTimeout(timer);
+  }, [key, dirty, ready, delay]);
+  useEffect(
+    () => () => {
+      if (latest.current.dirty && latest.current.ready) latest.current.save();
+    },
+    [],
+  );
+  useSaveShortcut(() => latest.current.save(), dirty && ready);
+}
+
+/** Where an autosaving editor is: saving, waiting to save, or saved (with what that means). */
+export function SaveState({ dirty, saving, note }: { dirty: boolean; saving: boolean; note?: ReactNode }) {
+  const t = useT();
+  return <span className="faint save-state">{saving ? t("common.saving") : dirty ? t("common.unsaved") : (note ?? t("common.saved"))}</span>;
 }
 
 export function EngineSelect({ engines, value, onChange, allowMissing }: { engines: Engine[]; value: string; onChange: (id: string) => void; allowMissing?: string }) {
@@ -133,7 +159,11 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                     {engine && !engine.available ? ` · ${t("common.missing")}` : ""}
                   </span>
                 </span>
-                {unread > 0 && <Chip tone="accent">{unread}</Chip>}
+                {unread > 0 && (
+                  <Chip tone="accent" title={t.count("home.status.review", unread).replaceAll("**", "")}>
+                    {unread}
+                  </Chip>
+                )}
                 {live && <StatusDot status="running" title={t("agents.chatLive")} />}
               </button>
             );
@@ -415,24 +445,12 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
   );
 }
 
-function EditorShell({ children, dirty, onSave, onDiscard, saving, note }: { children: ReactNode; dirty: boolean; onSave: () => void; onDiscard: () => void; saving: boolean; note?: ReactNode }) {
-  const t = useT();
-  useSaveShortcut(onSave, dirty && !saving);
+function EditorShell({ children, dirty, saving, note }: { children: ReactNode; dirty: boolean; saving: boolean; note?: ReactNode }) {
   return (
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 12 }}>
         {children}
-        <div className="hstack">
-          <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={onSave}>
-            {t("common.save")}
-          </Button>
-          {dirty && (
-            <Button variant="ghost" icon={Undo2} onClick={onDiscard}>
-              {t("common.discard")}
-            </Button>
-          )}
-          <span className="faint">{dirty ? t("common.unsaved") : note ?? t("common.saved")}</span>
-        </div>
+        <SaveState dirty={dirty} saving={saving} note={note} />
       </div>
     </div>
   );
@@ -440,14 +458,15 @@ function EditorShell({ children, dirty, onSave, onDiscard, saving, note }: { chi
 
 function BriefTab({ agent }: { agent: Agent }) {
   const t = useT();
-  const { push } = useToast();
-  const [brief, setBrief, discard] = useDraftState(`agent:${agent.id}:brief`, agent.brief);
+  const [brief, setBrief] = useDraftState(`agent:${agent.id}:brief`, agent.brief);
   const [save, saving] = useAction(async () => {
     await call("agents.save", { ...agent, brief });
-    push("success", t("agents.briefSaved"), t("agents.briefSavedBody"));
   }, t("agents.briefFailed"));
+  // Compared as the core keeps it (trailing space trimmed), or a trailing space would never count as saved.
+  const dirty = brief.trimEnd() !== agent.brief;
+  useAutosave(brief, dirty, !saving && Boolean(brief.trim()), () => void save());
   return (
-    <EditorShell dirty={brief !== agent.brief} saving={saving} onSave={() => void save()} onDiscard={discard}>
+    <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.briefSavedBody")}`}>
       <Notice icon={BookOpen}>{t("agents.briefNote")}</Notice>
       <TextArea value={brief} placeholder={t("agents.briefPlaceholder")} style={{ minHeight: 320 }} onChange={(event) => setBrief(event.target.value)} />
       <SecretNote />
@@ -457,16 +476,17 @@ function BriefTab({ agent }: { agent: Agent }) {
 
 function MemoryTab({ agent }: { agent: Agent }) {
   const t = useT();
-  const { push } = useToast();
   const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id));
-  const [text, setText, discard] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
+  const [text, setText] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
   const [save, saving] = useAction(async () => {
     await call("agents.writeMemory", agent.id, text ?? "");
-    push("success", t("agents.memorySaved"));
+    await memory.reload();
   }, t("agents.memoryFailed"));
+  const dirty = text !== null && text !== memory.data;
+  useAutosave(text, dirty, !saving, () => void save());
   if (text === null) return null;
   return (
-    <EditorShell dirty={text !== memory.data} saving={saving} onSave={() => void save()} onDiscard={discard} note={t("agents.memoryStored")}>
+    <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.memoryStored")}`}>
       <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>
       <TextArea code value={text} style={{ minHeight: 320 }} onChange={(event) => setText(event.target.value)} />
       <SecretNote />
@@ -537,19 +557,20 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const engines = useEngines().data ?? [];
-  const [form, setForm, discard] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice });
+  const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice });
   const { name, engine, allow, voice } = form;
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
   const setAllow = (next: boolean) => setForm((prev) => ({ ...prev, allow: next }));
   const setVoice = (next: string) => setForm((prev) => ({ ...prev, voice: next }));
   const voices = useVoiceStatus().data?.voices ?? [];
-  const dirty = name !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
+  const dirty = name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
-    await call("agents.save", { ...agent, name, engine, allowRoutines: allow, voice });
-    push("success", t("agents.updated"), engine !== agent.engine ? t("agents.engineFromNext", { engine: engineRow?.label ?? engine }) : undefined);
+    await call("agents.save", { ...agent, name: name.trim(), engine, allowRoutines: allow, voice });
+    // A new engine is worth a word; the rest just saves.
+    if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
   const [remove, removing] = useAction(async () => {
     const ok = await confirm({
@@ -563,7 +584,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
     await call("agents.delete", agent.id, agent.name);
     go({ view: "agents" });
   }, t("agents.deleteFailed"));
-  useSaveShortcut(() => void save(), dirty && !saving);
+  useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
 
   return (
     <div className="page-body">
@@ -594,17 +615,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
             <Button icon={Volume2} disabled={!voices.length} tip={t("voice.hearIt")} onClick={() => void call("voice.speak", t("voice.agentSample", { name }), voice)} />
           </div>
         </Field>
-        <div className="hstack">
-          <Button variant="primary" icon={Save} disabled={!dirty} busy={saving} onClick={() => void save()}>
-            {t("common.saveChanges")}
-          </Button>
-          {dirty && (
-            <Button variant="ghost" icon={Undo2} onClick={discard}>
-              {t("common.discard")}
-            </Button>
-          )}
-          {dirty && <span className="faint">Ctrl+S</span>}
-        </div>
+        <SaveState dirty={dirty} saving={saving} />
         <div className="section-title" style={{ marginTop: 28 }}>
           {t("common.dangerZone")}
         </div>

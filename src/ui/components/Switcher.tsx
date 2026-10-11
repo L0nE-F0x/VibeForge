@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessagesSquare, Mic, Power, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus, MessagesSquare, Plus, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
@@ -10,6 +10,7 @@ import { useT, type Key } from "../i18n/index.js";
 import { railViews } from "../rail.js";
 import { useNav, useOverlay } from "../state.js";
 import { SHOW_SHORTCUTS_EVENT } from "./Help.js";
+import { SETTINGS_SECTIONS } from "../settings-sections.js";
 
 // Ctrl+K: type part of a name and press Enter to land on any agent, chat, workspace, task,
 // routine, skill or view. Ctrl+Shift+K does the same from inside a terminal, where Ctrl+K
@@ -32,6 +33,8 @@ const LIMIT = 60;
 /** Runs are searched by what they said once this much is typed, and this many are listed. */
 const RUN_SEARCH_MIN = 3;
 const RUN_HITS = 8;
+/** Chats listed before anything is typed: the latest few. */
+const RECENT_CHATS = 5;
 
 export function Switcher({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -53,10 +56,6 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   useOverlay(true);
 
   const items = useMemo<Item[]>(() => {
-    const settingsAt = (id: string) => () => {
-      go({ view: "settings" });
-      setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" }), 120);
-    };
     const agentName = (id: string | null) => agents?.find((agent) => agent.id === id)?.name;
     return [
       ...railViews(rail).visible.map((item): Item => ({ id: `view:${item.view}`, title: t(item.label), kind: "switcher.view", icon: item.icon, act: () => open(item.view) })),
@@ -96,15 +95,33 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         act: () => go({ view: "routines", routineId: routine.id }),
       })),
       ...(skills ?? []).map((skill): Item => ({ id: `skill:${skill.id}`, title: skill.name, sub: skill.description, kind: "switcher.skill", icon: Sparkles, act: () => go({ view: "skills", skillId: skill.id }) })),
-      { id: "settings:voice", title: `${t("settings.title")} · ${t("voice.title")}`, kind: "switcher.setting", icon: Mic, act: settingsAt("settings-voice") },
-      { id: "settings:sounds", title: `${t("settings.title")} · ${t("sounds.title")}`, kind: "switcher.setting", icon: Volume2, act: settingsAt("settings-sounds") },
-      { id: "settings:tray", title: `${t("settings.title")} · ${t("tray.title")}`, kind: "switcher.setting", icon: Power, act: settingsAt("settings-tray") },
+      ...SETTINGS_SECTIONS.map((section): Item => ({
+        id: `settings:${section.id}`,
+        title: `${t("settings.title")} · ${t(section.label)}`,
+        kind: "switcher.setting",
+        icon: section.icon,
+        act: () => go({ view: "settings", section: section.id }),
+      })),
       { id: "shortcuts", title: t("shortcuts.title"), kind: "switcher.setting", icon: Keyboard, act: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
+      { id: "new:chat", title: t("switcher.newChat"), kind: "switcher.action", icon: MessageSquarePlus, act: () => go({ view: "chat" }) },
+      { id: "new:task", title: t("tasks.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "tasks", taskId: "new" }) },
+      { id: "new:skill", title: t("skills.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "skills", skillId: "new" }) },
     ];
   }, [agents, chats, workspaces, tasks, routines, skills, rail, home, t, go, open]);
 
   const shown = useMemo(() => {
-    if (!query.trim()) return items.slice(0, LIMIT);
+    // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open
+    // tasks); the views, which the rail already shows, come after.
+    if (!query.trim()) {
+      const rank = (item: Item) => ["chat:", "workspace:", "agent:", "task:", "new:", "view:"].findIndex((prefix) => item.id.startsWith(prefix));
+      const order = (item: Item) => (rank(item) < 0 ? 99 : rank(item));
+      const openTask = (item: Item) => !item.id.startsWith("task:") || tasks?.find((task) => `task:${task.id}` === item.id)?.status !== "done";
+      let chatsShown = 0;
+      return items
+        .filter((item) => openTask(item) && (!item.id.startsWith("chat:") || ++chatsShown <= RECENT_CHATS))
+        .sort((a, b) => order(a) - order(b))
+        .slice(0, LIMIT);
+    }
     return items
       .map((item) => {
         const title = fuzzyScore(query, item.title);
@@ -117,7 +134,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       .sort((a, b) => b.score - a.score)
       .slice(0, LIMIT)
       .map((entry) => entry.item);
-  }, [items, query]);
+  }, [items, query, tasks]);
 
   // Runs found by their words follow the names; they're a different kind of match, not ranked with them.
   const listed = useMemo<Item[]>(() => {

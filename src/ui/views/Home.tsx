@@ -1,14 +1,14 @@
 import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Hourglass, KanbanSquare, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
-import { duration, tildify } from "../../shared/text.js";
+import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_KEY } from "../components/RunDetail.js";
-import { Button, StatusChip, TimeAgo } from "../components/ui.js";
+import { Button, ShortAgo, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
-import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { useAttention, usePtyAttention } from "../attention.js";
 import { writerNames } from "../components/Occupancy.js";
 import { markWhere, markWho } from "../watch.js";
@@ -24,20 +24,36 @@ const WAITING_ROWS = 24;
 export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
   const engines = useEngines().data ?? [];
   const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
+  // The dot says how it went; a chip only for what didn't simply finish.
+  const clean = run.status === "exited" && !run.exitCode;
   return (
     <button type="button" className="run-row" aria-selected={selected} aria-current={selected || undefined} onClick={onClick}>
       <span className={`dot ${run.status}`} />
       <span className="vstack grow" style={{ gap: 1 }}>
-        <span className="title truncate">{title}</span>
+        {compact ? (
+          // A narrow list: the time stays on the first line, so the second can shrink first.
+          <span className="hstack" style={{ gap: 8 }}>
+            <span className="title truncate grow">{title}</span>
+            <span className="meta when">
+              <ShortAgo iso={run.endedAt ?? run.startedAt} />
+            </span>
+          </span>
+        ) : (
+          <span className="title truncate">{title}</span>
+        )}
         <span className="meta truncate">
           {kind}
           {run.changes ? ` · ${run.changes}` : ""}
-          {" · "}
-          <TimeAgo iso={run.endedAt ?? run.startedAt} />
+          {!compact && (
+            <>
+              {" · "}
+              <TimeAgo iso={run.endedAt ?? run.startedAt} />
+            </>
+          )}
         </span>
         {snippet && <Snippet text={snippet} className="truncate-2" />}
       </span>
-      {!compact && <StatusChip status={run.status} exitCode={run.exitCode} />}
+      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} />}
     </button>
   );
 }
@@ -83,7 +99,7 @@ export function HomeView() {
   const recent = useQuery("home-activity", ["runs"], () => call("runs.list", { since, limit: 2000 })).data ?? [];
   const [markAll, marking] = useAction(() => call("runs.markAllOpened"));
 
-  const time = (iso: string) => new Date(iso).toLocaleTimeString(t.language, { hour: "2-digit", minute: "2-digit" });
+  const time = (iso: string) => fireTime(iso, t.language, now);
   const upcoming = routines
     .filter((routine) => routine.enabled && routine.nextFires.length)
     .map((routine) => ({ routine, at: routine.nextFires[0] }))
@@ -100,6 +116,11 @@ export function HomeView() {
   const keyFor = (view: RailView) => {
     const key = railKey(rail, view);
     return key ? <kbd>{key.replace("+", " ")}</kbd> : null;
+  };
+  /** A running CLI by its name; a plain shell by its number when its workspace has more than one. */
+  const liveTitle = (session: (typeof live)[number]) => {
+    const number = session.program ? null : shellNumber(session.ptyId, live);
+    return session.program ?? (number ? `${t("common.shell")} ${number} · ${session.title}` : session.title);
   };
   const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const attention = useAttention();
@@ -158,28 +179,33 @@ export function HomeView() {
             <p className="home-status">
               <Rich text={statusLine} />
             </p>
-            <div className="home-actions">
-              <Button variant="primary" icon={FolderOpen} onClick={() => go({ view: "code" })}>
-                {t("home.action.workspace")}
-                {keyFor("code")}
-              </Button>
-              <Button icon={Bot} onClick={() => go({ view: "agents" })}>
-                {t("home.action.agent")}
-                {keyFor("agents")}
-              </Button>
-              <Button icon={MessagesSquare} onClick={() => go({ view: "chat" })}>
-                {t("home.action.chat")}
-                {keyFor("chat")}
-              </Button>
-            </div>
+            {/* While setting up, the numbered steps below are the way in; these would only repeat them. */}
+            {!onboarding && (
+              <div className="home-actions">
+                <Button variant="primary" icon={FolderOpen} onClick={() => go({ view: "code" })}>
+                  {t("home.action.workspace")}
+                  {keyFor("code")}
+                </Button>
+                <Button icon={Bot} onClick={() => go({ view: "agents" })}>
+                  {t("home.action.agent")}
+                  {keyFor("agents")}
+                </Button>
+                <Button icon={MessagesSquare} onClick={() => go({ view: "chat" })}>
+                  {t("home.action.chat")}
+                  {keyFor("chat")}
+                </Button>
+              </div>
+            )}
           </section>
 
-          <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
-            <span className="value">{recent.length}</span>
-            <span className="label">{t("home.stat.runs")}</span>
-            <span className="grow" />
-            <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
-          </button>
+          {recent.length > 0 && (
+            <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
+              <span className="value">{recent.length}</span>
+              <span className="label">{t("home.stat.runs")}</span>
+              <span className="grow" />
+              <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
+            </button>
+          )}
 
           {onboarding && (
             <div className="home-steps">
@@ -295,57 +321,61 @@ export function HomeView() {
                   <TerminalSquare size={13} /> {t("home.live.title")}
                 </div>
               )}
-              <div className="vstack" style={{ gap: 6 }}>
-                {live.slice(0, 8).map((session) => (
-                  <button
-                    key={session.ptyId}
-                    type="button"
-                    className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
-                    onClick={() => {
-                      if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
-                      else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
-                      else if (session.origin === "task" && session.taskId) go({ view: "tasks", taskId: session.taskId });
-                      else if (session.workspaceId) go({ view: "code", workspaceId: session.workspaceId, ptyId: session.ptyId });
-                      else if (session.runId) go({ view: "runs", runId: session.runId });
-                    }}
-                  >
-                    {session.kind === "shell" && !session.programEngineId ? (
-                      <SquareTerminal size={14} className="faint" />
-                    ) : (
-                      <span className={`ws-state ${session.working ? "working" : "open"}`} {...tipProps(session.working ? t("ws.working") : t("home.live.quiet"))} />
-                    )}
-                    <span className="vstack grow" style={{ gap: 1 }}>
-                      <span className="title truncate">{session.program ?? session.title}</span>
-                      <span className="meta truncate">
-                        {session.program ? `${session.title} · ` : ""}
-                        {tildify(session.cwd, home)}
-                        {session.alsoHere?.length ? ` · ${t("occupancy.alsoHere", { names: writerNames(session.alsoHere, agents) })}` : ""}
+              {live.length > 0 && (
+                <div className="vstack" style={{ gap: 6 }}>
+                  {live.slice(0, 8).map((session) => (
+                    <button
+                      key={session.ptyId}
+                      type="button"
+                      className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
+                      onClick={() => {
+                        if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
+                        else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
+                        else if (session.origin === "task" && session.taskId) go({ view: "tasks", taskId: session.taskId });
+                        else if (session.workspaceId) go({ view: "code", workspaceId: session.workspaceId, ptyId: session.ptyId });
+                        else if (session.runId) go({ view: "runs", runId: session.runId });
+                      }}
+                    >
+                      {session.kind === "shell" && !session.programEngineId ? (
+                        <SquareTerminal size={14} className="faint" />
+                      ) : (
+                        <span className={`ws-state ${session.working ? "working" : "open"}`} {...tipProps(session.working ? t("ws.working") : t("home.live.quiet"))} />
+                      )}
+                      <span className="vstack grow" style={{ gap: 1 }}>
+                        <span className="title truncate">{liveTitle(session)}</span>
+                        <span className="meta truncate">
+                          {session.program ? `${session.title} · ` : ""}
+                          {tildify(session.cwd, home)}
+                          {session.alsoHere?.length ? ` · ${t("occupancy.alsoHere", { names: writerNames(session.alsoHere, agents) })}` : ""}
+                        </span>
                       </span>
-                    </span>
-                    <span className="meta">{duration(session.startedAt, null, now)}</span>
-                  </button>
-                ))}
-              </div>
+                      <span className="meta">{duration(session.startedAt, null, now)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {upcoming.length > 0 && (
                 <div className="section-title">
                   <CalendarClock size={13} /> {t("home.next.title")}
                 </div>
               )}
-              <div className="vstack" style={{ gap: 6 }}>
-                {upcoming.map(({ routine, at }) => (
-                  <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
-                    <CalendarClock size={14} className="accent-text" />
-                    <span className="vstack grow" style={{ gap: 1 }}>
-                      <span className="title truncate">{routine.name}</span>
-                      <span className="meta truncate">
-                        {routine.agentName ?? t("home.next.missingAgent")} · {routine.description}
+              {upcoming.length > 0 && (
+                <div className="vstack" style={{ gap: 6 }}>
+                  {upcoming.map(({ routine, at }) => (
+                    <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
+                      <CalendarClock size={14} className="accent-text" />
+                      <span className="vstack grow" style={{ gap: 1 }}>
+                        <span className="title truncate">{routine.name}</span>
+                        <span className="meta truncate">
+                          {routine.agentName ?? t("home.next.missingAgent")} · {routine.description}
+                        </span>
                       </span>
-                    </span>
-                    <span className="meta">{time(at)}</span>
-                  </button>
-                ))}
-              </div>
+                      <span className="meta">{time(at)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="section-title">
                 <SquareTerminal size={13} /> {t("home.clis.title")}

@@ -25,8 +25,8 @@ import { isDockUrl } from "../../shared/dock-url.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
-import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { SidePanel, StripItem, useNarrowStage } from "../components/SidePanel.js";
+import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
@@ -144,6 +144,16 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   }, [route?.workspaceId, workspaces, file.data, currentId]);
 
   useEffect(() => writeLocal("vf.code.side", side), [side]);
+  // On a narrow tile the side panel steps aside without forgetting it was open; the button brings it back.
+  const narrow = useNarrowStage();
+  const [narrowSide, setNarrowSide] = useState(false);
+  useEffect(() => {
+    if (!narrow) setNarrowSide(false);
+  }, [narrow]);
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+  const sideOpen = narrow ? narrowSide : side.open;
+  const setSideOpen = (open: boolean) => (narrow ? setNarrowSide(open) : setSide((prev) => ({ ...prev, open })));
 
   useEffect(() => {
     if (!pendingDock) return;
@@ -457,6 +467,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     }
     setPendingDock({ id: workspaceId, url });
     setSide((prev) => (prev.open && prev.tab === "browser" ? prev : { ...prev, open: true, tab: "browser" }));
+    if (narrowRef.current) setNarrowSide(true);
     void setDockUrl(workspaceId, url);
   }
 
@@ -651,7 +662,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd="Ctrl+Shift+D" onClick={() => newTerminal(current, "row")} />
               <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd="Ctrl+Shift+E" onClick={() => newTerminal(current, "col")} />
               <span className="toolbar-sep" />
-              <Button size="sm" variant="ghost" icon={PanelRight} pressed={side.open} tip={t("code.sideTip")} onClick={() => setSide((prev) => ({ ...prev, open: !prev.open }))} />
+              <Button size="sm" variant="ghost" icon={PanelRight} pressed={sideOpen} tip={t("code.sideTip")} onClick={() => setSideOpen(!sideOpen)} />
             </div>
 
             <div className="code-work">
@@ -665,9 +676,19 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         icon={SquareTerminal}
                         title={t("code.noPanes.title")}
                         actions={
-                          <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
-                            {t("code.newTerminal")}
-                          </Button>
+                          <>
+                            <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
+                              {t("code.newTerminal")}
+                            </Button>
+                            {/* The CLIs found on this machine, one click each instead of a shell and typing. */}
+                            {engines
+                              .filter((engine) => engine.available)
+                              .map((engine) => (
+                                <Button key={engine.id} icon={Play} tip={t("code.startEngine", { engine: engine.label })} onClick={() => openFirst(workspace, { type: "engine", engineId: engine.id })}>
+                                  {engine.label}
+                                </Button>
+                              ))}
+                          </>
                         }
                       >
                         {t("code.noPanes.body")}
@@ -699,6 +720,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             runtime={runtime[pane.id]}
                             runId={runId}
                             program={session?.program ?? null}
+                            shellNumber={shellNumber(runtime[pane.id]?.ptyId, live)}
                             needsYou={ptyAttention.get(runtime[pane.id]?.ptyId ?? "")?.attention === "waiting"}
                             alsoHere={(session?.alsoHere ?? []).map((other) => agents.find((agent) => agent.id === other.agentId)?.name ?? other.label)}
                             engines={engines}
@@ -736,8 +758,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   </div>
                 );
               })}
-              {side.open && (
-                <aside className="side-panel" style={{ width: side.width }}>
+              {sideOpen && (
+                <aside className="side-panel" style={{ width: narrow ? Math.min(side.width, 280) : side.width }}>
                   <div className="side-resize" onPointerDown={startSideResize} />
                   <div className="side-tabs">
                     <Button size="sm" variant="ghost" icon={FolderTree} pressed={side.tab === "files"} onClick={() => setSide((prev) => ({ ...prev, tab: "files" }))}>
@@ -747,7 +769,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                       {t("code.browser")}
                     </Button>
                     <span className="grow" />
-                    <Button size="sm" variant="ghost" icon={X} tip={t("code.hideSide")} onClick={() => setSide((prev) => ({ ...prev, open: false }))} />
+                    <Button size="sm" variant="ghost" icon={X} tip={t("code.hideSide")} onClick={() => setSideOpen(false)} />
                   </div>
                   {side.tab === "files" ? (
                     <FilesPanel root={current.path} onInsert={insertPath} />
@@ -757,7 +779,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                       workspaceId={current.id}
                       url={browserUrl}
                       onUrl={rememberDock}
-                      visible={active && side.open && side.tab === "browser"}
+                      visible={active && sideOpen && side.tab === "browser"}
                     />
                   )}
                 </aside>
@@ -796,6 +818,7 @@ function PaneView({
   zoomed,
   onZoom,
   onOpenLink,
+  shellNumber,
 }: {
   pane: PaneNode;
   runtime: Runtime | undefined;
@@ -824,12 +847,14 @@ function PaneView({
   zoomed: boolean;
   onZoom: () => void;
   onOpenLink?: (url: string) => void;
+  /** Which shell this is in the workspace, when there is more than one. */
+  shellNumber?: number | null;
 }) {
   const t = useT();
   const state = runtime?.state ?? "idle";
   const [zone, setZone] = useState<DropZone | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
-  const title = pane.launch.type === "shell" ? t("common.shell") : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
+  const title = pane.launch.type === "shell" ? `${t("common.shell")}${shellNumber ? ` ${shellNumber}` : ""}` : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
   const shown = state === "live" && program ? program : title;
 

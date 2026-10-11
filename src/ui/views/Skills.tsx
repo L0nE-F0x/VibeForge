@@ -1,4 +1,4 @@
-import { Plus, Save, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { useEffect } from "react";
 import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
@@ -6,7 +6,7 @@ import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { useAction, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
-import { useSaveShortcut } from "./Agents.js";
+import { SaveState, useAutosave, useSaveShortcut } from "./Agents.js";
 import { useT } from "../i18n/index.js";
 
 const TEMPLATE = `## When
@@ -98,7 +98,7 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const { push } = useToast();
   const deleted = useDeleted();
   const agents = useAgents().data ?? [];
-  const [form, setForm, discard] = useDraftState(skill ? `skill:${skill.id}` : "skill:new", {
+  const [form, setForm] = useDraftState(skill ? `skill:${skill.id}` : "skill:new", {
     name: skill?.name ?? "",
     description: skill?.description ?? "",
     body: skill?.body ?? TEMPLATE,
@@ -107,12 +107,13 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setDescription = (next: string) => setForm((prev) => ({ ...prev, description: next }));
   const setBody = (next: string) => setForm((prev) => ({ ...prev, body: next }));
-  const dirty = !skill || name !== skill.name || description !== skill.description || body !== skill.body;
+  // Compared as the core keeps them (trimmed), so a stray space doesn't keep an autosave going.
+  const dirty = !skill || name.trim() !== skill.name || description.trim() !== skill.description || body.trim() !== skill.body;
 
   const [save, saving] = useAction(async () => {
-    const saved = await call("skills.save", { id: skill?.id, name, description, body });
-    push("success", skill ? t("skills.saved") : t("skills.created"), t("skills.savedBody"));
+    const saved = await call("skills.save", { id: skill?.id, name: name.trim(), description, body });
     if (!skill) {
+      push("success", t("skills.created"), t("skills.savedBody"));
       forgetDraft("skill:new");
       go({ view: "skills", skillId: saved.id });
     }
@@ -128,7 +129,9 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
     const current = agents.filter((agent) => agent.skills.includes(skill.id)).map((agent) => agent.id);
     await call("skills.setAgents", skill.id, on ? [...current, agentId] : current.filter((id) => id !== agentId));
   }, t("skills.agentFailed"));
-  useSaveShortcut(() => void save(), dirty && Boolean(name.trim()) && !saving);
+  // An existing skill saves itself as you edit; a new one is made by Create.
+  useAutosave(form, Boolean(skill) && dirty, Boolean(name.trim()) && !saving, () => void save());
+  useSaveShortcut(() => void save(), !skill && Boolean(name.trim()) && !saving);
 
   return (
     <div className="main">
@@ -136,14 +139,13 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
         <Sparkles size={17} className="accent-text" />
         <h1 className="grow truncate">{skill ? skill.name : t("skills.new")}</h1>
         {skill && <Button size="sm" variant="ghost" icon={Trash2} busy={removing} onClick={() => void remove()} title={t("skills.delete")} />}
-        {skill && dirty && (
-          <Button variant="ghost" icon={Undo2} onClick={discard}>
-            {t("common.discard")}
+        {skill ? (
+          <SaveState dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("skills.savedBody")}`} />
+        ) : (
+          <Button variant="primary" icon={Save} busy={saving} disabled={!name.trim()} kbd="Ctrl+S" tip={t("skills.create")} onClick={() => void save()}>
+            {t("skills.create")}
           </Button>
         )}
-        <Button variant="primary" icon={Save} busy={saving} disabled={!dirty || !name.trim()} onClick={() => void save()}>
-          {skill ? t("common.save") : t("skills.create")}
-        </Button>
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 14 }}>

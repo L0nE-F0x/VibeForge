@@ -159,7 +159,7 @@ function Shell() {
           {route.view === "routines" && <RoutinesView route={route} />}
           {route.view === "skills" && <SkillsView route={route} />}
           {route.view === "runs" && <RunsView route={route} />}
-          {route.view === "settings" && <SettingsView />}
+          {route.view === "settings" && <SettingsView route={route} />}
           </Suspense>
         </CrashBoundary>
         <CrashBoundary>
@@ -276,6 +276,10 @@ function Rail() {
     return [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (view === "agents")).map((mark) => mark.attention);
   };
 
+  /** What a badge counts, said in the tooltip: the two can't be told apart by the number alone. */
+  const badgeTip = (view: ViewName, count: number): string =>
+    view === "tasks" ? t.count("rail.tip.tasksReview", count, { count }) : t.count("home.status.review", count, { count }).replaceAll("**", "");
+
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
     if (view === "tasks") return review;
@@ -298,7 +302,7 @@ function Rail() {
             className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
-            {...tipProps(t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
+            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
             onClick={() => open(item.view)}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -362,7 +366,7 @@ function Rail() {
             onClose={() => setViewMenu(null)}
             items={[
               ...(viewMenu.view === PINNED ? [] : [{ label: t("rail.hide", { view: t(`rail.${viewMenu.view}`) }), icon: EyeOff, onSelect: () => hide(viewMenu.view) }]),
-              { label: t("rail.customize"), icon: SlidersHorizontal, onSelect: () => go({ view: "settings" }) },
+              { label: t("rail.customize"), icon: SlidersHorizontal, onSelect: () => go({ view: "settings", section: "rail" }) },
             ]}
           />
         </Popover>
@@ -404,10 +408,13 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   ) : undefined;
   return (
     <Popover anchor={anchor} onClose={onClose} tall>
-      <div className="list-label" style={{ paddingTop: 6 }}>
-        {t("live.title")}
-      </div>
-      {live.length === 0 && <div className="faint" style={{ padding: "6px 9px 10px" }}>{t("live.none")}</div>}
+      {/* Running terminals when there are some; "nothing is running" only when nothing else would show. */}
+      {(live.length > 0 || !shown) && (
+        <div className="list-label" style={{ paddingTop: 6 }}>
+          {t("live.title")}
+        </div>
+      )}
+      {live.length === 0 && !shown && <div className="faint" style={{ padding: "6px 9px 10px" }}>{t("live.none")}</div>}
       {live.map((session) => (
         <button
           key={session.ptyId}

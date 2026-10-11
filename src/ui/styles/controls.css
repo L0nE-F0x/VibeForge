@@ -207,6 +207,35 @@
   color: var(--fg-3);
 }
 
+/* The rest of a long hint, behind a mark (ui.tsx Field). */
+.hint-more {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 6px;
+  color: var(--fg-3);
+  cursor: help;
+}
+
+.hint-more:hover,
+.hint-more:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+/* "Don't put keys here": one quiet line under a box that goes to a CLI. */
+.secret-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.secret-note svg {
+  flex: none;
+  color: var(--yellow);
+}
+
 .field .error {
   font-size: var(--fs-sm);
   color: var(--red);
@@ -375,11 +404,19 @@
 .kbd,
 kbd {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 15px;
   padding: 0 4px;
   border-radius: 0;
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
   color: var(--fg-3);
+}
+
+/* On the accent fill the usual grey disappears: the keycap takes the button's own text colour. */
+.btn.primary kbd,
+.btn.primary .kbd {
+  color: var(--on-accent);
+  border-color: color-mix(in srgb, var(--on-accent) 55%, transparent);
+  opacity: 0.8;
 }
