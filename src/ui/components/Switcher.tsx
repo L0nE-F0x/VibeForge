@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessagesSquare, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus, MessagesSquare, Plus, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
@@ -33,6 +33,8 @@ const LIMIT = 60;
 /** Runs are searched by what they said once this much is typed, and this many are listed. */
 const RUN_SEARCH_MIN = 3;
 const RUN_HITS = 8;
+/** Chats listed before anything is typed: the latest few. */
+const RECENT_CHATS = 5;
 
 export function Switcher({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -101,11 +103,25 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         act: () => go({ view: "settings", section: section.id }),
       })),
       { id: "shortcuts", title: t("shortcuts.title"), kind: "switcher.setting", icon: Keyboard, act: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
+      { id: "new:chat", title: t("switcher.newChat"), kind: "switcher.action", icon: MessageSquarePlus, act: () => go({ view: "chat" }) },
+      { id: "new:task", title: t("tasks.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "tasks", taskId: "new" }) },
+      { id: "new:skill", title: t("skills.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "skills", skillId: "new" }) },
     ];
   }, [agents, chats, workspaces, tasks, routines, skills, rail, home, t, go, open]);
 
   const shown = useMemo(() => {
-    if (!query.trim()) return items.slice(0, LIMIT);
+    // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open
+    // tasks); the views, which the rail already shows, come after.
+    if (!query.trim()) {
+      const rank = (item: Item) => ["chat:", "workspace:", "agent:", "task:", "new:", "view:"].findIndex((prefix) => item.id.startsWith(prefix));
+      const order = (item: Item) => (rank(item) < 0 ? 99 : rank(item));
+      const openTask = (item: Item) => !item.id.startsWith("task:") || tasks?.find((task) => `task:${task.id}` === item.id)?.status !== "done";
+      let chatsShown = 0;
+      return items
+        .filter((item) => openTask(item) && (!item.id.startsWith("chat:") || ++chatsShown <= RECENT_CHATS))
+        .sort((a, b) => order(a) - order(b))
+        .slice(0, LIMIT);
+    }
     return items
       .map((item) => {
         const title = fuzzyScore(query, item.title);
@@ -118,7 +134,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       .sort((a, b) => b.score - a.score)
       .slice(0, LIMIT)
       .map((entry) => entry.item);
-  }, [items, query]);
+  }, [items, query, tasks]);
 
   // Runs found by their words follow the names; they're a different kind of match, not ranked with them.
   const listed = useMemo<Item[]>(() => {

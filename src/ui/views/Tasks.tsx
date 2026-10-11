@@ -32,7 +32,9 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   const [creating, setCreating] = useState(false);
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const list = tasks.data ?? [];
-  const open = route.taskId ? list.find((task) => task.id === route.taskId) ?? null : null;
+  // "new" (from Ctrl+K) opens a blank task, like the New task button.
+  const open = route.taskId && route.taskId !== "new" ? list.find((task) => task.id === route.taskId) ?? null : null;
+  const drafting = creating || route.taskId === "new";
 
   const onDrop = (status: TaskStatus) => async (event: DragEvent) => {
     setDropTarget(null);
@@ -130,7 +132,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
           );
         })}
       </div>
-      {(open || creating) && (
+      {(open || drafting) && (
         <TaskSheet
           key={open?.id ?? "new"}
           task={open}

@@ -408,10 +408,13 @@ function LivePopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
   ) : undefined;
   return (
     <Popover anchor={anchor} onClose={onClose} tall>
-      <div className="list-label" style={{ paddingTop: 6 }}>
-        {t("live.title")}
-      </div>
-      {live.length === 0 && <div className="faint" style={{ padding: "6px 9px 10px" }}>{t("live.none")}</div>}
+      {/* Running terminals when there are some; "nothing is running" only when nothing else would show. */}
+      {(live.length > 0 || !shown) && (
+        <div className="list-label" style={{ paddingTop: 6 }}>
+          {t("live.title")}
+        </div>
+      )}
+      {live.length === 0 && !shown && <div className="faint" style={{ padding: "6px 9px 10px" }}>{t("live.none")}</div>}
       {live.map((session) => (
         <button
           key={session.ptyId}
