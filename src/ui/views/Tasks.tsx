@@ -1,10 +1,10 @@
-import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
-import { Button, Chip, Field, Input, Notice, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useConfirm, useDeleted, useNav, useToast, type Route } from "../state.js";
 import { writerNames } from "../components/Occupancy.js";
@@ -102,8 +102,9 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
                     >
                       <span className="title">{task.title}</span>
                       <span className="hstack wrap" style={{ gap: 5 }}>
-                        <Chip>{agent?.name ?? t("tasks.noAgent")}</Chip>
-                        <Chip>{workspace?.name ?? t("tasks.noWorkspace")}</Chip>
+                        {/* A missing agent or workspace is said once, by the line under the chips. */}
+                        {(agent || task.blocker !== "missing-agent") && <Chip>{agent?.name ?? t("tasks.noAgent")}</Chip>}
+                        {(workspace || task.blocker !== "missing-workspace") && <Chip>{workspace?.name ?? t("tasks.noWorkspace")}</Chip>}
                         {task.isolated && <Chip icon={GitBranch} tone={task.copy ? "accent" : undefined} title={task.copy?.branch}>{t("tasks.copyChip")}</Chip>}
                       </span>
                       {task.status === "todo" && task.blocker && <span style={{ color: "var(--yellow)", fontSize: "var(--fs-sm)" }}>{t(blockerKey(task.blocker))}</span>}
@@ -117,7 +118,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
                         <span className="hstack faint" style={{ fontSize: "var(--fs-sm)" }}>
                           <span className={`dot ${task.lastRun.status}`} />
                           <span className="truncate">
-                            {task.lastRun.live ? "running" : task.lastRun.changes ?? task.lastRun.status} · <TimeAgo iso={task.lastRun.endedAt ?? task.lastRun.startedAt} />
+                            {task.lastRun.live ? t("status.running") : task.lastRun.changes ?? t(STATUS_KEY[task.lastRun.status])} · <TimeAgo iso={task.lastRun.endedAt ?? task.lastRun.startedAt} />
                           </span>
                         </span>
                       )}
@@ -162,11 +163,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     rows: Math.floor((window.innerHeight * 0.46 - 14) / Math.ceil(fontSize * 1.32 * 1.18)),
   });
   const runs = useQuery(task ? `runs:task:${task.id}` : null, ["runs"], () => call("runs.list", { taskId: task!.id, limit: 50 }));
+  // A new task starts with an agent and a workspace it is allowed in, so it can run as it stands.
+  const firstAgent = agents[0];
   const [form, setForm, discard] = useDraftState(task ? `task:${task.id}` : "task:new", {
     title: task?.title ?? "",
     body: task?.body ?? "",
-    agentId: task ? (task.agentId ?? "") : (agents[0]?.id ?? ""),
-    workspaceId: task ? (task.workspaceId ?? "") : (workspaces[0]?.id ?? ""),
+    agentId: task ? (task.agentId ?? "") : (firstAgent?.id ?? ""),
+    workspaceId: task ? (task.workspaceId ?? "") : ((firstAgent && workspaces.find((item) => allows(firstAgent, item.path))) ?? workspaces[0])?.id ?? "",
     isolated: task?.isolated ?? false,
     shareCheckout: task?.shareCheckout ?? false,
   });
@@ -179,7 +182,15 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const setShareCheckout = (next: boolean) => setForm((prev) => ({ ...prev, shareCheckout: next }));
   const setTitle = (next: string) => setForm((prev) => ({ ...prev, title: next }));
   const setBody = (next: string) => setForm((prev) => ({ ...prev, body: next }));
-  const setAgentId = (next: string) => setForm((prev) => ({ ...prev, agentId: next }));
+  // Picking an agent moves the workspace to one of its folders when the current one isn't.
+  const setAgentId = (next: string) =>
+    setForm((prev) => {
+      const picked = agents.find((item) => item.id === next);
+      const current = workspaces.find((item) => item.id === prev.workspaceId);
+      if (!picked || task?.copy || (current && allows(picked, current.path))) return { ...prev, agentId: next };
+      const allowed = workspaces.find((item) => allows(picked, item.path));
+      return { ...prev, agentId: next, workspaceId: allowed?.id ?? prev.workspaceId };
+    });
   const setWorkspaceId = (next: string) => setForm((prev) => ({ ...prev, workspaceId: next }));
 
   const dirty =
@@ -243,15 +254,22 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   }, t("tasks.deleteFailed"));
   useSaveShortcut(() => void save(), dirty && !saving && Boolean(title.trim()));
 
-  const outside = agent && workspace && !agent.places.some((place) => workspace.path === place || workspace.path.startsWith(`${place}/`));
+  const outside = agent && workspace && !allows(agent, workspace.path);
+  const statusLabel = task ? t(COLUMNS.find((column) => column.status === task.status)?.label ?? "tasks.col.todo") : "";
+  const wentWrong = task?.lastRun && task.status !== "running" && (task.lastRun.status === "failed" || task.lastRun.status === "stopped" || Boolean(task.lastRun.exitCode));
+  const ended = Boolean(task && (task.status === "review" || task.status === "done") && !live);
 
   return (
     <Sheet onClose={onClose} width={live ? 1100 : 780} label={task ? task.title : t("tasks.new")}>
       <div className="page-head">
         <KanbanSquare size={17} className="accent-text" />
         <h1 className="grow truncate">{task ? task.title : t("tasks.new")}</h1>
-        {task?.lastRun && task.status !== "running" && <StatusChip status={task.lastRun.status} exitCode={task.lastRun.exitCode} />}
-        {task && <Chip tone={task.status === "done" ? "ok" : task.status === "review" ? "warn" : task.status === "running" ? "accent" : undefined}>{t(COLUMNS.find((column) => column.status === task.status)?.label ?? "tasks.col.todo")}</Chip>}
+        {/* One chip: where the task is, unless its last run went wrong. */}
+        {task?.lastRun && wentWrong ? (
+          <StatusChip status={task.lastRun.status} exitCode={task.lastRun.exitCode} />
+        ) : (
+          task && <Chip tone={task.status === "done" ? "ok" : task.status === "review" ? "warn" : task.status === "running" ? "accent" : undefined}>{statusLabel}</Chip>
+        )}
         <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
       </div>
       {live && (
@@ -260,43 +278,48 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
         </div>
       )}
       <div className="page-body vstack" style={{ gap: 14 }}>
-        <div className="hstack wrap">
-          {task && (task.status === "todo" || task.status === "review" || task.status === "done") && !live && (
-            <Button variant="primary" icon={Play} busy={executing} disabled={(Boolean(task.blocker) && !dirty) || Boolean(task.waiting)} onClick={() => void execute()}>
-              {task.runIds.length ? t("tasks.runAgain") : t("tasks.execute")}
-            </Button>
-          )}
-          {task && task.lastRun && !live && task.status !== "todo" && (
-            <Button icon={RotateCcw} busy={continuing} onClick={() => void cont()} title={t("tasks.reopen")}>
-              {t("common.continue")}
-            </Button>
-          )}
-          {live && (
-            <Button icon={Square} busy={stopping} onClick={() => void stop()}>
-              {t("tasks.stop")}
-            </Button>
-          )}
-          {task?.status === "review" && (
-            <Button icon={CheckCircle2} onClick={() => void setStatus("done")}>
-              {t("tasks.markDone")}
-            </Button>
-          )}
-          {task && (task.status === "review" || task.status === "done") && (
-            <Button variant="ghost" icon={Undo2} onClick={() => void setStatus("todo")}>
-              {t("tasks.backToTodo")}
-            </Button>
-          )}
-          <span className="grow" />
-          {task && dirty && (
-            <Button variant="ghost" icon={Undo2} onClick={discard}>
-              {t("common.discard")}
-            </Button>
-          )}
-          <Button icon={Save} busy={saving} disabled={!dirty || !title.trim()} onClick={() => void save()}>
-            {task ? t("common.save") : t("tasks.create")}
-          </Button>
-          {task && <Button variant="danger" icon={Trash2} onClick={() => void remove()} title={t("tasks.delete")} />}
-        </div>
+        {task && (
+          <div className="hstack wrap">
+            {/* The ember button is the step that usually comes next: run a task to do, close one that's been reviewed. */}
+            {task.status === "todo" && !live && (
+              <Button variant="primary" icon={Play} busy={executing} disabled={(Boolean(task.blocker) && !dirty) || Boolean(task.waiting)} onClick={() => void execute()}>
+                {task.runIds.length ? t("tasks.runAgain") : t("tasks.execute")}
+              </Button>
+            )}
+            {task.status === "review" && !live && (
+              <Button variant={task.copy && task.copyOwned ? undefined : "primary"} icon={CheckCircle2} onClick={() => void setStatus("done")}>
+                {t("tasks.markDone")}
+              </Button>
+            )}
+            {task.lastRun && !live && task.status !== "todo" && (
+              <Button icon={RotateCcw} busy={continuing} onClick={() => void cont()} title={t("tasks.reopen")}>
+                {t("common.continue")}
+              </Button>
+            )}
+            {live && (
+              <Button icon={Square} busy={stopping} onClick={() => void stop()}>
+                {t("tasks.stop")}
+              </Button>
+            )}
+            <span className="grow" />
+            <MenuButton
+              size="sm"
+              variant="ghost"
+              icon={MoreHorizontal}
+              title={t("tasks.more")}
+              items={[
+                ...(ended
+                  ? [
+                      { label: t("tasks.runAgain"), icon: Play, disabled: (Boolean(task.blocker) && !dirty) || Boolean(task.waiting), onSelect: () => void execute() },
+                      { label: t("tasks.backToTodo"), icon: Undo2, onSelect: () => void setStatus("todo") },
+                      "sep" as const,
+                    ]
+                  : []),
+                { label: t("tasks.delete"), icon: Trash2, danger: true, onSelect: () => void remove() },
+              ]}
+            />
+          </div>
+        )}
         {task?.waiting && !live && (
           <Notice tone="accent" icon={Hourglass}>
             <div className="vstack" style={{ gap: 8 }}>
@@ -414,6 +437,27 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
           </>
         )}
       </div>
+      <div className="sheet-foot">
+        <span className="faint grow">{task && dirty ? t("common.unsaved") : ""}</span>
+        {task && dirty && (
+          <Button variant="ghost" icon={Undo2} onClick={discard}>
+            {t("common.discard")}
+          </Button>
+        )}
+        {!task && (
+          <Button variant="ghost" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+        )}
+        <Button variant={task ? undefined : "primary"} icon={Save} busy={saving} disabled={!dirty || !title.trim()} kbd="Ctrl+S" tip={task ? t("common.save") : t("tasks.create")} onClick={() => void save()}>
+          {task ? t("common.save") : t("tasks.create")}
+        </Button>
+      </div>
     </Sheet>
   );
+}
+
+/** Whether an agent may work in a folder: one of its places, or inside one. */
+function allows(agent: { places: string[] }, path: string): boolean {
+  return agent.places.some((place) => path === place || path.startsWith(`${place}/`));
 }

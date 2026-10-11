@@ -176,7 +176,8 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
           empty={{
             icon: MessagesSquare,
             title: t("chat.empty.title"),
-            body: t("chat.empty.body"),
+            // Claude Code's folder-trust question is worth a sentence only when it's the one picked.
+            body: (chat?.engine ?? engine) === "claude" ? `${t("chat.empty.body")} ${t("chat.empty.claudeTrust")}` : t("chat.empty.body"),
           }}
         />
       </div>

@@ -207,6 +207,35 @@
   color: var(--fg-3);
 }
 
+/* The rest of a long hint, behind a mark (ui.tsx Field). */
+.hint-more {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 6px;
+  color: var(--fg-3);
+  cursor: help;
+}
+
+.hint-more:hover,
+.hint-more:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+/* "Don't put keys here": one quiet line under a box that goes to a CLI. */
+.secret-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--fg-3);
+}
+
+.secret-note svg {
+  flex: none;
+  color: var(--yellow);
+}
+
 .field .error {
   font-size: var(--fs-sm);
   color: var(--red);

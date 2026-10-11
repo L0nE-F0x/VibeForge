@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -72,24 +72,63 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
 // ------------------------------------------------------------------ form controls
 
+/**
+ * A long hint keeps its first sentence on the form and the rest behind a small mark, so a form
+ * reads as a form and not a manual. `more` puts its own text behind the mark.
+ */
+export function splitHint(text: string, longer = 110): { first: string; rest: string } | null {
+  if (text.length <= longer) return null;
+  for (let index = 0; index < text.length - 1; index += 1) {
+    const char = text[index];
+    const western = ".!?".includes(char) && text[index + 1] === " ";
+    const cjk = "。！？".includes(char);
+    if (!western && !cjk) continue;
+    const first = text.slice(0, index + 1);
+    const rest = text.slice(index + 1).trim();
+    return first.length >= 24 && rest ? { first, rest } : null;
+  }
+  return null;
+}
+
+export function HintMore({ text }: { text: string }) {
+  return (
+    <span className="hint-more" tabIndex={0} aria-label={text} {...tipProps(text)}>
+      <Info size={11} />
+    </span>
+  );
+}
+
 export function Field({
   label,
   hint,
   error,
+  more,
   children,
   className,
 }: {
   label?: ReactNode;
   hint?: ReactNode;
   error?: ReactNode;
+  /** More about the field, behind a small mark after the hint. */
+  more?: string;
   children: ReactNode;
   className?: string;
 }) {
+  const split = typeof hint === "string" && !more ? splitHint(hint) : null;
+  const shown = split ? split.first : hint;
+  const extra = more ?? split?.rest;
   return (
     <div className={cx("field", className)}>
       {label && <span className="field-label">{label}</span>}
       {children}
-      {error ? <span className="error">{error}</span> : hint ? <span className="hint">{hint}</span> : null}
+      {error ? (
+        <span className="error">{error}</span>
+      ) : shown || extra ? (
+        <span className="hint">
+          {shown}
+          {extra && <HintMore text={extra} />}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -305,12 +344,25 @@ export function ShortAgo({ iso }: { iso: string | null | undefined }) {
   return <span {...tipProps(new Date(iso).toLocaleString(t.language))}>{shortAgo(iso, now, t.language)}</span>;
 }
 
+/** A page's subtitle: its first sentence, and the rest behind a mark when it runs long. */
+export function PageSub({ text }: { text: string }) {
+  const split = splitHint(text, 90);
+  return (
+    <span className="sub truncate">
+      {split ? split.first : text}
+      {split && <HintMore text={split.rest} />}
+    </span>
+  );
+}
+
+/** Said once per form, quietly: what goes in the box is handed to a CLI as plain text. */
 export function SecretNote() {
   const t = useT();
   return (
-    <Notice tone="warn" icon={AlertTriangle}>
+    <span className="secret-note">
+      <KeyRound size={12} />
       {t("common.secretNote")}
-    </Notice>
+    </span>
   );
 }
 

@@ -1,4 +1,4 @@
-import { ArrowUp, History, Play, Square, SquarePen, TerminalSquare, type LucideIcon } from "lucide-react";
+import { ArrowUp, History, Square, SquarePen, TerminalSquare, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefObject } from "react";
 import type { ChatView } from "../../shared/api.js";
 import { joinDictation } from "../../shared/dictation.js";
@@ -190,7 +190,7 @@ export function Composer({
       </div>
       <div className="composer-hint">
         <span>
-          <Rich text={t("session.keys")} />
+          <Rich text={t("session.keysShort")} />
         </span>
         <span className="grow" />
         {hint}
@@ -338,11 +338,7 @@ export function SessionPane({
           <span className="hstack">
             <TerminalSquare size={12} /> <Rich text={t("session.backToTerminal")} />
           </span>
-        ) : (
-          <span className="hstack">
-            <Play size={12} /> {chat ? t("session.startsEngine") : t("session.startsNew")}
-          </span>
-        )
+        ) : null
       }
     />
   );

@@ -4,7 +4,7 @@ import type { RoutineView, Schedule, SchedulePreview } from "../../shared/api.js
 import { fireTime } from "../../shared/text.js";
 import { call, useAgents, useRoutines } from "../api.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
-import { Button, Chip, Empty, Field, Input, Notice, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { Button, Chip, Empty, Field, Input, Notice, PageSub, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useDeleted, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
@@ -51,7 +51,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
         <CalendarClock size={17} className="accent-text" />
         <div className="vstack grow" style={{ gap: 0 }}>
           <h1>{t("rail.routines")}</h1>
-          <span className="sub">{t("routines.sub")}</span>
+          <PageSub text={t("routines.sub")} />
         </div>
         {!(routines.loaded && list.length === 0) && (
           <Button variant="primary" icon={Plus} disabled={agents.length === 0} onClick={() => setEditing("new")} title={agents.length ? undefined : t("routines.needAgent")}>
@@ -148,7 +148,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 )}
                 {routine.lastRun && (
                   <span className="hstack faint" style={{ fontSize: "var(--fs-sm)" }}>
-                    <StatusChip status={routine.lastRun.status} exitCode={routine.lastRun.exitCode} />
+                    {routine.lastRun.status === "exited" && !routine.lastRun.exitCode ? <span className="dot exited" /> : <StatusChip status={routine.lastRun.status} exitCode={routine.lastRun.exitCode} />}
                     <TimeAgo iso={routine.lastRun.startedAt} />
                     {routine.lastRun.changes ? ` · ${routine.lastRun.changes}` : ""}
                   </span>
@@ -288,10 +288,9 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
             </div>
           </div>
         </Field>
-        <Field label={t("routines.prompt")} hint={t("routines.promptHint")}>
+        <Field label={t("routines.prompt")} hint={t("routines.promptHint")} more={t("routines.checks")}>
           <TextArea value={prompt} placeholder={t("routines.promptPlaceholder")} style={{ minHeight: 170 }} onChange={(event) => setPrompt(event.target.value)} />
         </Field>
-        <Notice icon={CalendarClock}>{t("routines.checks")}</Notice>
         <SecretNote />
         <div className="hstack wrap" style={{ gap: 20 }}>
           <Toggle checked={enabled} onChange={setEnabled} label={t("routines.enabled")} />
@@ -300,20 +299,21 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
         <Field hint={t("turns.takeTurnsHint")}>
           <Toggle checked={!shareCheckout} onChange={(on) => setForm((prev) => ({ ...prev, shareCheckout: !on }))} label={t("turns.takeTurns")} />
         </Field>
-        <div className="hstack">
-          <Button variant="primary" icon={Save} busy={saving} disabled={!ready} onClick={() => void save()}>
-            {routine ? t("routines.save") : t("routines.create")}
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              discard();
-              onClose();
-            }}
-          >
-            {t("common.cancel")}
-          </Button>
-        </div>
+      </div>
+      <div className="sheet-foot">
+        <span className="grow" />
+        <Button
+          variant="ghost"
+          onClick={() => {
+            discard();
+            onClose();
+          }}
+        >
+          {t("common.cancel")}
+        </Button>
+        <Button variant="primary" icon={Save} busy={saving} disabled={!ready} kbd="Ctrl+S" tip={routine ? t("routines.save") : t("routines.create")} onClick={() => void save()}>
+          {routine ? t("routines.save") : t("routines.create")}
+        </Button>
       </div>
     </Sheet>
   );
