@@ -135,15 +135,36 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="segmented" role="group">
-      {options.map((option) => (
-        <button key={option.value} type="button" aria-pressed={value === option.value} onClick={() => onChange(option.value)}>
+    <div className="segmented" role="group" onKeyDown={(event) => moveChoice(event, options, value, onChange)}>
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          tabIndex={value === option.value || (index === 0 && !options.some((item) => item.value === value)) ? 0 : -1}
+          onClick={() => onChange(option.value)}
+        >
           {option.icon && <option.icon size={13} />}
           {option.label}
         </button>
       ))}
     </div>
   );
+}
+
+/** ←/→ (and Home/End) move a tab row or a segmented choice, as the keyboard expects of both. */
+function moveChoice<T>(event: React.KeyboardEvent<HTMLElement>, options: Array<{ value: T }>, value: T, onChange: (value: T) => void): void {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const at = options.findIndex((option) => option.value === value);
+  const to =
+    event.key === "ArrowRight" ? Math.min(options.length - 1, at + 1) : event.key === "ArrowLeft" ? Math.max(0, at - 1) : event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : -1;
+  if (to < 0) return;
+  event.preventDefault();
+  if (to === at) return;
+  onChange(options[to].value);
+  const buttons = event.currentTarget.querySelectorAll<HTMLElement>(":scope > button");
+  buttons[to]?.focus();
+  buttons[to]?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 export function Tabs<T extends string>({
@@ -156,9 +177,9 @@ export function Tabs<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" onKeyDown={(event) => moveChoice(event, tabs, value, onChange)}>
       {tabs.map((tab) => (
-        <button key={tab.value} type="button" role="tab" className="tab" aria-selected={value === tab.value} onClick={() => onChange(tab.value)}>
+        <button key={tab.value} type="button" role="tab" className="tab" aria-selected={value === tab.value} tabIndex={value === tab.value ? 0 : -1} onClick={() => onChange(tab.value)}>
           {tab.icon && <tab.icon size={14} />}
           {tab.label}
           {tab.badge}

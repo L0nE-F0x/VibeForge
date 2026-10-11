@@ -1,5 +1,5 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
@@ -14,6 +14,47 @@ interface PanelState {
 
 const STRIP = 56;
 export const TOGGLE_PANEL_EVENT = "vibeforge:toggle-panel";
+
+/**
+ * Below this width the stage is a narrow tile (half a laptop screen on a tiling desktop). List
+ * panels fold to their strip there without forgetting their width, and open over the work area
+ * when asked, so nothing has to slide sideways.
+ */
+const NARROW_STAGE = 860;
+let narrowNow = false;
+let watching = false;
+const narrowListeners = new Set<() => void>();
+
+function checkStage(): void {
+  const stage = document.querySelector<HTMLElement>(".stage");
+  const next = Boolean(stage && stage.clientWidth > 0 && stage.clientWidth < NARROW_STAGE);
+  if (next === narrowNow) return;
+  narrowNow = next;
+  for (const listener of narrowListeners) listener();
+}
+
+function watchStage(): void {
+  if (watching) return;
+  const stage = document.querySelector<HTMLElement>(".stage");
+  if (!stage) return;
+  watching = true;
+  new ResizeObserver(checkStage).observe(stage);
+  // A window that gets no frames (a hidden workspace) never reports a resize to the observer.
+  window.addEventListener("resize", checkStage);
+}
+
+/** Whether the stage is a narrow tile right now. */
+export function useNarrowStage(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      narrowListeners.add(notify);
+      watchStage();
+      checkStage();
+      return () => narrowListeners.delete(notify);
+    },
+    () => narrowNow,
+  );
+}
 
 function load(id: string, fallback: PanelState): PanelState {
   try {
@@ -136,6 +177,12 @@ export function SidePanel({
   const [state, setState] = useState<PanelState>(() => load(id, { width: defaultWidth, collapsed: false }));
   const [dragging, setDragging] = useState(false);
   const ref = useRef<HTMLElement>(null);
+  const narrow = useNarrowStage();
+  // Opened by hand on a narrow tile: it floats over the work area until a row is picked.
+  const [floating, setFloating] = useState(false);
+  useEffect(() => {
+    if (!narrow) setFloating(false);
+  }, [narrow]);
 
   const update = useCallback(
     (patch: Partial<PanelState>) =>
@@ -152,6 +199,10 @@ export function SidePanel({
     const toggle = () => {
       // Only the panel on screen answers; Code mode stays mounted behind other views.
       if (!ref.current || ref.current.offsetParent === null) return;
+      if (narrowNow) {
+        setFloating((open) => !open);
+        return;
+      }
       setState((prev) => {
         const next = { ...prev, collapsed: !prev.collapsed };
         save(id, next);
@@ -214,21 +265,46 @@ export function SidePanel({
     window.addEventListener("pointerup", up);
   };
 
-  useSelectionGlide(ref, !state.collapsed);
+  const collapsed = narrow ? !floating : state.collapsed;
+  useSelectionGlide(ref, !collapsed);
 
-  const collapsed = state.collapsed;
-  return (
+  useEffect(() => {
+    if (!floating) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setFloating(false);
+    };
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
+  }, [floating]);
+
+  // Picking a row in a floating panel puts it away again.
+  const closeOnPick = (event: React.MouseEvent) => {
+    if (floating && (event.target as HTMLElement).closest(".list-scroll :is(.row, .run-row)")) setTimeout(() => setFloating(false), 0);
+  };
+
+  const panel = (
     <aside
       ref={ref}
-      className={cx("list-panel", collapsed && "is-collapsed", dragging && "is-resizing", className)}
-      style={{ width: collapsed ? STRIP : state.width }}
+      className={cx("list-panel", collapsed && "is-collapsed", floating && "is-floating", dragging && "is-resizing", className)}
+      style={{ width: collapsed ? STRIP : floating ? Math.min(state.width, 320) : state.width }}
       onScrollCapture={rememberScroll}
       onKeyDown={moveInList}
+      onClick={closeOnPick}
     >
       {collapsed ? (
         <>
           <div className="list-head strip-head">
-            <Button variant="ghost" size="sm" icon={PanelLeftOpen} tip={t("panel.show")} kbd={primary ? "Ctrl+Shift+B" : undefined} tipSide="right" onClick={() => update({ collapsed: false })} />
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={PanelLeftOpen}
+              tip={t("panel.show")}
+              kbd={primary ? "Ctrl+Shift+B" : undefined}
+              tipSide="right"
+              onClick={() => (narrow ? setFloating(true) : update({ collapsed: false }))}
+            />
           </div>
           <div className="list-strip">{strip}</div>
         </>
@@ -237,18 +313,34 @@ export function SidePanel({
           <div className="list-head">
             <h2 className="grow truncate">{title}</h2>
             {actions}
-            <Button variant="ghost" size="sm" icon={PanelLeftClose} tip={t("panel.collapse")} kbd={primary ? "Ctrl+Shift+B" : undefined} onClick={() => update({ collapsed: true })} />
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={PanelLeftClose}
+              tip={t("panel.collapse")}
+              kbd={primary ? "Ctrl+Shift+B" : undefined}
+              onClick={() => (floating ? setFloating(false) : update({ collapsed: true }))}
+            />
           </div>
           {children}
-          <div
-            className="panel-resize"
-            onPointerDown={startResize}
-            onDoubleClick={() => update({ width: defaultWidth })}
-            {...tipProps(t("panel.resize"), { side: "right" })}
-          />
+          {!floating && (
+            <div
+              className="panel-resize"
+              onPointerDown={startResize}
+              onDoubleClick={() => update({ width: defaultWidth })}
+              {...tipProps(t("panel.resize"), { side: "right" })}
+            />
+          )}
         </>
       )}
     </aside>
+  );
+  // The slot is invisible to layout until the panel floats; then it keeps the strip's place in the row.
+  return (
+    <div className={cx("list-panel-slot", floating && "is-floating")}>
+      {panel}
+      {floating && <div className="list-panel-shade" onMouseDown={() => setFloating(false)} />}
+    </div>
   );
 }
 

@@ -50,7 +50,7 @@ interface Step {
   keys?: Array<[string, Key]>;
 }
 
-const LIST_PANEL = ".view.split-list > .list-panel";
+const LIST_PANEL = ".view.split-list > .list-panel-slot > .list-panel";
 
 const STEPS: Step[] = [
   { id: "welcome", icon: Compass },
@@ -81,7 +81,7 @@ const STEPS: Step[] = [
     title: "tour.workspaces.title",
     body: "tour.workspaces.body",
     route: { view: "code" },
-    target: [".code-view > .list-panel"],
+    target: [".code-view > .list-panel-slot > .list-panel"],
     side: "right",
     icon: SquareTerminal,
   },
