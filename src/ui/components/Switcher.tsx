@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessagesSquare, Mic, Power, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessagesSquare, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
@@ -10,6 +10,7 @@ import { useT, type Key } from "../i18n/index.js";
 import { railViews } from "../rail.js";
 import { useNav, useOverlay } from "../state.js";
 import { SHOW_SHORTCUTS_EVENT } from "./Help.js";
+import { SETTINGS_SECTIONS } from "../settings-sections.js";
 
 // Ctrl+K: type part of a name and press Enter to land on any agent, chat, workspace, task,
 // routine, skill or view. Ctrl+Shift+K does the same from inside a terminal, where Ctrl+K
@@ -53,10 +54,6 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   useOverlay(true);
 
   const items = useMemo<Item[]>(() => {
-    const settingsAt = (id: string) => () => {
-      go({ view: "settings" });
-      setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" }), 120);
-    };
     const agentName = (id: string | null) => agents?.find((agent) => agent.id === id)?.name;
     return [
       ...railViews(rail).visible.map((item): Item => ({ id: `view:${item.view}`, title: t(item.label), kind: "switcher.view", icon: item.icon, act: () => open(item.view) })),
@@ -96,9 +93,13 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         act: () => go({ view: "routines", routineId: routine.id }),
       })),
       ...(skills ?? []).map((skill): Item => ({ id: `skill:${skill.id}`, title: skill.name, sub: skill.description, kind: "switcher.skill", icon: Sparkles, act: () => go({ view: "skills", skillId: skill.id }) })),
-      { id: "settings:voice", title: `${t("settings.title")} · ${t("voice.title")}`, kind: "switcher.setting", icon: Mic, act: settingsAt("settings-voice") },
-      { id: "settings:sounds", title: `${t("settings.title")} · ${t("sounds.title")}`, kind: "switcher.setting", icon: Volume2, act: settingsAt("settings-sounds") },
-      { id: "settings:tray", title: `${t("settings.title")} · ${t("tray.title")}`, kind: "switcher.setting", icon: Power, act: settingsAt("settings-tray") },
+      ...SETTINGS_SECTIONS.map((section): Item => ({
+        id: `settings:${section.id}`,
+        title: `${t("settings.title")} · ${t(section.label)}`,
+        kind: "switcher.setting",
+        icon: section.icon,
+        act: () => go({ view: "settings", section: section.id }),
+      })),
       { id: "shortcuts", title: t("shortcuts.title"), kind: "switcher.setting", icon: Keyboard, act: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
     ];
   }, [agents, chats, workspaces, tasks, routines, skills, rail, home, t, go, open]);

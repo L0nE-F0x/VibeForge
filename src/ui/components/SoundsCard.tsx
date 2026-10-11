@@ -44,9 +44,10 @@ export function SoundsCard() {
       <Field hint={t("sounds.hint")}>
         <Toggle checked={sounds.on} onChange={(on) => void save({ on })} label={t("sounds.on")} />
       </Field>
-      <div className="vstack" style={{ gap: 10, opacity: sounds.on ? 1 : 0.5 }}>
+      <div className="vstack" style={{ gap: 10 }}>
         <Field label={t("sounds.volume")}>
           <Segmented
+            disabled={!sounds.on}
             value={levelOf(sounds.volume)}
             options={LEVELS.map((level) => ({ value: level.value, label: t(`sounds.level.${level.value}`) }))}
             onChange={(value) => {

@@ -326,6 +326,7 @@ export const pt: Catalog = {
   "runs.markdownFailed": "Não foi possível copiar a execução",
 
   "settings.title": "Ajustes",
+  "settings.sections": "Seções",
   "settings.appearance": "Aparência",
   "settings.defaults": "Padrões",
   "settings.notifications": "Notificações",
@@ -464,6 +465,7 @@ export const pt: Catalog = {
   "voice.languageHint": "Informar o idioma é mais rápido e seguro do que detectá-lo.",
   "voice.englishOnlyHint": "Este modelo só ouve inglês. Escolha um sem .en para outros idiomas.",
   "voice.getModel": "Baixar um modelo",
+  "voice.download": "Baixar",
   "voice.downloadHint": "Do projeto whisper.cpp no Hugging Face, para {dir}. Modelos que o Voxtype ou o whisper.cpp já baixaram também são encontrados.",
   "voice.downloadFailed": "Não foi possível baixar o modelo",
   "voice.englishOnly": "Só inglês, e o mais preciso em inglês",
@@ -591,6 +593,7 @@ export const pt: Catalog = {
   "tray.closeHint": "Os terminais continuam rodando e as rotinas continuam disparando. Saia pelo menu da bandeja.",
   "tray.login": "Iniciar ao entrar, na bandeja",
   "tray.loginHint": "Adiciona o VibeForge a ~/.config/autostart, como o Omarchy inicia outros apps da bandeja. A janela espera até você abri-la.",
+  "tray.loginHintNoTray": "A bandeja está desligada, então o VibeForge abre a janela ao entrar.",
   "tray.saveFailed": "Não foi possível mudar isso",
   "tray.offHint": "Desligar vale a partir da próxima vez que o VibeForge iniciar.",
   // ---------------------------------------------------------------- storage

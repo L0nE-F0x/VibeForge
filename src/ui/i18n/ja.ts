@@ -327,6 +327,7 @@ export const ja: Catalog = {
   "runs.markdownFailed": "実行をコピーできませんでした",
 
   "settings.title": "設定",
+  "settings.sections": "セクション",
   "settings.appearance": "外観",
   "settings.defaults": "既定値",
   "settings.notifications": "通知",
@@ -465,6 +466,7 @@ export const ja: Catalog = {
   "voice.languageHint": "指定したほうが検出より速く確実です。",
   "voice.englishOnlyHint": "このモデルは英語しか聞き取れません。他の言語には .en の付かないモデルを選んでください。",
   "voice.getModel": "モデルをダウンロード",
+  "voice.download": "ダウンロード",
   "voice.downloadHint": "Hugging Face の whisper.cpp プロジェクトから {dir} へ。Voxtype や whisper.cpp がダウンロード済みのモデルも見つけます。",
   "voice.downloadFailed": "モデルをダウンロードできませんでした",
   "voice.englishOnly": "英語専用。英語では最も正確です",
@@ -592,6 +594,7 @@ export const ja: Catalog = {
   "tray.closeHint": "ターミナルは動き続け、ルーティンも実行されます。終了はトレイのメニューから。",
   "tray.login": "ログイン時にトレイで起動",
   "tray.loginHint": "Omarchy が他のトレイアプリを起動するのと同じく、~/.config/autostart に VibeForge を追加します。ウィンドウは開くまで待機します。",
+  "tray.loginHintNoTray": "トレイがオフのため、ログイン時にウィンドウを開きます。",
   "tray.saveFailed": "変更できませんでした",
   "tray.offHint": "オフにした変更は、次に VibeForge を起動したときに反映されます。",
   // ---------------------------------------------------------------- storage

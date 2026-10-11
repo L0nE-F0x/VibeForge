@@ -336,6 +336,7 @@ export const en = {
 
   // ---------------------------------------------------------------- settings
   "settings.title": "Settings",
+  "settings.sections": "Sections",
   "settings.appearance": "Appearance",
   "settings.defaults": "Defaults",
   "settings.notifications": "Notifications",
@@ -478,6 +479,7 @@ export const en = {
   "voice.languageHint": "Naming it is faster and surer than detecting it.",
   "voice.englishOnlyHint": "This model only hears English. Pick one without .en for other languages.",
   "voice.getModel": "Download a model",
+  "voice.download": "Download",
   "voice.downloadHint": "From the whisper.cpp project on Hugging Face, into {dir}. Models that Voxtype or whisper.cpp already downloaded are found too.",
   "voice.downloadFailed": "Could not download the model",
   "voice.englishOnly": "English only, and the sharpest for English",
@@ -604,6 +606,7 @@ export const en = {
   "tray.closeHint": "Terminals keep running and routines keep firing. Quit from the tray menu.",
   "tray.login": "Start at login, in the tray",
   "tray.loginHint": "Adds VibeForge to ~/.config/autostart, the way Omarchy starts other tray apps. The window waits until you open it.",
+  "tray.loginHintNoTray": "The tray is off, so VibeForge opens its window at login instead.",
   "tray.saveFailed": "Could not change that",
   "tray.offHint": "Switching it off takes effect the next time VibeForge starts.",
   // ---------------------------------------------------------------- storage

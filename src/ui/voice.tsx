@@ -303,8 +303,7 @@ export function VoiceLayer() {
     if (refs.current.status && !refs.current.status.ready) {
       inform("info", say("voice.notReady"), say("voice.notReadyBody"));
       if (focused()) {
-        go({ view: "settings" });
-        setTimeout(() => document.getElementById("settings-voice")?.scrollIntoView({ block: "start", behavior: "smooth" }), 120);
+        go({ view: "settings", section: "voice" });
       }
       return false;
     }
@@ -413,8 +412,7 @@ export function VoiceLayer() {
     if (!agent) {
       inform("info", say("voice.noAgent"), say("voice.noAgentBody"));
       if (focused()) {
-        go({ view: "settings" });
-        setTimeout(() => document.getElementById("settings-voice")?.scrollIntoView({ block: "start", behavior: "smooth" }), 120);
+        go({ view: "settings", section: "voice" });
       }
       return;
     }

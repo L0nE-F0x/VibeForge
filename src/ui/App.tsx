@@ -159,7 +159,7 @@ function Shell() {
           {route.view === "routines" && <RoutinesView route={route} />}
           {route.view === "skills" && <SkillsView route={route} />}
           {route.view === "runs" && <RunsView route={route} />}
-          {route.view === "settings" && <SettingsView />}
+          {route.view === "settings" && <SettingsView route={route} />}
           </Suspense>
         </CrashBoundary>
         <CrashBoundary>
@@ -362,7 +362,7 @@ function Rail() {
             onClose={() => setViewMenu(null)}
             items={[
               ...(viewMenu.view === PINNED ? [] : [{ label: t("rail.hide", { view: t(`rail.${viewMenu.view}`) }), icon: EyeOff, onSelect: () => hide(viewMenu.view) }]),
-              { label: t("rail.customize"), icon: SlidersHorizontal, onSelect: () => go({ view: "settings" }) },
+              { label: t("rail.customize"), icon: SlidersHorizontal, onSelect: () => go({ view: "settings", section: "rail" }) },
             ]}
           />
         </Popover>

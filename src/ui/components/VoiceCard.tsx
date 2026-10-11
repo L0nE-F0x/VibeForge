@@ -31,20 +31,28 @@ function StatusRow({ ok, label, detail, children }: { ok: boolean; label: string
   );
 }
 
-/** Download buttons for one catalog, with the progress of whatever is downloading. */
+/** One catalog as a list to pick from and a Download button, with the progress of whatever is downloading. */
 function Downloads({ status, kind, items, hint }: { status: VoiceStatus; kind: DownloadKind; items: Array<{ id: string; mb: number; path: string | null; tip: string }>; hint: string }) {
   const t = useT();
   const [start] = useAction(async (id: string) => call("voice.download", kind, id), t("voice.downloadFailed"));
   const download = status.download;
   const mine = download?.kind === kind ? download : null;
+  const [picked, setPicked] = useState<string>(() => (items.find((item) => !item.path) ?? items[0])?.id ?? "");
+  const choice = items.find((item) => item.id === picked);
   return (
     <div className="vstack" style={{ gap: 8 }}>
-      <div className="hstack wrap" style={{ gap: 6 }}>
-        {items.map((item) => (
-          <Button key={item.id} size="sm" icon={Download} disabled={Boolean(item.path) || Boolean(download)} busy={mine?.id === item.id} tip={item.tip} onClick={() => void start(item.id)}>
-            {item.id} · {item.mb} MB{item.path ? " ✓" : ""}
-          </Button>
-        ))}
+      <div className="hstack" style={{ gap: 6, maxWidth: 560 }}>
+        <Select value={picked} onChange={(event) => setPicked(event.target.value)} disabled={Boolean(download)}>
+          {items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.id} · {item.mb} MB · {item.tip}
+              {item.path ? " ✓" : ""}
+            </option>
+          ))}
+        </Select>
+        <Button icon={Download} disabled={!choice || Boolean(choice.path) || Boolean(download)} busy={Boolean(mine)} onClick={() => choice && void start(choice.id)}>
+          {t("voice.download")}
+        </Button>
       </div>
       {mine && (
         <div className="hstack" style={{ gap: 10 }}>

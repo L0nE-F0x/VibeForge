@@ -327,6 +327,7 @@ export const zh: Catalog = {
   "runs.markdownFailed": "无法复制这次运行",
 
   "settings.title": "设置",
+  "settings.sections": "分区",
   "settings.appearance": "外观",
   "settings.defaults": "默认值",
   "settings.notifications": "通知",
@@ -465,6 +466,7 @@ export const zh: Catalog = {
   "voice.languageHint": "指定语言比自动识别更快、更准。",
   "voice.englishOnlyHint": "此模型只能听懂英语。其他语言请选择不带 .en 的模型。",
   "voice.getModel": "下载模型",
+  "voice.download": "下载",
   "voice.downloadHint": "来自 Hugging Face 上的 whisper.cpp 项目，保存到 {dir}。Voxtype 或 whisper.cpp 已下载的模型也会被找到。",
   "voice.downloadFailed": "无法下载模型",
   "voice.englishOnly": "仅英语，英语识别最准确",
@@ -592,6 +594,7 @@ export const zh: Catalog = {
   "tray.closeHint": "终端继续运行，例行任务继续触发。从托盘菜单退出。",
   "tray.login": "登录时在托盘中启动",
   "tray.loginHint": "像 Omarchy 启动其他托盘应用一样，把 VibeForge 加入 ~/.config/autostart。窗口会等你打开。",
+  "tray.loginHintNoTray": "托盘已关闭，所以登录时 VibeForge 会直接打开窗口。",
   "tray.saveFailed": "无法更改",
   "tray.offHint": "关闭后，将在下次启动 VibeForge 时生效。",
   // ---------------------------------------------------------------- storage

@@ -327,6 +327,7 @@ export const fr: Catalog = {
   "runs.markdownFailed": "Impossible de copier l'exécution",
 
   "settings.title": "Réglages",
+  "settings.sections": "Sections",
   "settings.appearance": "Apparence",
   "settings.defaults": "Valeurs par défaut",
   "settings.notifications": "Notifications",
@@ -465,6 +466,7 @@ export const fr: Catalog = {
   "voice.languageHint": "L’indiquer est plus rapide et plus sûr que la détecter.",
   "voice.englishOnlyHint": "Ce modèle n’entend que l’anglais. Choisissez-en un sans .en pour les autres langues.",
   "voice.getModel": "Télécharger un modèle",
+  "voice.download": "Télécharger",
   "voice.downloadHint": "Depuis le projet whisper.cpp sur Hugging Face, dans {dir}. Les modèles déjà téléchargés par Voxtype ou whisper.cpp sont aussi trouvés.",
   "voice.downloadFailed": "Impossible de télécharger le modèle",
   "voice.englishOnly": "Anglais seulement, et le plus précis en anglais",
@@ -592,6 +594,7 @@ export const fr: Catalog = {
   "tray.closeHint": "Les terminaux continuent et les routines se déclenchent toujours. Quittez depuis le menu de la barre d'état.",
   "tray.login": "Démarrer à la connexion, dans la barre d'état",
   "tray.loginHint": "Ajoute VibeForge à ~/.config/autostart, comme Omarchy démarre les autres applis de la barre d'état. La fenêtre attend que vous l'ouvriez.",
+  "tray.loginHintNoTray": "La zone de notification est désactivée : VibeForge ouvre plutôt sa fenêtre à la connexion.",
   "tray.saveFailed": "Impossible de modifier ce réglage",
   "tray.offHint": "La désactivation prend effet au prochain démarrage de VibeForge.",
   // ---------------------------------------------------------------- storage

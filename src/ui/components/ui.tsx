@@ -129,10 +129,12 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  disabled,
 }: {
   value: T;
   options: Array<{ value: T; label: ReactNode; icon?: LucideIcon }>;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="segmented" role="group" onKeyDown={(event) => moveChoice(event, options, value, onChange)}>
@@ -141,6 +143,7 @@ export function Segmented<T extends string>({
           key={option.value}
           type="button"
           aria-pressed={value === option.value}
+          disabled={disabled}
           tabIndex={value === option.value || (index === 0 && !options.some((item) => item.value === value)) ? 0 : -1}
           onClick={() => onChange(option.value)}
         >

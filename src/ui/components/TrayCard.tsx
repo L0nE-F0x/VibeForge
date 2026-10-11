@@ -26,7 +26,7 @@ export function TrayCard() {
       <Field hint={t("tray.closeHint")}>
         <Toggle checked={settings.tray && settings.closeToTray} disabled={!settings.tray} onChange={(closeToTray) => void save({ closeToTray })} label={t("tray.close")} />
       </Field>
-      <Field hint={t("tray.loginHint")}>
+      <Field hint={settings.tray ? t("tray.loginHint") : t("tray.loginHintNoTray")}>
         <Toggle checked={Boolean(autostart)} disabled={autostart === null} onChange={(on) => void setAutostart(on)} label={t("tray.login")} />
       </Field>
     </div>

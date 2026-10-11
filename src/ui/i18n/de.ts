@@ -326,6 +326,7 @@ export const de: Catalog = {
   "runs.markdownFailed": "Der Lauf konnte nicht kopiert werden",
 
   "settings.title": "Einstellungen",
+  "settings.sections": "Abschnitte",
   "settings.appearance": "Darstellung",
   "settings.defaults": "Standards",
   "settings.notifications": "Benachrichtigungen",
@@ -464,6 +465,7 @@ export const de: Catalog = {
   "voice.languageHint": "Sie anzugeben ist schneller und sicherer als sie zu erkennen.",
   "voice.englishOnlyHint": "Dieses Modell hört nur Englisch. Für andere Sprachen eins ohne .en wählen.",
   "voice.getModel": "Modell herunterladen",
+  "voice.download": "Herunterladen",
   "voice.downloadHint": "Vom whisper.cpp-Projekt auf Hugging Face, nach {dir}. Modelle, die Voxtype oder whisper.cpp schon geladen haben, werden auch gefunden.",
   "voice.downloadFailed": "Das Modell konnte nicht heruntergeladen werden",
   "voice.englishOnly": "Nur Englisch, dafür am genauesten",
@@ -591,6 +593,7 @@ export const de: Catalog = {
   "tray.closeHint": "Terminals laufen weiter und Routinen starten weiter. Beenden über das Tray-Menü.",
   "tray.login": "Beim Anmelden im Tray starten",
   "tray.loginHint": "Legt VibeForge in ~/.config/autostart ab, so wie Omarchy andere Tray-Apps startet. Das Fenster wartet, bis du es öffnest.",
+  "tray.loginHintNoTray": "Das Tray-Symbol ist aus, also öffnet VibeForge beim Anmelden stattdessen sein Fenster.",
   "tray.saveFailed": "Das ließ sich nicht ändern",
   "tray.offHint": "Das Ausschalten wirkt ab dem nächsten Start von VibeForge.",
   // ---------------------------------------------------------------- storage

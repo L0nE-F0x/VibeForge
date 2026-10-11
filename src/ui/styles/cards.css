@@ -310,3 +310,71 @@
     opacity: 0;
   }
 }
+
+/* Settings: the page beside a list of its sections, which follows the scroll (Settings.tsx). */
+.settings-body {
+  position: relative;
+}
+
+.settings-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  max-width: 1160px;
+  margin-inline: auto;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 940px;
+}
+
+.settings-toc {
+  position: sticky;
+  top: 0;
+  flex: none;
+  width: 176px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 2px;
+}
+
+.settings-toc button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.settings-toc button:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+}
+
+.settings-toc button:focus-visible {
+  outline: none;
+  color: var(--accent-2);
+  background: var(--focus-fill);
+  border-color: var(--focus-line);
+}
+
+.settings-toc button[aria-current="true"] {
+  color: var(--fg);
+  background: var(--fill-2);
+  border-left-color: var(--accent);
+}
+
+/* A narrow tile keeps the page and drops the list; Ctrl+K still finds every section by name. */
+@container stage (max-width: 1000px) {
+  .settings-toc {
+    display: none;
+  }
+}
