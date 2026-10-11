@@ -561,6 +561,7 @@ export const en = {
   "code.addEmpty": "Add a project folder to get terminals in it.",
   "code.moveFailed": "Could not move the workspace",
   "code.newTerminal": "New terminal",
+  "code.startEngine": "Start {engine} in this workspace",
   "code.sideTip": "Files and browser",
   "pane.run": "run",
   "rail.customize": "Customize the rail…",

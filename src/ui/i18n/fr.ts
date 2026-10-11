@@ -548,6 +548,7 @@ export const fr: Catalog = {
   "code.addEmpty": "Ajoutez un dossier de projet pour y ouvrir des terminaux.",
   "code.moveFailed": "Impossible de déplacer l’espace de travail",
   "code.newTerminal": "Nouveau terminal",
+  "code.startEngine": "Lancer {engine} dans cet espace de travail",
   "code.sideTip": "Fichiers et navigateur",
   "pane.run": "exécution",
   "rail.customize": "Personnaliser la barre…",

@@ -547,6 +547,7 @@ export const de: Catalog = {
   "code.addEmpty": "Füge einen Projektordner hinzu, um darin Terminals zu öffnen.",
   "code.moveFailed": "Arbeitsbereich konnte nicht verschoben werden",
   "code.newTerminal": "Neues Terminal",
+  "code.startEngine": "{engine} in diesem Arbeitsbereich starten",
   "code.sideTip": "Dateien und Browser",
   "pane.run": "Lauf",
   "rail.customize": "Leiste anpassen…",

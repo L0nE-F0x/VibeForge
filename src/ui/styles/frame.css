@@ -466,3 +466,8 @@
 .section-title .count {
   color: var(--accent);
 }
+
+/* A small button in a heading doesn't make that heading taller than its neighbours. */
+.section-title .btn.sm {
+  margin-block: -6px;
+}

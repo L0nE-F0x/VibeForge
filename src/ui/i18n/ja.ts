@@ -548,6 +548,7 @@ export const ja: Catalog = {
   "code.addEmpty": "プロジェクトフォルダを追加すると、そこでターミナルを開けます。",
   "code.moveFailed": "ワークスペースを移動できませんでした",
   "code.newTerminal": "新しいターミナル",
+  "code.startEngine": "このワークスペースで {engine} を起動",
   "code.sideTip": "ファイルとブラウザ",
   "pane.run": "実行",
   "rail.customize": "レールをカスタマイズ…",

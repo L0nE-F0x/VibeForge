@@ -26,7 +26,7 @@ import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
 import { SidePanel, StripItem, useNarrowStage } from "../components/SidePanel.js";
-import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
@@ -676,9 +676,19 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         icon={SquareTerminal}
                         title={t("code.noPanes.title")}
                         actions={
-                          <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
-                            {t("code.newTerminal")}
-                          </Button>
+                          <>
+                            <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
+                              {t("code.newTerminal")}
+                            </Button>
+                            {/* The CLIs found on this machine, one click each instead of a shell and typing. */}
+                            {engines
+                              .filter((engine) => engine.available)
+                              .map((engine) => (
+                                <Button key={engine.id} icon={Play} tip={t("code.startEngine", { engine: engine.label })} onClick={() => openFirst(workspace, { type: "engine", engineId: engine.id })}>
+                                  {engine.label}
+                                </Button>
+                              ))}
+                          </>
                         }
                       >
                         {t("code.noPanes.body")}
@@ -710,6 +720,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             runtime={runtime[pane.id]}
                             runId={runId}
                             program={session?.program ?? null}
+                            shellNumber={shellNumber(runtime[pane.id]?.ptyId, live)}
                             needsYou={ptyAttention.get(runtime[pane.id]?.ptyId ?? "")?.attention === "waiting"}
                             alsoHere={(session?.alsoHere ?? []).map((other) => agents.find((agent) => agent.id === other.agentId)?.name ?? other.label)}
                             engines={engines}
@@ -807,6 +818,7 @@ function PaneView({
   zoomed,
   onZoom,
   onOpenLink,
+  shellNumber,
 }: {
   pane: PaneNode;
   runtime: Runtime | undefined;
@@ -835,12 +847,14 @@ function PaneView({
   zoomed: boolean;
   onZoom: () => void;
   onOpenLink?: (url: string) => void;
+  /** Which shell this is in the workspace, when there is more than one. */
+  shellNumber?: number | null;
 }) {
   const t = useT();
   const state = runtime?.state ?? "idle";
   const [zone, setZone] = useState<DropZone | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
-  const title = pane.launch.type === "shell" ? t("common.shell") : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
+  const title = pane.launch.type === "shell" ? `${t("common.shell")}${shellNumber ? ` ${shellNumber}` : ""}` : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
   const shown = state === "live" && program ? program : title;
 

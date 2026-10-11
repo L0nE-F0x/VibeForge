@@ -21,3 +21,16 @@ export function WorkspaceState({ mark, count, strip }: { mark: WorkspaceMark | n
   const tip = mark === "open" ? t.count("code.running", count) : t(`ws.${mark}`);
   return <span className={`ws-state ${mark}${strip ? " in-strip" : ""}`} role="img" aria-label={tip} {...tipProps(tip)} />;
 }
+
+/**
+ * A plain shell's number among the shells open in its workspace, by when they started, so two of
+ * them read "Shell 1" and "Shell 2" in Code and on Home alike. Null when it is the only one.
+ */
+export function shellNumber(ptyId: string | null | undefined, live: readonly LiveSession[]): number | null {
+  const session = live.find((item) => item.ptyId === ptyId);
+  if (!session || session.kind !== "shell" || !session.workspaceId) return null;
+  const shells = live
+    .filter((item) => item.kind === "shell" && item.workspaceId === session.workspaceId)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.ptyId.localeCompare(b.ptyId));
+  return shells.length > 1 ? shells.indexOf(session) + 1 : null;
+}

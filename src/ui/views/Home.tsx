@@ -8,7 +8,7 @@ import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../comp
 import { ORIGIN_KEY } from "../components/RunDetail.js";
 import { Button, ShortAgo, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
-import { workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
 import { useAttention, usePtyAttention } from "../attention.js";
 import { writerNames } from "../components/Occupancy.js";
 import { markWhere, markWho } from "../watch.js";
@@ -117,6 +117,11 @@ export function HomeView() {
     const key = railKey(rail, view);
     return key ? <kbd>{key.replace("+", " ")}</kbd> : null;
   };
+  /** A running CLI by its name; a plain shell by its number when its workspace has more than one. */
+  const liveTitle = (session: (typeof live)[number]) => {
+    const number = session.program ? null : shellNumber(session.ptyId, live);
+    return session.program ?? (number ? `${t("common.shell")} ${number} · ${session.title}` : session.title);
+  };
   const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const attention = useAttention();
   const marks = usePtyAttention();
@@ -174,28 +179,33 @@ export function HomeView() {
             <p className="home-status">
               <Rich text={statusLine} />
             </p>
-            <div className="home-actions">
-              <Button variant="primary" icon={FolderOpen} onClick={() => go({ view: "code" })}>
-                {t("home.action.workspace")}
-                {keyFor("code")}
-              </Button>
-              <Button icon={Bot} onClick={() => go({ view: "agents" })}>
-                {t("home.action.agent")}
-                {keyFor("agents")}
-              </Button>
-              <Button icon={MessagesSquare} onClick={() => go({ view: "chat" })}>
-                {t("home.action.chat")}
-                {keyFor("chat")}
-              </Button>
-            </div>
+            {/* While setting up, the numbered steps below are the way in; these would only repeat them. */}
+            {!onboarding && (
+              <div className="home-actions">
+                <Button variant="primary" icon={FolderOpen} onClick={() => go({ view: "code" })}>
+                  {t("home.action.workspace")}
+                  {keyFor("code")}
+                </Button>
+                <Button icon={Bot} onClick={() => go({ view: "agents" })}>
+                  {t("home.action.agent")}
+                  {keyFor("agents")}
+                </Button>
+                <Button icon={MessagesSquare} onClick={() => go({ view: "chat" })}>
+                  {t("home.action.chat")}
+                  {keyFor("chat")}
+                </Button>
+              </div>
+            )}
           </section>
 
-          <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
-            <span className="value">{recent.length}</span>
-            <span className="label">{t("home.stat.runs")}</span>
-            <span className="grow" />
-            <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
-          </button>
+          {recent.length > 0 && (
+            <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
+              <span className="value">{recent.length}</span>
+              <span className="label">{t("home.stat.runs")}</span>
+              <span className="grow" />
+              <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
+            </button>
+          )}
 
           {onboarding && (
             <div className="home-steps">
@@ -311,57 +321,61 @@ export function HomeView() {
                   <TerminalSquare size={13} /> {t("home.live.title")}
                 </div>
               )}
-              <div className="vstack" style={{ gap: 6 }}>
-                {live.slice(0, 8).map((session) => (
-                  <button
-                    key={session.ptyId}
-                    type="button"
-                    className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
-                    onClick={() => {
-                      if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
-                      else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
-                      else if (session.origin === "task" && session.taskId) go({ view: "tasks", taskId: session.taskId });
-                      else if (session.workspaceId) go({ view: "code", workspaceId: session.workspaceId, ptyId: session.ptyId });
-                      else if (session.runId) go({ view: "runs", runId: session.runId });
-                    }}
-                  >
-                    {session.kind === "shell" && !session.programEngineId ? (
-                      <SquareTerminal size={14} className="faint" />
-                    ) : (
-                      <span className={`ws-state ${session.working ? "working" : "open"}`} {...tipProps(session.working ? t("ws.working") : t("home.live.quiet"))} />
-                    )}
-                    <span className="vstack grow" style={{ gap: 1 }}>
-                      <span className="title truncate">{session.program ?? session.title}</span>
-                      <span className="meta truncate">
-                        {session.program ? `${session.title} · ` : ""}
-                        {tildify(session.cwd, home)}
-                        {session.alsoHere?.length ? ` · ${t("occupancy.alsoHere", { names: writerNames(session.alsoHere, agents) })}` : ""}
+              {live.length > 0 && (
+                <div className="vstack" style={{ gap: 6 }}>
+                  {live.slice(0, 8).map((session) => (
+                    <button
+                      key={session.ptyId}
+                      type="button"
+                      className={`run-row${marks.get(session.ptyId)?.attention === "waiting" ? " needs-you" : ""}`}
+                      onClick={() => {
+                        if (session.origin === "agent-chat" && session.agentId && session.chatId) go({ view: "agents", agentId: session.agentId, tab: "chats", chatId: session.chatId });
+                        else if (session.origin === "chat" && session.chatId) go({ view: "chat", chatId: session.chatId });
+                        else if (session.origin === "task" && session.taskId) go({ view: "tasks", taskId: session.taskId });
+                        else if (session.workspaceId) go({ view: "code", workspaceId: session.workspaceId, ptyId: session.ptyId });
+                        else if (session.runId) go({ view: "runs", runId: session.runId });
+                      }}
+                    >
+                      {session.kind === "shell" && !session.programEngineId ? (
+                        <SquareTerminal size={14} className="faint" />
+                      ) : (
+                        <span className={`ws-state ${session.working ? "working" : "open"}`} {...tipProps(session.working ? t("ws.working") : t("home.live.quiet"))} />
+                      )}
+                      <span className="vstack grow" style={{ gap: 1 }}>
+                        <span className="title truncate">{liveTitle(session)}</span>
+                        <span className="meta truncate">
+                          {session.program ? `${session.title} · ` : ""}
+                          {tildify(session.cwd, home)}
+                          {session.alsoHere?.length ? ` · ${t("occupancy.alsoHere", { names: writerNames(session.alsoHere, agents) })}` : ""}
+                        </span>
                       </span>
-                    </span>
-                    <span className="meta">{duration(session.startedAt, null, now)}</span>
-                  </button>
-                ))}
-              </div>
+                      <span className="meta">{duration(session.startedAt, null, now)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {upcoming.length > 0 && (
                 <div className="section-title">
                   <CalendarClock size={13} /> {t("home.next.title")}
                 </div>
               )}
-              <div className="vstack" style={{ gap: 6 }}>
-                {upcoming.map(({ routine, at }) => (
-                  <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
-                    <CalendarClock size={14} className="accent-text" />
-                    <span className="vstack grow" style={{ gap: 1 }}>
-                      <span className="title truncate">{routine.name}</span>
-                      <span className="meta truncate">
-                        {routine.agentName ?? t("home.next.missingAgent")} · {routine.description}
+              {upcoming.length > 0 && (
+                <div className="vstack" style={{ gap: 6 }}>
+                  {upcoming.map(({ routine, at }) => (
+                    <button key={routine.id} type="button" className={`run-row${routine.failing ? " needs-you" : ""}`} onClick={() => go({ view: "routines", routineId: routine.id })}>
+                      <CalendarClock size={14} className="accent-text" />
+                      <span className="vstack grow" style={{ gap: 1 }}>
+                        <span className="title truncate">{routine.name}</span>
+                        <span className="meta truncate">
+                          {routine.agentName ?? t("home.next.missingAgent")} · {routine.description}
+                        </span>
                       </span>
-                    </span>
-                    <span className="meta">{time(at)}</span>
-                  </button>
-                ))}
-              </div>
+                      <span className="meta">{time(at)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="section-title">
                 <SquareTerminal size={13} /> {t("home.clis.title")}

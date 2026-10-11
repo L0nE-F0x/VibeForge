@@ -548,6 +548,7 @@ export const zh: Catalog = {
   "code.addEmpty": "添加一个项目文件夹，即可在其中打开终端。",
   "code.moveFailed": "无法移动工作区",
   "code.newTerminal": "新建终端",
+  "code.startEngine": "在此工作区启动 {engine}",
   "code.sideTip": "文件与浏览器",
   "pane.run": "运行",
   "rail.customize": "自定义侧栏…",
