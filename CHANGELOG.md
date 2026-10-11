@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-12
+
+**2.5: a desk that fits half a screen, a review you can do with J and K, and editors that save themselves.**
+
 ### Added
 
 - **Review a morning's work with J and K.** Runs opens on the first run waiting for review. `J` and `K` step through the list from anywhere in the view, and **Next to review** in the run's header jumps to the next one waiting. Runs you reviewed during the visit stay in the list, so you can go back to them.
@@ -362,7 +366,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.5.0
 [2.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.4.0
 [2.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.1
 [2.3.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.0
