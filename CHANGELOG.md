@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-10-14
+
+**2.6.1: CLIs behind a mise wrapper start again, and the GitHub graph loads.**
+
 ### Fixed
 
 - **CLIs installed through mise wrappers run again, and the GitHub graph loads.** Some setups put small scripts in `~/.local/bin` (`gh`, `codex`, `crush`…) that install a CLI through mise on first use and then run `mise x <tool> -- <tool>`. When mise's own folder for that tool is also on PATH, behind `~/.local/bin`, the script finds itself again and loops until something kills it. That is how the login shell's PATH looks, so the GitHub contribution graph timed out with "Command failed: gh api graphql…". VibeForge now runs the program behind such a script when it is on PATH, and uses the script only when nothing else is there. When `gh` does time out, the message says so.
@@ -378,7 +382,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.1
 [2.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.0
 [2.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.5.0
 [2.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.4.0
