@@ -14,7 +14,7 @@ export function seedEngines(): EngineRow[] {
     { id: "codex", label: "Codex", bin: "codex", args: [], promptArgs: ["{prompt}"], continueArgs: ["resume", "--last"] },
     { id: "grok", label: "Grok Build", bin: "grok", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
     { id: "cursor-agent", label: "Cursor Agent", bin: "cursor-agent", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
-    { id: "gemini", label: "Gemini CLI", bin: "gemini", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--resume", "latest"] },
+    { id: "agy", label: "Antigravity CLI", bin: "agy", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--continue"] },
     { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
     { id: "copilot", label: "Copilot", bin: "copilot", args: [], promptArgs: ["-i", "{prompt}"], continueArgs: ["--continue"] },
     { id: "kimi", label: "Kimi", bin: "kimi", args: [], continueArgs: ["--continue"] },
@@ -30,16 +30,51 @@ export function seedEngines(): EngineRow[] {
  * Bump it when a new seed row should appear for people who already have a file,
  * and name that row's id in `SEED_ADDED`.
  */
-export const ENGINE_SEED_REVISION = 2;
+export const ENGINE_SEED_REVISION = 3;
 
 /** Seed ids introduced at each revision after 1, which is the original list. */
 const SEED_ADDED: Record<number, readonly string[]> = {
   2: ["muse"],
+  3: ["agy"],
 };
 
 /**
- * Append seed rows introduced since `revision`, without touching rows already
- * in the file and without putting back a row removed after it was introduced.
+ * The Gemini CLI row shipped through 2.5.0. Revision 3 drops this exact row:
+ * personal Google accounts stopped being served on 18 June 2026, and Antigravity
+ * CLI is the replacement. A row someone edited (a different binary, prompt or
+ * resume line) is left alone, so an API-key or Code Assist install can stay.
+ */
+const RETIRED_GEMINI: EngineRow = {
+  id: "gemini",
+  label: "Gemini CLI",
+  bin: "gemini",
+  args: [],
+  promptArgs: ["-i", "{prompt}"],
+  continueArgs: ["--resume", "latest"],
+};
+
+function sameList(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+function isRetiredGemini(row: EngineRow): boolean {
+  return (
+    row.id === RETIRED_GEMINI.id &&
+    row.label === RETIRED_GEMINI.label &&
+    row.bin === RETIRED_GEMINI.bin &&
+    sameList(row.args, RETIRED_GEMINI.args) &&
+    sameList(row.promptArgs, RETIRED_GEMINI.promptArgs) &&
+    sameList(row.continueArgs, RETIRED_GEMINI.continueArgs)
+  );
+}
+
+/**
+ * Catch an engines file up to {@link ENGINE_SEED_REVISION}. New seed rows are
+ * appended, and the original Gemini CLI row is swapped for Antigravity at
+ * revision 3. Rows already in the file are otherwise left alone, and a row
+ * removed after it was introduced stays gone.
  */
 export function mergeEngineRows(saved: readonly EngineRow[], revision: number): { rows: EngineRow[]; revision: number; changed: boolean } {
   const seeds = seedEngines();
@@ -47,11 +82,20 @@ export function mergeEngineRows(saved: readonly EngineRow[], revision: number): 
   let rows = [...saved];
   let changed = from !== ENGINE_SEED_REVISION;
   for (let rev = from + 1; rev <= ENGINE_SEED_REVISION; rev += 1) {
+    let insertAt: number | null = null;
+    if (rev === 3) {
+      const at = rows.findIndex(isRetiredGemini);
+      if (at >= 0) {
+        rows = rows.filter((row) => !isRetiredGemini(row));
+        insertAt = at;
+        changed = true;
+      }
+    }
     for (const id of SEED_ADDED[rev] ?? []) {
       if (rows.some((row) => row.id === id)) continue;
       const seed = seeds.find((row) => row.id === id);
       if (!seed) continue;
-      rows = [...rows, seed];
+      rows = insertAt !== null && id === "agy" ? [...rows.slice(0, insertAt), seed, ...rows.slice(insertAt)] : [...rows, seed];
       changed = true;
     }
   }
@@ -176,8 +220,9 @@ export function programOf(argv: readonly string[], rows: readonly EngineRow[]): 
  */
 export function resumeArgsFromTranscript(row: EngineRow, transcript: string): string[] | null {
   const name = path.basename(row.bin).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // "claude --resume <id>", "codex resume <id>", "copilot --resume=<id>", "crush --session <id>".
-  const pattern = new RegExp(`\\b${name}\\s+(--resume|resume|--session)(?:\\s+|=)([0-9A-Za-z][\\w-]{7,})`, "g");
+  // "claude --resume <id>", "codex resume <id>", "copilot --resume=<id>",
+  // "crush --session <id>", "agy --conversation <id>".
+  const pattern = new RegExp(`\\b${name}\\s+(--resume|resume|--session|--conversation)(?:\\s+|=)([0-9A-Za-z][\\w-]{7,})`, "g");
   const matches = [...transcript.slice(-20_000).matchAll(pattern)];
   const last = matches[matches.length - 1];
   if (!last) return null;

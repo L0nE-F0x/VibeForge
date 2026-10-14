@@ -589,7 +589,7 @@ function flipper(slot, values, interval, onChange) {
 }
 
 function setupFlips() {
-  flipper($("[data-engine-flip]"), ["Claude Code", "Codex", "Grok Build", "Gemini CLI", "OpenCode"], 2400);
+  flipper($("[data-engine-flip]"), ["Claude Code", "Codex", "Grok Build", "Antigravity CLI", "OpenCode"], 2400);
 
   // "3 runs to review", as the app says it in each of its languages.
   const codes = $$("[data-lang-codes] span");

@@ -86,14 +86,14 @@ It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 
 
 ## Works with
 
-Anything with a command line. The defaults know how to hand a first prompt to **Claude Code**, **Codex**, **Grok**, **Cursor Agent**, **Gemini CLI**, **OpenCode** and **Muse** as an argument, and paste it into **Copilot**, **Kimi**, **Crush**, **Pi**, **Hermes** or any other CLI once it's ready. Add your own in Settings or in `~/.config/vibeforge/engines.json`:
+Anything with a command line. The defaults know how to hand a first prompt to **Claude Code**, **Codex**, **Grok**, **Cursor Agent**, **Antigravity CLI**, **OpenCode** and **Muse** as an argument, and paste it into **Copilot**, **Kimi**, **Crush**, **Pi**, **Hermes** or any other CLI once it's ready. Add your own in Settings or in `~/.config/vibeforge/engines.json`:
 
 ```json
 { "id": "claude", "label": "Claude Code", "bin": "claude", "args": [],
   "promptArgs": ["{prompt}"], "continueArgs": ["--continue"] }
 ```
 
-`args` are always passed. `promptArgs` puts the first message on the command line (`{prompt}` is replaced); leave it out and VibeForge pastes the message once the CLI is ready. `continueArgs` reopens the CLI's latest session in a folder — and when a CLI prints its own resume line on exit (`claude --resume <id>`, `grok --resume <id>`, `codex resume <id>`), **Continue** uses that exact session instead.
+`args` are always passed. `promptArgs` puts the first message on the command line (`{prompt}` is replaced); leave it out and VibeForge pastes the message once the CLI is ready. `continueArgs` reopens the CLI's latest session in a folder — and when a CLI prints its own resume line on exit (`claude --resume <id>`, `grok --resume <id>`, `codex resume <id>`, `agy --conversation <id>`), **Continue** uses that exact session instead.
 
 ## How it works
 

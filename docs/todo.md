@@ -1,13 +1,13 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.5.0, 2026-10-12, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.6.0, 2026-10-14, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
 - [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A buzz on a locked phone is still to build.
 - [ ] **The last English in other languages.** The tray menu, the quit question, the "still running in the tray" notice and the core's run-finished notifications are still in English, and so are cronstrue's schedule descriptions and git's change summaries. The window and the phone page are translated.
-- [ ] **Gemini plan limits**, when the next Gemini Pro lands. Gemini CLI's `/stats` quota comes from the Code Assist API (`retrieveUserQuota`, per model, with a project from `loadCodeAssist`). Its Google access token lasts an hour and only Gemini CLI renews it, so a read-only approach would show "sign-in expired" unless Gemini CLI ran recently. Work out the request from Gemini CLI's own source before adding it.
-- [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at.
+- [ ] **Antigravity plan limits.** Antigravity CLI (`agy`) shows quotas in its own `/usage` panel. It does not write a plain quota file, and Gemini CLI's Code Assist quota no longer applies to personal accounts (that CLI stopped serving them on 18 June 2026). Read a local source before adding a bar.
+- [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent, Crush and Antigravity haven't been looked at. Antigravity keeps token counts in protobuf inside `~/.gemini/antigravity-cli/conversations/*.db`, not in a named JSON log. Leftover Gemini CLI chat files are still counted.
 
 ## Only checked with stand-ins
 
