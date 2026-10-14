@@ -93,8 +93,8 @@ describe("engines", () => {
     });
     expect(planLaunch(claude, "/bin/claude", { prompt: "" })).toEqual({ argv: ["/bin/claude"], recordArgv: ["/bin/claude"], pasteInput: null });
     expect(planLaunch(claude, "/bin/claude", { continueSession: true }).argv).toEqual(["/bin/claude", "--continue"]);
-    const gemini = seedEngines().find((row) => row.id === "gemini")!;
-    expect(planLaunch(gemini, "/bin/gemini", { prompt: "hi" }).argv).toEqual(["/bin/gemini", "-i", "hi"]);
+    const agy = seedEngines().find((row) => row.id === "agy")!;
+    expect(planLaunch(agy, "/bin/agy", { prompt: "hi" }).argv).toEqual(["/bin/agy", "-i", "hi"]);
     const pasted = planLaunch({ id: "x", label: "X", bin: "x", args: ["--flag"] }, "/bin/x", { prompt: "hello" });
     expect(pasted).toEqual({ argv: ["/bin/x", "--flag"], recordArgv: ["/bin/x", "--flag"], pasteInput: "hello" });
     const huge = "x".repeat(150_000);
@@ -104,12 +104,12 @@ describe("engines", () => {
   });
 
   it("ends the options before a prompt that looks like a flag, only where it is positional", () => {
-    const [claude, gemini, pi] = ["claude", "gemini", "pi"].map((id) => seedEngines().find((row) => row.id === id)!);
+    const [claude, agy, pi] = ["claude", "agy", "pi"].map((id) => seedEngines().find((row) => row.id === id)!);
     expect(planLaunch(claude, "/bin/claude", { prompt: "--help" })).toMatchObject({ argv: ["/bin/claude", "--", "--help"], recordArgv: ["/bin/claude", "--", "{prompt}"] });
     expect(planLaunch(pi, "/bin/pi", { prompt: "- Summarize these points", continueSession: true }).argv).toEqual(["/bin/pi", "--continue", "--", "- Summarize these points"]);
     expect(planLaunch(claude, "/bin/claude", { prompt: "fix -v" }).argv).toEqual(["/bin/claude", "fix -v"]);
     // After "-i" the prompt is the flag's value: "--" there would make it a stray positional.
-    expect(planLaunch(gemini, "/bin/gemini", { prompt: "-x" }).argv).toEqual(["/bin/gemini", "-i", "-x"]);
+    expect(planLaunch(agy, "/bin/agy", { prompt: "-x" }).argv).toEqual(["/bin/agy", "-i", "-x"]);
     const valued = { id: "v", label: "V", bin: "v", args: [], promptArgs: ["--model", "big", "{prompt}"] };
     expect(planLaunch(valued, "/bin/v", { prompt: "-x" }).argv).toEqual(["/bin/v", "--model", "big", "--", "-x"]);
     const trailing = { id: "t", label: "T", bin: "t", args: [], promptArgs: ["{prompt}", "--yes"] };
@@ -122,6 +122,7 @@ describe("engines", () => {
     expect(programOf(["node", "--no-warnings", "/home/me/.npm/bin/codex.js", "resume"], rows)).toEqual({ label: "Codex", engineId: "codex" });
     expect(programOf(["/usr/bin/grok", "--continue"], rows)).toEqual({ label: "Grok Build", engineId: "grok" });
     expect(programOf(["/home/me/.local/share/claude/versions/2.1.283", "--resume"], rows)).toEqual({ label: "Claude Code", engineId: "claude" });
+    expect(programOf(["/home/me/.local/bin/agy", "--continue"], rows)).toEqual({ label: "Antigravity CLI", engineId: "agy" });
     expect(programOf(["/home/me/.local/bin/muse"], rows)).toEqual({ label: "Muse", engineId: "muse" });
     expect(programOf(["bash", "/home/me/.local/bin/muse"], rows)).toEqual({ label: "Muse", engineId: "muse" });
     expect(programOf(["/home/me/.local/bin/muse-bin-1.4.2-R4684.1"], rows)).toEqual({ label: "Muse", engineId: "muse" });
@@ -144,6 +145,11 @@ describe("engines", () => {
     const [copilot, crush] = ["copilot", "crush"].map((id) => seedEngines().find((row) => row.id === id)!);
     expect(resumeArgsFromTranscript(copilot, "Resume with copilot --resume=3f2a9c1e-77aa")).toEqual(["--resume=3f2a9c1e-77aa"]);
     expect(resumeArgsFromTranscript(crush, "crush --session 01HZX8K2M4 to pick up")).toEqual(["--session", "01HZX8K2M4"]);
+    const agy = seedEngines().find((row) => row.id === "agy")!;
+    expect(resumeArgsFromTranscript(agy, "Resume this session with:\nagy --conversation 055a398f-db14-4c5f-abbb-1bf03f8120a7\n")).toEqual([
+      "--conversation",
+      "055a398f-db14-4c5f-abbb-1bf03f8120a7",
+    ]);
     const plan = planLaunch(claude, "/bin/claude", { continueSession: true, resumeArgs: ["--resume", "abc12345"] });
     expect(plan.argv).toEqual(["/bin/claude", "--resume", "abc12345"]);
   });
@@ -408,6 +414,50 @@ describe("store", () => {
     store.writeEngineRows(store.readEngineRows().filter((row) => row.id !== "muse"));
     expect(store.readEngineRows().map((row) => row.id)).not.toContain("muse");
     store.close();
+  });
+
+  it("swaps the original Gemini CLI row for Antigravity, and leaves a hand-edited one", () => {
+    const stock = {
+      id: "gemini",
+      label: "Gemini CLI",
+      bin: "gemini",
+      args: [],
+      promptArgs: ["-i", "{prompt}"],
+      continueArgs: ["--resume", "latest"],
+    };
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "engines.json");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        engines: [
+          { id: "cursor-agent", label: "Cursor Agent", bin: "cursor-agent", args: [] },
+          stock,
+          { id: "opencode", label: "OpenCode", bin: "opencode", args: [] },
+        ],
+        seedRevision: 2,
+      }),
+    );
+    expect(store.readEngineRows().map((row) => row.id)).toEqual(["cursor-agent", "agy", "opencode"]);
+    expect(store.readEngineRows().find((row) => row.id === "agy")).toMatchObject({
+      label: "Antigravity CLI",
+      bin: "agy",
+      promptArgs: ["-i", "{prompt}"],
+      continueArgs: ["--continue"],
+    });
+    store.writeEngineRows(store.readEngineRows().filter((row) => row.id !== "agy"));
+    expect(store.readEngineRows().map((row) => row.id)).not.toContain("agy");
+    store.close();
+
+    const custom = new Store(tempDir(), tempDir());
+    fs.writeFileSync(
+      path.join(custom.configRoot, "engines.json"),
+      JSON.stringify({ engines: [{ ...stock, continueArgs: ["--resume", "mine"] }], seedRevision: 2 }),
+    );
+    const ids = custom.readEngineRows().map((row) => row.id);
+    expect(ids[0]).toBe("gemini");
+    expect(ids).toContain("agy");
+    custom.close();
   });
 
   it("keeps the tour finished once it is, and reads older settings files as not toured", () => {

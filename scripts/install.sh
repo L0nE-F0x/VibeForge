@@ -139,14 +139,14 @@ TryExec=$BIN_DIR/vibeforge
 Icon=$ICON_DIR/512x512/apps/vibeforge.png
 Terminal=false
 Categories=Development;
-Keywords=AI;Agent;Terminal;Code;Claude;Codex;Grok;
+Keywords=AI;Agent;Terminal;Code;Claude;Codex;Grok;Antigravity;
 StartupNotify=true
 StartupWMClass=vibeforge
 EOF
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
 
 found=()
-for cli in claude codex grok cursor-agent gemini opencode copilot crush kimi; do
+for cli in claude codex grok cursor-agent agy opencode copilot crush kimi; do
   command -v "$cli" >/dev/null 2>&1 && found+=("$cli")
 done
 

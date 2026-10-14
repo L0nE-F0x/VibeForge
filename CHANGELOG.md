@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-14
+
+**2.6: Antigravity CLI, in place of Gemini CLI.**
+
+### Changed
+
+- **Antigravity CLI replaces Gemini CLI.** On 18 June 2026 Google stopped serving Gemini CLI to free, Google AI Pro and Google AI Ultra accounts. The terminal replacement is Antigravity CLI (`agy`). VibeForge hands it the first prompt with `-i` and reopens the latest session with `--continue`. When the CLI prints `agy --conversation <id>` on the way out, Continue uses that session. An `engines.json` that still has the original Gemini CLI row swaps it for Antigravity in the same place. A Gemini CLI row you edited yourself stays, which covers an API key or a Code Assist Standard or Enterprise license. Pick the model inside Antigravity with `/model` (it remembers). Gemini 4 Argon is offered there on Google AI Ultra and eligible Gemini Enterprise plans, under slugs such as `gemini-4-argon-high`. Token counts still read leftover Gemini CLI chat files. Antigravity does not write a plain token log, so its own usage stays in the CLI's `/usage` panel.
+
 ## [2.5.0] - 2026-10-12
 
 **2.5: a desk that fits half a screen, a review you can do with J and K, and editors that save themselves.**
@@ -366,7 +374,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.0
 [2.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.5.0
 [2.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.4.0
 [2.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.3.1
