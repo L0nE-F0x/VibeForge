@@ -77,6 +77,13 @@ describe("engines", () => {
     expect(whichBin("not-exec", dir)).toBeNull();
     expect(whichBin(bin, "")).toBe(bin);
     expect(whichBin("", dir)).toBeNull();
+    // A mise install-on-first-use wrapper loses to the program behind it, but still runs alone.
+    const wrappers = tempDir();
+    const wrapper = path.join(wrappers, "fake-cli");
+    fs.writeFileSync(wrapper, '#!/bin/bash\nmise use -g --quiet "fake-cli" || exit 1\nexec mise x "fake-cli" -- "fake-cli" "$@"\n');
+    fs.chmodSync(wrapper, 0o755);
+    expect(whichBin("fake-cli", `${wrappers}:${dir}`)).toBe(bin);
+    expect(whichBin("fake-cli", wrappers)).toBe(wrapper);
     const rows = withAvailability([{ id: "a", label: "A", bin: "fake-cli", args: [] }, { id: "b", label: "B", bin: "missing", args: [] }], (name) => whichBin(name, dir));
     expect(rows.map((row) => [row.id, row.available, row.path])).toEqual([
       ["a", true, bin],

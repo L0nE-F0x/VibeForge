@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **CLIs installed through mise wrappers run again, and the GitHub graph loads.** Some setups put small scripts in `~/.local/bin` (`gh`, `codex`, `crush`…) that install a CLI through mise on first use and then run `mise x <tool> -- <tool>`. When mise's own folder for that tool is also on PATH, behind `~/.local/bin`, the script finds itself again and loops until something kills it. That is how the login shell's PATH looks, so the GitHub contribution graph timed out with "Command failed: gh api graphql…". VibeForge now runs the program behind such a script when it is on PATH, and uses the script only when nothing else is there. When `gh` does time out, the message says so.
+
 ## [2.6.0] - 2026-10-14
 
 **2.6: Antigravity CLI, in place of Gemini CLI.**

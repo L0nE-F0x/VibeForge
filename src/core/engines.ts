@@ -148,6 +148,21 @@ function executable(file: string): boolean {
   }
 }
 
+/**
+ * A small script that installs a CLI through mise on first use and then runs `mise x <tool> -- <tool>`.
+ * When the tool's install folder is already on PATH behind the script, `mise x` leaves PATH as it
+ * is, finds the script again and runs it again, forever.
+ */
+export function isMiseWrapper(file: string): boolean {
+  try {
+    if (fs.statSync(file).size > 4096) return false;
+    const text = fs.readFileSync(file, "utf8");
+    return text.startsWith("#!") && /\bmise\s+(x|exec)\b/.test(text);
+  } catch {
+    return false;
+  }
+}
+
 /** `which` without spawning a process for every row on every refresh. */
 export function whichBin(bin: string, envPath: string = process.env.PATH ?? ""): string | null {
   if (typeof bin !== "string" || bin.length === 0 || bin.includes("\0")) return null;
@@ -155,12 +170,16 @@ export function whichBin(bin: string, envPath: string = process.env.PATH ?? ""):
     const resolved = path.resolve(bin);
     return executable(resolved) ? resolved : null;
   }
+  // Prefer the program itself to a mise wrapper in front of it; the wrapper alone still runs.
+  let wrapper: string | null = null;
   for (const dir of envPath.split(path.delimiter)) {
     if (!dir) continue;
     const candidate = path.join(dir, bin);
-    if (executable(candidate)) return candidate;
+    if (!executable(candidate)) continue;
+    if (!isMiseWrapper(candidate)) return candidate;
+    wrapper ??= candidate;
   }
-  return null;
+  return wrapper;
 }
 
 export function withAvailability(
