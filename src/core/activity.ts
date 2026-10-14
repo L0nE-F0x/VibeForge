@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { whichBin } from "./engines.js";
 import { dayOf } from "./usage.js";
 import { commitDays } from "./vcs.js";
 
@@ -60,11 +61,12 @@ const QUERY = "query { viewer { login contributionsCollection { contributionCale
 
 function gh(args: string[], timeoutMs: number): Promise<{ stdout: string; error: string | null }> {
   return new Promise((resolve) => {
-    execFile("gh", args, { timeout: timeoutMs, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" } }, (error, stdout, stderr) => {
+    execFile(whichBin("gh") ?? "gh", args, { timeout: timeoutMs, encoding: "utf8", env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" } }, (error, stdout, stderr) => {
       if (!error) return resolve({ stdout, error: null });
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") return resolve({ stdout: "", error: "The GitHub CLI (gh) is not installed." });
-      if (/auth login|not logged/i.test(stderr)) return resolve({ stdout: "", error: "gh is not signed in. Run `gh auth login` in a terminal." });
+      if (error.killed) return resolve({ stdout: "", error: `gh did not answer within ${timeoutMs / 1000} seconds.` });
+      if (/auth login|not logged/i.test(stderr))return resolve({ stdout: "", error: "gh is not signed in. Run `gh auth login` in a terminal." });
       resolve({ stdout: "", error: (stderr || error.message).trim().split("\n")[0] || "gh failed." });
     });
   });
