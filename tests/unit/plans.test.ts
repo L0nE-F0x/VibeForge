@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexReading, fullAt, parseClaude, parseCodexWham, parseGrok, parseKimi, parseMuse, PlanWatcher } from "../../src/core/plans.js";
+import { codexReading, fullAt, parseAgy, parseClaude, parseCodexWham, parseGrok, parseKimi, parseMuse, PlanWatcher } from "../../src/core/plans.js";
 
 const NOW = Date.parse("2026-09-27T12:00:00Z");
 const TOKEN = "t".repeat(40);
@@ -40,6 +40,36 @@ const ANSWERS: Record<string, unknown> = {
       ],
     },
   },
+  "daily-cloudcode-pa.googleapis.com": {
+    groups: [
+      {
+        groupName: "Gemini Models",
+        buckets: [
+          { bucketId: "gemini-weekly", remainingFraction: 0.8, resetTime: inHours(72), window: "weekly" },
+          { bucketId: "gemini-5h", remainingFraction: 0.75, resetTime: inHours(2), window: "5h" },
+        ],
+      },
+      {
+        groupName: "Claude and GPT models",
+        buckets: [
+          { bucketId: "3p-weekly", remainingFraction: 1, window: "weekly" },
+          { bucketId: "3p-5h", remainingFraction: 1, window: "5h" },
+        ],
+      },
+      {
+        groupName: "Gemini 4 Argon",
+        buckets: [
+          {
+            bucketId: "gemini-argon-wtu-weekly",
+            displayName: "Gemini 4 Argon Weekly Limit",
+            remainingFraction: 0.41,
+            resetTime: inHours(140),
+            window: "weekly",
+          },
+        ],
+      },
+    ],
+  },
   "api.kimi.com": {
     // As Kimi sends it: counts as strings, resets as resetTime.
     usage: { limit: "100", used: "40", remaining: "60", resetTime: inHours(90) },
@@ -71,6 +101,14 @@ describe("plan limits", () => {
     expect(grok).toMatchObject({ percent: 77, limiter: "GrokBuild", resetsAt: inHours(11) });
     expect(grok?.windows).toHaveLength(2);
 
+    const agy = parseAgy(ANSWERS["daily-cloudcode-pa.googleapis.com"] as Record<string, unknown>);
+    expect(agy).toMatchObject({ percent: 59, limiter: "Gemini 4 Argon", resetsAt: inHours(140) });
+    expect(agy?.windows.map((window) => [window.name, Math.round(window.percent)])).toEqual([
+      ["5-hour", 25],
+      ["7-day", 20],
+      ["Gemini 4 Argon", 59],
+    ]);
+
     const kimi = parseKimi(ANSWERS["api.kimi.com"] as Record<string, unknown>);
     expect(kimi).toMatchObject({ percent: 100, limiter: "5-hour", resetsAt: inHours(2) });
     expect(kimi?.windows.map((window) => [window.name, window.percent])).toEqual([
@@ -84,6 +122,7 @@ describe("plan limits", () => {
 
     expect(parseClaude({})).toBeNull();
     expect(parseGrok({ config: {} })).toBeNull();
+    expect(parseAgy({})).toBeNull();
 
     const codex = codexReading([
       { windowMinutes: 10080, usedPercent: 20, resetsAt: null },

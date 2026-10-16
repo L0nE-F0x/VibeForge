@@ -218,4 +218,45 @@ describe("usage", () => {
     expect(claude.periods.all.models).toEqual([{ model: "claude-opus-5-5", total: 10 }, { model: "n", total: 3 }]);
     expect(Object.keys(JSON.parse(fs.readFileSync(ledger, "utf8")).days.claude)).toEqual(["2026-09-25", "2026-09-26"]);
   });
+
+  it("counts Antigravity CLI's SQLite conversation databases, once per model call", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const varint = (value: number): number[] => {
+      const out: number[] = [];
+      let v = value;
+      while (v >= 0x80) {
+        out.push((v & 0x7f) | 0x80);
+        v = Math.floor(v / 128);
+      }
+      out.push(v);
+      return out;
+    };
+    const fieldVarint = (field: number, value: number) => [...varint(field * 8), ...varint(value)];
+    const fieldBytes = (field: number, bytes: number[] | Buffer) => [...varint(field * 8 + 2), ...varint(bytes.length), ...bytes];
+    const fieldStr = (field: number, text: string) => fieldBytes(field, Buffer.from(text, "utf8"));
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const dbFile = path.join(home, ".gemini", "antigravity-cli", "conversations", "c1.db");
+    fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+    const db = new DatabaseSync(dbFile);
+    db.exec("CREATE TABLE steps (idx INTEGER PRIMARY KEY, type TEXT, data BLOB, metadata BLOB);");
+    db.exec("CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, step_indices TEXT, data BLOB);");
+
+    const stepSec = Math.floor(Date.parse(at(0)) / 1000);
+    const stepMeta = Buffer.from([...fieldBytes(1, fieldVarint(1, stepSec)), ...fieldBytes(9, fieldStr(7, "msg-argon-1"))]);
+    db.prepare("INSERT INTO steps (idx, type, metadata) VALUES (?, ?, ?)").run(5, "PLANNER_RESPONSE", stepMeta);
+
+    const usageStats = [...fieldVarint(2, 500), ...fieldVarint(3, 150), ...fieldVarint(4, 50), ...fieldVarint(5, 2000), ...fieldStr(7, "msg-argon-1")];
+    const chatMeta = [...fieldBytes(4, usageStats), ...fieldStr(19, "gemini-4-argon-trial"), ...fieldBytes(20, [...fieldStr(1, "last_step_index"), ...fieldStr(2, "5")])];
+    const genData = Buffer.from(fieldBytes(1, chatMeta));
+    db.prepare("INSERT INTO gen_metadata (idx, step_indices, data) VALUES (?, ?, ?)").run(0, "[5]", genData);
+    // Duplicate message_id in another row is counted only once.
+    db.prepare("INSERT INTO gen_metadata (idx, step_indices, data) VALUES (?, ?, ?)").run(1, "[5]", genData);
+    db.close();
+
+    const [agy] = (await new UsageScanner(home, { now: () => NOW, env: {} }).scan()).sources;
+    expect(agy.id).toBe("agy");
+    expect(agy.periods.today.tokens).toEqual({ total: 2700, cached: 2000, output: 150 });
+    expect(agy.periods.today.models).toEqual([{ model: "gemini-4-argon-trial", total: 2700 }]);
+  });
 });
