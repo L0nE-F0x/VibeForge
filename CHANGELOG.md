@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-10-16
+
+**2.6.2: Gemini and Gemini 4 Argon plan limits, and Antigravity CLI token counts.**
+
+### Added
+
+- **Gemini plan limits, including Gemini 4 Argon.** When you are signed in to Antigravity CLI (`agy`) and plan limits are on in Settings → Usage and activity, VibeForge now shows your Gemini 5-hour, 7-day and Gemini 4 Argon windows alongside Claude, Codex, Grok, Kimi and Muse, with the four-point Gemini spark on the desktop and the phone page. The sign-in is read from Antigravity's token file or the system keyring (`gemini` / `antigravity`).
+- **Antigravity CLI token counts.** The Tokens tab now reads Antigravity's SQLite conversation databases (`~/.gemini/antigravity-cli/conversations/*.db` and `~/.gemini/antigravity/conversations/*.db`), counting fresh input, cache reads and writes, thinking and output per model (`gemini-4-argon-trial`, `gemini-3.8-flash-n`…) once per model call.
+
 ## [2.6.1] - 2026-10-14
 
 **2.6.1: CLIs behind a mise wrapper start again, and the GitHub graph loads.**
@@ -382,7 +391,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.2...HEAD
+[2.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.2
 [2.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.1
 [2.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.0
 [2.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.5.0

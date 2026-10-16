@@ -1,21 +1,23 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { UsageLimit } from "./usage.js";
 
 // How much of each coding plan's windows is used. A plan is listed only when this machine is
 // signed in to that CLI (or, for a CLI that writes its limits into a log, when that log has
-// them). Claude, Grok, Kimi, Muse and Codex are asked with the sign-in their CLI already saved
-// here. That sign-in is read fresh for each call and never refreshed, rewritten or kept, so
-// VibeForge can't race a CLI over a rotating refresh token. Muse's answer arrives from the same
-// sign-in check Meta uses, and the extra key in that answer is thrown away. When a sign-in has
+// them). Claude, Grok, Antigravity, Kimi, Muse and Codex are asked with the sign-in their CLI
+// already saved here. That sign-in is read fresh for each call and never refreshed, rewritten or
+// kept, so VibeForge can't race a CLI over a rotating refresh token. Muse's answer arrives from the
+// same sign-in check Meta uses, and the extra key in that answer is thrown away. When a sign-in has
 // expired, the last numbers stay up, marked with their age, until the CLI renews it.
 
-export type PlanId = "claude" | "codex" | "grok" | "kimi" | "muse";
+export type PlanId = "claude" | "codex" | "grok" | "agy" | "kimi" | "muse";
 
 /** The order a signed-in plan is shown in. One that isn't signed in is left out. */
-export const PLAN_ORDER: readonly PlanId[] = ["claude", "codex", "grok", "kimi", "muse"];
+export const PLAN_ORDER: readonly PlanId[] = ["claude", "codex", "grok", "agy", "kimi", "muse"];
 
-export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi", muse: "Muse" };
+export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", agy: "Gemini", kimi: "Kimi", muse: "Muse" };
 
 export interface PlanWindow {
   /** As the provider names it: "5-hour", "7-day", "Weekly", "GrokBuild". */
@@ -315,7 +317,65 @@ export function parseMuse(data: Record<string, unknown>): Reading | null {
   return codexReading(limits);
 }
 
+/**
+ * Antigravity CLI's quota summary (`v1internal:retrieveUserQuotaSummary` or `agy -p /usage`):
+ * groups of buckets (`Gemini Models`, `Gemini 4 Argon`, `Claude and GPT models`), each with a
+ * remaining fraction from 0 to 1 and a reset time.
+ */
+export function parseAgy(data: Record<string, unknown>): Reading | null {
+  const inner = record(record(data.command)?.data) ?? data;
+  const groups = Array.isArray(inner.groups) ? inner.groups : [];
+  const windows: PlanWindow[] = [];
+  for (const item of groups) {
+    const group = record(item);
+    if (!group) continue;
+    const groupTitle = group.displayName ?? group.groupName;
+    const groupName = typeof groupTitle === "string" ? groupTitle.trim() : "";
+    const rawBuckets = (Array.isArray(group.buckets) ? group.buckets : []).map(record).filter((row): row is Record<string, unknown> => row !== null);
+    // Put 5-hour windows ahead of weekly ones within a group, matching the other providers.
+    const buckets = [...rawBuckets].sort((a, b) => (a.window === "5h" ? -1 : 1) - (b.window === "5h" ? -1 : 1));
+    for (const bucket of buckets) {
+      const fraction = num(bucket.remainingFraction, bucket.remaining_fraction);
+      const used = fraction !== null ? Math.round((1 - fraction) * 1000) / 10 : num(bucket.usedPercent, bucket.used_percent, bucket.percent);
+      if (used === null) continue;
+      const resetsAt = isoTime(bucket.resetTime ?? bucket.reset_time ?? bucket.resetsAt ?? bucket.resets_at);
+      const bucketId = typeof bucket.bucketId === "string" ? bucket.bucketId : "";
+      const win = typeof bucket.window === "string" ? bucket.window.toLowerCase() : "";
+      // Leave untouched third-party buckets off the Gemini card unless they have usage.
+      if ((bucketId.startsWith("3p-") || groupName === "Claude and GPT models") && used <= 0) continue;
+      let name: string;
+      if (groupName === "Gemini Models" || bucketId === "gemini-5h" || bucketId === "gemini-weekly") {
+        name = win === "5h" || bucketId.endsWith("-5h") ? "5-hour" : win === "weekly" || bucketId.endsWith("-weekly") ? "7-day" : String(bucket.displayName || groupName || "Gemini");
+      } else {
+        const base =
+          groupName === "Claude and GPT models"
+            ? "Claude & GPT"
+            : groupName || String(bucket.displayName ?? "").replace(/\s+Weekly\s+Limit$/i, "").trim() || bucketId || "Model";
+        const suffix = buckets.length > 1 ? (win === "5h" ? " 5-hour" : win === "weekly" ? " 7-day" : win ? ` ${win}` : "") : "";
+        name = `${base}${suffix}`;
+      }
+      addWindow(windows, { name, percent: clamp(used), resetsAt });
+    }
+  }
+  return fromWindows(windows, (name) => name.includes("5-hour"));
+}
+
 // ------------------------------------------------------------------ the sign-ins
+
+const AGY_USER_AGENT = "antigravity/cli/1.4.0 (aidev_client; os_type=linux; arch=amd64; cl=1000494485; auth_method=consumer)";
+
+function readKeyringJson(service: string, username: string): Record<string, unknown> | null {
+  try {
+    const out = execFileSync("secret-tool", ["lookup", "service", service, "username", username], {
+      encoding: "utf8",
+      timeout: 1500,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out ? record(JSON.parse(out)) : null;
+  } catch {
+    return null;
+  }
+}
 
 interface Provider {
   id: PlanId;
@@ -338,6 +398,8 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
   const kimiDirs = [path.join(home, ".kimi-code"), path.join(home, ".kimi")];
   const configHome = env.XDG_CONFIG_HOME || path.join(home, ".config");
   const codexHome = env.CODEX_HOME || path.join(home, ".codex");
+  const geminiHome = path.join(env.GEMINI_CLI_HOME || home, ".gemini");
+  const agyFiles = [path.join(geminiHome, "antigravity-cli", "antigravity-oauth-token"), path.join(geminiHome, "antigravity", "antigravity-oauth-token")];
   return [
     {
       id: "claude",
@@ -383,6 +445,35 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
             },
             timeoutMs: 6_000,
             parse: parseGrok,
+          },
+        };
+      },
+    },
+    {
+      id: "agy",
+      signIn: (now) => {
+        const creds =
+          agyFiles.map(readJson).find(Boolean) ??
+          (!env.GEMINI_CLI_HOME && home === os.homedir() ? readKeyringJson("gemini", "antigravity") : null);
+        const oauth = record(creds?.token) ?? creds;
+        const access = token(oauth?.access_token ?? oauth?.accessToken);
+        if (!access) return null;
+        const expires = isoTime(oauth?.expiry ?? oauth?.expires_at);
+        if (expires && Date.parse(expires) <= now) return { expired: true };
+        return {
+          expired: false,
+          ask: {
+            url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+            method: "POST",
+            headers: {
+              ...base,
+              Authorization: `Bearer ${access}`,
+              "Content-Type": "application/json",
+              "User-Agent": AGY_USER_AGENT,
+            },
+            body: "{}",
+            timeoutMs: 8_000,
+            parse: parseAgy,
           },
         };
       },

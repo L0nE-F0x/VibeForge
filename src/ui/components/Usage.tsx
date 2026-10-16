@@ -15,7 +15,7 @@ import { Button } from "./ui.js";
 
 const METER = 6;
 
-export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", kimi: "Kimi", muse: "Muse" };
+export const PLAN_NAMES: Record<PlanId, string> = { claude: "Claude", codex: "Codex", grok: "Grok", agy: "Gemini", kimi: "Kimi", muse: "Muse" };
 
 export function compactTokens(value: number, language: string): string {
   return new Intl.NumberFormat(language, { notation: "compact", maximumFractionDigits: value >= 1e9 ? 2 : 1 }).format(value);

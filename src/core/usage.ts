@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { readJson, writeJson } from "./fsx.js";
 
 // Token usage read from the logs the coding CLIs already keep on this machine. Nothing is sent
-// anywhere and no API is called: Claude Code, Codex, Grok Build, Gemini CLI, Kimi Code and Muse Code each
+// anywhere and no API is called: Claude Code, Codex, Grok Build, Antigravity CLI, Gemini CLI, Kimi Code and Muse Code each
 // write what every model call used, and this adds it up per day. Append-only logs are read from
 // where the last pass stopped, so a rescan costs only what was written since.
 //
@@ -333,6 +334,160 @@ function geminiFile(state: FileState, text: string): void {
   }
 }
 
+function readVarint(buf: Uint8Array, pos: number): [number, number] {
+  let result = 0;
+  let shift = 0;
+  let index = pos;
+  while (index < buf.length) {
+    const byte = buf[index++];
+    result += (byte & 0x7f) * 2 ** shift;
+    if ((byte & 0x80) === 0) return [result, index];
+    shift += 7;
+  }
+  return [result, index];
+}
+
+function walkProto(buf: Uint8Array, onField: (field: number, wire: number, value: number | Uint8Array) => void): void {
+  let pos = 0;
+  while (pos < buf.length) {
+    const [tag, nextPos] = readVarint(buf, pos);
+    pos = nextPos;
+    const field = Math.floor(tag / 8);
+    const wire = tag & 7;
+    if (field <= 0) break;
+    if (wire === 0) {
+      const [val, after] = readVarint(buf, pos);
+      pos = after;
+      onField(field, wire, val);
+    } else if (wire === 1) {
+      pos += 8;
+    } else if (wire === 2) {
+      const [len, after] = readVarint(buf, pos);
+      if (len < 0 || after + len > buf.length) break;
+      onField(field, wire, buf.subarray(after, after + len));
+      pos = after + len;
+    } else if (wire === 5) {
+      pos += 4;
+    } else {
+      break;
+    }
+  }
+}
+
+/**
+ * Antigravity CLI (`agy`): a SQLite `.db` per conversation under `~/.gemini/antigravity-cli/conversations`
+ * (and `~/.gemini/antigravity/conversations`), with protobuf-encoded `steps` and `gen_metadata`.
+ */
+function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<string>): void {
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+  } catch {
+    return;
+  }
+  try {
+    const stepTimes = new Map<number, string>();
+    const msgTimes = new Map<string, string>();
+    for (const row of db.prepare("SELECT idx, metadata FROM steps WHERE metadata IS NOT NULL").all()) {
+      const meta = row.metadata as Uint8Array | null;
+      if (!meta?.length) continue;
+      let iso: string | null = null;
+      let msgId = "";
+      walkProto(meta, (field, wire, val) => {
+        if (field === 1 && wire === 2 && val instanceof Uint8Array) {
+          walkProto(val, (tf, tw, tv) => {
+            if (tf === 1 && tw === 0 && typeof tv === "number" && tv > 1_000_000_000) iso = new Date(tv * 1000).toISOString();
+          });
+        } else if (field === 9 && wire === 2 && val instanceof Uint8Array) {
+          walkProto(val, (uf, uw, uv) => {
+            if (uf === 7 && uw === 2 && uv instanceof Uint8Array) msgId = Buffer.from(uv).toString("utf8");
+          });
+        }
+      });
+      if (iso) {
+        if (typeof row.idx === "number") stepTimes.set(row.idx, iso);
+        if (msgId) msgTimes.set(msgId, iso);
+      }
+    }
+
+    for (const row of db.prepare("SELECT idx, data FROM gen_metadata WHERE data IS NOT NULL").all()) {
+      const data = row.data as Uint8Array | null;
+      if (!data?.length) continue;
+      walkProto(data, (outerField, outerWire, outerVal) => {
+        if (outerField !== 1 || outerWire !== 2 || !(outerVal instanceof Uint8Array)) return;
+        let model = "";
+        let fallbackModel = "";
+        let lastStep = -1;
+        let input = 0;
+        let output = 0;
+        let cacheWrite = 0;
+        let cacheRead = 0;
+        let thinking = 0;
+        let responseOut = 0;
+        let msgId = "";
+        let respId = "";
+        walkProto(outerVal, (field, wire, val) => {
+          if (field === 4 && wire === 2 && val instanceof Uint8Array) {
+            walkProto(val, (uf, uw, uv) => {
+              if (uw === 0 && typeof uv === "number") {
+                if (uf === 2) input = uv;
+                else if (uf === 3) output = uv;
+                else if (uf === 4) cacheWrite = uv;
+                else if (uf === 5) cacheRead = uv;
+                else if (uf === 9) thinking = uv;
+                else if (uf === 10) responseOut = uv;
+              } else if (uw === 2 && uv instanceof Uint8Array) {
+                if (uf === 7) msgId = Buffer.from(uv).toString("utf8");
+                else if (uf === 11) respId = Buffer.from(uv).toString("utf8");
+              }
+            });
+          } else if (field === 19 && wire === 2 && val instanceof Uint8Array) {
+            model = Buffer.from(val).toString("utf8");
+          } else if ((field === 21 || field === 22) && wire === 2 && val instanceof Uint8Array && !fallbackModel) {
+            fallbackModel = Buffer.from(val).toString("utf8");
+          } else if (field === 20 && wire === 2 && val instanceof Uint8Array) {
+            let k = "";
+            let v = "";
+            walkProto(val, (mf, mw, mv) => {
+              if (mw === 2 && mv instanceof Uint8Array) {
+                if (mf === 1) k = Buffer.from(mv).toString("utf8");
+                else if (mf === 2) v = Buffer.from(mv).toString("utf8");
+              }
+            });
+            if (k === "last_step_index") lastStep = Number(v);
+          }
+        });
+        const outTokens = output || thinking + responseOut;
+        const total = input + cacheWrite + cacheRead + outTokens;
+        if (total <= 0) return;
+        const key = msgId || respId || `${file}:${String(row.idx)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        state.keys.add(key);
+        let iso = (msgId && msgTimes.get(msgId)) || null;
+        if (!iso && lastStep >= 0) {
+          for (let step = lastStep; step >= Math.max(0, lastStep - 5); step -= 1) {
+            const candidate = stepTimes.get(step);
+            if (candidate) {
+              iso = candidate;
+              break;
+            }
+          }
+        }
+        count(state.tally, iso ?? fallbackIso, model || fallbackModel || "gemini", { total, cached: cacheRead, output: outTokens });
+      });
+    }
+  } catch {
+    /* unreadable or mid-write SQLite file; counted on the next pass */
+  } finally {
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // ------------------------------------------------------------------ the ledger
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -436,6 +591,7 @@ interface Source {
   /** Logs that only grow are read line by line from where the last pass stopped. */
   lines?: (state: FileState, line: string) => void;
   whole?: (state: FileState, text: string) => void;
+  db?: (state: FileState, file: string, stat: fs.Stats) => void;
 }
 
 export class UsageScanner {
@@ -444,6 +600,8 @@ export class UsageScanner {
   private readonly claudeSeen = new Set<string>();
   /** Muse record ids counted so far, across a session and its child sessions. */
   private readonly museSeen = new Set<string>();
+  /** Antigravity message ids counted so far, across conversation databases. */
+  private readonly agySeen = new Set<string>();
   private readonly sources: Source[];
   private readonly now: () => Date;
   /** Where the ledger is kept; without one it lasts only as long as this scanner. */
@@ -456,11 +614,19 @@ export class UsageScanner {
     const claudeRoots = (env.CLAUDE_CONFIG_DIR ? env.CLAUDE_CONFIG_DIR.split(",") : [path.join(home, ".claude"), path.join(home, ".config", "claude")]).map((root) =>
       path.join(root.trim(), "projects"),
     );
+    const geminiHome = path.join(env.GEMINI_CLI_HOME || home, ".gemini");
     this.sources = [
       { id: "claude", roots: claudeRoots, pattern: /\.jsonl$/, depth: 3, lines: (state, line) => claudeLine(state, line, this.claudeSeen) },
       { id: "codex", roots: [path.join(env.CODEX_HOME || path.join(home, ".codex"), "sessions")], pattern: /\.jsonl$/, depth: 4, lines: codexLine },
       { id: "grok", roots: [path.join(home, ".grok", "sessions")], pattern: /^usage\.json$/, depth: 2, whole: grokFile },
-      { id: "gemini", roots: [path.join(env.GEMINI_CLI_HOME || home, ".gemini", "tmp")], pattern: /^session-.*\.json$/, depth: 2, whole: geminiFile },
+      {
+        id: "agy",
+        roots: [path.join(geminiHome, "antigravity-cli", "conversations"), path.join(geminiHome, "antigravity", "conversations")],
+        pattern: /\.db$/,
+        depth: 1,
+        db: (state, file, stat) => agyDb(state, file, new Date(stat.mtimeMs).toISOString(), this.agySeen),
+      },
+      { id: "gemini", roots: [path.join(geminiHome, "tmp")], pattern: /^session-.*\.json$/, depth: 2, whole: geminiFile },
       { id: "kimi", roots: [path.join(env.KIMI_CODE_HOME || path.join(home, ".kimi-code"), "sessions")], pattern: /^wire\.jsonl$/, depth: 5, lines: kimiLine },
       {
         id: "muse",
@@ -557,6 +723,7 @@ export class UsageScanner {
       for (const key of state.keys) {
         this.claudeSeen.delete(key);
         this.museSeen.delete(key);
+        this.agySeen.delete(key);
       }
       this.files.delete(file);
     }
@@ -574,15 +741,18 @@ export class UsageScanner {
     let state = this.files.get(file);
     if (state && state.size === stat.size && state.mtimeMs === stat.mtimeMs) return state;
     const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, rest: "", tally: new Map(), keys: new Set(), model: "", limits: null });
-    if (!state || source.whole || stat.size < state.offset) {
+    if (!state || source.whole || source.db || stat.size < state.offset) {
       for (const key of state?.keys ?? []) {
         this.claudeSeen.delete(key);
         this.museSeen.delete(key);
+        this.agySeen.delete(key);
       }
       state = fresh();
     }
     try {
-      if (source.whole) {
+      if (source.db) {
+        source.db(state, file, stat);
+      } else if (source.whole) {
         source.whole(state, await fs.promises.readFile(file, "utf8"));
       } else if (source.lines && stat.size > state.offset) {
         const handle = await fs.promises.open(file, "r");
