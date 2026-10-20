@@ -418,7 +418,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   function talkTargets(session: LiveSession, workspace: Workspace): TalkTarget[] {
     const place = (other: LiveSession): string | null => {
       const elsewhere = other.workspaceId === workspace.id ? null : (workspaces.find((item) => item.id === other.workspaceId)?.name ?? null);
-      const view = other.origin === "task" ? t("rail.tasks") : other.origin === "chat" ? t("rail.chat") : other.origin === "routine" ? t("rail.routines") : null;
+      const views: Partial<Record<NonNullable<LiveSession["origin"]>, string>> = { task: t("rail.tasks"), chat: t("rail.chat"), "agent-chat": t("rail.agents"), routine: t("rail.routines") };
+      const view = (other.origin && views[other.origin]) || null;
       if (!view && !elsewhere && other.workspaceId !== workspace.id) return t("talk.elsewhere");
       return [view, elsewhere].filter(Boolean).join(" · ") || null;
     };

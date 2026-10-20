@@ -76,6 +76,8 @@ interface WaitSpec {
   done: (answered: Answered | null) => void;
   /** The CLI went away, or a person pressed Stop. */
   dropped?: (why: string) => void;
+  /** Aborts when the sender stops waiting early (its own tool timed out): the answer then goes to it as a message. */
+  gone?: AbortSignal;
 }
 
 interface Waiter extends WaitSpec {
@@ -177,7 +179,7 @@ export class MessageDesk {
   // ---------------------------------------------------------------- tell
 
   /** `vibeforge tell <to> "…"`: a message from one CLI (or a terminal outside VibeForge) to another. */
-  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number }): Promise<TellResult> {
+  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TellResult> {
     if (!this.settings().on) return Promise.resolve({ ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." });
     const list = this.list();
     const from = list.find((item) => item.ptyId === input.fromPty) ?? null;
@@ -228,6 +230,7 @@ export class MessageDesk {
                         note: from ? `${to.label} is still working. Its answer will be sent to you as a message when it's done.` : `${to.label} is still working.`,
                       }),
                 dropped: (why) => resolve({ ok: false, error: why }),
+                gone: input.gone,
               }
             : null,
         delivered: input.wait && !atLimit ? undefined : () => resolve({ ok: true, to: to.handle, delivered: atLimit ? "draft" : "sent", note }),
@@ -633,7 +636,9 @@ export class MessageDesk {
     const engine = session ? this.engineOf(session) : null;
     const watch = this.core.options.host.watchReply;
     const logKind = engine && watch ? replyLogFor(engine.id, engine.bin) : null;
-    const waiter: Waiter = { ...spec, since, abort: new AbortController(), logKind, reading: false, gaveUp: false, forwardTo };
+    const waiter: Waiter = { ...spec, since, abort: new AbortController(), logKind, reading: false, gaveUp: Boolean(spec.gone?.aborted), forwardTo };
+    // A sender that hangs up early has stopped waiting, as if its deadline had passed.
+    spec.gone?.addEventListener("abort", () => (waiter.gaveUp = true), { once: true });
     this.waiting.set(target, [...(this.waiting.get(target) ?? []), waiter]);
     if (logKind && session && watch) {
       const cwd = session.programCwd || (session.runId ? this.core.store.getRun(session.runId)?.cwd : null) || session.cwd;

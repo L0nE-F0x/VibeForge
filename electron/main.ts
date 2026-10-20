@@ -821,10 +821,10 @@ async function createWindow(): Promise<void> {
 let hostError: string | null = null;
 
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
-async function answerTalk(request: TalkRequest): Promise<unknown> {
+async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unknown> {
   if (!service) return { ok: false, error: "VibeForge is still starting." };
   if (request.op === "who") return { ok: true, ...service.whoIsHere(request.pty) };
-  if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs });
+  if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
   return service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
 }
 

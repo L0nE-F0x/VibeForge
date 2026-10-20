@@ -4,6 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { answerFromScreen, cleanText, Handles, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
 import { parseTalkRequest } from "../../src/core/control.js";
+import { LogFile } from "../../src/core/log.js";
+import { listenControl } from "../../electron/control.js";
+import net from "node:net";
 import { grokTurn, kimiTurn, lastReplyIn } from "../../src/core/replies.js";
 import type { LiveSession } from "../../src/core/types.js";
 import { setup, tempDir } from "./fixtures/service-harness.js";
@@ -103,6 +106,27 @@ describe("who can be reached", () => {
     expect(parseTalkRequest('{"op":"tell","to":"codex"}')).toBeNull();
     expect(parseTalkRequest('{"op":"rm"}')).toBeNull();
     expect(parseTalkRequest("voice start")).toBeNull();
+  });
+});
+
+describe("the control socket", () => {
+  it("tells the service when a CLI hangs up before its answer", async () => {
+    const dir = tempDir();
+    const socketPath = path.join(dir, "c.sock");
+    let hungUp: () => void = () => undefined;
+    const done = new Promise<void>((resolve) => (hungUp = resolve));
+    const stop = listenControl(socketPath, new LogFile(path.join(dir, "log.txt")), () => undefined, (_request, gone) => {
+      gone.addEventListener("abort", () => hungUp());
+      return new Promise(() => undefined);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const client = net.connect(socketPath);
+    await new Promise((resolve) => client.on("connect", resolve));
+    client.write(`${JSON.stringify({ op: "tell", pty: "p", to: "x", text: "hi", wait: true })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    client.destroy();
+    await done;
+    stop();
   });
 });
 
@@ -233,6 +257,27 @@ describe("CLIs talking through VibeForge", () => {
     await ctx.svc.pumpMessages();
     expect(ctx.sent.at(-1)).toEqual({ ptyId: a.ptyId, text: expect.stringContaining("[Message from Codex, sent through VibeForge]\nLooks fine.") });
     expect(b.ptyId).not.toBe(codex.ptyId);
+    ctx.svc.close();
+  });
+
+  it("sends the answer as a message when the asking CLI stops waiting early", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.host.screen = async () => "pasty> [Message from Argy]\n\nIt is 42.\n\npasty> ";
+    const gone = new AbortController();
+    void ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "What is it?", wait: true, gone: gone.signal });
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toHaveLength(1);
+    // Its own tool gave up after two minutes and hung up.
+    pass(120_000);
+    gone.abort();
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toEqual({ ptyId: a.ptyId, text: expect.stringMatching(/^\[Message from Pasty, sent through VibeForge\][\s\S]*It is 42\./) });
     ctx.svc.close();
   });
 

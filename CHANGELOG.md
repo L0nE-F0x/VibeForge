@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **"Its changes" are only its changes.** A review or Send to… → Its changes included every file that was already changed or untracked when the CLI started. Files that were already changed then, and that it hasn't touched since, are now left out; when nothing is left, the review says so and waits for a turn that changes something.
 - **Messages to a CLI that has just started** wait until it has drawn its first screen and gone quiet, instead of landing while it is still starting.
 - **Handles stay put.** `vibeforge who` names (`claude`, `claude-2`) no longer shift when a CLI closes, so an answer addressed to one can't reach another CLI that started later.
+- **An answer isn't lost when the asking CLI stops waiting.** Claude Code's shell tool gives up on a command after two minutes, while `vibeforge tell --wait` waits up to nine. An answer that came after the tool hung up was dropped; it now arrives as a message.
 - **Stop while a message is going in** no longer drops another message waiting in the queue, a delivery asked for at the end of a pass is no longer put off by a second, and a waited-for answer that never comes stops showing as waiting after half an hour.
 
 ## [2.7.1] - 2026-10-20

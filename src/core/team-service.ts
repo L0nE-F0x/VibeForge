@@ -217,7 +217,7 @@ export class TeamService extends ServiceCore {
     return this.messages.who(fromPty);
   }
 
-  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number }): Promise<TellResult> {
+  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TellResult> {
     return this.messages.tell(input);
   }
 
