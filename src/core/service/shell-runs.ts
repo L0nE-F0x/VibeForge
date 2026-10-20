@@ -1,6 +1,7 @@
 import path from "node:path";
 import { programOf } from "../engines.js";
 import { allocateRunDir } from "../runs.js";
+import { dirtyFiles } from "../vcs.js";
 import { BLIP_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
 
@@ -80,6 +81,7 @@ export class ShellRecorder {
     } catch {
       /* not a repo, or git is slow; the run is recorded without */
     }
+    this.core.dirtyAtStart.set(id, dirtyFiles(cwd).catch(() => null));
     this.core.store.saveRun({
       id,
       origin: "code",

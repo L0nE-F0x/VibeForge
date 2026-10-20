@@ -14,6 +14,7 @@ import {
   reviewRequestText,
   screenTail,
   answerFromScreen,
+  Handles,
   SETTLE_MS,
   type Answer,
   type Reachable,
@@ -23,7 +24,7 @@ import { writeFileAtomic } from "../fsx.js";
 import { replyLogFor, type ReplyLog } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
-import { diffSince, isGitRepo } from "../vcs.js";
+import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
 import { patchFiles } from "../worktrees.js";
 import type { LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
@@ -41,6 +42,10 @@ const IDLE_MS = 1500;
 const BETWEEN_MS = 3000;
 /** A CLI whose log should have the answer, but doesn't after this long quiet, is read from its screen. */
 const LOG_PATIENCE_MS = 30_000;
+/** A CLI that hasn't gone quiet once since it started may still be drawing its first screen. */
+const BOOT_MS = 5000;
+/** An answer still not in this long after the sender stopped waiting is given up on. */
+const LATE_ANSWER_MS = 30 * 60 * 1000;
 /** Tasks one CLI may have running that it handed out; more are made but wait in To do. */
 const MAX_RUNNING_HANDED_OUT = 3;
 const KEEP_FILES = 40;
@@ -116,6 +121,7 @@ export class MessageDesk {
   private readonly lastHuman = new Map<string, { at: number; sent: boolean }>();
   private readonly lastSent = new Map<string, number>();
   private readonly reviews = new Map<string, Review>();
+  private readonly handles = new Handles();
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
   private again = false;
@@ -142,10 +148,14 @@ export class MessageDesk {
   // ---------------------------------------------------------------- who is there
 
   list(): Reachable[] {
-    return reachable([...this.core.live.values()], {
-      agent: (id) => this.core.store.getAgent(id)?.name ?? null,
-      engine: (session) => this.engineOf(session),
-    });
+    return reachable(
+      [...this.core.live.values()],
+      {
+        agent: (id) => this.core.store.getAgent(id)?.name ?? null,
+        engine: (session) => this.engineOf(session),
+      },
+      this.handles,
+    );
   }
 
   private engineOf(session: LiveSession): { id: string; label: string; bin: string } | null {
@@ -274,12 +284,15 @@ export class MessageDesk {
     return cleanText(screenTail(screen ?? ""));
   }
 
+  /** What this CLI changed: the folder's changes since it started, less files already changed then that it hasn't touched. */
   private async changesOf(ptyId: string): Promise<string> {
     const session = this.core.live.get(ptyId);
     if (!session) return "";
     const run = session.runId ? this.core.store.getRun(session.runId) : null;
     const cwd = run?.cwd || session.programCwd || session.cwd;
-    return diffSince(cwd, run?.gitStart ?? null).catch(() => "");
+    const before = session.runId ? await this.core.dirtyAtStart.get(session.runId) : null;
+    const patch = await diffSince(cwd, run?.gitStart ?? null).catch(() => "");
+    return leaveOutUntouched(patch, cwd, before);
   }
 
   // ---------------------------------------------------------------- a person steps in
@@ -319,12 +332,17 @@ export class MessageDesk {
 
   // ---------------------------------------------------------------- review with…
 
-  /** Review with…: when the author's turn ends, the reviewer reads its changes, and the author gets the review back. */
-  startReview(authorPty: string, reviewerPty: string): void {
+  /**
+   * Review with…: when the author's turn ends, the reviewer reads its changes, and the author gets
+   * the review back. `changes` says whether the author has changed anything yet; without, the
+   * review waits for its next turn.
+   */
+  async startReview(authorPty: string, reviewerPty: string): Promise<{ changes: boolean }> {
     const author = this.core.live.get(authorPty);
     const reviewer = this.core.live.get(reviewerPty);
     if (!author || !reviewer || !isCodingCli(author) || !isCodingCli(reviewer)) throw new Error("That CLI isn't running any more.");
     if (authorPty === reviewerPty) throw new Error("Pick another CLI to review the changes.");
+    const changes = Boolean((await this.changesOf(authorPty)).trim());
     for (const [id, review] of this.reviews) if (review.authorPty === authorPty) this.reviews.delete(id);
     this.stopped.delete(authorPty);
     this.stopped.delete(reviewerPty);
@@ -340,6 +358,7 @@ export class MessageDesk {
     });
     this.core.emit("live");
     void this.pump();
+    return { changes };
   }
 
   private async stepReview(key: string, review: Review, now: number): Promise<void> {
@@ -530,19 +549,23 @@ export class MessageDesk {
       this.again = true;
       return this.running;
     }
-    this.running = (async () => {
-      do {
-        this.again = false;
-        await this.pass();
-      } while (this.again);
-    })().finally(() => {
-      this.running = null;
-      if (!this.pending.length && !this.waiting.size && !this.reviews.size && this.timer) {
-        clearInterval(this.timer);
-        this.timer = null;
+    const run = (async () => {
+      try {
+        do {
+          this.again = false;
+          await this.pass();
+        } while (this.again);
+      } finally {
+        // In the same step as the last look at `again`, so a call in between can't be lost.
+        this.running = null;
+        if (!this.pending.length && !this.waiting.size && !this.reviews.size && this.timer) {
+          clearInterval(this.timer);
+          this.timer = null;
+        }
       }
-    });
-    return this.running;
+    })();
+    this.running = run;
+    return run;
   }
 
   private async pass(): Promise<void> {
@@ -550,6 +573,8 @@ export class MessageDesk {
     for (const [key, review] of [...this.reviews]) await this.stepReview(key, review, now);
     const busy = new Set<string>();
     for (const item of [...this.pending]) {
+      // Taken out while an earlier delivery was going in (Stop, or the CLI ended).
+      if (!this.pending.includes(item)) continue;
       const session = this.core.live.get(item.toPty);
       if (!session || !isCodingCli(session)) {
         this.pending.splice(this.pending.indexOf(item), 1);
@@ -592,7 +617,7 @@ export class MessageDesk {
     const session = this.core.live.get(ptyId);
     if (!session || session.working) return false;
     const quiet = Date.parse(session.quietAt ?? session.cliSince ?? session.startedAt);
-    if (Number.isFinite(quiet) && now - quiet < IDLE_MS) return false;
+    if (Number.isFinite(quiet) && now - quiet < (session.quietAt ? IDLE_MS : BOOT_MS)) return false;
     if (now - (this.lastSent.get(ptyId) ?? 0) < BETWEEN_MS) return false;
     const human = this.lastHuman.get(ptyId);
     return !human || human.sent || now - human.at >= HUMAN_DRAFT_MS;
@@ -635,6 +660,8 @@ export class MessageDesk {
       waiter.gaveUp = true;
       waiter.done(null);
     }
+    // Its answer never came (the CLI never took the message up): stop looking, or the pane says it's waiting forever.
+    if (waiter.gaveUp && now >= waiter.deadline + LATE_ANSWER_MS) this.takeWaiter(target, waiter);
   }
 
   private takeWaiter(target: string, waiter: Waiter): boolean {

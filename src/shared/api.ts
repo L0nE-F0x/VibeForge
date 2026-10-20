@@ -399,8 +399,11 @@ export interface DeskMethods {
 
   /** Send to…: a pane's last answer, selection or changes, left as a draft in another pane. False when there was nothing to send. */
   "talk.sendDraft": (fromPty: string, toPty: string, what: "reply" | "selection" | "changes", selection?: string) => { sent: boolean };
-  /** Review with…: once the author's turn ends, the reviewer reads its changes and the review goes back to it. */
-  "talk.review": (authorPty: string, reviewerPty: string) => void;
+  /**
+   * Review with…: once the author's turn ends, the reviewer reads its changes and the review goes
+   * back to it. `changes` is false when the author hasn't changed anything yet: it waits for its next turn.
+   */
+  "talk.review": (authorPty: string, reviewerPty: string) => { changes: boolean };
   /** Stop messages to and from this terminal until a person types in it. */
   "talk.stop": (ptyId: string) => void;
   "pty.resize": (ptyId: string, cols: number, rows: number) => void;

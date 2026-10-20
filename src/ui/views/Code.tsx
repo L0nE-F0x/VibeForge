@@ -195,9 +195,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     void call("layouts.save", workspaceId, next).catch(() => undefined);
   }, []);
 
+  /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
   const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}) => {
-      if (starting.current.has(pane.id)) return;
+    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}): Promise<string | null> => {
+      if (starting.current.has(pane.id)) return null;
       starting.current.add(pane.id);
       patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
       // Measure after React has laid the new pane out. A window on a hidden workspace gets no
@@ -208,8 +209,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       });
       const size = estimateTermSize(document.querySelector<HTMLElement>(`[data-pane="${pane.id}"]`), fontSizeRef.current, 34);
       try {
+        let ptyId: string;
         if (pane.launch.type === "shell") {
-          const { ptyId } = await call("code.shell", { workspaceId: workspace.id, ...size });
+          ({ ptyId } = await call("code.shell", { workspaceId: workspace.id, ...size }));
           patchRuntime(pane.id, { ptyId, runId: null, state: "live" });
         } else {
           const result = await call("code.engine", {
@@ -218,12 +220,15 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
             continueSession: opts.continueSession,
             ...size,
           });
+          ptyId = result.ptyId;
           patchRuntime(pane.id, { ptyId: result.ptyId, runId: result.runId, state: "live" });
         }
         setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
+        return ptyId;
       } catch (error) {
         patchRuntime(pane.id, { state: "idle" });
         fail(error, t("code.startFailed"));
+        return null;
       } finally {
         starting.current.delete(pane.id);
       }
@@ -406,16 +411,35 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     return state?.state === "live" ? state.ptyId : null;
   }
 
-  /** The other coding CLIs open anywhere, for Send to…: this workspace's first. */
+  /**
+   * The other coding CLIs open anywhere, for Send to…: this workspace's terminals first. Any other
+   * says where it is (another workspace, a task, a chat, a routine), so it is never picked unseen.
+   */
   function talkTargets(session: LiveSession, workspace: Workspace): TalkTarget[] {
+    const place = (other: LiveSession): string | null => {
+      const elsewhere = other.workspaceId === workspace.id ? null : (workspaces.find((item) => item.id === other.workspaceId)?.name ?? null);
+      const view = other.origin === "task" ? t("rail.tasks") : other.origin === "chat" ? t("rail.chat") : other.origin === "routine" ? t("rail.routines") : null;
+      if (!view && !elsewhere && other.workspaceId !== workspace.id) return t("talk.elsewhere");
+      return [view, elsewhere].filter(Boolean).join(" · ") || null;
+    };
     return live
       .filter((other) => other.ptyId !== session.ptyId && isCodingCli(other))
       .map((other) => ({
         ptyId: other.ptyId,
         label: agents.find((agent) => agent.id === other.agentId)?.name ?? (other.program || other.title.split(" · ")[0] || other.title),
-        where: other.workspaceId === workspace.id ? null : (workspaces.find((item) => item.id === other.workspaceId)?.name ?? null),
+        where: place(other),
       }))
       .sort((a, b) => Number(a.where !== null) - Number(b.where !== null));
+  }
+
+  /** Review with a new CLI here: `engineId` in a new pane beside `paneId`; its terminal once it runs. */
+  function startReviewer(workspace: Workspace, paneId: string, engineId: string): Promise<string | null> {
+    const layout = layoutsRef.current[workspace.id];
+    const existing = layout ? panesOf(layout).find((pane) => pane.id === paneId) : undefined;
+    if (!layout || !existing) return Promise.resolve(null);
+    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch: { type: "engine", engineId } };
+    updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir: "row", ratio: 0.5, a: existing, b: pane }));
+    return startPane(workspace, pane);
   }
 
   /** Bring the pane holding `ptyId` forward and into focus, when it is in Code. */
@@ -757,7 +781,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             alsoHere={(session?.alsoHere ?? []).map((other) => agents.find((agent) => agent.id === other.agentId)?.name ?? other.label)}
                             talk={session?.talk ?? null}
                             talkTargets={session && isCodingCli(session) && talkOn ? talkTargets(session, workspace) : []}
+                            reviewEngines={session && isCodingCli(session) && talkOn ? engines.filter((engine) => engine.available) : []}
                             onDraft={(toPty) => focusPty(toPty)}
+                            onNewReviewer={(engineId) => startReviewer(workspace, pane.id, engineId)}
                             engines={engines}
                             active={active && visible}
                             focused={focus[workspace.id] === pane.id}
@@ -838,7 +864,9 @@ function PaneView({
   alsoHere,
   talk,
   talkTargets,
+  reviewEngines,
   onDraft,
+  onNewReviewer,
   engines,
   active,
   focused,
@@ -872,7 +900,10 @@ function PaneView({
   talk: TalkState | null;
   /** The other coding CLIs this one can send to; empty when it isn't one, or talking is off. */
   talkTargets: TalkTarget[];
+  /** The CLIs that could be started beside this one to review it. */
+  reviewEngines: Engine[];
   onDraft: (toPty: string) => void;
+  onNewReviewer: (engineId: string) => Promise<string | null>;
   engines: Engine[];
   active: boolean;
   focused: boolean;
@@ -947,7 +978,14 @@ function PaneView({
         <span className="grow" />
         <div className="pane-actions">
           {state === "live" && runtime?.ptyId && (
-            <TalkButton ptyId={runtime.ptyId} targets={talkTargets} selection={() => terminalRef.current?.selection() ?? ""} onDraft={onDraft} />
+            <TalkButton
+              ptyId={runtime.ptyId}
+              targets={talkTargets}
+              engines={reviewEngines}
+              selection={() => terminalRef.current?.selection() ?? ""}
+              onDraft={onDraft}
+              onNewReviewer={onNewReviewer}
+            />
           )}
           {(canZoom || zoomed) && (
             <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />

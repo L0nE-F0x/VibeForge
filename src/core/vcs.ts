@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -257,6 +258,75 @@ function capPatch(text: string): string {
   if (text.length <= MAX_PATCH) return text;
   const cut = text.slice(0, MAX_PATCH);
   return `${cut.endsWith("\n") ? cut : `${cut}\n`}# saved diff truncated\n`;
+}
+
+/** Files already changed in a work tree, each with a stamp of what it holds: what a CLI found when it started. */
+export type DirtyFiles = Map<string, string>;
+
+const DIRTY_MAX = 1000;
+const STAMP_HASH_MAX = 8 * 1024 * 1024;
+
+/**
+ * The files that differ from the last commit right now (new ones included), each stamped by its
+ * content, so a later patch can leave out the ones nobody has touched since. Read-only. Null when
+ * git can't say, or there are too many to stamp.
+ */
+export async function dirtyFiles(cwd: string, timeoutMs = 5000): Promise<DirtyFiles | null> {
+  if (!cwd) return null;
+  const status = await execGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd, timeoutMs);
+  if (status.code !== 0 || status.timedOut || status.truncated) return null;
+  const fields = status.stdout.split("\0");
+  const names: string[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index];
+    if (entry.length < 4) continue;
+    names.push(entry.slice(3));
+    // A rename or copy is followed by the name it had before.
+    if (/[RC]/.test(entry.slice(0, 2))) index += 1;
+  }
+  if (names.length > DIRTY_MAX) return null;
+  const files: DirtyFiles = new Map();
+  for (const name of names) {
+    const full = fileInWorkTree(cwd, name);
+    if (full) files.set(name, fileStamp(full));
+  }
+  return files;
+}
+
+/** What a file holds now, as a short string: a hash of its bytes, its link, or that it's gone. */
+function fileStamp(full: string): string {
+  try {
+    const st = fs.lstatSync(full);
+    if (st.isSymbolicLink()) return `link:${fs.readlinkSync(full)}`;
+    if (!st.isFile()) return "other";
+    if (st.size > STAMP_HASH_MAX) return `size:${st.size}:${st.mtimeMs}`;
+    return `sha1:${createHash("sha1").update(fs.readFileSync(full)).digest("hex")}`;
+  } catch {
+    return "gone";
+  }
+}
+
+/**
+ * `patch` without the files that were already changed when the CLI started (`before`) and still
+ * hold exactly that: those changes are someone else's. Notes about the patch (lines starting
+ * with "# ") are kept.
+ */
+export function leaveOutUntouched(patch: string, cwd: string, before: DirtyFiles | null | undefined): string {
+  if (!before?.size || !patch) return patch;
+  return patch
+    .split(/^(?=diff --git )/m)
+    .map((block) => {
+      const name = /^diff --git a\/.+? b\/(.+)$/m.exec(block)?.[1];
+      if (!name || !block.startsWith("diff --git ") || !before.has(name)) return block;
+      const full = fileInWorkTree(cwd, name);
+      if (!full || fileStamp(full) !== before.get(name)) return block;
+      return block
+        .split("\n")
+        .filter((line) => line.startsWith("# "))
+        .map((line) => `${line}\n`)
+        .join("");
+    })
+    .join("");
 }
 
 /** "3 files changed, 20 insertions(+)" from a git.txt snapshot, or null. */

@@ -230,8 +230,8 @@ export class TeamService extends ServiceCore {
     return this.messages.sendDraft(input);
   }
 
-  startReview(authorPty: string, reviewerPty: string): void {
-    this.messages.startReview(authorPty, reviewerPty);
+  startReview(authorPty: string, reviewerPty: string): Promise<{ changes: boolean }> {
+    return this.messages.startReview(authorPty, reviewerPty);
   }
 
   stopTalk(ptyId: string): void {
