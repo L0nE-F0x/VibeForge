@@ -4,7 +4,6 @@ What's next. What shipped is in `CHANGELOG.md` (2.6.2, 2026-10-16, is the latest
 
 ## Next up
 
-- [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A buzz on a locked phone is still to build.
 - [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at. Leftover Gemini CLI chat files are still counted alongside Antigravity's conversation databases.
 
 ## Only checked with stand-ins
@@ -19,10 +18,10 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 ## Parked
 
+- [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A locked phone needs Web Push, which goes through Apple's or Google's push servers: the first third-party service VibeForge would use. Parked on 2026-10-20; if it comes back, it is opt-in and the push carries no content.
+
 - [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
 
 ## Known rough edges
-
-- A routine whose third failure in a row is a failed *start* (folder or CLI gone) glows, but gets no notification: failed starts don't send a finish notification.
 
 - `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).

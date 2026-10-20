@@ -62,6 +62,8 @@ export interface Task {
   shareCheckout: boolean;
   /** The run this task was handed off from, when it was. */
   sourceRunId: string | null;
+  /** The CLI that handed this task out with `vibeforge task`, by name ("Claude Code"); null when a person made it. */
+  askedBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -152,6 +154,17 @@ export interface Settings {
   keepRuns: { days: number; maxMb: number };
   /** The phone page served on this machine. Off until turned on. */
   companion: CompanionSettings;
+  /** Coding CLIs messaging each other and handing out tasks (`vibeforge tell`, `vibeforge task`). */
+  agentTalk: AgentTalkSettings;
+}
+
+/** How far CLIs may go on their own when they talk to each other. */
+export interface AgentTalkSettings {
+  on: boolean;
+  /** Messages between two CLIs, either way, before the next one waits for a person to press Enter. */
+  maxMessages: number;
+  /** Review rounds for Review with…: the reviewer answers, the author fixes, this many times. */
+  reviewRounds: number;
 }
 
 /** The phone page. `token` is empty until the page is turned on. */
@@ -245,6 +258,22 @@ export interface LiveSession {
   quietAt?: string | null;
   /** The other coding CLIs in the same folder (filled in for the window, not stored). */
   alsoHere?: Array<{ ptyId: string; label: string; agentId: string | null }>;
+  /** Messages with other CLIs, while there are any (filled in for the window, not stored). */
+  talk?: TalkState | null;
+}
+
+/** A terminal talking with other CLIs through VibeForge, for its pane. */
+export interface TalkState {
+  /** Who it has traded messages with since a person last typed in it. */
+  with: string[];
+  /** The most messages traded with any one of them, against `max`. */
+  messages: number;
+  max: number;
+  /** Messages waiting to go to or from it. */
+  queued: number;
+  /** The limit was reached: the next message waits for a person to press Enter. */
+  held: boolean;
+  review: { role: "author" | "reviewer"; other: string; phase: "author" | "reviewer" | "fixing"; round: number; rounds: number } | null;
 }
 
 export type Topic =

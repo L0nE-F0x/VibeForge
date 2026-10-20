@@ -7,6 +7,7 @@ import { ChatDesk } from "./service/chats.js";
 import { RunDesk } from "./service/runs.js";
 import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns } from "./service/turns.js";
+import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
@@ -31,9 +32,11 @@ export class TeamService extends ServiceCore {
   private readonly chats = new ChatDesk(this);
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
+  private readonly messages = new MessageDesk(this, this.tasks);
 
   override close(): void {
     this.turns.close();
+    this.messages.close();
     super.close();
   }
 
@@ -204,7 +207,45 @@ export class TeamService extends ServiceCore {
 
   /** The live sessions for the window, each with who else is in its folder. */
   liveForView(): LiveSession[] {
-    return this.turns.withNeighbours();
+    return this.turns.withNeighbours().map((session) => ({ ...session, talk: this.messages.talkFor(session.ptyId) }));
+  }
+
+  // ---------------------------------------------------------------- agents talking
+
+  /** The coding CLIs `vibeforge tell` can reach, and the agents `vibeforge task` can hand to. */
+  whoIsHere(fromPty: string | null): WhoResult {
+    return this.messages.who(fromPty);
+  }
+
+  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number }): Promise<TellResult> {
+    return this.messages.tell(input);
+  }
+
+  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
+    return this.messages.handTask(input);
+  }
+
+  /** Send to…: one pane's last answer, selection or changes, as a draft in another pane. */
+  sendDraft(input: { fromPty: string; toPty: string; what: "reply" | "selection" | "changes"; selection?: string }): Promise<{ sent: boolean }> {
+    return this.messages.sendDraft(input);
+  }
+
+  startReview(authorPty: string, reviewerPty: string): void {
+    this.messages.startReview(authorPty, reviewerPty);
+  }
+
+  stopTalk(ptyId: string): void {
+    this.messages.stop(ptyId);
+  }
+
+  /** A person typed into a terminal (not a message from another CLI). */
+  onHumanInput(ptyId: string, data: string): void {
+    this.messages.onHumanInput(ptyId, data);
+  }
+
+  /** Delivers waiting messages and reads answers now (also every second while any are in flight). */
+  pumpMessages(): Promise<void> {
+    return this.messages.pump();
   }
 
   /** The coding CLIs in a folder right now, for "also in this folder". */
@@ -331,5 +372,6 @@ export class TeamService extends ServiceCore {
 
   onPtyActivity(ptyId: string, working: boolean): void {
     this.shellRuns.onPtyActivity(ptyId, working);
+    if (!working) void this.messages.pump();
   }
 }

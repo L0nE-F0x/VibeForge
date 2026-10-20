@@ -1,4 +1,4 @@
-import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
@@ -345,6 +345,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             </div>
           </Notice>
         )}
+        {task?.askedBy && <Notice icon={MessagesSquare}>{t("tasks.askedBy", { name: task.askedBy })}</Notice>}
         {task && !task.waiting && !live && !task.isolated && task.writers.length > 0 && (
           <Notice icon={Hourglass}>
             {t(task.writers.some((writer) => writer.busy) ? "turns.busyHere" : "turns.idleHere", { names: writerNames(task.writers, agents) })}

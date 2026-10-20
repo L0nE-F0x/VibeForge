@@ -108,6 +108,21 @@ React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (sy
 - **Login-shell PATH**: VibeForge asks your login shell for `PATH` at start, so CLIs installed with mise or into `~/.local/bin` are found however it was launched.
 - **Allowed folders are a policy, not a sandbox.** Runs start inside them and the prompt tells the CLI to stay there, but a coding CLI has a shell.
 
+## Agents together
+
+Two CLIs open side by side can work together. Every VibeForge terminal has a `vibeforge` command on its PATH, so a CLI can run it with its own shell tool:
+
+```sh
+vibeforge who                                   # the CLIs open now, and the agents you can hand tasks to
+vibeforge tell codex "Can you check the migration in db/?"
+vibeforge tell codex --wait "Is this regex safe?"   # prints Codex's answer
+vibeforge task helper "Write tests for src/parse.ts"
+```
+
+`tell` pastes the message into the other CLI once it is free, labelled with who sent it and how to answer. With `--wait` the answer comes back to the one who asked: from the CLI's own session log for Claude Code, Codex, Grok Build and Kimi Code, and from its screen for the rest. If the answer takes longer than the wait (9 minutes unless `--timeout` says otherwise), it arrives later as a message. `task` hands a VibeForge agent a task that runs in its own git copy of the workspace, never in the folder of the CLI that asked; a person still applies its changes, and a task handed out this way can't hand out more. Agents that VibeForge starts are told these commands exist; a CLI you opened yourself learns them from the first message it gets, or from `vibeforge help`.
+
+In Code, the send button on a terminal's title bar does the same by hand: **Send to…** puts that CLI's last answer, the text you selected or its changes into another CLI's prompt for you to read and send, and **Ask … to review its changes** has the other CLI review this one's diff when its turn ends and sends the review back (one round, or more in Settings). Two CLIs can trade 8 messages before the next one waits in the prompt for you to press Enter; typing in either terminal starts the count again. The title bar shows who a CLI is talking with, and its stop button ends it until you type there. **Settings → Agents together** turns it off or changes the limits.
+
 ## Voice
 
 Talk to your agents instead of typing to them, and hear them answer. Everything happens on this machine: [whisper.cpp](https://github.com/ggml-org/whisper.cpp) turns speech into text, [Piper](https://github.com/OHF-Voice/piper1-gpl) reads answers aloud, and no audio leaves your computer or is kept.

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, firedAtOrAfter, isScheduleValid, mostRecentSlot, nextFireTimes, ROUTINE_FAILING, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
-import type { Agent, Routine, Schedule } from "../types.js";
+import type { Agent, Routine, RunMeta, Schedule } from "../types.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -155,6 +155,7 @@ export class RoutineDesk {
       if (scheduledAt && firedAtOrAfter(routine.lastFiredAt, new Date(scheduledAt))) return { queued: true, behind: [] };
       const busy = now || routine.shareCheckout ? [] : await this.turns.busyIn(cwd);
       if (busy.length) {
+        const first = !this.turns.waiting("routine", id);
         this.turns.enqueue({
           kind: "routine",
           id,
@@ -162,6 +163,8 @@ export class RoutineDesk {
           start: () => this.fire(id, scheduledAt && this.slotAfterWait(id, scheduledAt), size),
           failed: (message) => this.failedStart(routine, agent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
         });
+        // A due slot is nobody's click: say once that it is waiting, and for whom.
+        if (first && scheduledAt) this.tell(routine, `waiting for ${busy.map((writer) => writer.label).join(", ")} to finish`);
         this.core.emit("routines");
         return { queued: true, behind: busy.map((writer) => writer.label) };
       }
@@ -185,11 +188,19 @@ export class RoutineDesk {
   /** A start that failed with nobody watching: a failed run for a due slot, a notification for Run now. */
   private failedStart(routine: Routine, agent: Agent, message: string, scheduledAt: string | null): void {
     if (!scheduledAt) {
-      this.core.options.host.notify({ title: routine.name, body: message, routineId: routine.id });
+      this.tell(routine, message);
       return;
     }
     const latest = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0];
     if (!latest || latest.startedAt < scheduledAt) this.recordFailedStart(routine, agent, message);
+    // A spawn that failed has its run already.
+    else this.core.notifyFinished(latest);
+  }
+
+  /** A note about a routine, when notifications are on for it. */
+  private tell(routine: Routine, body: string): void {
+    if (!this.core.store.readSettings().notify || !routine.notify) return;
+    this.core.options.host.notify({ title: routine.name, body, routineId: routine.id });
   }
 
   async tick(now: Date = this.core.now()): Promise<Array<{ routineId: string; decision: TickDecision; error?: string }>> {
@@ -228,8 +239,9 @@ export class RoutineDesk {
           if (this.core.store.getRoutine(routine.id)?.lastFiredAt !== decision.scheduledAt) {
             this.core.store.writeRoutine({ ...(this.core.store.getRoutine(routine.id) ?? routine), lastFiredAt: decision.scheduledAt });
           }
-          const recorded = this.core.store.queryRuns({ routineId: routine.id, limit: 5 }).some((run) => !runsBefore.has(run.id));
+          const recorded = this.core.store.queryRuns({ routineId: routine.id, limit: 5 }).find((run) => !runsBefore.has(run.id));
           if (!recorded) this.recordFailedStart(routine, agent, message);
+          else this.core.notifyFinished(recorded);
         }
         this.core.emit("routines");
       }
@@ -260,7 +272,7 @@ export class RoutineDesk {
     const title = `${agent.name} · ${routine.name}`;
     const { id, dir } = allocateRunDir(this.core.options.dataRoot, started, title);
     const at = started.toISOString();
-    this.core.store.saveRun({
+    const run: RunMeta = {
       id,
       origin: "routine",
       title,
@@ -286,7 +298,9 @@ export class RoutineDesk {
       changes: null,
       gitStart: null,
       continuedFrom: null,
-    });
+    };
+    this.core.store.saveRun(run);
+    this.core.notifyFinished(run);
     this.core.emit("runs");
   }
 

@@ -8,3 +8,5 @@ dist-electron/
 .netlify/
 .vibeforge-installer
 coverage/
+# Handoffs, audits and design notes kept on this machine only
+docs/archive/

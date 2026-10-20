@@ -279,7 +279,8 @@ export class TaskDesk {
 
   /**
    * Bring a task copy's changes into the workspace as uncommitted edits. A clean apply removes the
-   * copy and marks the task done; with conflicts the copy stays until they're sorted out.
+   * copy and marks the task done, and so does a copy with nothing to apply; with conflicts the copy
+   * stays until they're sorted out.
    */
   async applyCopy(id: string): Promise<ApplyResult> {
     const task = this.core.store.getTask(id);
@@ -289,7 +290,7 @@ export class TaskDesk {
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
     const patch = await copyPatch(task.copy, this.owner(id));
     const result = await applyToWorkspace(task.copy, patch);
-    if (result.files.length && !result.conflicts.length) {
+    if (!result.conflicts.length) {
       await removeCopy(task.copy, this.owner(id));
       const current = this.core.store.getTask(id) ?? task;
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });

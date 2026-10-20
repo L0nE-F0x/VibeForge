@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Engine, LayoutNode, PaneLaunch, Workspace, WorkspaceFile } from "../../shared/api.js";
+import type { Engine, LayoutNode, LiveSession, PaneLaunch, TalkState, Workspace, WorkspaceFile } from "../../shared/api.js";
 import { isDockUrl } from "../../shared/dock-url.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
@@ -33,6 +33,7 @@ import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { BranchDialog } from "./BranchDialog.js";
+import { TalkButton, TalkChip, type TalkTarget } from "../components/TalkMenu.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { setPtyInView, setWorkspaceInView, useAttention, usePtyAttention } from "../attention.js";
@@ -63,6 +64,11 @@ function zoneFor(event: React.DragEvent<HTMLElement>): DropZone {
   return distance < 0.28 ? zone : "center";
 }
 
+/** A coding CLI: a run VibeForge started, or one typed into a shell (src/core/checkout.ts says the same). */
+function isCodingCli(session: LiveSession): boolean {
+  return session.kind === "run" || Boolean(session.programEngineId);
+}
+
 function readLocal<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -90,6 +96,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const agents = useAgents().data ?? [];
   const settings = useSettings().data;
   const live = useLive().data ?? [];
+  const talkOn = settings?.agentTalk.on ?? false;
   const home = useAppInfo().data?.home ?? "";
   const workspaces = useMemo(() => file.data?.workspaces ?? [], [file.data]);
 
@@ -397,6 +404,31 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   function livePty(paneId: string): string | null {
     const state = runtimeRef.current[paneId];
     return state?.state === "live" ? state.ptyId : null;
+  }
+
+  /** The other coding CLIs open anywhere, for Send to…: this workspace's first. */
+  function talkTargets(session: LiveSession, workspace: Workspace): TalkTarget[] {
+    return live
+      .filter((other) => other.ptyId !== session.ptyId && isCodingCli(other))
+      .map((other) => ({
+        ptyId: other.ptyId,
+        label: agents.find((agent) => agent.id === other.agentId)?.name ?? (other.program || other.title.split(" · ")[0] || other.title),
+        where: other.workspaceId === workspace.id ? null : (workspaces.find((item) => item.id === other.workspaceId)?.name ?? null),
+      }))
+      .sort((a, b) => Number(a.where !== null) - Number(b.where !== null));
+  }
+
+  /** Bring the pane holding `ptyId` forward and into focus, when it is in Code. */
+  function focusPty(ptyId: string) {
+    for (const [workspaceId, node] of Object.entries(layouts)) {
+      const pane = node && panesOf(node).find((item) => runtime[item.id]?.ptyId === ptyId);
+      if (!pane) continue;
+      const workspace = workspaces.find((item) => item.id === workspaceId);
+      if (workspace) select(workspace);
+      setFocus((prev) => ({ ...prev, [workspaceId]: pane.id }));
+      setTimeout(() => terminals.current.get(pane.id)?.focus(), 0);
+      return;
+    }
   }
 
   function insertPath(target: string) {
@@ -723,6 +755,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             shellNumber={shellNumber(runtime[pane.id]?.ptyId, live)}
                             needsYou={ptyAttention.get(runtime[pane.id]?.ptyId ?? "")?.attention === "waiting"}
                             alsoHere={(session?.alsoHere ?? []).map((other) => agents.find((agent) => agent.id === other.agentId)?.name ?? other.label)}
+                            talk={session?.talk ?? null}
+                            talkTargets={session && isCodingCli(session) && talkOn ? talkTargets(session, workspace) : []}
+                            onDraft={(toPty) => focusPty(toPty)}
                             engines={engines}
                             active={active && visible}
                             focused={focus[workspace.id] === pane.id}
@@ -801,6 +836,9 @@ function PaneView({
   program,
   needsYou,
   alsoHere,
+  talk,
+  talkTargets,
+  onDraft,
   engines,
   active,
   focused,
@@ -830,6 +868,11 @@ function PaneView({
   needsYou: boolean;
   /** The other coding CLIs working in the same folder. */
   alsoHere: string[];
+  /** Messages with other CLIs, while there are any. */
+  talk: TalkState | null;
+  /** The other coding CLIs this one can send to; empty when it isn't one, or talking is off. */
+  talkTargets: TalkTarget[];
+  onDraft: (toPty: string) => void;
   engines: Engine[];
   active: boolean;
   focused: boolean;
@@ -853,6 +896,7 @@ function PaneView({
   const t = useT();
   const state = runtime?.state ?? "idle";
   const [zone, setZone] = useState<DropZone | null>(null);
+  const terminalRef = useRef<TerminalHandle | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
   const title = pane.launch.type === "shell" ? `${t("common.shell")}${shellNumber ? ` ${shellNumber}` : ""}` : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
@@ -899,8 +943,12 @@ function PaneView({
           </button>
         )}
         {zoomed && <span className="chip accent">{t("pane.maximized")}</span>}
+        {talk && runtime?.ptyId && <TalkChip ptyId={runtime.ptyId} talk={talk} />}
         <span className="grow" />
         <div className="pane-actions">
+          {state === "live" && runtime?.ptyId && (
+            <TalkButton ptyId={runtime.ptyId} targets={talkTargets} selection={() => terminalRef.current?.selection() ?? ""} onDraft={onDraft} />
+          )}
           {(canZoom || zoomed) && (
             <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />
           )}
@@ -939,7 +987,10 @@ function PaneView({
         <>
           <LiveTerminal
             key={runtime.ptyId}
-            ref={register}
+            ref={(handle) => {
+              terminalRef.current = handle;
+              register(handle);
+            }}
             ptyId={runtime.ptyId}
             active={active}
             autoFocus={focused}
