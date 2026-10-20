@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-20
+
+**2.7.0: your CLIs can talk to each other, review each other's changes and hand out tasks.**
+
 ### Added
 
 - **Agents together.** A coding CLI in any VibeForge terminal can now talk to the others: `vibeforge who` lists them, `vibeforge tell <name> "…"` pastes a message into another CLI once it is free (labelled with who sent it and how to answer), and `vibeforge tell --wait` brings the answer back, from the session logs of Claude Code, Codex, Grok Build and Kimi Code, or from the screen for other CLIs. An answer that takes longer than the wait arrives later as a message.
@@ -411,7 +415,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.6.2...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.0
 [2.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.2
 [2.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.1
 [2.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.0
