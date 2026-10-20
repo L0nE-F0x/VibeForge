@@ -650,7 +650,7 @@ export const fr: Catalog = {
   "tasks.appliedBody.other": "{count} fichiers modifiés, pas encore validés. La copie a été retirée.",
   "tasks.applyConflicts": "Appliqué, avec des conflits à résoudre",
   "tasks.applyConflictsBody": "{files} a aussi changé dans l'espace de travail. Des marqueurs de conflit y sont maintenant ; la copie reste jusqu'à ce que vous l'abandonniez. L'abandonner ne retire pas les marqueurs.",
-  "tasks.applyNothing": "La copie n'a aucun changement à appliquer",
+  "tasks.applyNothing": "La copie n'avait aucun changement, elle a été supprimée",
   "tasks.applyFailed": "Impossible d'appliquer les changements",
   "tasks.discardCopy": "Abandonner la copie",
   "tasks.discardCopyTitle": "Abandonner la copie de « {title} » ?",

@@ -649,7 +649,7 @@ export const de: Catalog = {
   "tasks.appliedBody.other": "{count} Dateien geändert, noch nicht committet. Die Kopie ist entfernt.",
   "tasks.applyConflicts": "Übernommen, mit Konflikten zum Auflösen",
   "tasks.applyConflictsBody": "{files} wurde auch im Arbeitsbereich geändert. Dort stehen jetzt Konfliktmarkierungen; die Kopie bleibt, bis du sie verwirfst. Verwerfen entfernt die Markierungen nicht.",
-  "tasks.applyNothing": "Die Kopie hat keine Änderungen zum Übernehmen",
+  "tasks.applyNothing": "Die Kopie hatte keine Änderungen und wurde entfernt",
   "tasks.applyFailed": "Die Änderungen ließen sich nicht übernehmen",
   "tasks.discardCopy": "Kopie verwerfen",
   "tasks.discardCopyTitle": "Die Kopie von „{title}“ verwerfen?",
