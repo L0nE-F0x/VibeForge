@@ -358,6 +358,25 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("counts a message typed into a chat as a person stepping in", async () => {
+    let at = AT;
+    const ctx = setup({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 1, reviewRounds: 1 } });
+    const other = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    const chat = ctx.svc.createChat({ engine: "argy" });
+    const first = await ctx.svc.sendChat(chat.id, "hello");
+    at += 6000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "one" })).toMatchObject({ delivered: "sent" });
+    at += 4000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "two" })).toMatchObject({ delivered: "draft" });
+    // The person writes in the chat: the count starts again.
+    expect(await ctx.svc.sendChat(chat.id, "go on")).toMatchObject({ started: false, ptyId: first.ptyId });
+    at += 16_000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "three" })).toMatchObject({ delivered: "sent" });
+    ctx.svc.close();
+  });
+
   it("sends a selection to another pane as a draft for a person to send", async () => {
     const { ctx, a, b } = await twoClis();
     expect(await ctx.svc.sendDraft({ fromPty: a.ptyId, toPty: b.ptyId, what: "selection", selection: "  the bit I picked\x1b[0m " })).toEqual({ sent: true });

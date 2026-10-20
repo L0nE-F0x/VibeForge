@@ -225,7 +225,11 @@ async function sendTo(
   if (live) {
     if (live.working && !input.force) return { working: true };
     if (live.chatId) await service.sendChat(live.chatId, input.text, PHONE_SIZE);
-    else await supervisor.send(live.ptyId, input.text);
+    else {
+      // A person, from the phone: like typing in the terminal.
+      service.onHumanInput(live.ptyId, "\r");
+      await supervisor.send(live.ptyId, input.text);
+    }
     return { working: false, ptyId: live.ptyId, runId: live.runId ?? input.runId };
   }
   // The CLI has ended (or quit back to its shell): pick its session up again, with this as the next instruction.
