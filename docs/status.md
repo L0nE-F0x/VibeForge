@@ -1,4 +1,16 @@
-# Status — 2026-10-12
+# Status — 2026-10-20
+
+## Copies by default, the last English, Ctrl+K over text (2026-10-20, `feat/copies-words-search`)
+
+From the backlog review.
+
+- **Copies.** A new task's form leaves `isolated` unset and shows it on when `workspaces.branches` says the workspace is a repository (it follows the workspace picked). Switching it either way sticks. Existing tasks, Hand off and `vibeforge task` keep their own rules. The 2.0 design's condition for this (a real Claude Code copy executed, applied and conflicted) was met during 2.0's checks.
+- **The main process speaks the window's language.** `src/core/main-text.ts` (`MainText`) loads the catalog for Settings' language (or `app.getLocale()` for "system") through `companion-text.ts`'s loader, and is reloaded when Settings change. The tray menu and tooltip (`TrayState.language` rebuilds it), both quit questions, the tray notice and the folder picker's title use it. Notifications the core sends are translated part by part (" · ") in `host.notify`: the core's own words through `matchCoreText` (new `core.run*`, `core.failedInRow`, `core.couldntStart`, `core.waitingFor`), git's summaries through `src/shared/changes.ts`. Plan alerts take `AlertWords` (English by default).
+- **Change summaries** (`parseChanges` / `changesText`) become "2 Commits · 3 Dateien +10 −1 · 1 neue Datei" in the window (`changesFor`: run rows, the run's chip, tasks, routines, the chat's pick-up line); an unknown text stays as it is. The phone page still shows them as the core wrote them.
+- **Schedules** (`src/ui/schedule-text.ts`): intervals from the catalogs (`schedule.every*`, plural forms), cron through cronstrue's own `de`, `es`, `fr`, `ja`, `pt_BR` and `zh_CN` locales, 12- or 24-hour as `Intl` says for the language. The core's English `description` stays as the fallback.
+- **Ctrl+K** (`Switcher.tsx`): items carry `text` (a task's body, a routine's prompt, a skill's body); with no match in the name, three letters or more found in it list the item below every name, with a snippet (`textSnippet` in `fuzzy.ts`).
+- Checked: `npm test` (267), typecheck, lint, and the worktree build headless: Routines in German ("Um 18:00, Montag bis Freitag", "Alle 2 Stunden"), Ctrl+K finding a task by a word in its details, and a new task in a git workspace opening with the copy switch on.
+
 
 ## 2.5.0: a UI pass from an audit (2026-10-12)
 

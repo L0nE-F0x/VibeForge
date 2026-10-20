@@ -5,7 +5,6 @@ What's next. What shipped is in `CHANGELOG.md` (2.6.2, 2026-10-16, is the latest
 ## Next up
 
 - [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A buzz on a locked phone is still to build.
-- [ ] **The last English in other languages.** The tray menu, the quit question, the "still running in the tray" notice and the core's run-finished notifications are still in English, and so are cronstrue's schedule descriptions and git's change summaries. The window and the phone page are translated.
 - [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at. Leftover Gemini CLI chat files are still counted alongside Antigravity's conversation databases.
 
 ## Only checked with stand-ins

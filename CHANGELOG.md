@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **New tasks work in their own copy.** A new task in a git workspace starts with **Work in a separate copy** on, so its agent never edits the folder you or another agent are in. Switch it off on the task to work in the workspace itself; existing tasks keep their setting.
+- **Everything in your language.** The tray menu, the quit question, the "still running in the tray" notice, desktop notifications for tasks and routines, plan alerts, schedule descriptions (on your language's clock) and git's change summaries ("2 files +10 −1") now follow VibeForge's language.
+
+### Added
+
+- **Ctrl+K finds what things say.** Typing three letters or more also finds a task by its details, a routine by its prompt and a skill by its procedure, with the words around the match.
+
 ## [2.6.2] - 2026-10-16
 
 **2.6.2: Gemini and Gemini 4 Argon plan limits, and Antigravity CLI token counts.**
