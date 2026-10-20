@@ -364,7 +364,10 @@ export class MessageDesk {
     const reviewerLabel = list.find((item) => item.ptyId === review.reviewerPty)?.label ?? "The reviewer";
     if (!this.reviews.has(key)) return;
     if (!patch.trim()) {
-      this.reviews.delete(key);
+      // Nothing yet: asked before the author has changed anything, so wait for its next turn. A
+      // turn that ends with nothing changed ends the review.
+      if (review.since === 0) review.since = now;
+      else this.reviews.delete(key);
       this.core.emit("live");
       return;
     }

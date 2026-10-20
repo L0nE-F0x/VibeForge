@@ -322,6 +322,48 @@ describe("a review loop and handing out tasks", () => {
     ctx.svc.close();
   });
 
+  it("waits for the author's next turn when asked before it has changed anything", async () => {
+    let at = AT;
+    const repo = gitRepo();
+    const ctx = setup({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const author = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const reviewer = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    pass(10_000);
+    ctx.svc.startReview(author.ptyId, reviewer.ptyId);
+    await ctx.svc.pumpMessages();
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === author.ptyId)?.talk?.review).toMatchObject({ phase: "author" });
+    // Its turn: it edits, goes quiet, and the review goes out.
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, true);
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n");
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.map((item) => item.ptyId)).toEqual([reviewer.ptyId]);
+    ctx.svc.close();
+
+    // A turn that ends with nothing changed ends it.
+    const other = setup({ now: () => new Date(at) });
+    const space = other.svc.addWorkspace(gitRepo()).workspaces[0];
+    const quiet = await other.svc.startEngine({ workspaceId: space.id, engineId: "argy" });
+    const second = await other.svc.startEngine({ workspaceId: space.id, engineId: "pasty" });
+    pass(10_000);
+    other.svc.startReview(quiet.ptyId, second.ptyId);
+    await other.svc.pumpMessages();
+    pass(1000);
+    other.svc.onPtyActivity(quiet.ptyId, true);
+    pass(1000);
+    other.svc.onPtyActivity(quiet.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await other.svc.pumpMessages();
+    expect(other.svc.liveForView().find((item) => item.ptyId === quiet.ptyId)?.talk ?? null).toBeNull();
+    expect(other.sent).toEqual([]);
+    other.svc.close();
+  });
+
   it("hands a task to an agent in its own copy, never the sender's folder, and only one level deep", async () => {
     const repo = gitRepo();
     const ctx = setup();
