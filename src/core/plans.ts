@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -364,17 +364,19 @@ export function parseAgy(data: Record<string, unknown>): Reading | null {
 
 const AGY_USER_AGENT = "antigravity/cli/1.4.0 (aidev_client; os_type=linux; arch=amd64; cl=1000494485; auth_method=consumer)";
 
-function readKeyringJson(service: string, username: string): Record<string, unknown> | null {
-  try {
-    const out = execFileSync("secret-tool", ["lookup", "service", service, "username", username], {
-      encoding: "utf8",
-      timeout: 1500,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return out ? record(JSON.parse(out)) : null;
-  } catch {
-    return null;
-  }
+/** A JSON secret from the desktop keyring. Asked without blocking: a locked keyring can take its full timeout. */
+function readKeyringJson(service: string, username: string): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    execFile("secret-tool", ["lookup", "service", service, "username", username], { encoding: "utf8", timeout: 1500 }, (error, stdout) => {
+      if (error) return resolve(null);
+      try {
+        const out = stdout.trim();
+        resolve(out ? record(JSON.parse(out)) : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }
 
 interface Provider {
@@ -385,7 +387,7 @@ interface Provider {
    */
   hideWithoutPlan?: boolean;
   /** Null when this machine isn't signed in to it. */
-  signIn: (now: number) => SignIn | null;
+  signIn: (now: number) => SignIn | null | Promise<SignIn | null>;
 }
 
 function token(value: unknown): string | null {
@@ -451,10 +453,10 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
     },
     {
       id: "agy",
-      signIn: (now) => {
+      signIn: async (now) => {
         const creds =
           agyFiles.map(readJson).find(Boolean) ??
-          (!env.GEMINI_CLI_HOME && home === os.homedir() ? readKeyringJson("gemini", "antigravity") : null);
+          (!env.GEMINI_CLI_HOME && home === os.homedir() ? await readKeyringJson("gemini", "antigravity") : null);
         const oauth = record(creds?.token) ?? creds;
         const access = token(oauth?.access_token ?? oauth?.accessToken);
         if (!access) return null;
@@ -659,7 +661,7 @@ export class PlanWatcher {
 
     if (network) {
       const asks = this.providers.map(async (provider) => {
-        const signIn = provider.signIn(now);
+        const signIn = await provider.signIn(now);
         if (!signIn) return;
         const kept = this.kept.get(provider.id);
         if (signIn.expired) {
