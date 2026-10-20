@@ -5,7 +5,7 @@ import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
 import { runLabel } from "../views/Home.js";
 import { Snippet } from "./Snippet.js";
-import { fuzzyScore } from "../fuzzy.js";
+import { fuzzyScore, textSnippet } from "../fuzzy.js";
 import { useT, type Key } from "../i18n/index.js";
 import { railViews } from "../rail.js";
 import { useNav, useOverlay } from "../state.js";
@@ -24,6 +24,8 @@ interface Item {
   sub?: string;
   /** For a run found by its words: the text around the match. */
   snippet?: string;
+  /** What it says (a task's details, a routine's prompt, a skill's procedure), found when its name isn't. */
+  text?: string;
   kind: Key;
   icon: LucideIcon;
   act: () => void;
@@ -85,16 +87,17 @@ export function Switcher({ onClose }: { onClose: () => void }) {
           icon: MessagesSquare,
           act: () => go(chat.agentId ? { view: "agents", agentId: chat.agentId, tab: "chats", chatId: chat.id } : { view: "chat", chatId: chat.id }),
         })),
-      ...(tasks ?? []).map((task): Item => ({ id: `task:${task.id}`, title: task.title, kind: "switcher.task", icon: KanbanSquare, act: () => go({ view: "tasks", taskId: task.id }) })),
+      ...(tasks ?? []).map((task): Item => ({ id: `task:${task.id}`, title: task.title, text: task.body, kind: "switcher.task", icon: KanbanSquare, act: () => go({ view: "tasks", taskId: task.id }) })),
       ...(routines ?? []).map((routine): Item => ({
         id: `routine:${routine.id}`,
         title: routine.name,
         sub: routine.agentName ?? undefined,
+        text: routine.prompt,
         kind: "switcher.routine",
         icon: CalendarClock,
         act: () => go({ view: "routines", routineId: routine.id }),
       })),
-      ...(skills ?? []).map((skill): Item => ({ id: `skill:${skill.id}`, title: skill.name, sub: skill.description, kind: "switcher.skill", icon: Sparkles, act: () => go({ view: "skills", skillId: skill.id }) })),
+      ...(skills ?? []).map((skill): Item => ({ id: `skill:${skill.id}`, title: skill.name, sub: skill.description, text: skill.body, kind: "switcher.skill", icon: Sparkles, act: () => go({ view: "skills", skillId: skill.id }) })),
       ...SETTINGS_SECTIONS.map((section): Item => ({
         id: `settings:${section.id}`,
         title: `${t("settings.title")} · ${t(section.label)}`,
@@ -128,7 +131,11 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         // The second line (a path, an agent's name) counts only when it holds the query as typed,
         // and below a match in the name: scattered letters match almost any long path.
         const sub = item.sub?.toLowerCase().includes(query.trim().toLowerCase()) ? fuzzyScore(query, item.sub) : -1;
-        return { item, score: Math.max(title, sub >= 0 ? sub / 3 : -1) };
+        const score = Math.max(title, sub >= 0 ? sub / 3 : -1);
+        if (score >= 0 || !item.text) return { item, score };
+        // Below every name: found by what it says, with the words around it.
+        const snippet = textSnippet(query, item.text);
+        return snippet ? { item: { ...item, snippet }, score: 0 } : { item, score: -1 };
       })
       .filter((entry) => entry.score >= 0)
       .sort((a, b) => b.score - a.score)
