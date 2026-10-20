@@ -13,6 +13,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Send to… and review.** The send button on a Code terminal's title bar puts that CLI's last answer, the selected text or its changes into another CLI's prompt as a draft, and **Ask … to review its changes** has another CLI review the diff when this one's turn ends, then sends the review back.
 - **Limits you can see.** Two CLIs can trade 8 messages before the next one waits in the prompt for you to press Enter, and typing in either terminal starts the count again. A chip on the title bar shows who a CLI is talking with, and its stop button ends it. **Settings → Agents together** turns it all off or changes the message limit and the review rounds.
 
+### Fixed
+
+- **A routine that can't start says so.** When a scheduled routine fails before its CLI runs (its folder or CLI is gone, or the CLI won't spawn), you now get the same desktop notification as a run that ended, with the reason, and the third failure in a row still says so once.
+- **A routine waiting its turn says so.** A due routine that waits for another coding CLI in its folder sends one notification for that slot, naming who it is waiting for.
+- **A task or routine on a trust or sign-in question keeps its folder.** Until it has started working, other waiting work doesn't start in the same folder, so nothing lands while the question is still up.
+- **Applying a copy with no changes tidies it away.** The copy is removed and the task is marked done, instead of staying until you discard it.
+
 ## [2.6.2] - 2026-10-16
 
 **2.6.2: Gemini and Gemini 4 Argon plan limits, and Antigravity CLI token counts.**

@@ -650,7 +650,7 @@ export const ja: Catalog = {
   "tasks.appliedBody.other": "{count} 個のファイルを変更しました（未コミット）。コピーは削除しました。",
   "tasks.applyConflicts": "適用しました。解決が必要な競合があります",
   "tasks.applyConflictsBody": "{files} はワークスペース側でも変更されていたため、競合マーカーが入りました。コピーは破棄するまで残ります。破棄してもマーカーは消えません。",
-  "tasks.applyNothing": "コピーに適用する変更はありません",
+  "tasks.applyNothing": "コピーに変更がなかったので、コピーを削除しました",
   "tasks.applyFailed": "変更を適用できませんでした",
   "tasks.discardCopy": "コピーを破棄",
   "tasks.discardCopyTitle": "「{title}」のコピーを破棄しますか？",

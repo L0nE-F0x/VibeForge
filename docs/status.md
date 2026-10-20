@@ -13,10 +13,22 @@ The founder's top item from the backlog review: two live CLIs talking, all three
 - **Window.** `TalkButton` (`src/ui/components/TalkMenu.tsx`) on a live coding CLI's title bar: with more than one other CLI it asks which first (`MenuItem.keepOpen`), then Its last answer / The selected text / Its changes / Ask … to review its changes. A draft brings the other pane forward. `TalkChip` shows "Beta · 1/8", a review's step, or a held limit in amber, with a stop button. **Settings → Agents together** (`TalkCard`): the switch, the limit and the rounds. All text in 7 languages.
 - Checked: `npm test` (276), typecheck, lint, coverage floor, and the worktree build driven headless with two stand-in CLIs (one started from Code's button, one typed into a shell): `vibeforge who`, `tell --wait` answered from the screen, `task` asked by Alpha, Send to… landing a labelled draft and focusing that pane, the menu's items, the chips, Stop clearing them and refusing the next `tell` (exit 1), Settings → Agents together, and a full review round on a git workspace (patch file with the edit, the review back in the author, over 9 s after the fix). Not tried with real Claude Code or Codex sending the commands themselves.
 
+## Backlog review (2026-10-20)
+
+The founder asked for a review of everything parked. Decided: agent collaboration in full (Send to…, `vibeforge tell` with `--wait`, the review loop) plus agents creating tasks for each other in their own copy; new tasks in their own copy by default; the last English strings and Ctrl+K over tasks, skills and routines; a small-fixes PR; cleanup. The locked-phone buzz is parked (Web Push needs Apple's or Google's push servers). Skipped from Muse's ideas: runs side by side, per-agent stats, workspace templates. The handoffs, audits and design notes that sat untracked in the checkout are in `docs/archive/` (ignored by git).
+
+Small fixes (`fix/turns-and-notices`):
+
+- **Routine notices.** `ServiceCore.notifyFinished` is public and says `couldn't start: <reason>` for a failed run without an exit code. A routine's failed start (`recordFailedStart`, or a spawn failure found after `fire` threw, or a queued start that failed) goes through it, so the third failure in a row is announced like any other. A due slot that queues sends one note, "waiting for <who> to finish" (`RoutineDesk.tell`, which respects Settings and the routine's own switch; Run now's failure note now does too).
+- **First screen keeps the turn.** `hasTurn` is true for a task or routine run that has never gone quiet (no `quietAt`): the trust or sign-in question an unattended CLI may be on. Code panes and chats are unchanged, so an unused pane still doesn't hold a folder.
+- **Empty Apply.** `TaskDesk.applyCopy` removes the copy and marks the task done whenever there are no conflicts, including an empty patch (`tasks.applyNothing` says so in 7 languages).
+- Already fixed, re-checked: a Codex log line no longer replaces a newer online plan reading (`summaryNow` compares the log's own time), and the side browser is clipped to the stage when panned (`clipBox` in `CodeParts.tsx`).
+- Checked: `npm test` (264).
+
 
 ## 2.5.0: a UI pass from an audit (2026-10-12)
 
-Claude wrote a UI audit of 2.4.0 (`docs/ui-audit-2026-10-12.md`, untracked: 5 high, 10 medium, 9 low findings, with screenshots in `~/Pictures/VibeForge UI audit 2026-10-12/`). The founder asked for all of it. Branch `feat/ui-audit`, one commit per area:
+Claude wrote a UI audit of 2.4.0 (`docs/archive/ui-audit-2026-10-12.md`, kept locally: 5 high, 10 medium, 9 low findings, with screenshots in `~/Pictures/VibeForge UI audit 2026-10-12/`). The founder asked for all of it. Branch `feat/ui-audit`, one commit per area:
 
 - **Narrow tiles.** `useNarrowStage()` (`SidePanel.tsx`) says when `.stage` is under 860px. List panels then render as their strip without saving that, and the expand button floats the panel over the work area (`.list-panel-slot.is-floating`; Esc, the shade or picking a row closes it). Code's side panel follows the same flag (`narrowSide`). The pan floor (`--screen-floor`) is 560px now, down from 920. The board goes 2×2 under 800px of stage (container query). The Tour's selectors moved to `.list-panel-slot > .list-panel`.
 - **Settings.** `src/ui/settings-sections.ts` lists the 14 sections (`settings-<id>` anchors). Settings has a sticky list that follows the scroll (hidden under 1000px of stage), and the route takes `section` (Ctrl+K, the rail's Customize, voice's "set up dictation"). It is cleared after landing, so going back later doesn't jump.
@@ -53,10 +65,10 @@ The Tokens tab had today and a 7-day chart. It now has **Today · Week · Month 
 
 ## 2.2.0: an outside audit, checked and worked through (2026-10-07)
 
-Muse Code wrote an audit of the tree (`AUDIT.md`, untracked). Claude checked each claim against the code before acting:
+Muse Code wrote an audit of the tree (`docs/archive/AUDIT-muse-2026-10-07.md`, kept locally). Claude checked each claim against the code before acting:
 
 - **Wrong or overstated.** "Rewording an error silently breaks translation": `tests/unit/core-text.test.ts` already failed on any untranslated `throw new Error`. "The service layer has no tests": nothing imported `src/core/service/` directly, but `TeamService` drove it to about 89% of lines. "Errors leave no trail": page errors reach `vibeforge.log` through `console-message`. The companion tests it called failing passed (223). Its error-code migration and big file splits were left out on purpose.
-- **Missed.** Both medium items from `docs/audit.md` (2026-10-01) were still open. They are fixed now.
+- **Missed.** Both medium items from `docs/archive/audit-2026-10-01.md` (2026-10-01) were still open. They are fixed now.
 
 What changed:
 
@@ -90,7 +102,7 @@ Grok built the prototype; Claude reviewed it and fixed what the review found.
 
 ## 2.0: agents take turns, and every waiter has a name (2026-10-01)
 
-Planned in `docs/design-2.0.md` (written with Grok, reviewed and adjusted by Claude; the differences are listed at the end of this section).
+Planned in `docs/archive/design-2.0.md` (kept locally; written with Grok, reviewed and adjusted by Claude; the differences are listed at the end of this section).
 
 - **1.3.1, a task's copy is confined.** Discard, Apply, Execute and delete only stage or remove `<data>/worktrees/<task id>`, by name and after following symlinks (`ownedCopyPath` in `src/core/worktrees.ts`). Any other copy path loads, shows on the task sheet as untrusted with **Forget it**, and is never touched. Tested with real git: the path pointing at the checkout, a symlink at the right name, and a copy already gone.
 - **The site's privacy card** now says the release check goes online; the installer stops instead of falling back to `main`.

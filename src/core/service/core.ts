@@ -459,7 +459,8 @@ export class ServiceCore {
     this.emit("runs", "live", "tasks", "chats", "routines");
   }
 
-  private notifyFinished(run: RunMeta): void {
+  /** A desktop note for a task's or routine's run that ended, or a routine's that never started. Said once. */
+  notifyFinished(run: RunMeta): void {
     if (run.notifiedAt) return;
     if (run.origin !== "routine" && run.origin !== "task") return;
     const settings = this.store.readSettings();
@@ -471,7 +472,9 @@ export class ServiceCore {
     const outcome =
       run.status === "stopped"
         ? "stopped"
-        : run.exitCode && run.exitCode !== 0
+        : run.status === "failed" && run.exitCode === null
+          ? `couldn't start: ${run.error ?? "unknown error"}`
+          : run.exitCode && run.exitCode !== 0
           ? `exited with code ${run.exitCode}`
           : "finished";
     // Said once, on the run that makes it a streak; Routines and Home keep it lit after that.
