@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Clicking a terminal no longer counts as typing.** CLIs such as Claude Code ask the terminal to report focus, and those reports reset the message count between two CLIs and lifted a Stop. Focus and mouse reports are now ignored; keys still count.
+- **`vibeforge who` shows folders under your home as `~/…`**, as a shell prompt does, instead of the full path.
+
 ## [2.7.0] - 2026-10-20
 
 **2.7.0: your CLIs can talk to each other, review each other's changes and hand out tasks.**

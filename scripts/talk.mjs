@@ -93,7 +93,10 @@ try {
   if (command === "who") {
     const answer = await ask({ op: "who", pty });
     if (answer.error) fail(answer.error);
-    const lines = answer.clis.map((cli) => `${cli.you ? "* " : "  "}${cli.handle.padEnd(14)} ${cli.label}${cli.working ? " (working)" : ""} in ${cli.folder}`);
+    // Folders under your home read as ~/…, as a shell prompt shows them.
+    const home = process.env.HOME;
+    const shown = (folder) => (home && (folder === home || folder.startsWith(`${home}/`)) ? `~${folder.slice(home.length)}` : folder);
+    const lines = answer.clis.map((cli) => `${cli.you ? "* " : "  "}${cli.handle.padEnd(14)} ${cli.label}${cli.working ? " (working)" : ""} in ${shown(cli.folder)}`);
     process.stdout.write(`${lines.length ? `CLIs (vibeforge tell <name>):\n${lines.join("\n")}` : "No coding CLIs are running in VibeForge."}\n`);
     if (answer.you) process.stdout.write(`You are ${answer.you}.\n`);
     if (answer.agents.length) process.stdout.write(`Agents (vibeforge task <name>): ${answer.agents.map((agent) => agent.handle).join(", ")}\n`);
