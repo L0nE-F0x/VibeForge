@@ -22,6 +22,15 @@ control_sock() {
   fi
 }
 
+# `vibeforge tell|who|task …`, from a coding CLI in a VibeForge terminal: talk to the other CLIs
+# through the running window. scripts/talk.mjs has the details (`vibeforge help`).
+case "${1:-}" in
+  tell | who | task | help | --help | -h)
+    command -v node >/dev/null 2>&1 || { echo "vibeforge: node is not on PATH" >&2; exit 1; }
+    VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec node "$ROOT/scripts/talk.mjs" "$@"
+    ;;
+esac
+
 # `vibeforge --voice start|stop|cancel`, from a keybinding: hand the action to the
 # running window over its control socket, which takes milliseconds, where starting Electron to be
 # handed off would lose the first words.

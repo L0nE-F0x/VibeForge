@@ -817,7 +817,7 @@ describe("runs", () => {
     };
     const stamp = new Date().toISOString();
     const task = (id: string, runIds: string[]) =>
-      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, isolated: false, copy: null, shareCheckout: false, sourceRunId: null, createdAt: stamp, updatedAt: stamp });
+      store.writeTask({ id, title: id, body: "", status: "running", agentId: null, workspaceId: null, runIds, isolated: false, copy: null, shareCheckout: false, sourceRunId: null, askedBy: null, createdAt: stamp, updatedAt: stamp });
     task("crashed", [orphan("crashed")]);
     // Its latest run is a newer one, as after an Execute that raced the settling.
     task("restarted", [orphan("restarted"), "a-newer-run"]);

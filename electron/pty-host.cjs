@@ -178,14 +178,15 @@ function writeInput(session, data) {
 }
 
 /** Paste text the way a terminal does, then press Enter. */
-function sendText(session, text) {
+/** Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first). */
+function sendText(session, text, enter = true) {
   if (session.exited) return;
   const clean = String(text).replace(/\r\n/g, "\n").replace(/\x1b\[20[01]~/g, "");
   if (session.mirror.modes.bracketedPasteMode) {
     writeInput(session, `\x1b[200~${clean}\x1b[201~`);
-    setTimeout(() => writeInput(session, "\r"), ENTER_AFTER_PASTE_MS);
+    if (enter) setTimeout(() => writeInput(session, "\r"), ENTER_AFTER_PASTE_MS);
   } else {
-    writeInput(session, `${clean.replace(/\n/g, "\r")}\r`);
+    writeInput(session, enter ? `${clean.replace(/\n/g, "\r")}\r` : clean.replace(/\n/g, "\r"));
   }
 }
 
@@ -235,7 +236,8 @@ function spawnSession(msg) {
   const rows = Math.max(2, Number(msg.rows) || 32);
   const runDir = typeof msg.runDir === "string" && msg.runDir ? msg.runDir : null;
   const id = crypto.randomUUID();
-  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge" };
+  // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in.
+  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id };
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
   const mirror = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
@@ -355,7 +357,7 @@ async function handle(msg) {
       reply(msg.reqId, { ok: true });
       return;
     case "send":
-      sendText(need(msg), String(msg.text ?? ""));
+      sendText(need(msg), String(msg.text ?? ""), msg.enter !== false);
       reply(msg.reqId, { ok: true });
       return;
     case "resize": {

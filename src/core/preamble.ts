@@ -14,6 +14,8 @@ export interface PreambleInput {
   priorTranscript?: string | null;
   /** The run works in a separate git worktree (`path`) of the workspace (`of`). */
   workingCopy?: { path: string; of: string } | null;
+  /** Other CLIs can be reached with `vibeforge tell` and `vibeforge task` (Settings → Agents together). */
+  talk?: boolean;
 }
 
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
@@ -44,6 +46,13 @@ export function buildPreamble(input: PreambleInput): string {
   for (const skill of input.skills) {
     if (!skill.body.trim()) continue;
     parts.push("", `## Skill: ${skill.name}`, skill.body.trim());
+  }
+  if (input.talk) {
+    parts.push(
+      "",
+      "## Other agents",
+      "Other coding CLIs may be open in VibeForge beside you. `vibeforge who` lists them. `vibeforge tell <name> \"…\"` sends one a message (add `--wait` to get its answer back), and `vibeforge task <agent> \"…\"` hands a VibeForge agent a task that runs in its own copy of the workspace. Use them when a second opinion or a separate piece of work helps; keep exchanges short.",
+    );
   }
   if (input.priorTranscript) {
     parts.push(

@@ -25,7 +25,8 @@ import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
-import { controlSocketPath, voiceArg } from "../src/core/control.js";
+import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
+import { lastReply, watchReply } from "./replies.js";
 import { listenControl } from "./control.js";
 import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
 import { Talk } from "./talk.js";
@@ -184,7 +185,10 @@ const host: DeskHost = {
       throw error;
     }
   },
-  send: (ptyId, text) => supervisor.send(ptyId, text),
+  send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
+  screen: async (ptyId) => (await supervisor.snapshot(ptyId)).plain,
+  watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
+  lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
   kill: (ptyId) => supervisor.kill(ptyId),
   record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
   resolveBin: (bin) => whichBin(bin),
@@ -613,8 +617,18 @@ function handlers(): Handlers {
     "voice.forget": (ptyId) => talk.forget(typeof ptyId === "string" ? ptyId : undefined),
     "voice.installBindings": () => voice.installBindings(),
 
-    "pty.write": (ptyId, data) => supervisor.write(ptyId, data),
-    "pty.send": (ptyId, text) => supervisor.send(ptyId, text),
+    // Anything the window writes is a person: typing, a paste, dictation, the Write box.
+    "pty.write": (ptyId, data) => {
+      service?.onHumanInput(ptyId, data);
+      return supervisor.write(ptyId, data);
+    },
+    "pty.send": (ptyId, text) => {
+      service?.onHumanInput(ptyId, "\r");
+      return supervisor.send(ptyId, text);
+    },
+    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
+    "talk.review": (authorPty, reviewerPty) => s().startReview(authorPty, reviewerPty),
+    "talk.stop": (ptyId) => s().stopTalk(ptyId),
     "pty.resize": (ptyId, cols, rows) => supervisor.resize(ptyId, cols, rows),
     "pty.snapshot": (ptyId) => supervisor.snapshot(ptyId),
     "pty.kill": (ptyId) => s().killPty(ptyId),
@@ -794,9 +808,46 @@ async function createWindow(): Promise<void> {
 /** Why the terminal host is down, for a page that loads after it happened. */
 let hostError: string | null = null;
 
+/** A request from `vibeforge tell|who|task` in one of the terminals. */
+async function answerTalk(request: TalkRequest): Promise<unknown> {
+  if (!service) return { ok: false, error: "VibeForge is still starting." };
+  if (request.op === "who") return { ok: true, ...service.whoIsHere(request.pty) };
+  if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs });
+  return service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
+}
+
+/**
+ * What every terminal starts with: the control socket, and `vibeforge` on PATH (a link to
+ * scripts/vibeforge in the data folder), so a CLI in any terminal can run `vibeforge tell`.
+ */
+function terminalEnv(): NodeJS.ProcessEnv {
+  const env = childEnv(process.env);
+  env.VIBEFORGE_SOCKET = voice.status().controlSocket;
+  const bin = path.join(roots.dataRoot, "bin");
+  const target = path.join(appRoot(), "scripts", "vibeforge");
+  try {
+    fs.mkdirSync(bin, { recursive: true });
+    const link = path.join(bin, "vibeforge");
+    let current: string | null = null;
+    try {
+      current = fs.readlinkSync(link);
+    } catch {
+      /* not made yet */
+    }
+    if (fs.existsSync(target) && current !== target) {
+      fs.rmSync(link, { force: true });
+      fs.symlinkSync(target, link);
+    }
+    env.PATH = `${bin}${path.delimiter}${env.PATH ?? ""}`;
+  } catch (error) {
+    log.warn(`Could not put vibeforge on the terminals' PATH: ${describeError(error)}`);
+  }
+  return env;
+}
+
 async function startHost(): Promise<void> {
   try {
-    await supervisor.start(appRoot(), childEnv(process.env));
+    await supervisor.start(appRoot(), terminalEnv());
     hostError = null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -898,7 +949,7 @@ if (!app.requestSingleInstanceLock()) {
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig();
-    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
+    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), answerTalk);
     win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
     refreshTrayHost();

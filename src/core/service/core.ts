@@ -277,6 +277,7 @@ export class ServiceCore {
       prompt,
       priorTranscript,
       workingCopy,
+      talk: this.store.readSettings().agentTalk.on,
     });
   }
 
