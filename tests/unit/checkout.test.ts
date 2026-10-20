@@ -64,6 +64,14 @@ describe("who else is in a folder", () => {
     expect(hasTurn(session({ programEngineId: "claude", startedAt: ago(TURN_GRACE_MS * 10), cliSince: ago(1000) }), NOW)).toBe(true);
     expect(hasTurn(session({ kind: "run" }), NOW)).toBe(false);
   });
+
+  it("keeps the turn for a task or routine still on its first screen, since nobody may be there to answer it", () => {
+    expect(hasTurn(session({ kind: "run", origin: "task" }), NOW)).toBe(true);
+    expect(hasTurn(session({ kind: "run", origin: "routine" }), NOW)).toBe(true);
+    expect(hasTurn(session({ kind: "run", origin: "routine", quietAt: ago(TURN_GRACE_MS + 1) }), NOW)).toBe(false);
+    // A CLI someone opened in Code has them there.
+    expect(hasTurn(session({ kind: "run", origin: "code" }), NOW)).toBe(false);
+  });
 });
 
 describe("one git job at a time per repository", () => {

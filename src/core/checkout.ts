@@ -47,9 +47,14 @@ export function sessionFolder(session: LiveSession): string {
   return session.programCwd || session.cwd;
 }
 
-/** Whether a coding CLI still has its turn: working, just quiet, or just started. */
+/**
+ * Whether a coding CLI still has its turn: working, just quiet, or just started. A task or routine
+ * that hasn't begun working keeps it too: it may be on a trust or sign-in question that only a
+ * person can answer, and work started under it would land before the answer.
+ */
 export function hasTurn(session: LiveSession, now: number): boolean {
   if (session.working) return true;
+  if (session.kind === "run" && (session.origin === "task" || session.origin === "routine") && !session.quietAt) return true;
   const since = Date.parse(session.quietAt ?? session.cliSince ?? session.startedAt);
   return Number.isFinite(since) && now - since < TURN_GRACE_MS;
 }
