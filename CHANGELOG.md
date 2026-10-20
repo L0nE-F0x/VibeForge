@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Agents together.** A coding CLI in any VibeForge terminal can now talk to the others: `vibeforge who` lists them, `vibeforge tell <name> "…"` pastes a message into another CLI once it is free (labelled with who sent it and how to answer), and `vibeforge tell --wait` brings the answer back, from the session logs of Claude Code, Codex, Grok Build and Kimi Code, or from the screen for other CLIs. An answer that takes longer than the wait arrives later as a message.
+- **Hand out tasks.** `vibeforge task <agent> "…"` gives a VibeForge agent a task that runs in its own git copy of the workspace, never in the asking CLI's folder. The task says who asked for it, a person still applies its changes, and a task handed out this way can't hand out more. Agents that VibeForge starts are told about these commands.
+- **Send to… and review.** The send button on a Code terminal's title bar puts that CLI's last answer, the selected text or its changes into another CLI's prompt as a draft, and **Ask … to review its changes** has another CLI review the diff when this one's turn ends, then sends the review back.
+- **Limits you can see.** Two CLIs can trade 8 messages before the next one waits in the prompt for you to press Enter, and typing in either terminal starts the count again. A chip on the title bar shows who a CLI is talking with, and its stop button ends it. **Settings → Agents together** turns it all off or changes the message limit and the review rounds.
+
 ## [2.6.2] - 2026-10-16
 
 **2.6.2: Gemini and Gemini 4 Argon plan limits, and Antigravity CLI token counts.**
