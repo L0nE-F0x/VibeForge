@@ -1,3 +1,4 @@
+import type { Key } from "../src/core/companion-text.js";
 import { Menu, nativeImage, Tray, type NativeImage } from "electron";
 
 // VibeForge in the system tray: Omarchy's bar lists it with Steam and the rest, and it can be
@@ -6,6 +7,8 @@ import { Menu, nativeImage, Tray, type NativeImage } from "electron";
 // waiting for you.
 
 export interface TrayState {
+  /** The language the menu is in; a change rebuilds it. */
+  language: string;
   live: number;
   waiting: number;
   /** Who is waiting, by name, at most a few: each opens where it waits. */
@@ -54,11 +57,17 @@ function withMark(base: NativeImage, color: string, outline: string): NativeImag
   return nativeImage.createFromBitmap(bitmap, { width: SIZE, height: SIZE });
 }
 
-function status(state: TrayState): string {
+/** The menu's words, in the window's language (src/core/main-text.ts). */
+export interface TrayWords {
+  say(key: Key): string;
+  count(base: string, count: number): string;
+}
+
+function status(state: TrayState, words: TrayWords): string {
   const parts: string[] = [];
-  if (state.waiting) parts.push(`${state.waiting} waiting for you`);
-  if (state.live) parts.push(`${state.live} running`);
-  return parts.length ? parts.join(" · ") : "Nothing running";
+  if (state.waiting) parts.push(words.count("tray.status.waiting", state.waiting));
+  if (state.live) parts.push(words.count("tray.status.running", state.live));
+  return parts.length ? parts.join(" · ") : words.say("tray.status.nothing");
 }
 
 export class TrayIcon {
@@ -70,6 +79,7 @@ export class TrayIcon {
     private iconPath: string,
     private colors: { mark: string; outline: string },
     private actions: TrayActions,
+    private words: TrayWords,
   ) {}
 
   /** Made on first use: image work waits for the app to be ready. */
@@ -108,20 +118,21 @@ export class TrayIcon {
     this.state = state;
     if (!was || Boolean(was.waiting) !== Boolean(state.waiting)) tray.setImage(state.waiting ? this.icons().marked : this.icons().plain);
     if (was && JSON.stringify(was) === JSON.stringify(state)) return;
-    tray.setToolTip(`VibeForge · ${status(state)}`);
+    const say = (key: Key) => this.words.say(key);
+    tray.setToolTip(`VibeForge · ${status(state, this.words)}`);
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: "Open VibeForge", click: () => this.actions.open() },
+        { label: say("tray.menu.open"), click: () => this.actions.open() },
         ...state.waiters.map((label, index) => ({ label, click: () => this.actions.openWaiter(index) })),
-        { label: status(state), enabled: false },
-        { label: "Go to anything…", accelerator: "Ctrl+K", click: () => this.actions.goAnywhere() },
+        { label: status(state, this.words), enabled: false },
+        { label: say("tray.menu.goAnywhere"), accelerator: "Ctrl+K", click: () => this.actions.goAnywhere() },
         { type: "separator" },
-        { label: "Sounds", type: "checkbox", checked: state.sounds, click: (item) => this.actions.setSounds(item.checked) },
-        { label: "Notifications", type: "checkbox", checked: state.notify, click: (item) => this.actions.setNotify(item.checked) },
-        { label: "Start at login, in the tray", type: "checkbox", checked: state.autostart, click: (item) => this.actions.setAutostart(item.checked) },
+        { label: say("tray.menu.sounds"), type: "checkbox", checked: state.sounds, click: (item) => this.actions.setSounds(item.checked) },
+        { label: say("tray.menu.notify"), type: "checkbox", checked: state.notify, click: (item) => this.actions.setNotify(item.checked) },
+        { label: say("tray.login"), type: "checkbox", checked: state.autostart, click: (item) => this.actions.setAutostart(item.checked) },
         { type: "separator" },
-        { label: "Settings…", click: () => this.actions.settings() },
-        { label: "Quit VibeForge", click: () => this.actions.quit() },
+        { label: say("tray.menu.settings"), click: () => this.actions.settings() },
+        { label: say("tray.menu.quit"), click: () => this.actions.quit() },
       ]),
     );
   }

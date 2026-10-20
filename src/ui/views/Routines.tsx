@@ -10,6 +10,8 @@ import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { writerNames } from "../components/Occupancy.js";
+import { changesFor } from "../changes-text.js";
+import { scheduleText } from "../schedule-text.js";
 
 const CRON_PRESETS: Array<{ label: Key; expr: string }> = [
   { label: "routines.preset.weekdays", expr: "0 9 * * 1-5" },
@@ -89,7 +91,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                     {routine.stillRunning && <Chip tone="accent">{t("routines.running")}</Chip>}
                   </div>
                   <span className="faint truncate">
-                    {routine.agentName ?? t("routines.missingAgent")} · {routine.description}
+                    {routine.agentName ?? t("routines.missingAgent")} · {scheduleText(routine.schedule, t, routine.description)}
                     {routine.enabled && routine.nextFires[0] ? ` · ${t("routines.nextAt", { time: fireTime(routine.nextFires[0], t.language) })}` : ""}
                   </span>
                 </div>
@@ -150,7 +152,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   <span className="hstack faint" style={{ fontSize: "var(--fs-sm)" }}>
                     {routine.lastRun.status === "exited" && !routine.lastRun.exitCode ? <span className="dot exited" /> : <StatusChip status={routine.lastRun.status} exitCode={routine.lastRun.exitCode} />}
                     <TimeAgo iso={routine.lastRun.startedAt} />
-                    {routine.lastRun.changes ? ` · ${routine.lastRun.changes}` : ""}
+                    {routine.lastRun.changes ? ` · ${changesFor(routine.lastRun.changes, t)}` : ""}
                   </span>
                 )}
                 <span className="grow" />
@@ -279,7 +281,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
             <div className="card" style={{ padding: "9px 12px" }}>
               {preview?.valid ? (
                 <div className="vstack" style={{ gap: 4 }}>
-                  <strong>{preview.description}</strong>
+                  <strong>{scheduleText(schedule, t, preview.description)}</strong>
                   <span className="faint">{t("routines.nextList", { times: preview.next.map((when) => fireTime(when, t.language)).join("  ·  ") })}</span>
                 </div>
               ) : (

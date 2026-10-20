@@ -27,6 +27,7 @@ import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg } from "../src/core/control.js";
 import { listenControl } from "./control.js";
+import { MainText } from "../src/core/main-text.js";
 import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
@@ -188,7 +189,8 @@ const host: DeskHost = {
   kill: (ptyId) => supervisor.kill(ptyId),
   record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
   resolveBin: (bin) => whichBin(bin),
-  notify,
+  // The core speaks English; its notes are put in the window's language here.
+  notify: (note) => notify({ ...note, body: words.coreText(note.body) }),
   finished: (run) => send("run-finished", run),
   snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
   gitHead: (cwd) => gitHead(cwd),
@@ -227,7 +229,7 @@ async function planSummary(fresh: boolean) {
   if (settings.quotaAlerts && settings.notify) {
     for (const alert of quotaAlerts.check(summary)) {
       log.info(`Plan alert: ${alert.plan} ${alert.window} at ${Math.floor(alert.percent)}%`);
-      notify(quotaNote(alert, Date.now()));
+      notify(quotaNote(alert, Date.now(), words.alerts()));
     }
   }
   return summary;
@@ -299,6 +301,18 @@ function refreshPalette(): void {
 const autostartPath = autostartFile(process.env, os.homedir());
 const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${appRoot()}"`);
 
+/** The main process's own words, in the window's language. */
+const words = new MainText();
+
+/** Follow Settings' language (or the desktop's), then rebuild the tray menu in it. */
+function syncWords(): void {
+  if (!service) return;
+  void words
+    .use(service.getSettings().language, app.getLocale())
+    .then(syncTray)
+    .catch((error: unknown) => log.warn(`Translations: ${describeError(error)}`));
+}
+
 const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.darkerBackground }, {
   open: () => focusWindow(),
   goAnywhere: () => {
@@ -323,7 +337,7 @@ const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.
     syncTray();
   },
   quit: () => void quitFromTray(),
-});
+}, words);
 
 function setAutostart(on: boolean): void {
   try {
@@ -336,7 +350,7 @@ function setAutostart(on: boolean): void {
 
 function trayState(): TrayState {
   const settings = service!.getSettings();
-  return { live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
+  return { language: words.language, live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
 }
 
 function syncTray(): void {
@@ -394,12 +408,12 @@ async function quitFromTray(): Promise<void> {
     const runs = live.filter((session) => session.kind === "run").length;
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
-      buttons: ["Quit and stop them", "Keep working"],
+      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
       defaultId: 1,
       cancelId: 1,
       title: "VibeForge",
-      message: `${live.length} terminal${live.length === 1 ? " is" : "s are"} still running.`,
-      detail: runs ? "Quitting stops them. Every run keeps its transcript and git snapshot." : "Quitting closes them.",
+      message: words.count("main.quit", live.length),
+      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
     });
     if (response !== 0) return;
   }
@@ -448,7 +462,7 @@ function handlers(): Handlers {
       const newest = service?.listWorkspaces().workspaces.at(-1)?.path;
       const start = [pickedBeside, newest && path.dirname(newest)].find((dir): dir is string => Boolean(dir && fs.existsSync(dir)));
       const options = {
-        title: title || "Choose a folder",
+        title: title || words.say("main.chooseFolder"),
         defaultPath: start ?? os.homedir(),
         properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
       };
@@ -755,7 +769,7 @@ async function createWindow(): Promise<void> {
       win?.hide();
       if (!trayNoticeShown && service.getSettings().notify) {
         trayNoticeShown = true;
-        notify({ title: "VibeForge is still running", body: "It's in the tray with your terminals and routines. Quit from its menu." });
+        notify({ title: words.say("main.stillRunning"), body: words.say("main.stillRunningBody") });
       }
       return;
     }
@@ -764,14 +778,12 @@ async function createWindow(): Promise<void> {
     if (live.length === 0) return;
     const choice = dialog.showMessageBoxSync(win!, {
       type: "question",
-      buttons: ["Quit and stop them", "Keep working"],
+      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
       defaultId: 1,
       cancelId: 1,
       title: "VibeForge",
-      message: `${live.length} terminal${live.length === 1 ? " is" : "s are"} still running.`,
-      detail: runs
-        ? "Quitting stops them. Every run keeps its transcript and git snapshot."
-        : "Quitting closes them.",
+      message: words.count("main.quit", live.length),
+      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
     });
     if (choice === 1) event.preventDefault();
     else quitting = true;
@@ -886,6 +898,7 @@ if (!app.requestSingleInstanceLock()) {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) syncTray();
       if (topics.includes("settings")) syncCompanion(companionWire());
+      if (topics.includes("settings")) syncWords();
     });
     palette = resolvePalette(service.getSettings().theme);
     syncCompanion(companionWire());
@@ -893,6 +906,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);
     syncTray();
+    syncWords();
     const hostReady = startHost();
     await createWindow();
     await hostReady;

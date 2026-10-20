@@ -14,6 +14,7 @@ import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { coreText } from "../core-text.js";
 import { expectAnswer, expectOnEnter, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
+import { changesFor } from "../changes-text.js";
 
 // ------------------------------------------------------------------ composer
 
@@ -386,7 +387,7 @@ export function SessionPane({
                 {ended[0]}
                 <TimeAgo iso={last.endedAt ?? last.startedAt} />
                 {ended[1]}
-                {last.changes ? ` · ${last.changes}` : ""}. {t("session.pickUp")}
+                {last.changes ? ` · ${changesFor(last.changes, t)}` : ""}. {t("session.pickUp")}
               </span>
               <Button size="sm" icon={History} onClick={() => go({ view: "runs", runId: last.id })}>
                 {t("session.review")}

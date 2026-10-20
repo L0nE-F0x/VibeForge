@@ -29,6 +29,7 @@ import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, Ti
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { diffFiles } from "../diff-files.js";
+import { changesFor } from "../changes-text.js";
 
 export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
   "agent-chat": "origin.agent-chat",
@@ -211,7 +212,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
           <div className="hstack">
             <h1 className="truncate">{run.title}</h1>
             <StatusChip status={run.status} exitCode={run.exitCode} />
-            {run.changes && <Chip icon={FileDiff}>{run.changes}</Chip>}
+            {run.changes && <Chip icon={FileDiff}>{changesFor(run.changes, t)}</Chip>}
           </div>
           <div className="sub truncate">
             {t(ORIGIN_KEY[run.origin])} · {engine?.label ?? run.engine} · <span className="mono">{tildify(run.cwd, home)}</span> · {t("run.started")}{" "}

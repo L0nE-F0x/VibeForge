@@ -84,11 +84,26 @@ function sameWindow(a: string | null, b: string | null): boolean {
 }
 
 /** A notification's words for an alert. `now` is for the time left until the reset. */
-export function quotaNote(alert: QuotaAlert, now: number): { title: string; body: string } {
-  const name = PLAN_NAMES[alert.plan];
-  const title = alert.step >= 100 ? `${name}: the ${alert.window} limit is reached` : `${name}: ${Math.floor(alert.percent)}% of the ${alert.window} limit used`;
+/** The words a plan alert is made of; English unless the main process passes its own (src/core/main-text.ts). */
+export interface AlertWords {
+  reached(vars: { plan: string; window: string }): string;
+  used(vars: { plan: string; window: string; percent: string }): string;
+  resets(vars: { time: string }): string;
+  days(count: number): string;
+}
+
+const ENGLISH: AlertWords = {
+  reached: ({ plan, window }) => `${plan}: the ${window} limit is reached`,
+  used: ({ plan, window, percent }) => `${plan}: ${percent}% of the ${window} limit used`,
+  resets: ({ time }) => `Resets in ${time}.`,
+  days: (count) => `${count} days`,
+};
+
+export function quotaNote(alert: QuotaAlert, now: number, words: AlertWords = ENGLISH): { title: string; body: string } {
+  const plan = PLAN_NAMES[alert.plan];
+  const title = alert.step >= 100 ? words.reached({ plan, window: alert.window }) : words.used({ plan, window: alert.window, percent: String(Math.floor(alert.percent)) });
   if (!alert.resetsAt) return { title, body: "" };
   const minutes = Math.max(1, Math.round((Date.parse(alert.resetsAt) - now) / 60_000));
-  const left = minutes < 60 ? `${minutes}m` : minutes < 48 * 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${Math.round(minutes / 60 / 24)} days`;
-  return { title, body: `Resets in ${left}.` };
+  const left = minutes < 60 ? `${minutes}m` : minutes < 48 * 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : words.days(Math.round(minutes / 60 / 24));
+  return { title, body: words.resets({ time: left }) };
 }
