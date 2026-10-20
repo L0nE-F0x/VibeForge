@@ -36,11 +36,38 @@ export interface Names {
 }
 
 /**
- * Every live coding CLI, with a handle. An agent goes by its name, a bare CLI by its engine's id;
- * a second one with the same name gets "-2", in the order they started.
+ * Handles given out while VibeForge runs. A CLI keeps its handle while it lives, and a handle is
+ * never given to another CLI, so "vibeforge tell claude-2" in an earlier message can't reach a
+ * CLI that started after the one it meant.
  */
-export function reachable(live: readonly LiveSession[], names: Names): Reachable[] {
+export class Handles {
+  private readonly byPty = new Map<string, string>();
+  private readonly given = new Set<string>();
+
+  for(ptyId: string, base: string): string {
+    const had = this.byPty.get(ptyId);
+    // Kept unless the terminal now runs something else (another CLI typed into the same shell).
+    if (had !== undefined && (had === base || (had.startsWith(`${base}-`) && /^\d+$/.test(had.slice(base.length + 1))))) return had;
+    let handle = base;
+    for (let n = 2; this.given.has(handle); n += 1) handle = `${base}-${n}`;
+    this.given.add(handle);
+    this.byPty.set(ptyId, handle);
+    return handle;
+  }
+
+  /** Lets go of the CLIs that have gone; their handles stay used. */
+  keepOnly(ptyIds: ReadonlySet<string>): void {
+    for (const ptyId of [...this.byPty.keys()]) if (!ptyIds.has(ptyId)) this.byPty.delete(ptyId);
+  }
+}
+
+/**
+ * Every live coding CLI, with a handle. An agent goes by its name, a bare CLI by its engine's id;
+ * a second one with the same name gets "-2", in the order they started (or as `handles` gave them out).
+ */
+export function reachable(live: readonly LiveSession[], names: Names, handles?: Handles): Reachable[] {
   const sessions = live.filter(isCodingCli).sort((a, b) => since(a).localeCompare(since(b)) || a.ptyId.localeCompare(b.ptyId));
+  handles?.keepOnly(new Set(sessions.map((session) => session.ptyId)));
   const taken = new Map<string, number>();
   return sessions.map((session) => {
     const engine = names.engine(session);
@@ -50,7 +77,7 @@ export function reachable(live: readonly LiveSession[], names: Names): Reachable
     taken.set(base, seen);
     const engineLabel = engine?.label ?? session.program ?? "CLI";
     return {
-      handle: seen === 1 ? base : `${base}-${seen}`,
+      handle: handles ? handles.for(session.ptyId, base) : seen === 1 ? base : `${base}-${seen}`,
       ptyId: session.ptyId,
       label: agent ? `${agent} (${engineLabel})` : engineLabel,
       engineId: engine?.id ?? session.programEngineId ?? null,

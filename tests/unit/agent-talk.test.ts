@@ -2,8 +2,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { answerFromScreen, cleanText, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
+import { answerFromScreen, cleanText, Handles, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
 import { parseTalkRequest } from "../../src/core/control.js";
+import { LogFile } from "../../src/core/log.js";
+import { listenControl } from "../../electron/control.js";
+import net from "node:net";
 import { grokTurn, kimiTurn, lastReplyIn } from "../../src/core/replies.js";
 import type { LiveSession } from "../../src/core/types.js";
 import { setup, tempDir } from "./fixtures/service-harness.js";
@@ -53,6 +56,20 @@ describe("who can be reached", () => {
     ]);
   });
 
+  it("keeps a CLI's handle while it lives and never gives it to another CLI", () => {
+    const handles = new Handles();
+    const first = reachable([session({ ptyId: "a", title: "Claude" }), session({ ptyId: "b", title: "Claude", startedAt: new Date(AT + 1000).toISOString() })], names, handles);
+    expect(first.map((item) => item.handle)).toEqual(["claude", "claude-2"]);
+    // "a" ends and "c" starts: "b" stays claude-2, and "c" doesn't take over a's address.
+    const later = reachable([session({ ptyId: "b", title: "Claude", startedAt: new Date(AT + 1000).toISOString() }), session({ ptyId: "c", title: "Claude", startedAt: new Date(AT + 2000).toISOString() })], names, handles);
+    expect(later.map((item) => [item.ptyId, item.handle])).toEqual([
+      ["b", "claude-2"],
+      ["c", "claude-3"],
+    ]);
+    // "claude" alone still finds the one Claude Code a sender means when there's only one.
+    expect(resolveTarget("claude", "b", later)).toMatchObject({ ok: true, to: { ptyId: "c" } });
+  });
+
   it("finds a target by handle, engine or name, preferring the sender's workspace", () => {
     const list = reachable(
       [session({ ptyId: "a", title: "Claude" }), session({ ptyId: "b", title: "Claude", workspaceId: "w2" }), session({ ptyId: "c", title: "Codex" })],
@@ -89,6 +106,27 @@ describe("who can be reached", () => {
     expect(parseTalkRequest('{"op":"tell","to":"codex"}')).toBeNull();
     expect(parseTalkRequest('{"op":"rm"}')).toBeNull();
     expect(parseTalkRequest("voice start")).toBeNull();
+  });
+});
+
+describe("the control socket", () => {
+  it("tells the service when a CLI hangs up before its answer", async () => {
+    const dir = tempDir();
+    const socketPath = path.join(dir, "c.sock");
+    let hungUp: () => void = () => undefined;
+    const done = new Promise<void>((resolve) => (hungUp = resolve));
+    const stop = listenControl(socketPath, new LogFile(path.join(dir, "log.txt")), () => undefined, (_request, gone) => {
+      gone.addEventListener("abort", () => hungUp());
+      return new Promise(() => undefined);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const client = net.connect(socketPath);
+    await new Promise((resolve) => client.on("connect", resolve));
+    client.write(`${JSON.stringify({ op: "tell", pty: "p", to: "x", text: "hi", wait: true })}\n`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    client.destroy();
+    await done;
+    stop();
   });
 });
 
@@ -222,6 +260,27 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("sends the answer as a message when the asking CLI stops waiting early", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.host.screen = async () => "pasty> [Message from Argy]\n\nIt is 42.\n\npasty> ";
+    const gone = new AbortController();
+    void ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "What is it?", wait: true, gone: gone.signal });
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toHaveLength(1);
+    // Its own tool gave up after two minutes and hung up.
+    pass(120_000);
+    gone.abort();
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toEqual({ ptyId: a.ptyId, text: expect.stringMatching(/^\[Message from Pasty, sent through VibeForge\][\s\S]*It is 42\./) });
+    ctx.svc.close();
+  });
+
   it("leaves the message past the limit as a draft, starts again when a person types, and stops on Stop", async () => {
     const { ctx, pass, a, b } = await twoClis();
     ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 2, reviewRounds: 1 } });
@@ -259,6 +318,65 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("doesn't paste into a CLI that has only just started and hasn't settled yet", async () => {
+    let at = AT;
+    const ctx = setup({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const a = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    at += 10_000;
+    const b = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    at += 2000;
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Hi" })).toMatchObject({ delivered: "queued" });
+    expect(ctx.sent).toEqual([]);
+    // It drew its screen and went quiet: now it's ready.
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    at += 2000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.map((item) => item.ptyId)).toEqual([b.ptyId]);
+    ctx.svc.close();
+  });
+
+  it("keeps the rest of the queue when a person presses Stop while a message is going in", async () => {
+    const { ctx, pass, workspace, a, b } = await twoClis();
+    const c = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    pass(6000);
+    for (const busy of [a, b, c]) ctx.svc.onPtyActivity(busy.ptyId, true);
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "for b" });
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "argy-2", text: "for c" });
+    await ctx.svc.tell({ fromPty: c.ptyId, to: "argy", text: "for a" });
+    for (const busy of [a, b, c]) ctx.svc.onPtyActivity(busy.ptyId, false);
+    pass(4000);
+    // While the message to b goes in, a person stops c.
+    const send = ctx.host.send;
+    ctx.host.send = async (ptyId, text, enter) => {
+      if (ptyId === b.ptyId) ctx.svc.stopTalk(c.ptyId);
+      return send(ptyId, text, enter);
+    };
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.map((item) => item.ptyId)).toEqual([b.ptyId]);
+    ctx.svc.close();
+  });
+
+  it("counts a message typed into a chat as a person stepping in", async () => {
+    let at = AT;
+    const ctx = setup({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 1, reviewRounds: 1 } });
+    const other = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    const chat = ctx.svc.createChat({ engine: "argy" });
+    const first = await ctx.svc.sendChat(chat.id, "hello");
+    at += 6000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "one" })).toMatchObject({ delivered: "sent" });
+    at += 4000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "two" })).toMatchObject({ delivered: "draft" });
+    // The person writes in the chat: the count starts again.
+    expect(await ctx.svc.sendChat(chat.id, "go on")).toMatchObject({ started: false, ptyId: first.ptyId });
+    at += 16_000;
+    expect(await ctx.svc.tell({ fromPty: other.ptyId, to: "argy", text: "three" })).toMatchObject({ delivered: "sent" });
+    ctx.svc.close();
+  });
+
   it("sends a selection to another pane as a draft for a person to send", async () => {
     const { ctx, a, b } = await twoClis();
     expect(await ctx.svc.sendDraft({ fromPty: a.ptyId, toPty: b.ptyId, what: "selection", selection: "  the bit I picked\x1b[0m " })).toEqual({ sent: true });
@@ -292,7 +410,7 @@ describe("a review loop and handing out tasks", () => {
 
     // The author is mid-turn: the review waits for it.
     ctx.svc.onPtyActivity(author.ptyId, true);
-    ctx.svc.startReview(author.ptyId, reviewer.ptyId);
+    await ctx.svc.startReview(author.ptyId, reviewer.ptyId);
     fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo");
     await ctx.svc.pumpMessages();
     expect(ctx.sent).toHaveLength(0);
@@ -335,7 +453,7 @@ describe("a review loop and handing out tasks", () => {
     const author = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
     const reviewer = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
     pass(10_000);
-    ctx.svc.startReview(author.ptyId, reviewer.ptyId);
+    await ctx.svc.startReview(author.ptyId, reviewer.ptyId);
     await ctx.svc.pumpMessages();
     expect(ctx.svc.liveForView().find((item) => item.ptyId === author.ptyId)?.talk?.review).toMatchObject({ phase: "author" });
     // Its turn: it edits, goes quiet, and the review goes out.
@@ -355,7 +473,7 @@ describe("a review loop and handing out tasks", () => {
     const quiet = await other.svc.startEngine({ workspaceId: space.id, engineId: "argy" });
     const second = await other.svc.startEngine({ workspaceId: space.id, engineId: "pasty" });
     pass(10_000);
-    other.svc.startReview(quiet.ptyId, second.ptyId);
+    await other.svc.startReview(quiet.ptyId, second.ptyId);
     await other.svc.pumpMessages();
     pass(1000);
     other.svc.onPtyActivity(quiet.ptyId, true);
@@ -366,6 +484,40 @@ describe("a review loop and handing out tasks", () => {
     expect(other.svc.liveForView().find((item) => item.ptyId === quiet.ptyId)?.talk ?? null).toBeNull();
     expect(other.sent).toEqual([]);
     other.svc.close();
+  });
+
+  it("reviews only what the author changed, not files that were already changed when it started", async () => {
+    let at = AT;
+    const repo = gitRepo();
+    // Someone's work in progress, there before the author starts.
+    fs.mkdirSync(path.join(repo, "promo"));
+    fs.writeFileSync(path.join(repo, "promo", "POST.md"), "draft\n");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nmine\n");
+    const ctx = setup({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const author = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const reviewer = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    pass(10_000);
+    // Nothing of its own yet: the review says so and waits for its next turn.
+    expect(await ctx.svc.startReview(author.ptyId, reviewer.ptyId)).toEqual({ changes: false });
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toEqual([]);
+    expect(await ctx.svc.sendDraft({ fromPty: author.ptyId, toPty: reviewer.ptyId, what: "changes" })).toEqual({ sent: false });
+    // It writes one new file and goes quiet: only that is sent.
+    ctx.svc.onPtyActivity(author.ptyId, true);
+    fs.writeFileSync(path.join(repo, "b.txt"), "new\n");
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.map((item) => item.ptyId)).toEqual([reviewer.ptyId]);
+    expect(ctx.sent[0].text).toContain("(b.txt)");
+    const patch = fs.readFileSync(/changes are in (\S+?\.patch)/.exec(ctx.sent[0].text)?.[1] ?? "", "utf8");
+    expect(patch).toContain("+new");
+    expect(patch).not.toContain("POST.md");
+    expect(patch).not.toContain("mine");
+    ctx.svc.close();
   });
 
   it("hands a task to an agent in its own copy, never the sender's folder, and only one level deep", async () => {

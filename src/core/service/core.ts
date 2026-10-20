@@ -3,7 +3,7 @@ import path from "node:path";
 import { newCompanionToken, normalizeCompanion } from "../companion.js";
 import { planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
-import { diffSince, summarizeSnapshot } from "../vcs.js";
+import { diffSince, dirtyFiles, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile } from "../run-storage.js";
@@ -34,6 +34,8 @@ export class ServiceCore {
   readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
   readonly gitAtStart = new Map<string, string>();
+  /** Per live run: the files already changed when it started, so its own changes can be told apart. */
+  readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
   private readonly undoable = new Map<string, { bin: Bin; restore: () => void; timer: ReturnType<typeof setTimeout>; settle?: () => void }>();
   private pending = new Set<Topic>();
@@ -321,6 +323,7 @@ export class ServiceCore {
     } catch {
       gitStart = null;
     }
+    this.dirtyAtStart.set(id, dirtyFiles(input.cwd).catch(() => null));
     const meta: RunMeta = {
       id,
       origin: input.origin,
@@ -361,6 +364,7 @@ export class ServiceCore {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.dirtyAtStart.delete(id);
       this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
@@ -430,6 +434,7 @@ export class ServiceCore {
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
+    this.dirtyAtStart.delete(runId);
     const finished = this.store.saveRun({
       ...latest,
       status: latest.stopRequested ? "stopped" : outcome.status,

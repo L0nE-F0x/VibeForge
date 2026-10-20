@@ -217,7 +217,7 @@ export class TeamService extends ServiceCore {
     return this.messages.who(fromPty);
   }
 
-  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number }): Promise<TellResult> {
+  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TellResult> {
     return this.messages.tell(input);
   }
 
@@ -230,8 +230,8 @@ export class TeamService extends ServiceCore {
     return this.messages.sendDraft(input);
   }
 
-  startReview(authorPty: string, reviewerPty: string): void {
-    this.messages.startReview(authorPty, reviewerPty);
+  startReview(authorPty: string, reviewerPty: string): Promise<{ changes: boolean }> {
+    return this.messages.startReview(authorPty, reviewerPty);
   }
 
   stopTalk(ptyId: string): void {
@@ -291,8 +291,11 @@ export class TeamService extends ServiceCore {
     return this.chats.deleteChat(id);
   }
 
-  sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
-    return this.chats.sendChat(id, text, size);
+  async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
+    const result = await this.chats.sendChat(id, text, size);
+    // Typed into a live session by a person, like typing in its terminal.
+    if (!result.started) this.messages.onHumanInput(result.ptyId, "\r");
+    return result;
   }
 
   /** Start an agent in a workspace it is allowed to use, with its brief. */

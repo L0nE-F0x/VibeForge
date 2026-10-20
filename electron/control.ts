@@ -13,7 +13,8 @@ export function listenControl(
   socketPath: string,
   log: LogFile,
   onVoice: (action: VoiceAction) => void,
-  onTalk: (request: TalkRequest) => Promise<unknown>,
+  /** `gone` aborts when the asker hangs up before its answer (a CLI's tool timed out, say). */
+  onTalk: (request: TalkRequest, gone: AbortSignal) => Promise<unknown>,
 ): () => void {
   // A socket left by a crashed run would make listen fail; nothing else could be using this path.
   try {
@@ -24,6 +25,11 @@ export function listenControl(
   const server = net.createServer((socket) => {
     let buffer = "";
     let answering = false;
+    let answered = false;
+    const gone = new AbortController();
+    socket.on("close", () => {
+      if (!answered) gone.abort();
+    });
     socket.setEncoding("utf8");
     const handle = (line: string) => {
       if (!line.trim().startsWith("{")) {
@@ -34,8 +40,9 @@ export function listenControl(
       if (answering) return;
       answering = true;
       const request = parseTalkRequest(line);
-      const reply = request ? onTalk(request).catch((error: unknown) => ({ ok: false, error: describeError(error) })) : Promise.resolve({ ok: false, error: "That request isn't one VibeForge knows." });
+      const reply = request ? onTalk(request, gone.signal).catch((error: unknown) => ({ ok: false, error: describeError(error) })) : Promise.resolve({ ok: false, error: "That request isn't one VibeForge knows." });
       void reply.then((answer) => {
+        answered = true;
         if (!socket.destroyed) socket.end(`${JSON.stringify(answer)}\n`);
       });
     };
