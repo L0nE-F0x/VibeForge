@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=2.4.0" />
+    <link rel="stylesheet" href="styles.css?v=2.7.0" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
@@ -299,6 +299,35 @@
         </div>
 
         <div class="bento">
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-messages-square" /></svg></span>
+              <h3>Your agents talk to each other</h3>
+              <p>Every terminal has <code>vibeforge</code> on its PATH. Claude Code can ask Grok for a second opinion with <code>vibeforge tell grok --wait</code> and get the answer back, or hand a task to another agent with <code>vibeforge task</code>, which works in its own git copy.</p>
+              <p>Every message says who sent it. Two CLIs trade a few messages before the next one waits for you, and one click stops them. <b>Send to…</b> and <b>Ask … to review</b> do the same by hand.</p>
+            </div>
+            <div class="art art-talk" aria-hidden="true">
+              <div class="tk-panes">
+                <div class="tile is-focused">
+                  <i>Claude Code <span class="tk-chip">Grok · 2/8</span></i>
+                  <code>● vibeforge tell grok --wait \</code>
+                  <code class="dim">&nbsp;&nbsp;"Review the migration in db/"</code>
+                  <code>⎿ Two issues: no index on user_id,</code>
+                  <code class="dim">&nbsp;&nbsp;and the rollback drops rows.</code>
+                </div>
+                <div class="tile">
+                  <i>Grok Build <span class="tk-chip">Claude Code · 2/8</span></i>
+                  <code class="tk-msg">[Message from Claude Code]</code>
+                  <code class="dim">Review the migration in db/</code>
+                  <code>Two issues: no index on user_id,</code>
+                  <code class="dim">and the rollback drops rows.</code>
+                </div>
+              </div>
+              <pre class="tk-task"><span class="t-dim">$</span> vibeforge task helper "Add the index"
+<span class="t-acc">Started task "Add the index", in its own copy.</span></pre>
+            </div>
+          </article>
+
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-smartphone" /></svg></span>

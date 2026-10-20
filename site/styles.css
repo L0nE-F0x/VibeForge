@@ -2009,6 +2009,55 @@ h2 {
   }
 }
 
+/* talk: two CLIs in Code trading a message, and a task handed out (src/ui/components/TalkMenu.tsx) */
+
+.art-talk {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tk-panes {
+  display: flex;
+  gap: 7px;
+  min-height: 132px;
+}
+
+.tk-panes .tile i {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tk-chip {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.tile code.tk-msg {
+  color: var(--accent-2);
+}
+
+.tk-task {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--fg-2);
+  font: 11px/1.6 var(--mono);
+  white-space: pre-wrap;
+}
+
+/* A phone has room for one pane across: the two stack. */
+@media (max-width: 640px) {
+  .tk-panes {
+    flex-direction: column;
+  }
+}
+
 /* phone: the phone page, as a paired phone shows the desk (companion/app.css) */
 
 .card.full {
