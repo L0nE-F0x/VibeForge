@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parse, stringify } from "yaml";
+import { DEFAULT_MAX_MESSAGES } from "./agent-talk.js";
 import { defaultCompanion, normalizeCompanion } from "./companion.js";
 import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
 import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
@@ -118,6 +119,7 @@ export function defaultSettings(): Settings {
     rail: { order: [], hidden: [] },
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
+    agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1 },
   };
 }
 
@@ -274,6 +276,7 @@ function normalizeTask(id: string, value: unknown): Task | null {
     copy: workingCopy(record.copy),
     shareCheckout: record.shareCheckout === true,
     sourceRunId: strOrNull(record.sourceRunId),
+    askedBy: strOrNull(record.askedBy),
     createdAt: str(record.createdAt),
     updatedAt: str(record.updatedAt),
   };
@@ -565,6 +568,11 @@ export class Store {
         maxMb: count(raw.keepRuns?.maxMb, 1_000_000, defaults.keepRuns.maxMb),
       },
       companion: normalizeCompanion(raw.companion),
+      agentTalk: {
+        on: bool(raw.agentTalk?.on, defaults.agentTalk.on),
+        maxMessages: Math.max(1, count(raw.agentTalk?.maxMessages, 50, defaults.agentTalk.maxMessages)),
+        reviewRounds: Math.max(1, count(raw.agentTalk?.reviewRounds, 5, defaults.agentTalk.reviewRounds)),
+      },
     };
   }
 

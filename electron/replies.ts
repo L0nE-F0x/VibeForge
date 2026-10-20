@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { claudeLogCwd, claudeProjectDir, claudeTurn, codexDayDir, codexLogCwd, codexTurn, type ReplyLog, type Turn } from "../src/core/replies.js";
+import { claudeLogCwd, claudeProjectDir, claudeTurn, codexDayDir, codexLogCwd, codexTurn, grokSessionsDir, grokTurn, kimiStateCwd, kimiTurn, lastReplyIn, type ReplyLog, type Turn } from "../src/core/replies.js";
 
 const POLL_MS = 700;
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -31,6 +31,36 @@ function readFrom(file: string, offset: number): { text: string; size: number } 
   }
 }
 
+function subdirs(dir: string): string[] {
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(dir, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function recentFile(file: string, since: number): boolean {
+  try {
+    return fs.statSync(file).mtimeMs >= since - RECENT_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Grok Build keeps the messages and the turns in two files, so each recent session is read whole. */
+function grokTurns(opts: { home: string; cwd: string; since: number; words: string }): Turn[] {
+  return subdirs(grokSessionsDir(opts.home, opts.cwd))
+    .filter((session) => recentFile(path.join(session, "events.jsonl"), opts.since))
+    .map((session) => {
+      const history = readFrom(path.join(session, "chat_history.jsonl"), 0)?.text ?? "";
+      const events = readFrom(path.join(session, "events.jsonl"), 0)?.text ?? "";
+      return grokTurn(history.slice(-KEEP_BYTES), events.slice(-KEEP_BYTES), opts.since, opts.words);
+    });
+}
+
 function head(file: string): string {
   return readFrom(file, 0)?.text.slice(0, 32 * 1024) ?? "";
 }
@@ -53,6 +83,71 @@ function recentJsonl(dir: string, since: number, prefix = ""): string[] {
   }
 }
 
+/** The session logs `kind` may have written in `cwd` since `since`; `cwdOk` remembers which files were checked. */
+function logFiles(opts: { kind: ReplyLog; home: string; cwd: string; since: number }, cwdOk: Map<string, boolean>): string[] {
+  if (opts.kind === "kimi") {
+    const root = path.join(process.env.KIMI_CODE_HOME || path.join(opts.home, ".kimi-code"), "sessions");
+    return subdirs(root)
+      .flatMap(subdirs)
+      .filter((session) => {
+        if (!cwdOk.has(session)) cwdOk.set(session, kimiStateCwd(readFrom(path.join(session, "state.json"), 0)?.text ?? "") === opts.cwd);
+        return cwdOk.get(session);
+      })
+      .flatMap((session) => subdirs(path.join(session, "agents")).map((agent) => path.join(agent, "wire.jsonl")))
+      .filter((file) => recentFile(file, opts.since));
+  }
+  if (opts.kind === "claude") {
+    const dir = claudeProjectDir(opts.home, opts.cwd);
+    if (fs.existsSync(dir)) return recentJsonl(dir, opts.since);
+    // A folder name Claude Code spells differently: find its logs by the cwd written inside them.
+    const root = path.join(opts.home, ".claude", "projects");
+    let dirs: string[] = [];
+    try {
+      dirs = fs.readdirSync(root).map((name) => path.join(root, name));
+    } catch {
+      return [];
+    }
+    return dirs.flatMap((folder) => recentJsonl(folder, opts.since)).filter((file) => {
+      if (!cwdOk.has(file)) cwdOk.set(file, claudeLogCwd(head(file)) === opts.cwd);
+      return cwdOk.get(file);
+    });
+  }
+  const now = new Date();
+  const days = [now, new Date(now.getTime() - 24 * 60 * 60 * 1000)].map((date) => codexDayDir(opts.home, date));
+  return [...new Set(days)].flatMap((dir) => recentJsonl(dir, opts.since, "rollout-")).filter((file) => {
+    if (!cwdOk.has(file)) cwdOk.set(file, codexLogCwd(head(file)) === opts.cwd);
+    return cwdOk.get(file);
+  });
+}
+
+/**
+ * The CLI's latest finished answer in `cwd`, from the session log written to most recently since
+ * `since`. Null when there is none yet.
+ */
+export function lastReply(opts: { kind: ReplyLog; home: string; cwd: string; since: number }): string | null {
+  if (opts.kind === "grok") {
+    const session = subdirs(grokSessionsDir(opts.home, opts.cwd))
+      .filter((dir) => recentFile(path.join(dir, "events.jsonl"), opts.since))
+      .sort((a, b) => mtime(path.join(b, "events.jsonl")) - mtime(path.join(a, "events.jsonl")))[0];
+    if (!session) return null;
+    const history = readFrom(path.join(session, "chat_history.jsonl"), 0)?.text ?? "";
+    const events = readFrom(path.join(session, "events.jsonl"), 0)?.text ?? "";
+    return lastReplyIn("grok", history.slice(-KEEP_BYTES), events.slice(-KEEP_BYTES));
+  }
+  const file = logFiles(opts, new Map()).sort((a, b) => mtime(b) - mtime(a))[0];
+  if (!file) return null;
+  const size = mtime(file) ? fs.statSync(file).size : 0;
+  return lastReplyIn(opts.kind, readFrom(file, Math.max(0, size - KEEP_BYTES))?.text ?? "");
+}
+
+function mtime(file: string): number {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Waits for the answer to a prompt sent from `cwd` at or after `since`, reading the CLI's own
  * session logs as they grow. Resolves with the reply's text, or null on timeout or abort.
@@ -61,32 +156,10 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
   const tails = new Map<string, Tail>();
   const cwdOk = new Map<string, boolean>();
   const started = Date.now();
-  const parse = (text: string): Turn => (opts.kind === "claude" ? claudeTurn(text, opts.since, opts.words) : codexTurn(text, opts.since, opts.words));
+  const parse = (text: string): Turn =>
+    opts.kind === "claude" ? claudeTurn(text, opts.since, opts.words) : opts.kind === "kimi" ? kimiTurn(text, opts.since, opts.words) : codexTurn(text, opts.since, opts.words);
 
-  const candidates = (): string[] => {
-    if (opts.kind === "claude") {
-      const dir = claudeProjectDir(opts.home, opts.cwd);
-      if (fs.existsSync(dir)) return recentJsonl(dir, opts.since);
-      // A folder name Claude Code spells differently: find its logs by the cwd written inside them.
-      const root = path.join(opts.home, ".claude", "projects");
-      let dirs: string[] = [];
-      try {
-        dirs = fs.readdirSync(root).map((name) => path.join(root, name));
-      } catch {
-        return [];
-      }
-      return dirs.flatMap((folder) => recentJsonl(folder, opts.since)).filter((file) => {
-        if (!cwdOk.has(file)) cwdOk.set(file, claudeLogCwd(head(file)) === opts.cwd);
-        return cwdOk.get(file);
-      });
-    }
-    const now = new Date();
-    const days = [now, new Date(now.getTime() - 24 * 60 * 60 * 1000)].map((date) => codexDayDir(opts.home, date));
-    return [...new Set(days)].flatMap((dir) => recentJsonl(dir, opts.since, "rollout-")).filter((file) => {
-      if (!cwdOk.has(file)) cwdOk.set(file, codexLogCwd(head(file)) === opts.cwd);
-      return cwdOk.get(file);
-    });
-  };
+  const candidates = (): string[] => logFiles(opts, cwdOk);
 
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout | null = null;
@@ -100,8 +173,8 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
 
     const poll = () => {
       if (opts.signal.aborted) return;
-      const turns: Turn[] = [];
-      for (const file of candidates()) {
+      const turns: Turn[] = opts.kind === "grok" ? grokTurns(opts) : [];
+      for (const file of opts.kind === "grok" ? [] : candidates()) {
         let tail = tails.get(file);
         if (!tail) {
           let size = 0;

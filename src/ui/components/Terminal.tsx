@@ -18,6 +18,8 @@ export interface TerminalHandle {
   focus(): void;
   /** Insert text the way a paste would (bracketed when the program asked for it). */
   paste(text: string): void;
+  /** The text selected in the terminal, or "". */
+  selection(): string;
 }
 
 /**
@@ -164,6 +166,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       termRef.current?.paste(text);
       termRef.current?.focus();
     },
+    selection: () => termRef.current?.getSelection() ?? "",
   }));
 
   useEffect(() => {

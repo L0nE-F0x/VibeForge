@@ -16,12 +16,15 @@ import { t as translate, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { routeForMark, useAction, useNav } from "../state.js";
 import { railKey, type RailView } from "../rail.js";
+import { changesFor } from "../changes-text.js";
+import { scheduleText } from "../schedule-text.js";
 
 const DAYS = 14;
 /** Waiting rows painted on Home before "and N more"; eight is the point, this is a backstop. */
 const WAITING_ROWS = 24;
 
 export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
+  const t = useT();
   const engines = useEngines().data ?? [];
   const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
   // The dot says how it went; a chip only for what didn't simply finish.
@@ -43,7 +46,7 @@ export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunV
         )}
         <span className="meta truncate">
           {kind}
-          {run.changes ? ` · ${run.changes}` : ""}
+          {run.changes ? ` · ${changesFor(run.changes, t)}` : ""}
           {!compact && (
             <>
               {" · "}
@@ -368,7 +371,7 @@ export function HomeView() {
                       <span className="vstack grow" style={{ gap: 1 }}>
                         <span className="title truncate">{routine.name}</span>
                         <span className="meta truncate">
-                          {routine.agentName ?? t("home.next.missingAgent")} · {routine.description}
+                          {routine.agentName ?? t("home.next.missingAgent")} · {scheduleText(routine.schedule, t, routine.description)}
                         </span>
                       </span>
                       <span className="meta">{time(at)}</span>

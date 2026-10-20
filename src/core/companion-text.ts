@@ -5,8 +5,8 @@ import { en } from "../ui/i18n/en.js";
 // a language that is missing one fails the typecheck like the rest of the app. The page asks for
 // them once; errors the server sends back are translated here.
 
-type Key = keyof typeof en;
-type Catalog = { readonly [K in Key]: string };
+export type Key = keyof typeof en;
+export type Catalog = { readonly [K in Key]: string };
 
 export const PHONE_LANGUAGES = ["en", "de", "es", "fr", "pt", "ja", "zh"] as const;
 export type PhoneLanguage = (typeof PHONE_LANGUAGES)[number];
@@ -22,7 +22,8 @@ const LOADERS: Record<Exclude<PhoneLanguage, "en">, () => Promise<Catalog>> = {
 
 const catalogs = new Map<PhoneLanguage, Promise<Catalog>>([["en", Promise.resolve(en)]]);
 
-function catalog(language: PhoneLanguage): Promise<Catalog> {
+/** One language's catalog, loaded once; English when it can't be. */
+export function catalog(language: PhoneLanguage): Promise<Catalog> {
   let found = catalogs.get(language);
   if (!found) {
     found = LOADERS[language as Exclude<PhoneLanguage, "en">]().catch(() => en);
@@ -46,7 +47,7 @@ export function phoneLanguage(setting: string, acceptLanguage: string | undefine
   return "en";
 }
 
-function fill(text: string, vars?: Record<string, string>): string {
+export function fill(text: string, vars?: Record<string, string>): string {
   if (!vars) return text;
   return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
 }

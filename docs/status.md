@@ -1,8 +1,45 @@
-# Status — 2026-10-12
+# Status — 2026-10-20
+
+## Copies by default, the last English, Ctrl+K over text (2026-10-20, `feat/copies-words-search`)
+
+From the backlog review.
+
+- **Copies.** A new task's form leaves `isolated` unset and shows it on when `workspaces.branches` says the workspace is a repository (it follows the workspace picked). Switching it either way sticks. Existing tasks, Hand off and `vibeforge task` keep their own rules. The 2.0 design's condition for this (a real Claude Code copy executed, applied and conflicted) was met during 2.0's checks.
+- **The main process speaks the window's language.** `src/core/main-text.ts` (`MainText`) loads the catalog for Settings' language (or `app.getLocale()` for "system") through `companion-text.ts`'s loader, and is reloaded when Settings change. The tray menu and tooltip (`TrayState.language` rebuilds it), both quit questions, the tray notice and the folder picker's title use it. Notifications the core sends are translated part by part (" · ") in `host.notify`: the core's own words through `matchCoreText` (new `core.run*`, `core.failedInRow`, `core.couldntStart`, `core.waitingFor`), git's summaries through `src/shared/changes.ts`. Plan alerts take `AlertWords` (English by default).
+- **Change summaries** (`parseChanges` / `changesText`) become "2 Commits · 3 Dateien +10 −1 · 1 neue Datei" in the window (`changesFor`: run rows, the run's chip, tasks, routines, the chat's pick-up line); an unknown text stays as it is. The phone page still shows them as the core wrote them.
+- **Schedules** (`src/ui/schedule-text.ts`): intervals from the catalogs (`schedule.every*`, plural forms), cron through cronstrue's own `de`, `es`, `fr`, `ja`, `pt_BR` and `zh_CN` locales, 12- or 24-hour as `Intl` says for the language. The core's English `description` stays as the fallback.
+- **Ctrl+K** (`Switcher.tsx`): items carry `text` (a task's body, a routine's prompt, a skill's body); with no match in the name, three letters or more found in it list the item below every name, with a snippet (`textSnippet` in `fuzzy.ts`).
+- Checked: `npm test` (267), typecheck, lint, and the worktree build headless: Routines in German ("Um 18:00, Montag bis Freitag", "Alle 2 Stunden"), Ctrl+K finding a task by a word in its details, and a new task in a git workspace opening with the copy switch on.
+
+## Agents together (2026-10-20, `feat/agents-together`)
+
+The founder's top item from the backlog review: two live CLIs talking, all three planned stages plus agents handing out tasks (decided 2026-10-20).
+
+- **Core.** `src/core/agent-talk.ts` (pure): `reachable` names every live coding CLI (an agent by its name, a bare CLI by its engine id, `-2` for a second one, by start time); `resolveTarget` takes a handle, engine id, label or agent name and prefers the sender's workspace; `messageText`, `reviewRequestText` and `reviewReplyText` are the words; `answerFromScreen` finds what a CLI wrote after a message, skipping the message's last line even when it wraps. `src/core/service/messages.ts` (`MessageDesk`, behind `TeamService`) queues messages per terminal and delivers one when its CLI isn't working, went quiet 1.5 s ago, wasn't sent anything in the last 3 s, and no person is halfway through typing (15 s since a key without Enter). It runs every second while anything is in flight; a `pump()` call during a pass waits for it and one more.
+- **Answers.** `--wait` watches the CLI's own log through `DeskHost.watchReply` (`electron/replies.ts`, now with Grok Build's `chat_history.jsonl` plus `events.jsonl` and Kimi Code's `wire.jsonl`, found by the session's `state.json` cwd). A CLI with no readable log is read from its screen once it has worked and been quiet `SETTLE_MS` (4 s); one with a log falls back to the screen after 30 s quiet with nothing in the log. Past the deadline (9 minutes by default, so a CLI's 10-minute tool timeout isn't hit) the sender is told, and the answer follows as a message. Talk-back gained Grok and Kimi too (`replyLogFor`). Checked on this machine's real logs: the latest three Grok and three Kimi sessions each gave an answer.
+- **Limits.** Messages are counted per pair of terminals; at `agentTalk.maxMessages` (8) the next one is pasted without Enter and the sender is told why. Anything the window writes to a terminal (`pty.write`, `pty.send`) is a person: it resets that terminal's counts and lifts a Stop. **Stop** drops the queue and waits to and from that terminal, clears its counts and refuses new messages until a person types there. Long texts (over 8000 characters) go in a file under `<data>/messages/` and the CLI gets the path; review patches go under `<data>/reviews/`; each keeps its newest 40.
+- **Review loop.** `startReview(author, reviewer)`: once the author's turn has ended (quiet `SETTLE_MS`; after the first round it must also have worked since), its diff since the run started (`diffSince` with the run's `gitStart`) is written to a patch file and the reviewer is asked to review it read-only. The reviewer's answer goes back to the author as a message; `agentTalk.reviewRounds` (1) rounds, then it ends. Asked before the author has changed anything, it waits for the author's next turn; a turn that ends with nothing changed ends it.
+- **Tasks.** `handTask` makes a task for an agent in the sender's workspace with `askedBy` (new on `Task`, shown on the sheet) and `isolated: true`, then executes it in its copy. Not a git repository, `--no-start`, a start that fails, or three running tasks from the same sender: it stays in To do and the CLI is told why. A run of a task that was handed out can't hand out more.
+- **The command.** `scripts/vibeforge tell|who|task|help` runs `scripts/talk.mjs`, which sends one JSON line over the control socket and prints the answer (exit 0, 1 refused, 2 usage, 3 still waiting). `electron/control.ts` answers JSON lines (up to 512 KB, `parseTalkRequest`) beside the voice lines. Each terminal gets `VIBEFORGE_PTY` (its id, set by the PTY host) and `VIBEFORGE_SOCKET`, and `<data>/bin/vibeforge` (a link to `scripts/vibeforge`) goes first on the terminals' PATH. The agent preamble gains an "Other agents" section while talking is on.
+- **Window.** `TalkButton` (`src/ui/components/TalkMenu.tsx`) on a live coding CLI's title bar: with more than one other CLI it asks which first (`MenuItem.keepOpen`), then Its last answer / The selected text / Its changes / Ask … to review its changes. A draft brings the other pane forward. `TalkChip` shows "Beta · 1/8", a review's step, or a held limit in amber, with a stop button. **Settings → Agents together** (`TalkCard`): the switch, the limit and the rounds. All text in 7 languages.
+- Checked: `npm test` (276), typecheck, lint, coverage floor, and the worktree build driven headless with two stand-in CLIs (one started from Code's button, one typed into a shell): `vibeforge who`, `tell --wait` answered from the screen, `task` asked by Alpha, Send to… landing a labelled draft and focusing that pane, the menu's items, the chips, Stop clearing them and refusing the next `tell` (exit 1), Settings → Agents together, and a full review round on a git workspace (patch file with the edit, the review back in the author, over 9 s after the fix). Not tried with real Claude Code or Codex sending the commands themselves.
+
+## Backlog review (2026-10-20)
+
+The founder asked for a review of everything parked. Decided: agent collaboration in full (Send to…, `vibeforge tell` with `--wait`, the review loop) plus agents creating tasks for each other in their own copy; new tasks in their own copy by default; the last English strings and Ctrl+K over tasks, skills and routines; a small-fixes PR; cleanup. The locked-phone buzz is parked (Web Push needs Apple's or Google's push servers). Skipped from Muse's ideas: runs side by side, per-agent stats, workspace templates. The handoffs, audits and design notes that sat untracked in the checkout are in `docs/archive/` (ignored by git).
+
+Small fixes (`fix/turns-and-notices`):
+
+- **Routine notices.** `ServiceCore.notifyFinished` is public and says `couldn't start: <reason>` for a failed run without an exit code. A routine's failed start (`recordFailedStart`, or a spawn failure found after `fire` threw, or a queued start that failed) goes through it, so the third failure in a row is announced like any other. A due slot that queues sends one note, "waiting for <who> to finish" (`RoutineDesk.tell`, which respects Settings and the routine's own switch; Run now's failure note now does too).
+- **First screen keeps the turn.** `hasTurn` is true for a task or routine run that has never gone quiet (no `quietAt`): the trust or sign-in question an unattended CLI may be on. Code panes and chats are unchanged, so an unused pane still doesn't hold a folder.
+- **Empty Apply.** `TaskDesk.applyCopy` removes the copy and marks the task done whenever there are no conflicts, including an empty patch (`tasks.applyNothing` says so in 7 languages).
+- Already fixed, re-checked: a Codex log line no longer replaces a newer online plan reading (`summaryNow` compares the log's own time), and the side browser is clipped to the stage when panned (`clipBox` in `CodeParts.tsx`).
+- Checked: `npm test` (264).
+
 
 ## 2.5.0: a UI pass from an audit (2026-10-12)
 
-Claude wrote a UI audit of 2.4.0 (`docs/ui-audit-2026-10-12.md`, untracked: 5 high, 10 medium, 9 low findings, with screenshots in `~/Pictures/VibeForge UI audit 2026-10-12/`). The founder asked for all of it. Branch `feat/ui-audit`, one commit per area:
+Claude wrote a UI audit of 2.4.0 (`docs/archive/ui-audit-2026-10-12.md`, kept locally: 5 high, 10 medium, 9 low findings, with screenshots in `~/Pictures/VibeForge UI audit 2026-10-12/`). The founder asked for all of it. Branch `feat/ui-audit`, one commit per area:
 
 - **Narrow tiles.** `useNarrowStage()` (`SidePanel.tsx`) says when `.stage` is under 860px. List panels then render as their strip without saving that, and the expand button floats the panel over the work area (`.list-panel-slot.is-floating`; Esc, the shade or picking a row closes it). Code's side panel follows the same flag (`narrowSide`). The pan floor (`--screen-floor`) is 560px now, down from 920. The board goes 2×2 under 800px of stage (container query). The Tour's selectors moved to `.list-panel-slot > .list-panel`.
 - **Settings.** `src/ui/settings-sections.ts` lists the 14 sections (`settings-<id>` anchors). Settings has a sticky list that follows the scroll (hidden under 1000px of stage), and the route takes `section` (Ctrl+K, the rail's Customize, voice's "set up dictation"). It is cleared after landing, so going back later doesn't jump.
@@ -39,10 +76,10 @@ The Tokens tab had today and a 7-day chart. It now has **Today · Week · Month 
 
 ## 2.2.0: an outside audit, checked and worked through (2026-10-07)
 
-Muse Code wrote an audit of the tree (`AUDIT.md`, untracked). Claude checked each claim against the code before acting:
+Muse Code wrote an audit of the tree (`docs/archive/AUDIT-muse-2026-10-07.md`, kept locally). Claude checked each claim against the code before acting:
 
 - **Wrong or overstated.** "Rewording an error silently breaks translation": `tests/unit/core-text.test.ts` already failed on any untranslated `throw new Error`. "The service layer has no tests": nothing imported `src/core/service/` directly, but `TeamService` drove it to about 89% of lines. "Errors leave no trail": page errors reach `vibeforge.log` through `console-message`. The companion tests it called failing passed (223). Its error-code migration and big file splits were left out on purpose.
-- **Missed.** Both medium items from `docs/audit.md` (2026-10-01) were still open. They are fixed now.
+- **Missed.** Both medium items from `docs/archive/audit-2026-10-01.md` (2026-10-01) were still open. They are fixed now.
 
 What changed:
 
@@ -76,7 +113,7 @@ Grok built the prototype; Claude reviewed it and fixed what the review found.
 
 ## 2.0: agents take turns, and every waiter has a name (2026-10-01)
 
-Planned in `docs/design-2.0.md` (written with Grok, reviewed and adjusted by Claude; the differences are listed at the end of this section).
+Planned in `docs/archive/design-2.0.md` (kept locally; written with Grok, reviewed and adjusted by Claude; the differences are listed at the end of this section).
 
 - **1.3.1, a task's copy is confined.** Discard, Apply, Execute and delete only stage or remove `<data>/worktrees/<task id>`, by name and after following symlinks (`ownedCopyPath` in `src/core/worktrees.ts`). Any other copy path loads, shows on the task sheet as untrusted with **Forget it**, and is never touched. Tested with real git: the path pointing at the checkout, a symlink at the right name, and a copy already gone.
 - **The site's privacy card** now says the release check goes online; the installer stops instead of falling back to `main`.

@@ -1,0 +1,396 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { answerFromScreen, cleanText, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
+import { parseTalkRequest } from "../../src/core/control.js";
+import { grokTurn, kimiTurn, lastReplyIn } from "../../src/core/replies.js";
+import type { LiveSession } from "../../src/core/types.js";
+import { setup, tempDir } from "./fixtures/service-harness.js";
+
+const AT = Date.parse("2026-10-20T09:00:00Z");
+
+function session(over: Partial<LiveSession>): LiveSession {
+  return {
+    ptyId: "p",
+    runId: null,
+    kind: "run",
+    title: "Argy",
+    cwd: "/w",
+    pid: 1,
+    startedAt: new Date(AT).toISOString(),
+    origin: "code",
+    agentId: null,
+    chatId: null,
+    taskId: null,
+    workspaceId: "w1",
+    ...over,
+  };
+}
+
+const names: Names = {
+  agent: (id) => (id === "a1" ? "Notes" : null),
+  engine: (s) => (s.title.startsWith("Codex") ? { id: "codex", label: "Codex" } : { id: "claude", label: "Claude Code" }),
+};
+
+describe("who can be reached", () => {
+  it("names CLIs by agent or engine, numbering the second of a name by when it started", () => {
+    const list = reachable(
+      [
+        session({ ptyId: "b", title: "Claude", startedAt: new Date(AT + 2000).toISOString() }),
+        session({ ptyId: "a", title: "Claude" }),
+        session({ ptyId: "c", title: "Codex" }),
+        session({ ptyId: "d", title: "Claude", agentId: "a1" }),
+        session({ ptyId: "e", kind: "shell", title: "bash" }),
+      ],
+      names,
+    );
+    expect(list.map((item) => [item.ptyId, item.handle, item.label])).toEqual([
+      ["a", "claude", "Claude Code"],
+      ["c", "codex", "Codex"],
+      ["d", "notes", "Notes (Claude Code)"],
+      ["b", "claude-2", "Claude Code"],
+    ]);
+  });
+
+  it("finds a target by handle, engine or name, preferring the sender's workspace", () => {
+    const list = reachable(
+      [session({ ptyId: "a", title: "Claude" }), session({ ptyId: "b", title: "Claude", workspaceId: "w2" }), session({ ptyId: "c", title: "Codex" })],
+      names,
+    );
+    expect(resolveTarget("codex", "a", list)).toMatchObject({ ok: true, to: { ptyId: "c" } });
+    expect(resolveTarget("Claude-2", "c", list)).toMatchObject({ ok: true, to: { ptyId: "b" } });
+    expect(resolveTarget("claude", "a", list)).toEqual({ ok: false, reason: "self", options: [] });
+    // From codex in w1, "claude" could be either, but only one is in w1.
+    expect(resolveTarget("claude-code", "c", list)).toMatchObject({ ok: true, to: { ptyId: "a" } });
+    expect(resolveTarget("claude-code", null, list)).toMatchObject({ ok: false, reason: "ambiguous", options: ["claude", "claude-2"] });
+    expect(resolveTarget("grok", "a", list)).toMatchObject({ ok: false, reason: "none" });
+  });
+
+  it("labels a message with its sender and how to answer, and keeps keys out of it", () => {
+    expect(messageText({ fromLabel: "Codex", fromHandle: "codex", text: "Look at a.ts", answer: "tell" })).toBe(
+      '[Message from Codex, sent through VibeForge]\nLook at a.ts\n\n(To answer, run: vibeforge tell codex "your answer")',
+    );
+    expect(messageText({ fromLabel: "Codex", fromHandle: "codex", text: "x", answer: "wait" })).toContain("is waiting for your answer");
+    expect(messageText({ fromLabel: "Codex", fromHandle: null, text: "x", answer: "none" })).toBe("From Codex:\nx");
+    expect(cleanText("a\x1b[201~\x1b[31mred\x03\r\nnext")).toBe("a[31mred\nnext");
+    expect(screenTail("one\n\n\n\ntwo   \n\n")).toBe("one\n\ntwo");
+    const sent = messageText({ fromLabel: "Alpha", fromHandle: "alpha", text: "What is it?", answer: "wait" });
+    // The footer wraps at 40 columns on this screen.
+    const screen = `$ beta\nold stuff\n[Message from Alpha, sent through VibeForge]\nWhat is it?\n\n(Alpha is waiting for your answer: just\nreply here when you're done, it goes back\nto them.)\nthinking\nIt is 42.\n> `;
+    expect(answerFromScreen(screen, sent)).toBe("thinking\nIt is 42.\n>");
+    expect(answerFromScreen("just the answer\n", sent)).toBe("just the answer");
+  });
+
+  it("reads requests from vibeforge tell, who and task, and nothing else", () => {
+    expect(parseTalkRequest('{"op":"tell","pty":"p1","to":"codex","text":"hi","wait":true,"timeoutMs":60000}')).toEqual({ op: "tell", pty: "p1", to: "codex", text: "hi", wait: true, timeoutMs: 60000 });
+    expect(parseTalkRequest('{"op":"who"}')).toEqual({ op: "who", pty: null });
+    expect(parseTalkRequest('{"op":"task","agent":"notes","text":"do it","start":false}')).toMatchObject({ op: "task", start: false, wait: false });
+    expect(parseTalkRequest('{"op":"tell","to":"codex"}')).toBeNull();
+    expect(parseTalkRequest('{"op":"rm"}')).toBeNull();
+    expect(parseTalkRequest("voice start")).toBeNull();
+  });
+});
+
+describe("answers from Grok Build and Kimi Code logs", () => {
+  it("reads a Grok turn from its history and events", () => {
+    const history = [
+      { type: "system", content: "sys" },
+      { type: "user", content: [{ type: "text", text: "Old question" }] },
+      { type: "assistant", content: "Old answer", tool_calls: [] },
+      { type: "user", content: [{ type: "text", text: "[Message from Codex, sent through VibeForge]\nReview this" }] },
+      { type: "assistant", content: "Looking.", tool_calls: [{}] },
+      { type: "user", content: [{ type: "text", text: "tool output" }], synthetic_reason: "tool" },
+      { type: "assistant", content: "Two bugs: a and b.", tool_calls: [] },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join("\n");
+    const events = (ended: boolean) =>
+      [
+        { ts: new Date(AT - 60_000).toISOString(), type: "turn_started" },
+        { ts: new Date(AT - 50_000).toISOString(), type: "turn_ended" },
+        { ts: new Date(AT + 1000).toISOString(), type: "turn_started" },
+        ...(ended ? [{ ts: new Date(AT + 9000).toISOString(), type: "turn_ended" }] : []),
+      ]
+        .map((row) => JSON.stringify(row))
+        .join("\n");
+    expect(grokTurn(history, events(false), AT, "[Message from Codex")).toEqual({ prompted: true, matched: true, reply: null });
+    expect(grokTurn(history, events(true), AT, "[Message from Codex")).toEqual({ prompted: true, matched: true, reply: "Two bugs: a and b." });
+    expect(lastReplyIn("grok", history, events(true))).toBe("Two bugs: a and b.");
+  });
+
+  it("reads a Kimi turn from wire.jsonl", () => {
+    const rows = [
+      { type: "turn.prompt", turnId: 0, input: [{ type: "text", text: "First" }], time: AT - 10_000 },
+      { type: "agent.message.appended", message: { message: { role: "assistant", content: [{ type: "text", text: "First answer" }] } } },
+      { type: "turn.ended", turnId: 0, time: AT - 9000 },
+      { type: "turn.prompt", turnId: 1, input: [{ type: "text", text: "Second" }], time: AT + 1000 },
+      { type: "agent.message.appended", message: { message: { role: "assistant", content: [{ type: "think", think: "hm" }, { type: "text", text: "Let me look." }] } } },
+      { type: "agent.message.appended", message: { message: { role: "tool", content: [{ type: "text", text: "output" }] } } },
+      { type: "agent.message.appended", message: { message: { role: "assistant", content: [{ type: "text", text: "Done: it works." }] } } },
+    ];
+    const log = rows.map((row) => JSON.stringify(row)).join("\n");
+    expect(kimiTurn(log, AT, "Second")).toEqual({ prompted: true, matched: true, reply: null });
+    expect(lastReplyIn("kimi", log)).toBe("First answer");
+    const ended = `${log}\n${JSON.stringify({ type: "turn.ended", turnId: 1, time: AT + 5000 })}`;
+    expect(kimiTurn(ended, AT, "Second").reply).toBe("Done: it works.");
+    expect(lastReplyIn("kimi", ended)).toBe("Done: it works.");
+  });
+});
+
+/** A clock the test moves by hand, and two CLIs open in one workspace. */
+async function twoClis() {
+  let at = AT;
+  const ctx = setup({ now: () => new Date(at) });
+  const pass = (ms: number) => (at += ms);
+  const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+  const a = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+  const b = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+  pass(5000);
+  return { ctx, pass, workspace, a, b };
+}
+
+describe("CLIs talking through VibeForge", () => {
+  it("delivers a labelled message once the other CLI is free, and says when it is queued", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    expect(ctx.svc.whoIsHere(a.ptyId)).toMatchObject({ you: "argy", clis: [{ handle: "argy", you: true }, { handle: "pasty", you: false }] });
+
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Hello" })).toEqual({ ok: true, to: "pasty", delivered: "sent", note: undefined });
+    expect(ctx.sent).toEqual([{ ptyId: b.ptyId, text: '[Message from Argy, sent through VibeForge]\nHello\n\n(To answer, run: vibeforge tell argy "your answer")' }]);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ with: ["Argy"], messages: 1, max: 8, held: false });
+
+    // Busy: told at once that it's queued, delivered once it has been quiet a moment.
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Second" })).toMatchObject({ ok: true, delivered: "queued" });
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toHaveLength(1);
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent[1].text).toContain("Second");
+
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "argy", text: "me" })).toEqual({ ok: false, error: "That's you." });
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "grok", text: "hi" })).toMatchObject({ ok: false, error: expect.stringMatching(/No CLI called "grok".*Running now: pasty/) });
+    ctx.svc.close();
+  });
+
+  it("waits for the answer and reads it from the screen when the CLI keeps no log VibeForge reads", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.host.screen = async () => "pasty> [Message from Argy]\n\nThe answer is 42.\n\npasty> ";
+    const asked = ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "What is it?", wait: true });
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent[0].text).toContain("Argy is waiting for your answer");
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    await ctx.svc.pumpMessages();
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(await asked).toMatchObject({ ok: true, delivered: "sent", fromScreen: true, reply: expect.stringContaining("The answer is 42.") });
+    ctx.svc.close();
+  });
+
+  it("uses the CLI's own log when it has one, and forwards a late answer as a message", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    let answer: (reply: string) => void = () => undefined;
+    const watched: Array<{ kind: string; words: string }> = [];
+    ctx.host.watchReply = (opts) =>
+      new Promise((resolve) => {
+        watched.push({ kind: opts.kind, words: opts.words });
+        answer = resolve;
+      });
+    // Make the target a Codex CLI, whose log VibeForge reads.
+    const rows = JSON.parse(fs.readFileSync(path.join(ctx.configRoot, "engines.json"), "utf8"));
+    rows.engines.push({ id: "codex", label: "Codex", bin: "argy", args: [] });
+    fs.writeFileSync(path.join(ctx.configRoot, "engines.json"), JSON.stringify(rows));
+    const workspace = ctx.svc.listWorkspaces().workspaces[0];
+    const codex = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "codex" });
+    pass(5000);
+    const asked = ctx.svc.tell({ fromPty: a.ptyId, to: "codex", text: "Review it", wait: true, timeoutMs: 10_000 });
+    await ctx.svc.pumpMessages();
+    expect(watched).toEqual([{ kind: "codex", words: "[Message from Argy, sent through VibeForge]" }]);
+    pass(11_000);
+    await ctx.svc.pumpMessages();
+    expect(await asked).toMatchObject({ ok: true, timedOut: true, reply: null });
+    // The answer comes later: it goes to Argy as a message.
+    answer("Looks fine.");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toEqual({ ptyId: a.ptyId, text: expect.stringContaining("[Message from Codex, sent through VibeForge]\nLooks fine.") });
+    expect(b.ptyId).not.toBe(codex.ptyId);
+    ctx.svc.close();
+  });
+
+  it("leaves the message past the limit as a draft, starts again when a person types, and stops on Stop", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 2, reviewRounds: 1 } });
+    for (const text of ["one", "two"]) {
+      await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text });
+      pass(4000);
+    }
+    const third = await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "three" });
+    expect(third).toMatchObject({ ok: true, delivered: "draft", note: expect.stringContaining("2 messages") });
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: a.ptyId, enter: false });
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === a.ptyId)?.talk).toMatchObject({ held: true });
+
+    // Pressing Enter on it is a person stepping in.
+    ctx.svc.onHumanInput(a.ptyId, "\r");
+    pass(4000);
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "four" })).toMatchObject({ delivered: "sent" });
+
+    ctx.svc.stopTalk(a.ptyId);
+    expect(ctx.svc.liveForView().map((item) => item.talk ?? null)).toEqual([null, null]);
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "five" })).toMatchObject({ ok: false, error: expect.stringContaining("stopped") });
+    ctx.svc.onHumanInput(a.ptyId, "x");
+    pass(4000);
+    // Typing without Enter holds messages back for a while, so they don't land in a half-written prompt.
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "six" })).toMatchObject({ delivered: "queued" });
+    pass(15_000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)?.text).toContain("six");
+
+    ctx.svc.saveSettings({ agentTalk: { on: false, maxMessages: 2, reviewRounds: 1 } });
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "seven" })).toMatchObject({ ok: false, error: expect.stringContaining("turned off") });
+    ctx.svc.close();
+  });
+
+  it("sends a selection to another pane as a draft for a person to send", async () => {
+    const { ctx, a, b } = await twoClis();
+    expect(await ctx.svc.sendDraft({ fromPty: a.ptyId, toPty: b.ptyId, what: "selection", selection: "  the bit I picked\x1b[0m " })).toEqual({ sent: true });
+    expect(ctx.sent).toEqual([{ ptyId: b.ptyId, text: "From Argy:\nthe bit I picked[0m", enter: false }]);
+    expect(await ctx.svc.sendDraft({ fromPty: a.ptyId, toPty: b.ptyId, what: "selection", selection: " " })).toEqual({ sent: false });
+    ctx.svc.close();
+  });
+});
+
+function gitRepo(): string {
+  const repo = tempDir();
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" });
+  git("init", "-q");
+  fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+  git("add", "a.txt");
+  git("commit", "-qm", "init");
+  return repo;
+}
+
+describe("a review loop and handing out tasks", () => {
+  it("has the reviewer read the author's changes when its turn ends, and brings the review back", async () => {
+    let at = AT;
+    const repo = gitRepo();
+    const ctx = setup({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const author = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const reviewer = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    ctx.host.screen = async (ptyId) => (ptyId === reviewer.ptyId ? "Findings: a.txt lost its newline." : "");
+    pass(5000);
+
+    // The author is mid-turn: the review waits for it.
+    ctx.svc.onPtyActivity(author.ptyId, true);
+    ctx.svc.startReview(author.ptyId, reviewer.ptyId);
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo");
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toHaveLength(0);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === author.ptyId)?.talk?.review).toMatchObject({ role: "author", phase: "author", other: "Pasty" });
+    ctx.svc.onPtyActivity(author.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toHaveLength(1);
+    expect(ctx.sent[0].ptyId).toBe(reviewer.ptyId);
+    const patchPath = /changes are in (\S+?\.patch)/.exec(ctx.sent[0].text)?.[1] ?? "";
+    expect(fs.readFileSync(patchPath, "utf8")).toContain("+two");
+    expect(ctx.sent[0].text).toContain("Don't change any files");
+
+    // The reviewer works, goes quiet: its findings go to the author, and one round is the end.
+    ctx.svc.onPtyActivity(reviewer.ptyId, true);
+    pass(1000);
+    ctx.svc.onPtyActivity(reviewer.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent[1]).toEqual({ ptyId: author.ptyId, text: expect.stringContaining("[Review of your changes from Pasty, sent through VibeForge]\nFindings: a.txt lost its newline.") });
+    ctx.svc.onPtyActivity(author.ptyId, true);
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === author.ptyId)?.talk ?? null).toBeNull();
+    expect(ctx.sent).toHaveLength(2);
+    ctx.svc.close();
+  });
+
+  it("waits for the author's next turn when asked before it has changed anything", async () => {
+    let at = AT;
+    const repo = gitRepo();
+    const ctx = setup({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const author = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const reviewer = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    pass(10_000);
+    ctx.svc.startReview(author.ptyId, reviewer.ptyId);
+    await ctx.svc.pumpMessages();
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === author.ptyId)?.talk?.review).toMatchObject({ phase: "author" });
+    // Its turn: it edits, goes quiet, and the review goes out.
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, true);
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n");
+    pass(1000);
+    ctx.svc.onPtyActivity(author.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.map((item) => item.ptyId)).toEqual([reviewer.ptyId]);
+    ctx.svc.close();
+
+    // A turn that ends with nothing changed ends it.
+    const other = setup({ now: () => new Date(at) });
+    const space = other.svc.addWorkspace(gitRepo()).workspaces[0];
+    const quiet = await other.svc.startEngine({ workspaceId: space.id, engineId: "argy" });
+    const second = await other.svc.startEngine({ workspaceId: space.id, engineId: "pasty" });
+    pass(10_000);
+    other.svc.startReview(quiet.ptyId, second.ptyId);
+    await other.svc.pumpMessages();
+    pass(1000);
+    other.svc.onPtyActivity(quiet.ptyId, true);
+    pass(1000);
+    other.svc.onPtyActivity(quiet.ptyId, false);
+    pass(SETTLE_MS + 100);
+    await other.svc.pumpMessages();
+    expect(other.svc.liveForView().find((item) => item.ptyId === quiet.ptyId)?.talk ?? null).toBeNull();
+    expect(other.sent).toEqual([]);
+    other.svc.close();
+  });
+
+  it("hands a task to an agent in its own copy, never the sender's folder, and only one level deep", async () => {
+    const repo = gitRepo();
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+    const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+
+    const result = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Write the tests for a.txt\nKeep them small." });
+    expect(result).toMatchObject({ ok: true, title: "Write the tests for a.txt", started: true });
+    const task = ctx.svc.listTasks()[0];
+    expect(task).toMatchObject({ askedBy: "Pasty", isolated: true, status: "running", workspaceId: workspace.id });
+    expect(task.body).toContain("Asked by Pasty.");
+    const run = ctx.spawns.at(-1)!;
+    expect(run.cwd).toBe(path.join(ctx.dataRoot, "worktrees", task.id));
+
+    // The task's own CLI can't hand out more.
+    const taskPty = ctx.svc.listLive().find((item) => item.taskId === task.id)!.ptyId;
+    expect(await ctx.svc.handTask({ fromPty: taskPty, agent: "helper", text: "More" })).toMatchObject({ ok: false, error: expect.stringContaining("can't hand out tasks") });
+    expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "nobody", text: "x" })).toMatchObject({ ok: false, error: expect.stringContaining("Agents: helper") });
+    expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Later", start: false })).toMatchObject({ ok: true, started: false });
+
+    // Not a repository: no copy, so it waits in To do for a person.
+    const plain = tempDir();
+    const plainSpace = ctx.svc.addWorkspace(plain).workspaces.find((item) => item.path === plain)!;
+    await ctx.svc.saveAgent({ name: "Plain", brief: "b", engine: "argy", places: [plain] });
+    const there = await ctx.svc.startEngine({ workspaceId: plainSpace.id, engineId: "pasty" });
+    expect(await ctx.svc.handTask({ fromPty: there.ptyId, agent: "plain", text: "Tidy" })).toMatchObject({ ok: true, started: false, note: expect.stringContaining("isn't a git repository") });
+    ctx.svc.close();
+  });
+});

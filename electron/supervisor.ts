@@ -164,8 +164,8 @@ export class PtySupervisor {
     await this.request({ op: "write", ptyId, data });
   }
 
-  async send(ptyId: string, text: string): Promise<void> {
-    await this.request({ op: "send", ptyId, text });
+  async send(ptyId: string, text: string, enter = true): Promise<void> {
+    await this.request({ op: "send", ptyId, text, enter });
   }
 
   /** The foreground program right now. `known: false` means the read failed, not that the shell is back. */

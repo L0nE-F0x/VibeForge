@@ -33,7 +33,9 @@ import type {
   Schedule,
   Settings,
   Skill,
+  AgentTalkSettings,
   SoundSettings,
+  TalkState,
   TaskStatus,
   Topic,
   VoiceSettings,
@@ -81,10 +83,12 @@ export type {
   Skill,
   SkillInput,
   TaskInput,
+  TalkState,
   TaskStatus,
   TaskView,
   TermSize,
   Topic,
+  AgentTalkSettings,
   SoundSettings,
   VoiceSettings,
   WorkspaceFile,
@@ -392,6 +396,13 @@ export interface DeskMethods {
 
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
+
+  /** Send to…: a pane's last answer, selection or changes, left as a draft in another pane. False when there was nothing to send. */
+  "talk.sendDraft": (fromPty: string, toPty: string, what: "reply" | "selection" | "changes", selection?: string) => { sent: boolean };
+  /** Review with…: once the author's turn ends, the reviewer reads its changes and the review goes back to it. */
+  "talk.review": (authorPty: string, reviewerPty: string) => void;
+  /** Stop messages to and from this terminal until a person types in it. */
+  "talk.stop": (ptyId: string) => void;
   "pty.resize": (ptyId: string, cols: number, rows: number) => void;
   "pty.snapshot": (ptyId: string) => PtySnapshot;
   "pty.kill": (ptyId: string) => void;

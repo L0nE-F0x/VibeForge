@@ -3,6 +3,7 @@ import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
 import type { Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
 import type { Writer } from "../checkout.js";
+import type { ReplyLog } from "../replies.js";
 import type { Waiting } from "./turns.js";
 
 // ------------------------------------------------------------------ host contract
@@ -20,8 +21,14 @@ export interface SpawnRequest {
 
 export interface DeskHost {
   spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number }>;
-  /** Paste text into a live session and press Enter. */
-  send(ptyId: string, text: string): Promise<void>;
+  /** Paste text into a live session and press Enter, or (`enter` false) leave it there for a person to send. */
+  send(ptyId: string, text: string, enter?: boolean): Promise<void>;
+  /** What a live terminal shows now, as plain text, with its scrollback. */
+  screen?(ptyId: string): Promise<string>;
+  /** The answer to a prompt sent at or after `since`, from the CLI's own session log; null on abort or timeout. */
+  watchReply?(opts: { kind: ReplyLog; cwd: string; since: number; words: string; signal: AbortSignal }): Promise<string | null>;
+  /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */
+  lastReply?(opts: { kind: ReplyLog; cwd: string; since: number }): Promise<string | null>;
   kill(ptyId: string): Promise<void>;
   /** Record a shell's terminal into a run folder from now on, or (null) stop and write its files. */
   record(ptyId: string, runDir: string | null): Promise<void>;

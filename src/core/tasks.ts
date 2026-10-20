@@ -12,6 +12,7 @@ export interface CreateTaskInput {
   isolated?: boolean;
   shareCheckout?: boolean;
   sourceRunId?: string | null;
+  askedBy?: string | null;
   now?: Date;
 }
 
@@ -42,6 +43,7 @@ export function createTask(input: CreateTaskInput): Task {
     copy: null,
     shareCheckout: input.shareCheckout ?? false,
     sourceRunId: input.sourceRunId ?? null,
+    askedBy: input.askedBy ?? null,
     createdAt: now,
     updatedAt: now,
   };

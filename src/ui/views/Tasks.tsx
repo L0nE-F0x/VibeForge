@@ -1,4 +1,4 @@
-import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
@@ -12,6 +12,7 @@ import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
+import { changesFor } from "../changes-text.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
   { status: "todo", label: "tasks.col.todo" },
@@ -120,7 +121,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
                         <span className="hstack faint" style={{ fontSize: "var(--fs-sm)" }}>
                           <span className={`dot ${task.lastRun.status}`} />
                           <span className="truncate">
-                            {task.lastRun.live ? t("status.running") : task.lastRun.changes ?? t(STATUS_KEY[task.lastRun.status])} · <TimeAgo iso={task.lastRun.endedAt ?? task.lastRun.startedAt} />
+                            {task.lastRun.live ? t("status.running") : changesFor(task.lastRun.changes, t) ?? t(STATUS_KEY[task.lastRun.status])} · <TimeAgo iso={task.lastRun.endedAt ?? task.lastRun.startedAt} />
                           </span>
                         </span>
                       )}
@@ -172,12 +173,14 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     body: task?.body ?? "",
     agentId: task ? (task.agentId ?? "") : (firstAgent?.id ?? ""),
     workspaceId: task ? (task.workspaceId ?? "") : ((firstAgent && workspaces.find((item) => allows(firstAgent, item.path))) ?? workspaces[0])?.id ?? "",
-    isolated: task?.isolated ?? false,
+    // A new task leaves this unset until it's switched: it then works in its own copy whenever the workspace is a git repository.
+    isolated: task ? task.isolated : (undefined as boolean | undefined),
     shareCheckout: task?.shareCheckout ?? false,
   });
   const { title, body, agentId, workspaceId } = form;
-  // A draft kept before copies existed has no `isolated`.
-  const isolated = form.isolated ?? false;
+  const repo = useQuery(!task && workspaceId ? `branches:${workspaceId}` : null, ["workspaces"], () => call("workspaces.branches", workspaceId));
+  // A draft kept before copies existed has no `isolated` either.
+  const isolated = form.isolated ?? (task ? task.isolated : Boolean(repo.data?.repo));
   const setIsolated = (next: boolean) => setForm((prev) => ({ ...prev, isolated: next }));
   // A draft kept before 2.0 has no `shareCheckout`.
   const shareCheckout = form.shareCheckout ?? false;
@@ -342,6 +345,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             </div>
           </Notice>
         )}
+        {task?.askedBy && <Notice icon={MessagesSquare}>{t("tasks.askedBy", { name: task.askedBy })}</Notice>}
         {task && !task.waiting && !live && !task.isolated && task.writers.length > 0 && (
           <Notice icon={Hourglass}>
             {t(task.writers.some((writer) => writer.busy) ? "turns.busyHere" : "turns.idleHere", { names: writerNames(task.writers, agents) })}

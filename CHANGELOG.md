@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Agents together.** A coding CLI in any VibeForge terminal can now talk to the others: `vibeforge who` lists them, `vibeforge tell <name> "…"` pastes a message into another CLI once it is free (labelled with who sent it and how to answer), and `vibeforge tell --wait` brings the answer back, from the session logs of Claude Code, Codex, Grok Build and Kimi Code, or from the screen for other CLIs. An answer that takes longer than the wait arrives later as a message.
+- **Hand out tasks.** `vibeforge task <agent> "…"` gives a VibeForge agent a task that runs in its own git copy of the workspace, never in the asking CLI's folder. The task says who asked for it, a person still applies its changes, and a task handed out this way can't hand out more. Agents that VibeForge starts are told about these commands.
+- **Send to… and review.** The send button on a Code terminal's title bar puts that CLI's last answer, the selected text or its changes into another CLI's prompt as a draft, and **Ask … to review its changes** has another CLI review the diff when this one's turn ends, then sends the review back.
+- **Limits you can see.** Two CLIs can trade 8 messages before the next one waits in the prompt for you to press Enter, and typing in either terminal starts the count again. A chip on the title bar shows who a CLI is talking with, and its stop button ends it. **Settings → Agents together** turns it all off or changes the message limit and the review rounds.
+- **Ctrl+K finds what things say.** Typing three letters or more also finds a task by its details, a routine by its prompt and a skill by its procedure, with the words around the match.
+
+### Changed
+
+- **New tasks work in their own copy.** A new task in a git workspace starts with **Work in a separate copy** on, so its agent never edits the folder you or another agent are in. Switch it off on the task to work in the workspace itself; existing tasks keep their setting.
+- **Everything in your language.** The tray menu, the quit question, the "still running in the tray" notice, desktop notifications for tasks and routines, plan alerts, schedule descriptions (on your language's clock) and git's change summaries ("2 files +10 −1") now follow VibeForge's language.
+
+### Fixed
+
+- **A routine that can't start says so.** When a scheduled routine fails before its CLI runs (its folder or CLI is gone, or the CLI won't spawn), you now get the same desktop notification as a run that ended, with the reason, and the third failure in a row still says so once.
+- **A routine waiting its turn says so.** A due routine that waits for another coding CLI in its folder sends one notification for that slot, naming who it is waiting for.
+- **A task or routine on a trust or sign-in question keeps its folder.** Until it has started working, other waiting work doesn't start in the same folder, so nothing lands while the question is still up.
+- **Applying a copy with no changes tidies it away.** The copy is removed and the task is marked done, instead of staying until you discard it.
+
 ## [2.6.2] - 2026-10-16
 
 **2.6.2: Gemini and Gemini 4 Argon plan limits, and Antigravity CLI token counts.**

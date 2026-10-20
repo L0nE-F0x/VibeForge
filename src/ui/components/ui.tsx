@@ -517,6 +517,8 @@ export interface MenuItem {
   /** Stands out in the accent colour, for the one thing worth noticing (an available update). */
   accent?: boolean;
   disabled?: boolean;
+  /** A step inside the menu (picking where to go next), so choosing it doesn't close the menu. */
+  keepOpen?: boolean;
 }
 
 /**
@@ -600,7 +602,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
             disabled={item.disabled}
             style={item.danger ? { color: "var(--red)" } : undefined}
             onClick={() => {
-              onClose();
+              if (!item.keepOpen) onClose();
               item.onSelect();
             }}
           >

@@ -35,7 +35,7 @@ export function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot
     }),
   );
   const spawns: SpawnRequest[] = [];
-  const sent: Array<{ ptyId: string; text: string }> = [];
+  const sent: Array<{ ptyId: string; text: string; enter?: boolean }> = [];
   const killed: string[] = [];
   const notes: Array<{ title: string; body: string }> = [];
   const ended: Array<{ runId: string; origin: string; outcome: string }> = [];
@@ -48,8 +48,8 @@ export function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot
       spawns.push(request);
       return { ptyId: `pty-${n}`, pid: 1000 + n };
     },
-    async send(ptyId, text) {
-      sent.push({ ptyId, text });
+    async send(ptyId, text, enter) {
+      sent.push(enter === false ? { ptyId, text, enter } : { ptyId, text });
     },
     async kill(ptyId) {
       killed.push(ptyId);

@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 
 // The control socket: how `vibeforge --voice start` reaches the running window in a few
-// milliseconds, instead of starting a second Electron only to be handed off. One per data folder,
+// milliseconds, instead of starting a second Electron only to be handed off, and how
+// `vibeforge tell|who|task` from a CLI in one of its terminals reaches the others. One per data folder,
 // so a test instance with its own VIBEFORGE_DATA never answers for the real one. scripts/vibeforge
 // works out the same path in bash; keep the two in step.
 
@@ -20,6 +21,44 @@ export function parseControl(line: string): VoiceAction | null {
   const match = /^\s*voice\s+(\w+)\s*$/.exec(line);
   const action = match?.[1] as VoiceAction | undefined;
   return action && VOICE_ACTIONS.includes(action) ? action : null;
+}
+
+/** A request from `vibeforge tell|who|task` (scripts/talk.mjs): one JSON line. */
+export type TalkRequest =
+  | { op: "who"; pty: string | null }
+  | { op: "tell"; pty: string | null; to: string; text: string; wait: boolean; timeoutMs?: number }
+  | { op: "task"; pty: string | null; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number };
+
+/** The largest request line: a long message is still one line of JSON. */
+export const TALK_REQUEST_MAX = 512 * 1024;
+
+const text = (value: unknown, max: number): string | null => (typeof value === "string" && value.length <= max ? value : null);
+const duration = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(value, 24 * 60 * 60 * 1000) : undefined;
+
+export function parseTalkRequest(line: string): TalkRequest | null {
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const pty = text(raw.pty, 200) || null;
+  if (raw.op === "who") return { op: "who", pty };
+  const body = text(raw.text, TALK_REQUEST_MAX);
+  if (!body) return null;
+  if (raw.op === "tell") {
+    const to = text(raw.to, 200);
+    return to ? { op: "tell", pty, to, text: body, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) } : null;
+  }
+  if (raw.op === "task") {
+    const agent = text(raw.agent, 200);
+    if (!agent) return null;
+    return { op: "task", pty, agent, text: body, title: text(raw.title, 200) ?? undefined, start: raw.start !== false, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) };
+  }
+  return null;
 }
 
 /** `--voice start` (or `--voice=start`) among a second instance's arguments. */

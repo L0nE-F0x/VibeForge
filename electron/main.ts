@@ -25,8 +25,10 @@ import { TrayIcon, type TrayState } from "./tray.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
-import { controlSocketPath, voiceArg } from "../src/core/control.js";
+import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
+import { lastReply, watchReply } from "./replies.js";
 import { listenControl } from "./control.js";
+import { MainText } from "../src/core/main-text.js";
 import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
@@ -184,11 +186,15 @@ const host: DeskHost = {
       throw error;
     }
   },
-  send: (ptyId, text) => supervisor.send(ptyId, text),
+  send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
+  screen: async (ptyId) => (await supervisor.snapshot(ptyId)).plain,
+  watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
+  lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
   kill: (ptyId) => supervisor.kill(ptyId),
   record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
   resolveBin: (bin) => whichBin(bin),
-  notify,
+  // The core speaks English; its notes are put in the window's language here.
+  notify: (note) => notify({ ...note, body: words.coreText(note.body) }),
   finished: (run) => send("run-finished", run),
   snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
   gitHead: (cwd) => gitHead(cwd),
@@ -227,7 +233,7 @@ async function planSummary(fresh: boolean) {
   if (settings.quotaAlerts && settings.notify) {
     for (const alert of quotaAlerts.check(summary)) {
       log.info(`Plan alert: ${alert.plan} ${alert.window} at ${Math.floor(alert.percent)}%`);
-      notify(quotaNote(alert, Date.now()));
+      notify(quotaNote(alert, Date.now(), words.alerts()));
     }
   }
   return summary;
@@ -299,6 +305,18 @@ function refreshPalette(): void {
 const autostartPath = autostartFile(process.env, os.homedir());
 const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${appRoot()}"`);
 
+/** The main process's own words, in the window's language. */
+const words = new MainText();
+
+/** Follow Settings' language (or the desktop's), then rebuild the tray menu in it. */
+function syncWords(): void {
+  if (!service) return;
+  void words
+    .use(service.getSettings().language, app.getLocale())
+    .then(syncTray)
+    .catch((error: unknown) => log.warn(`Translations: ${describeError(error)}`));
+}
+
 const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.darkerBackground }, {
   open: () => focusWindow(),
   goAnywhere: () => {
@@ -323,7 +341,7 @@ const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.
     syncTray();
   },
   quit: () => void quitFromTray(),
-});
+}, words);
 
 function setAutostart(on: boolean): void {
   try {
@@ -336,7 +354,7 @@ function setAutostart(on: boolean): void {
 
 function trayState(): TrayState {
   const settings = service!.getSettings();
-  return { live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
+  return { language: words.language, live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
 }
 
 function syncTray(): void {
@@ -394,12 +412,12 @@ async function quitFromTray(): Promise<void> {
     const runs = live.filter((session) => session.kind === "run").length;
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
-      buttons: ["Quit and stop them", "Keep working"],
+      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
       defaultId: 1,
       cancelId: 1,
       title: "VibeForge",
-      message: `${live.length} terminal${live.length === 1 ? " is" : "s are"} still running.`,
-      detail: runs ? "Quitting stops them. Every run keeps its transcript and git snapshot." : "Quitting closes them.",
+      message: words.count("main.quit", live.length),
+      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
     });
     if (response !== 0) return;
   }
@@ -448,7 +466,7 @@ function handlers(): Handlers {
       const newest = service?.listWorkspaces().workspaces.at(-1)?.path;
       const start = [pickedBeside, newest && path.dirname(newest)].find((dir): dir is string => Boolean(dir && fs.existsSync(dir)));
       const options = {
-        title: title || "Choose a folder",
+        title: title || words.say("main.chooseFolder"),
         defaultPath: start ?? os.homedir(),
         properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
       };
@@ -613,8 +631,18 @@ function handlers(): Handlers {
     "voice.forget": (ptyId) => talk.forget(typeof ptyId === "string" ? ptyId : undefined),
     "voice.installBindings": () => voice.installBindings(),
 
-    "pty.write": (ptyId, data) => supervisor.write(ptyId, data),
-    "pty.send": (ptyId, text) => supervisor.send(ptyId, text),
+    // Anything the window writes is a person: typing, a paste, dictation, the Write box.
+    "pty.write": (ptyId, data) => {
+      service?.onHumanInput(ptyId, data);
+      return supervisor.write(ptyId, data);
+    },
+    "pty.send": (ptyId, text) => {
+      service?.onHumanInput(ptyId, "\r");
+      return supervisor.send(ptyId, text);
+    },
+    "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
+    "talk.review": (authorPty, reviewerPty) => s().startReview(authorPty, reviewerPty),
+    "talk.stop": (ptyId) => s().stopTalk(ptyId),
     "pty.resize": (ptyId, cols, rows) => supervisor.resize(ptyId, cols, rows),
     "pty.snapshot": (ptyId) => supervisor.snapshot(ptyId),
     "pty.kill": (ptyId) => s().killPty(ptyId),
@@ -755,7 +783,7 @@ async function createWindow(): Promise<void> {
       win?.hide();
       if (!trayNoticeShown && service.getSettings().notify) {
         trayNoticeShown = true;
-        notify({ title: "VibeForge is still running", body: "It's in the tray with your terminals and routines. Quit from its menu." });
+        notify({ title: words.say("main.stillRunning"), body: words.say("main.stillRunningBody") });
       }
       return;
     }
@@ -764,14 +792,12 @@ async function createWindow(): Promise<void> {
     if (live.length === 0) return;
     const choice = dialog.showMessageBoxSync(win!, {
       type: "question",
-      buttons: ["Quit and stop them", "Keep working"],
+      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
       defaultId: 1,
       cancelId: 1,
       title: "VibeForge",
-      message: `${live.length} terminal${live.length === 1 ? " is" : "s are"} still running.`,
-      detail: runs
-        ? "Quitting stops them. Every run keeps its transcript and git snapshot."
-        : "Quitting closes them.",
+      message: words.count("main.quit", live.length),
+      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
     });
     if (choice === 1) event.preventDefault();
     else quitting = true;
@@ -794,9 +820,46 @@ async function createWindow(): Promise<void> {
 /** Why the terminal host is down, for a page that loads after it happened. */
 let hostError: string | null = null;
 
+/** A request from `vibeforge tell|who|task` in one of the terminals. */
+async function answerTalk(request: TalkRequest): Promise<unknown> {
+  if (!service) return { ok: false, error: "VibeForge is still starting." };
+  if (request.op === "who") return { ok: true, ...service.whoIsHere(request.pty) };
+  if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs });
+  return service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
+}
+
+/**
+ * What every terminal starts with: the control socket, and `vibeforge` on PATH (a link to
+ * scripts/vibeforge in the data folder), so a CLI in any terminal can run `vibeforge tell`.
+ */
+function terminalEnv(): NodeJS.ProcessEnv {
+  const env = childEnv(process.env);
+  env.VIBEFORGE_SOCKET = voice.status().controlSocket;
+  const bin = path.join(roots.dataRoot, "bin");
+  const target = path.join(appRoot(), "scripts", "vibeforge");
+  try {
+    fs.mkdirSync(bin, { recursive: true });
+    const link = path.join(bin, "vibeforge");
+    let current: string | null = null;
+    try {
+      current = fs.readlinkSync(link);
+    } catch {
+      /* not made yet */
+    }
+    if (fs.existsSync(target) && current !== target) {
+      fs.rmSync(link, { force: true });
+      fs.symlinkSync(target, link);
+    }
+    env.PATH = `${bin}${path.delimiter}${env.PATH ?? ""}`;
+  } catch (error) {
+    log.warn(`Could not put vibeforge on the terminals' PATH: ${describeError(error)}`);
+  }
+  return env;
+}
+
 async function startHost(): Promise<void> {
   try {
-    await supervisor.start(appRoot(), childEnv(process.env));
+    await supervisor.start(appRoot(), terminalEnv());
     hostError = null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -886,6 +949,7 @@ if (!app.requestSingleInstanceLock()) {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) syncTray();
       if (topics.includes("settings")) syncCompanion(companionWire());
+      if (topics.includes("settings")) syncWords();
     });
     palette = resolvePalette(service.getSettings().theme);
     syncCompanion(companionWire());
@@ -893,12 +957,13 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);
     syncTray();
+    syncWords();
     const hostReady = startHost();
     await createWindow();
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig();
-    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }));
+    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), answerTalk);
     win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
     refreshTrayHost();

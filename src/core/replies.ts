@@ -2,8 +2,9 @@ import path from "node:path";
 
 // Talking back: finding what an agent answered, and turning it into something worth hearing.
 // A CLI's own session log says it better than its screen does: Claude Code keeps one JSONL file
-// per session under ~/.claude/projects, Codex under ~/.codex/sessions. Pure; electron/replies.ts
-// watches the files.
+// per session under ~/.claude/projects, Codex under ~/.codex/sessions, Grok Build under
+// ~/.grok/sessions and Kimi Code under ~/.kimi-code/sessions. Pure; electron/replies.ts watches
+// the files.
 
 export interface Turn {
   /** A prompt was sent after the time asked about. */
@@ -170,13 +171,129 @@ export function codexTurn(log: string, since: number, words = ""): Turn {
   return { prompted: true, matched, reply: null };
 }
 
+// ------------------------------------------------------------------ Grok Build
+
+/** Grok Build's folder of sessions for a working directory: the directory, percent-encoded. */
+export function grokSessionsDir(home: string, cwd: string): string {
+  return path.join(home, ".grok", "sessions", encodeURIComponent(cwd));
+}
+
+function plainText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((block) => (typeof block === "string" ? block : typeof (block as { text?: unknown })?.text === "string" ? String((block as { text: string }).text) : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * A Grok Build session: `chat_history.jsonl` holds the messages without times, `events.jsonl` the
+ * turns with them. The turn that started at or after `since` has ended once a "turn_ended" follows
+ * it; the reply is the last assistant text after the prompt (the one mentioning `words`, else the
+ * last typed one). Rows Grok adds itself carry a `synthetic_reason` and are not prompts.
+ */
+export function grokTurn(history: string, events: string, since: number, words = ""): Turn {
+  const turns = parseLines(events);
+  const started = turns.findIndex((row) => row.type === "turn_started" && Date.parse(String(row.ts ?? "")) >= since);
+  if (started < 0) return NO_TURN;
+  const ended = turns.slice(started + 1).some((row) => row.type === "turn_ended");
+  const rows = parseLines(history);
+  const prompts = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.type === "user" && !row.synthetic_reason && plainText(row.content).trim());
+  const hit = words ? [...prompts].reverse().find(({ row }) => mentions(plainText(row.content), words)) : undefined;
+  const prompt = hit ?? prompts[prompts.length - 1];
+  const matched = Boolean(hit);
+  if (!prompt || !ended) return { prompted: true, matched, reply: null };
+  let reply = "";
+  for (const row of rows.slice(prompt.index + 1)) if (row.type === "assistant" && plainText(row.content).trim()) reply = plainText(row.content);
+  return { prompted: true, matched, reply: reply.trim() };
+}
+
+// ------------------------------------------------------------------ Kimi Code
+
+/** The working directory a Kimi Code session ran in, from the session's state.json. */
+export function kimiStateCwd(state: string): string | null {
+  try {
+    const cwd = (JSON.parse(state) as { cwd?: unknown }).cwd;
+    return typeof cwd === "string" ? cwd : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A Kimi Code `wire.jsonl`: a "turn.prompt" (time in milliseconds) opens a turn, and its
+ * "turn.ended" closes it; the reply is the last assistant text appended in between.
+ */
+export function kimiTurn(log: string, since: number, words = ""): Turn {
+  const rows = parseLines(log);
+  let start = -1;
+  let matched = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.type !== "turn.prompt" || !(Number(row.time) >= since)) continue;
+    const text = plainText(row.input);
+    if (start < 0 || (!matched && words && mentions(text, words))) {
+      start = i;
+      matched = Boolean(words) && mentions(text, words);
+      if (matched || !words) break;
+    }
+  }
+  if (start < 0) return NO_TURN;
+  const turnId = rows[start].turnId;
+  let lastText = "";
+  for (const row of rows.slice(start + 1)) {
+    if (row.type === "turn.prompt") return { prompted: true, matched, reply: null };
+    const message = (row.message as { message?: { role?: unknown; content?: unknown } } | undefined)?.message;
+    if (row.type === "agent.message.appended" && message?.role === "assistant" && Array.isArray(message.content)) {
+      const text = message.content
+        .filter((block) => (block as { type?: unknown })?.type === "text")
+        .map((block) => String((block as { text?: unknown }).text ?? ""))
+        .join("\n")
+        .trim();
+      if (text) lastText = text;
+    }
+    if (row.type === "turn.ended" && row.turnId === turnId) return { prompted: true, matched, reply: lastText };
+  }
+  return { prompted: true, matched, reply: null };
+}
+
 /** Which engines leave a log VibeForge can read replies from. */
-export type ReplyLog = "claude" | "codex";
+export type ReplyLog = "claude" | "codex" | "grok" | "kimi";
 
 export function replyLogFor(engineId: string, bin: string): ReplyLog | null {
   const name = `${engineId} ${path.basename(bin)}`.toLowerCase();
   if (/\bclaude\b/.test(name)) return "claude";
   if (/\bcodex\b/.test(name)) return "codex";
+  if (/\bgrok\b/.test(name)) return "grok";
+  if (/\bkimi\b/.test(name)) return "kimi";
+  return null;
+}
+
+// ------------------------------------------------------------------ the latest answer
+
+/** When each prompt in a log was sent (for Grok Build, when each turn started), oldest first. */
+function promptTimes(kind: ReplyLog, log: string): number[] {
+  const rows = parseLines(log);
+  const times =
+    kind === "claude"
+      ? rows.filter((row) => claudePromptText(row) !== null).map(time)
+      : kind === "codex"
+        ? rows.filter((row) => row.type === "event_msg" && (row.payload as { type?: unknown } | undefined)?.type === "user_message").map(time)
+        : kind === "kimi"
+          ? rows.filter((row) => row.type === "turn.prompt").map((row) => Number(row.time))
+          : rows.filter((row) => row.type === "turn_started").map((row) => Date.parse(String(row.ts ?? "")));
+  return times.filter((at) => Number.isFinite(at));
+}
+
+/** The answer of the last turn that has finished in one CLI's log (`events` is Grok Build's second file). */
+export function lastReplyIn(kind: ReplyLog, log: string, events = ""): string | null {
+  const starts = promptTimes(kind, kind === "grok" ? events : log);
+  // The newest turn may still be going; then the one before it is the latest answer.
+  for (const since of starts.slice(-2).reverse()) {
+    const turn = kind === "claude" ? claudeTurn(log, since) : kind === "codex" ? codexTurn(log, since) : kind === "kimi" ? kimiTurn(log, since) : grokTurn(log, events, since);
+    if (turn.reply?.trim()) return turn.reply.trim();
+  }
   return null;
 }
 

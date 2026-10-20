@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -10,6 +10,7 @@ import { startTour } from "../components/Tour.js";
 import { CompanionCard } from "../components/CompanionCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
 import { StorageCard } from "../components/StorageCard.js";
+import { TalkCard } from "../components/TalkCard.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
@@ -294,6 +295,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
               <Input className="mono" value={shell} onChange={(event) => setShell(event.target.value)} onBlur={() => shell.trim() && shell !== current.defaultShell && void patch({ defaultShell: shell.trim() })} />
             </Field>
           </div>
+
+          <div className="section-title" id="settings-together">
+            <MessagesSquare size={13} /> {t("settings.together")}
+          </div>
+          <TalkCard />
 
           <div className="section-title" id="settings-voice">
             <Mic size={13} /> {t("voice.title")}
