@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-20
+
+**2.7.2: Send to… and review stay in the workspace you meant, a review sees only the changes it was asked about, and answers between CLIs no longer get lost.**
+
 ### Fixed
 
 - **Send to… and Review with… never pick a CLI in another workspace unseen.** With one other CLI open somewhere else, the menu went straight to what to send, so "Ask Claude Code to review" pasted the review into a Claude Code in a different workspace (and Send to… jumped there). The menu now lists that CLI with the workspace (or task, chat or routine) it is in, and only skips the choice when the one other CLI is in the same workspace.
@@ -436,7 +440,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.7.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.7.2...HEAD
+[2.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.2
 [2.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.1
 [2.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.0
 [2.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.6.2
