@@ -131,7 +131,9 @@ describe("talk: Codex's rollout log", () => {
     expect(replyLogFor("claude", "claude")).toBe("claude");
     expect(replyLogFor("my-claude", "/opt/claude")).toBe("claude");
     expect(replyLogFor("codex", "codex")).toBe("codex");
-    expect(replyLogFor("grok", "grok")).toBeNull();
+    expect(replyLogFor("grok", "grok")).toBe("grok");
+    expect(replyLogFor("kimi", "kimi")).toBe("kimi");
+    expect(replyLogFor("agy", "agy")).toBeNull();
     expect(mentions("Please: add tests for the scheduler, thanks", "Add tests for the scheduler.")).toBe(true);
     expect(mentions("something else", "Add tests")).toBe(false);
   });
