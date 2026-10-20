@@ -376,15 +376,21 @@
 .pane-head .pane-title {
   font-weight: 600;
   color: var(--fg);
+  /* When the header is full, the name keeps its room and "Also here" gives way first. */
+  flex-shrink: 0;
+  max-width: 45%;
 }
 
 .pane-head .pane-sub {
   font-size: var(--fs-xs);
   color: var(--fg-3);
+  flex-shrink: 4;
+  min-width: 0;
 }
 
 /* Quiet until wanted: the focused pane shows its two buttons, the others on hover. */
 .pane-head .pane-actions {
+  flex: none;
   display: flex;
   gap: 1px;
   opacity: 0;
@@ -657,4 +663,39 @@
   right: 2px;
   margin: 0;
   outline: 2px solid var(--bg-dark);
+}
+
+/* Talking with another CLI: who, how far along, and Stop, next to the pane's name. */
+.pane-head .pane-talk {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+/* Short as it is ("Beta · 1/8"); several names stop at a width and trail off. */
+.pane-head .pane-talk .chip {
+  max-width: 220px;
+  overflow: hidden;
+}
+
+.pane-head .pane-talk-stop {
+  flex: none;
+}
+
+.pane-head .pane-talk.is-held .chip {
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 45%, transparent);
+}
+
+.pane-head .pane-talk-stop {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-3);
+}
+
+.pane-head .pane-talk-stop:hover {
+  color: var(--red);
 }

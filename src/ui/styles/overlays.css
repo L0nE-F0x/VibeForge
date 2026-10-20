@@ -298,3 +298,9 @@ button.rail-logo:focus-visible {
   background: var(--line);
   margin: 4px 2px;
 }
+
+/* A menu's first line when it asks a question ("Send to…") before its choices. */
+.menu-head {
+  padding: 6px 9px 4px;
+  font-size: var(--fs-xs);
+}
