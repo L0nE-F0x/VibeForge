@@ -257,6 +257,8 @@ describe("routines", () => {
     expect(failed).toHaveLength(1);
     expect(failed[0]).toMatchObject({ status: "failed", origin: "routine" });
     expect(failed[0].error).toMatch(/allowed folders exist/);
+    // Nobody was watching, so it says so, once.
+    expect(ctx.notes.map((note) => note.body)).toEqual([expect.stringMatching(/^couldn't start: None of .* allowed folders exist/)]);
     ctx.svc.close();
   });
 
@@ -383,6 +385,8 @@ describe("taking turns in a folder", () => {
     expect(ctx.svc.listRoutines()[0].waiting?.behind).toHaveLength(1);
     await ctx.svc.tick(new Date(time.now().getTime() + 30_000));
     expect(ctx.spawns).toHaveLength(1);
+    // Said once for the slot, not on every tick.
+    expect(ctx.notes).toEqual([expect.objectContaining({ title: "Notes", body: "waiting for Argy to finish" })]);
     // A person in Code is never made to wait.
     await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
     expect(ctx.spawns).toHaveLength(2);
@@ -657,6 +661,15 @@ describe("runs", () => {
     await ctx.svc.discardTaskCopy(second.id);
     expect(fs.existsSync(secondCopy.path)).toBe(false);
     expect(ctx.svc.listTasks().find((item) => item.id === second.id)!.copy).toBeNull();
+
+    // A copy the agent left as it was: Apply has nothing to bring in, and tidies the copy away.
+    const idleTask = ctx.svc.saveTask({ title: "Idle", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const idle = started(await ctx.svc.executeTask(idleTask.id));
+    const idleCopy = ctx.svc.listTasks().find((item) => item.id === idleTask.id)!.copy!;
+    await ctx.exit(idle.ptyId);
+    expect(await ctx.svc.applyTaskCopy(idleTask.id)).toEqual({ files: [], conflicts: [] });
+    expect(fs.existsSync(idleCopy.path)).toBe(false);
+    expect(ctx.svc.listTasks().find((item) => item.id === idleTask.id)!).toMatchObject({ status: "done", copy: null });
 
     // A folder that isn't a repository can't have a copy.
     const plain = tempDir();
