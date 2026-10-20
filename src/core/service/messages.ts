@@ -44,6 +44,8 @@ const LOG_PATIENCE_MS = 30_000;
 /** Tasks one CLI may have running that it handed out; more are made but wait in To do. */
 const MAX_RUNNING_HANDED_OUT = 3;
 const KEEP_FILES = 40;
+/** Focus in/out (CSI I, CSI O) and mouse reports (X10 and SGR), which a terminal sends on its own. */
+const TERMINAL_REPORTS = /\x1b\[[IO]|\x1b\[M[\s\S]{3}|\x1b\[<\d+;\d+;\d+[mM]/g;
 
 export type TellResult =
   | { ok: true; to: string; delivered: "sent" | "draft" | "queued"; reply?: string | null; fromScreen?: boolean; timedOut?: boolean; note?: string }
@@ -284,6 +286,9 @@ export class MessageDesk {
 
   /** A person typed into a terminal: its counts start again, and a Stop on it is lifted. */
   onHumanInput(ptyId: string, data: string): void {
+    // A terminal reports focus and the mouse as input too (Claude Code asks for focus events):
+    // clicking a pane isn't a person stepping into the conversation.
+    if (!data.replace(TERMINAL_REPORTS, "")) return;
     this.lastHuman.set(ptyId, { at: this.nowMs(), sent: /[\r\n]/.test(data) });
     let changed = this.stopped.delete(ptyId);
     for (const key of [...this.counts.keys()]) {

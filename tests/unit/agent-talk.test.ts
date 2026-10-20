@@ -234,6 +234,10 @@ describe("CLIs talking through VibeForge", () => {
     expect(ctx.sent.at(-1)).toMatchObject({ ptyId: a.ptyId, enter: false });
     expect(ctx.svc.liveForView().find((item) => item.ptyId === a.ptyId)?.talk).toMatchObject({ held: true });
 
+    // Clicking the pane (a focus report) or moving the mouse over it isn't.
+    ctx.svc.onHumanInput(a.ptyId, "\x1b[I");
+    ctx.svc.onHumanInput(a.ptyId, "\x1b[<35;10;4M\x1b[O");
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === a.ptyId)?.talk).toMatchObject({ held: true });
     // Pressing Enter on it is a person stepping in.
     ctx.svc.onHumanInput(a.ptyId, "\r");
     pass(4000);
