@@ -4,9 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 import { readJson, writeJson } from "./fsx.js";
 
 // Token usage read from the logs the coding CLIs already keep on this machine. Nothing is sent
-// anywhere and no API is called: Claude Code, Codex, Grok Build, Antigravity CLI, Gemini CLI, Kimi Code and Muse Code each
-// write what every model call used, and this adds it up per day. Append-only logs are read from
-// where the last pass stopped, so a rescan costs only what was written since.
+// anywhere and no API is called: Claude Code, Codex, Grok Build, Antigravity CLI, Gemini CLI, Kimi Code, Muse Code, OpenCode
+// and Copilot CLI each write what every model call used, and this adds it up per day. Append-only
+// logs are read from where the last pass stopped, so a rescan costs only what was written since.
+// Cursor Agent keeps no token counts on disk, and Crush keeps only each session's latest context
+// size, which goes down as well as up, so neither can be added up.
 //
 // The CLIs clear their own old logs (Claude Code after 30 days), so each day's count is also kept
 // in a small ledger of VibeForge's own. That is what the month and all time add up, and a day
@@ -50,7 +52,7 @@ export interface UsageSpan {
 }
 
 export interface UsageSource {
-  /** The engine it belongs to: claude, codex, grok, gemini, kimi or muse. */
+  /** The engine it belongs to: claude, codex, grok, agy, gemini, kimi, muse, opencode or copilot. */
   id: string;
   /** Today; the last 7 days; the last 30 days; every day counted. */
   periods: Record<UsagePeriod, UsageSpan>;
@@ -125,9 +127,15 @@ function count(tally: Tally, iso: unknown, model: string, tokens: Tokens): void 
   tally.set(day, models);
 }
 
-/** Files under `root` (to `depth` folders down) matching `pattern`, changed since `since`. */
-function recentFiles(root: string, pattern: RegExp, since: number, depth: number): Array<{ file: string; stat: fs.Stats }> {
-  const found: Array<{ file: string; stat: fs.Stats }> = [];
+/** A file's size and last change. */
+type Stamp = Pick<fs.Stats, "size" | "mtimeMs">;
+
+/**
+ * Files under `root` (to `depth` folders down) matching `pattern`, changed since `since`. With
+ * `wal`, a SQLite database's stamp takes in its `-wal` file, where writes wait until a checkpoint.
+ */
+function recentFiles(root: string, pattern: RegExp, since: number, depth: number, wal = false): Array<{ file: string; stat: Stamp }> {
+  const found: Array<{ file: string; stat: Stamp }> = [];
   const walk = (dir: string, level: number) => {
     let entries: fs.Dirent[];
     try {
@@ -143,7 +151,15 @@ function recentFiles(root: string, pattern: RegExp, since: number, depth: number
       }
       if (!entry.isFile() || !pattern.test(entry.name)) continue;
       try {
-        const stat = fs.statSync(full);
+        let stat: Stamp = fs.statSync(full);
+        if (wal) {
+          try {
+            const log = fs.statSync(`${full}-wal`);
+            stat = { size: stat.size + log.size, mtimeMs: Math.max(stat.mtimeMs, log.mtimeMs) };
+          } catch {
+            /* no write-ahead log */
+          }
+        }
         if (stat.mtimeMs >= since) found.push({ file: full, stat });
       } catch {
         /* gone since the listing */
@@ -317,6 +333,33 @@ function kimiLine(state: FileState, line: string): void {
   count(state.tally, museTime(record.time), typeof record.model === "string" && record.model ? record.model : "kimi", { total, cached, output });
 }
 
+/**
+ * Copilot CLI (1.0.95 on): a `session.usage_record` line per model call in each session's
+ * events.jsonl. `inputTokens` already includes the cache, and `outputTokens` the reasoning. A
+ * forked session starts with its parent's lines, so a call is counted once, by its `usageId`.
+ */
+function copilotLine(state: FileState, line: string, seen: Set<string>): void {
+  if (!line.includes('"session.usage_record"')) return;
+  let record: { id?: string; type?: string; timestamp?: string; data?: { usage?: Record<string, unknown> } };
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return;
+  }
+  const usage = record.data?.usage;
+  if (record.type !== "session.usage_record" || !usage) return;
+  const usageId = (usage.accounting as { usageId?: unknown } | undefined)?.usageId;
+  const key = typeof usageId === "string" && usageId ? usageId : (record.id ?? "");
+  if (key && seen.has(key)) return;
+  if (key) {
+    seen.add(key);
+    state.keys.add(key);
+  }
+  const output = num(usage.outputTokens);
+  const total = num(usage.inputTokens) + output;
+  count(state.tally, record.timestamp, typeof usage.model === "string" && usage.model ? usage.model : "copilot", { total, cached: num(usage.cacheReadTokens), output });
+}
+
 /** Gemini CLI: a chat file per session, whose answers carry their tokens. */
 function geminiFile(state: FileState, text: string): void {
   let record: { messages?: Array<{ type?: string; timestamp?: string; model?: string; tokens?: Record<string, unknown> }> };
@@ -488,6 +531,72 @@ function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<st
   }
 }
 
+/**
+ * OpenCode: one SQLite database for every project (`opencode.db` in its data folder), with an
+ * assistant message per model call whose JSON carries its tokens. 2.x keeps them in
+ * `session_message` (`model.id`); 1.x in `message` (`role`, `modelID`), and 2.x copies that history
+ * under the same ids. `input` leaves out the cache and `output` leaves out reasoning. A fork starts
+ * with copies of its parent's messages, which are skipped the way `opencode stats` skips them.
+ */
+function opencodeDb(state: FileState, file: string, since: number, seen: Set<string>): void {
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+  } catch {
+    return;
+  }
+  try {
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
+    const columns = (table: string) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)));
+    const usage = (data: string) =>
+      ["input", "output", "reasoning", "cache.read", "cache.write"].map((name) => `json_extract(${data}, '$.tokens.${name}') AS "${name}"`).join(", ");
+    const rows: Array<Record<string, unknown>> = [];
+    if (tables.has("session_message")) {
+      const sessions = tables.has("session_v2") ? "session_v2" : "session";
+      const forks = tables.has(sessions) && columns(sessions).has("fork_session_id");
+      rows.push(
+        ...db
+          .prepare(
+            `SELECT message.id AS id, message.time_created AS at, json_extract(message.data, '$.model.id') AS model, ${usage("message.data")}
+             FROM session_message AS message
+             ${forks ? `JOIN ${sessions} AS session ON session.id = message.session_id` : ""}
+             WHERE message.type = 'assistant' AND message.time_created >= ?
+             ${forks ? "AND (session.fork_session_id IS NULL OR message.time_created >= session.time_created)" : ""}`,
+          )
+          .all(since),
+      );
+    }
+    if (tables.has("message")) {
+      rows.push(
+        ...db
+          .prepare(
+            `SELECT id, time_created AS at, json_extract(data, '$.modelID') AS model, ${usage("data")}
+             FROM message WHERE json_extract(data, '$.role') = 'assistant' AND time_created >= ?`,
+          )
+          .all(since),
+      );
+    }
+    for (const row of rows) {
+      const key = String(row.id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      state.keys.add(key);
+      const cached = num(row["cache.read"]);
+      const output = num(row.output) + num(row.reasoning);
+      const total = num(row.input) + num(row["cache.write"]) + cached + output;
+      count(state.tally, museTime(row.at), typeof row.model === "string" && row.model ? row.model : "opencode", { total, cached, output });
+    }
+  } catch {
+    /* unreadable, mid-migration or an unknown layout; counted on the next pass */
+  } finally {
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 // ------------------------------------------------------------------ the ledger
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -591,7 +700,8 @@ interface Source {
   /** Logs that only grow are read line by line from where the last pass stopped. */
   lines?: (state: FileState, line: string) => void;
   whole?: (state: FileState, text: string) => void;
-  db?: (state: FileState, file: string, stat: fs.Stats) => void;
+  /** A SQLite database is read again whole when it changes, from `since` (ms) on. */
+  db?: (state: FileState, file: string, stat: Stamp, since: number) => void;
 }
 
 export class UsageScanner {
@@ -602,6 +712,10 @@ export class UsageScanner {
   private readonly museSeen = new Set<string>();
   /** Antigravity message ids counted so far, across conversation databases. */
   private readonly agySeen = new Set<string>();
+  /** OpenCode message ids counted so far, across its tables and databases. */
+  private readonly opencodeSeen = new Set<string>();
+  /** Copilot call ids counted so far, across a session and its forks. */
+  private readonly copilotSeen = new Set<string>();
   private readonly sources: Source[];
   private readonly now: () => Date;
   /** Where the ledger is kept; without one it lasts only as long as this scanner. */
@@ -615,6 +729,7 @@ export class UsageScanner {
       path.join(root.trim(), "projects"),
     );
     const geminiHome = path.join(env.GEMINI_CLI_HOME || home, ".gemini");
+    const dataHome = env.XDG_DATA_HOME || path.join(home, ".local", "share");
     this.sources = [
       { id: "claude", roots: claudeRoots, pattern: /\.jsonl$/, depth: 3, lines: (state, line) => claudeLine(state, line, this.claudeSeen) },
       { id: "codex", roots: [path.join(env.CODEX_HOME || path.join(home, ".codex"), "sessions")], pattern: /\.jsonl$/, depth: 4, lines: codexLine },
@@ -630,12 +745,34 @@ export class UsageScanner {
       { id: "kimi", roots: [path.join(env.KIMI_CODE_HOME || path.join(home, ".kimi-code"), "sessions")], pattern: /^wire\.jsonl$/, depth: 5, lines: kimiLine },
       {
         id: "muse",
-        roots: [path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "muse", "sessions")],
+        roots: [path.join(dataHome, "muse", "sessions")],
         pattern: /^session\.jsonl$/,
         depth: 6,
         lines: (state, line) => museLine(state, line, this.museSeen),
       },
+      {
+        id: "opencode",
+        // `opencode.db`, or `opencode-<channel>.db` for a beta or preview build.
+        roots: [path.join(dataHome, "opencode")],
+        pattern: /^opencode(-[\w.-]+)?\.db$/,
+        depth: 0,
+        db: (state, file, _stat, since) => opencodeDb(state, file, since, this.opencodeSeen),
+      },
+      {
+        id: "copilot",
+        roots: [path.join(env.COPILOT_HOME || path.join(home, ".copilot"), "session-state")],
+        pattern: /^events\.jsonl$/,
+        depth: 1,
+        lines: (state, line) => copilotLine(state, line, this.copilotSeen),
+      },
     ];
+  }
+
+  /** Lets go of ids a file counted, before it is read again or once it is gone. */
+  private forget(keys: Iterable<string>): void {
+    for (const key of keys) {
+      for (const seen of [this.claudeSeen, this.museSeen, this.agySeen, this.opencodeSeen, this.copilotSeen]) seen.delete(key);
+    }
   }
 
   /** Only one pass at a time; callers during a pass get its result. */
@@ -673,9 +810,9 @@ export class UsageScanner {
       let limits: FileState["limits"] = null;
       let lastAt = 0;
       for (const root of source.roots) {
-        for (const { file, stat } of recentFiles(root, source.pattern, since, source.depth)) {
+        for (const { file, stat } of recentFiles(root, source.pattern, since, source.depth, Boolean(source.db))) {
           live.add(file);
-          const state = await this.read(source, file, stat);
+          const state = await this.read(source, file, stat, since);
           lastAt = Math.max(lastAt, stat.mtimeMs);
           if (state.limits && (!limits || state.limits.at > limits.at)) limits = state.limits;
           for (const [day, models] of state.tally) {
@@ -720,11 +857,7 @@ export class UsageScanner {
     // Forget files that fell out of the window; their days are in the ledger.
     for (const [file, state] of this.files) {
       if (live.has(file)) continue;
-      for (const key of state.keys) {
-        this.claudeSeen.delete(key);
-        this.museSeen.delete(key);
-        this.agySeen.delete(key);
-      }
+      this.forget(state.keys);
       this.files.delete(file);
     }
     if (changed && this.ledgerFile) {
@@ -737,21 +870,17 @@ export class UsageScanner {
     return { sources, scannedAt: now.toISOString() };
   }
 
-  private async read(source: Source, file: string, stat: fs.Stats): Promise<FileState> {
+  private async read(source: Source, file: string, stat: Stamp, since: number): Promise<FileState> {
     let state = this.files.get(file);
     if (state && state.size === stat.size && state.mtimeMs === stat.mtimeMs) return state;
     const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, rest: "", tally: new Map(), keys: new Set(), model: "", limits: null });
     if (!state || source.whole || source.db || stat.size < state.offset) {
-      for (const key of state?.keys ?? []) {
-        this.claudeSeen.delete(key);
-        this.museSeen.delete(key);
-        this.agySeen.delete(key);
-      }
+      this.forget(state?.keys ?? []);
       state = fresh();
     }
     try {
       if (source.db) {
-        source.db(state, file, stat);
+        source.db(state, file, stat, since);
       } else if (source.whole) {
         source.whole(state, await fs.promises.readFile(file, "utf8"));
       } else if (source.lines && stat.size > state.offset) {

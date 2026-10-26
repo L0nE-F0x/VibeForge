@@ -4,7 +4,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.7.2, 2026-10-20, is the latest
 
 ## Next up
 
-- [ ] **Token usage from more CLIs.** OpenCode (SQLite now), Copilot, Cursor Agent and Crush haven't been looked at. Leftover Gemini CLI chat files are still counted alongside Antigravity's conversation databases.
+Nothing queued.
 
 ## Only checked with stand-ins
 
@@ -25,3 +25,4 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 ## Known rough edges
 
 - `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).
+- **No tokens from Cursor Agent or Crush** (looked at 2026-10-26, see `status.md`). Cursor Agent only gets its counts from Cursor's server and hands them to hooks; Crush overwrites each session's count with the latest context size. Revisit if either starts keeping a per-call log.
