@@ -104,6 +104,15 @@ export class TrayIcon {
     this.update(state);
   }
 
+  /** A new tray host doesn't know the old icon, and Electron won't register it again: make it anew. */
+  remake(): void {
+    if (!this.tray || !this.state) return;
+    const state = this.state;
+    this.tray.destroy();
+    this.tray = null;
+    this.show(state);
+  }
+
   recolor(mark: string, outline: string): void {
     if (mark === this.colors.mark && outline === this.colors.outline) return;
     this.colors = { mark, outline };
