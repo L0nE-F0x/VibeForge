@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-27
+
+**2.8.0: the Tokens tab counts OpenCode and Copilot CLI, and Antigravity's tokens show while its session is still open.**
+
 ### Added
 
 - **Tokens from OpenCode and Copilot CLI.** The Tokens tab now counts OpenCode, from its `opencode.db` (1.x and 2.x), and Copilot CLI from 1.0.95 on, from the usage record it writes for each model call. A forked session's copies of earlier calls are counted once. Cursor Agent keeps no token counts on disk, and Crush keeps only each session's latest context size, so neither appears.
@@ -448,7 +452,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.7.2...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.0
 [2.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.2
 [2.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.1
 [2.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.0
