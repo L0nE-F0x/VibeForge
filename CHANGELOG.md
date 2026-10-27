@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-27
+
+**2.8.1: Start at login shows VibeForge in the tray again.**
+
 ### Fixed
 
 - **Start at login shows the tray icon.** At login VibeForge could start before Omarchy's bar was ready to take tray icons. It started, hidden as it should be, but with no icon there was nothing to open it from, so it looked as if it hadn't started at all. It now watches for the bar's tray and adds its icon whenever one appears, including after the bar restarts.
@@ -456,7 +460,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.1
 [2.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.0
 [2.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.2
 [2.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.1
