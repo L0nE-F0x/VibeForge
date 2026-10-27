@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Tokens from OpenCode and Copilot CLI.** The Tokens tab now counts OpenCode, from its `opencode.db` (1.x and 2.x), and Copilot CLI from 1.0.95 on, from the usage record it writes for each model call. A forked session's copies of earlier calls are counted once. Cursor Agent keeps no token counts on disk, and Crush keeps only each session's latest context size, so neither appears.
+
+### Fixed
+
+- **Antigravity's tokens show while its session is still open.** Its conversation databases hold new writes in a side file (`-wal`) until the CLI closes, and the Tokens tab only noticed them after that. It now sees them on the next refresh.
+
 ## [2.7.2] - 2026-10-20
 
 **2.7.2: Send to… and review stay in the workspace you meant, a review sees only the changes it was asked about, and answers between CLIs no longer get lost.**

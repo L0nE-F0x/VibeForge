@@ -259,4 +259,79 @@ describe("usage", () => {
     expect(agy.periods.today.tokens).toEqual({ total: 2700, cached: 2000, output: 150 });
     expect(agy.periods.today.models).toEqual([{ model: "gemini-4-argon-trial", total: 2700 }]);
   });
+
+  it("counts OpenCode's database once per model call, 2.x and 1.x tables alike, and sees writes still in its WAL", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const dbFile = path.join(home, ".local", "share", "opencode", "opencode.db");
+    fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+    const db = new DatabaseSync(dbFile);
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, fork_session_id TEXT, time_created INTEGER NOT NULL);");
+    db.exec("CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);");
+    db.exec("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);");
+    const tokens = (input: number, output: number, reasoning = 0, read = 0, write = 0) => ({ input, output, reasoning, cache: { read, write } });
+    const step = db.prepare("INSERT INTO session_message (id, session_id, type, time_created, data) VALUES (?, ?, ?, ?, ?)");
+    const v2 = (id: string, session: string, when: string, used: object, model = "claude-sonnet-5") =>
+      step.run(id, session, "assistant", Date.parse(when), JSON.stringify({ model: { id: model, providerID: "anthropic" }, tokens: used }));
+    db.prepare("INSERT INTO session_v2 VALUES (?, ?, ?)").run("ses_a", null, Date.parse(at(1)));
+    // A fork made at 15:00 starts with a copy of the parent's earlier messages.
+    db.prepare("INSERT INTO session_v2 VALUES (?, ?, ?)").run("ses_fork", "ses_a", Date.parse(at(0, 15)));
+    step.run("msg_user", "ses_a", "user", Date.parse(at(0)), JSON.stringify({ text: "hi" }));
+    v2("msg_a", "ses_a", at(0), tokens(100, 20, 5, 1000, 50));
+    v2("msg_copy", "ses_fork", at(0, 11), tokens(100, 20, 5, 1000, 50));
+    v2("msg_fork", "ses_fork", at(0, 16), tokens(1, 1));
+    // 1.x history: one message 2.x copied over under the same id, one only in the old table.
+    const v1 = db.prepare("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)");
+    v1.run("msg_a", "ses_a", Date.parse(at(0)), JSON.stringify({ role: "assistant", modelID: "claude-sonnet-5", tokens: tokens(100, 20, 5, 1000, 50) }));
+    v1.run("msg_old", "ses_old", Date.parse(at(1)), JSON.stringify({ role: "assistant", modelID: "grok-code", tokens: tokens(10, 2) }));
+    v1.run("msg_ask", "ses_old", Date.parse(at(1)), JSON.stringify({ role: "user" }));
+
+    const scanner = new UsageScanner(home, { now: () => NOW, env: {} });
+    const [opencode] = (await scanner.scan()).sources;
+    expect(opencode.id).toBe("opencode");
+    expect(opencode.periods.today.tokens).toEqual({ total: 1177, cached: 1000, output: 26 });
+    expect(opencode.periods.week.models).toEqual([
+      { model: "claude-sonnet-5", total: 1177 },
+      { model: "grok-code", total: 12 },
+    ]);
+
+    // With the connection open the write waits in opencode.db-wal, and opencode.db itself doesn't change.
+    v2("msg_b", "ses_a", at(0, 18), tokens(3, 0));
+    expect(fs.existsSync(`${dbFile}-wal`)).toBe(true);
+    const [after] = (await scanner.scan()).sources;
+    expect(after.periods.today.tokens.total).toBe(1180);
+    db.close();
+    // XDG_DATA_HOME moves it.
+    expect((await new UsageScanner(home, { now: () => NOW, env: { XDG_DATA_HOME: path.join(home, "elsewhere") } }).scan()).sources).toEqual([]);
+  });
+
+  it("counts Copilot CLI's usage records once, across a session and its fork", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const record = (usageId: string, when: string, usage: Record<string, number>, model = "claude-sonnet-4.5") =>
+      JSON.stringify({ id: `ev-${usageId}`, timestamp: when, parentId: null, type: "session.usage_record", data: { usage: { model, ...usage, accounting: { sourceSessionId: "s1", sequence: 1, usageId } } } });
+    const call = { inputTokens: 1200, outputTokens: 30, cacheReadTokens: 1000, cacheWriteTokens: 50, reasoningTokens: 10 };
+    write(
+      path.join(home, ".copilot", "session-state", "s1", "events.jsonl"),
+      [
+        JSON.stringify({ id: "ev-0", timestamp: at(0), type: "assistant.usage", ephemeral: true, data: { model: "claude-sonnet-4.5", inputTokens: 999, outputTokens: 999 } }),
+        record("u1", at(0), call),
+        record("u2", at(1), { inputTokens: 100, outputTokens: 10 }, "gpt-5.3"),
+        // Running totals that repeat the records above.
+        JSON.stringify({ id: "ev-9", timestamp: at(0), type: "session.shutdown", data: { modelMetrics: { "claude-sonnet-4.5": { usage: { inputTokens: 1200, outputTokens: 30 } } } } }),
+        "",
+      ].join("\n"),
+    );
+    write(path.join(home, ".copilot", "session-state", "s2", "events.jsonl"), [record("u1", at(0), call), record("u3", at(0), { inputTokens: 5, outputTokens: 1 }), ""].join("\n"));
+
+    const [copilot] = (await new UsageScanner(home, { now: () => NOW, env: {} }).scan()).sources;
+    expect(copilot.id).toBe("copilot");
+    expect(copilot.periods.today.tokens).toEqual({ total: 1236, cached: 1000, output: 31 });
+    expect(copilot.periods.week.models).toEqual([
+      { model: "claude-sonnet-4.5", total: 1236 },
+      { model: "gpt-5.3", total: 110 },
+    ]);
+    // COPILOT_HOME moves it.
+    expect((await new UsageScanner(home, { now: () => NOW, env: { COPILOT_HOME: path.join(home, "elsewhere") } }).scan()).sources).toEqual([]);
+  });
 });
