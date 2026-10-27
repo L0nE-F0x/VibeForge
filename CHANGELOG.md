@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Start at login shows the tray icon.** At login VibeForge could start before Omarchy's bar was ready to take tray icons. It started, hidden as it should be, but with no icon there was nothing to open it from, so it looked as if it hadn't started at all. It now watches for the bar's tray and adds its icon whenever one appears, including after the bar restarts.
+
 ## [2.8.0] - 2026-10-27
 
 **2.8.0: the Tokens tab counts OpenCode and Copilot CLI, and Antigravity's tokens show while its session is still open.**

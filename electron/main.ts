@@ -22,6 +22,7 @@ import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from ".
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
 import { TrayIcon, type TrayState } from "./tray.js";
+import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
@@ -956,6 +957,21 @@ if (!app.requestSingleInstanceLock()) {
     guardPermissions();
     registerIpc();
     tray.recolor(palette.accent2, palette.darkerBackground);
+    // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
+    // login) gets the icon again instead of leaving VibeForge running with nothing to open it from.
+    const stopTrayWatch = watchTrayHost(
+      (owner) => {
+        trayHost = owner !== "";
+        if (!owner || !tray.shown) return;
+        log.info("A new tray host; adding the icon to it");
+        try {
+          tray.remake();
+        } catch (error) {
+          log.warn(`The tray icon: ${describeError(error)}`);
+        }
+      },
+      (message) => log.warn(message),
+    );
     syncTray();
     syncWords();
     const hostReady = startHost();
@@ -1000,6 +1016,7 @@ if (!app.requestSingleInstanceLock()) {
       stopThemeWatch();
       stopConfigWatch();
       stopControl();
+      stopTrayWatch();
     });
   });
 
