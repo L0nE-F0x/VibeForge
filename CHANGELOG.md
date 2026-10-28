@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-10-28
+
+**2.9.0: pick any theme in Settings, and keep it when the desktop switches.**
+
 ### Added
 
 - **Pick any theme in Settings.** Settings → Appearance → Colours still follows your Omarchy theme by default, and now lists every theme next to it: the ones installed on your machine, your own included, and Omarchy's 22 stock themes, which VibeForge now ships so they work without Omarchy too. Click one, or move with the arrow keys, and the whole window changes at once. A pinned theme stays when the desktop switches to another; if it is removed, VibeForge goes back to following Omarchy and says so. Ctrl+K finds them too: type "tokyo" and press Enter.
@@ -464,7 +468,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.8.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.9.0
 [2.8.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.1
 [2.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.0
 [2.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.7.2
