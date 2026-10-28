@@ -11,7 +11,8 @@ import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, isSchedu
 import { allocateRunDir, normalizeRun, runFolderStamp, writeRunMeta } from "../../src/core/runs.js";
 import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
 import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/tasks.js";
-import { BUILTIN_PALETTE, companionColor, contrast, paletteFromFiles, parseFlatToml, readableMuted, toHex } from "../../src/core/theme.js";
+import { BUILTIN_PALETTE, companionColor, contrast, listThemes, paletteFromFiles, parseFlatToml, readableMuted, readTheme, resolvePalette, toHex } from "../../src/core/theme.js";
+import { BUNDLED_THEMES } from "../../src/core/themes-bundled.js";
 import type { RunMeta } from "../../src/core/types.js";
 import { diffSince, gitHead, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
@@ -307,6 +308,46 @@ describe("theme", () => {
     expect(toHex("nope")).toBeNull();
     expect(parseFlatToml('# comment\nkey = "#ffffff" # trailing\nother = \'x\'\n')).toEqual({ key: "#ffffff", other: "x" });
   });
+
+  it("lists installed themes over the stock ones it ships, and pins one by name", () => {
+    const home = tempDir();
+    const mine = path.join(home, ".config", "omarchy", "themes");
+    const stock = path.join(tempDir(), "themes");
+    const theme = (root: string, id: string, accent: string) => {
+      fs.mkdirSync(path.join(root, id), { recursive: true });
+      fs.writeFileSync(path.join(root, id, "colors.toml"), `background = "#101010"\nforeground = "#eeeeee"\naccent = "${accent}"\n`);
+    };
+    theme(mine, "tokyo-night", "#ff0000");
+    theme(mine, "my-own", "#00ff00");
+    theme(stock, "tokyo-night", "#0000ff");
+    fs.mkdirSync(path.join(stock, "half-made"));
+    const roots = [mine, stock];
+
+    const list = listThemes(home, roots);
+    expect(list.system).toBeNull();
+    expect(list.themes[0].id).toBe("apex-forge");
+    expect(list.themes.find((item) => item.id === "tokyo-night")?.accent).toBe("#ff0000");
+    expect(list.themes.find((item) => item.id === "my-own")?.name).toBe("My Own");
+    expect(list.themes.some((item) => item.id === "half-made")).toBe(false);
+    // Every stock theme is there even with none installed, once each.
+    expect(new Set(list.themes.map((item) => item.id)).size).toBe(list.themes.length);
+    for (const bundled of BUNDLED_THEMES) expect(list.themes.some((item) => item.id === bundled.id)).toBe(true);
+    expect(list.themes.find((item) => item.id === "catppuccin-latte")?.mode).toBe("light");
+
+    expect(resolvePalette("my-own", home, roots).accent).toBe("#00ff00");
+    expect(resolvePalette("nord", home, roots)).toMatchObject({ id: "nord", name: "Nord", source: "builtin" });
+    expect(resolvePalette("apex-forge", home, [])).toBe(BUILTIN_PALETTE);
+    expect(readTheme("../tokyo-night", roots)).toBeNull();
+
+    // Following, and a pinned theme that's gone, both wear the desktop's theme.
+    const current = path.join(home, ".local", "state", "omarchy", "current");
+    fs.mkdirSync(path.join(current, "theme"), { recursive: true });
+    fs.writeFileSync(path.join(current, "theme", "colors.toml"), 'background = "#202020"\nforeground = "#ffffff"\naccent = "#123456"\n');
+    fs.writeFileSync(path.join(current, "theme.name"), "my-own\n");
+    expect(resolvePalette("omarchy", home, roots)).toMatchObject({ id: "my-own", name: "My Own", accent: "#123456" });
+    expect(resolvePalette("deleted-theme", home, roots).accent).toBe("#123456");
+    expect(listThemes(home, roots).system).toMatchObject({ id: "my-own", accent: "#123456" });
+  });
 });
 
 describe("git snapshot", () => {
@@ -471,7 +512,11 @@ describe("store", () => {
     const store = new Store(tempDir(), tempDir());
     const file = path.join(store.configRoot, "settings.json");
     fs.writeFileSync(file, JSON.stringify({ defaultEngine: "codex", theme: "builtin" }));
-    expect(store.readSettings()).toMatchObject({ defaultEngine: "codex", theme: "builtin", tourDone: false });
+    expect(store.readSettings()).toMatchObject({ defaultEngine: "codex", theme: "apex-forge", tourDone: false });
+    fs.writeFileSync(file, JSON.stringify({ theme: "tokyo-night" }));
+    expect(store.readSettings().theme).toBe("tokyo-night");
+    fs.writeFileSync(file, JSON.stringify({ theme: "../../etc" }));
+    expect(store.readSettings().theme).toBe("omarchy");
     store.writeSettings({ ...store.readSettings(), tourDone: true });
     expect(store.readSettings().tourDone).toBe(true);
     fs.writeFileSync(file, JSON.stringify({ tourDone: "yes" }));

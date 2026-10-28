@@ -11,6 +11,7 @@ import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from 
 import { isSafeId, slugify } from "./slug.js";
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../shared/text.js";
 import { TASK_STATUSES } from "./tasks.js";
+import { isThemeId } from "./theme.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { WorkingCopy } from "./worktrees.js";
 import type {
@@ -547,7 +548,8 @@ export class Store {
           ? raw.terminalFontSize
           : defaults.terminalFontSize,
       terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
-      theme: raw.theme === "builtin" ? "builtin" : "omarchy",
+      // "builtin" was Apex Forge before any theme could be picked.
+      theme: raw.theme === "builtin" ? "apex-forge" : isThemeId(str(raw.theme)) ? str(raw.theme) : defaults.theme,
       tourDone: bool(raw.tourDone, defaults.tourDone),
       checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
       language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,

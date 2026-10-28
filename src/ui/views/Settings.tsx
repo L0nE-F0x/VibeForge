@@ -11,11 +11,11 @@ import { CompanionCard } from "../components/CompanionCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
 import { StorageCard } from "../components/StorageCard.js";
 import { TalkCard } from "../components/TalkCard.js";
+import { ThemeField } from "../components/ThemePicker.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
 import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
-import { usePalette } from "../theme.js";
 import { PINNED, railViews, type RailView } from "../rail.js";
 import { useAction, useNav, useToast, type Route } from "../state.js";
 import { SETTINGS_SECTIONS, sectionAnchor } from "../settings-sections.js";
@@ -155,7 +155,6 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
   const settings = useSettings();
   const engines = useEngines();
   const info = useAppInfo().data;
-  const palette = usePalette();
   const [shell, setShell] = useState("");
   const [font, setFont] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -245,19 +244,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
                 ))}
               </Select>
             </Field>
-            <Field
-              label={t("settings.colours")}
-              hint={current.theme === "omarchy" ? t("settings.coloursOmarchy", { name: palette?.source === "omarchy" ? palette.name : t("settings.noOmarchyTheme") }) : t("settings.coloursBuiltin")}
-            >
-              <Segmented
-                value={current.theme}
-                onChange={(theme) => void patch({ theme })}
-                options={[
-                  { value: "omarchy", label: t("settings.followOmarchy") },
-                  { value: "builtin", label: t("settings.builtin") },
-                ]}
-              />
-            </Field>
+            <ThemeField value={current.theme} onChange={(theme) => void patch({ theme })} />
             <div className="form-grid">
               <Field label={t("settings.font")}>
                 <Input value={font} onChange={(event) => setFont(event.target.value)} onBlur={() => font.trim() && font !== current.terminalFontFamily && void patch({ terminalFontFamily: font.trim() })} />

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { BUNDLED_THEMES } from "./themes-bundled.js";
 
 export interface TerminalPalette {
   background: string;
@@ -13,6 +14,8 @@ export interface TerminalPalette {
 }
 
 export interface Palette {
+  /** The theme's folder name, as Omarchy names it: "tokyo-night". */
+  id: string;
   name: string;
   source: "omarchy" | "builtin";
   mode: "dark" | "light";
@@ -40,6 +43,7 @@ export interface Palette {
 
 /** Apex Forge: the fallback when no Omarchy theme can be read. */
 export const BUILTIN_PALETTE: Palette = {
+  id: "apex-forge",
   name: "Apex Forge",
   source: "builtin",
   mode: "dark",
@@ -201,8 +205,8 @@ export function readableMuted(muted: string, foreground: string, background: str
   return color;
 }
 
-export function paletteFromFiles(input: { name: string; colors: string; ghostty?: string | null }): Palette | null {
-  const colors = parseFlatToml(input.colors);
+export function paletteFromFiles(input: { id?: string; name: string; colors: string | Readonly<Record<string, string>>; ghostty?: string | null }): Palette | null {
+  const colors = typeof input.colors === "string" ? parseFlatToml(input.colors) : input.colors;
   const pick = (...keys: string[]): string | null => {
     for (const key of keys) {
       const hex = toHex(colors[key]);
@@ -249,6 +253,7 @@ export function paletteFromFiles(input: { name: string; colors: string; ghostty?
   if (ghostty) for (const [index, hex] of Object.entries(ghostty.ansiOverrides)) if (Number(index) < 16) ansi[Number(index)] = hex;
   const selection = pick("selection") ?? base.selection;
   return {
+    id: input.id ?? input.name.toLowerCase().replace(/\s+/g, "-"),
     name: input.name || "Omarchy",
     source: "omarchy",
     mode,
@@ -294,17 +299,109 @@ export function readOmarchyPalette(home = os.homedir()): Palette | null {
   for (const dir of themeDirCandidates(home)) {
     const colors = readOptional(path.join(dir, "colors.toml"));
     if (!colors) continue;
-    const raw = readOptional(path.join(dir, "..", "theme.name"))?.trim() || path.basename(dir);
-    const name = raw.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-    const palette = paletteFromFiles({ name, colors, ghostty: readOptional(path.join(dir, "ghostty.conf")) });
+    const id = readOptional(path.join(dir, "..", "theme.name"))?.trim() || path.basename(dir);
+    const palette = paletteFromFiles({ id, name: themeName(id), colors, ghostty: readOptional(path.join(dir, "ghostty.conf")) });
     if (palette) return palette;
   }
   return null;
 }
 
-export function resolvePalette(preference: "omarchy" | "builtin", home = os.homedir()): Palette {
-  if (preference === "builtin") return BUILTIN_PALETTE;
-  return readOmarchyPalette(home) ?? BUILTIN_PALETTE;
+/** "tokyo-night" → "Tokyo Night", as `omarchy theme list` shows it. */
+export function themeName(id: string): string {
+  return id.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/** A theme folder's name, safe to join onto a themes folder. "omarchy" is the setting that follows the desktop. */
+export function isThemeId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
+/** Where Omarchy keeps themes. The person's own come first, as they replace a stock theme of the same name. */
+export function themeRoots(home = os.homedir(), omarchyPath = process.env.OMARCHY_PATH): string[] {
+  const roots = [path.join(home, ".config", "omarchy", "themes")];
+  if (omarchyPath) roots.push(path.join(omarchyPath, "themes"));
+  roots.push(path.join(home, ".local", "share", "omarchy", "themes"), "/usr/share/omarchy/themes");
+  return [...new Set(roots)];
+}
+
+function readThemeDir(root: string, id: string): Palette | null {
+  const dir = path.join(root, id);
+  const colors = readOptional(path.join(dir, "colors.toml"));
+  return colors ? paletteFromFiles({ id, name: themeName(id), colors, ghostty: readOptional(path.join(dir, "ghostty.conf")) }) : null;
+}
+
+function bundledPalette(theme: (typeof BUNDLED_THEMES)[number]): Palette | null {
+  const palette = paletteFromFiles({ id: theme.id, name: themeName(theme.id), colors: theme.colors });
+  return palette && { ...palette, source: "builtin" };
+}
+
+/** One theme by its folder name: installed on this machine, else shipped with VibeForge, else null. */
+export function readTheme(id: string, roots = themeRoots()): Palette | null {
+  if (!isThemeId(id)) return null;
+  for (const root of roots) {
+    const palette = readThemeDir(root, id);
+    if (palette) return palette;
+  }
+  const bundled = BUNDLED_THEMES.find((theme) => theme.id === id);
+  if (bundled) return bundledPalette(bundled);
+  return id === BUILTIN_PALETTE.id ? BUILTIN_PALETTE : null;
+}
+
+/** What Settings shows of a theme: its name and three squares. */
+export interface ThemeChoice {
+  id: string;
+  name: string;
+  mode: "dark" | "light";
+  background: string;
+  accent: string;
+  accent2: string;
+}
+
+export interface ThemeList {
+  /** The desktop's own theme, when this is Omarchy. */
+  system: ThemeChoice | null;
+  /** Apex Forge first, then by name. */
+  themes: ThemeChoice[];
+}
+
+function choice(palette: Palette): ThemeChoice {
+  return { id: palette.id, name: palette.name, mode: palette.mode, background: palette.background, accent: palette.accent, accent2: palette.accent2 };
+}
+
+/** Every theme VibeForge can wear: the ones installed here, then the stock ones it ships. */
+export function listThemes(home = os.homedir(), roots = themeRoots(home)): ThemeList {
+  const found = new Map<string, Palette>();
+  for (const root of roots) {
+    let ids: string[];
+    try {
+      ids = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const id of ids) {
+      if (found.has(id) || !isThemeId(id)) continue;
+      const palette = readThemeDir(root, id);
+      if (palette) found.set(id, palette);
+    }
+  }
+  for (const theme of BUNDLED_THEMES) {
+    const palette = found.has(theme.id) ? null : bundledPalette(theme);
+    if (palette) found.set(theme.id, palette);
+  }
+  if (!found.has(BUILTIN_PALETTE.id)) found.set(BUILTIN_PALETTE.id, BUILTIN_PALETTE);
+  const first = (item: ThemeChoice) => (item.id === BUILTIN_PALETTE.id ? 0 : 1);
+  const themes = [...found.values()].map(choice).sort((a, b) => first(a) - first(b) || a.name.localeCompare(b.name));
+  const system = readOmarchyPalette(home);
+  return { system: system && choice(system), themes };
+}
+
+/**
+ * "omarchy" follows the desktop's theme; anything else pins a theme by its folder name. A pinned
+ * theme that is gone falls back to following, and no Omarchy theme at all means Apex Forge.
+ */
+export function resolvePalette(theme: string, home = os.homedir(), roots = themeRoots(home)): Palette {
+  const pinned = theme === "omarchy" ? null : readTheme(theme, roots);
+  return pinned ?? readOmarchyPalette(home) ?? BUILTIN_PALETTE;
 }
 
 /** Watch the Omarchy "current" folder; theme switches replace it. Returns a stop function. */

@@ -1,4 +1,17 @@
-# Status — 2026-10-26
+# Status — 2026-10-28
+
+## Pick any theme (2026-10-28, `feat/theme-picker`)
+
+The founder asked to be able to wear a theme other than the desktop's, or the default, from Settings.
+
+- **The setting** (`Settings.theme`) is now `"omarchy"` (follow the desktop, still the default) or a theme's folder name, such as `"tokyo-night"`. The old `"builtin"` reads as `"apex-forge"`, so older settings files keep their look; a name that isn't a safe folder name (`isThemeId`) reads as `"omarchy"`.
+- **Where themes come from** (`listThemes`, `readTheme` in `src/core/theme.ts`): `~/.config/omarchy/themes` first, as Omarchy lets the person's own theme replace a stock one of the same name, then `$OMARCHY_PATH/themes`, `~/.local/share/omarchy/themes` (older installs) and `/usr/share/omarchy/themes`, then the stock themes VibeForge ships, then the built-in Apex Forge. Each is its `colors.toml` (and `ghostty.conf`, if it has one) through the same `paletteFromFiles` the desktop's theme goes through, so a pinned Tokyo Night looks exactly like following Omarchy into Tokyo Night.
+- **Shipped stock themes:** `src/core/themes-bundled.ts` holds the `colors.toml` of Omarchy's 22 stock themes, regenerated with `node scripts/themes.ts` (reads `$OMARCHY_PATH/themes`). They make the picker useful off Omarchy and keep `npm run smoke` meaningful on CI.
+- **A pinned theme that's gone** (a theme of the person's own, deleted) falls back to following the desktop; Settings says which theme is missing and shows Follow as chosen.
+- **Settings → Appearance → Colours** (`src/ui/components/ThemePicker.tsx`): one radio group, Follow Omarchy (with the desktop theme's name and squares) heading a grid of every theme, three squares each (background and both accents; a light theme shows by its first square). The four interaction states as elsewhere. ←/→ step, ↑/↓ move a row (Follow heads the grid), Home/End; moving applies at once. Keys count from the focused choice, not the saved one, so quick presses don't skip (a CDP run with ↑↑ landed one short before that). The list reloads when the palette changes, so the Follow row follows a desktop switch while pinned.
+- **Ctrl+K:** "Theme · <name>" entries and "Theme · Follow Omarchy theme", listed only once something is typed.
+- Tour: the welcome card's theme line says Settings can pin another; all seven languages.
+- Checked: `npm test` (295, with the theme list: own theme over stock, a half-made folder skipped, every shipped theme once, pinning, the fallback, the desktop's theme as `system`; settings reading `"builtin"` and an unsafe name), typecheck, lint, build, `SMOKE_HEADLESS=1 scripts/smoke.mjs` (new step: click Tokyo Night, the accent changes). A CDP run of the built app, headless, with a scratch desktop on Apex Forge plus a theme of its own: 25 choices with names whole; clicking Tokyo Night set `--accent` #7aa2f7, `--term-bg` #1a1b26 and `tokyo-night` in settings.json; the desktop switching to Nord left it on Tokyo Night while the Follow row said Nord; → saved `vantablack` with focus following; Home, ↓, ↓ a row, ↑↑ back to Follow (Nord's #81a1c1); Ctrl+K "latte" Enter put the window in Catppuccin Latte (light); deleting the pinned own theme fell back to Nord with the "isn't on this machine" hint; no page errors. Screenshots looked right in Apex Forge, Tokyo Night and Catppuccin Latte.
 
 ## Tokens from OpenCode and Copilot CLI (2026-10-26, `feat/more-token-logs`)
 

@@ -21,7 +21,7 @@ import type {
   TaskView,
   TermSize,
 } from "../core/team-service.js";
-import type { Palette } from "../core/theme.js";
+import type { Palette, ThemeChoice, ThemeList } from "../core/theme.js";
 import type {
   Agent,
   Engine,
@@ -67,6 +67,8 @@ export type {
   Queued,
   LiveSession,
   Palette,
+  ThemeChoice,
+  ThemeList,
   Routine,
   RoutineInput,
   RoutineView,
@@ -243,6 +245,8 @@ export interface DockState {
 export interface DeskMethods {
   "app.info": () => AppInfo;
   "app.palette": () => Palette;
+  /** Every theme Settings can pin, and the desktop's own. */
+  "app.themes": () => ThemeList;
   "app.openPath": (target: string) => void;
   "app.openExternal": (url: string) => void;
   "app.pickFolder": (title?: string) => string | null;
