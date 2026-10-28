@@ -124,7 +124,8 @@ export interface Settings {
   notify: boolean;
   terminalFontSize: number;
   terminalFontFamily: string;
-  theme: "omarchy" | "builtin";
+  /** "omarchy" follows the desktop's theme; anything else pins one by its folder name, such as "tokyo-night". */
+  theme: string;
   /** The welcome tour has been finished or skipped; it opens by itself until then. */
   tourDone: boolean;
   /** Ask GitHub for the newest release at start and every few hours. */

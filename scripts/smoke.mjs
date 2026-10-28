@@ -195,6 +195,12 @@ async function main() {
   await call("settings.save", { language: "en" });
   await until(`document.querySelector(".page-head h1")?.textContent === "Settings"`, "English again");
 
+  step("a theme picked in Settings restyles the window");
+  await until(`document.querySelectorAll('.theme-picker [role="radio"]').length > 20`, "every theme in Settings → Colours");
+  await page(`[...document.querySelectorAll('.theme-picker [role="radio"]')].find((radio) => radio.textContent === "Tokyo Night").click(), true`);
+  await until(`getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() === "#7aa2f7"`, "Tokyo Night's accent");
+  await call("settings.save", { theme: "omarchy" });
+
   step("Ctrl+K finds things by name");
   await key("k", "KeyK", 2);
   await until(`Boolean(document.querySelector(".switcher input"))`, "the switcher");

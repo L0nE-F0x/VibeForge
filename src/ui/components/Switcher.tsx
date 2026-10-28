@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus, MessagesSquare, Plus, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus, MessagesSquare, Palette, Plus, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
@@ -8,9 +8,10 @@ import { Snippet } from "./Snippet.js";
 import { fuzzyScore, textSnippet } from "../fuzzy.js";
 import { useT, type Key } from "../i18n/index.js";
 import { railViews } from "../rail.js";
-import { useNav, useOverlay } from "../state.js";
+import { useAction, useNav, useOverlay } from "../state.js";
 import { SHOW_SHORTCUTS_EVENT } from "./Help.js";
 import { SETTINGS_SECTIONS } from "../settings-sections.js";
+import { FOLLOW, useThemes } from "./ThemePicker.js";
 
 // Ctrl+K: type part of a name and press Enter to land on any agent, chat, workspace, task,
 // routine, skill or view. Ctrl+Shift+K does the same from inside a terminal, where Ctrl+K
@@ -50,6 +51,8 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const routines = useRoutines().data;
   const skills = useSkills().data;
   const engines = useEngines().data;
+  const themes = useThemes();
+  const [pickTheme] = useAction(async (theme: string) => call("settings.save", { theme }), t("settings.saveFailed"));
   const [query, setQuery] = useState("");
   const words = useDebounced(query.trim(), 140);
   const runHits = useQuery(words.length >= RUN_SEARCH_MIN ? `switcher:runs:${words}` : null, ["runs"], () => call("runs.search", words, RUN_HITS)).data;
@@ -109,8 +112,11 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       { id: "new:chat", title: t("switcher.newChat"), kind: "switcher.action", icon: MessageSquarePlus, act: () => go({ view: "chat" }) },
       { id: "new:task", title: t("tasks.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "tasks", taskId: "new" }) },
       { id: "new:skill", title: t("skills.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "skills", skillId: "new" }) },
+      // Listed once something is typed: "tokyo", Enter, and the whole app is in Tokyo Night.
+      { id: `theme:${FOLLOW}`, title: `${t("switcher.theme")} · ${t("settings.followOmarchy")}`, sub: themes?.system?.name, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(FOLLOW) },
+      ...(themes?.themes ?? []).map((theme): Item => ({ id: `theme:${theme.id}`, title: `${t("switcher.theme")} · ${theme.name}`, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(theme.id) })),
     ];
-  }, [agents, chats, workspaces, tasks, routines, skills, rail, home, t, go, open]);
+  }, [agents, chats, workspaces, tasks, routines, skills, themes, rail, home, t, go, open, pickTheme]);
 
   const shown = useMemo(() => {
     // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open
@@ -121,7 +127,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       const openTask = (item: Item) => !item.id.startsWith("task:") || tasks?.find((task) => `task:${task.id}` === item.id)?.status !== "done";
       let chatsShown = 0;
       return items
-        .filter((item) => openTask(item) && (!item.id.startsWith("chat:") || ++chatsShown <= RECENT_CHATS))
+        .filter((item) => openTask(item) && !item.id.startsWith("theme:") && (!item.id.startsWith("chat:") || ++chatsShown <= RECENT_CHATS))
         .sort((a, b) => order(a) - order(b))
         .slice(0, LIMIT);
     }

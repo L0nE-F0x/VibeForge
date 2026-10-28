@@ -351,6 +351,74 @@
   border-color: var(--sel-line);
 }
 
+/* Settings → Colours: following the desktop heads a grid of every theme, three squares each. */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 60%, transparent);
+}
+
+.theme-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  text-align: left;
+}
+
+.theme-choice.follow {
+  grid-column: 1 / -1;
+}
+
+.theme-choice:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+}
+
+.theme-choice:focus-visible {
+  outline: none;
+  color: var(--accent-2);
+  border-color: var(--focus-line);
+}
+
+.theme-choice[aria-checked="true"] {
+  color: var(--fg);
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+/* The desktop's theme, at the end of the follow row. */
+.theme-note {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-weight: 450;
+}
+
+/* A theme's background and both accents, outlined so a square that matches the page still shows
+   (and a light theme reads as one by its first square). */
+.theme-squares {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.theme-squares i {
+  width: 10px;
+  height: 10px;
+  outline: 1px solid color-mix(in srgb, var(--fg-3) 45%, transparent);
+  outline-offset: -1px;
+}
+
 .tabs {
   display: flex;
   gap: 2px;

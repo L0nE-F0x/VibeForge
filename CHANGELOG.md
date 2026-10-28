@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Pick any theme in Settings.** Settings → Appearance → Colours still follows your Omarchy theme by default, and now lists every theme next to it: the ones installed on your machine, your own included, and Omarchy's 22 stock themes, which VibeForge now ships so they work without Omarchy too. Click one, or move with the arrow keys, and the whole window changes at once. A pinned theme stays when the desktop switches to another; if it is removed, VibeForge goes back to following Omarchy and says so. Ctrl+K finds them too: type "tokyo" and press Enter.
+
 ## [2.8.1] - 2026-10-27
 
 **2.8.1: Start at login shows VibeForge in the tray again.**

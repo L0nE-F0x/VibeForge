@@ -11,7 +11,7 @@ import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile, PageErrors } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService, type DeskHost } from "../src/core/team-service.js";
-import { resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
+import { listThemes, resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
 import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
@@ -457,6 +457,7 @@ function handlers(): Handlers {
       logFile: log.file,
     }),
     "app.palette": () => palette,
+    "app.themes": () => listThemes(),
     "app.openPath": (target) => openPath(target),
     "app.openExternal": (url) => {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
