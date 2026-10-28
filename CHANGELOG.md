@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-28
+
+**2.10.0: CLIs in Code know about each other, and a task you hand out reports back when it's done.**
+
 ### Added
 
 - **Handed-out tasks report back.** When an agent finishes its turn on a task another CLI handed it with `vibeforge task`, that CLI gets a report as a message: what the agent said, its changes as a patch with the files listed, and where its copy is. If the task ends before the agent answers, the report says so. The task's terminal shows "Reports to …" until then, and its stop button cancels the report. `--wait` still prints the first answer right away instead.
@@ -478,7 +482,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.10.0
 [2.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.9.0
 [2.8.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.1
 [2.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.0
