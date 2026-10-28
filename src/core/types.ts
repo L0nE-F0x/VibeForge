@@ -275,6 +275,8 @@ export interface TalkState {
   /** The limit was reached: the next message waits for a person to press Enter. */
   held: boolean;
   review: { role: "author" | "reviewer"; other: string; phase: "author" | "reviewer" | "fixing"; round: number; rounds: number } | null;
+  /** A task handed out by that CLI: what this one does goes back to it as a report. */
+  reportsTo: string | null;
 }
 
 export type Topic =

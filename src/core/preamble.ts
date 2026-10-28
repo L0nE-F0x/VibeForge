@@ -18,6 +18,15 @@ export interface PreambleInput {
   talk?: boolean;
 }
 
+/** How a CLI in VibeForge reaches the others; the same words in an agent's preamble and a Code pane's note. */
+export const TEAM_COMMANDS =
+  "The `vibeforge` command in your shell reaches them: `vibeforge who` lists the CLIs open now and the agents you can hand work to. `vibeforge tell <name> \"…\"` sends one a message (add `--wait` to get its answer back). `vibeforge task <agent> \"…\"` hands an agent a separate piece of work: it works in its own git copy of the workspace, and what it did comes back to you as a message when it finishes (a person applies its changes). Use them when a second opinion or work in parallel helps; keep messages short.";
+
+/** What a coding CLI started in a Code pane is told about the others, where it takes extra instructions (see `instructionArgs`). */
+export function codePaneNote(): string {
+  return `You are running in a terminal in VibeForge, where other coding CLIs may be open beside you. ${TEAM_COMMANDS}`;
+}
+
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
 export function memoryForPrompt(memory: string): string {
   return memory.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trim();
@@ -51,7 +60,7 @@ export function buildPreamble(input: PreambleInput): string {
     parts.push(
       "",
       "## Other agents",
-      "Other coding CLIs may be open in VibeForge beside you. `vibeforge who` lists them. `vibeforge tell <name> \"…\"` sends one a message (add `--wait` to get its answer back), and `vibeforge task <agent> \"…\"` hands a VibeForge agent a task that runs in its own copy of the workspace. Use them when a second opinion or a separate piece of work helps; keep exchanges short.",
+      `Other coding CLIs may be open in VibeForge beside you. ${TEAM_COMMANDS}`,
     );
   }
   if (input.priorTranscript) {

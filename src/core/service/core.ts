@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion } from "../companion.js";
-import { planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
+import { instructionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -294,6 +294,8 @@ export class ServiceCore {
     promptText: string | null;
     /** Text pasted after a continued session loads. */
     pasteAfter?: string | null;
+    /** Added to the CLI's own instructions where it takes some at start (see instructionArgs). */
+    instructions?: string | null;
     continueSession?: boolean;
     /** The exact session to reopen, read from the previous run's transcript. */
     resumeArgs?: string[] | null;
@@ -315,6 +317,9 @@ export class ServiceCore {
       continueSession: input.continueSession,
       resumeArgs: input.resumeArgs,
       promptFile: preamblePath,
+      instructions: input.instructions
+        ? { argv: instructionArgs(input.engine.row, input.instructions), record: instructionArgs(input.engine.row, "{VibeForge note}") }
+        : null,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
     let gitStart: string | null = null;

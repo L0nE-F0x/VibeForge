@@ -16,6 +16,7 @@ import {
   answerFromScreen,
   Handles,
   SETTLE_MS,
+  taskReportText,
   type Answer,
   type Reachable,
 } from "../agent-talk.js";
@@ -25,7 +26,7 @@ import { replyLogFor, type ReplyLog } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
 import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
-import { patchFiles } from "../worktrees.js";
+import { copyPatch, patchFiles } from "../worktrees.js";
 import type { LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
 import type { TaskDesk } from "./tasks.js";
@@ -46,6 +47,8 @@ const LOG_PATIENCE_MS = 30_000;
 const BOOT_MS = 5000;
 /** An answer still not in this long after the sender stopped waiting is given up on. */
 const LATE_ANSWER_MS = 30 * 60 * 1000;
+/** How long a handed-out task is watched for its first answer, to report it to the CLI that handed it out. */
+const REPORT_MS = 4 * 60 * 60 * 1000;
 /** Tasks one CLI may have running that it handed out; more are made but wait in To do. */
 const MAX_RUNNING_HANDED_OUT = 3;
 const KEEP_FILES = 40;
@@ -78,6 +81,8 @@ interface WaitSpec {
   dropped?: (why: string) => void;
   /** Aborts when the sender stops waiting early (its own tool timed out): the answer then goes to it as a message. */
   gone?: AbortSignal;
+  /** Once the sender has stopped waiting: what to do with an answer or an end, and for how long to keep watching. Without it, an answer is forwarded as a message. */
+  after?: { answered: (answered: Answered) => void; ended: () => void; forMs: number };
 }
 
 interface Waiter extends WaitSpec {
@@ -172,7 +177,8 @@ export class MessageDesk {
     return {
       you: list.find((item) => item.ptyId === fromPty)?.handle ?? null,
       clis: list.map((item) => ({ handle: item.handle, label: item.label, folder: item.cwd, working: item.working, you: item.ptyId === fromPty })),
-      agents: this.core.store.listAgents().map((agent) => ({ name: agent.name, handle: slugify(agent.name, 24) })),
+      // An agent's id is the name `vibeforge task` takes; a cut of the name could be another agent's.
+      agents: this.core.store.listAgents().map((agent) => ({ name: agent.name, handle: agent.id })),
     };
   }
 
@@ -327,7 +333,7 @@ export class MessageDesk {
       item.dropped("A person stopped this conversation.");
     }
     for (const [target, list] of [...this.waiting]) {
-      for (const waiter of [...list]) if (target === ptyId || waiter.forwardTo === ptyId) this.dropWaiter(target, waiter, "A person stopped this conversation.");
+      for (const waiter of [...list]) if (target === ptyId || waiter.forwardTo === ptyId) this.dropWaiter(target, waiter, "A person stopped this conversation.", false);
     }
     for (const [id, review] of this.reviews) if (review.authorPty === ptyId || review.reviewerPty === ptyId) this.reviews.delete(id);
     this.core.emit("live");
@@ -448,10 +454,9 @@ export class MessageDesk {
   /** `vibeforge task <agent> "…"`: a task for a VibeForge agent, in its own copy so it never works in the sender's folder. */
   async handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
     if (!this.settings().on) return { ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." };
-    const wanted = slugify(input.agent, 48);
     const agents = this.core.store.listAgents();
-    const agent = agents.find((item) => item.id === input.agent || slugify(item.name, 48) === wanted);
-    if (!agent) return { ok: false, error: `No agent called "${input.agent}".${agents.length ? ` Agents: ${agents.map((item) => slugify(item.name, 24)).join(", ")}.` : " There are no agents yet."}` };
+    const agent = findAgent(agents, input.agent);
+    if (!agent) return { ok: false, error: `No agent called "${input.agent}".${agents.length ? ` Agents: ${agents.map((item) => item.id).join(", ")}.` : " There are no agents yet."}` };
     const text = cleanText(input.text);
     if (!text) return { ok: false, error: "The task is empty." };
     const from = this.list().find((item) => item.ptyId === input.fromPty) ?? null;
@@ -466,7 +471,7 @@ export class MessageDesk {
     if (!workspace) return { ok: false, error: "Start this from a terminal in a workspace, so VibeForge knows where the task belongs." };
     const askedBy = from?.label ?? "a terminal outside VibeForge";
     const isolated = await isGitRepo(workspace.path).catch(() => false);
-    const title = (input.title?.trim() || text.split("\n")[0]).replace(/\s+/g, " ").slice(0, 80);
+    const title = taskTitle(input.title?.trim() || text.split("\n")[0]);
     const task = createTask({
       title,
       body: `${text}\n\nAsked by ${askedBy}.`,
@@ -493,16 +498,64 @@ export class MessageDesk {
       return { ok: true, taskId: task.id, title, started: false, note: `It couldn't start: ${error instanceof Error ? error.message : String(error)} It waits in To do.` };
     }
     const note = `${agent.name} works in its own copy of ${workspace.path}. A person applies its changes from the task.`;
-    if (!input.wait || !("ptyId" in launched)) return { ok: true, taskId: task.id, title, started: true, note };
+    const asker = from?.ptyId ?? null;
+    // Nobody to answer or report to: a terminal outside VibeForge gets the usual notification.
+    if (!("ptyId" in launched) || (!input.wait && !asker)) return { ok: true, taskId: task.id, title, started: true, note };
     const ptyId = launched.ptyId;
+    const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
     return new Promise<TaskResult>((resolve) => {
-      this.watchAnswer(ptyId, {
-        words: "",
-        deadline: this.nowMs() + Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS),
-        done: (answered) =>
-          resolve({ ok: true, taskId: task.id, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${agent.name} is still working on it. ${note}` }),
-      }, Date.parse(this.core.live.get(ptyId)?.startedAt ?? "") || this.nowMs());
+      // `--wait` gets the first answer here. Without it, or once the wait is over, the CLI that
+      // handed the task out gets a report as a message.
+      if (!input.wait) resolve({ ok: true, taskId: task.id, title, started: true, note: `${note}${reports}` });
+      this.watchAnswer(
+        ptyId,
+        {
+          words: "",
+          deadline: this.nowMs() + (input.wait ? Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS) : 0),
+          done: (answered) =>
+            resolve({ ok: true, taskId: task.id, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${agent.name} is still working on it. ${note}${reports}` }),
+          dropped: () => resolve({ ok: true, taskId: task.id, title, started: true, reply: null, note: `It ended before ${agent.name} answered. ${note}` }),
+          // Not waiting: the answer is a report from the start.
+          gone: input.wait ? undefined : AbortSignal.abort(),
+          after: asker
+            ? {
+                answered: (answered) => void this.reportTask(task.id, ptyId, asker, answered, false),
+                ended: () => void this.reportTask(task.id, ptyId, asker, null, true),
+                forMs: REPORT_MS,
+              }
+            : undefined,
+        },
+        Date.parse(this.core.live.get(ptyId)?.startedAt ?? "") || this.nowMs(),
+        asker,
+      );
     });
+  }
+
+  /** A handed-out task's first answer (or its end), its changes and where they are, to the CLI that handed it out. */
+  private async reportTask(taskId: string, taskPty: string, asker: string, answered: Answered | null, ended: boolean): Promise<void> {
+    const to = this.core.live.get(asker);
+    const task = this.core.store.getTask(taskId);
+    if (!to || !isCodingCli(to) || !task || this.stopped.has(asker) || this.stopped.has(taskPty)) return;
+    const from = this.list().find((item) => item.ptyId === taskPty) ?? null;
+    const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
+    const patch = task.copy ? await copyPatch(task.copy, { dataRoot: this.core.options.dataRoot, taskId }).catch(() => "") : "";
+    const reply = answered?.reply ? cleanText(answered.reply) : null;
+    const text = taskReportText({
+      agentLabel: from?.label ?? agent?.name ?? "The agent",
+      handle: from?.handle ?? null,
+      title: task.title,
+      ended,
+      reply,
+      savedAt: reply ? this.saveIfLong("messages", reply) : null,
+      patchPath: patch.trim() ? this.saveFile("reviews", "patch", patch) : null,
+      files: patchFiles(patch),
+      copyPath: task.copy?.path ?? null,
+    });
+    // Counted like any message between the two: past the limit it waits in the prompt for a person.
+    const atLimit = (this.counts.get(pairKey(taskPty, asker)) ?? 0) >= this.settings().maxMessages;
+    this.pending.push({ id: randomBytes(4).toString("hex"), fromPty: taskPty, toPty: asker, text, enter: !atLimit, counts: true, waiter: null, dropped: () => undefined });
+    this.core.emit("live");
+    void this.pump();
   }
 
   // ---------------------------------------------------------------- the window
@@ -518,9 +571,10 @@ export class MessageDesk {
       if (b === ptyId && a !== "outside") partners.set(a, count);
     }
     const queued = this.pending.filter((item) => item.toPty === ptyId || item.fromPty === ptyId).length;
-    const waits = [...this.waiting.entries()].filter(([target]) => target === ptyId).length;
+    const mine = this.waiting.get(ptyId) ?? [];
+    const reporting = mine.find((waiter) => waiter.after && waiter.forwardTo);
     const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
-    if (!partners.size && !queued && !waits && !review) return null;
+    if (!partners.size && !queued && !mine.length && !review) return null;
     const max = this.settings().maxMessages;
     return {
       with: [...partners.keys()].map(name).filter((label): label is string => Boolean(label)),
@@ -537,6 +591,7 @@ export class MessageDesk {
             rounds: review.rounds,
           }
         : null,
+      reportsTo: reporting?.forwardTo ? name(reporting.forwardTo) : null,
     };
   }
 
@@ -666,7 +721,7 @@ export class MessageDesk {
       waiter.done(null);
     }
     // Its answer never came (the CLI never took the message up): stop looking, or the pane says it's waiting forever.
-    if (waiter.gaveUp && now >= waiter.deadline + LATE_ANSWER_MS) this.takeWaiter(target, waiter);
+    if (waiter.gaveUp && now >= waiter.deadline + (waiter.after?.forMs ?? LATE_ANSWER_MS)) this.takeWaiter(target, waiter);
   }
 
   private takeWaiter(target: string, waiter: Waiter): boolean {
@@ -685,6 +740,10 @@ export class MessageDesk {
       waiter.done(answered);
       return;
     }
+    if (waiter.after) {
+      waiter.after.answered(answered);
+      return;
+    }
     // The sender gave up waiting: the answer reaches it as a message instead.
     if (!waiter.forwardTo || !answered.reply?.trim()) return;
     const from = this.list().find((item) => item.ptyId === target);
@@ -701,8 +760,13 @@ export class MessageDesk {
     void this.pump();
   }
 
-  private dropWaiter(target: string, waiter: Waiter, why: string): void {
-    if (!this.takeWaiter(target, waiter) || waiter.gaveUp) return;
+  /** The CLI went away (or, with `ended` false, a person pressed Stop): nothing more will come. */
+  private dropWaiter(target: string, waiter: Waiter, why: string, ended = true): void {
+    if (!this.takeWaiter(target, waiter)) return;
+    if (waiter.gaveUp) {
+      if (ended) waiter.after?.ended();
+      return;
+    }
     if (waiter.dropped) waiter.dropped(why);
     else waiter.done(null);
   }
@@ -728,4 +792,29 @@ export class MessageDesk {
     }
     return file;
   }
+}
+
+/**
+ * The agent `vibeforge task` names: by id (what `vibeforge who` prints), by name, or by the
+ * 24-letter cut of its name that `who` printed before 2.10.
+ */
+export function findAgent<T extends { id: string; name: string }>(agents: readonly T[], wanted: string): T | null {
+  const slug = slugify(wanted, 48);
+  return (
+    agents.find((item) => item.id === wanted) ??
+    agents.find((item) => item.id === slug || slugify(item.name, 48) === slug) ??
+    agents.find((item) => slugify(item.name, 24) === slug) ??
+    null
+  );
+}
+
+/** A task's title from its first line: up to 80 characters, cut at a word ("…the single word: hi" kept its "hi" only once this did). */
+export function taskTitle(line: string, max = 80): string {
+  const text = line.replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  // A word that ends right at the cut stays; one cut in half goes.
+  const whole = /[\s,;:.!?]/.test(text[cut.length]);
+  const space = cut.lastIndexOf(" ");
+  return `${(whole || space <= max / 2 ? cut : cut.slice(0, space)).replace(/[\s,;:.-]+$/, "")}…`;
 }

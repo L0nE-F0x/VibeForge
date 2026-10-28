@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeEngineRows, planLaunch, programOf, resumeArgsFromTranscript, seedEngines, whichBin, withAvailability } from "../../src/core/engines.js";
+import { instructionArgs, normalizeEngineRows, planLaunch, programOf, resumeArgsFromTranscript, seedEngines, whichBin, withAvailability } from "../../src/core/engines.js";
 import { listDir } from "../../src/core/files.js";
 import { cwdAllowed, isPathInside } from "../../src/core/places.js";
 import { buildPreamble, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
@@ -109,6 +109,21 @@ describe("engines", () => {
     const long = planLaunch(claude, "/bin/claude", { prompt: huge, promptFile: "/runs/1/preamble.md" });
     expect(long.argv[1]).toContain("/runs/1/preamble.md");
     expect(long.pasteInput).toBeNull();
+  });
+
+  it("adds instructions where a CLI takes them, before the words that resume a session", () => {
+    const row = (id: string, bin = id) => ({ id, label: id, bin, args: [] });
+    expect(instructionArgs(row("claude"), "Be kind.")).toEqual(["--append-system-prompt", "Be kind."]);
+    expect(instructionArgs(row("my-claude", "/opt/claude"), "x")[0]).toBe("--append-system-prompt");
+    expect(instructionArgs(row("grok"), "Be kind.")).toEqual(["--rules", "Be kind."]);
+    expect(instructionArgs(row("codex"), 'Say "hi"\nthen go.', () => false)).toEqual(["-c", 'developer_instructions="Say \\"hi\\"\\nthen go."']);
+    // Codex's own developer_instructions would be replaced, so they win.
+    expect(instructionArgs(row("codex"), "x", () => true)).toEqual([]);
+    expect(instructionArgs(row("agy"), "x")).toEqual([]);
+    const codex = seedEngines().find((item) => item.id === "codex")!;
+    const plan = planLaunch(codex, "/bin/codex", { continueSession: true, instructions: { argv: ["-c", "developer_instructions=\"x\""], record: ["-c", "developer_instructions=\"{note}\""] } });
+    expect(plan.argv).toEqual(["/bin/codex", "-c", 'developer_instructions="x"', "resume", "--last"]);
+    expect(plan.recordArgv).toEqual(["/bin/codex", "-c", 'developer_instructions="{note}"', "resume", "--last"]);
   });
 
   it("ends the options before a prompt that looks like a flag, only where it is positional", () => {

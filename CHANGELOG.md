@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Handed-out tasks report back.** When an agent finishes its turn on a task another CLI handed it with `vibeforge task`, that CLI gets a report as a message: what the agent said, its changes as a patch with the files listed, and where its copy is. If the task ends before the agent answers, the report says so. The task's terminal shows "Reports to …" until then, and its stop button cancels the report. `--wait` still prints the first answer right away instead.
+- **CLIs in Code know about each other.** Claude Code, Codex and Grok Build started in a Code pane are now told about `vibeforge who`, `tell` and `task`, added to their own instructions, so they use them without being shown how. Codex is left alone when its own config sets developer instructions. Turning off Settings → Agents together turns this off too.
+
+### Fixed
+
+- **`vibeforge task` takes the names `vibeforge who` prints.** `who` listed agents by a shortened name, which `task` didn't accept for agents with long names ("No agent called vibeforge-github-repo-ma"). `who` now prints each agent's id, and `task` still takes the shortened names too.
+- **Task titles are cut at a word.** A long first line was cut at 80 characters mid-word, so "…containing the single word: hi" became a title without the "hi". It now ends at a whole word with "…".
+
 ## [2.9.0] - 2026-10-28
 
 **2.9.0: pick any theme in Settings, and keep it when the desktop switches.**

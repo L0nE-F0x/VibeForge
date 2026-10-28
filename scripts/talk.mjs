@@ -17,8 +17,9 @@ const USAGE = `Talk to the other coding CLIs open in VibeForge.
 
   vibeforge task <agent> [--title "<title>"] [--no-start] [--wait] [--timeout <minutes>] "<instructions>"
       Hand a task to a VibeForge agent. It works in its own git copy of your workspace,
-      never in your folder; a person applies its changes from the task.
-      --no-start  leave it in To do.   --wait  wait for its first answer and print it.
+      never in your folder; a person applies its changes from the task. When it finishes
+      its turn, what it said and changed comes back to you as a message.
+      --no-start  leave it in To do.   --wait  wait for its first answer and print it instead.
 
 Two CLIs may send each other a limited number of messages before a person has to
 press Enter on the next one (Settings → Agents together). Exit codes: 0 done,
