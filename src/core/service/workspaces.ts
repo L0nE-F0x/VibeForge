@@ -1,6 +1,7 @@
 import path from "node:path";
 import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
 import { isDirectory } from "../fsx.js";
+import { codePaneNote } from "../preamble.js";
 import type { LayoutNode } from "../types.js";
 import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
 import type { Launched, TermSize } from "./types.js";
@@ -166,6 +167,8 @@ export class WorkspaceDesk {
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,
       continuedFrom: previous?.id ?? null,
+      // Agent runs learn about the other CLIs from their preamble; a plain CLI here from this.
+      instructions: this.core.store.readSettings().agentTalk.on ? codePaneNote() : null,
       cols: opts.cols,
       rows: opts.rows,
     });

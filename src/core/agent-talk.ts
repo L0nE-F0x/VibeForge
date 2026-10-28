@@ -162,6 +162,32 @@ export function reviewReplyText(input: { reviewerLabel: string; reply: string; s
   ].join("\n");
 }
 
+/** What a handed-out task did, on its way back to the CLI that handed it out. */
+export function taskReportText(input: {
+  agentLabel: string;
+  handle: string | null;
+  title: string;
+  /** Its CLI closed before it answered. */
+  ended: boolean;
+  reply: string | null;
+  savedAt?: string | null;
+  patchPath: string | null;
+  files: readonly string[];
+  copyPath: string | null;
+}): string {
+  const files = input.files.length > 12 ? `${input.files.slice(0, 12).join(", ")} and ${input.files.length - 12} more` : input.files.join(", ");
+  const said = input.savedAt ? `Its answer is long, so it is saved at ${input.savedAt}. Read it first.` : input.reply?.trim() ? `Its answer:\n${input.reply.trim()}` : null;
+  return [
+    `[Task report from ${input.agentLabel}, sent through VibeForge]`,
+    input.ended ? `The task you handed out, "${input.title}", ended before ${input.agentLabel} answered.` : `${input.agentLabel} finished its turn on the task you handed it: "${input.title}".`,
+    ...(said ? [said] : []),
+    input.patchPath
+      ? `Its changes are in ${input.patchPath}${files ? ` (${files})` : ""}, made in its own copy${input.copyPath ? ` at ${input.copyPath}` : ""}. A person applies them from the task in VibeForge.`
+      : "It changed no files.",
+    ...(input.handle && !input.ended ? ["", `(To ask it more, run: vibeforge tell ${input.handle} "…")`] : []),
+  ].join("\n");
+}
+
 /** The pair two terminals' messages are counted under, whichever way they go. */
 export function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;

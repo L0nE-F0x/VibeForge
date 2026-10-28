@@ -160,7 +160,9 @@ export function TalkChip({ ptyId, talk }: { ptyId: string; talk: TalkState }) {
       ? t("talk.held", { names: talk.with.join(", "), max: talk.max })
       : talk.with.length
         ? t("talk.with", { names: talk.with.join(", "), count: talk.messages, max: talk.max })
-        : t("talk.queued", { count: talk.queued });
+        : talk.reportsTo && !talk.queued
+          ? t("talk.reportsTo", { name: talk.reportsTo })
+          : t("talk.queued", { count: talk.queued });
   return (
     <span className={`pane-talk${talk.held ? " is-held" : ""}`}>
       <span className="chip accent" {...tipProps(t("talk.chipTip"))}>

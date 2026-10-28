@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Engine, EngineRow } from "./types.js";
 
@@ -248,6 +249,30 @@ export function resumeArgsFromTranscript(row: EngineRow, transcript: string): st
   return last[0].includes(`${last[1]}=`) ? [`${last[1]}=${last[2]}`] : [last[1], last[2]];
 }
 
+/** Codex's own config.toml, if it sets `developer_instructions` (which `-c` would replace). */
+function codexHasInstructions(): boolean {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  try {
+    return /^\s*developer_instructions\s*=/m.test(fs.readFileSync(path.join(home, "config.toml"), "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Arguments that add `text` to a CLI's own instructions, for the CLIs that take some at start:
+ * Claude Code appends it to its system prompt, Grok Build to its rules, and Codex takes it as
+ * developer instructions unless its config.toml has its own. Empty for the rest.
+ */
+export function instructionArgs(row: EngineRow, text: string, codexOwn: () => boolean = codexHasInstructions): string[] {
+  const name = `${row.id} ${path.basename(row.bin)}`.toLowerCase();
+  if (/\bclaude\b/.test(name)) return ["--append-system-prompt", text];
+  if (/\bgrok\b/.test(name)) return ["--rules", text];
+  // -c takes TOML, and a JSON string is a TOML basic string.
+  if (/\bcodex\b/.test(name) && !codexOwn()) return ["-c", `developer_instructions=${JSON.stringify(text)}`];
+  return [];
+}
+
 /** Linux refuses a single argv string past 128 KiB. Stay well under it. */
 export const MAX_PROMPT_ARG_BYTES = 100_000;
 
@@ -262,23 +287,31 @@ export interface LaunchPlan {
 export function planLaunch(
   row: EngineRow,
   binPath: string,
-  opts: { prompt?: string | null; continueSession?: boolean; resumeArgs?: string[] | null; promptFile?: string | null },
+  opts: {
+    prompt?: string | null;
+    continueSession?: boolean;
+    resumeArgs?: string[] | null;
+    promptFile?: string | null;
+    /** From {@link instructionArgs}: what the CLI gets, and the shorter stand-in the run record keeps. */
+    instructions?: { argv: string[]; record: string[] } | null;
+  },
 ): LaunchPlan {
-  const argv = [binPath, ...row.args];
-  if (opts.resumeArgs?.length) argv.push(...opts.resumeArgs);
-  else if (opts.continueSession && row.continueArgs?.length) argv.push(...row.continueArgs);
+  // Options before the resume words, which can be a subcommand (`codex resume --last`).
+  const resume = opts.resumeArgs?.length ? opts.resumeArgs : opts.continueSession && row.continueArgs?.length ? row.continueArgs : [];
+  const argv = [binPath, ...row.args, ...(opts.instructions?.argv ?? []), ...resume];
+  const record = [binPath, ...row.args, ...(opts.instructions?.record ?? []), ...resume];
   const prompt = opts.prompt?.trim() ? opts.prompt : null;
-  if (!prompt) return { argv, recordArgv: argv, pasteInput: null };
-  if (!row.promptArgs?.length) return { argv, recordArgv: argv, pasteInput: prompt };
+  if (!prompt) return { argv, recordArgv: record, pasteInput: null };
+  if (!row.promptArgs?.length) return { argv, recordArgv: record, pasteInput: prompt };
   let text = prompt;
   if (Buffer.byteLength(text, "utf8") > MAX_PROMPT_ARG_BYTES) {
-    if (!opts.promptFile) return { argv, recordArgv: argv, pasteInput: prompt };
+    if (!opts.promptFile) return { argv, recordArgv: record, pasteInput: prompt };
     text = `Your full instructions for this run are in ${opts.promptFile}. Read that file first and follow it.`;
   }
   const promptArgs = text.startsWith("-") && endsPositional(row.promptArgs) ? [...row.promptArgs.slice(0, -1), "--", "{prompt}"] : row.promptArgs;
   return {
     argv: [...argv, ...promptArgs.map((arg) => arg.replaceAll("{prompt}", text))],
-    recordArgv: [...argv, ...promptArgs],
+    recordArgv: [...record, ...promptArgs],
     pasteInput: null,
   };
 }
