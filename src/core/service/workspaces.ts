@@ -1,7 +1,8 @@
 import path from "node:path";
 import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
 import { isDirectory } from "../fsx.js";
-import { codePaneNote } from "../preamble.js";
+import { cwdAllowed } from "../places.js";
+import { codePaneNote, leadNote } from "../preamble.js";
 import type { LayoutNode } from "../types.js";
 import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
 import type { Launched, TermSize } from "./types.js";
@@ -144,6 +145,22 @@ export class WorkspaceDesk {
     return { ptyId: spawned.ptyId };
   }
 
+  /**
+   * What a CLI started here is told: the lead (Settings → Agents together) gets its team in this
+   * workspace and the rules; any other CLI, that the others exist. Agent runs learn it from their preamble.
+   */
+  private paneInstructions(engineId: string, folder: string): { instructions: string | null; allowVibeforge: boolean } {
+    const talk = this.core.store.readSettings().agentTalk;
+    if (!talk.on) return { instructions: null, allowVibeforge: false };
+    if (!talk.lead || talk.lead !== engineId) return { instructions: codePaneNote(), allowVibeforge: false };
+    const rows = this.core.store.readEngineRows();
+    const team = this.core.store
+      .listAgents()
+      .filter((agent) => cwdAllowed(folder, agent.places))
+      .map((agent) => ({ id: agent.id, name: agent.name, engine: rows.find((row) => row.id === agent.engine)?.label ?? agent.engine, goodAt: agent.goodAt, tier: agent.tier }));
+    return { instructions: leadNote({ team, ...talk }), allowVibeforge: true };
+  }
+
   async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
@@ -167,8 +184,7 @@ export class WorkspaceDesk {
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,
       continuedFrom: previous?.id ?? null,
-      // Agent runs learn about the other CLIs from their preamble; a plain CLI here from this.
-      instructions: this.core.store.readSettings().agentTalk.on ? codePaneNote() : null,
+      ...this.paneInstructions(engine.row.id, workspace.path),
       cols: opts.cols,
       rows: opts.rows,
     });

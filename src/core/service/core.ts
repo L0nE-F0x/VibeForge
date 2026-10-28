@@ -296,6 +296,8 @@ export class ServiceCore {
     pasteAfter?: string | null;
     /** Added to the CLI's own instructions where it takes some at start (see instructionArgs). */
     instructions?: string | null;
+    /** A lead: Claude Code may run `vibeforge` without asking. */
+    allowVibeforge?: boolean;
     continueSession?: boolean;
     /** The exact session to reopen, read from the previous run's transcript. */
     resumeArgs?: string[] | null;
@@ -318,7 +320,10 @@ export class ServiceCore {
       resumeArgs: input.resumeArgs,
       promptFile: preamblePath,
       instructions: input.instructions
-        ? { argv: instructionArgs(input.engine.row, input.instructions), record: instructionArgs(input.engine.row, "{VibeForge note}") }
+        ? {
+            argv: instructionArgs(input.engine.row, input.instructions, { allowVibeforge: input.allowVibeforge }),
+            record: instructionArgs(input.engine.row, "{VibeForge note}", { allowVibeforge: input.allowVibeforge }),
+          }
         : null,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;

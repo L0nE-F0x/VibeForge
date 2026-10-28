@@ -24,6 +24,7 @@ import type {
 import type { Palette, ThemeChoice, ThemeList } from "../core/theme.js";
 import type {
   Agent,
+  AgentTier,
   Engine,
   EngineRow,
   LayoutNode,
@@ -57,6 +58,7 @@ export type { Deleted };
 
 export type {
   Agent,
+  AgentTier,
   AgentInput,
   ChatView,
   Engine,
@@ -410,6 +412,8 @@ export interface DeskMethods {
   "talk.review": (authorPty: string, reviewerPty: string) => { changes: boolean };
   /** Stop messages to and from this terminal until a person types in it. */
   "talk.stop": (ptyId: string) => void;
+  /** Start tasks this terminal's CLI handed out that wait for a person (all of them, or the ones named). */
+  "talk.startTasks": (ptyId: string, taskIds: string[] | null) => { started: number; failed: string[] };
   "pty.resize": (ptyId: string, cols: number, rows: number) => void;
   "pty.snapshot": (ptyId: string) => PtySnapshot;
   "pty.kill": (ptyId: string) => void;

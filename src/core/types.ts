@@ -10,6 +10,9 @@ export type RunStatus = "running" | "exited" | "stopped" | "failed";
 
 export type TaskStatus = "todo" | "running" | "review" | "done";
 
+/** What an agent costs to hand work to, as its owner rates it; "" when they haven't said. */
+export type AgentTier = "fast" | "everyday" | "strong" | "";
+
 export interface Agent {
   id: string;
   name: string;
@@ -21,6 +24,9 @@ export interface Agent {
   allowRoutines: boolean;
   /** The Piper voice (.onnx) this agent's answers are read in; empty uses the one in Settings. */
   voice: string;
+  /** One line for a lead deciding whom to hand work to: "small, well-defined edits", "icons and images". */
+  goodAt: string;
+  tier: AgentTier;
   createdAt: string;
   updatedAt: string;
 }
@@ -166,6 +172,16 @@ export interface AgentTalkSettings {
   maxMessages: number;
   /** Review rounds for Review with…: the reviewer answers, the author fixes, this many times. */
   reviewRounds: number;
+  /** The engine whose CLI leads when a Code pane starts it: it is told the team and hands work out. "" for none. */
+  lead: string;
+  /** "ask": a task a CLI hands out waits for a person to press Start. "go": it starts at once, within the limits below. */
+  handOff: "ask" | "go";
+  /** Handed-out tasks one CLI may have working (not yet reported back) at once. */
+  maxWorking: number;
+  /** Tasks one CLI may hand out between two things a person types into it; more wait for Start. */
+  maxHandOffs: number;
+  /** The CLI that handed a task out may apply its changes itself with `vibeforge apply`. */
+  leadApplies: boolean;
 }
 
 /** The phone page. `token` is empty until the page is turned on. */
@@ -277,6 +293,8 @@ export interface TalkState {
   review: { role: "author" | "reviewer"; other: string; phase: "author" | "reviewer" | "fixing"; round: number; rounds: number } | null;
   /** A task handed out by that CLI: what this one does goes back to it as a report. */
   reportsTo: string | null;
+  /** Tasks this CLI handed out that wait for a person to press Start. */
+  toStart: Array<{ taskId: string; title: string; agent: string }>;
 }
 
 export type Topic =

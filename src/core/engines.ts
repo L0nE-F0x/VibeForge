@@ -262,11 +262,14 @@ function codexHasInstructions(): boolean {
 /**
  * Arguments that add `text` to a CLI's own instructions, for the CLIs that take some at start:
  * Claude Code appends it to its system prompt, Grok Build to its rules, and Codex takes it as
- * developer instructions unless its config.toml has its own. Empty for the rest.
+ * developer instructions unless its config.toml has its own. Empty for the rest. `allowVibeforge`
+ * lets Claude Code run `vibeforge` without asking (for a lead; VibeForge holds its tasks itself
+ * under Ask first). It goes first, because `--allowedTools` takes every word up to the next option.
  */
-export function instructionArgs(row: EngineRow, text: string, codexOwn: () => boolean = codexHasInstructions): string[] {
+export function instructionArgs(row: EngineRow, text: string, opts: { allowVibeforge?: boolean; codexOwn?: () => boolean } = {}): string[] {
   const name = `${row.id} ${path.basename(row.bin)}`.toLowerCase();
-  if (/\bclaude\b/.test(name)) return ["--append-system-prompt", text];
+  const codexOwn = opts.codexOwn ?? codexHasInstructions;
+  if (/\bclaude\b/.test(name)) return [...(opts.allowVibeforge ? ["--allowedTools", "Bash(vibeforge:*)"] : []), "--append-system-prompt", text];
   if (/\bgrok\b/.test(name)) return ["--rules", text];
   // -c takes TOML, and a JSON string is a TOML basic string.
   if (/\bcodex\b/.test(name) && !codexOwn()) return ["-c", `developer_instructions=${JSON.stringify(text)}`];

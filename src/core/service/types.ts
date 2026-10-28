@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
-import type { Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
+import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
 import type { Writer } from "../checkout.js";
 import type { ReplyLog } from "../replies.js";
 import type { Waiting } from "./turns.js";
@@ -60,6 +60,8 @@ export interface AgentInput {
   allowRoutines?: boolean;
   /** A Piper voice file; empty uses the one in Settings. */
   voice?: string;
+  goodAt?: string;
+  tier?: AgentTier;
 }
 
 export interface SkillInput {

@@ -116,9 +116,12 @@ describe("engines", () => {
     expect(instructionArgs(row("claude"), "Be kind.")).toEqual(["--append-system-prompt", "Be kind."]);
     expect(instructionArgs(row("my-claude", "/opt/claude"), "x")[0]).toBe("--append-system-prompt");
     expect(instructionArgs(row("grok"), "Be kind.")).toEqual(["--rules", "Be kind."]);
-    expect(instructionArgs(row("codex"), 'Say "hi"\nthen go.', () => false)).toEqual(["-c", 'developer_instructions="Say \\"hi\\"\\nthen go."']);
+    expect(instructionArgs(row("codex"), 'Say "hi"\nthen go.', { codexOwn: () => false })).toEqual(["-c", 'developer_instructions="Say \\"hi\\"\\nthen go."']);
     // Codex's own developer_instructions would be replaced, so they win.
-    expect(instructionArgs(row("codex"), "x", () => true)).toEqual([]);
+    expect(instructionArgs(row("codex"), "x", { codexOwn: () => true })).toEqual([]);
+    // A lead's Claude Code may run vibeforge; the list of tools ends at the next option.
+    expect(instructionArgs(row("claude"), "x", { allowVibeforge: true })).toEqual(["--allowedTools", "Bash(vibeforge:*)", "--append-system-prompt", "x"]);
+    expect(instructionArgs(row("grok"), "x", { allowVibeforge: true })).toEqual(["--rules", "x"]);
     expect(instructionArgs(row("agy"), "x")).toEqual([]);
     const codex = seedEngines().find((item) => item.id === "codex")!;
     const plan = planLaunch(codex, "/bin/codex", { continueSession: true, instructions: { argv: ["-c", "developer_instructions=\"x\""], record: ["-c", "developer_instructions=\"{note}\""] } });

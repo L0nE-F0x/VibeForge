@@ -174,15 +174,28 @@ export function taskReportText(input: {
   patchPath: string | null;
   files: readonly string[];
   copyPath: string | null;
+  /** The task's id, when the CLI that handed it out may apply its changes itself. */
+  applyWith?: string | null;
+  /** It went quiet with nothing in the log VibeForge reads for it: `reply` is the end of its screen. */
+  waiting?: boolean;
 }): string {
   const files = input.files.length > 12 ? `${input.files.slice(0, 12).join(", ")} and ${input.files.length - 12} more` : input.files.join(", ");
+  if (input.waiting) {
+    const screen = (input.reply ?? "").split("\n").filter((line) => line.trim()).slice(-15).join("\n");
+    return [
+      `[Task report from ${input.agentLabel}, sent through VibeForge]`,
+      `${input.agentLabel} went quiet on the task you handed it, "${input.title}", without answering. It may be waiting for a person in its terminal, such as a question about trusting the folder; tell the person.`,
+      ...(screen ? ["The end of its screen:", screen] : []),
+      "You get another report when it answers.",
+    ].join("\n");
+  }
   const said = input.savedAt ? `Its answer is long, so it is saved at ${input.savedAt}. Read it first.` : input.reply?.trim() ? `Its answer:\n${input.reply.trim()}` : null;
   return [
     `[Task report from ${input.agentLabel}, sent through VibeForge]`,
     input.ended ? `The task you handed out, "${input.title}", ended before ${input.agentLabel} answered.` : `${input.agentLabel} finished its turn on the task you handed it: "${input.title}".`,
     ...(said ? [said] : []),
     input.patchPath
-      ? `Its changes are in ${input.patchPath}${files ? ` (${files})` : ""}, made in its own copy${input.copyPath ? ` at ${input.copyPath}` : ""}. A person applies them from the task in VibeForge.`
+      ? `Its changes are in ${input.patchPath}${files ? ` (${files})` : ""}, made in its own copy${input.copyPath ? ` at ${input.copyPath}` : ""}. ${input.applyWith ? `When they're right, apply them with: vibeforge apply ${input.applyWith}` : "A person applies them from the task in VibeForge."}`
       : "It changed no files.",
     ...(input.handle && !input.ended ? ["", `(To ask it more, run: vibeforge tell ${input.handle} "…")`] : []),
   ].join("\n");

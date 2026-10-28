@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `vibeforge tell`, `vibeforge who` and `vibeforge task`: coding CLIs in VibeForge's terminals
+// `vibeforge tell`, `vibeforge who`, `vibeforge task` and `vibeforge apply`: coding CLIs in VibeForge's terminals
 // talking to each other through the running window's control socket. One JSON line goes in, one
 // comes back. The window knows which terminal asked from VIBEFORGE_PTY, which it sets in each one.
 import net from "node:net";
@@ -7,7 +7,8 @@ import net from "node:net";
 const USAGE = `Talk to the other coding CLIs open in VibeForge.
 
   vibeforge who
-      The CLIs you can reach (and which one is you), and the agents you can hand tasks to.
+      The CLIs you can reach (and which one is you), and the agents you can hand tasks to,
+      with what each is good at.
 
   vibeforge tell <name> [--wait] [--timeout <minutes>] "<message>"
       Paste a message into another CLI once it is free, labelled with who sent it.
@@ -20,6 +21,11 @@ const USAGE = `Talk to the other coding CLIs open in VibeForge.
       never in your folder; a person applies its changes from the task. When it finishes
       its turn, what it said and changed comes back to you as a message.
       --no-start  leave it in To do.   --wait  wait for its first answer and print it instead.
+      Under Ask first (Settings → Agents together) it waits for a person to press Start.
+
+  vibeforge apply <task-id>
+      Bring a task you handed out into your folder as uncommitted changes, ending its
+      session. Only when Settings → Agents together lets the CLI that handed it out.
 
 Two CLIs may send each other a limited number of messages before a person has to
 press Enter on the next one (Settings → Agents together). Exit codes: 0 done,
@@ -100,8 +106,19 @@ try {
     const lines = answer.clis.map((cli) => `${cli.you ? "* " : "  "}${cli.handle.padEnd(14)} ${cli.label}${cli.working ? " (working)" : ""} in ${shown(cli.folder)}`);
     process.stdout.write(`${lines.length ? `CLIs (vibeforge tell <name>):\n${lines.join("\n")}` : "No coding CLIs are running in VibeForge."}\n`);
     if (answer.you) process.stdout.write(`You are ${answer.you}.\n`);
-    if (answer.agents.length) process.stdout.write(`Agents (vibeforge task <name>): ${answer.agents.map((agent) => agent.handle).join(", ")}\n`);
+    const TIERS = { fast: "cheap and fast", everyday: "everyday cost", strong: "strong and costly" };
+    const agents = answer.agents.map((agent) =>
+      [`  ${agent.handle.padEnd(14)} ${agent.engine ?? ""}`, agent.goodAt, TIERS[agent.tier]].filter(Boolean).join(" · "),
+    );
+    if (agents.length) process.stdout.write(`Agents (vibeforge task <name>):\n${agents.join("\n")}\n`);
     process.exit(0);
+  }
+  if (command === "apply") {
+    if (!words[0]) fail(`apply needs a task id\n\n${USAGE}`, 2);
+    const answer = await ask({ op: "apply", pty, task: words[0] });
+    if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
+    process.stdout.write(`${answer.files.length ? `Applied ${answer.files.join(", ")}. ` : ""}${answer.note}\n`);
+    process.exit(answer.conflicts.length ? 1 : 0);
   }
   if (command !== "tell" && command !== "task") fail(`unknown command ${command}\n\n${USAGE}`, 2);
   const [target, ...message] = words;
