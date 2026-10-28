@@ -27,7 +27,8 @@ import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
 import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
-import type { LiveSession, TalkState } from "../types.js";
+import { cwdAllowed } from "../places.js";
+import type { AgentTier, LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
 import type { TaskDesk } from "./tasks.js";
 
@@ -49,8 +50,10 @@ const BOOT_MS = 5000;
 const LATE_ANSWER_MS = 30 * 60 * 1000;
 /** How long a handed-out task is watched for its first answer, to report it to the CLI that handed it out. */
 const REPORT_MS = 4 * 60 * 60 * 1000;
-/** Tasks one CLI may have running that it handed out; more are made but wait in To do. */
-const MAX_RUNNING_HANDED_OUT = 3;
+/** A handed-out task's CLI that hasn't moved since it started counts as quiet after this long. */
+const STUCK_MS = 30_000;
+/** Reports of a task waiting for a person, after each of which its answer is watched for again. */
+const MAX_REWATCH = 3;
 const KEEP_FILES = 40;
 /** Focus in/out (CSI I, CSI O) and mouse reports (X10 and SGR), which a terminal sends on its own. */
 const TERMINAL_REPORTS = /\x1b\[[IO]|\x1b\[M[\s\S]{3}|\x1b\[<\d+;\d+;\d+[mM]/g;
@@ -64,7 +67,8 @@ export type TaskResult = { ok: true; taskId: string; title: string; started: boo
 export interface WhoResult {
   you: string | null;
   clis: Array<{ handle: string; label: string; folder: string; working: boolean; you: boolean }>;
-  agents: Array<{ name: string; handle: string }>;
+  /** The agents `vibeforge task` can hand work to: those allowed in the asking CLI's workspace, or all from outside one. */
+  agents: Array<{ name: string; handle: string; engine: string; goodAt: string; tier: AgentTier }>;
 }
 
 type Answered = { reply: string | null; fromScreen: boolean };
@@ -83,6 +87,11 @@ interface WaitSpec {
   gone?: AbortSignal;
   /** Once the sender has stopped waiting: what to do with an answer or an end, and for how long to keep watching. Without it, an answer is forwarded as a message. */
   after?: { answered: (answered: Answered) => void; ended: () => void; forMs: number };
+  /**
+   * A CLI that drew one screen and never moved (a trust question as it starts) never goes "quiet":
+   * it counts as quiet this long after the watch began.
+   */
+  stuckMs?: number;
 }
 
 interface Waiter extends WaitSpec {
@@ -129,6 +138,16 @@ export class MessageDesk {
   private readonly lastSent = new Map<string, number>();
   private readonly reviews = new Map<string, Review>();
   private readonly handles = new Handles();
+  /** Handed-out tasks and the terminal that handed each one out, which hears back from it. */
+  private readonly handed = new Map<string, string>();
+  /** Handed-out tasks waiting for a person to press Start, by the terminal that handed them out. */
+  private readonly proposed = new Map<string, string>();
+  /** Tasks each terminal has handed out since a person last typed in it. */
+  private readonly handedSince = new Map<string, number>();
+  /** How many times each task has been watched again after a report that it waits for a person. */
+  private readonly rewatched = new Map<string, number>();
+  /** `--wait` callers, by task, until its first answer. */
+  private readonly waitFor = new Map<string, (answered: Answered | null, ended: boolean) => void>();
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
   private again = false;
@@ -177,9 +196,21 @@ export class MessageDesk {
     return {
       you: list.find((item) => item.ptyId === fromPty)?.handle ?? null,
       clis: list.map((item) => ({ handle: item.handle, label: item.label, folder: item.cwd, working: item.working, you: item.ptyId === fromPty })),
-      // An agent's id is the name `vibeforge task` takes; a cut of the name could be another agent's.
-      agents: this.core.store.listAgents().map((agent) => ({ name: agent.name, handle: agent.id })),
+      agents: this.teamFor(fromPty),
     };
+  }
+
+  private teamFor(fromPty: string | null): WhoResult["agents"] {
+    const session = fromPty ? this.core.live.get(fromPty) : undefined;
+    const folder = this.core.workspaceById(session?.workspaceId)?.path ?? null;
+    const rows = this.core.store.readEngineRows();
+    return (
+      this.core.store
+        .listAgents()
+        .filter((agent) => !folder || cwdAllowed(folder, agent.places))
+        // An agent's id is the name `vibeforge task` takes; a cut of the name could be another agent's.
+        .map((agent) => ({ name: agent.name, handle: agent.id, engine: rows.find((row) => row.id === agent.engine)?.label ?? agent.engine, goodAt: agent.goodAt, tier: agent.tier }))
+    );
   }
 
   // ---------------------------------------------------------------- tell
@@ -312,6 +343,7 @@ export class MessageDesk {
     // clicking a pane isn't a person stepping into the conversation.
     if (!data.replace(TERMINAL_REPORTS, "")) return;
     this.lastHuman.set(ptyId, { at: this.nowMs(), sent: /[\r\n]/.test(data) });
+    this.handedSince.delete(ptyId);
     let changed = this.stopped.delete(ptyId);
     for (const key of [...this.counts.keys()]) {
       if (key.split("|").includes(ptyId)) {
@@ -484,58 +516,187 @@ export class MessageDesk {
     });
     this.core.store.writeTask(task);
     this.core.emit("tasks");
-    const runningFromHere = this.core.store.listTasks().filter((item) => item.askedBy === askedBy && item.status === "running").length;
-    const startable = input.start !== false;
-    if (!startable) return { ok: true, taskId: task.id, title, started: false, note: "It waits in To do until a person executes it." };
+    const asker = from?.ptyId ?? null;
+    if (asker) this.handed.set(task.id, asker);
+    const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
+    if (input.start === false) return { ok: true, taskId: task.id, title, started: false, note: "It waits in To do until a person executes it." };
     if (!isolated) return { ok: true, taskId: task.id, title, started: false, note: `${workspace.path} isn't a git repository, so the task can't have its own copy. It waits in To do for a person to start it.` };
-    if (runningFromHere >= MAX_RUNNING_HANDED_OUT) {
-      return { ok: true, taskId: task.id, title, started: false, note: `You already have ${MAX_RUNNING_HANDED_OUT} tasks running, so this one waits in To do.` };
-    }
+    // How far a CLI goes on its own (Settings → Agents together): a task past it waits for a
+    // person to press Start on the terminal that handed it out.
+    const talk = this.settings();
+    const held = (why: string): TaskResult => {
+      if (asker) this.proposed.set(task.id, asker);
+      this.core.emit("live");
+      return { ok: true, taskId: task.id, title, started: false, note: asker ? `${why}${reports}` : "It waits in To do for a person to start it." };
+    };
+    const handedNow = asker ? (this.handedSince.get(asker) ?? 0) + 1 : 0;
+    if (asker) this.handedSince.set(asker, handedNow);
+    if (talk.handOff === "ask") return held("It waits for the person to press Start on your terminal's title bar (Ask first, in VibeForge's Settings → Agents together).");
+    if (asker && handedNow > talk.maxHandOffs) return held(`You've handed out ${talk.maxHandOffs} tasks since the person last wrote to you, so this one waits for them to press Start.`);
+    if (asker && this.workingFor(asker) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
+    return this.startHanded(task.id, asker, input);
+  }
+
+  /** Tasks this CLI handed out that are still working: started, and not reported back yet. */
+  private workingFor(asker: string): number {
+    let count = 0;
+    for (const list of this.waiting.values()) for (const waiter of list) if (waiter.after && waiter.forwardTo === asker) count += 1;
+    return count;
+  }
+
+  /**
+   * Start a handed-out task and watch for its first answer. `--wait` gets it as the result;
+   * otherwise, or once the wait is over, it goes to the CLI that handed it out as a report.
+   */
+  private async startHanded(taskId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number } = {}): Promise<TaskResult> {
+    this.proposed.delete(taskId);
+    const task = this.core.store.getTask(taskId);
+    if (!task) return { ok: false, error: "That task no longer exists." };
+    const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
+    const workspace = this.core.workspaceById(task.workspaceId);
+    const title = task.title;
     let launched: Awaited<ReturnType<TaskDesk["executeTask"]>>;
     try {
-      launched = await this.tasks.executeTask(task.id);
+      launched = await this.tasks.executeTask(taskId);
     } catch (error) {
-      return { ok: true, taskId: task.id, title, started: false, note: `It couldn't start: ${error instanceof Error ? error.message : String(error)} It waits in To do.` };
+      return { ok: true, taskId, title, started: false, note: `It couldn't start: ${error instanceof Error ? error.message : String(error)} It waits in To do.` };
     }
-    const note = `${agent.name} works in its own copy of ${workspace.path}. A person applies its changes from the task.`;
-    const asker = from?.ptyId ?? null;
-    // Nobody to answer or report to: a terminal outside VibeForge gets the usual notification.
-    if (!("ptyId" in launched) || (!input.wait && !asker)) return { ok: true, taskId: task.id, title, started: true, note };
-    const ptyId = launched.ptyId;
+    const name = agent?.name ?? "The agent";
+    const note = `${name} works in its own copy of ${workspace?.path ?? "the workspace"}. ${this.settings().leadApplies && asker ? "You can apply its changes with vibeforge apply once it reports." : "A person applies its changes from the task."}`;
     const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
+    // Nobody to answer or report to: a terminal outside VibeForge gets the usual notification.
+    if (!("ptyId" in launched) || (!opts.wait && !asker)) return { ok: true, taskId, title, started: true, note };
+    this.watchReport(taskId, launched.ptyId, asker, opts);
+    if (!opts.wait) return { ok: true, taskId, title, started: true, note: `${note}${reports}` };
     return new Promise<TaskResult>((resolve) => {
-      // `--wait` gets the first answer here. Without it, or once the wait is over, the CLI that
-      // handed the task out gets a report as a message.
-      if (!input.wait) resolve({ ok: true, taskId: task.id, title, started: true, note: `${note}${reports}` });
-      this.watchAnswer(
-        ptyId,
-        {
-          words: "",
-          deadline: this.nowMs() + (input.wait ? Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS) : 0),
-          done: (answered) =>
-            resolve({ ok: true, taskId: task.id, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${agent.name} is still working on it. ${note}${reports}` }),
-          dropped: () => resolve({ ok: true, taskId: task.id, title, started: true, reply: null, note: `It ended before ${agent.name} answered. ${note}` }),
-          // Not waiting: the answer is a report from the start.
-          gone: input.wait ? undefined : AbortSignal.abort(),
-          after: asker
-            ? {
-                answered: (answered) => void this.reportTask(task.id, ptyId, asker, answered, false),
-                ended: () => void this.reportTask(task.id, ptyId, asker, null, true),
-                forMs: REPORT_MS,
-              }
-            : undefined,
-        },
-        Date.parse(this.core.live.get(ptyId)?.startedAt ?? "") || this.nowMs(),
-        asker,
+      this.waitFor.set(taskId, (answered, ended) =>
+        resolve(
+          ended
+            ? { ok: true, taskId, title, started: true, reply: null, note: `It ended before ${name} answered. ${note}` }
+            : { ok: true, taskId, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${name} is still working on it. ${note}${reports}` },
+        ),
       );
     });
   }
 
-  /** A handed-out task's first answer (or its end), its changes and where they are, to the CLI that handed it out. */
-  private async reportTask(taskId: string, taskPty: string, asker: string, answered: Answered | null, ended: boolean): Promise<void> {
+  /** Watches a started task's first answer (from `since`, its start by default); see startHanded. */
+  private watchReport(taskId: string, ptyId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number }, since?: number): void {
+    const settle = (answered: Answered | null, ended: boolean) => {
+      const waiting = this.waitFor.get(taskId);
+      this.waitFor.delete(taskId);
+      waiting?.(answered, ended);
+    };
+    this.watchAnswer(
+      ptyId,
+      {
+        words: "",
+        deadline: this.nowMs() + (opts.wait ? Math.max(1000, opts.timeoutMs ?? DEFAULT_WAIT_MS) : 0),
+        done: (answered) => settle(answered, false),
+        dropped: () => settle(null, true),
+        // Not waiting: the answer is a report from the start.
+        gone: opts.wait ? undefined : AbortSignal.abort(),
+        // Only from its start: once reported as waiting for a person, it has to move before it's heard from again.
+        stuckMs: since === undefined ? STUCK_MS : undefined,
+        after: asker
+          ? {
+              answered: (answered) =>
+                void this.reportTask(taskId, ptyId, asker, answered, false).then((waiting) => {
+                  // Stuck on a question for a person: watch again, so its answer still comes back.
+                  const times = this.rewatched.get(taskId) ?? 0;
+                  if (!waiting || times >= MAX_REWATCH || !this.core.live.has(ptyId)) return;
+                  this.rewatched.set(taskId, times + 1);
+                  this.watchReport(taskId, ptyId, asker, {}, this.nowMs());
+                }),
+              ended: () => void this.reportTask(taskId, ptyId, asker, null, true),
+              forMs: REPORT_MS,
+            }
+          : undefined,
+      },
+      since ?? (Date.parse(this.core.live.get(ptyId)?.startedAt ?? "") || this.nowMs()),
+      asker,
+    );
+  }
+
+  /** This terminal's held tasks that are still there to start; ones deleted or started from the board drop out. */
+  private toStart(ptyId: string): TalkState["toStart"] {
+    const out: TalkState["toStart"] = [];
+    for (const [taskId, asker] of [...this.proposed]) {
+      if (asker !== ptyId) continue;
+      const task = this.core.store.getTask(taskId);
+      if (!task || task.status !== "todo") {
+        this.proposed.delete(taskId);
+        continue;
+      }
+      out.push({ taskId, title: task.title, agent: (task.agentId && this.core.store.getAgent(task.agentId)?.name) || "" });
+    }
+    return out;
+  }
+
+  /** Start: a person starts tasks a CLI handed out that were held for them (all of this terminal's, or the ones named). */
+  async startHeld(ptyId: string, taskIds: readonly string[] | null): Promise<{ started: number; failed: string[] }> {
+    const ids = [...this.proposed].filter(([id, asker]) => asker === ptyId && (!taskIds || taskIds.includes(id))).map(([id]) => id);
+    let started = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      const result = await this.startHanded(id, ptyId);
+      if (result.ok && result.started) started += 1;
+      else failed.push(result.ok ? (result.note ?? id) : result.error);
+    }
+    this.core.emit("live");
+    return { started, failed };
+  }
+
+  /** A person executed a handed-out task from the board: it reports to the CLI that handed it out all the same. */
+  adoptStarted(taskId: string, ptyId: string): void {
+    const asker = this.handed.get(taskId) ?? null;
+    if (!asker || !this.core.live.has(asker)) return;
+    if (this.proposed.delete(taskId)) this.core.emit("live");
+    this.watchReport(taskId, ptyId, asker, {});
+  }
+
+  /**
+   * `vibeforge apply <task>`: the CLI that handed a task out brings its changes into the workspace,
+   * when Settings lets it. The task's session ends first, as its work is done.
+   */
+  async applyHanded(input: { fromPty: string | null; task: string }): Promise<{ ok: true; files: string[]; conflicts: string[]; note: string } | { ok: false; error: string }> {
+    const talk = this.settings();
+    if (!talk.on) return { ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." };
+    if (!talk.leadApplies) return { ok: false, error: "A person applies handed-out tasks' changes. VibeForge's Settings → Agents together can let the CLI that handed one out do it." };
+    const task = this.core.store.getTask(input.task) ?? this.core.store.listTasks().find((item) => item.title === input.task) ?? null;
+    if (!task) return { ok: false, error: `No task called "${input.task}".` };
+    if (!input.fromPty || this.handed.get(task.id) !== input.fromPty) return { ok: false, error: "Only the CLI that handed this task out can apply it. A person can apply it from the task in VibeForge." };
+    if (!task.copy) return { ok: false, error: "This task has no changes of its own to apply." };
+    try {
+      const live = task.runIds.at(-1) ? this.core.ptyByRun.get(task.runIds.at(-1)!) : undefined;
+      await this.tasks.stopTask(task.id);
+      if (live) await this.core.waitForExit(live, 5000);
+      const result = await this.tasks.applyCopy(task.id);
+      return {
+        ok: true,
+        files: result.files,
+        conflicts: result.conflicts,
+        note: result.conflicts.length
+          ? `Some changes conflict with this folder (${result.conflicts.join(", ")}); the rest are in. The task's copy stays until a person sorts it out.`
+          : `Applied as uncommitted changes, and the task is done.`,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * A handed-out task's first answer (or its end), its changes and where they are, to the CLI that
+   * handed it out. True when it reported the task as waiting for a person rather than answered.
+   */
+  private async reportTask(taskId: string, taskPty: string, asker: string, answered: Answered | null, ended: boolean): Promise<boolean> {
     const to = this.core.live.get(asker);
     const task = this.core.store.getTask(taskId);
-    if (!to || !isCodingCli(to) || !task || this.stopped.has(asker) || this.stopped.has(taskPty)) return;
+    if (!to || !isCodingCli(to) || !task || this.stopped.has(asker) || this.stopped.has(taskPty)) return false;
+    // Read from the screen although VibeForge reads this CLI's log: nothing came into the log, so
+    // it never got going (a trust or permission question on screen, most likely).
+    const session = this.core.live.get(taskPty);
+    const engine = session ? this.engineOf(session) : null;
+    const waiting = Boolean(!ended && answered?.fromScreen && engine && replyLogFor(engine.id, engine.bin));
     const from = this.list().find((item) => item.ptyId === taskPty) ?? null;
     const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
     const patch = task.copy ? await copyPatch(task.copy, { dataRoot: this.core.options.dataRoot, taskId }).catch(() => "") : "";
@@ -550,12 +711,15 @@ export class MessageDesk {
       patchPath: patch.trim() ? this.saveFile("reviews", "patch", patch) : null,
       files: patchFiles(patch),
       copyPath: task.copy?.path ?? null,
+      applyWith: this.settings().leadApplies && !ended ? task.id : null,
+      waiting,
     });
     // Counted like any message between the two: past the limit it waits in the prompt for a person.
     const atLimit = (this.counts.get(pairKey(taskPty, asker)) ?? 0) >= this.settings().maxMessages;
     this.pending.push({ id: randomBytes(4).toString("hex"), fromPty: taskPty, toPty: asker, text, enter: !atLimit, counts: true, waiter: null, dropped: () => undefined });
     this.core.emit("live");
     void this.pump();
+    return waiting;
   }
 
   // ---------------------------------------------------------------- the window
@@ -574,7 +738,8 @@ export class MessageDesk {
     const mine = this.waiting.get(ptyId) ?? [];
     const reporting = mine.find((waiter) => waiter.after && waiter.forwardTo);
     const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
-    if (!partners.size && !queued && !mine.length && !review) return null;
+    const toStart = this.toStart(ptyId);
+    if (!partners.size && !queued && !mine.length && !review && !toStart.length) return null;
     const max = this.settings().maxMessages;
     return {
       with: [...partners.keys()].map(name).filter((label): label is string => Boolean(label)),
@@ -592,6 +757,7 @@ export class MessageDesk {
           }
         : null,
       reportsTo: reporting?.forwardTo ? name(reporting.forwardTo) : null,
+      toStart,
     };
   }
 
@@ -695,6 +861,8 @@ export class MessageDesk {
     // A sender that hangs up early has stopped waiting, as if its deadline had passed.
     spec.gone?.addEventListener("abort", () => (waiter.gaveUp = true), { once: true });
     this.waiting.set(target, [...(this.waiting.get(target) ?? []), waiter]);
+    // Checked every second from now: a CLI that never moves would otherwise never be looked at again.
+    this.ensureTimer();
     if (logKind && session && watch) {
       const cwd = session.programCwd || (session.runId ? this.core.store.getRun(session.runId)?.cwd : null) || session.cwd;
       void watch({ kind: logKind, cwd, since: since - 2000, words: spec.words, signal: waiter.abort.signal })
@@ -709,7 +877,8 @@ export class MessageDesk {
     const session = this.core.live.get(target);
     if (!session || !isCodingCli(session)) return this.dropWaiter(target, waiter, "That CLI isn't running any more.");
     const quietAt = Date.parse(session.quietAt ?? "");
-    const answered = !session.working && quietAt > waiter.since && now - quietAt >= (waiter.logKind ? LOG_PATIENCE_MS : SETTLE_MS);
+    const quietSince = quietAt > waiter.since ? quietAt : waiter.stuckMs && !session.quietAt ? waiter.since + waiter.stuckMs : Number.NaN;
+    const answered = !session.working && Number.isFinite(quietSince) && now - quietSince >= (waiter.logKind ? LOG_PATIENCE_MS : SETTLE_MS);
     if (answered && !waiter.reading) {
       waiter.reading = true;
       const screen = await this.core.options.host.screen?.(target).catch(() => "");

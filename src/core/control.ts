@@ -3,7 +3,7 @@ import path from "node:path";
 
 // The control socket: how `vibeforge --voice start` reaches the running window in a few
 // milliseconds, instead of starting a second Electron only to be handed off, and how
-// `vibeforge tell|who|task` from a CLI in one of its terminals reaches the others. One per data folder,
+// `vibeforge tell|who|task|apply` from a CLI in one of its terminals reaches the others. One per data folder,
 // so a test instance with its own VIBEFORGE_DATA never answers for the real one. scripts/vibeforge
 // works out the same path in bash; keep the two in step.
 
@@ -27,7 +27,8 @@ export function parseControl(line: string): VoiceAction | null {
 export type TalkRequest =
   | { op: "who"; pty: string | null }
   | { op: "tell"; pty: string | null; to: string; text: string; wait: boolean; timeoutMs?: number }
-  | { op: "task"; pty: string | null; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number };
+  | { op: "task"; pty: string | null; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number }
+  | { op: "apply"; pty: string | null; task: string };
 
 /** The largest request line: a long message is still one line of JSON. */
 export const TALK_REQUEST_MAX = 512 * 1024;
@@ -47,6 +48,10 @@ export function parseTalkRequest(line: string): TalkRequest | null {
   }
   const pty = text(raw.pty, 200) || null;
   if (raw.op === "who") return { op: "who", pty };
+  if (raw.op === "apply") {
+    const task = text(raw.task, 200);
+    return task ? { op: "apply", pty, task } : null;
+  }
   const body = text(raw.text, TALK_REQUEST_MAX);
   if (!body) return null;
   if (raw.op === "tell") {

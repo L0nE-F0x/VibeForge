@@ -184,8 +184,11 @@ export class TeamService extends ServiceCore {
     return this.tasks.deleteTask(id);
   }
 
-  executeTask(id: string, size: TermSize = {}, now = false): Promise<Launched | Queued> {
-    return this.tasks.executeTask(id, size, false, now);
+  async executeTask(id: string, size: TermSize = {}, now = false): Promise<Launched | Queued> {
+    const launched = await this.tasks.executeTask(id, size, false, now);
+    // A handed-out task started from the board still reports to the CLI that handed it out.
+    if ("ptyId" in launched) this.messages.adoptStarted(id, launched.ptyId);
+    return launched;
   }
 
   continueTask(id: string, size: TermSize = {}, followUp: string | null = null): Promise<Launched> {
@@ -223,6 +226,16 @@ export class TeamService extends ServiceCore {
 
   handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
     return this.messages.handTask(input);
+  }
+
+  /** Start on a terminal's title bar: the tasks it handed out that wait for a person. */
+  startHeldTasks(ptyId: string, taskIds: readonly string[] | null = null): Promise<{ started: number; failed: string[] }> {
+    return this.messages.startHeld(ptyId, taskIds);
+  }
+
+  /** `vibeforge apply <task>` from the CLI that handed the task out, when Settings allows it. */
+  applyHandedTask(input: { fromPty: string | null; task: string }) {
+    return this.messages.applyHanded(input);
   }
 
   /** Send to…: one pane's last answer, selection or changes, as a draft in another pane. */

@@ -645,6 +645,7 @@ function handlers(): Handlers {
     "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
     "talk.review": (authorPty, reviewerPty) => s().startReview(authorPty, reviewerPty),
     "talk.stop": (ptyId) => s().stopTalk(ptyId),
+    "talk.startTasks": (ptyId, taskIds) => s().startHeldTasks(ptyId, taskIds),
     "pty.resize": (ptyId, cols, rows) => supervisor.resize(ptyId, cols, rows),
     "pty.snapshot": (ptyId) => supervisor.snapshot(ptyId),
     "pty.kill": (ptyId) => s().killPty(ptyId),
@@ -827,6 +828,7 @@ async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unkn
   if (!service) return { ok: false, error: "VibeForge is still starting." };
   if (request.op === "who") return { ok: true, ...service.whoIsHere(request.pty) };
   if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
+  if (request.op === "apply") return service.applyHandedTask({ fromPty: request.pty, task: request.task });
   return service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
 }
 

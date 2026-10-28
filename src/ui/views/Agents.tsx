@@ -16,13 +16,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
-import type { Agent, ChatView, Engine } from "../../shared/api.js";
+import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
 import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
@@ -557,18 +557,21 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const engines = useEngines().data ?? [];
-  const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice });
-  const { name, engine, allow, voice } = form;
+  const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
+  const { name, engine, allow, voice, goodAt, tier } = form;
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
   const setAllow = (next: boolean) => setForm((prev) => ({ ...prev, allow: next }));
   const setVoice = (next: string) => setForm((prev) => ({ ...prev, voice: next }));
+  const setGoodAt = (next: string) => setForm((prev) => ({ ...prev, goodAt: next }));
+  const setTier = (next: AgentTier) => setForm((prev) => ({ ...prev, tier: next }));
   const voices = useVoiceStatus().data?.voices ?? [];
-  const dirty = name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice;
+  const dirty =
+    name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice || (goodAt ?? "").trim() !== agent.goodAt || (tier ?? "") !== agent.tier;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
-    await call("agents.save", { ...agent, name: name.trim(), engine, allowRoutines: allow, voice });
+    await call("agents.save", { ...agent, name: name.trim(), engine, allowRoutines: allow, voice, goodAt: goodAt ?? "", tier: tier ?? "" });
     // A new engine is worth a word; the rest just saves.
     if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
@@ -601,6 +604,23 @@ function SettingsTab({ agent }: { agent: Agent }) {
           <Notice tone="accent">{t("agents.switching", { engine: engineRow?.label ?? engine })}</Notice>
         )}
         <Toggle checked={allow} onChange={setAllow} label={t("agents.allowRoutines")} />
+        <div className="form-grid">
+          <Field label={t("agents.goodAt")} hint={t("agents.goodAtHint")}>
+            <Input value={goodAt ?? ""} maxLength={160} placeholder={t("agents.goodAtPlaceholder")} onChange={(event) => setGoodAt(event.target.value)} />
+          </Field>
+          <Field label={t("agents.tier")}>
+            <Segmented<AgentTier>
+              value={tier ?? ""}
+              onChange={setTier}
+              options={[
+                { value: "", label: t("agents.tierNone") },
+                { value: "fast", label: t("agents.tierFast") },
+                { value: "everyday", label: t("agents.tierEveryday") },
+                { value: "strong", label: t("agents.tierStrong") },
+              ]}
+            />
+          </Field>
+        </div>
         <Field label={t("voice.agentVoice")} hint={voices.length ? t("voice.agentVoiceHint") : t("voice.agentVoiceNone")}>
           <div className="hstack" style={{ gap: 6, maxWidth: 420 }}>
             <Select value={voice} onChange={(event) => setVoice(event.target.value)} disabled={!voices.length && !voice}>

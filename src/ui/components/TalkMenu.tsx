@@ -1,9 +1,9 @@
-import { ArrowLeft, CircleStop, FileDiff, MessageSquareText, MessagesSquare, ScanEye, Send, SquarePlus, TextSelect } from "lucide-react";
+import { ArrowLeft, CircleStop, FileDiff, ListChecks, MessageSquareText, MessagesSquare, Play, ScanEye, Send, SquarePlus, TextSelect, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { TalkState } from "../../shared/api.js";
 import { call } from "../api.js";
 import { useT } from "../i18n/index.js";
-import { useToast } from "../state.js";
+import { useDeleted, useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, Menu, Popover, type MenuItem } from "./ui.js";
 
@@ -143,8 +143,74 @@ export function TalkButton({
   );
 }
 
-/** While a CLI talks with others: with whom, how many messages, a review's step, and Stop. */
+/** While a CLI talks with others: with whom, how many messages, a review's step, and Stop; and tasks it handed out that wait for Start. */
 export function TalkChip({ ptyId, talk }: { ptyId: string; talk: TalkState }) {
+  const start = talk.toStart.length ? <StartChip ptyId={ptyId} tasks={talk.toStart} /> : null;
+  // Only tasks to start: nothing else to say about this terminal.
+  if (start && !talk.review && !talk.with.length && !talk.queued && !talk.reportsTo) return start;
+  return (
+    <>
+      {start}
+      <TalkStatus ptyId={ptyId} talk={talk} />
+    </>
+  );
+}
+
+/**
+ * Tasks this CLI handed out that wait for you (Ask first, or past its limits): start one or all,
+ * or discard them (Undo brings them back).
+ */
+function StartChip({ ptyId, tasks }: { ptyId: string; tasks: TalkState["toStart"] }) {
+  const t = useT();
+  const { push, fail } = useToast();
+  const deleted = useDeleted();
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const start = async (ids: string[] | null) => {
+    try {
+      const result = await call("talk.startTasks", ptyId, ids);
+      if (result.failed.length) push("info", t("talk.startFailed"), result.failed.join("\n"));
+    } catch (error) {
+      fail(error, t("talk.failed"));
+    }
+  };
+  const discard = async () => {
+    try {
+      for (const task of tasks) deleted(t("common.deletedNamed", { name: task.title }), await call("tasks.delete", task.taskId));
+    } catch (error) {
+      fail(error, t("talk.failed"));
+    }
+  };
+  const only = tasks.length === 1 ? tasks[0] : null;
+  // One task is named in the heading; several are listed, each to start on its own.
+  const items: Array<MenuItem | "sep"> = [
+    { label: t.count("talk.startAll", tasks.length), hint: only?.agent ? t("talk.startTo", { agent: only.agent }) : undefined, icon: Play, accent: true, onSelect: () => void start(null) },
+    ...(only
+      ? []
+      : [
+          "sep" as const,
+          ...tasks.map((task): MenuItem => ({ label: task.title, hint: task.agent ? t("talk.startTo", { agent: task.agent }) : undefined, icon: Play, onSelect: () => void start([task.taskId]) })),
+        ]),
+    "sep",
+    { label: t.count("talk.discardAll", tasks.length), icon: Trash2, danger: true, onSelect: () => void discard() },
+  ];
+  return (
+    <>
+      <button type="button" className={`chip accent pane-start${anchor ? " is-open" : ""}`} onClick={(event) => setAnchor(anchor ? null : event.currentTarget)} {...tipProps(t("talk.toStartTip"))}>
+        <ListChecks size={11} />
+        <span className="truncate">{t.count("talk.toStart", tasks.length)}</span>
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} onClose={() => setAnchor(null)}>
+          <div className="menu-head faint">{t("talk.toStartHead")}</div>
+          {only && <div className="menu-head truncate" style={{ maxWidth: 360 }}>{only.title}</div>}
+          <Menu items={items} onClose={() => setAnchor(null)} />
+        </Popover>
+      )}
+    </>
+  );
+}
+
+function TalkStatus({ ptyId, talk }: { ptyId: string; talk: TalkState }) {
   const t = useT();
   const review = talk.review;
   const round = review && review.rounds > 1 ? ` · ${t("talk.round", { round: review.round, rounds: review.rounds })}` : "";

@@ -1,3 +1,5 @@
+import type { AgentTier } from "./types.js";
+
 export interface PreambleSkill {
   name: string;
   body: string;
@@ -25,6 +27,45 @@ export const TEAM_COMMANDS =
 /** What a coding CLI started in a Code pane is told about the others, where it takes extra instructions (see `instructionArgs`). */
 export function codePaneNote(): string {
   return `You are running in a terminal in VibeForge, where other coding CLIs may be open beside you. ${TEAM_COMMANDS}`;
+}
+
+/** An agent a lead can hand work to, as its note lists it. */
+export interface TeamMember {
+  id: string;
+  name: string;
+  /** Its engine's label: "Grok Build". */
+  engine: string;
+  goodAt: string;
+  tier: AgentTier;
+}
+
+const TIER_TEXT: Record<AgentTier, string> = { fast: "Cheap and fast.", everyday: "Everyday cost.", strong: "Strong and costly.", "": "" };
+
+/**
+ * What the lead is told when a Code pane starts it: its team in this workspace, how to hand work
+ * out, and how far it may go on its own (Settings → Agents together).
+ */
+export function leadNote(input: { team: readonly TeamMember[]; handOff: "ask" | "go"; maxWorking: number; maxHandOffs: number; leadApplies: boolean }): string {
+  const team = input.team.map((member) =>
+    [`- ${member.id}: ${member.name === member.id ? "" : `${member.name}, `}${member.engine}.`, member.goodAt ? `Good at: ${member.goodAt.replace(/\.$/, "")}.` : "", TIER_TEXT[member.tier]].filter(Boolean).join(" "),
+  );
+  return [
+    `You are running in a terminal in VibeForge, and you lead in this workspace: the person talks to you, and you can hand parts of the work to other agents. ${TEAM_COMMANDS}`,
+    "",
+    team.length ? 'Your team here (hand an agent work with `vibeforge task <id> "…"`):' : "No agents may work in this folder yet; a person adds them in VibeForge's Agents view.",
+    ...team,
+    "",
+    "How to lead:",
+    "- Do the work yourself unless another agent is better at a part, cheaper for it, or parts can run at the same time. Prefer the cheapest agent that will do a part well, and keep strong ones for the hard parts.",
+    "- An agent sees only what you hand it, not this conversation: say what to do, where, and how to tell it's done.",
+    "- Each task works in its own git copy and comes back to you as a report when its agent finishes its turn.",
+    input.handOff === "ask"
+      ? "- Tasks you hand out wait for the person to press Start on your terminal's title bar. Tell them what you handed out and why, and carry on with your own part."
+      : `- Tasks you hand out start at once. At most ${input.maxWorking} work at the same time, and you may hand out ${input.maxHandOffs} between two messages from the person; more wait for the person to press Start.`,
+    input.leadApplies
+      ? "- When a report's changes are right, bring them into this folder with `vibeforge apply <task-id>`, which also ends that task's session. Leave ones you're unsure of for the person."
+      : "- The person applies the changes from each task; you can read the patch a report points to.",
+  ].join("\n");
 }
 
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */

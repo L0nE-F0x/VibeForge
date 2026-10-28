@@ -16,6 +16,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { WorkingCopy } from "./worktrees.js";
 import type {
   Agent,
+  AgentTier,
   ChatRecord,
   EngineRow,
   LayoutNode,
@@ -120,7 +121,7 @@ export function defaultSettings(): Settings {
     rail: { order: [], hidden: [] },
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
-    agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1 },
+    agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
   };
 }
 
@@ -204,6 +205,15 @@ function readYaml(file: string): unknown {
   }
 }
 
+/** A "good at" line: one line, short enough for a roster. */
+export function oneLine(text: string, max = 160): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+export function agentTier(value: unknown): AgentTier {
+  return value === "fast" || value === "everyday" || value === "strong" ? value : "";
+}
+
 function normalizeAgent(id: string, value: unknown): Agent | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -217,6 +227,8 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
     skills: strList(record.skills),
     allowRoutines: bool(record.allowRoutines, true),
     voice: str(record.voice).trim(),
+    goodAt: oneLine(str(record.goodAt)),
+    tier: agentTier(record.tier),
     createdAt: str(record.createdAt),
     updatedAt: str(record.updatedAt),
   };
@@ -574,6 +586,11 @@ export class Store {
         on: bool(raw.agentTalk?.on, defaults.agentTalk.on),
         maxMessages: Math.max(1, count(raw.agentTalk?.maxMessages, 50, defaults.agentTalk.maxMessages)),
         reviewRounds: Math.max(1, count(raw.agentTalk?.reviewRounds, 5, defaults.agentTalk.reviewRounds)),
+        lead: str(raw.agentTalk?.lead).trim(),
+        handOff: raw.agentTalk?.handOff === "go" ? "go" : "ask",
+        maxWorking: Math.max(1, count(raw.agentTalk?.maxWorking, 20, defaults.agentTalk.maxWorking)),
+        maxHandOffs: Math.max(1, count(raw.agentTalk?.maxHandOffs, 50, defaults.agentTalk.maxHandOffs)),
+        leadApplies: bool(raw.agentTalk?.leadApplies, defaults.agentTalk.leadApplies),
       },
     };
   }

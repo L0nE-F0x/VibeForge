@@ -105,6 +105,8 @@ describe("who can be reached", () => {
     expect(parseTalkRequest('{"op":"who"}')).toEqual({ op: "who", pty: null });
     expect(parseTalkRequest('{"op":"task","agent":"notes","text":"do it","start":false}')).toMatchObject({ op: "task", start: false, wait: false });
     expect(parseTalkRequest('{"op":"tell","to":"codex"}')).toBeNull();
+    expect(parseTalkRequest('{"op":"apply","pty":"p1","task":"t-1"}')).toEqual({ op: "apply", pty: "p1", task: "t-1" });
+    expect(parseTalkRequest('{"op":"apply"}')).toBeNull();
     expect(parseTalkRequest('{"op":"rm"}')).toBeNull();
     expect(parseTalkRequest("voice start")).toBeNull();
   });
@@ -284,7 +286,7 @@ describe("CLIs talking through VibeForge", () => {
 
   it("leaves the message past the limit as a draft, starts again when a person types, and stops on Stop", async () => {
     const { ctx, pass, a, b } = await twoClis();
-    ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 2, reviewRounds: 1 } });
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 2, reviewRounds: 1 } });
     for (const text of ["one", "two"]) {
       await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text });
       pass(4000);
@@ -314,7 +316,7 @@ describe("CLIs talking through VibeForge", () => {
     await ctx.svc.pumpMessages();
     expect(ctx.sent.at(-1)?.text).toContain("six");
 
-    ctx.svc.saveSettings({ agentTalk: { on: false, maxMessages: 2, reviewRounds: 1 } });
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: false, maxMessages: 2, reviewRounds: 1 } });
     expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "seven" })).toMatchObject({ ok: false, error: expect.stringContaining("turned off") });
     ctx.svc.close();
   });
@@ -363,7 +365,7 @@ describe("CLIs talking through VibeForge", () => {
     let at = AT;
     const ctx = setup({ now: () => new Date(at) });
     const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
-    ctx.svc.saveSettings({ agentTalk: { on: true, maxMessages: 1, reviewRounds: 1 } });
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 1, reviewRounds: 1 } });
     const other = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
     const chat = ctx.svc.createChat({ engine: "argy" });
     const first = await ctx.svc.sendChat(chat.id, "hello");
@@ -386,6 +388,11 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 });
+
+/** Settings → Agents together → Go ahead: handed-out tasks start at once, within the limits. */
+function goAhead(ctx: ReturnType<typeof setup>, over: Partial<ReturnType<typeof ctx.svc.getSettings>["agentTalk"]> = {}) {
+  ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, handOff: "go", ...over } });
+}
 
 function gitRepo(): string {
   const repo = tempDir();
@@ -526,6 +533,7 @@ describe("a review loop and handing out tasks", () => {
     const ctx = setup();
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+    goAhead(ctx);
     const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
 
     const result = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Write the tests for a.txt\nKeep them small." });
@@ -564,7 +572,7 @@ describe("a review loop and handing out tasks", () => {
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     await ctx.svc.saveAgent({ name: "VibeForge GitHub repo manager", brief: "b", engine: "argy", places: [repo] });
     const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
-    expect(ctx.svc.whoIsHere(sender.ptyId).agents).toEqual([{ name: "VibeForge GitHub repo manager", handle: "vibeforge-github-repo-manager" }]);
+    expect(ctx.svc.whoIsHere(sender.ptyId).agents).toEqual([{ name: "VibeForge GitHub repo manager", handle: "vibeforge-github-repo-manager", engine: "Argy", goodAt: "", tier: "" }]);
     for (const name of ["vibeforge-github-repo-manager", "VibeForge GitHub repo manager", "vibeforge-github-repo-ma"]) {
       expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: name, text: "Tidy", start: false })).toMatchObject({ ok: true });
     }
@@ -599,6 +607,7 @@ describe("a review loop and handing out tasks", () => {
     const pass = (ms: number) => (at += ms);
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+    goAhead(ctx);
     const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
     pass(5000);
     const reports = () => ctx.sent.filter((item) => item.ptyId === sender.ptyId && item.text.startsWith("[Task report"));
@@ -642,8 +651,10 @@ describe("a review loop and handing out tasks", () => {
 
     // Waiting for it gets the answer there and then, and no report after.
     const waited = ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Quick one", wait: true, timeoutMs: 60_000 });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const third = ctx.svc.listLive().find((item) => item.taskId && ![task.id].includes(item.taskId) && item.ptyId !== taskPty)!.ptyId;
+    // Its git copy takes a moment to make.
+    const isThird = (item: { taskId: string | null; ptyId: string }) => Boolean(item.taskId) && item.taskId !== task.id && item.ptyId !== taskPty;
+    for (let i = 0; i < 200 && !ctx.svc.listLive().some(isThird); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const third = ctx.svc.listLive().find(isThird)!.ptyId;
     ctx.host.screen = async () => "Done quickly.\n> ";
     ctx.svc.onPtyActivity(third, true);
     pass(1000);
@@ -659,6 +670,161 @@ describe("a review loop and handing out tasks", () => {
     expect(await ctx.svc.handTask({ fromPty: null, agent: "helper", text: "From outside" })).toMatchObject({ ok: true, started: true });
     const outside = ctx.svc.listLive().find((item) => !before.has(item.ptyId))!.ptyId;
     expect(ctx.svc.liveForView().find((item) => item.ptyId === outside)?.talk ?? null).toBeNull();
+    ctx.svc.close();
+  });
+});
+
+describe("a lead and its team", () => {
+  /** A repository with a Helper agent allowed in it, and a sending CLI's pane there. */
+  async function team(over: { now?: () => Date } = {}) {
+    const repo = gitRepo();
+    const ctx = setup(over);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo], goodAt: "small, well-defined edits", tier: "fast" });
+    const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    const talk = (ptyId: string) => ctx.svc.liveForView().find((item) => item.ptyId === ptyId)?.talk ?? null;
+    const taskPtyOf = (taskId: string) => ctx.svc.listLive().find((item) => item.taskId === taskId)?.ptyId ?? null;
+    return { repo, ctx, workspace, sender, talk, taskPtyOf };
+  }
+
+  it("holds a handed-out task for Start under Ask first, and it reports back once started", async () => {
+    const { ctx, sender, talk, taskPtyOf } = await team();
+    const first = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Add b.txt" });
+    expect(first).toMatchObject({ ok: true, started: false, note: expect.stringContaining("press Start on your terminal's title bar") });
+    const id = first.ok ? first.taskId : "";
+    expect(ctx.svc.listTasks().find((task) => task.id === id)?.status).toBe("todo");
+    expect(taskPtyOf(id)).toBeNull();
+    expect(talk(sender.ptyId)?.toStart).toEqual([{ taskId: id, title: "Add b.txt", agent: "Helper" }]);
+
+    // Start on the sender's title bar: it runs, and its pane reports to the sender.
+    expect(await ctx.svc.startHeldTasks(sender.ptyId)).toEqual({ started: 1, failed: [] });
+    expect(talk(sender.ptyId)?.toStart ?? []).toEqual([]);
+    expect(talk(taskPtyOf(id)!)).toMatchObject({ reportsTo: "Pasty" });
+
+    // One deleted from the board drops out; one executed from the board still reports back.
+    const second = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Never mind" });
+    await ctx.svc.deleteTask(second.ok ? second.taskId : "");
+    expect(talk(sender.ptyId)?.toStart ?? []).toEqual([]);
+    const third = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Add c.txt" });
+    const thirdId = third.ok ? third.taskId : "";
+    await ctx.svc.executeTask(thirdId);
+    expect(talk(sender.ptyId)?.toStart ?? []).toEqual([]);
+    expect(talk(taskPtyOf(thirdId)!)).toMatchObject({ reportsTo: "Pasty" });
+    ctx.svc.close();
+  });
+
+  it("goes ahead within its limits: hand-offs between two messages from the person, and tasks working at once", async () => {
+    const { ctx, sender, talk } = await team();
+    goAhead(ctx, { maxHandOffs: 2, maxWorking: 5 });
+    const hand = (text: string) => ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text });
+    expect(await hand("One")).toMatchObject({ started: true });
+    expect(await hand("Two")).toMatchObject({ started: true });
+    expect(await hand("Three")).toMatchObject({ started: false, note: expect.stringContaining("since the person last wrote to you") });
+    expect(talk(sender.ptyId)?.toStart.map((item) => item.title)).toEqual(["Three"]);
+    // The person writes to it: it may hand out two more.
+    ctx.svc.onHumanInput(sender.ptyId, "go on\r");
+    expect(await hand("Four")).toMatchObject({ started: true });
+    goAhead(ctx, { maxHandOffs: 2, maxWorking: 3 });
+    expect(await hand("Five")).toMatchObject({ started: false, note: expect.stringContaining("3 of your tasks are still working") });
+    expect(talk(sender.ptyId)?.toStart.map((item) => item.title)).toEqual(["Three", "Five"]);
+    // A person's Start isn't held back by the limits.
+    expect(await ctx.svc.startHeldTasks(sender.ptyId)).toEqual({ started: 2, failed: [] });
+    ctx.svc.close();
+  });
+
+  it("lets the CLI that handed a task out apply its changes, only when Settings says so", async () => {
+    const { repo, ctx, workspace, sender, taskPtyOf } = await team();
+    goAhead(ctx);
+    const handed = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Add b.txt" });
+    const id = handed.ok ? handed.taskId : "";
+    fs.writeFileSync(path.join(ctx.spawns.at(-1)!.cwd, "b.txt"), "new\n");
+    expect(await ctx.svc.applyHandedTask({ fromPty: sender.ptyId, task: id })).toMatchObject({ ok: false, error: expect.stringContaining("A person applies") });
+    goAhead(ctx, { leadApplies: true });
+    const other = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    expect(await ctx.svc.applyHandedTask({ fromPty: other.ptyId, task: id })).toMatchObject({ ok: false, error: expect.stringContaining("Only the CLI that handed") });
+    expect(taskPtyOf(id)).not.toBeNull();
+    // Its session ends, its changes land as uncommitted edits, and the task is done.
+    expect(await ctx.svc.applyHandedTask({ fromPty: sender.ptyId, task: id })).toMatchObject({ ok: true, files: ["b.txt"], conflicts: [] });
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new\n");
+    expect(ctx.svc.listTasks().find((task) => task.id === id)).toMatchObject({ status: "done", copy: null });
+    expect(taskPtyOf(id)).toBeNull();
+    ctx.svc.close();
+  });
+
+  it("says when a handed-out task sits at a question for a person, and reports its answer once it comes", async () => {
+    let at = AT;
+    const { ctx, workspace, sender, talk, taskPtyOf } = await team({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    // The helper is a CLI whose log VibeForge reads (Codex here), so its screen is only a fallback.
+    const rows = JSON.parse(fs.readFileSync(path.join(ctx.configRoot, "engines.json"), "utf8"));
+    rows.engines.push({ id: "codex", label: "Codex", bin: "argy", args: [], promptArgs: ["{prompt}"] });
+    fs.writeFileSync(path.join(ctx.configRoot, "engines.json"), JSON.stringify(rows));
+    await ctx.svc.saveAgent({ name: "Logger", brief: "b", engine: "codex", places: [workspace.path] });
+    const watches: Array<(reply: string) => void> = [];
+    ctx.host.watchReply = () => new Promise((resolve) => watches.push(resolve));
+    ctx.host.screen = async () => "Do you trust the contents of this directory?\n  Yes, proceed   y\n  No, quit       n";
+    goAhead(ctx);
+    pass(5000);
+    const handed = await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "logger", text: "Write notes/ideas.md" });
+    const pty = taskPtyOf(handed.ok ? handed.taskId : "")!;
+    const reports = () => ctx.sent.filter((item) => item.ptyId === sender.ptyId && item.text.startsWith("[Task report"));
+    const settle = async (count: number) => {
+      for (let i = 0; i < 100 && reports().length < count; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        pass(1000);
+        await ctx.svc.pumpMessages();
+      }
+    };
+
+    // It draws its trust question as its first screen and never moves, with nothing in its log:
+    // the sender hears it may be waiting. Nothing pumps by hand here: VibeForge's own timer looks.
+    pass(61_000);
+    for (let i = 0; i < 40 && reports().length < 1; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reports()[0].text).toContain('Logger (Codex) went quiet on the task you handed it, "Write notes/ideas.md", without answering. It may be waiting for a person');
+    expect(reports()[0].text).toContain("The end of its screen:\nDo you trust the contents of this directory?");
+    expect(talk(pty)).toMatchObject({ reportsTo: "Pasty" });
+
+    // A person answers it, it works, and its answer arrives from its log as a second report.
+    ctx.svc.onPtyActivity(pty, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(pty, false);
+    watches.at(-1)!("Wrote notes/ideas.md with five ideas.");
+    await settle(2);
+    expect(reports()[1].text).toContain("Logger (Codex) finished its turn on the task you handed it");
+    expect(reports()[1].text).toContain("Its answer:\nWrote notes/ideas.md with five ideas.");
+    ctx.svc.close();
+  });
+
+  it("tells the lead its team in this workspace and the rules, and lets its Claude Code run vibeforge", async () => {
+    const { ctx, workspace, sender } = await team();
+    const rows = JSON.parse(fs.readFileSync(path.join(ctx.configRoot, "engines.json"), "utf8"));
+    rows.engines.push({ id: "claude", label: "Claude Code", bin: "argy", args: [] });
+    fs.writeFileSync(path.join(ctx.configRoot, "engines.json"), JSON.stringify(rows));
+    const elsewhere = tempDir();
+    await ctx.svc.saveAgent({ name: "Faraway", brief: "b", engine: "pasty", places: [elsewhere] });
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, lead: "claude" } });
+
+    const lead = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "claude" });
+    const argv = ctx.spawns.at(-1)!.argv;
+    expect(argv.slice(1, 4)).toEqual(["--allowedTools", "Bash(vibeforge:*)", "--append-system-prompt"]);
+    expect(argv[4]).toContain("you lead in this workspace");
+    expect(argv[4]).toContain("- helper: Helper, Argy. Good at: small, well-defined edits. Cheap and fast.");
+    expect(argv[4]).not.toContain("faraway");
+    expect(argv[4]).toContain("wait for the person to press Start");
+    expect(argv[4]).toContain("The person applies the changes");
+    // `who` lists the same team, with what each is good at.
+    expect(ctx.svc.whoIsHere(lead.ptyId).agents).toEqual([{ name: "Helper", handle: "helper", engine: "Argy", goodAt: "small, well-defined edits", tier: "fast" }]);
+    expect(ctx.svc.whoIsHere(sender.ptyId).agents.map((agent) => agent.handle)).toEqual(["helper"]);
+
+    goAhead(ctx, { leadApplies: true });
+    await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "claude" });
+    expect(ctx.spawns.at(-1)!.argv[4]).toMatch(/start at once\. At most 3 work at the same time, and you may hand out 4/);
+    expect(ctx.spawns.at(-1)!.argv[4]).toContain("vibeforge apply <task-id>");
+    // Not the lead: the plain note, and Claude Code still asks before running vibeforge.
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, lead: "" } });
+    await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "claude" });
+    expect(ctx.spawns.at(-1)!.argv.slice(1, 2)).toEqual(["--append-system-prompt"]);
+    expect(ctx.spawns.at(-1)!.argv[2]).not.toContain("you lead");
     ctx.svc.close();
   });
 });

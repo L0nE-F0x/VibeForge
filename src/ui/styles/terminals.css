@@ -699,3 +699,30 @@
 .pane-head .pane-talk-stop:hover {
   color: var(--red);
 }
+
+/* Tasks this CLI handed out that wait for you: amber, like anything else waiting on you. */
+.pane-head .pane-start {
+  flex: none;
+  max-width: 180px;
+  cursor: pointer;
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 50%, transparent);
+  background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+}
+
+.pane-head .pane-start:hover {
+  color: var(--accent);
+  border-color: var(--hover-line);
+  background: var(--hover-fill);
+}
+
+.pane-head .pane-start:focus-visible {
+  outline: none;
+  border-color: var(--focus-line);
+}
+
+.pane-head .pane-start.is-open {
+  color: var(--fg);
+  border-color: var(--sel-line);
+  background: var(--sel-fill);
+}
