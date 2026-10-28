@@ -4,9 +4,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.10.0, 2026-10-28, is the lates
 
 ## Next up
 
-The team, parts 2 and 3 (agreed 2026-10-28; part 1, CLIs told about each other and tasks reporting back, is in `status.md`). A lead is one of your own agents and decides who does what; VibeForge never routes by itself.
+The team, part 3 (agreed 2026-10-28; parts 1 and 2 are in `status.md`). The lead decides who does what; VibeForge never routes by itself.
 
-- [ ] **A lead and its team (2.11.0).** Mark one agent the lead of a workspace. Each agent gets a short "good at" line and a cost tier, which the lead is given with the rules. **Settings → Agents together**: Off, **Ask first** (the lead shows its plan, you press Go; the default) or **Go ahead** within caps: agents at once, which agents, hand-offs per request. The lead's Claude Code gets `Bash(vibeforge:*)` allowed only under Go ahead. Who applies helpers' work: you, with an option to let the lead.
 - [ ] **Watching the team (2.12.0).** A quiet strip per workspace: the lead, each helper, what it's doing and its result, and Stop all.
 
 ## Only checked with stand-ins

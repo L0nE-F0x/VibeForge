@@ -325,6 +325,7 @@
 .segmented button {
   height: 24px;
   padding: 0 10px;
+  white-space: nowrap;
   border-radius: 0;
   color: var(--fg-3);
   font-weight: 550;

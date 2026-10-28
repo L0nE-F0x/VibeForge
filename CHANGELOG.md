@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **A lead for your team.** Pick a **Lead in Code** in Settings → Agents together, such as Claude Code. When a Code pane starts it, it's told your team: the agents allowed in that workspace, what each is good at and what it costs. It hands them parts of the work with `vibeforge task` when another agent is better or cheaper for a part, or when parts can run at the same time, and does the rest itself. Its Claude Code runs `vibeforge` without asking each time.
+- **Good at, and cost.** Each agent's Settings tab has a one-line **Good at** and a **Cost** (Cheap, Everyday or Strong) for the lead to choose by. `vibeforge who` lists them too, and only the agents allowed in the asking CLI's workspace.
+- **Ask first, or Go ahead.** Under **Ask first**, the default, a task a CLI hands out waits for you: its title bar shows "N to start", to start them or discard them. Under **Go ahead** tasks start at once, up to how many work at the same time and how many a CLI hands out between two of your messages; past those limits they wait for you the same way.
+- **The lead can apply its helpers' work** with `vibeforge apply <task>`, if you turn that on. It ends the helper's session and brings its changes into your folder as uncommitted edits. Otherwise you apply them from the task, as before.
+
+### Changed
+
+- **Handed-out tasks wait for you by default.** Since 2.7, `vibeforge task` started a task at once. It now waits for your Start unless Settings → Agents together says Go ahead.
+
+### Fixed
+
+- **A helper stuck on a question says so.** A handed-out task's CLI that stops at a question for a person (Grok Build 1.0.70 asks whether to trust a new folder) used to be reported as finished, with its screen as the answer. The report now says it may be waiting for you and shows the end of its screen, and its real answer follows as a second report once it carries on.
+- **A CLI that never moves is still checked.** A task whose CLI showed one screen and never changed it was never looked at again, so its report never came.
+
 ## [2.10.0] - 2026-10-28
 
 **2.10.0: CLIs in Code know about each other, and a task you hand out reports back when it's done.**
