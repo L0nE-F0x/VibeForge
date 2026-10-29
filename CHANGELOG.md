@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-29
+
+**2.11.0: a lead hands parts of the work to the agents best suited to them, and you decide whether those tasks wait for you or start on their own.**
+
 ### Added
 
 - **A lead for your team.** Pick a **Lead in Code** in Settings → Agents together, such as Claude Code. When a Code pane starts it, it's told your team: the agents allowed in that workspace, what each is good at and what it costs. It hands them parts of the work with `vibeforge task` when another agent is better or cheaper for a part, or when parts can run at the same time, and does the rest itself. Its Claude Code runs `vibeforge` without asking each time.
@@ -498,7 +502,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.11.0
 [2.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.10.0
 [2.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.9.0
 [2.8.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.8.1
