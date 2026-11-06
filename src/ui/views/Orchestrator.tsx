@@ -67,7 +67,7 @@ export function OrchestratorView() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const [saveMode] = useAction(async (mode: "plan" | "go") => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, mode } }), t("settings.saveFailed"));
-  const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine } }), t("settings.saveFailed"));
+  const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "" } }), t("settings.saveFailed"));
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const planners = engines.filter((engine) => canOrchestrate(engine));
   const engineId = settings?.orchestrator.engine ?? "grok";
@@ -254,10 +254,13 @@ const PROBLEM_KEY: Record<NonNullable<OrchestratorTurn["problem"]>, Key> = {
   unreadable: "orch.problem.unreadable",
   timeout: "orch.problem.timeout",
   stopped: "orch.problem.stopped",
+  signIn: "orch.problem.signIn",
 };
 
-function TurnView({ turn, engineLabel, compact }: { turn: OrchestratorTurn; engineLabel: string; compact?: boolean }) {
+function TurnView({ turn, engineLabel: current, compact }: { turn: OrchestratorTurn; engineLabel: string; compact?: boolean }) {
   const t = useT();
+  const engines = useEngines().data ?? [];
+  const engineLabel = (turn.by && (engines.find((engine) => engine.id === turn.by)?.label ?? turn.by)) || current;
   if (turn.from === "you") {
     return (
       <div className="orch-turn from-you">

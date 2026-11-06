@@ -391,6 +391,8 @@ export interface DeskMethods {
   /** Say something to the Orchestrator. Resolves once it has answered (the answer comes as a turn). */
   "orchestrator.ask": (text: string) => void;
   "orchestrator.stopThinking": () => void;
+  /** The models a planning CLI offers (Claude Code's aliases, or what Grok Build and Antigravity list). */
+  "orchestrator.models": (engineId: string) => string[];
   /** Start a new conversation. */
   "orchestrator.clear": () => void;
   /** Go: carry out a waiting plan. */

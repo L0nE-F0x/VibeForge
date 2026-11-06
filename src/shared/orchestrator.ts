@@ -32,7 +32,7 @@ export interface OrchestratorStep {
   openedWorkspaceId: string | null;
 }
 
-export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped";
+export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
 
 export interface OrchestratorTurn {
   id: string;
@@ -42,6 +42,8 @@ export interface OrchestratorTurn {
   /** A plan: steps, and where it is. "replaced" is a plan the next answer took over. */
   steps?: OrchestratorStep[];
   plan?: "waiting" | "running" | "done" | "cancelled" | "replaced";
+  /** The CLI that gave this answer (an engine id), so its words keep its name after the planner changes. */
+  by?: string;
   /** The answer went wrong. `detail` is what the CLI said, if anything. */
   problem?: OrchestratorProblem;
   detail?: string;
@@ -62,12 +64,26 @@ export function canOrchestrate(row: Pick<EngineRow, "id" | "bin">): boolean {
   return brainKind(row) !== null;
 }
 
-export function brainKind(row: Pick<EngineRow, "id" | "bin">): "grok" | "claude" | null {
+export type BrainKind = "grok" | "claude" | "codex" | "agy";
+
+/**
+ * Which planner a CLI is: the four frontier labs' own CLIs, each with a headless turn, output held
+ * to a JSON schema, and a way to keep it from changing anything. Grok Build, Claude Code, Codex,
+ * and Antigravity CLI (Google's, for Gemini).
+ */
+export function brainKind(row: Pick<EngineRow, "id" | "bin">): BrainKind | null {
   const name = `${row.id} ${row.bin.split("/").pop() ?? row.bin}`.toLowerCase();
   if (/\bgrok\b/.test(name)) return "grok";
   if (/\bclaude\b/.test(name)) return "claude";
+  if (/\bcodex\b/.test(name)) return "codex";
+  if (/\bagy\b|antigravity/.test(name)) return "agy";
   return null;
 }
+
+/** Model names a planner takes without asking it: Claude Code's aliases. The others list theirs. */
+export const KNOWN_MODELS: Partial<Record<BrainKind, string[]>> = {
+  claude: ["haiku", "sonnet", "opus", "fable"],
+};
 
 export interface PlanContext {
   workspaces: Array<{ id: string; name: string; folder: string; git: boolean }>;

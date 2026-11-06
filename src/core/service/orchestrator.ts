@@ -7,7 +7,11 @@ import { isCodingCli } from "../checkout.js";
 import { readJson, writeJson } from "../fsx.js";
 import {
   brainArgs,
+  brainKind,
   canOrchestrate,
+  KNOWN_MODELS,
+  STRICT_PLAN_SCHEMA,
+  signedOut,
   orchestratorRules,
   readBrainOutput,
   resolvePlan,
@@ -21,8 +25,10 @@ import { isGitRepo } from "../vcs.js";
 import type { ServiceCore } from "./core.js";
 import type { WorkspaceDesk } from "./workspaces.js";
 
-/** One planning turn can think for a while; past this it is given up on. */
-const BRAIN_TIMEOUT_MS = 3 * 60_000;
+/** One planning turn can think for a while (Antigravity's first took 80 s); past this it is given up on. */
+const BRAIN_TIMEOUT_MS = 5 * 60_000;
+/** How long listing a planner's models may take. */
+const MODELS_TIMEOUT_MS = 30_000;
 /** Turns kept in the conversation file and shown. */
 const KEEP_TURNS = 200;
 /** The size a terminal starts at before its pane in Code resizes it. */
@@ -46,9 +52,9 @@ export interface BrainRun {
 }
 
 /** Runs one headless turn of a CLI. The real one spawns it; tests hand in their own. */
-export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal) => Promise<BrainRun>;
+export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs?: number) => Promise<BrainRun>;
 
-const spawnBrain: BrainRunner = (argv, cwd, signal) =>
+const spawnBrain: BrainRunner = (argv, cwd, signal, timeoutMs = BRAIN_TIMEOUT_MS) =>
   new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -57,7 +63,7 @@ const spawnBrain: BrainRunner = (argv, cwd, signal) =>
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-    }, BRAIN_TIMEOUT_MS);
+    }, timeoutMs);
     const abort = () => child.kill("SIGTERM");
     signal.addEventListener("abort", abort, { once: true });
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
@@ -84,6 +90,8 @@ const turnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).sl
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
+  /** Models each planner listed, kept for this run of VibeForge. */
+  private readonly models = new Map<string, string[]>();
   runner: BrainRunner = spawnBrain;
 
   constructor(
@@ -179,13 +187,13 @@ export class OrchestratorDesk {
   }
 
   private answer(turn: Omit<OrchestratorTurn, "id" | "at" | "from">): OrchestratorTurn {
-    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", ...turn };
+    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", by: this.settings().engine, ...turn };
     this.conversation.turns.push(full);
     return full;
   }
 
   private async think(words: string, signal: AbortSignal): Promise<void> {
-    const { engine: engineId, mode } = this.settings();
+    const { engine: engineId, mode, model } = this.settings();
     const engine = this.core.resolveEngine(engineId);
     if (!engine || !canOrchestrate(engine.row)) {
       this.answer({ text: "", problem: "noEngine" });
@@ -195,23 +203,30 @@ export class OrchestratorDesk {
       this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false };
     }
     const context = await this.context();
-    const args = brainArgs(engine.row, { text: words, rules: orchestratorRules(context), sessionId: this.conversation.sessionId, resume: this.conversation.begun });
+    const work = path.join(this.dir, "work");
+    fs.mkdirSync(work, { recursive: true });
+    // Codex reads the schema from a file.
+    const schemaFile = path.join(work, "plan-schema.json");
+    fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
+    const args = brainArgs(engine.row, { text: words, rules: orchestratorRules(context), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, schemaFile });
     if (!args) {
       this.answer({ text: "", problem: "noEngine" });
       return;
     }
-    fs.mkdirSync(path.join(this.dir, "work"), { recursive: true });
-    const run = await this.runner([engine.binPath, ...args], path.join(this.dir, "work"), signal);
+    const run = await this.runner([engine.binPath, ...args], work, signal);
     if (signal.aborted) return;
     if (run.timedOut) {
       this.answer({ text: "", problem: "timeout" });
       return;
     }
-    const { plan, text } = readBrainOutput(run.stdout);
-    if (run.code !== 0 && !plan) {
-      this.answer({ text: "", problem: "failed", detail: lastLines(run.stderr || run.stdout) });
+    const { plan, text, sessionId, error } = readBrainOutput(run.stdout);
+    if ((run.code !== 0 || error) && !plan) {
+      const detail = lastLines(error || run.stderr || run.stdout);
+      this.answer({ text: "", problem: signedOut(`${error}\n${run.stderr}\n${run.stdout}`) ? "signIn" : "failed", detail });
       return;
     }
+    // Codex and Antigravity name their own session; the next turn resumes that one.
+    if (sessionId) this.conversation.sessionId = sessionId;
     this.conversation.begun = true;
     if (!plan) {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
@@ -226,6 +241,27 @@ export class OrchestratorDesk {
     for (const turn of this.conversation.turns) if (turn.plan === "waiting") turn.plan = "replaced";
     const turn = this.answer({ text: plan.say, steps, plan: "waiting" });
     if (mode === "go" && steps.every((step) => !stepIssue(step, context))) void this.run(turn.id);
+  }
+
+  /**
+   * The models a planner offers, for the picker in Settings: Claude Code's aliases, or what
+   * `grok models` and `agy models` list (they ask their own service, so only when the picker is
+   * opened). Codex has no list; the picker takes a name typed in.
+   */
+  async listModels(engineId: string): Promise<string[]> {
+    const engine = this.core.resolveEngine(engineId);
+    const kind = engine ? brainKind(engine.row) : null;
+    if (!engine || !kind) return [];
+    const known = KNOWN_MODELS[kind];
+    if (known) return known;
+    if (kind !== "grok" && kind !== "agy") return [];
+    const cached = this.models.get(engineId);
+    if (cached) return cached;
+    fs.mkdirSync(path.join(this.dir, "work"), { recursive: true });
+    const run = await this.runner([engine.binPath, ...engine.row.args, "models"], path.join(this.dir, "work"), new AbortController().signal, MODELS_TIMEOUT_MS);
+    const listed = kind === "grok" ? grokModels(run.stdout) : agyModels(run.stdout);
+    if (listed.length) this.models.set(engineId, listed);
+    return listed;
   }
 
   /** Stop waiting for the planning CLI's answer. */
@@ -342,6 +378,16 @@ export class OrchestratorDesk {
 function tildify(folder: string): string {
   const home = os.homedir();
   return folder === home || folder.startsWith(`${home}/`) ? `~${folder.slice(home.length)}` : folder;
+}
+
+/** `grok models`: "  * grok-4.7 (default)" and "  - grok-4.6" lines. */
+export function grokModels(text: string): string[] {
+  return [...text.matchAll(/^\s*[*-]\s+([\w.:/-]+)/gm)].map((match) => match[1]);
+}
+
+/** `agy models`: an id, a tab, and its name, on each line. */
+export function agyModels(text: string): string[] {
+  return text.split("\n").flatMap((line) => (/^[\w.:/-]+\t/.test(line) ? [line.split("\t")[0]] : []));
 }
 
 function lastLines(text: string): string {

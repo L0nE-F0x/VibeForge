@@ -2,14 +2,16 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, readBrainOutput, resolvePlan, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
-import type { BrainRun } from "../../src/core/service/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
+import { agyModels, grokModels, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
 
 const grok: EngineRow = { id: "grok", label: "Grok Build", bin: "grok", args: [] };
 const claude: EngineRow = { id: "claude", label: "Claude Code", bin: "claude", args: [] };
 const codex: EngineRow = { id: "codex", label: "Codex", bin: "codex", args: [] };
+const agy: EngineRow = { id: "agy", label: "Antigravity CLI", bin: "agy", args: [] };
+const kimi: EngineRow = { id: "kimi", label: "Kimi", bin: "kimi", args: [] };
 
 const context: PlanContext = {
   workspaces: [
@@ -29,8 +31,10 @@ describe("the Orchestrator's plans", () => {
   it("plans with Grok Build or Claude Code, tools off, resuming its own session", () => {
     expect(canOrchestrate(grok)).toBe(true);
     expect(canOrchestrate(claude)).toBe(true);
-    expect(canOrchestrate(codex)).toBe(false);
-    expect(brainArgs(codex, { text: "hi", rules: "r", sessionId: "s", resume: false })).toBeNull();
+    expect(canOrchestrate(codex)).toBe(true);
+    expect(canOrchestrate(agy)).toBe(true);
+    expect(canOrchestrate(kimi)).toBe(false);
+    expect(brainArgs(kimi, { text: "hi", rules: "r", sessionId: "s", resume: false })).toBeNull();
 
     const first = brainArgs(grok, { text: "-start claude", rules: "RULES", sessionId: "abc", resume: false }) ?? [];
     expect(first.slice(0, 4)).toEqual(["-p", "-start claude", "--rules", "RULES"]);
@@ -42,6 +46,60 @@ describe("the Orchestrator's plans", () => {
     // --tools takes every word up to the next option, so "" comes straight before one.
     expect(asked.slice(0, 3)).toEqual(["--tools", "", "--print"]);
     expect(asked.slice(-4)).toEqual(["--resume", "abc", "--", "--help me"]);
+  });
+
+  it("plans with Codex and Antigravity too, read-only, resuming the session each reported", () => {
+    const first = brainArgs(codex, { text: "-start grok", rules: 'say "hi"', sessionId: "", resume: false, schemaFile: "/w/plan.json", model: "gpt-x" }) ?? [];
+    expect(first[0]).toBe("exec");
+    expect(first).toContain('sandbox_mode="read-only"');
+    expect(first).toContain(`developer_instructions=${JSON.stringify('say "hi"')}`);
+    expect(first.slice(first.indexOf("--output-schema"), first.indexOf("--output-schema") + 2)).toEqual(["--output-schema", "/w/plan.json"]);
+    expect(first.slice(-4)).toEqual(["-m", "gpt-x", "--", "-start grok"]);
+    const again = brainArgs(codex, { text: "and then", rules: "r", sessionId: "thread-1", resume: true, schemaFile: "/w/plan.json" }) ?? [];
+    expect(again.slice(0, 2)).toEqual(["exec", "resume"]);
+    expect(again.slice(-3)).toEqual(["--", "thread-1", "and then"]);
+    expect(brainArgs(codex, { text: "x", rules: "r", sessionId: "", resume: false })).toBeNull();
+
+    const asked = brainArgs(agy, { text: "Start Grok in Dune", rules: "RULES", sessionId: "", resume: false }) ?? [];
+    expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
+    expect(asked).toContain("plan");
+    expect(asked).not.toContain("--conversation");
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target"]);
+    expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
+    expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
+    expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);
+  });
+
+  it("reads Antigravity's answer and Codex's lines, and knows a planner that isn't signed in", () => {
+    // Antigravity CLI, 2026-11-07.
+    const fromAgy = JSON.stringify({
+      conversation_id: "270c9b69",
+      status: "SUCCESS",
+      response: '{"say":"Starting Grok in Dune.","steps":[]}',
+      structured_output: { say: "Starting Grok in Dune.", steps: [{ branch: "", engine: "grok", kind: "start", prompt: "", target: "", workspace: "Dune" }] },
+    });
+    expect(readBrainOutput(fromAgy)).toMatchObject({ sessionId: "270c9b69", plan: { say: "Starting Grok in Dune.", steps: [{ kind: "start", engine: "grok", workspace: "Dune", branch: "" }] } });
+    const fromCodex = [
+      '{"type":"thread.started","thread_id":"01a1b20d"}',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"thinking"}}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\\"say\\":\\"Which workspace?\\",\\"steps\\":[]}"}}',
+      '{"type":"turn.completed","usage":{}}',
+    ].join("\n");
+    expect(readBrainOutput(fromCodex)).toMatchObject({ sessionId: "01a1b20d", plan: { say: "Which workspace?", steps: [] }, error: "" });
+    // Codex, not logged in (2026-11-07).
+    const refused = ['{"type":"thread.started","thread_id":"t2"}', '{"type":"turn.started"}', '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"}}'].join("\n");
+    const out = readBrainOutput(refused);
+    expect(out.plan).toBeNull();
+    expect(signedOut(out.error)).toBe(true);
+    expect(signedOut("Invalid API key · Please run /login")).toBe(true);
+    expect(signedOut("rate limited, try again")).toBe(false);
+    expect(readBrainOutput(JSON.stringify({ session_id: "c1", structured_output: { say: "Hi.", steps: [] } })).sessionId).toBe("c1");
+  });
+
+  it("lists the models Grok Build and Antigravity print", () => {
+    expect(grokModels("You are logged in with grok.com.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n")).toEqual(["grok-4.7", "grok-4.7-build-fast", "grok-4.6"]);
+    expect(agyModels("Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)\n")).toEqual(["gemini-4-argon-medium", "claude-sonnet-5-5-low"]);
   });
 
   it("tells the planning CLI what is here and that it never picks an engine itself", () => {
@@ -132,7 +190,7 @@ function withPlanner(answers: Array<Record<string, unknown> | string>) {
   const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
   engines.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] });
   fs.writeFileSync(file, JSON.stringify(engines));
-  ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan" } });
+  ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "" } });
   const calls: Array<{ argv: string[]; cwd: string }> = [];
   ctx.svc.orchestrator.runner = async (argv, cwd): Promise<BrainRun> => {
     calls.push({ argv, cwd });
@@ -198,7 +256,7 @@ describe("the Orchestrator in the service", () => {
       { say: "Which CLI?", steps: [{ kind: "start", engine: "nobody", workspace: "shop", prompt: "Second." }] },
     ]);
     ctx.svc.addWorkspace(repo);
-    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "" } });
     await ctx.svc.orchestratorAsk("start argy on one");
     await until(() => ctx.svc.orchestratorView().turns[1]?.plan === "done");
     expect(ctx.spawns).toHaveLength(1);
@@ -245,9 +303,44 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("resumes the session a planner names itself, says when it isn't signed in, and lists models", async () => {
+    const ctx = setup();
+    const file = path.join(ctx.configRoot, "engines.json");
+    const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+    engines.engines.push({ id: "codex", label: "Codex", bin: "argy", args: [] }, { id: "claude", label: "Claude Code", bin: "pasty", args: [] });
+    fs.writeFileSync(file, JSON.stringify(engines));
+    ctx.svc.saveSettings({ orchestrator: { engine: "codex", mode: "plan", model: "gpt-x" } });
+    const calls: string[][] = [];
+    const lines = (thread: string, say: string) => [`{"type":"thread.started","thread_id":"${thread}"}`, JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ say, steps: [] }) } })].join("\n");
+    const answers = [
+      { code: 0, stdout: lines("thread-9", "Hello."), stderr: "", timedOut: false },
+      { code: 0, stdout: lines("thread-9", "Still here."), stderr: "", timedOut: false },
+      { code: 1, stdout: '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized"}}', stderr: "", timedOut: false },
+    ];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      calls.push(argv);
+      return answers.shift() ?? { code: 1, stdout: "", stderr: "", timedOut: false };
+    };
+    await ctx.svc.orchestratorAsk("hi");
+    await ctx.svc.orchestratorAsk("still there?");
+    expect(calls[0].slice(1, 3)).toEqual(["exec", "--json"]);
+    expect(calls[0]).toContain("gpt-x");
+    const schemaFile = calls[0][calls[0].indexOf("--output-schema") + 1];
+    expect(JSON.parse(fs.readFileSync(schemaFile, "utf8")).required).toEqual(["say", "steps"]);
+    expect(calls[1].slice(1, 3)).toEqual(["exec", "resume"]);
+    expect(calls[1].slice(-3)).toEqual(["--", "thread-9", "still there?"]);
+    expect(ctx.svc.orchestratorView().turns.map((turn) => turn.text)).toEqual(["hi", "Hello.", "still there?", "Still here."]);
+    await ctx.svc.orchestratorAsk("and now?");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ problem: "signIn", detail: "unexpected status 401 Unauthorized" });
+    expect(await ctx.svc.orchestratorModels("claude")).toEqual(["haiku", "sonnet", "opus", "fable"]);
+    expect(await ctx.svc.orchestratorModels("codex")).toEqual([]);
+    expect(await ctx.svc.orchestratorModels("argy")).toEqual([]);
+    ctx.svc.close();
+  });
+
   it("says so when the planning CLI isn't one that can plan or isn't installed", async () => {
     const ctx = setup();
-    ctx.svc.saveSettings({ orchestrator: { engine: "argy", mode: "plan" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "argy", mode: "plan", model: "" } });
     expect(ctx.svc.orchestratorView().engineReady).toBe(false);
     await ctx.svc.orchestratorAsk("hi");
     expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ from: "vibeforge", problem: "noEngine" });
