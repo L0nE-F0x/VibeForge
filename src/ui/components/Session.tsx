@@ -35,6 +35,7 @@ export function Composer({
   keepKey,
   onEscape,
   quiet,
+  voiceWords,
 }: {
   placeholder: string;
   onSend: (text: string) => Promise<boolean | undefined>;
@@ -60,6 +61,8 @@ export function Composer({
   onEscape?: () => void;
   /** Dictated words sent from here aren't answered aloud (the Orchestrator answers in text). */
   quiet?: boolean;
+  /** Names whisper should expect in this box, beyond the agents and CLIs it always gets. */
+  voiceWords?: () => string[];
 }) {
   const t = useT();
   const [text, setText] = useDraftState(keepKey ?? null, "");
@@ -88,6 +91,7 @@ export function Composer({
       });
     },
     ptyId: voicePty,
+    words: voiceWords,
   }));
 
   useDraft(draftKey, (words) => dictation.target.insert(words));

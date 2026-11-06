@@ -167,6 +167,7 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
   const { go } = useNav();
   const { fail } = useToast();
   const engines = useEngines().data ?? [];
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   const turns = view?.turns ?? [];
   const shown = compact ? turns.slice(-4) : turns;
@@ -235,6 +236,8 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
         quiet
         sendLabel={t("common.send")}
         voiceLabel={t("orch.title")}
+        // Workspace names are what gets misheard ("Star Ledger", "frontier-halls"), and a few words every request has.
+        voiceWords={() => [...workspaces.flatMap((item) => [item.name, item.name.replace(/[-_.]+/g, " ")]), "branch", "workspace"]}
         draftKey={DRAFT_KEY}
         keepKey="orchestrator"
         onEscape={onEscape}
