@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **The Orchestrator: talk to VibeForge itself.** Say or type what to start, such as "start Claude Code in VibeForge on a new branch called fix-tray and do this, and Grok in Dune to do that", in **Orchestra** in the rail or from any view with Ctrl+Shift+O. Hold Ctrl+Shift+Space in its box to dictate. Grok Build turns it into a plan (or Claude Code, in Settings → Orchestrator), in one short turn with its tools off, using that CLI's own plan: no API key, no local model. VibeForge carries it out: each CLI starts in its own copy of the workspace on the new branch, with its instruction, in a Code pane, and your folder stays where it is.
+- **A plan card before anything starts.** Each step shows its CLI, workspace, branch and instruction; change any of them, drop a step, then press **Go**. **Just go** in Settings starts plans at once, except one with something missing. The Orchestrator can also message a running CLI, close one, or tell you what's running. It answers in text, and never picks a CLI you didn't name.
+- **Running, with Stop all.** Beside the conversation, every coding CLI that's open, the Orchestrator's own marked, each with Open in Code and Stop, and Stop all for the ones it started.
+
 ## [2.11.0] - 2026-10-29
 
 **2.11.0: a lead hands parts of the work to the agents best suited to them, and you decide whether those tasks wait for you or start on their own.**

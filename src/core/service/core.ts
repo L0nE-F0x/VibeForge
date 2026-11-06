@@ -307,6 +307,8 @@ export class ServiceCore {
     chatId?: string | null;
     workspaceId?: string | null;
     continuedFrom?: string | null;
+    /** The Orchestrator started it (Code gives it a pane). */
+    orchestrated?: boolean;
     cols?: number;
     rows?: number;
   }): Promise<Launched> {
@@ -394,6 +396,7 @@ export class ServiceCore {
       taskId: meta.taskId,
       workspaceId: meta.workspaceId,
       routineId: meta.routineId,
+      ...(input.orchestrated ? { orchestrated: true } : {}),
     });
     if (input.chatId) {
       const chat = this.store.getChat(input.chatId);

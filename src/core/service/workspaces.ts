@@ -1,5 +1,5 @@
 import path from "node:path";
-import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
+import { newBranchCheckout, openBranchCheckout, readBranches, type BranchList, type OpenedCheckout } from "../branches.js";
 import { isDirectory } from "../fsx.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
@@ -64,6 +64,27 @@ export class WorkspaceDesk {
     let next = this.addWorkspace(opened.path);
     if (!known && next.lastWorkspaceId) next = this.updateWorkspace(next.lastWorkspaceId, { name: `${opened.repoName} · ${opened.branch}` });
     return next;
+  }
+
+  /**
+   * New work on `branch` in its own folder beside this workspace (the Orchestrator's start step):
+   * the branch is made from this folder's commit when it doesn't exist. The new folder becomes a
+   * workspace, named for the repository and branch, and is returned.
+   */
+  async openNewBranch(id: string, branch: string): Promise<{ workspaceId: string; opened: OpenedCheckout }> {
+    const workspace = this.workspace(id);
+    const opened = await newBranchCheckout(workspace.path, branch);
+    const known = this.core.store.readWorkspaces().workspaces.find((item) => path.resolve(item.path) === path.resolve(opened.path));
+    if (known) return { workspaceId: known.id, opened };
+    // Added without becoming the one Code shows: the person stays where they are.
+    const before = this.core.store.readWorkspaces();
+    const next = addWorkspaceRecord(before, opened.path);
+    const added = next.workspaces.find((item) => path.resolve(item.path) === path.resolve(opened.path));
+    if (!added) throw new Error("Choose a folder that exists.");
+    const named = updateWorkspaceRecord({ ...next, lastWorkspaceId: before.lastWorkspaceId }, added.id, { name: `${opened.repoName} · ${opened.branch}` });
+    this.core.store.writeWorkspaces(named);
+    this.core.emit("workspaces");
+    return { workspaceId: added.id, opened };
   }
 
   private workspace(id: string) {
@@ -161,7 +182,7 @@ export class WorkspaceDesk {
     return { instructions: leadNote({ team, ...talk }), allowVibeforge: true };
   }
 
-  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
+  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean } & TermSize): Promise<Launched> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
@@ -185,6 +206,7 @@ export class WorkspaceDesk {
       workspaceId: workspace.id,
       continuedFrom: previous?.id ?? null,
       ...this.paneInstructions(engine.row.id, workspace.path),
+      orchestrated: opts.orchestrated,
       cols: opts.cols,
       rows: opts.rows,
     });

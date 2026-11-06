@@ -293,6 +293,51 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
   }
 
+  // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
+  // not Code is on screen, so it is there when the person goes to look. Each one once.
+  const placed = useRef(new Set<string>());
+  useEffect(() => {
+    for (const session of live) {
+      if (!session.orchestrated || !session.workspaceId || placed.current.has(session.ptyId)) continue;
+      const workspace = workspaces.find((item) => item.id === session.workspaceId);
+      if (!workspace) continue;
+      placed.current.add(session.ptyId);
+      if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) continue;
+      const launch: PaneLaunch = { type: "engine", engineId: engineOfTitle(session.title) };
+      if (workspace.id in layoutsRef.current) {
+        place(workspace, session, launch);
+        continue;
+      }
+      // Not loaded yet: load its saved panes first (and start their shells, as opening it would).
+      void call("layouts.get", workspace.id)
+        .catch(() => null)
+        .then((saved) => {
+          if (!(workspace.id in layoutsRef.current)) {
+            layoutsRef.current = { ...layoutsRef.current, [workspace.id]: saved };
+            setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
+            for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
+          }
+          place(workspace, session, launch);
+        });
+    }
+    // Only new sessions matter; the rest is read through refs.
+  }, [live, workspaces]);
+
+  /** Into a pane of the same CLI that has nothing running (left from last time), or a new one beside. */
+  function place(workspace: Workspace, session: LiveSession, launch: PaneLaunch) {
+    const layout = layoutsRef.current[workspace.id];
+    const idle = (layout ? panesOf(layout) : []).find((pane) => {
+      const state = runtimeRef.current[pane.id]?.state ?? "idle";
+      return pane.launch.type === "engine" && launch.type === "engine" && pane.launch.engineId === launch.engineId && (state === "idle" || state === "exited");
+    });
+    if (!idle) {
+      adopt(workspace, session.ptyId, session.runId, launch);
+      return;
+    }
+    patchRuntime(idle.id, { ptyId: session.ptyId, runId: session.runId, state: "live", exitText: null });
+    setFocus((prev) => ({ ...prev, [workspace.id]: idle.id }));
+  }
+
   /** The first pane of a workspace whose panes were all closed. */
   function openFirst(workspace: Workspace, launch: PaneLaunch) {
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };

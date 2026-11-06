@@ -153,7 +153,8 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
     group: "shortcuts.anywhere",
     rows: [
       { keys: "Ctrl+K", text: "shortcuts.switcher" },
-      { keys: "Ctrl+1…8", text: "shortcuts.switchViews" },
+      { keys: "Ctrl+Shift+O", text: "shortcuts.orchestrator" },
+      { keys: "Ctrl+1…9", text: "shortcuts.switchViews" },
       { keys: "Alt+1…9", text: "shortcuts.workspaces" },
       { keys: "Ctrl+,", text: "shortcuts.settings" },
       { keys: "Alt+←", text: "shortcuts.back" },

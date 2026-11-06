@@ -8,6 +8,8 @@ import { RunDesk } from "./service/runs.js";
 import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
+import { OrchestratorDesk } from "./service/orchestrator.js";
+import type { OrchestratorStep, OrchestratorView } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
@@ -33,10 +35,12 @@ export class TeamService extends ServiceCore {
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
   private readonly messages = new MessageDesk(this, this.tasks);
+  readonly orchestrator = new OrchestratorDesk(this, this.workspaces);
 
   override close(): void {
     this.turns.close();
     this.messages.close();
+    this.orchestrator.close();
     super.close();
   }
 
@@ -134,6 +138,40 @@ export class TeamService extends ServiceCore {
 
   startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize): Promise<Launched> {
     return this.workspaces.startEngine(opts);
+  }
+
+  // ---------------------------------------------------------------- the Orchestrator
+
+  orchestratorView(): OrchestratorView {
+    return this.orchestrator.view();
+  }
+
+  orchestratorAsk(text: string): Promise<void> {
+    return this.orchestrator.ask(text);
+  }
+
+  orchestratorStopThinking(): void {
+    this.orchestrator.stopThinking();
+  }
+
+  orchestratorClear(): void {
+    this.orchestrator.clear();
+  }
+
+  orchestratorRun(turnId: string): Promise<void> {
+    return this.orchestrator.run(turnId);
+  }
+
+  orchestratorCancel(turnId: string): void {
+    this.orchestrator.cancel(turnId);
+  }
+
+  orchestratorEditStep(turnId: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>): void {
+    this.orchestrator.editStep(turnId, stepId, patch);
+  }
+
+  orchestratorRemoveStep(turnId: string, stepId: string): void {
+    this.orchestrator.removeStep(turnId, stepId);
   }
 
   // ---------------------------------------------------------------- routines

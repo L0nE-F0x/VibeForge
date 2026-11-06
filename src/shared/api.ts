@@ -35,6 +35,7 @@ import type {
   Settings,
   Skill,
   AgentTalkSettings,
+  OrchestratorSettings,
   SoundSettings,
   TalkState,
   TaskStatus,
@@ -49,6 +50,9 @@ import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
+import type { OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue } from "../core/orchestrator.js";
+
+export type { OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue };
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
 export type { ApplyResult, WorkingCopy, BranchList };
@@ -93,6 +97,7 @@ export type {
   TermSize,
   Topic,
   AgentTalkSettings,
+  OrchestratorSettings,
   SoundSettings,
   VoiceSettings,
   WorkspaceFile,
@@ -380,6 +385,19 @@ export interface DeskMethods {
   "storage.tidy": () => RunUpkeep;
 
   "live.list": () => LiveSession[];
+
+  /** The Orchestrator's conversation, and whether its planning CLI is answering. */
+  "orchestrator.get": () => OrchestratorView;
+  /** Say something to the Orchestrator. Resolves once it has answered (the answer comes as a turn). */
+  "orchestrator.ask": (text: string) => void;
+  "orchestrator.stopThinking": () => void;
+  /** Start a new conversation. */
+  "orchestrator.clear": () => void;
+  /** Go: carry out a waiting plan. */
+  "orchestrator.run": (turnId: string) => void;
+  "orchestrator.cancel": (turnId: string) => void;
+  "orchestrator.editStep": (turnId: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>) => void;
+  "orchestrator.removeStep": (turnId: string, stepId: string) => void;
 
   "voice.status": () => VoiceStatus;
   "voice.start": () => void;
