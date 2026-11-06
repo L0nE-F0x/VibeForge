@@ -34,6 +34,7 @@ export function Composer({
   draftKey,
   keepKey,
   onEscape,
+  quiet,
 }: {
   placeholder: string;
   onSend: (text: string) => Promise<boolean | undefined>;
@@ -57,6 +58,8 @@ export function Composer({
   keepKey?: string | null;
   /** Esc in the box: close it (what's typed stays, under `keepKey`). */
   onEscape?: () => void;
+  /** Dictated words sent from here aren't answered aloud (the Orchestrator answers in text). */
+  quiet?: boolean;
 }) {
   const t = useT();
   const [text, setText] = useDraftState(keepKey ?? null, "");
@@ -118,7 +121,7 @@ export function Composer({
     if (sentFrom) forgetDraft(sentFrom);
     setText("");
     dictated.current = "";
-    if (words) expectAnswer(dictation.target, words);
+    if (words && !quiet) expectAnswer(dictation.target, words);
   }
 
   function insert(snippet: string) {

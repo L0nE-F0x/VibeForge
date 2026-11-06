@@ -1,0 +1,349 @@
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { isCodingCli } from "../checkout.js";
+import { readJson, writeJson } from "../fsx.js";
+import {
+  brainArgs,
+  canOrchestrate,
+  orchestratorRules,
+  readBrainOutput,
+  resolvePlan,
+  stepIssue,
+  type OrchestratorStep,
+  type OrchestratorTurn,
+  type OrchestratorView,
+  type PlanContext,
+} from "../orchestrator.js";
+import { isGitRepo } from "../vcs.js";
+import type { ServiceCore } from "./core.js";
+import type { WorkspaceDesk } from "./workspaces.js";
+
+/** One planning turn can think for a while; past this it is given up on. */
+const BRAIN_TIMEOUT_MS = 3 * 60_000;
+/** Turns kept in the conversation file and shown. */
+const KEEP_TURNS = 200;
+/** The size a terminal starts at before its pane in Code resizes it. */
+const START_SIZE = { cols: 120, rows: 32 };
+
+interface Conversation {
+  /** The planning CLI's own session, resumed each turn so it remembers what was said. */
+  sessionId: string;
+  /** The engine that session belongs to; another engine starts a new one. */
+  engineId: string;
+  /** The session exists (its first turn went through), so the next turn resumes it. */
+  begun: boolean;
+  turns: OrchestratorTurn[];
+}
+
+export interface BrainRun {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+/** Runs one headless turn of a CLI. The real one spawns it; tests hand in their own. */
+export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal) => Promise<BrainRun>;
+
+const spawnBrain: BrainRunner = (argv, cwd, signal) =>
+  new Promise((resolve) => {
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, BRAIN_TIMEOUT_MS);
+    const abort = () => child.kill("SIGTERM");
+    signal.addEventListener("abort", abort, { once: true });
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
+    const done = (code: number | null) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve({ code, stdout, stderr, timedOut });
+    };
+    child.on("error", (error) => {
+      stderr += error.message;
+      done(127);
+    });
+    child.on("close", (code) => done(code));
+  });
+
+const turnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+/**
+ * The Orchestrator's side of the main process: the conversation, one planning turn at a time
+ * through the CLI chosen in Settings, and carrying plans out. Starting goes through Code's own
+ * `startEngine`, each CLI in a new branch's folder beside its workspace.
+ */
+export class OrchestratorDesk {
+  private conversation: Conversation;
+  private thinking: AbortController | null = null;
+  runner: BrainRunner = spawnBrain;
+
+  constructor(
+    private readonly core: ServiceCore,
+    private readonly workspaces: WorkspaceDesk,
+  ) {
+    this.conversation = this.load();
+  }
+
+  private get dir(): string {
+    return path.join(this.core.options.dataRoot, "orchestrator");
+  }
+
+  private load(): Conversation {
+    const saved = readJson<Partial<Conversation> | null>(path.join(this.dir, "conversation.json"), null);
+    const turns = Array.isArray(saved?.turns) ? saved.turns.filter((turn) => turn && typeof turn.text === "string") : [];
+    // A plan that was running when VibeForge closed isn't any more.
+    for (const turn of turns) {
+      if (turn.plan === "running") turn.plan = "done";
+      for (const step of turn.steps ?? []) if (step.state === "running") step.state = "failed";
+    }
+    return {
+      sessionId: typeof saved?.sessionId === "string" && saved.sessionId ? saved.sessionId : randomUUID(),
+      engineId: typeof saved?.engineId === "string" ? saved.engineId : "",
+      begun: Boolean(saved?.begun),
+      turns,
+    };
+  }
+
+  private save(): void {
+    this.conversation.turns = this.conversation.turns.slice(-KEEP_TURNS);
+    writeJson(path.join(this.dir, "conversation.json"), this.conversation);
+    this.core.emit("orchestrator");
+  }
+
+  private settings() {
+    return this.core.store.readSettings().orchestrator;
+  }
+
+  view(): OrchestratorView {
+    const { engine, mode } = this.settings();
+    const row = this.core.store.readEngineRows().find((item) => item.id === engine);
+    return {
+      engineId: engine,
+      engineReady: Boolean(row && canOrchestrate(row) && this.core.resolveEngine(engine)),
+      mode,
+      thinking: this.thinking !== null,
+      turns: this.conversation.turns,
+    };
+  }
+
+  /** What the planning CLI is told is here: workspaces, CLIs, and the ones running. */
+  async context(): Promise<PlanContext> {
+    const rows = this.core.store.readEngineRows();
+    const workspaces = await Promise.all(
+      this.core.store.readWorkspaces().workspaces.map(async (item) => ({ id: item.id, name: item.name, folder: tildify(item.path), git: await isGitRepo(item.path).catch(() => false) })),
+    );
+    const names = new Map(workspaces.map((item) => [item.id, item.name]));
+    const running = this.core
+      .listLive()
+      .filter(isCodingCli)
+      .map((session) => ({
+        id: session.ptyId,
+        engine: session.program || session.title.split(" · ")[0] || session.title,
+        workspace: (session.workspaceId && names.get(session.workspaceId)) || session.title,
+        folder: tildify(session.programCwd || session.cwd),
+        working: Boolean(session.working ?? this.core.hostWorking.get(session.ptyId)),
+        orchestrated: Boolean(session.orchestrated),
+      }));
+    return {
+      workspaces,
+      engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)) })),
+      running,
+    };
+  }
+
+  /** What the person said or typed. The answer, and any plan, arrive as later turns. */
+  async ask(text: string): Promise<void> {
+    const words = text.trim();
+    if (!words) return;
+    if (this.thinking) throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+    const now = this.core.now().toISOString();
+    this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
+    const controller = new AbortController();
+    this.thinking = controller;
+    this.save();
+    try {
+      await this.think(words, controller.signal);
+    } finally {
+      if (this.thinking === controller) this.thinking = null;
+      this.save();
+    }
+  }
+
+  private answer(turn: Omit<OrchestratorTurn, "id" | "at" | "from">): OrchestratorTurn {
+    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", ...turn };
+    this.conversation.turns.push(full);
+    return full;
+  }
+
+  private async think(words: string, signal: AbortSignal): Promise<void> {
+    const { engine: engineId, mode } = this.settings();
+    const engine = this.core.resolveEngine(engineId);
+    if (!engine || !canOrchestrate(engine.row)) {
+      this.answer({ text: "", problem: "noEngine" });
+      return;
+    }
+    if (this.conversation.engineId !== engineId) {
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false };
+    }
+    const context = await this.context();
+    const args = brainArgs(engine.row, { text: words, rules: orchestratorRules(context), sessionId: this.conversation.sessionId, resume: this.conversation.begun });
+    if (!args) {
+      this.answer({ text: "", problem: "noEngine" });
+      return;
+    }
+    fs.mkdirSync(path.join(this.dir, "work"), { recursive: true });
+    const run = await this.runner([engine.binPath, ...args], path.join(this.dir, "work"), signal);
+    if (signal.aborted) return;
+    if (run.timedOut) {
+      this.answer({ text: "", problem: "timeout" });
+      return;
+    }
+    const { plan, text } = readBrainOutput(run.stdout);
+    if (run.code !== 0 && !plan) {
+      this.answer({ text: "", problem: "failed", detail: lastLines(run.stderr || run.stdout) });
+      return;
+    }
+    this.conversation.begun = true;
+    if (!plan) {
+      this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
+      return;
+    }
+    const steps = resolvePlan(plan, context);
+    if (!steps.length) {
+      this.answer({ text: plan.say });
+      return;
+    }
+    // A new plan takes the place of one still waiting for Go.
+    for (const turn of this.conversation.turns) if (turn.plan === "waiting") turn.plan = "replaced";
+    const turn = this.answer({ text: plan.say, steps, plan: "waiting" });
+    if (mode === "go" && steps.every((step) => !stepIssue(step, context))) void this.run(turn.id);
+  }
+
+  /** Stop waiting for the planning CLI's answer. */
+  stopThinking(): void {
+    if (!this.thinking) return;
+    this.thinking.abort();
+    this.thinking = null;
+    this.answer({ text: "", problem: "stopped" });
+    this.save();
+  }
+
+  /** Start over: a new session for the planning CLI, and an empty conversation. */
+  clear(): void {
+    this.thinking?.abort();
+    this.thinking = null;
+    this.conversation = { sessionId: randomUUID(), engineId: this.settings().engine, begun: false, turns: [] };
+    this.save();
+  }
+
+  private plan(turnIdValue: string): OrchestratorTurn {
+    const turn = this.conversation.turns.find((item) => item.id === turnIdValue);
+    if (!turn?.steps) throw new Error("That plan is gone.");
+    return turn;
+  }
+
+  /** A change made on the plan card before Go: a step's CLI, workspace, branch or words. */
+  editStep(turnIdValue: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>): void {
+    const turn = this.plan(turnIdValue);
+    if (turn.plan !== "waiting") throw new Error("That plan has already been carried out.");
+    const steps = turn.steps ?? [];
+    const at = steps.findIndex((step) => step.id === stepId);
+    if (at < 0) throw new Error("That plan is gone.");
+    const clean: Partial<OrchestratorStep> = {};
+    for (const key of ["engineId", "workspaceId", "branch", "prompt", "target"] as const) {
+      if (typeof patch[key] === "string") clean[key] = patch[key];
+    }
+    steps[at] = { ...steps[at], ...clean };
+    this.save();
+  }
+
+  removeStep(turnIdValue: string, stepId: string): void {
+    const turn = this.plan(turnIdValue);
+    if (turn.plan !== "waiting") throw new Error("That plan has already been carried out.");
+    turn.steps = (turn.steps ?? []).filter((step) => step.id !== stepId);
+    if (!turn.steps.length) turn.plan = "cancelled";
+    this.save();
+  }
+
+  cancel(turnIdValue: string): void {
+    const turn = this.plan(turnIdValue);
+    if (turn.plan !== "waiting") return;
+    turn.plan = "cancelled";
+    for (const step of turn.steps ?? []) step.state = "skipped";
+    this.save();
+  }
+
+  /** Go: carry the plan out, one step after another. A step that fails doesn't stop the rest. */
+  async run(turnIdValue: string): Promise<void> {
+    const turn = this.plan(turnIdValue);
+    if (turn.plan !== "waiting") return;
+    turn.plan = "running";
+    this.save();
+    for (const step of turn.steps ?? []) {
+      const context = await this.context();
+      if (stepIssue(step, context)) {
+        step.state = "skipped";
+        this.save();
+        continue;
+      }
+      step.state = "running";
+      this.save();
+      try {
+        await this.carryOut(step);
+        step.state = "done";
+      } catch (error) {
+        step.state = "failed";
+        step.error = error instanceof Error ? error.message : String(error);
+      }
+      this.save();
+    }
+    turn.plan = "done";
+    this.save();
+  }
+
+  private async carryOut(step: OrchestratorStep): Promise<void> {
+    if (step.kind === "start") {
+      const workspace = this.core.workspaceById(step.workspaceId);
+      if (!workspace) throw new Error("That workspace is gone.");
+      let workspaceId = workspace.id;
+      if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
+        const opened = await this.workspaces.openNewBranch(workspace.id, step.branch.trim());
+        workspaceId = opened.workspaceId;
+        step.branch = opened.opened.branch;
+      }
+      step.openedWorkspaceId = workspaceId;
+      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, prompt: step.prompt, orchestrated: true, ...START_SIZE });
+      step.ptyId = launched.ptyId;
+      return;
+    }
+    if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
+    if (step.kind === "tell") {
+      await this.core.options.host.send(step.target, step.prompt, true);
+      return;
+    }
+    await this.core.killPty(step.target);
+  }
+
+  close(): void {
+    this.thinking?.abort();
+    this.thinking = null;
+  }
+}
+
+function tildify(folder: string): string {
+  const home = os.homedir();
+  return folder === home || folder.startsWith(`${home}/`) ? `~${folder.slice(home.length)}` : folder;
+}
+
+function lastLines(text: string): string {
+  return text.trim().split("\n").filter(Boolean).slice(-4).join("\n").slice(0, 600);
+}

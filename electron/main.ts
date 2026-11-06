@@ -613,6 +613,14 @@ function handlers(): Handlers {
     "storage.tidy": () => s().maintainRuns(),
 
     "live.list": () => s().liveForView(),
+    "orchestrator.get": () => s().orchestratorView(),
+    "orchestrator.ask": (text) => s().orchestratorAsk(String(text ?? "")),
+    "orchestrator.stopThinking": () => s().orchestratorStopThinking(),
+    "orchestrator.clear": () => s().orchestratorClear(),
+    "orchestrator.run": (turnId) => s().orchestratorRun(String(turnId ?? "")),
+    "orchestrator.cancel": (turnId) => s().orchestratorCancel(String(turnId ?? "")),
+    "orchestrator.editStep": (turnId, stepId, patch) => s().orchestratorEditStep(String(turnId ?? ""), String(stepId ?? ""), patch && typeof patch === "object" ? patch : {}),
+    "orchestrator.removeStep": (turnId, stepId) => s().orchestratorRemoveStep(String(turnId ?? ""), String(stepId ?? "")),
 
     "voice.status": () => voice.status(),
     "voice.start": () => voice.start(),

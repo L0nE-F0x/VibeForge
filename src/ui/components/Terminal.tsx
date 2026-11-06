@@ -43,7 +43,7 @@ function isAppShortcut(event: KeyboardEvent): boolean {
   if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
   if (event.ctrlKey && !event.altKey && event.key === ",") return true;
   // Ctrl+Shift+K opens the switcher; plain Ctrl+K stays the program's (kill to end of line).
-  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewlk]$/i.test(event.key) || event.code === "Slash")) return true;
+  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewlko]$/i.test(event.key) || event.code === "Slash")) return true;
   // Alt+1…9 jumps between workspaces.
   if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
   return false;

@@ -20,6 +20,7 @@ import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
 import { CodeView } from "./views/Code.js";
 import { HomeView } from "./views/Home.js";
+import { OPEN_ORCHESTRATOR_EVENT, OrchestratorBar, OrchestratorView } from "./views/Orchestrator.js";
 
 // Home is the first screen and Code stays mounted to keep its terminals; the other views load
 // the first time they're opened.
@@ -49,6 +50,14 @@ export function App() {
 function Shell() {
   const { route, go, open, back, forward } = useNav();
   const [switcher, setSwitcher] = useState(false);
+  const [orchestrator, setOrchestrator] = useState(false);
+  const closeOrchestrator = useCallback(() => setOrchestrator(false), []);
+  const viewRef = useRef(route.view);
+  viewRef.current = route.view;
+  // In its own view the bar has nothing to add; leaving the view doesn't bring it back.
+  useEffect(() => {
+    if (route.view === "orchestrator") setOrchestrator(false);
+  }, [route.view]);
   const { push } = useToast();
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const workspacesRef = useRef(workspaces);
@@ -81,6 +90,10 @@ function Shell() {
       } else if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setSwitcher((open) => !open);
+      } else if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        setSwitcher(false);
+        if (viewRef.current !== "orchestrator") setOrchestrator((open) => !open);
       } else if (event.ctrlKey && event.shiftKey && event.code === "Slash") {
         event.preventDefault();
         window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT));
@@ -101,6 +114,8 @@ function Shell() {
     };
     const showSwitcher = () => setSwitcher(true);
     window.addEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
+    const showOrchestrator = () => setOrchestrator(true);
+    window.addEventListener(OPEN_ORCHESTRATOR_EVENT, showOrchestrator);
     const offSwitcher = on("open-switcher", showSwitcher);
     // Shift+wheel slides the desk sideways when a tile is narrower than the page.
     const onWheel = (event: WheelEvent) => {
@@ -130,6 +145,7 @@ function Shell() {
       .catch(() => undefined);
     return () => {
       window.removeEventListener(OPEN_SWITCHER_EVENT, showSwitcher);
+      window.removeEventListener(OPEN_ORCHESTRATOR_EVENT, showOrchestrator);
       offSwitcher();
       offRoute();
       window.removeEventListener("keydown", onKey);
@@ -148,6 +164,7 @@ function Shell() {
       <VoiceLayer />
       <SessionWatch />
       {switcher && <Switcher onClose={() => setSwitcher(false)} />}
+      {orchestrator && <OrchestratorBar onClose={closeOrchestrator} />}
       <Rail />
       <main className="stage">
         <CrashBoundary key={route.view}>
@@ -159,6 +176,7 @@ function Shell() {
           {route.view === "routines" && <RoutinesView route={route} />}
           {route.view === "skills" && <SkillsView route={route} />}
           {route.view === "runs" && <RunsView route={route} />}
+          {route.view === "orchestrator" && <OrchestratorView />}
           {route.view === "settings" && <SettingsView route={route} />}
           </Suspense>
         </CrashBoundary>

@@ -163,6 +163,15 @@ export interface Settings {
   companion: CompanionSettings;
   /** Coding CLIs messaging each other and handing out tasks (`vibeforge tell`, `vibeforge task`). */
   agentTalk: AgentTalkSettings;
+  /** The Orchestrator: which CLI plans, and whether a plan waits for Go. */
+  orchestrator: OrchestratorSettings;
+}
+
+export interface OrchestratorSettings {
+  /** The engine that turns what the person says into a plan (Grok Build or Claude Code). */
+  engine: string;
+  /** "plan" shows the plan with a Go button; "go" carries it out at once. */
+  mode: "plan" | "go";
 }
 
 /** How far CLIs may go on their own when they talk to each other. */
@@ -277,6 +286,8 @@ export interface LiveSession {
   alsoHere?: Array<{ ptyId: string; label: string; agentId: string | null }>;
   /** Messages with other CLIs, while there are any (filled in for the window, not stored). */
   talk?: TalkState | null;
+  /** The Orchestrator started it: Code gives it a pane in its workspace. */
+  orchestrated?: boolean;
 }
 
 /** A terminal talking with other CLIs through VibeForge, for its pane. */
@@ -309,4 +320,5 @@ export type Topic =
   | "settings"
   | "live"
   | "updates"
-  | "voice";
+  | "voice"
+  | "orchestrator";

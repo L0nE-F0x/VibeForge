@@ -197,3 +197,36 @@ async function addCheckout(folder: string, main: string, branch: string): Promis
   if (added.code !== 0) throw openFailure(branch, added);
   return { path: path.resolve(target), branch, repoName: path.basename(main) };
 }
+
+/**
+ * A branch in its own folder for new work (the Orchestrator's start step): a new branch from the
+ * commit `folder` is on, or the branch itself when it already exists and isn't the one `folder`
+ * is on. When it is, or a folder of that name is taken, the name gets -2, -3… instead.
+ */
+export async function newBranchCheckout(folder: string, branch: string): Promise<OpenedCheckout> {
+  const name = branch.trim();
+  const top = await git(["rev-parse", "--show-toplevel"], folder);
+  if (top.code === 127) throw new Error("git was not found on PATH.");
+  if (top.code !== 0 || !top.stdout.trim()) throw new Error("This folder is not a git repository.");
+  const check = await git(["check-ref-format", "--branch", name], folder);
+  if (check.code !== 0 || check.stdout.trim() !== name) throw new Error("That branch name is not valid.");
+  const trees = await worktrees(folder);
+  const main = trees[0]?.path;
+  if (!main) throw new Error("This folder is not a git repository.");
+  return withRepoLock(main, async () => {
+    const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], folder);
+    const current = head.code === 0 ? head.stdout.trim() : "";
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      const candidate = attempt === 1 ? name : `${name}-${attempt}`;
+      if (candidate === current) continue;
+      const exists = (await git(["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`], folder)).code === 0;
+      if (exists) return addCheckout(folder, main, candidate);
+      const target = checkoutDir(main, candidate);
+      if (fs.existsSync(target)) continue;
+      const added = await git(["worktree", "add", "-q", "-b", candidate, target, "HEAD"], folder);
+      if (added.code !== 0) throw openFailure(candidate, added);
+      return { path: path.resolve(target), branch: candidate, repoName: path.basename(main) };
+    }
+    throw new Error(`Could not open ${name}: every name from ${name}-2 to ${name}-20 is taken.`);
+  });
+}

@@ -18,6 +18,7 @@ export type Route =
   | { view: "routines"; routineId?: string }
   | { view: "skills"; skillId?: string }
   | { view: "runs"; runId?: string; filter?: RunFilter }
+  | { view: "orchestrator" }
   | { view: "settings"; section?: string };
 
 export type RunFilter = "review" | "all" | "live";
@@ -42,7 +43,7 @@ function pushRoute(prev: Route[], route: Route): Route[] {
   return [...prev.slice(-30), route];
 }
 
-const VIEWS: ViewName[] = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "settings"];
+const VIEWS: ViewName[] = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "orchestrator", "settings"];
 const NAV_KEY = "vf.nav";
 
 /** A route this page could have made: a saved one, or one handed back by the tray or a notification. */

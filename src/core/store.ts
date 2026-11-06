@@ -122,6 +122,7 @@ export function defaultSettings(): Settings {
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
+    orchestrator: { engine: "grok", mode: "plan" },
   };
 }
 
@@ -591,6 +592,10 @@ export class Store {
         maxWorking: Math.max(1, count(raw.agentTalk?.maxWorking, 20, defaults.agentTalk.maxWorking)),
         maxHandOffs: Math.max(1, count(raw.agentTalk?.maxHandOffs, 50, defaults.agentTalk.maxHandOffs)),
         leadApplies: bool(raw.agentTalk?.leadApplies, defaults.agentTalk.leadApplies),
+      },
+      orchestrator: {
+        engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
+        mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
       },
     };
   }

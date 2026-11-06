@@ -4,9 +4,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.11.0, 2026-10-29, is the lates
 
 ## Next up
 
-The team, part 3 (agreed 2026-10-28; parts 1 and 2 are in `status.md`). The lead decides who does what; VibeForge never routes by itself.
-
-- [ ] **Watching the team (2.12.0).** A quiet strip per workspace: the lead, each helper, what it's doing and its result, and Stop all.
+- [ ] **The Orchestrator with Claude Code as planner.** Built and unit-tested (`--tools "" --print --json-schema`), not tried with the real CLI yet.
+- [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to the Orchestrator, and a per-workspace strip in Code (the Running list in the Orchestrator covers Stop all for now).
 
 ## Only checked with stand-ins
 
