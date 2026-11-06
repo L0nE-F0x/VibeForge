@@ -2058,6 +2058,130 @@ h2 {
   }
 }
 
+/* orchestrator: the Ctrl+Shift+O bar with a plan card (src/ui/views/Orchestrator.tsx) */
+
+.art-orch {
+  align-items: center;
+  justify-content: center;
+}
+
+.or-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 460px);
+  padding: 12px 14px 14px;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  box-shadow: 0 0 34px -14px var(--halo);
+  font: 11px/1.5 var(--mono);
+}
+
+.or-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.or-head svg,
+.or-mic svg,
+.or-step svg,
+.or-branch svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.or-head > svg {
+  color: var(--accent);
+}
+
+.or-head b {
+  flex: 1;
+  color: var(--fg);
+}
+
+.or-mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 55%, transparent);
+  color: var(--accent-2);
+  font-size: 9.5px;
+  animation: em-edge 1.6s ease-in-out infinite;
+}
+
+.or-you {
+  align-self: flex-end;
+  max-width: 86%;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg);
+}
+
+.or-say {
+  color: var(--fg-2);
+}
+
+.or-plan {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 22px -10px var(--halo);
+}
+
+.or-plan-head,
+.or-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  color: var(--fg-3);
+}
+
+.or-plan-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.or-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.or-step + .or-step {
+  border-top: 1px solid var(--line);
+}
+
+.or-step > svg {
+  color: var(--accent-2);
+}
+
+.or-step b {
+  color: var(--fg);
+}
+
+.or-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-3);
+}
+
+.or-foot {
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+}
+
 /* phone: the phone page, as a paired phone shows the desk (companion/app.css) */
 
 .card.full {
