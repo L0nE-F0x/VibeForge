@@ -616,6 +616,7 @@ function handlers(): Handlers {
     "orchestrator.get": () => s().orchestratorView(),
     "orchestrator.ask": (text) => s().orchestratorAsk(String(text ?? "")),
     "orchestrator.stopThinking": () => s().orchestratorStopThinking(),
+    "orchestrator.models": (engineId) => s().orchestratorModels(String(engineId ?? "")),
     "orchestrator.clear": () => s().orchestratorClear(),
     "orchestrator.run": (turnId) => s().orchestratorRun(String(turnId ?? "")),
     "orchestrator.cancel": (turnId) => s().orchestratorCancel(String(turnId ?? "")),

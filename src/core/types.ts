@@ -172,6 +172,8 @@ export interface OrchestratorSettings {
   engine: string;
   /** "plan" shows the plan with a Go button; "go" carries it out at once. */
   mode: "plan" | "go";
+  /** A model for that CLI to plan with; empty keeps its own default. */
+  model: string;
 }
 
 /** How far CLIs may go on their own when they talk to each other. */

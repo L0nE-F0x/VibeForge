@@ -39,13 +39,42 @@ export const PLAN_SCHEMA = {
 } as const;
 
 /**
- * One planning turn's command line. Grok Build 1.0.70: `-p` is one turn printed to stdout, and
- * `-s` names a new session that `-r` resumes. Claude Code: `--print`, `--session-id`/`--resume`,
- * and `--tools ""` with nothing else after it but options, as it takes every word up to the next one.
+ * The same plan, the way OpenAI's structured output wants it: every field required. Codex and
+ * Antigravity get this one; an empty string stands for a field that doesn't apply.
  */
-export function brainArgs(row: EngineRow, opts: { text: string; rules: string; sessionId: string; resume: boolean }): string[] | null {
-  const schema = JSON.stringify(PLAN_SCHEMA);
+export const STRICT_PLAN_SCHEMA = {
+  ...PLAN_SCHEMA,
+  properties: {
+    ...PLAN_SCHEMA.properties,
+    steps: { ...PLAN_SCHEMA.properties.steps, items: { ...PLAN_SCHEMA.properties.steps.items, required: ["kind", "engine", "workspace", "branch", "prompt", "target"] } },
+  },
+} as const;
+
+export interface BrainOptions {
+  text: string;
+  rules: string;
+  /** The planner's session: ours for Grok Build and Claude Code, the one it reported for Codex and Antigravity. */
+  sessionId: string;
+  resume: boolean;
+  /** A model the person picked; empty keeps the CLI's own default. */
+  model?: string;
+  /** Codex reads the schema from a file. */
+  schemaFile?: string;
+}
+
+/**
+ * One planning turn's command line, tools off or read-only, output held to the plan's schema.
+ * - Grok Build 1.0.77: `-p` one turn, `--rules`, `--json-schema`, `-s <uuid>` names a session that `-r` resumes.
+ * - Claude Code 2.1: `--print`, `--append-system-prompt`, `--session-id`/`--resume`, and `--tools ""`
+ *   with only options after it, as it takes every word up to the next one.
+ * - Codex 0.16x: `exec --json`, `--output-schema <file>`, a read-only sandbox, the rules as developer
+ *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort.
+ * - Antigravity CLI: `-p` with the rules in the message (it has no option for them), `--json-schema`,
+ *   plan mode, `--conversation <id>` from its last answer. Low effort: a first turn at its default took 80 s.
+ */
+export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   const kind = brainKind(row);
+  const model = opts.model?.trim() ?? "";
   if (kind === "grok") {
     return [
       ...row.args,
@@ -54,7 +83,7 @@ export function brainArgs(row: EngineRow, opts: { text: string; rules: string; s
       "--rules",
       opts.rules,
       "--json-schema",
-      schema,
+      JSON.stringify(PLAN_SCHEMA),
       "--output-format",
       "json",
       "--max-turns",
@@ -62,6 +91,7 @@ export function brainArgs(row: EngineRow, opts: { text: string; rules: string; s
       "--no-subagents",
       "--no-plan",
       "--disable-web-search",
+      ...(model ? ["-m", model] : []),
       opts.resume ? "-r" : "-s",
       opts.sessionId,
     ];
@@ -75,16 +105,59 @@ export function brainArgs(row: EngineRow, opts: { text: string; rules: string; s
       "--output-format",
       "json",
       "--json-schema",
-      schema,
+      JSON.stringify(PLAN_SCHEMA),
       "--append-system-prompt",
       opts.rules,
+      ...(model ? ["--model", model] : []),
       opts.resume ? "--resume" : "--session-id",
       opts.sessionId,
       "--",
       opts.text,
     ];
   }
+  if (kind === "codex") {
+    if (!opts.schemaFile) return null;
+    const options = [
+      "--json",
+      "--skip-git-repo-check",
+      "--output-schema",
+      opts.schemaFile,
+      "-c",
+      'sandbox_mode="read-only"',
+      "-c",
+      'model_reasoning_effort="low"',
+      // -c takes TOML, and a JSON string is a TOML basic string.
+      "-c",
+      `developer_instructions=${JSON.stringify(opts.rules)}`,
+      ...(model ? ["-m", model] : []),
+    ];
+    const resume = opts.resume && opts.sessionId;
+    return [...row.args, "exec", ...(resume ? ["resume"] : []), ...options, "--", ...(resume ? [opts.sessionId] : []), opts.text];
+  }
+  if (kind === "agy") {
+    const resume = opts.resume && opts.sessionId;
+    return [
+      ...row.args,
+      "-p",
+      `${opts.rules}\n\nThe person said:\n${opts.text}`,
+      "--output-format",
+      "json",
+      "--json-schema",
+      JSON.stringify(STRICT_PLAN_SCHEMA),
+      "--mode",
+      "plan",
+      "--effort",
+      "low",
+      ...(model ? ["--model", model] : []),
+      ...(resume ? ["--conversation", opts.sessionId] : []),
+    ];
+  }
   return null;
+}
+
+/** Whether a planner's error means it isn't signed in, so the card can say so plainly. */
+export function signedOut(text: string): boolean {
+  return /\b401\b|unauthori[sz]ed|not logged in|please run \/login|log ?in again|sign ?in (again|first|required)|invalid api key/i.test(text);
 }
 
 /** What the planning CLI is told each turn: its job, the steps it may give, and what is here right now. */
@@ -130,29 +203,64 @@ export interface RawPlan {
   steps: Array<{ kind: string; engine?: string; workspace?: string; branch?: string; prompt?: string; target?: string }>;
 }
 
+/** What one planning turn printed: the plan, its words, the session it reported, and any error. */
+export interface BrainOutput {
+  plan: RawPlan | null;
+  text: string;
+  sessionId: string;
+  error: string;
+}
+
 /**
- * The plan in a planning turn's output: Grok Build's `structuredOutput`, Claude Code's
- * `structured_output`, or JSON in the answer's text. Null when there is none.
+ * The plan in a planning turn's output: Grok Build's `structuredOutput`, Claude Code's and
+ * Antigravity's `structured_output`, Codex's last agent message in its JSON lines, or JSON in the
+ * answer's text. `plan` is null when there is none.
  */
-export function readBrainOutput(stdout: string): { plan: RawPlan | null; text: string } {
+export function readBrainOutput(stdout: string): BrainOutput {
   let outer: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(stdout.trim()) as unknown;
-    if (parsed && typeof parsed === "object") outer = parsed as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) outer = parsed as Record<string, unknown>;
   } catch {
     outer = null;
   }
-  const text = outer ? String(outer.text ?? outer.result ?? "") : stdout.trim();
-  const candidates: unknown[] = outer ? [outer.structuredOutput, outer.structured_output] : [];
-  for (const source of [text, stdout]) {
+  // A single line of Codex's events is still an event, not an answer.
+  if (outer && typeof outer.type === "string" && /^(thread|turn|item)\.|^error$/.test(outer.type)) outer = null;
+  let sessionId = "";
+  let error = "";
+  let text = "";
+  const candidates: unknown[] = [];
+  if (outer) {
+    text = String(outer.text ?? outer.result ?? outer.response ?? "");
+    sessionId = String(outer.sessionId ?? outer.session_id ?? outer.conversation_id ?? "");
+    if (outer.is_error === true) error = text;
+    candidates.push(outer.structuredOutput, outer.structured_output);
+  } else {
+    // Codex: one event per line.
+    for (const line of stdout.split("\n")) {
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const item = (event.item ?? {}) as Record<string, unknown>;
+      if (event.type === "thread.started" && typeof event.thread_id === "string") sessionId = event.thread_id;
+      else if (event.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") text = item.text;
+      else if (event.type === "turn.failed") error = String((event.error as { message?: unknown } | undefined)?.message ?? "");
+      else if (event.type === "error" && typeof event.message === "string") error = event.message;
+    }
+    if (!text && !sessionId && !error) text = stdout.trim();
+  }
+  for (const source of [text, outer ? stdout : ""]) {
     const json = jsonIn(source);
     if (json !== undefined) candidates.push(json);
   }
   for (const candidate of candidates) {
     const plan = asPlan(candidate);
-    if (plan) return { plan, text };
+    if (plan) return { plan, text, sessionId, error: "" };
   }
-  return { plan: null, text };
+  return { plan: null, text, sessionId, error };
 }
 
 function jsonIn(text: string): unknown {

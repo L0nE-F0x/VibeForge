@@ -150,6 +150,10 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.ask(text);
   }
 
+  orchestratorModels(engineId: string): Promise<string[]> {
+    return this.orchestrator.listModels(engineId);
+  }
+
   orchestratorStopThinking(): void {
     this.orchestrator.stopThinking();
   }

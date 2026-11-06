@@ -4,7 +4,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.11.0, 2026-10-29, is the lates
 
 ## Next up
 
-- [ ] **The Orchestrator with Claude Code as planner.** Built and unit-tested (`--tools "" --print --json-schema`), not tried with the real CLI yet.
+- [ ] **Codex as the Orchestrator's planner, signed in.** Built to Codex's JSON lines and tested against its real "not signed in" answer; a real plan from it isn't checked, as Codex isn't signed in on this machine.
+- [ ] **Muse as a planner**, later (founder, 2026-11-07).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to the Orchestrator, and a per-workspace strip in Code (the Running list in the Orchestrator covers Stop all for now).
 
 ## Only checked with stand-ins
