@@ -21,7 +21,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:ital,wght@0,400..800;1,400&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=2.7.0" />
+    <link rel="stylesheet" href="styles.css?v=2.12.0" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true" focusable="false">
@@ -60,6 +60,7 @@
       <symbol id="i-smartphone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2"/><path d="M12 18h.01"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
       <symbol id="i-message-square-plus" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M12 8v6"/><path d="M9 11h6"/></symbol>
+      <symbol id="i-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13"/></symbol>
       <symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></symbol>
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
       <symbol id="i-package" viewBox="0 0 24 24"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></symbol>
@@ -299,6 +300,28 @@
         </div>
 
         <div class="bento">
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon"><svg><use href="#i-workflow" /></svg></span>
+              <h3>Tell VibeForge what to start</h3>
+              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere and say it or type it: <i>“Start Claude Code in VibeForge on a new branch called fix-tray and make the icon pulse. And Grok in Dune to write the parser tests.”</i> One of your own CLIs (Grok Build, Claude Code, Codex or Antigravity) turns that into a plan, in one short turn that can't change anything. Press <b>Go</b> and each CLI starts on its new branch, in its own copy of the workspace, in Code.</p>
+              <p>No API key and nothing to download: it plans on the CLI plan you already pay for. Change any step before Go, or let it just go. It never picks a CLI you didn't name.</p>
+            </div>
+            <div class="art art-orch" aria-hidden="true">
+              <div class="or-bar">
+                <div class="or-head"><svg><use href="#i-workflow" /></svg><b>Orchestrator</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
+                <div class="or-you">Start Claude Code in VibeForge on a new branch called fix-tray, and Grok in Dune to write the parser tests.</div>
+                <div class="or-say">Starting Claude Code in VibeForge on fix-tray, and Grok Build in Dune on parser-tests.</div>
+                <div class="or-plan">
+                  <div class="or-plan-head"><span class="tk-chip">Plan</span><span>2 steps</span></div>
+                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Claude Code</b><span>VibeForge</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>fix-tray</span></div>
+                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Grok Build</b><span>Dune</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>parser-tests</span></div>
+                  <div class="or-foot"><span>Cancel</span><span class="m-primary">Go</span></div>
+                </div>
+              </div>
+            </div>
+          </article>
+
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-messages-square" /></svg></span>
