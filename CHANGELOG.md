@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dictating to the Orchestrator hears your workspace names.** Whisper is now told the workspaces' names when you talk in the Orchestrator's box, as it already was for agents and CLIs, so "Star Ledger" or "frontier halls" no longer come out as other words.
+
 ## [2.12.0] - 2026-11-07
 
 **2.12.0: talk to VibeForge itself. Say or type what to start where, and one of your own CLIs plans it while VibeForge sets it up.**
