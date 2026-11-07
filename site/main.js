@@ -443,16 +443,16 @@ function setupCircuit() {
 // ------------------------------------------------------------------ the desk demo
 
 const SESSION = [
-  { html: '<span class="dim">~/Projects/frontier-halls</span>' },
-  { type: '<span class="acc">❯</span> claude "# VibeForge run · Agent: Release notes · Allowed folders: ~/Projects/frontier-halls …"' },
-  { html: '<span class="dim">  brief · memory · 2 skills · prompt — handed over as one argument</span>', wait: 700 },
+  { html: '<span class="dim">~/projects/weather-api</span>' },
+  { type: '<span class="acc">❯</span> claude "# VibeForge run · Agent: Release notes · Allowed folders: ~/projects/weather-api …"' },
+  { html: '<span class="dim">  brief · memory.md · 2 skills · prompt</span>', wait: 700 },
   { html: "" },
-  { html: '<span class="acc">●</span> Reading the 14 commits merged since yesterday', wait: 900 },
-  { html: '<span class="acc">●</span> Grouping changes by what a player can now do', wait: 900 },
-  { html: '<span class="acc">●</span> Checking every claim against the diff', wait: 1000 },
+  { html: '<span class="acc">●</span> Reading 14 commits merged since v2.3.1', wait: 900 },
+  { html: '<span class="acc">●</span> Grouping new endpoints, fixes, and breaking changes', wait: 900 },
+  { html: '<span class="acc">●</span> Checking every entry against the git diff', wait: 1000 },
   { html: '<span class="acc">●</span> Wrote RELEASE_NOTES.md  <span class="grn">+38</span> <span class="red">−4</span>', wait: 900 },
   { html: "" },
-  { html: '<span class="grn">✓</span> Draft ready for review. Nothing pushed, tagged or published.', wait: 600 },
+  { html: '<span class="grn">✓</span> Draft ready for review. Nothing pushed, tagged, or published.', wait: 600 },
 ];
 
 function setupDesk() {
@@ -630,7 +630,7 @@ function setupVoiceArt() {
   const cells = $$("[data-voice-meter] i");
   const typed = $("[data-voice-typed]");
   const clock = $("[data-voice-clock]");
-  const lines = ["Add tests for the scheduler.", "Refactor the lamp so it glows at night.", "Check why the dock hides the menu."];
+  const lines = ["Write tests for expired JWT tokens.", "Why is /checkout returning 500 on empty carts?", "Add cursor pagination to /users."];
   let visible = false;
   let running = false;
   const level = (value) => {
@@ -716,10 +716,10 @@ function setupPausing() {
 // ------------------------------------------------------------------ tour
 
 const CAPTIONS = [
-  ["Home", "What's live, what finished and needs a look, and what runs next."],
-  ["Code", "Shells and CLIs tiled side by side, the ones you aren't in stepping back, a file tree, and a browser for any link."],
-  ["Tasks", "Writing a task starts nothing. Execute does, and the result lands in Review with its diff."],
-  ["Maestro", "Say what to start. Your own CLI plans it, and each one starts on its own branch, side by side."],
+  ["Home", "Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs."],
+  ["Code", "Shells and coding CLIs tiled side by side, with your workspaces on the left, a file tree, and a built-in browser."],
+  ["Tasks", "Queue up tasks on a board. Hit Execute to run an agent in its own git worktree, then review and apply its diff."],
+  ["Maestro", "Say or type what to start. Your CLI builds a plan and opens each agent on its own branch in a git worktree."],
 ];
 
 function setupTour() {
