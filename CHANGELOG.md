@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-07
+
+**2.13.0: Maestro on your phone. Say what to start where, from the couch, and your computer plans it and sets it up.**
+
 ### Added
 
 - **The Orchestrator on your phone.** **Maestro**, at the top of the phone page's desk, is the desktop's Orchestrator: the same conversation, planned by the same CLI on the computer. Plans come as the same cards, where you can change a step's CLI, workspace, branch or instruction, leave a step out, then **Go** or **Cancel**; **Show me first** / **Just go**, who plans, **New**, and the **Running** list (open a CLI, stop one, or **Stop all** the ones it started) are there too. Tap the mic and speak, or hold it and let go: the phone records, and the computer's own whisper turns it into words, told your workspace names as the desktop's box is. The audio goes over your tailnet to the computer and nowhere else, isn't kept, and the words wait in the box for **Send**. The mic shows when Settings → Voice on the computer has whisper.cpp and a model.
