@@ -1,5 +1,5 @@
 import { Check, CircleAlert, ExternalLink, GitBranch, MessageSquare, Play, RotateCcw, Square, SquareTerminal, Workflow, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, Workspace } from "../../shared/api.js";
 import { canOrchestrate, stepIssue, type PlanContext } from "../../shared/orchestrator.js";
@@ -20,6 +20,9 @@ import { setDraft } from "../voice.js";
 export const OPEN_ORCHESTRATOR_EVENT = "vibeforge:open-orchestrator";
 export const ORCHESTRATOR_KEYS = "Ctrl+Shift+O";
 const DRAFT_KEY = "orchestrator";
+
+/** Put the bar away: "Open in Code" on the bar opens the terminal, so the bar mustn't stay over it. */
+const LeaveBar = createContext<(() => void) | null>(null);
 
 export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines"], () => call("orchestrator.get"));
 
@@ -151,7 +154,9 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           </Button>
           <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd="Esc" onClick={onClose} />
         </div>
-        <Conversation view={view} compact onEscape={onClose} />
+        <LeaveBar.Provider value={onClose}>
+          <Conversation view={view} compact onEscape={onClose} />
+        </LeaveBar.Provider>
       </div>
     </div>,
     document.body,
@@ -339,6 +344,7 @@ function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean
 function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; step: OrchestratorStep; editable: boolean; compact?: boolean; issue: StepIssue | null }) {
   const t = useT();
   const { go } = useNav();
+  const leaveBar = useContext(LeaveBar);
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const live = useLive().data ?? [];
@@ -413,7 +419,11 @@ function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; s
         {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
       </div>
       {step.state === "done" && step.kind === "start" && step.ptyId && (
-        <Button size="sm" icon={SquareTerminal} disabled={!opened} onClick={() => go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined, ptyId: step.ptyId ?? undefined })}>
+        <Button size="sm" icon={SquareTerminal} disabled={!opened} onClick={() => {
+            leaveBar?.();
+            go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined, ptyId: step.ptyId ?? undefined });
+          }}
+        >
           {t("orch.open")}
         </Button>
       )}
