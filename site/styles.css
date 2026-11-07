@@ -2865,6 +2865,21 @@ h2 {
   transition: color 0.2s, background 0.2s, border-color 0.2s;
 }
 
+/* Four tabs across a phone: the words carry it, the icons step aside. */
+@media (max-width: 520px) {
+  .tour-tabs {
+    gap: 6px;
+  }
+
+  .tour-tabs button {
+    padding: 0 11px;
+  }
+
+  .tour-tabs button svg {
+    display: none;
+  }
+}
+
 .tour-tabs button:hover {
   color: var(--accent);
   background: var(--hover-fill);

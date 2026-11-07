@@ -719,6 +719,7 @@ const CAPTIONS = [
   ["Home", "What's live, what finished and needs a look, and what runs next."],
   ["Code", "Shells and CLIs tiled side by side, the ones you aren't in stepping back, a file tree, and a browser for any link."],
   ["Tasks", "Writing a task starts nothing. Execute does, and the result lands in Review with its diff."],
+  ["Maestro", "Say what to start. Your own CLI plans it, and each one starts on its own branch, side by side."],
 ];
 
 function setupTour() {
