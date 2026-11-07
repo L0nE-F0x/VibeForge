@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.12.2] - 2026-11-07
+
+**2.12.2: Open in Code from the Orchestrator bar takes you straight to the terminal.**
+
 ### Fixed
 
 - **Open in Code from the Orchestrator bar puts the bar away.** Pressing Open in Code on a plan step in the Ctrl+Shift+O bar opened the CLI's terminal underneath the bar, which stayed on top until you closed it, and the first click anywhere else only closed it. The bar now closes as the terminal opens.
