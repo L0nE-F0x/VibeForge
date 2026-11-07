@@ -4,12 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VibeForge — your coding agents, forged into one desk</title>
-    <meta name="description" content="An open-source desktop for Omarchy that runs Claude Code, Codex, Grok and every coding CLI you already use — agents that remember, routines on a schedule, real terminals and a review inbox. No accounts, no keys, no telemetry." />
+    <meta name="description" content="An open-source desktop app for Omarchy that runs Claude Code, Codex, Grok, and your other coding CLIs side by side, each on its own branch in a git worktree. Includes saved agents, scheduled routines, and git diffs to review. No accounts, no API keys, no telemetry." />
     <meta name="theme-color" content="#09090b" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vibe-forge.net/" />
     <meta property="og:title" content="VibeForge — your coding agents, forged into one desk" />
-    <meta property="og:description" content="Open-source agent desk for Omarchy. Claude Code, Codex, Grok and friends in real terminals, as a team." />
+    <meta property="og:description" content="Run several coding CLIs at once, each on its own branch in a git worktree, in one open-source desktop app for Omarchy." />
     <meta property="og:image" content="https://vibe-forge.net/assets/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -121,8 +121,8 @@
           </div>
           <h1>Your coding agents, <span class="forged">forged</span> into one desk.</h1>
           <p class="lede">
-            VibeForge runs Claude Code, Codex, Grok and every other coding CLI you already use — in real terminals, as a team. Teammates that remember,
-            routines that run on schedule, and a review inbox for everything they touched.
+            Run several coding CLIs at once (Claude Code, Codex, Grok, or anything else on your PATH), each on its own branch in a git worktree.
+            Save reusable agents, put recurring jobs on a schedule, and review every git diff in one place.
           </p>
           <div class="cta">
             <a class="btn primary" href="#install"><svg><use href="#i-terminal" /></svg>Install on Omarchy</a>
@@ -163,13 +163,13 @@
               <aside class="m-list">
                 <div class="m-list-head">Agents <span class="m-chip-btn"><svg><use href="#i-plus" /></svg>New</span></div>
                 <div class="m-row">
-                  <span class="m-avatar">DJ</span>
-                  <span class="m-row-text"><b>Dependency janitor</b><i>Codex</i></span>
+                  <span class="m-avatar">TW</span>
+                  <span class="m-row-text"><b>Test writer</b><i>Codex</i></span>
                   <span class="m-count">1</span>
                 </div>
                 <div class="m-row">
-                  <span class="m-avatar">DG</span>
-                  <span class="m-row-text"><b>Docs gardener</b><i>Grok Build</i></span>
+                  <span class="m-avatar">SA</span>
+                  <span class="m-row-text"><b>Security audit</b><i>Grok Build</i></span>
                 </div>
                 <div class="m-row is-on">
                   <span class="m-avatar">RN</span>
@@ -198,16 +198,16 @@
                     <div class="m-chats-label">Recent</div>
                     <div class="m-chat is-on">
                       <span class="m-dot is-live" data-demo-chatdot></span>
-                      <span class="m-row-text"><b>Draft release notes for what merged</b><i data-demo-chatwhen>now</i></span>
+                      <span class="m-row-text"><b>Draft v2.4 release notes</b><i data-demo-chatwhen>now</i></span>
                     </div>
                     <div class="m-chat">
                       <span class="m-dot is-ok"></span>
-                      <span class="m-row-text"><b>Notes for the 0.3 hotfix</b><i>2 days ago</i></span>
+                      <span class="m-row-text"><b>Changelog for v2.3.1 patch</b><i>2 days ago</i></span>
                     </div>
                   </aside>
                   <div class="m-session" data-demo-session>
                     <div class="m-sessionhead">
-                      <b>Draft release notes for what merged</b>
+                      <b>Draft v2.4 release notes</b>
                       <span class="m-dot is-live m-livebit"></span>
                       <span class="m-grow"></span>
                       <span class="m-ghost-btn m-hide-sm m-livebit"><svg><use href="#i-square-pen" /></svg>Write</span>
@@ -246,18 +246,18 @@
             </div>
             <div class="w-run">
               <span class="m-dot is-ok"></span>
-              <span class="w-run-text"><b>Bump vite to 7.1</b><i>Task · 3 files changed · 1 hr ago</i></span>
+              <span class="w-run-text"><b>Add rate limiting to /forecast</b><i>Task · 3 files changed · 1 hr ago</i></span>
             </div>
             <div class="w-run">
               <span class="m-dot is-warn"></span>
-              <span class="w-run-text"><b>Dependency janitor · Nightly audit</b><i>Routine · stopped · yesterday</i></span>
+              <span class="w-run-text"><b>Security audit · Nightly audit</b><i>Routine · stopped · yesterday</i></span>
             </div>
             <div class="w-diff">
               <div class="d-file">RELEASE_NOTES.md</div>
-              <div class="d-add">+## What you can do now</div>
-              <div class="d-add">+- Great-hall lamps glow warm at night</div>
-              <div class="d-add">+- Doors remember who opened them</div>
-              <div class="d-del">-- fixed lamp bug</div>
+              <div class="d-add">+## New in v2.4</div>
+              <div class="d-add">+- Hourly /forecast now returns wind gusts</div>
+              <div class="d-add">+- Rate-limit headers on all public endpoints</div>
+              <div class="d-del">-- misc api fixes</div>
             </div>
           </div>
 
@@ -265,7 +265,7 @@
             <div class="w-head"><svg><use href="#i-calendar-clock" /></svg>Up next</div>
             <div class="w-next"><span class="w-time">09:00</span><span><b>Weekday notes</b><i>At 09:00, Monday through Friday</i></span></div>
             <div class="w-next"><span class="w-time">02:00</span><span><b>Nightly audit</b><i>Every day at 02:00</i></span></div>
-            <div class="w-next"><span class="w-time">+30m</span><span><b>Inbox triage</b><i>Every 30 minutes</i></span></div>
+            <div class="w-next"><span class="w-time">+30m</span><span><b>CI failure check</b><i>Every 30 minutes</i></span></div>
           </div>
 
           <div class="toast" data-demo-toast>
@@ -286,17 +286,17 @@
             <span>Claude Code</span><span>Codex</span><span>Grok Build</span><span>Cursor Agent</span><span>Antigravity CLI</span><span>OpenCode</span><span>Copilot</span><span>Crush</span><span>Kimi</span><span>Muse</span><span>Pi</span><span>Hermes</span><span class="any">+ anything with a command line</span>
           </div>
         </div>
-        <p class="engines-note">VibeForge never calls a model API and never holds a key. Every engine is a CLI you're already signed in to, found through your login shell: mise, <code>~/.local/bin</code>, all of it.</p>
+        <p class="engines-note">VibeForge never calls a model API or stores an API key. Every engine is a CLI you're already signed in to, found through your login shell (including <code>mise</code> and <code>~/.local/bin</code>).</p>
       </section>
 
       <!-- ============================================================ features -->
       <section class="section" id="features">
         <div class="section-head reveal">
           <span class="kicker"><b>02</b> Features</span>
-          <h2>A crew, not a chat box.</h2>
+          <h2>Run several agents at once.</h2>
           <p>
-            The CLIs are already installed and signed in. VibeForge remembers <b>who</b> does the work, <b>where</b> they may work, <b>when</b> work
-            starts, and <b>what to review</b> when it ends.
+            Give each coding CLI its own branch in a git worktree so parallel runs never step on your files. Save agents with persistent instructions,
+            schedule recurring jobs, and inspect every diff in one inbox.
           </p>
         </div>
 
@@ -305,18 +305,18 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
-              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere and say it or type it: <i>“Start Claude Code in VibeForge on a new branch called fix-tray and make the icon pulse. And Grok in Dune to write the parser tests.”</i> One of your own CLIs (Grok Build, Claude Code, Codex or Antigravity) turns that into a plan, in one short turn that can't change anything. Press <b>Go</b> and each CLI starts on its new branch, in its own copy of the workspace, in Code.</p>
-              <p>No API key and nothing to download: it plans on the CLI plan you already pay for. Change any step before Go, or let it just go. It never picks a CLI you didn't name.</p>
+              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
+              <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It only starts CLIs you ask for.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">
                 <div class="or-head"><svg><use href="#i-workflow" /></svg><b>Orchestrator</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
-                <div class="or-you">Start Claude Code in VibeForge on a new branch called fix-tray, and Grok in Dune to write the parser tests.</div>
-                <div class="or-say">Starting Claude Code in VibeForge on fix-tray, and Grok Build in Dune on parser-tests.</div>
+                <div class="or-you">In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.</div>
+                <div class="or-say">Starting Claude Code on fix-nav and Codex on checkout-tests in web-app.</div>
                 <div class="or-plan">
                   <div class="or-plan-head"><span class="tk-chip">Plan</span><span>2 steps</span></div>
-                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Claude Code</b><span>VibeForge</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>fix-tray</span></div>
-                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Grok Build</b><span>Dune</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>parser-tests</span></div>
+                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Claude Code</b><span>web-app</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>fix-nav</span></div>
+                  <div class="or-step"><svg><use href="#i-arrow-right" /></svg><b>Codex</b><span>web-app</span><span class="or-branch"><svg><use href="#i-git-branch" /></svg>checkout-tests</span></div>
                   <div class="or-foot"><span>Cancel</span><span class="m-primary">Go</span></div>
                 </div>
               </div>
@@ -327,8 +327,8 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-messages-square" /></svg></span>
               <h3>Your agents talk to each other</h3>
-              <p>Every terminal has <code>vibeforge</code> on its PATH. Claude Code can ask Grok for a second opinion with <code>vibeforge tell grok --wait</code> and get the answer back, or hand a task to another agent with <code>vibeforge task</code>, which works in its own git copy and reports back when it's done. Make one CLI the lead, and it hands out parts of the work to the agents best and cheapest for them, waiting for your Start unless you let it go ahead.</p>
-              <p>Every message says who sent it. Two CLIs trade a few messages before the next one waits for you, and one click stops them. <b>Send to…</b> and <b>Ask … to review</b> do the same by hand.</p>
+              <p>Every terminal has <code>vibeforge</code> on its <code>PATH</code>. Claude Code can ask Grok for a second opinion with <code>vibeforge tell grok --wait</code>, or delegate a subtask to another agent with <code>vibeforge task</code>. Delegated tasks run on their own branch in a git worktree and report back with a patch when they finish. You can also make one CLI the lead so it hands subtasks to faster or cheaper agents, pausing for your approval unless you let it start automatically.</p>
+              <p>Every message is labelled with who sent it, back-and-forth turns are capped so agents can't loop forever, and one click stops them. <b>Send to…</b> and <b>Ask … to review</b> on each pane's title bar do the same manually.</p>
             </div>
             <div class="art art-talk" aria-hidden="true">
               <div class="tk-panes">
@@ -347,9 +347,9 @@
                   <code class="dim">and the rollback drops rows.</code>
                 </div>
               </div>
-              <pre class="tk-task"><span class="t-dim">$</span> vibeforge task helper "Add the index"
-<span class="t-acc">Started task "Add the index", in its own copy.</span>
-<span class="t-dim">[Task report from Helper] Added the index.</span></pre>
+              <pre class="tk-task"><span class="t-dim">$</span> vibeforge task test-writer "Write rollback tests for db/004_users.sql"
+<span class="t-acc">Started task "Write rollback tests for db/004_users.sql", in its own copy.</span>
+<span class="t-dim">[Task report from Test writer] Added 4 rollback tests; 1 caught the missing index.</span></pre>
             </div>
           </article>
 
@@ -377,8 +377,8 @@
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-bot" /></svg></span>
-              <h3>Teammates that outlive the engine</h3>
-              <p>Each agent keeps a brief, a memory file, installed skills and the folders it may touch. Switch it from Claude Code to Codex to Grok and it's still the same teammate.</p>
+              <h3>Agents that aren't tied to one CLI</h3>
+              <p>Each agent keeps its own instructions, a persistent memory file, installed skills, and the folders it's allowed to use. Switch it from Claude Code to Codex to Grok without rewriting your setup.</p>
             </div>
             <div class="art art-agent">
               <div class="agent-card">
@@ -393,7 +393,7 @@
                 <span><svg><use href="#i-book-open" /></svg>Brief</span>
                 <span><svg><use href="#i-brain" /></svg>Memory</span>
                 <span><svg><use href="#i-sparkles" /></svg>2 skills</span>
-                <span><svg><use href="#i-folder-open" /></svg>~/Projects/frontier-halls</span>
+                <span><svg><use href="#i-folder-open" /></svg>~/projects/weather-api</span>
               </div>
             </div>
           </article>
@@ -402,11 +402,11 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-square-terminal" /></svg></span>
               <h3>Tiled like your desktop</h3>
-              <p>Split terminals side by side, a file tree that drops paths into the focused pane, and a browser beside them: click a link in a terminal and it opens there, one page per workspace.</p>
+              <p>Split terminals side by side, click files in the tree to insert their paths, and open dev-server links in a built-in browser pane beside your code.</p>
             </div>
             <div class="art art-tiles">
               <div class="tile"><i>shell</i><code>npm run dev</code><code class="dim">➜ localhost:5173</code></div>
-              <div class="tile is-focused"><i>Claude Code</i><code>● Editing lamp.ts</code><code class="dim">✓ tests pass</code></div>
+              <div class="tile is-focused"><i>Claude Code</i><code>● Nav.tsx</code><code class="dim">✓ 18 passed</code></div>
               <div class="tile tile-web"><i>localhost</i><span class="web-block"></span><span class="web-line"></span><span class="web-line short"></span></div>
             </div>
           </article>
@@ -416,17 +416,17 @@
               <span class="card-icon"><svg><use href="#i-mic" /></svg></span>
               <h3>Talk to your agents</h3>
               <p>
-                Hold <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd> and speak into the chat or terminal in front of you. <kbd>Super</kbd> <kbd>Alt</kbd> <kbd>V</kbd> from anywhere on the desktop talks to one agent, and the words wait in their chat. whisper.cpp listens, on this machine.
+                Hold <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd> to dictate into the active chat or terminal. Press <kbd>Super</kbd> <kbd>Alt</kbd> <kbd>V</kbd> from anywhere on your desktop to dictate to a chosen agent, and your words wait in its chat until you hit Enter. Transcribed locally with whisper.cpp.
               </p>
             </div>
             <div class="art art-voice" data-voice-art>
               <div class="v-bar">
                 <span class="v-meter" data-voice-meter><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
                 <b>Listening</b>
-                <span class="v-to">→ Atlas</span>
+                <span class="v-to">→ Test writer</span>
                 <span class="v-clock" data-voice-clock>0:00</span>
               </div>
-              <div class="v-box"><span data-voice-typed>Add tests for the scheduler.</span><span class="v-caret"></span></div>
+              <div class="v-box"><span data-voice-typed>Write tests for expired JWT tokens.</span><span class="v-caret"></span></div>
               <div class="v-hint"><span class="keycap-s">Esc</span> cancels · everything stays on this computer</div>
             </div>
           </article>
@@ -435,10 +435,10 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-volume" /></svg></span>
               <h3>And they answer out loud</h3>
-              <p>Piper reads the first paragraph of a reply to something you sent by voice, in that agent's own voice. Hold the key again to cut in.</p>
+              <p>When you dictate a prompt, Piper reads the first paragraph of the reply aloud in that agent's voice, right on your machine. Hold the dictate key again to interrupt.</p>
             </div>
             <div class="art art-answer" data-answer-art>
-              <div class="a-line"><svg><use href="#i-volume" /></svg><b>Atlas</b><span>Added three tests. They all pass.</span></div>
+              <div class="a-line"><svg><use href="#i-volume" /></svg><b>Test writer</b><span>Added four token expiry tests. All pass.</span></div>
               <div class="a-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
           </article>
@@ -446,8 +446,8 @@
           <article class="card reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-calendar-clock" /></svg></span>
-              <h3>Routines that respect your time</h3>
-              <p>Cron or intervals, read back in plain words. They run while VibeForge is running, in the tray too; missed slots are shown, never replayed.</p>
+              <h3>Agents on a schedule</h3>
+              <p>Run agents on a cron schedule or a fixed interval for weekday changelogs, nightly audits, or recurring checks. Routines keep running in the system tray, and missed runs are logged instead of piling up after sleep.</p>
             </div>
             <div class="art art-cron">
               <code class="cron">0 9 * * 1-5</code>
@@ -461,8 +461,7 @@
               <span class="card-icon"><svg><use href="#i-git-compare" /></svg></span>
               <h3>Review everything they touched</h3>
               <p>
-                Every run keeps its final screen, a transcript, the exact prompt and the git diff since it began, saved the moment it ends so later edits stay out of it. <b>Continue</b> reopens the very same
-                session when the CLI printed one (<code>claude --resume</code>, <code>grok --resume</code>, …).
+                Every run saves its final terminal screen, full transcript, prompt, and the git diff from start to finish, captured the moment it ends so later edits stay out of it. Click <b>Continue</b> to reopen the exact CLI session (<code>claude --resume</code>, <code>grok --resume</code>, and others).
               </p>
             </div>
             <div class="art art-review">
@@ -474,9 +473,9 @@
               <div class="rv-tabs"><span>Final screen</span><span class="is-on">Changes</span><span>Prompt</span><span>Transcript</span></div>
               <div class="rv-diff">
                 <div class="d-file">diff --git a/RELEASE_NOTES.md</div>
-                <div class="d-add">+- Great-hall lamps glow warm at night</div>
-                <div class="d-add">+- Doors remember who opened them</div>
-                <div class="d-del">-- fixed lamp bug</div>
+                <div class="d-add">+- Hourly /forecast now returns wind gusts</div>
+                <div class="d-add">+- Rate-limit headers on all public endpoints</div>
+                <div class="d-del">-- misc api fixes</div>
               </div>
               <div class="rv-foot"><code>claude --resume e6ea7991-…</code><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Continue</span></div>
             </div>
@@ -485,22 +484,22 @@
           <article class="card reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-kanban" /></svg></span>
-              <h3>Tasks that wait for you</h3>
-              <p>Writing or assigning a task never starts anything. <b>Execute</b> does, and the result lands in Review with its diff.</p>
+              <h3>A task board you trigger</h3>
+              <p>Queue up tasks and assign an agent without starting anything yet. Hit <b>Execute</b> when you're ready: the agent runs on its own branch in a git worktree, and the finished diff lands in <b>Review</b> to apply or discard.</p>
             </div>
             <div class="art art-board">
               <div class="col"><i>To do</i></div>
               <div class="col"><i>Running</i></div>
               <div class="col"><i>Review</i></div>
-              <div class="board-card"><b>Fix lamp flicker</b><span></span></div>
+              <div class="board-card"><b>Fix OAuth redirect</b><span></span></div>
             </div>
           </article>
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
-              <h3>Real terminals, not a chat skin</h3>
-              <p>WebGL xterm, split and dragged into place. <kbd>Ctrl</kbd> <kbd>V</kbd> pastes text, and a screenshot on its own goes straight to the program, so images paste into Claude Code like in ghostty.</p>
+              <h3>Full terminals, not a chat wrapper</h3>
+              <p>WebGL xterm panes you can split and drag into place. <kbd>Ctrl</kbd> <kbd>V</kbd> pastes text, and clipboard screenshots go straight to CLIs like Claude Code, just like in Ghostty.</p>
             </div>
             <div class="art art-keys">
               <span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">V</span>
@@ -510,8 +509,8 @@
           <article class="card reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-shield" /></svg></span>
-              <h3>Private by construction</h3>
-              <p>No accounts, no keys, no telemetry. It asks GitHub for the newest release number, and you can turn that off. Anything else that goes online, like plan limits or your GitHub graph, is off until you turn it on. Agents, skills, routines and tasks are YAML and Markdown you can edit in Neovim.</p>
+              <h3>Local and private</h3>
+              <p>No accounts, no API keys, no telemetry. VibeForge only checks GitHub for new releases (which you can turn off); optional features like plan usage limits and your GitHub commit graph stay off until you turn them on. Agents, skills, routines, and tasks are plain YAML and Markdown files you can edit in Neovim.</p>
             </div>
             <div class="art art-private">
               <span class="lock"><svg><use href="#i-lock" /></svg></span>
@@ -522,8 +521,8 @@
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-refresh" /></svg></span>
-              <h3>Updates itself, in plain sight</h3>
-              <p>When a release is out, Help gets a dot. Update shows the notes, runs the installer in a terminal you can watch, and restarts. All it asks GitHub for is the newest release and its notes.</p>
+              <h3>Updates in plain sight</h3>
+              <p>When a new release is out, <b>Help</b> shows a badge. Click <b>Update</b> to read the release notes, watch the installer run in a real terminal, and restart.</p>
             </div>
             <div class="art art-update" data-update-art>
               <div class="up-head"><b>Update VibeForge</b><span class="chip ok">2.12.2</span></div>
@@ -542,7 +541,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-activity" /></svg></span>
               <h3>It glows when it's your turn</h3>
-              <p>When a CLI or agent goes quiet where you aren't looking, its workspace or chat lights up like an ember, and so does the view's icon in the rail. With VibeForge in the background, two soft knocks and a notification bring you there.</p>
+              <p>When a background CLI finishes or stops to ask a question, its workspace, chat, and sidebar icon glow like an ember until you check it. When VibeForge is unfocused, a soft sound and desktop notification take you straight there.</p>
             </div>
             <div class="art art-ember" aria-hidden="true">
               <div class="em-row"><i class="em-px open"></i><b>pixel-weather</b><span>~/projects/pixel-weather</span></div>
@@ -554,11 +553,11 @@
           <article class="card reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-rotate-ccw" /></svg></span>
-              <h3>Undo, not "are you sure?"</h3>
-              <p>Deleting a chat, task, skill or routine happens at once. Undo on the toast, or <kbd>Ctrl</kbd> <kbd>Z</kbd>, puts it back.</p>
+              <h3>Instant delete with Undo</h3>
+              <p>Deleting a chat, task, skill, or routine happens right away. Click <b>Undo</b> on the toast or press <kbd>Ctrl</kbd> <kbd>Z</kbd> to put it back.</p>
             </div>
             <div class="art art-undo" aria-hidden="true">
-              <div class="undo-toast"><span>Deleted Old notes</span><b>Undo</b></div>
+              <div class="undo-toast"><span>Deleted Auth refactor</span><b>Undo</b></div>
             </div>
           </article>
 
@@ -566,7 +565,7 @@
             <div class="card-copy">
               <span class="card-icon"><svg><use href="#i-languages" /></svg></span>
               <h3>Seven languages</h3>
-              <p>Following your system language unless you pick one.</p>
+              <p>Follows your system language automatically, or pick one in Settings.</p>
             </div>
             <div class="art art-lang">
               <div class="lang-codes" data-lang-codes><span>EN</span><span>DE</span><span>ES</span><span>FR</span><span>PT</span><span>JA</span><span>ZH</span></div>
@@ -580,7 +579,7 @@
       <section class="section" id="tour">
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
-          <h2>Not a mockup. The real desk.</h2>
+          <h2>Inside the real app.</h2>
           <p>Screenshots of VibeForge 2.12.1 on a working day, in the Apex Forge theme.</p>
         </div>
         <div class="tour reveal" data-tour>
@@ -592,7 +591,7 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=2.12.1" width="1890" height="1138" alt="VibeForge\'s Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
+              <img src="assets/app-home.webp?v=2.12.1" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
             </figure>
             <figure class="shot">
               <img src="assets/app-code.webp?v=2.12.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of the Orchestrator from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
@@ -604,7 +603,7 @@
               <img src="assets/app-maestro.webp?v=2.12.1" width="1890" height="1138" alt="The Orchestrator: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it shows the plan, both steps done with Open in Code, and the Running list beside it marks the two it started." loading="lazy" />
             </figure>
           </div>
-          <p class="tour-caption" data-tour-caption><b>Home</b> What's live, what finished and needs a look, and what runs next.</p>
+          <p class="tour-caption" data-tour-caption><b>Home</b> Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs.</p>
         </div>
       </section>
 
@@ -613,28 +612,28 @@
         <div class="section-head reveal">
           <span class="kicker"><b>—</b> Under the hood</span>
           <h2>What happens when you hit Send.</h2>
-          <p>No magic, no parsing a TUI into cards. A process, a terminal, and a record.</p>
+          <p>No wrapper APIs and no scraping terminal output into fake chat bubbles. Just real CLI processes, git worktrees, and saved diffs.</p>
         </div>
         <ol class="flow">
           <li class="reveal">
             <span class="flow-node">01</span>
-            <h3>One argument, intact</h3>
-            <p>The brief, memory, skills and your prompt reach the CLI as a single argument. The few CLIs without a prompt flag get it pasted in once, never typed line by line.</p>
+            <h3>Context passed directly</h3>
+            <p>VibeForge combines the agent's brief, memory, skills, and your prompt and passes them straight to the CLI via its prompt flag (or a single paste if it doesn't have one).</p>
           </li>
           <li class="reveal">
             <span class="flow-node">02</span>
-            <h3>A real terminal</h3>
-            <p>It runs in the agent's allowed folder. A headless mirror keeps every screen, so switching views never loses a line.</p>
+            <h3>Runs in a real terminal</h3>
+            <p>The process runs inside its workspace or git worktree. A headless terminal mirror keeps every screen intact when you switch views or close the window to the tray.</p>
           </li>
           <li class="reveal">
             <span class="flow-node">03</span>
-            <h3>A record when it ends</h3>
-            <p>Final screen, transcript and the full diff land in the run folder, frozen as it ends. Stop hangs up the process group, like closing a window.</p>
+            <h3>Saved when it finishes</h3>
+            <p>As soon as a run exits, its final screen, transcript, and full git diff are saved to disk. Stopping sends a clean hangup to the whole process group.</p>
           </li>
           <li class="reveal">
             <span class="flow-node">04</span>
-            <h3>Pick it back up</h3>
-            <p>Continue reopens the exact session. Follow-ups are pasted into the live CLI and submitted, even multi-line ones.</p>
+            <h3>Resume the same session</h3>
+            <p>Continue reopens the CLI's exact saved session where it left off, and follow-up messages are pasted straight into the live terminal.</p>
           </li>
         </ol>
       </section>
@@ -664,19 +663,19 @@
                 <div class="tp-canvas">
                   <div class="tp-pane">
                     <div class="tp-pane-head"><span class="m-dot is-live"></span>Shell</div>
-                    <pre><span class="t-dir">frontier-halls</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> git log --oneline
-<span class="t-yel">3f2a91c</span> Warm the great-hall lamps
-<span class="t-yel">8e01bd4</span> Doors remember who opened them
-<span class="t-yel">c7d4a02</span> Split the lighting shader
-<span class="t-dir">frontier-halls</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> <span class="t-cursor"></span></pre>
+                    <pre><span class="t-dir">weather-api</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> npm test
+<span class="t-grn">✓</span> test/forecast.test.ts <span class="t-yel">18ms</span>
+<span class="t-grn">✓</span> test/stations.test.ts <span class="t-yel">11ms</span>
+<span class="t-grn">✓</span> 24 passed
+<span class="t-dir">weather-api</span> <span class="t-branch">main</span> <span class="t-acc">❯</span> <span class="t-cursor"></span></pre>
                   </div>
                   <div class="tp-pane is-focused">
-                    <div class="tp-pane-head"><span class="m-dot is-live"></span>Codex</div>
-                    <pre><span class="t-acc">●</span> Reading src/lighting/lamp.ts
-<span class="t-acc">●</span> Found flicker: frame time used as seed
-<span class="t-grn">+</span> seed = hash(lamp.id)
-<span class="t-red">-</span> seed = performance.now()
-<span class="t-grn">✓</span> 42 tests passed</pre>
+                    <div class="tp-pane-head"><span class="m-dot is-live"></span>Codex · rate-limit</div>
+                    <pre><span class="t-acc">●</span> Read src/routes/forecast.ts
+<span class="t-acc">●</span> Cap /forecast at 60 req/min
+<span class="t-red">-</span> const limit = Infinity
+<span class="t-grn">+</span> const limit = 60 // per min
+<span class="t-grn">✓</span> 28 passed (+4 new)</pre>
                   </div>
                 </div>
               </div>
@@ -695,13 +694,13 @@
               <h2>Keys, like the rest of your desktop.</h2>
             </div>
             <dl class="keys">
-              <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Go to any agent, chat, workspace, task, routine or skill, or a run by what it said</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Jump to any agent, chat, workspace, task, routine, or skill, or search past runs by transcript</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>9</kbd></dt><dd>Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs, Maestro</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Tell the Orchestrator what to start, from any view</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd>/<kbd>E</kbd></dt><dd>A new terminal on the right, or below</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Open Orchestrator from any view to launch CLIs on new branches</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd>/<kbd>E</kbd></dt><dd>Split a new terminal to the right or below</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>M</kbd></dt><dd>Maximize the focused pane</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Z</kbd></dt><dd>Undo a delete, while its toast is up</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>/</kbd></dt><dd>Every shortcut on one sheet</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Z</kbd></dt><dd>Undo a delete while its toast is up</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>/</kbd></dt><dd>Show every keyboard shortcut</dd></div>
             </dl>
           </div>
           <div class="reveal">
@@ -714,12 +713,12 @@
 <pre class="code"><span class="y-key">name</span>: Release notes
 <span class="y-key">engine</span>: claude
 <span class="y-key">brief</span>: |
-  You draft release notes from merged work.
-  Group changes by what a person can now do.
-  Verify every claim against the repo.
-  <span class="y-em">Do not push, tag or publish.</span>
+  Draft release notes from commits since the last tag.
+  Group new endpoints, fixes, and breaking changes.
+  Check every entry against the git diff.
+  <span class="y-em">Do not push, tag, or publish.</span>
 <span class="y-key">places</span>:
-  - ~/Projects/frontier-halls
+  - ~/projects/weather-api
 <span class="y-key">skills</span>:
   - release-notes
 <span class="y-key">allowRoutines</span>: <span class="y-bool">true</span></pre>
@@ -805,6 +804,6 @@ npm run build && ./scripts/vibeforge</pre>
       </p>
     </footer>
 
-    <script src="main.js?v=2.12.1" defer></script>
+    <script src="main.js?v=2.12.1-1" defer></script>
   </body>
 </html>
