@@ -2,8 +2,11 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { bearerToken, tokenMatches, type DeskPayload } from "./companion.js";
+import type { PhoneOrchestrator } from "./companion-orchestrator.js";
 import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
+import type { OrchestratorStep } from "./orchestrator.js";
 import type { PlanSummary } from "./plans.js";
+import { BYTES_PER_SECOND, MAX_SECONDS } from "./voice.js";
 import type { en } from "../ui/i18n/en.js";
 
 type PhoneKey = Extract<keyof typeof en, `phone.${string}`>;
@@ -12,6 +15,9 @@ type PhoneKey = Extract<keyof typeof en, `phone.${string}`>;
 export const COMPANION_PROMPT_MAX = 8000;
 
 const BODY_MAX = 64_000;
+
+/** Speech from the phone: 16 kHz mono s16le, as long as a recording on the computer may be. */
+export const HEAR_MAX = MAX_SECONDS * BYTES_PER_SECOND;
 
 export interface SessionPayload {
   ptyId: string | null;
@@ -45,6 +51,29 @@ export interface CompanionActions {
   launch(input: { workspaceId: string; agentId: string; engineId: string; prompt: string }): Promise<LaunchResult>;
   /** Plan limits as the desktop shows them, or null when Settings leave them off. */
   plans(): Promise<PlanSummary | null>;
+  /** The Orchestrator: the computer's own conversation and plans. The phone shows them and asks. */
+  orchestrator: OrchestratorActions;
+  /** Speech from the phone's mic (16 kHz mono s16le), turned into words by the computer's whisper. */
+  hear(pcm: Buffer): Promise<{ text: string; empty: "short" | "silent" | "nothing" | null }>;
+}
+
+export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>;
+
+/** What the desktop's Orchestrator view does, for the phone. */
+export interface OrchestratorActions {
+  view(): PhoneOrchestrator;
+  /** Starts a planning turn and returns; the answer comes as a later turn. Refused while one is still answering. */
+  ask(text: string): void;
+  stopThinking(): void;
+  /** New: an empty conversation and a new session for the planner. Running CLIs keep running. */
+  clear(): void;
+  /** Go. */
+  run(turnId: string): Promise<void>;
+  cancel(turnId: string): void;
+  editStep(turnId: string, stepId: string, patch: StepPatch): void;
+  removeStep(turnId: string, stepId: string): void;
+  /** The view's own header: which CLI plans, and whether a plan waits for Go. */
+  settings(patch: { engine?: string; mode?: "plan" | "go" }): void;
 }
 
 /** A refusal the phone shows: a `phone.*` sentence, sent in the phone's language. */
@@ -64,6 +93,7 @@ const PAGES: Record<string, { name: string; type: string }> = {
   "/app.css": { name: "app.css", type: "text/css; charset=utf-8" },
   "/app.js": { name: "app.js", type: "text/javascript; charset=utf-8" },
   "/sw.js": { name: "sw.js", type: "text/javascript; charset=utf-8" },
+  "/mic-worklet.js": { name: "mic-worklet.js", type: "text/javascript; charset=utf-8" },
   "/manifest.webmanifest": { name: "manifest.webmanifest", type: "application/manifest+json" },
   "/fonts/geist-latin-wght-normal.woff2": { name: "fonts/geist-latin-wght-normal.woff2", type: "font/woff2" },
   "/fonts/geist-latin-ext-wght-normal.woff2": { name: "fonts/geist-latin-ext-wght-normal.woff2", type: "font/woff2" },
@@ -92,21 +122,36 @@ function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-async function readBody(req: http.IncomingMessage): Promise<unknown> {
+async function readRaw(req: http.IncomingMessage, max: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
-    if (size > BODY_MAX) throw new CompanionHttpError("phone.error.tooLarge", 413);
+    if (size > max) throw new CompanionHttpError("phone.error.tooLarge", 413);
     chunks.push(buf);
   }
-  if (size === 0) return {};
+  return Buffer.concat(chunks);
+}
+
+async function readBody(req: http.IncomingMessage): Promise<unknown> {
+  const raw = await readRaw(req, BODY_MAX);
+  if (raw.length === 0) return {};
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    return JSON.parse(raw.toString("utf8")) as unknown;
   } catch {
     throw new CompanionHttpError("phone.error.invalid", 400);
   }
+}
+
+/** A step's fields as the phone sent them: known keys, strings only, each kept to a sensible length. */
+function stepPatch(value: unknown): StepPatch {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const patch: StepPatch = {};
+  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["prompt", COMPANION_PROMPT_MAX]] as const) {
+    if (typeof raw[key] === "string") patch[key] = (raw[key] as string).slice(0, max);
+  }
+  return patch;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -186,8 +231,42 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     sendJson(res, 200, await opts.actions.session({ ptyId: url.searchParams.get("ptyId") || "", runId: url.searchParams.get("runId") || "" }));
     return;
   }
+  if (method === "GET" && url.pathname === "/api/orchestrator") {
+    const view = opts.actions.orchestrator.view();
+    // Why a step failed is the main process's own sentence, as the window translates it.
+    const language = languageOf(req, opts);
+    for (const turn of view.turns) {
+      for (const step of turn.steps ?? []) if (step.error) step.error = await phoneCoreText(language, step.error);
+    }
+    sendJson(res, 200, view);
+    return;
+  }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
-  const body = (await readBody(req)) as { ptyId?: unknown; runId?: unknown; text?: unknown; force?: unknown; workspaceId?: unknown; agentId?: unknown; engineId?: unknown; prompt?: unknown };
+  if (url.pathname === "/api/orchestrator/hear") {
+    const pcm = await readRaw(req, HEAR_MAX);
+    sendJson(res, 200, await opts.actions.hear(pcm));
+    return;
+  }
+  const body = (await readBody(req)) as {
+    ptyId?: unknown;
+    runId?: unknown;
+    text?: unknown;
+    force?: unknown;
+    workspaceId?: unknown;
+    agentId?: unknown;
+    engineId?: unknown;
+    prompt?: unknown;
+    turnId?: unknown;
+    stepId?: unknown;
+    patch?: unknown;
+    engine?: unknown;
+    mode?: unknown;
+  };
+  if (url.pathname.startsWith("/api/orchestrator/")) {
+    await orchestratorPost(url.pathname.slice("/api/orchestrator/".length), body, opts.actions.orchestrator);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
   if (url.pathname === "/api/send") {
     const ptyId = text(body.ptyId, 80);
     const runId = text(body.runId, 200);
@@ -215,6 +294,40 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
   throw new CompanionHttpError("phone.error.notFound", 404);
+}
+
+/** The Orchestrator's buttons: say something, Stop, New, Go, Cancel, a step changed or left out, and the view's header. */
+async function orchestratorPost(
+  action: string,
+  body: { text?: unknown; turnId?: unknown; stepId?: unknown; patch?: unknown; engine?: unknown; mode?: unknown },
+  desk: OrchestratorActions,
+): Promise<void> {
+  const turnId = text(body.turnId, 80);
+  const stepId = text(body.stepId, 80);
+  const needTurn = () => {
+    if (!turnId) throw new CompanionHttpError("phone.error.invalid", 400);
+    return turnId;
+  };
+  const needStep = () => {
+    if (!stepId) throw new CompanionHttpError("phone.error.invalid", 400);
+    return stepId;
+  };
+  if (action === "ask") {
+    const words = text(body.text, COMPANION_PROMPT_MAX);
+    if (!words) throw new CompanionHttpError("phone.error.empty", 400);
+    desk.ask(words);
+  } else if (action === "stop") desk.stopThinking();
+  else if (action === "new") desk.clear();
+  else if (action === "go") await desk.run(needTurn());
+  else if (action === "cancel") desk.cancel(needTurn());
+  else if (action === "step") desk.editStep(needTurn(), needStep(), stepPatch(body.patch));
+  else if (action === "remove") desk.removeStep(needTurn(), needStep());
+  else if (action === "settings") {
+    const engine = text(body.engine, 80);
+    const mode = body.mode === "plan" || body.mode === "go" ? body.mode : undefined;
+    if (!engine && !mode) throw new CompanionHttpError("phone.error.invalid", 400);
+    desk.settings({ ...(engine ? { engine } : {}), ...(mode ? { mode } : {}) });
+  } else throw new CompanionHttpError("phone.error.notFound", 404);
 }
 
 function languageOf(req: http.IncomingMessage, opts: CompanionHttpOptions): PhoneLanguage {

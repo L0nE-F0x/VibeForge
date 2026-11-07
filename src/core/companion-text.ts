@@ -1,9 +1,10 @@
 import { matchCoreText } from "../ui/core-match.js";
 import { en } from "../ui/i18n/en.js";
 
-// The phone page's words come from the app's own catalogs (its `phone.*` and `plans.*` keys), so
-// a language that is missing one fails the typecheck like the rest of the app. The page asks for
-// them once; errors the server sends back are translated here.
+// The phone page's words come from the app's own catalogs (its `phone.*`, `plans.*` and the
+// Orchestrator's `orch.*` keys, and a few of the window's), so a language that is missing one fails
+// the typecheck like the rest of the app. The page asks for them once; errors the server sends
+// back are translated here.
 
 export type Key = keyof typeof en;
 export type Catalog = { readonly [K in Key]: string };
@@ -52,12 +53,18 @@ export function fill(text: string, vars?: Record<string, string>): string {
   return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? vars[name] : match));
 }
 
+/** Groups of keys the page uses whole. */
+const PHONE_PREFIXES = ["phone.", "plans.", "orch."] as const;
+
+/** The window's words the page shares, one by one: the Orchestrator's name in the rail, and what dictation says on the desktop too. */
+const PHONE_KEYS: readonly Key[] = ["rail.orchestrator", "common.cancel", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+
 /** Every word the page shows, in one language, English where a catalog has none. */
 export async function phoneWords(language: PhoneLanguage): Promise<Record<string, string>> {
   const chosen = await catalog(language);
   const words: Record<string, string> = {};
   for (const key of Object.keys(en) as Key[]) {
-    if (key.startsWith("phone.") || key.startsWith("plans.")) words[key] = chosen[key] ?? en[key];
+    if (PHONE_PREFIXES.some((prefix) => key.startsWith(prefix)) || PHONE_KEYS.includes(key)) words[key] = chosen[key] ?? en[key];
   }
   return words;
 }

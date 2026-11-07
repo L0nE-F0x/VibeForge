@@ -85,6 +85,15 @@ export const KNOWN_MODELS: Partial<Record<BrainKind, string[]>> = {
   claude: ["haiku", "sonnet", "opus", "fable"],
 };
 
+/**
+ * What whisper is told to listen for when someone talks to the Orchestrator, on the desktop or the
+ * phone: workspace names are what gets misheard ("Star Ledger", "frontier-halls"), and a few words
+ * every request has.
+ */
+export function orchestratorVoiceWords(workspaces: readonly string[]): string[] {
+  return [...workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]), "branch", "workspace"];
+}
+
 export interface PlanContext {
   workspaces: Array<{ id: string; name: string; folder: string; git: boolean }>;
   engines: Array<{ id: string; label: string; available: boolean }>;

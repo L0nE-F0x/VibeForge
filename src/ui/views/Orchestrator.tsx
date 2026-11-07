@@ -2,7 +2,7 @@ import { Check, CircleAlert, ExternalLink, GitBranch, MessageSquare, Play, Rotat
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, Workspace } from "../../shared/api.js";
-import { canOrchestrate, stepIssue, type PlanContext } from "../../shared/orchestrator.js";
+import { canOrchestrate, orchestratorVoiceWords, stepIssue, type PlanContext } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
 import { usePtyAttention } from "../attention.js";
 import { coreText } from "../core-text.js";
@@ -241,8 +241,7 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
         quiet
         sendLabel={t("common.send")}
         voiceLabel={t("orch.title")}
-        // Workspace names are what gets misheard ("Star Ledger", "frontier-halls"), and a few words every request has.
-        voiceWords={() => [...workspaces.flatMap((item) => [item.name, item.name.replace(/[-_.]+/g, " ")]), "branch", "workspace"]}
+        voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
         draftKey={DRAFT_KEY}
         keepKey="orchestrator"
         onEscape={onEscape}
