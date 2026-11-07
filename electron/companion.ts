@@ -1,12 +1,15 @@
 import { buildDesk, COMPANION_RECENT_MS, isCodingSession, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
-import { startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type SessionPayload } from "../src/core/companion-http.js";
+import { CompanionHttpError, startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type OrchestratorActions, type SessionPayload } from "../src/core/companion-http.js";
+import { buildPhoneOrchestrator, orchestratorDictationWords } from "../src/core/companion-orchestrator.js";
 import { describeError } from "../src/core/log.js";
+import { canOrchestrate } from "../src/core/orchestrator.js";
+import { vocabularyPrompt } from "../src/shared/dictation.js";
 import { readRunText } from "../src/core/run-storage.js";
 import { RUN_FILES } from "../src/core/runs.js";
 import type { TeamService } from "../src/core/team-service.js";
 import type { PlanSummary } from "../src/core/plans.js";
 import type { LiveSession, RunMeta } from "../src/core/types.js";
-import type { CompanionStatus } from "../src/shared/api.js";
+import type { CompanionStatus, Dictation } from "../src/shared/api.js";
 import type { PtySupervisor } from "./supervisor.js";
 
 /** A phone has no pane to measure, so a launched agent gets a modest terminal. */
@@ -21,6 +24,10 @@ export interface CompanionWire {
   log: (line: string) => void;
   /** Plan limits as the desktop's live popover reads them (null when Settings leave them off). */
   plans: () => Promise<PlanSummary | null>;
+  /** Speech recorded on the phone, turned into words by the desktop's own whisper (Settings → Voice). */
+  hear: (pcm: Buffer, prompt: string) => Promise<Dictation>;
+  /** Whether that can work here: whisper.cpp and a model. */
+  canHear: () => boolean;
 }
 
 let server: CompanionHttp | null = null;
@@ -122,6 +129,65 @@ function actionsFor(wire: CompanionWire): CompanionActions {
       return { ptyId: result.ptyId, runId: result.runId };
     },
     plans: () => wire.plans(),
+    orchestrator: orchestratorFor(wire),
+    hear: async (pcm) => {
+      const workspaces = service.listWorkspaces().workspaces.map((item) => item.name);
+      const prompt = vocabularyPrompt(
+        orchestratorDictationWords({
+          agents: service.listAgents().map((agent) => agent.name),
+          routines: service.listRoutines().map((routine) => routine.name),
+          engines: service.listEngines().map((engine) => engine.label),
+          workspaces,
+        }),
+      );
+      const heard = await wire.hear(pcm, prompt);
+      return { text: heard.text, empty: heard.empty };
+    },
+  };
+}
+
+/** How long whether the computer can hear the phone is trusted: the page asks every two seconds. */
+const HEAR_CHECK_MS = 10_000;
+
+/** The desktop's Orchestrator view, as the phone works it: the same desk, the same calls. */
+export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" | "log">): OrchestratorActions {
+  const service = wire.service;
+  let hearing = { at: 0, can: false };
+  return {
+    view: () => {
+      const now = Date.now();
+      if (now - hearing.at > HEAR_CHECK_MS) hearing = { at: now, can: wire.canHear() };
+      return buildPhoneOrchestrator({
+        view: service.orchestratorView(),
+        engines: service.listEngines(),
+        workspaces: service.listWorkspaces().workspaces,
+        live: service.liveForView(),
+        hear: hearing.can,
+      });
+    },
+    ask: (text) => {
+      // The answer takes a while (one turn of the planning CLI). It arrives as a turn the page polls for.
+      if (service.orchestratorView().thinking) throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+      void service.orchestratorAsk(text).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
+    },
+    stopThinking: () => service.orchestratorStopThinking(),
+    clear: () => service.orchestratorClear(),
+    run: (turnId) => service.orchestratorRun(turnId),
+    cancel: (turnId) => service.orchestratorCancel(turnId),
+    editStep: (turnId, stepId, patch) => service.orchestratorEditStep(turnId, stepId, patch),
+    removeStep: (turnId, stepId) => service.orchestratorRemoveStep(turnId, stepId),
+    settings: (patch) => {
+      const current = service.getSettings().orchestrator;
+      let next = current;
+      if (patch.engine && patch.engine !== current.engine) {
+        const row = service.listEngines().find((engine) => engine.id === patch.engine);
+        if (!row || !canOrchestrate(row)) throw new CompanionHttpError("phone.error.invalid", 400);
+        // Another planner starts on its own default model, as in the desktop's view.
+        next = { ...next, engine: row.id, model: "" };
+      }
+      if (patch.mode) next = { ...next, mode: patch.mode };
+      if (next !== current) service.saveSettings({ orchestrator: next });
+    },
   };
 }
 

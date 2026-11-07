@@ -337,16 +337,8 @@ export class Voice {
     this.transcribing = true;
     this.opts.state({ phase: "transcribing", level: 0, seconds, speech: null });
     try {
-      const status = this.status();
-      if (!status.model) throw new Error("The whisper model is gone. Settings → Voice can download one.");
-      const via = status.server ? "whisper-server" : "whisper-cli";
-      const raw = status.server
-        ? await this.viaServer(status.server, status.model, status.language, pcm, prompt)
-        : await this.viaCli(status.cli!, status.model, status.language, pcm, prompt);
-      const text = cleanTranscript(raw);
-      const done = result(text ? null : "nothing", text);
-      this.opts.log.info(`Voice: ${seconds.toFixed(1)} s transcribed in ${(done.tookMs / 1000).toFixed(1)} s by ${via} with ${path.basename(status.model)}`);
-      return done;
+      const text = await this.words(pcm, prompt, seconds, stoppedAt, "");
+      return result(text ? null : "nothing", text);
     } catch (error) {
       this.opts.log.warn(`Voice: transcription failed: ${describeError(error).split("\n")[0]}`);
       throw error;
@@ -354,6 +346,50 @@ export class Voice {
       this.transcribing = false;
       this.opts.state({ phase: "idle", level: 0, seconds: 0, speech: null });
     }
+  }
+
+  /**
+   * Words for speech recorded somewhere else: the phone page's mic, as 16 kHz mono s16le. The same
+   * checks and the same whisper as a recording here; the window's own recording isn't touched.
+   */
+  async transcribe(pcm: Buffer, prompt = ""): Promise<Dictation> {
+    const startedAt = Date.now();
+    const audio = pcm.subarray(0, pcm.length - (pcm.length % 2));
+    const seconds = audio.length / BYTES_PER_SECOND;
+    const result = (empty: Dictation["empty"], text = ""): Dictation => ({ text, seconds, tookMs: Date.now() - startedAt, empty });
+    if (seconds < MIN_SECONDS) return result("short");
+    if (peakLoudness(audio) < SILENCE_RMS) {
+      this.opts.log.info(`Voice: ${seconds.toFixed(1)} s of silence from the phone, not transcribed`);
+      return result("silent");
+    }
+    try {
+      const text = await this.words(audio, prompt, seconds, startedAt, " from the phone");
+      return result(text ? null : "nothing", text);
+    } catch (error) {
+      this.opts.log.warn(`Voice: transcription from the phone failed: ${describeError(error).split("\n")[0]}`);
+      throw error;
+    }
+  }
+
+  /** Whether speech can be turned into words here: whisper.cpp and a model. A recorder isn't needed for that. */
+  canTranscribe(): boolean {
+    const settings = this.opts.settings();
+    const whisper = this.whisper();
+    return Boolean((whisper.server || whisper.cli) && pickModel(this.findModels(), settings.model, settings.language));
+  }
+
+  /** What whisper heard in `pcm`, tidied. */
+  private async words(pcm: Buffer, prompt: string, seconds: number, since: number, from: string): Promise<string> {
+    const status = this.status();
+    if (!status.model) throw new Error("The whisper model is gone. Settings → Voice can download one.");
+    if (!status.server && !status.cli) throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
+    const via = status.server ? "whisper-server" : "whisper-cli";
+    const raw = status.server
+      ? await this.viaServer(status.server, status.model, status.language, pcm, prompt)
+      : await this.viaCli(status.cli as string, status.model, status.language, pcm, prompt);
+    const text = cleanTranscript(raw);
+    this.opts.log.info(`Voice: ${seconds.toFixed(1)} s${from} transcribed in ${((Date.now() - since) / 1000).toFixed(1)} s by ${via} with ${path.basename(status.model)}`);
+    return text;
   }
 
   // ---------------------------------------------------------------- whisper

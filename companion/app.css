@@ -187,10 +187,15 @@ html.keyboard #app { padding-bottom: 12px; }
 
 .top .mark { flex: none; }
 
-/* The website's lockup: the V, then VibeForge. Buzz sits at the end of the bar. */
+/* The website's lockup: the V, then VibeForge. Buzz and Maestro sit at the end of the bar. */
 .top.brand-top { display: flex; }
 
-.brand-top > .ghost { margin-left: auto; flex: none; }
+.brand-top > .wordmark-home { margin-right: auto; }
+
+.brand-top > .ghost { flex: none; min-height: 40px; padding: 8px 12px; }
+
+/* With Buzz showing too, the name gives up some width so both buttons fit on a small phone. */
+.brand-top:has(> .ghost:not([hidden]) + .ghost) .wordmark-home .wordmark { width: min(168px, 34vw); }
 
 .wordmark-home {
   display: flex;
@@ -809,6 +814,333 @@ html.keyboard .credit { display: none; }
 }
 .plan-window span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* ---------------------------------------------------------------- the Orchestrator (Maestro) */
+
+/* The conversation scrolls between the header and the box; the box stays on screen. */
+#app > section.orch { position: relative; overflow: hidden; }
+
+#app > section.orch > .orch-turns {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+
+/* A short conversation sits at the bottom, by the box, as the desktop's does. */
+.orch-turns::before { content: ""; flex: 1 1 auto; }
+
+.orch-composer textarea { min-height: 72px; }
+
+.top-action { flex: none; min-height: 36px; padding: 6px 12px; font-size: 12px; }
+
+.small-btn { min-height: 34px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+
+.glyph { display: block; flex: none; fill: currentColor; }
+
+.orch-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.orch-planner-field { flex: 1 1 150px; min-width: 0; }
+
+.orch-planner-field select { padding-top: 9px; padding-bottom: 9px; }
+
+.segs { display: flex; flex: none; }
+
+.seg {
+  position: relative;
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.seg + .seg { margin-left: -1px; }
+
+.seg.on {
+  z-index: 1;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--fg);
+}
+
+.seg:not(:disabled):active { background: var(--press-fill); }
+.seg:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; z-index: 2; }
+.seg:disabled { opacity: 0.5; cursor: default; }
+
+/* "Running · 3", one line under the header; the list opens over the page. */
+.orch-running-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.chev {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.orch-earlier { margin: 0; text-align: center; }
+
+.orch-start { display: flex; flex-direction: column; gap: 10px; }
+
+.orch-start h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+}
+
+.orch-start p { margin: 0; }
+
+.orch-examples { display: flex; flex-direction: column; gap: 6px; }
+
+.orch-example {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  transition: border-color 0.12s, background-color 0.12s, color 0.12s;
+}
+
+.orch-example:active, .orch-example:focus-visible {
+  outline: none;
+  border-color: var(--hover-line);
+  background: var(--hover-fill);
+  color: var(--fg);
+}
+
+.orch-list { display: flex; flex-direction: column; gap: 12px; }
+
+.orch-turn { display: flex; align-items: flex-start; gap: 10px; }
+
+.orch-turn.from-you { justify-content: flex-end; }
+
+.orch-turn.from-you .orch-said {
+  max-width: 86%;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--card));
+}
+
+.orch-said { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.orch-who {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-deep);
+}
+
+.orch-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding-top: 5px; }
+
+.orch-thinking { align-items: center; }
+
+.orch-problem, .orch-problem-text { color: var(--amber); }
+
+.orch-problem { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); }
+
+.orch-detail {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.orch-plan { border: 1px solid var(--line-2); background: var(--card); }
+
+.orch-plan.state-waiting {
+  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+  box-shadow: 0 0 18px -8px color-mix(in srgb, var(--amber) 55%, transparent);
+}
+
+.orch-plan.state-cancelled, .orch-plan.state-replaced { opacity: 0.6; }
+
+.orch-plan-head, .orch-plan-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+
+.orch-plan-head { border-bottom: 1px solid var(--line); }
+
+.orch-plan-foot { flex-wrap: wrap; border-top: 1px solid var(--line); }
+
+.orch-plan-foot .btn { min-width: 88px; }
+
+.chip {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid currentColor;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.chip.waiting { color: var(--amber); }
+.chip.working { color: var(--accent); }
+.chip.done { color: var(--faint); }
+
+.orch-step { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; }
+
+.orch-step + .orch-step { border-top: 1px solid var(--line); }
+
+.orch-step.has-issue { background: color-mix(in srgb, var(--amber) 6%, transparent); }
+
+.orch-step-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--amber);
+}
+
+.orch-step.step-done .orch-step-icon { color: var(--green); }
+.orch-step.step-failed .orch-step-icon { color: var(--bad); }
+
+.orch-step-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.orch-step-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.orch-step-line select { flex: 1 1 140px; width: auto; min-width: 0; padding: 9px 32px 9px 10px; }
+
+.orch-branch {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-deep);
+  color: var(--faint);
+}
+
+.orch-branch:focus-within { border-color: var(--focus-line); }
+
+.orch-branch input { flex: 1; min-width: 0; padding: 9px 0; border: 0; background: transparent; }
+
+.orch-branch input:focus { background: transparent; }
+
+.orch-branch-text { display: inline-flex; align-items: center; gap: 5px; color: var(--faint); }
+
+.orch-prompt { min-height: 44px; padding: 9px 10px; resize: none; line-height: 1.45; }
+
+.orch-prompt-text { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.orch-issue { color: var(--amber); font-size: 11.5px; }
+
+.orch-error { color: color-mix(in srgb, var(--bad) 75%, var(--fg)); font-size: 11.5px; overflow-wrap: anywhere; }
+
+.orch-step-actions { display: flex; }
+
+.orch-step-x { flex: none; display: grid; place-items: center; width: 36px; min-height: 36px; padding: 0; }
+
+/* The Running panel: each CLI opens its session; Stop or Interrupt beside it, Stop all for the Orchestrator's own. */
+.orch-team { display: flex; flex-direction: column; }
+
+.orch-team-head { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+
+.ghost.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+
+.orch-member { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
+
+.orch-member-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.orch-member-open:active { background-color: var(--press-fill); }
+.orch-member-open:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+
+.orch-member-copy { display: flex; flex-direction: column; gap: 2px; }
+
+.orch-mine { color: var(--accent); font-size: 11.5px; font-weight: 500; }
+
+/* The mic: tap to talk and tap again, or hold. It glows while it listens. */
+.orch-composer .actions { flex-wrap: nowrap; }
+
+.mic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  padding: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.mic.live {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--amber);
+  animation: ember-breathe 2.2s ease-in-out infinite;
+}
+
+.mic-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 34px; }
+
+.mic-note.said { color: var(--faint); }
+
+/* Cancel at the end of the first line; how to stop on a line of its own under it. */
+.mic-note .mic-cancel { margin-left: auto; }
+
+.mic-note .mic-hint { order: 9; flex-basis: 100%; }
+
+.mic-clock { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.meter { display: inline-flex; align-items: flex-end; gap: 2px; }
+
+.meter i { display: block; width: 4px; height: 12px; background: color-mix(in srgb, var(--faint) 30%, transparent); }
+
+.meter i.on { background: var(--accent); }
+.meter i.hot { background: var(--amber); }
+
 @keyframes ember-breathe {
   0%, 100% { box-shadow: var(--ember-lit); }
   50% { box-shadow: var(--ember-low); }
@@ -828,5 +1160,5 @@ html.keyboard .credit { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .px, .session.waiting::before, .install, .sheet { animation: none; }
+  .px, .session.waiting::before, .install, .sheet, .mic.live { animation: none; }
 }

@@ -918,6 +918,8 @@ function companionWire() {
     icon: iconPath(),
     log: (line: string) => log.info(line),
     plans: () => planSummary(false),
+    hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
+    canHear: () => voice.canTranscribe(),
   };
 }
 

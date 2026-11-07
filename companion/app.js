@@ -17,6 +17,8 @@ if (localStorage.getItem(TEXT_KEY) === "1") document.documentElement.classList.a
 let desk = null;
 let session = null;
 let sessionQuery = { ptyId: "", runId: "" };
+/** Where a session's Back goes: the desk, or the Orchestrator it was opened from. */
+let sessionBack = "desk";
 let launchWorkspace = "";
 let error = "";
 let busy = false;
@@ -199,11 +201,13 @@ async function refresh() {
       plans = (await call("/api/plans").catch(() => ({ plans }))).plans ?? null;
     }
     const next = view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`) : null;
+    const nextOrch = view === "maestro" ? await call("/api/orchestrator") : null;
     // A newer poll, or a change of page, has already replaced what this one would show.
     if (mine !== ticket) return;
     watch(payload);
     desk = payload;
     if (view === "session") session = next;
+    if (view === "maestro") orch = nextOrch;
     error = "";
   } catch (err) {
     if (mine !== ticket) return;
@@ -243,6 +247,8 @@ async function withBusy(task) {
 /** Builds the page for the current view from scratch. Only a change of view does this. */
 function show() {
   ticket += 1;
+  // The mic belongs to the Orchestrator's box: leaving the page puts it down.
+  if (view !== "maestro") micCancel();
   // The install offer only shows on the code and the landing page (app.css), never over a text box.
   document.body.dataset.view = token ? view : "pair";
   parts = { banner: el("div", { class: "banner", hidden: true }) };
@@ -257,6 +263,7 @@ function update() {
   if (view === "desk") updateDesk();
   else if (view === "launch") updateLaunch();
   else if (view === "session") updateSession();
+  else if (view === "maestro") updateMaestro();
   else if (view === "pair" && parts.pair) parts.pair.disabled = busy;
 }
 
@@ -271,6 +278,7 @@ function page() {
   if (view === "home") return homePage();
   if (view === "launch") return launchPage();
   if (view === "session") return sessionPage();
+  if (view === "maestro") return maestroPage();
   return deskPage();
 }
 
@@ -393,9 +401,15 @@ async function onBuzz(want, button) {
 /** A panel over the landing. Closing it shows the three buttons again; the page is not rebuilt. */
 function sheet(title, ...nodes) {
   let opener = null;
+  /** What the panel covers: the page under it, while it is open. */
+  const under = (inert) => {
+    for (const child of panel.parentElement?.children || []) {
+      if (child !== panel && !child.classList.contains("sheet")) child.toggleAttribute("inert", inert);
+    }
+  };
   const close = () => {
     panel.hidden = true;
-    panel.parentElement?.querySelector(".home-hero")?.removeAttribute("inert");
+    under(false);
     if (opener instanceof HTMLElement) opener.focus();
     opener = null;
   };
@@ -416,7 +430,7 @@ function sheet(title, ...nodes) {
     for (const other of home?.querySelectorAll(":scope > .sheet") || []) {
       if (other !== panel) other.hidden = true;
     }
-    home?.querySelector(".home-hero")?.setAttribute("inert", "");
+    under(true);
     panel.hidden = false;
     panel.querySelector(".sheet-close")?.focus();
   };
@@ -430,6 +444,7 @@ function homePage() {
     t("phone.homeHowTitle"),
     el("p", { class: "muted lede" }, t("phone.homeLead")),
     el("p", { class: "how" }, t("phone.homeHow")),
+    el("p", { class: "how" }, t("phone.homeHowMaestro")),
     el("p", { class: "small muted reach" }, t("phone.homeReach")),
     el("p", { class: "small faint home-return" }, t("phone.homeReturn")),
   );
@@ -497,10 +512,11 @@ function deskPage() {
   parts.plansKey = null;
   parts.list = el("div", {});
   parts.listKey = null;
+  const maestro = el("button", { class: "ghost maestro-open", type: "button", onclick: () => setView("maestro") }, t("rail.orchestrator"));
   return el(
     "section",
     {},
-    el("div", { class: "top brand-top" }, deskWordmark(), parts.buzz),
+    el("div", { class: "top brand-top" }, deskWordmark(), parts.buzz, maestro),
     parts.plans,
     parts.list,
   );
@@ -744,7 +760,8 @@ function plansCard(summary) {
 function openSession(query) {
   sessionQuery = query;
   session = null;
-  setView(query.ptyId || query.runId ? "session" : "desk");
+  sessionBack = view === "maestro" ? "maestro" : "desk";
+  setView(query.ptyId || query.runId ? "session" : sessionBack);
 }
 
 function openLaunch(workspaceId) {
@@ -822,7 +839,7 @@ function sessionPage() {
   return el(
     "section",
     { class: "fit" },
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView("desk"); } }, t("phone.back")), parts.title, parts.px, parts.pill),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => { session = null; setView(sessionBack); } }, t("phone.back")), parts.title, parts.px, parts.pill),
     parts.meta,
     parts.screen,
     el("div", { class: "card stack composer" }, parts.prompt, el("div", { class: "actions" }, parts.send, parts.stop)),
@@ -887,6 +904,796 @@ async function stopSession() {
   if (!window.confirm(ask)) return;
   const ptyId = session.ptyId;
   await withBusy(() => post("/api/stop", { ptyId }));
+}
+
+// ---------------------------------------------------------------- the Orchestrator (Maestro)
+
+// The desktop's Orchestrator view on the phone (src/ui/views/Orchestrator.tsx): the same
+// conversation, plan cards and Running list, read from and sent to the computer. The planning CLI
+// runs there; the page only shows what it said and passes on what the person says and taps.
+
+/** The Orchestrator as the page last read it (GET /api/orchestrator). */
+let orch = null;
+/** What is typed or dictated for the Orchestrator, kept while the page shows something else. */
+let orchDraft = "";
+/** A step's changes on their way to the computer, by step id, so a poll in between doesn't put the old words back. */
+const pendingSteps = new Map();
+/** Step changes go one after another, and Go waits for them. */
+let stepQueue = Promise.resolve();
+
+const ORCH_EXAMPLES = ["orch.example.start", "orch.example.two", "orch.example.ask"];
+const ISSUE_KEYS = { workspace: "orch.issue.workspace", engine: "orch.issue.engine", engineMissing: "orch.issue.engineMissing", target: "orch.issue.target", prompt: "orch.issue.prompt" };
+const PLAN_TONE = { waiting: "waiting", running: "working", done: "done", cancelled: "done", replaced: "done" };
+
+/** Pixel glyphs in one colour (the text's): a step's kind and state, a branch, leaving a step out, the mic. */
+const GLYPHS_SMALL = {
+  start: ["#......", "###....", "#####..", "#######", "#####..", "###....", "#......"],
+  tell: [".......", "#..#...", ".#..#..", "..#..#.", ".#..#..", "#..#...", "......."],
+  stop: [".......", ".#####.", ".#####.", ".#####.", ".#####.", ".#####.", "......."],
+  done: [".......", "......#", ".....#.", "#...#..", ".#.#...", "..#....", "......."],
+  failed: ["...#...", "...#...", "...#...", "...#...", "...#...", ".......", "...#..."],
+  remove: ["#.....#", ".#...#.", "..#.#..", "...#...", "..#.#..", ".#...#.", "#.....#"],
+  branch: [".#...#.", ".#...#.", ".#..#..", ".#.#...", ".##....", ".#.....", ".#....."],
+  mic: ["..###..", ".#####.", ".#####.", ".#####.", ".#####.", "#.###.#", "#.....#", ".#...#.", "..###..", "...#...", ".#####."],
+};
+
+function glyph(name, scale = 2) {
+  return pixels(GLYPHS_SMALL[name], `glyph glyph-${name}`, scale);
+}
+
+/** A sentence with a number in it, in the plural form the phone's language uses (translateCount on the desktop). */
+function tCount(base, count, vars) {
+  const form = `${base}.${new Intl.PluralRules(language).select(count)}`;
+  return t(form in words ? form : `${base}.other`, { count, ...vars });
+}
+
+function engineLabel(id) {
+  return orch?.engines.find((engine) => engine.id === id)?.label || id || "";
+}
+
+/** The node someone is typing in. A poll leaves it alone; a picked option is already sent, so a list doesn't count. */
+function editingIn(node) {
+  const active = document.activeElement;
+  return Boolean(active && node.contains(active) && active.matches("input, textarea"));
+}
+
+function maestroPage() {
+  parts.orchTurns = new Map();
+  parts.orchTurnsKey = null;
+  parts.planner = el("select", { class: "orch-planner", "aria-label": t("orch.planner"), onchange: () => void saveOrch({ engine: parts.planner.value }) });
+  parts.plannerKey = null;
+  parts.modes = ["plan", "go"].map((mode) => el("button", { class: "seg", type: "button", "data-mode": mode, "aria-pressed": "false", onclick: () => void saveOrch({ mode }) }, t(`orch.mode.${mode}`)));
+  parts.newTalk = el("button", { class: "ghost top-action", type: "button", title: t("orch.newTip"), onclick: () => void newTalk() }, t("orch.new"));
+  parts.runningOpen = el("button", { class: "ghost orch-running-open", type: "button", hidden: true, onclick: () => parts.runningSheet.open() });
+  parts.runningList = el("div", { class: "orch-team" });
+  parts.runningKey = null;
+  parts.runningSheet = sheet(t("orch.team"), parts.runningList);
+  parts.orchLoading = el("p", { class: "small faint" }, t("phone.loading"));
+  parts.earlier = el("p", { class: "small faint orch-earlier", hidden: true });
+  parts.startBody = el("p", { class: "muted" });
+  parts.startHere = el(
+    "div",
+    { class: "orch-start", hidden: true },
+    el("h2", {}, t("orch.empty.title")),
+    parts.startBody,
+    el(
+      "div",
+      { class: "orch-examples" },
+      ORCH_EXAMPLES.map((key) =>
+        el(
+          "button",
+          {
+            class: "orch-example",
+            type: "button",
+            onclick: () => {
+              orchDraft = t(key);
+              parts.box.value = orchDraft;
+            },
+          },
+          t(key),
+        ),
+      ),
+    ),
+  );
+  parts.notReady = el("div", { class: "orch-problem", hidden: true });
+  parts.turnList = el("div", { class: "orch-list" });
+  parts.thinkingText = el("span", { class: "grow muted" });
+  parts.thinkingStop = el("button", { class: "ghost small-btn", type: "button", onclick: () => void stopThinking() }, t("orch.stop"));
+  parts.thinking = el("div", { class: "orch-turn from-vibeforge orch-thinking", hidden: true }, whoMark(), el("span", { class: "px working", "aria-hidden": "true" }), parts.thinkingText, parts.thinkingStop);
+  parts.turns = el("div", { class: "orch-turns" }, parts.orchLoading, parts.earlier, parts.startHere, parts.notReady, parts.turnList, parts.thinking);
+  parts.stickTurns = true;
+  // Follow the conversation as it grows, unless the person scrolled up to read.
+  parts.turns.addEventListener("scroll", () => {
+    const node = parts.turns;
+    parts.stickTurns = node.scrollHeight - node.scrollTop - node.clientHeight < 32;
+  });
+  parts.box = el("textarea", { id: "orch-say", placeholder: t("phone.orchPlaceholder"), "aria-label": t("orch.title") });
+  parts.box.value = orchDraft;
+  parts.box.addEventListener("input", () => {
+    orchDraft = parts.box.value;
+  });
+  parts.micMeter = el("span", { class: "meter", "aria-hidden": "true" }, Array.from({ length: METER_CELLS }, () => el("i")));
+  parts.micBusy = el("span", { class: "px working", "aria-hidden": "true" });
+  parts.micWord = el("strong", {});
+  parts.micClock = el("span", { class: "mic-clock" });
+  parts.micHint = el("span", { class: "small faint mic-hint" });
+  parts.micCancel = el("button", { class: "ghost small-btn mic-cancel", type: "button", onclick: () => micCancel() }, t("common.cancel"));
+  parts.micNote = el("div", { class: "mic-note", hidden: true, role: "status", "aria-live": "polite" }, parts.micMeter, parts.micBusy, parts.micWord, parts.micClock, parts.micHint, parts.micCancel);
+  parts.mic = micButton();
+  parts.say = el("button", { class: "btn", type: "button", onclick: () => void askOrch() }, t("phone.send"));
+  return el(
+    "section",
+    { class: "fit orch" },
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.back")), el("h1", { class: "grow" }, t("orch.title")), parts.newTalk),
+    el(
+      "div",
+      { class: "orch-head" },
+      el("label", { class: "orch-planner-field" }, t("orch.planner"), parts.planner),
+      el("div", { class: "segs", role: "group", "aria-label": t("orch.modeLabel") }, parts.modes),
+    ),
+    parts.runningOpen,
+    parts.turns,
+    el("div", { class: "card stack composer orch-composer" }, parts.micNote, parts.box, el("div", { class: "actions" }, parts.mic, parts.say)),
+    parts.runningSheet,
+  );
+}
+
+function whoMark() {
+  return el("span", { class: "orch-who", "aria-hidden": "true" }, brandMark());
+}
+
+function updateMaestro() {
+  if (!parts.turns) return;
+  paintPlanner();
+  for (const button of parts.modes) {
+    const on = orch?.mode === button.dataset.mode;
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-pressed", String(on));
+    button.disabled = busy || !orch;
+  }
+  parts.newTalk.disabled = busy || !orch?.turns.length;
+  paintRunning();
+  parts.orchLoading.hidden = Boolean(orch);
+  parts.say.disabled = busy || !orch || orch.thinking;
+  paintMic();
+  if (!orch) return;
+  const label = engineLabel(orch.engineId);
+  parts.earlier.hidden = !orch.earlier;
+  if (orch.earlier) parts.earlier.textContent = tCount("phone.orchEarlier", orch.earlier);
+  parts.startHere.hidden = orch.turns.length > 0 || orch.thinking;
+  parts.startBody.textContent = t("orch.empty.body", { engine: label });
+  parts.notReady.hidden = orch.engineReady;
+  parts.notReady.textContent = t("phone.orchNotReady", { engine: label });
+  const changed = paintTurns();
+  parts.thinking.hidden = !orch.thinking;
+  parts.thinkingText.textContent = t("orch.thinking", { engine: label });
+  parts.thinkingStop.disabled = busy;
+  for (const button of parts.turnList.querySelectorAll("button[data-act]")) button.disabled = busy || button.dataset.off === "1";
+  const key = JSON.stringify([changed, orch.turns.length, orch.thinking, orch.engineReady]);
+  if (key !== parts.orchTurnsKey) {
+    parts.orchTurnsKey = key;
+    if (parts.stickTurns && !editingIn(parts.turns)) parts.turns.scrollTop = parts.turns.scrollHeight;
+  }
+}
+
+/** The planner list, rebuilt only when it changes and never while it is open. */
+function paintPlanner() {
+  const select = parts.planner;
+  select.disabled = busy || !orch;
+  if (!orch || document.activeElement === select) return;
+  const key = JSON.stringify([orch.planners, orch.engineId]);
+  if (key === parts.plannerKey) return;
+  parts.plannerKey = key;
+  const options = orch.planners.map((engine) => el("option", { value: engine.id }, `${engine.label}${engine.available ? "" : ` ${t("common.notOnPath")}`}`));
+  if (!orch.planners.some((engine) => engine.id === orch.engineId)) options.unshift(el("option", { value: orch.engineId }, orch.engineId));
+  select.replaceChildren(...options);
+  select.value = orch.engineId;
+}
+
+/**
+ * The conversation, one node per turn, rebuilt only when that turn changed. A plan card someone
+ * is typing in waits until they leave it. Returns whether anything moved.
+ */
+function paintTurns() {
+  // A plan card names CLIs, workspaces and running terminals, so it is redrawn when those change.
+  const context = JSON.stringify([orch.engines, orch.workspaces, orch.running.map((item) => [item.ptyId, item.label]), [...pendingSteps]]);
+  const seen = new Set();
+  let previous = null;
+  let changed = false;
+  for (const turn of orch.turns) {
+    seen.add(turn.id);
+    const key = JSON.stringify(turn) + context;
+    let entry = parts.orchTurns.get(turn.id);
+    let fresh = false;
+    // A card is left alone while someone types in it, unless its plan has gone ahead (or been dropped) meanwhile.
+    if (!entry || (entry.key !== key && !(turn.plan === "waiting" && editingIn(entry.node)))) {
+      const node = turnNode(turn);
+      if (entry) entry.node.replaceWith(node);
+      entry = { key, node };
+      parts.orchTurns.set(turn.id, entry);
+      fresh = true;
+    }
+    const want = previous ? previous.nextSibling : parts.turnList.firstChild;
+    if (entry.node !== want) {
+      parts.turnList.insertBefore(entry.node, want);
+      fresh = true;
+    }
+    // A box can only be measured once it is on the page.
+    if (fresh) sizePrompts(entry.node);
+    changed ||= fresh;
+    previous = entry.node;
+  }
+  for (const [id, entry] of parts.orchTurns) {
+    if (seen.has(id)) continue;
+    entry.node.remove();
+    parts.orchTurns.delete(id);
+    changed = true;
+  }
+  return changed;
+}
+
+function turnNode(turn) {
+  if (turn.from === "you") return el("div", { class: "orch-turn from-you" }, el("span", { class: "orch-said" }, turn.text));
+  const label = engineLabel(turn.by || orch.engineId);
+  const said = turn.problem
+    ? el("div", { class: "orch-problem-text" }, el("span", {}, t(`orch.problem.${turn.problem}`, { engine: label })), turn.detail ? el("span", { class: "orch-detail" }, turn.detail) : null)
+    : turn.text
+      ? el("span", { class: "orch-said" }, turn.text)
+      : null;
+  return el("div", { class: "orch-turn from-vibeforge" }, whoMark(), el("div", { class: "orch-body" }, said, turn.steps ? planCard(turn) : null));
+}
+
+function planCard(turn) {
+  const steps = turn.steps || [];
+  const state = turn.plan || "done";
+  const waiting = state === "waiting";
+  const blocked = waiting ? steps.filter((step) => step.issue).length : 0;
+  const card = el(
+    "div",
+    { class: `orch-plan state-${state}` },
+    el("div", { class: "orch-plan-head" }, el("span", { class: `chip ${PLAN_TONE[state] || "done"}` }, t(`orch.plan.${state}`)), el("span", { class: "small faint" }, tCount("orch.steps", steps.length))),
+    steps.map((step) => stepNode(turn, step, waiting)),
+  );
+  if (waiting) {
+    const note = blocked > 0 && blocked < steps.length ? tCount("orch.skipNote", blocked) : blocked === steps.length ? t("orch.fixFirst") : "";
+    card.append(
+      el(
+        "div",
+        { class: "orch-plan-foot" },
+        el("span", { class: "small faint grow" }, note),
+        el("button", { class: "ghost", type: "button", "data-act": "cancel", disabled: busy, onclick: () => void cancelPlan(turn, card) }, t("common.cancel")),
+        el("button", { class: "btn", type: "button", "data-act": "go", "data-off": blocked === steps.length ? "1" : "0", disabled: busy || blocked === steps.length, onclick: () => void goPlan(turn, card) }, t("orch.go")),
+      ),
+    );
+  }
+  return card;
+}
+
+function stepNode(turn, step, editable) {
+  const pending = pendingSteps.get(step.id) || {};
+  const value = (key) => (key in pending ? pending[key] : step[key]);
+  const icon =
+    step.state === "running"
+      ? el("span", { class: "px working", "aria-hidden": "true" })
+      : glyph(step.state === "done" ? "done" : step.state === "failed" ? "failed" : step.kind);
+  const main = el("div", { class: "orch-step-main" });
+  if (step.kind === "start") {
+    if (editable) {
+      main.append(el("div", { class: "orch-step-line" }, enginePick(turn, step, value("engineId")), workspacePick(turn, step, value("workspaceId"))), branchField(turn, step, value("branch")));
+    } else {
+      const workspace = orch.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
+      main.append(
+        el(
+          "div",
+          { class: "orch-step-line" },
+          el("strong", {}, engineLabel(step.engineId)),
+          el("span", { class: "faint" }, "·"),
+          el("span", {}, workspace),
+          step.branch ? el("span", { class: "orch-branch-text" }, glyph("branch"), step.branch) : null,
+        ),
+      );
+    }
+  } else {
+    const target = orch.running.find((item) => item.ptyId === step.target);
+    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, step.kind === "tell" ? t("orch.tell") : t("orch.close")), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
+  }
+  if (step.kind !== "stop") main.append(editable ? promptField(turn, step, value("prompt")) : el("span", { class: "orch-prompt-text" }, step.prompt));
+  if (step.issue) main.append(el("span", { class: "orch-issue" }, t(ISSUE_KEYS[step.issue] || "orch.fixFirst", { asked: step.asked || "?" })));
+  if (step.state === "failed" && step.error) main.append(el("span", { class: "orch-error" }, step.error));
+  if (step.state === "skipped") main.append(el("span", { class: "small faint" }, t("orch.skipped")));
+  if (step.state === "done" && step.kind === "start" && step.ptyId) {
+    main.append(
+      el(
+        "div",
+        { class: "orch-step-actions" },
+        el(
+          "button",
+          { class: "ghost small-btn", type: "button", "data-act": "open", "data-off": step.live ? "0" : "1", disabled: busy || !step.live, onclick: () => openSession({ ptyId: step.ptyId, runId: step.runId || "" }) },
+          t("phone.orchOpen"),
+        ),
+      ),
+    );
+  }
+  const remove = editable
+    ? el("button", { class: "ghost orch-step-x", type: "button", "data-act": "remove", "aria-label": t("orch.removeStep"), title: t("orch.removeStep"), disabled: busy, onclick: () => void removeStep(turn, step) }, glyph("remove"))
+    : null;
+  return el("div", { class: `orch-step step-${step.state}${step.issue ? " has-issue" : ""}`, "data-step": step.id }, el("span", { class: "orch-step-icon" }, icon), main, remove);
+}
+
+/** Every CLI, the ones not on the computer's PATH greyed out (EnginePick on the desktop). */
+function enginePick(turn, step, value) {
+  const engines = orch.engines;
+  const select = el(
+    "select",
+    { "aria-label": t("orch.engine"), "data-field": "engineId" },
+    engines.some((engine) => engine.id === value) ? null : el("option", { value: "" }, t("orch.pickEngine")),
+    engines.map((engine) => el("option", { value: engine.id, disabled: !engine.available && engine.id !== value }, `${engine.label}${engine.available ? "" : ` ${t("common.notOnPath")}`}`)),
+  );
+  select.value = value;
+  select.addEventListener("change", () => editStep(turn, step, { engineId: select.value }));
+  return select;
+}
+
+function workspacePick(turn, step, value) {
+  const workspaces = orch.workspaces;
+  const select = el(
+    "select",
+    { "aria-label": t("orch.workspace"), "data-field": "workspaceId" },
+    workspaces.some((item) => item.id === value) ? null : el("option", { value: "" }, t("orch.pickWorkspace")),
+    workspaces.map((item) => el("option", { value: item.id }, item.name)),
+  );
+  select.value = value;
+  select.addEventListener("change", () => editStep(turn, step, { workspaceId: select.value }));
+  return select;
+}
+
+/** The new branch, in its own copy of the workspace. Empty: no copy (a folder that isn't a git repository). */
+function branchField(turn, step, value) {
+  const input = el("input", { class: "orch-branch-input", "data-field": "branch", autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: t("orch.noBranch"), "aria-label": t("orch.branch") });
+  input.value = value;
+  input.addEventListener("blur", () => {
+    const next = input.value.trim();
+    if (next !== currentStep(step, "branch")) editStep(turn, step, { branch: next });
+  });
+  return el("label", { class: "orch-branch", title: t("orch.branchTip") }, glyph("branch"), input);
+}
+
+/** What it is asked to do, as tall as its words (up to a point), so the whole instruction reads before Go. */
+function promptField(turn, step, value) {
+  const box = el("textarea", { class: "orch-prompt", "data-field": "prompt", "aria-label": t("orch.prompt") });
+  box.value = value;
+  box.addEventListener("input", () => sizePrompt(box));
+  box.addEventListener("blur", () => {
+    if (box.value !== currentStep(step, "prompt")) editStep(turn, step, { prompt: box.value });
+  });
+  return box;
+}
+
+function sizePrompt(box) {
+  box.style.height = "0px";
+  box.style.height = `${Math.min(240, Math.max(44, box.scrollHeight + 2))}px`;
+}
+
+function sizePrompts(node) {
+  for (const box of node.querySelectorAll("textarea.orch-prompt")) sizePrompt(box);
+}
+
+/** A step's field as the computer will have it once the changes on their way have landed. */
+function currentStep(step, key) {
+  const pending = pendingSteps.get(step.id);
+  return pending && key in pending ? pending[key] : step[key];
+}
+
+/** A change made on the card before Go, sent at once. A poll before it lands shows it too. */
+function editStep(turn, step, patch) {
+  const pending = { ...(pendingSteps.get(step.id) || {}), ...patch };
+  pendingSteps.set(step.id, pending);
+  const sent = stepQueue.then(() => post("/api/orchestrator/step", { turnId: turn.id, stepId: step.id, patch }));
+  stepQueue = sent.then(
+    () => undefined,
+    () => undefined,
+  );
+  sent
+    .catch((err) => {
+      error = err.message;
+    })
+    .finally(() => {
+      if (pendingSteps.get(step.id) === pending) pendingSteps.delete(step.id);
+      void refresh();
+    });
+  return sent;
+}
+
+/** Whatever is typed on the card and not sent yet: iOS doesn't always take the focus off a box when Go is tapped. */
+function flushStepEdits(turn, card) {
+  for (const step of turn.steps || []) {
+    const row = [...card.querySelectorAll("[data-step]")].find((node) => node.dataset.step === step.id);
+    if (!row) continue;
+    const patch = {};
+    for (const field of row.querySelectorAll("[data-field]")) {
+      const key = field.dataset.field;
+      const next = key === "branch" ? field.value.trim() : field.value;
+      if (next !== currentStep(step, key)) patch[key] = next;
+    }
+    if (Object.keys(patch).length) editStep(turn, step, patch);
+  }
+}
+
+/** Done with the card: what was typed on it is sent, and the box lets go so the card can show what happens next. */
+function leaveCard(turn, card) {
+  flushStepEdits(turn, card);
+  if (card.contains(document.activeElement)) document.activeElement.blur();
+}
+
+async function goPlan(turn, card) {
+  leaveCard(turn, card);
+  parts.stickTurns = true;
+  await withBusy(async () => {
+    await stepQueue;
+    await post("/api/orchestrator/go", { turnId: turn.id });
+    return true;
+  });
+}
+
+function cancelPlan(turn, card) {
+  if (card.contains(document.activeElement)) document.activeElement.blur();
+  return withBusy(() => post("/api/orchestrator/cancel", { turnId: turn.id }));
+}
+
+function removeStep(turn, step) {
+  if (document.activeElement?.closest?.(".orch-plan")) document.activeElement.blur();
+  return withBusy(() => post("/api/orchestrator/remove", { turnId: turn.id, stepId: step.id }));
+}
+
+async function askOrch() {
+  const said = parts.box.value.trim();
+  if (!said || !orch || orch.thinking) return;
+  parts.stickTurns = true;
+  const sent = await withBusy(async () => {
+    await post("/api/orchestrator/ask", { text: said });
+    return true;
+  });
+  if (!sent) return;
+  orchDraft = "";
+  if (parts.box) parts.box.value = "";
+}
+
+function stopThinking() {
+  return withBusy(() => post("/api/orchestrator/stop", {}));
+}
+
+function newTalk() {
+  return withBusy(() => post("/api/orchestrator/new", {}));
+}
+
+function saveOrch(patch) {
+  return withBusy(() => post("/api/orchestrator/settings", patch));
+}
+
+/** "Running · 3": every coding CLI on the computer, the Orchestrator's first. The list opens over the page. */
+function paintRunning() {
+  const running = orch?.running ?? [];
+  const own = running.filter((item) => item.orchestrated);
+  parts.runningOpen.hidden = running.length === 0;
+  const key = JSON.stringify([running, busy]);
+  if (key === parts.runningKey) return;
+  parts.runningKey = key;
+  const lit = running.some((item) => item.state === "working") ? "working" : "waiting";
+  parts.runningOpen.replaceChildren(
+    ...[
+      el("span", { class: `px ${lit}`, "aria-hidden": "true" }),
+      el("span", { class: "grow" }, `${t("orch.team")} · ${running.length}`),
+      own.length ? el("span", { class: "small faint" }, `${t("orch.mine")} · ${own.length}`) : null,
+      el("span", { class: "chev", "aria-hidden": "true" }),
+    ].filter(Boolean),
+  );
+  const rows = running.map((item) =>
+    el(
+      "div",
+      { class: `orch-member ${item.state}` },
+      el(
+        "button",
+        { class: "orch-member-open", type: "button", onclick: () => openSession({ ptyId: item.ptyId, runId: item.runId || "" }) },
+        el("span", { class: `px ${item.state}`, "aria-hidden": "true" }),
+        el(
+          "span",
+          { class: "grow orch-member-copy" },
+          el("span", { class: "title" }, item.name, item.orchestrated ? el("span", { class: "orch-mine" }, ` · ${t("orch.mine")}`) : null),
+          el("span", { class: "small muted" }, item.workspace),
+        ),
+        el("span", { class: `pill ${item.state}` }, stateLabel(item.state)),
+      ),
+      el("button", { class: "ghost small-btn", type: "button", disabled: busy, onclick: () => void stopOne(item) }, item.stop === "interrupt" ? t("phone.interrupt") : t("orch.stopOne")),
+    ),
+  );
+  parts.runningList.replaceChildren(
+    ...[
+      own.length ? el("div", { class: "orch-team-head" }, el("button", { class: "ghost danger", type: "button", disabled: busy, onclick: () => void stopAll(own) }, t("orch.stopAll"))) : null,
+      running.length ? null : el("p", { class: "small faint" }, t("orch.teamEmpty")),
+      ...rows,
+    ].filter(Boolean),
+  );
+}
+
+/** Stop as the phone stops: a run's terminal closes; a CLI typed into a shell is interrupted and the shell stays. */
+async function stopOne(item) {
+  if (!window.confirm(item.stop === "interrupt" ? t("phone.askInterrupt") : t("phone.askStop"))) return;
+  await withBusy(() => post("/api/stop", { ptyId: item.ptyId }));
+}
+
+/** Stop all: only the CLIs the Orchestrator started, as on the desktop, which asks first too. */
+async function stopAll(own) {
+  if (!window.confirm(`${tCount("orch.stopAllTitle", own.length)}\n\n${t("orch.stopAllBody")}`)) return;
+  await withBusy(() => Promise.all(own.map((item) => post("/api/stop", { ptyId: item.ptyId }))));
+}
+
+// ---------------------------------------------------------------- talking to it
+
+// The mic records on the phone and the computer's own whisper hears it (Settings → Voice there),
+// told the same names as the desktop's box. The words land in the box and wait for Send. Tap to
+// start and tap again to stop, or hold and let go: src/ui/mic.ts on the desktop.
+
+/** A press shorter than this is a tap: it keeps listening until the next tap (MIC_TAP_MS on the desktop). */
+const MIC_TAP_MS = 350;
+/** A recording stops by itself after this long, as on the computer. */
+const MIC_MAX_SECONDS = 180;
+/** What whisper takes: 16 kHz mono. */
+const HEAR_RATE = 16000;
+const METER_CELLS = 10;
+const EMPTY_HEARD = { short: "phone.micShort", silent: "voice.empty.silent", nothing: "voice.empty.nothing" };
+
+/** The recording, while there is one: starting (the phone asks for the mic), recording, or being heard. */
+let mic = null;
+/** A short note after a recording that gave no words. */
+let micSaid = { text: "", until: 0 };
+
+function micSupported() {
+  return Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
+}
+
+function micButton() {
+  const button = el("button", { class: "ghost mic", type: "button", hidden: true, "aria-label": t("phone.mic"), title: t("phone.mic") }, glyph("mic"));
+  let press = null;
+  button.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || button.disabled) return;
+    event.preventDefault();
+    try {
+      button.setPointerCapture(event.pointerId);
+    } catch {
+      /* not every pointer can be captured */
+    }
+    // A press while it listens is the tap that stops it, on release.
+    press = { at: Date.now(), started: !mic };
+    if (!mic) micBegin();
+  });
+  button.addEventListener("pointerup", (event) => {
+    const held = press;
+    press = null;
+    if (held && event.button === 0) micRelease(held, false);
+  });
+  button.addEventListener("pointercancel", () => {
+    const held = press;
+    press = null;
+    if (held) micRelease(held, true);
+  });
+  // Enter or Space on the focused button: a tap, with no hold to measure.
+  button.addEventListener("click", (event) => {
+    if (event.detail !== 0) return;
+    if (mic) void micFinish();
+    else {
+      micBegin();
+      if (mic) mic.latched = true;
+    }
+  });
+  button.addEventListener("contextmenu", (event) => event.preventDefault());
+  return button;
+}
+
+/** Letting go: a tap (or a press the phone's own question about the mic interrupted) keeps listening; a hold, or the tap that ends it, finishes. */
+function micRelease(held, cancelled) {
+  const current = mic;
+  if (!current || current.phase === "hearing") return;
+  if (held.started && (current.phase === "starting" || (!cancelled && Date.now() - held.at < MIC_TAP_MS))) {
+    current.latched = true;
+    paintMic();
+    return;
+  }
+  void micFinish();
+}
+
+function micSeconds(current) {
+  return current.ctx ? current.length / current.ctx.sampleRate : 0;
+}
+
+/** How full the meter is: the loudness of the last stretch on -60…0 dBFS (meterLevel on the computer). */
+function loudness(samples) {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
+  const value = Math.sqrt(sum / Math.max(1, samples.length));
+  if (value <= 0) return 0;
+  return Math.max(0, Math.min(1, (20 * Math.log10(value) + 60) / 60));
+}
+
+function micBegin() {
+  if (mic) return;
+  const mine = { phase: "starting", latched: false, finish: false, chunks: [], length: 0, level: 0, ctx: null, stream: null, source: null, node: null, timer: 0 };
+  micSaid = { text: "", until: 0 };
+  try {
+    // Made inside the tap itself, or iOS keeps it silent.
+    mine.ctx = new AudioContext();
+    void mine.ctx.resume().catch(() => undefined);
+  } catch {
+    showMicNote(t("phone.micFailed"));
+    return;
+  }
+  mic = mine;
+  paintMic();
+  void (async () => {
+    try {
+      mine.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      await mine.ctx.audioWorklet.addModule("/mic-worklet.js");
+      if (mic !== mine) {
+        closeMic(mine);
+        return;
+      }
+      mine.source = mine.ctx.createMediaStreamSource(mine.stream);
+      mine.node = new AudioWorkletNode(mine.ctx, "vibeforge-mic");
+      mine.node.port.onmessage = (event) => {
+        mine.chunks.push(event.data);
+        mine.length += event.data.length;
+        mine.level = loudness(event.data);
+      };
+      mine.source.connect(mine.node);
+      // Connected through to the speakers so it keeps running; it writes nothing, so nothing plays.
+      mine.node.connect(mine.ctx.destination);
+      if (mine.ctx.state === "suspended") await mine.ctx.resume();
+      mine.phase = "recording";
+      mine.timer = window.setInterval(() => {
+        if (mic !== mine) return;
+        if (micSeconds(mine) >= MIC_MAX_SECONDS) void micFinish();
+        else paintMic();
+      }, 200);
+      paintMic();
+      if (mine.finish) void micFinish();
+    } catch (err) {
+      closeMic(mine);
+      if (mic !== mine) return;
+      mic = null;
+      showMicNote(err && err.name === "NotAllowedError" ? t("phone.micBlocked") : t("phone.micFailed"));
+    }
+  })();
+}
+
+/** Lets go of the microphone and the audio it went through. */
+function closeMic(current) {
+  window.clearInterval(current.timer);
+  try {
+    current.source?.disconnect();
+    current.node?.disconnect();
+    if (current.node) current.node.port.onmessage = null;
+  } catch {
+    /* already disconnected */
+  }
+  for (const track of current.stream?.getTracks() || []) track.stop();
+  void current.ctx?.close().catch(() => undefined);
+}
+
+function micCancel() {
+  const current = mic;
+  if (!current || current.phase === "hearing") return;
+  mic = null;
+  closeMic(current);
+  paintMic();
+}
+
+/** The recording as whisper wants it: 16 kHz mono signed 16-bit, each output sample the average of the input it covers. */
+function toPcm(chunks, length, rate) {
+  const all = new Float32Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    all.set(chunk.subarray(0, Math.min(chunk.length, length - at)), at);
+    at += chunk.length;
+  }
+  const ratio = rate / HEAR_RATE;
+  const out = new Int16Array(Math.floor(length / ratio));
+  for (let i = 0; i < out.length; i += 1) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = start; j < end; j += 1) sum += all[j];
+    const value = Math.max(-1, Math.min(1, sum / (end - start)));
+    out[i] = value < 0 ? value * 0x8000 : value * 0x7fff;
+  }
+  return out;
+}
+
+/** Dictated words joined onto what is already in the box, with one space between (joinDictation on the desktop). */
+function joinDictation(before, said) {
+  if (!before.trim()) return said;
+  return /\s$/.test(before) ? before + said : `${before} ${said}`;
+}
+
+async function micFinish() {
+  const mine = mic;
+  if (!mine || mine.phase === "hearing") return;
+  if (mine.phase === "starting") {
+    mine.finish = true;
+    return;
+  }
+  mine.phase = "hearing";
+  closeMic(mine);
+  paintMic();
+  try {
+    const pcm = toPcm(mine.chunks, mine.length, mine.ctx.sampleRate);
+    let response;
+    try {
+      response = await fetch("/api/orchestrator/hear", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream" }, body: pcm });
+    } catch {
+      throw new Error(t("phone.offline"));
+    }
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      forget();
+      return;
+    }
+    if (!response.ok) throw new Error(body.error || t("phone.error.failed"));
+    if (body.text) {
+      const box = view === "maestro" ? parts.box : null;
+      orchDraft = joinDictation(box ? box.value : orchDraft, body.text);
+      if (box) box.value = orchDraft;
+    } else showMicNote(t(EMPTY_HEARD[body.empty] || "voice.empty.nothing"));
+  } catch (err) {
+    error = err.message;
+    update();
+  } finally {
+    if (mic === mine) mic = null;
+    paintMic();
+  }
+}
+
+function showMicNote(text) {
+  micSaid = { text, until: Date.now() + 6000 };
+  paintMic();
+  window.setTimeout(paintMic, 6100);
+}
+
+function paintMic() {
+  const button = parts.mic;
+  if (!button || view !== "maestro" || !button.isConnected) return;
+  const phase = mic?.phase ?? "idle";
+  button.hidden = !mic && !(orch?.hear && micSupported());
+  if (button.dataset.phase !== phase) {
+    button.dataset.phase = phase;
+    button.replaceChildren(phase === "hearing" ? el("span", { class: "px working", "aria-hidden": "true" }) : glyph(phase === "recording" ? "stop" : "mic"));
+  }
+  button.classList.toggle("live", phase === "recording" || phase === "starting");
+  button.setAttribute("aria-pressed", String(phase === "recording"));
+  button.disabled = phase === "hearing";
+  const note = parts.micNote;
+  const listening = phase === "recording" || phase === "starting";
+  const said = !mic && micSaid.text && Date.now() < micSaid.until;
+  note.hidden = !listening && phase !== "hearing" && !said;
+  note.classList.toggle("said", Boolean(said));
+  parts.micMeter.hidden = !listening;
+  parts.micBusy.hidden = phase !== "hearing";
+  parts.micClock.hidden = !listening;
+  parts.micCancel.hidden = !listening;
+  if (listening) {
+    const lit = Math.round((mic.level || 0) * METER_CELLS);
+    [...parts.micMeter.children].forEach((cell, index) => {
+      cell.className = index < lit ? (index >= METER_CELLS - 2 ? "hot" : "on") : "";
+    });
+    const seconds = Math.floor(micSeconds(mic));
+    parts.micWord.textContent = t("voice.listening");
+    parts.micClock.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    parts.micHint.textContent = mic.latched || phase === "starting" ? t("phone.micTap") : t("phone.micHold");
+  } else if (phase === "hearing") {
+    parts.micWord.textContent = t("voice.transcribing");
+    parts.micHint.textContent = "";
+  } else if (said) {
+    parts.micWord.textContent = "";
+    parts.micHint.textContent = micSaid.text;
+  }
 }
 
 let installEvent = null;

@@ -131,6 +131,18 @@ function actions(patch: Partial<CompanionActions> = {}): CompanionActions {
     stop: async () => undefined,
     launch: async () => ({ ptyId: "p2", runId: "r2" }),
     plans: async () => null,
+    orchestrator: {
+      view: () => ({ engineId: "grok", engineReady: true, mode: "plan", thinking: false, earlier: 0, turns: [], planners: [], engines: [], workspaces: [], running: [], hear: false }),
+      ask: () => undefined,
+      stopThinking: () => undefined,
+      clear: () => undefined,
+      run: async () => undefined,
+      cancel: () => undefined,
+      editStep: () => undefined,
+      removeStep: () => undefined,
+      settings: () => undefined,
+    },
+    hear: async () => ({ text: "", empty: "short" }),
     ...patch,
   };
 }
@@ -383,11 +395,16 @@ describe("the phone page's words", () => {
     expect(phoneLanguage("xx", "de")).toBe("en");
   });
 
-  it("serves the page's words and the plan words from the app's catalogs", async () => {
+  it("serves the page's words, the plan words and the Orchestrator's from the app's catalogs", async () => {
     const de = await phoneWords("de");
     expect(de["phone.send"]).toBe("Senden");
     expect(de["plans.title"]).toBeTruthy();
-    expect(Object.keys(de).some((key) => !key.startsWith("phone.") && !key.startsWith("plans."))).toBe(false);
+    // The Orchestrator says what the desktop's does, in the same words.
+    expect(de["orch.go"]).toBe("Los");
+    expect(de["rail.orchestrator"]).toBe("Dirigent");
+    expect(de["voice.listening"]).toBe("Hört zu");
+    const shared = ["rail.orchestrator", "common.cancel", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+    expect(Object.keys(de).filter((key) => !/^(phone|plans|orch)\./.test(key)).sort()).toEqual([...shared].sort());
     expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
     for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {
       expect((await phoneWords(language))["phone.credit"]).toContain("{name}");
@@ -416,6 +433,18 @@ describe("the phone page's words", () => {
       "phone.homeMark",
       "phone.homeClose",
       "phone.back",
+      "phone.homeHowMaestro",
+      "phone.orchNotReady",
+      "phone.orchPlaceholder",
+      "phone.orchOpen",
+      "phone.orchEarlier.one",
+      "phone.orchEarlier.other",
+      "phone.mic",
+      "phone.micTap",
+      "phone.micHold",
+      "phone.micShort",
+      "phone.micBlocked",
+      "phone.micFailed",
     ];
     expect((await phoneWords("en"))["phone.homeKind"]).toBe("Mobile companion");
     expect((await phoneWords("en"))["phone.homeSettings"]).toBe("Settings");
