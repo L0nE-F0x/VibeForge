@@ -3,9 +3,10 @@ import { escapeTop, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/ov
 import { confirmSlot } from "../../src/ui/state.js";
 
 /** A keydown as the overlay stack sees it, recording what was done to it. */
-function keydown(key: string, init: { defaultPrevented?: boolean; isComposing?: boolean } = {}) {
+function keydown(key: string, init: { defaultPrevented?: boolean; isComposing?: boolean; target?: { closest: (selector: string) => unknown } } = {}) {
   const event = {
     key,
+    target: init.target ?? null,
     defaultPrevented: init.defaultPrevented ?? false,
     isComposing: init.isComposing ?? false,
     stopped: false,
@@ -61,6 +62,21 @@ describe("the overlay stack", () => {
     // Escape that ends an IME composition belongs to the field.
     expect(escapeTop(keydown("Escape", { isComposing: true }))).toBe(false);
     expect(closed).toEqual([]);
+  });
+
+  it("leaves Escape typed into a terminal to its program, and closes once focus is out of it", () => {
+    const closed: string[] = [];
+    open(closed, "task sheet");
+    // A live CLI in the sheet: Claude Code stops on Escape, so the sheet must stay.
+    const terminal = { closest: (selector: string) => (selector === ".xterm" ? {} : null) };
+    const typed = keydown("Escape", { target: terminal });
+    expect(escapeTop(typed)).toBe(false);
+    expect(typed.defaultPrevented || typed.stopped).toBe(false);
+    expect(closed).toEqual([]);
+    // Focus on the sheet's own controls: Escape closes it as before.
+    const button = { closest: () => null };
+    expect(escapeTop(keydown("Escape", { target: button }))).toBe(true);
+    expect(closed).toEqual(["task sheet"]);
   });
 
   it("does nothing on Escape with nothing open, and says when something is", () => {

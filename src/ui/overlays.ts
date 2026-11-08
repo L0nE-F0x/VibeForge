@@ -35,12 +35,25 @@ export function overlayOpen(): boolean {
   return stack.length > 0;
 }
 
-type EscapeEvent = Pick<KeyboardEvent, "key" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation">;
+type EscapeEvent = Pick<KeyboardEvent, "key" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation"> & {
+  target: EventTarget | { closest?: (selector: string) => unknown } | null;
+};
 
-/** Escape closes the top overlay and nothing under it. False when it wasn't one for us. */
+/** Whether a key was typed into a terminal: its program gets it, not the window. */
+function inTerminal(target: EscapeEvent["target"]): boolean {
+  const closest = (target as { closest?: (selector: string) => unknown } | null)?.closest;
+  return typeof closest === "function" && Boolean(closest.call(target, ".xterm"));
+}
+
+/**
+ * Escape closes the top overlay and nothing under it. False when it wasn't one for us. In a
+ * terminal (a task sheet's live CLI) Escape is the program's: Claude Code stops on it. The way
+ * out is then the overlay's close button, or Escape once focus has left the terminal.
+ */
 export function escapeTop(event: EscapeEvent): boolean {
   // Taken already: dictation drops its words on Escape (voice.tsx), the tour closes itself.
   if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return false;
+  if (inTerminal(event.target)) return false;
   const top = topOverlay();
   if (!top) return false;
   event.preventDefault();
