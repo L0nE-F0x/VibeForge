@@ -375,6 +375,50 @@ function setIndexAside(file: string): void {
   }
 }
 
+// ---------------------------------------------------------------- read cache
+
+/**
+ * How long after a change a file is still parsed on every read. A second change within the same
+ * tick of the file system's clock, at the same size, could keep the first one's stamp.
+ */
+const SETTLE_MS = 2000;
+
+/** What identifies a file's contents without reading them; null when there is no such file. */
+function fileStamp(file: string): { key: string; settled: boolean } | null {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return null;
+    return { key: `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, settled: Date.now() - stat.mtimeMs > SETTLE_MS };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Settings, engines and agents as last parsed, kept while their file is unchanged on disk. The
+ * services read them hundreds of times a refresh, and a stat costs far less than parsing again.
+ * These are files people edit by hand, so the stamp (inode, size, modify and change times) is
+ * checked on every read, and the store's own writes drop the entry at once. Every read gets its
+ * own copy, so a caller changing what it got can't change what the next one sees.
+ */
+class ReadCache {
+  private readonly entries = new Map<string, { key: string; value: unknown }>();
+
+  read<T>(file: string, load: () => T): T {
+    const stamp = fileStamp(file);
+    const hit = this.entries.get(file);
+    if (stamp && hit?.key === stamp.key) return structuredClone(hit.value) as T;
+    const value = load();
+    if (stamp?.settled) this.entries.set(file, { key: stamp.key, value: structuredClone(value) });
+    else this.entries.delete(file);
+    return value;
+  }
+
+  forget(file: string): void {
+    this.entries.delete(file);
+  }
+}
+
 export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
@@ -567,7 +611,13 @@ export class Store {
 
   // ---------------------------------------------------------------- settings & engines
 
+  private readonly cache = new ReadCache();
+
   readSettings(): Settings {
+    return this.cache.read(path.join(this.configRoot, "settings.json"), () => this.loadSettings());
+  }
+
+  private loadSettings(): Settings {
     const file = path.join(this.configRoot, "settings.json");
     const defaults = defaultSettings();
     const raw = readJson<Partial<Settings> | null>(file, null);
@@ -628,9 +678,14 @@ export class Store {
 
   writeSettings(settings: Settings): void {
     writeJson(path.join(this.configRoot, "settings.json"), settings, { mode: 0o600 });
+    this.cache.forget(path.join(this.configRoot, "settings.json"));
   }
 
   readEngineRows(): EngineRow[] {
+    return this.cache.read(path.join(this.configRoot, "engines.json"), () => this.loadEngineRows());
+  }
+
+  private loadEngineRows(): EngineRow[] {
     const file = path.join(this.configRoot, "engines.json");
     if (!fs.existsSync(file)) {
       const seeded = seedEngines();
@@ -650,6 +705,7 @@ export class Store {
     const raw = readJson<{ seedRevision?: unknown }>(file, {});
     const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
     writeJson(file, { engines: normalizeEngineRows(rows), seedRevision: revision });
+    this.cache.forget(file);
   }
 
   // ---------------------------------------------------------------- workspaces & layouts
@@ -713,7 +769,8 @@ export class Store {
 
   getAgent(id: string): Agent | null {
     if (!isSafeId(id)) return null;
-    return normalizeAgent(id, readYaml(path.join(this.configRoot, "agents", id, "agent.yaml")));
+    const file = path.join(this.configRoot, "agents", id, "agent.yaml");
+    return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
   }
 
   writeAgent(agent: Agent): void {
@@ -722,6 +779,7 @@ export class Store {
     const memoryPath = path.join(dir, "memory.md");
     if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
     writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
+    this.cache.forget(path.join(dir, "agent.yaml"));
   }
 
   readMemory(agentId: string): string {
@@ -741,6 +799,7 @@ export class Store {
   deleteAgent(id: string): void {
     if (!isSafeId(id)) return;
     fs.rmSync(path.join(this.configRoot, "agents", id), { recursive: true, force: true });
+    this.cache.forget(path.join(this.configRoot, "agents", id, "agent.yaml"));
   }
 
   // ---------------------------------------------------------------- skills

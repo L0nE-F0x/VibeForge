@@ -7,6 +7,9 @@ import { readJson, writeJson } from "./fsx.js";
 // anywhere and no API is called: Claude Code, Codex, Grok Build, Antigravity CLI, Gemini CLI, Kimi Code, Muse Code, OpenCode
 // and Copilot CLI each write what every model call used, and this adds it up per day. Append-only
 // logs are read from where the last pass stopped, so a rescan costs only what was written since.
+// This runs in Electron's main process, which relays every terminal byte, so logs are read a slice
+// at a time with a turn for everything else in between: a first pass over a few GB of logs then
+// takes a while but never stalls the app, and costs about one slice of memory.
 // Cursor Agent keeps no token counts on disk, and Crush keeps only each session's latest context
 // size, which goes down as well as up, so neither can be added up.
 //
@@ -20,6 +23,8 @@ export const USAGE_DAYS = 7;
 export const MONTH_DAYS = 30;
 /** At most this many weeks of bars for all time; the total still covers every day. */
 export const ALL_WEEKS = 16;
+/** How much of a log is read at a time. */
+export const SLICE_BYTES = 1024 * 1024;
 
 export type UsagePeriod = "today" | "week" | "month" | "all";
 
@@ -85,10 +90,8 @@ interface Ledger {
 interface FileState {
   size: number;
   mtimeMs: number;
-  /** Bytes already read, for logs that only grow. */
+  /** Bytes already read, for logs that only grow: the end of the last whole line. */
   offset: number;
-  /** A line cut off by the end of the last read. */
-  rest: string;
   tally: Tally;
   /** Claude Code message ids this file counted; a resumed session repeats them in its new file. */
   keys: Set<string>;
@@ -130,44 +133,83 @@ function count(tally: Tally, iso: unknown, model: string, tokens: Tokens): void 
 /** A file's size and last change. */
 type Stamp = Pick<fs.Stats, "size" | "mtimeMs">;
 
+/** A turn for the rest of the main process: IPC, terminal output, timers. */
+const breathe = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+async function stampOf(file: string, wal: boolean): Promise<Stamp | null> {
+  try {
+    const stat = await fs.promises.stat(file);
+    if (!wal) return stat;
+    try {
+      const log = await fs.promises.stat(`${file}-wal`);
+      return { size: stat.size + log.size, mtimeMs: Math.max(stat.mtimeMs, log.mtimeMs) };
+    } catch {
+      return stat; /* no write-ahead log */
+    }
+  } catch {
+    return null; /* gone since the listing */
+  }
+}
+
 /**
  * Files under `root` (to `depth` folders down) matching `pattern`, changed since `since`. With
  * `wal`, a SQLite database's stamp takes in its `-wal` file, where writes wait until a checkpoint.
  */
-function recentFiles(root: string, pattern: RegExp, since: number, depth: number, wal = false): Array<{ file: string; stat: Stamp }> {
+async function recentFiles(root: string, pattern: RegExp, since: number, depth: number, wal = false): Promise<Array<{ file: string; stat: Stamp }>> {
   const found: Array<{ file: string; stat: Stamp }> = [];
-  const walk = (dir: string, level: number) => {
+  const walk = async (dir: string, level: number) => {
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
+    // A folder's files are looked at together, then taken in the order listed, folders and all.
+    const stamps = new Map(entries.filter((entry) => entry.isFile() && pattern.test(entry.name)).map((entry) => [entry, stampOf(path.join(dir, entry.name), wal)]));
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (level < depth) walk(full, level + 1);
+        if (level < depth) await walk(full, level + 1);
         continue;
       }
-      if (!entry.isFile() || !pattern.test(entry.name)) continue;
-      try {
-        let stat: Stamp = fs.statSync(full);
-        if (wal) {
-          try {
-            const log = fs.statSync(`${full}-wal`);
-            stat = { size: stat.size + log.size, mtimeMs: Math.max(stat.mtimeMs, log.mtimeMs) };
-          } catch {
-            /* no write-ahead log */
-          }
-        }
-        if (stat.mtimeMs >= since) found.push({ file: full, stat });
-      } catch {
-        /* gone since the listing */
-      }
+      const stat = await stamps.get(entry);
+      if (stat && stat.mtimeMs >= since) found.push({ file: full, stat });
     }
   };
-  walk(root, 0);
+  await walk(root, 0);
   return found;
+}
+
+/**
+ * The whole lines of a log from `state.offset` to `end`, a slice at a time. The offset moves to
+ * the end of each whole line, so a line still being written is read again on the next pass.
+ */
+async function readLines(file: string, state: FileState, end: number, onLine: (line: string) => void): Promise<void> {
+  const handle = await fs.promises.open(file, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(Math.min(SLICE_BYTES, end - state.offset));
+    // The start of a line cut off by the end of a slice; copied, as the buffer is reused.
+    let carry: Buffer[] = [];
+    let position = state.offset;
+    while (position < end) {
+      const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, end - position), position);
+      if (!bytesRead) break;
+      const slice = buffer.subarray(0, bytesRead);
+      let start = 0;
+      for (let newline = slice.indexOf(10); newline !== -1; newline = slice.indexOf(10, start)) {
+        const piece = slice.subarray(start, newline);
+        onLine((carry.length ? Buffer.concat([...carry, piece]) : piece).toString("utf8"));
+        carry = [];
+        start = newline + 1;
+        state.offset = position + start;
+      }
+      if (start < bytesRead) carry.push(Buffer.from(slice.subarray(start)));
+      position += bytesRead;
+      await breathe();
+    }
+  } finally {
+    await handle.close();
+  }
 }
 
 // ------------------------------------------------------------------ the formats
@@ -810,9 +852,10 @@ export class UsageScanner {
       let limits: FileState["limits"] = null;
       let lastAt = 0;
       for (const root of source.roots) {
-        for (const { file, stat } of recentFiles(root, source.pattern, since, source.depth, Boolean(source.db))) {
+        for (const { file, stat } of await recentFiles(root, source.pattern, since, source.depth, Boolean(source.db))) {
           live.add(file);
           const state = await this.read(source, file, stat, since);
+          await breathe();
           lastAt = Math.max(lastAt, stat.mtimeMs);
           if (state.limits && (!limits || state.limits.at > limits.at)) limits = state.limits;
           for (const [day, models] of state.tally) {
@@ -873,7 +916,7 @@ export class UsageScanner {
   private async read(source: Source, file: string, stat: Stamp, since: number): Promise<FileState> {
     let state = this.files.get(file);
     if (state && state.size === stat.size && state.mtimeMs === stat.mtimeMs) return state;
-    const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, rest: "", tally: new Map(), keys: new Set(), model: "", limits: null });
+    const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, tally: new Map(), keys: new Set(), model: "", limits: null });
     if (!state || source.whole || source.db || stat.size < state.offset) {
       this.forget(state?.keys ?? []);
       state = fresh();
@@ -884,18 +927,9 @@ export class UsageScanner {
       } else if (source.whole) {
         source.whole(state, await fs.promises.readFile(file, "utf8"));
       } else if (source.lines && stat.size > state.offset) {
-        const handle = await fs.promises.open(file, "r");
-        try {
-          const length = stat.size - state.offset;
-          const buffer = Buffer.alloc(length);
-          await handle.read(buffer, 0, length, state.offset);
-          const lines = (state.rest + buffer.toString("utf8")).split("\n");
-          state.rest = lines.pop() ?? "";
-          for (const line of lines) source.lines(state, line);
-          state.offset = stat.size;
-        } finally {
-          await handle.close();
-        }
+        const lines = source.lines;
+        const into = state;
+        await readLines(file, into, stat.size, (line) => lines(into, line));
       }
     } catch {
       /* unreadable now; counted as it was */

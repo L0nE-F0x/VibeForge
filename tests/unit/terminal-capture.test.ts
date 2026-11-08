@@ -56,6 +56,26 @@ describe("terminal capture", () => {
     expect(done.transcript).not.toContain("KEEP-SCREEN");
   });
 
+  it("parses output that piles up as one batch, and counts it down as it goes", async () => {
+    const sink = openSink() as ReturnType<typeof openSink> & { pending: number; onDrain: (() => void) | null };
+    let drained = 0;
+    sink.onDrain = () => {
+      drained += 1;
+    };
+    let size = 0;
+    for (let line = 1; line <= 200; line += 1) {
+      const text = `LINE-${line}\r\n`;
+      size += text.length;
+      capture.captureWrite(sink, text);
+    }
+    expect(sink.pending).toBe(size);
+    const done = await capture.captureFinish(sink);
+    expect(sink.pending).toBe(0);
+    // The first piece is parsed at once; the other 199 waited behind it and went in together.
+    expect(drained).toBe(2);
+    expect(done.transcript).toContain("LINE-200");
+  });
+
   it("rebuilds a blank saved frame from scrollback, including one trimmed mid-session", async () => {
     const full = await capture.restoreScrollback("\x1b[?1049h\x1b[HKEEP-SCREEN\r\n\x1b[?1049l\x1b[2J");
     expect(full?.transcript).toContain("KEEP-SCREEN");
