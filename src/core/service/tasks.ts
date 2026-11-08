@@ -288,7 +288,8 @@ export class TaskDesk {
       return folderInCopy(task.copy, workspace.path);
     }
     if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id));
+    // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
+    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id), task.copy);
     const current = this.core.store.getTask(task.id) ?? task;
     this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
     return folderInCopy(copy, workspace.path);

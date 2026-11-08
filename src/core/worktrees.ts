@@ -176,14 +176,16 @@ export async function repoRoot(folder: string): Promise<string | null> {
 /**
  * Make a new copy of the repository `folder` belongs to, at `target`, on a fresh branch from its
  * current commit. Committed work only: edits not yet committed in the workspace stay there.
+ * `previous` is the task's last copy, when its folder has gone: its branch, commits and all, is
+ * picked back up rather than started again.
  */
-export async function createCopy(folder: string, target: string, branch: string): Promise<WorkingCopy> {
+export async function createCopy(folder: string, target: string, branch: string, previous: WorkingCopy | null = null): Promise<WorkingCopy> {
   const repo = await repoRoot(folder);
   if (!repo) throw new Error("A separate copy needs the workspace to be a git repository.");
-  return withRepoLock(repo, () => makeCopy(repo, target, branch));
+  return withRepoLock(repo, () => makeCopy(repo, target, branch, previous));
 }
 
-async function makeCopy(repo: string, target: string, branch: string): Promise<WorkingCopy> {
+async function makeCopy(repo: string, target: string, branch: string, previous: WorkingCopy | null): Promise<WorkingCopy> {
   const head = await git(["rev-parse", "--verify", "-q", "HEAD"], repo);
   const base = head.stdout.trim();
   if (head.code !== 0 || !base) throw new Error("A separate copy needs at least one commit in the workspace.");
@@ -192,9 +194,37 @@ async function makeCopy(repo: string, target: string, branch: string): Promise<W
   // A copy deleted by hand leaves its entry behind, and git refuses to reuse its name.
   await git(["worktree", "prune"], repo);
   fs.mkdirSync(path.dirname(target), { recursive: true });
+  const tip = (await git(["rev-parse", "--verify", "-q", `refs/heads/${branch}^{commit}`], repo)).stdout.trim();
+  const inUse = (await registered(repo)).some((entry) => entry.branch === `refs/heads/${branch}`);
+  if (tip && !inUse) {
+    const resume = previous && previous.branch === branch && path.resolve(previous.repo) === repo && isCommitId(previous.base) && (await isAncestor(repo, previous.base, tip));
+    if (resume) {
+      const added = await git(["worktree", "add", "-q", target, branch], repo);
+      if (added.code !== 0) throw failure("Could not make the copy", added);
+      return { path: path.resolve(target), branch, base: previous.base, repo };
+    }
+    // `-B` would reset the branch; commits on it that HEAD doesn't have stay reachable under another name.
+    if (!(await isAncestor(repo, tip, base))) {
+      const renamed = await git(["branch", "-m", branch, await savedName(repo, branch)], repo);
+      if (renamed.code !== 0) throw failure("Could not make the copy", renamed);
+    }
+  }
   const added = await git(["worktree", "add", "-q", "-B", branch, target, base], repo);
   if (added.code !== 0) throw failure("Could not make the copy", added);
   return { path: path.resolve(target), branch, base, repo };
+}
+
+async function isAncestor(repo: string, older: string, newer: string): Promise<boolean> {
+  return (await git(["merge-base", "--is-ancestor", older, newer], repo)).code === 0;
+}
+
+/** A free `<branch>-saved-<date>` name for an old copy branch that is being set aside. */
+async function savedName(repo: string, branch: string): Promise<string> {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  for (let count = 1; ; count += 1) {
+    const name = `${branch}-saved-${stamp}${count > 1 ? `-${count}` : ""}`;
+    if ((await git(["rev-parse", "--verify", "-q", `refs/heads/${name}`], repo)).code !== 0) return name;
+  }
 }
 
 interface Registered {

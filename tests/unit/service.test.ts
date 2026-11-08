@@ -817,6 +817,31 @@ describe("runs", () => {
     expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
   });
 
+  it("picks a task's copy back up, commits and all, when its folder was deleted by hand", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Edit", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const copy = ctx.svc.listTasks().find((item) => item.id === task.id)!.copy!;
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "agent's work\n");
+    git(copy.path, "commit", "-qam", "agent");
+    fs.rmSync(copy.path, { recursive: true, force: true });
+
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    expect(ctx.svc.listTasks().find((item) => item.id === task.id)!.copy).toEqual(copy);
+    expect(fs.readFileSync(path.join(copy.path, "a.txt"), "utf8")).toBe("agent's work\n");
+    expect(await ctx.svc.applyTaskCopy(task.id)).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
+    ctx.svc.close();
+  });
+
   it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
     const repo = tempDir();
     const git = (...args: string[]) =>

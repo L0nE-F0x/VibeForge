@@ -236,6 +236,43 @@ function worktrees(repo: string): string {
 }
 
 describe("making a task's copy", () => {
+  it("picks the copy's branch back up when its folder went, commits and all", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("one", "ONE"));
+    git(copy.path, "commit", "-qam", "agent");
+    const commit = git(copy.path, "rev-parse", "HEAD").trim();
+    fs.rmSync(copy.path, { recursive: true, force: true });
+    git(repo, "commit", "--allow-empty", "-qm", "the workspace moves on");
+
+    const again = await createCopy(repo, copy.path, copy.branch, copy);
+    expect(again).toEqual(copy);
+    expect(git(again.path, "rev-parse", "HEAD").trim()).toBe(commit);
+    expect(await copyPatch(again, owner)).toContain("+ONE");
+  });
+
+  it("sets an old copy branch with commits of its own aside, rather than resetting it", async () => {
+    const { repo, copy } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("one", "ONE"));
+    git(copy.path, "commit", "-qam", "agent");
+    const commit = git(copy.path, "rev-parse", "HEAD").trim();
+    fs.rmSync(copy.path, { recursive: true, force: true });
+    const saved = () => git(repo, "branch", "--list", "vibeforge/task-1-saved-*", "--format=%(refname:short)").trim().split("\n").filter(Boolean);
+
+    // No record of that copy (another task of the same name, long gone): a fresh branch from HEAD.
+    const fresh = await createCopy(repo, copy.path, copy.branch);
+    const head = git(repo, "rev-parse", "HEAD").trim();
+    expect(fresh.base).toBe(head);
+    expect(git(fresh.path, "rev-parse", "HEAD").trim()).toBe(head);
+    expect(saved()).toHaveLength(1);
+    expect(saved()[0]).toMatch(/^vibeforge\/task-1-saved-\d{8}-\d{6}$/);
+    expect(git(repo, "rev-parse", saved()[0]).trim()).toBe(commit);
+
+    // A branch with nothing of its own is simply started again.
+    fs.rmSync(fresh.path, { recursive: true, force: true });
+    await createCopy(repo, copy.path, copy.branch);
+    expect(saved()).toHaveLength(1);
+  });
+
   it("keeps a copy locked through a prune while it waits in the trash, and tidies it after", async () => {
     const { repo, copy, owner, dataRoot } = await repoWithCopy({ "a.txt": LINES });
     expect(await lockCopy(copy, owner)).toBe(true);
