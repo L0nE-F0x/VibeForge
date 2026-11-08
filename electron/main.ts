@@ -30,6 +30,10 @@ import { Updater } from "./updater.js";
 import { companionWire, makeVoice } from "./voice-phone.js";
 import { MainWindow } from "./window.js";
 
+// The main process's entry: it makes the shared context and each part beside it (window.ts, ipc.ts,
+// host-lifecycle.ts, tray-controller.ts, notify.ts, quit.ts, timers.ts and the rest) in a fixed
+// order, then starts them once Electron is ready. The order is part of the behaviour: keep it.
+
 const APP_ID = "dev.vibeforge.app";
 const roots = defaultRoots();
 ensureLayout(roots.configRoot, roots.dataRoot);
@@ -45,6 +49,8 @@ app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
 if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
+
+// ------------------------------------------------------------------ the parts
 
 const supervisor = new PtySupervisor();
 const appRoot = app.getAppPath();
@@ -65,7 +71,6 @@ const { send, focusWindow, install } = ctx;
 const notify = desktopNotifier(ctx);
 
 const host = deskHost(ctx, notify);
-
 const dock = new Dock(
   () => ctx.win,
   (state) => send("dock", state),
@@ -85,7 +90,6 @@ const dock = new Dock(
 );
 
 const stats = new Stats(ctx, notify, app.getVersion());
-
 const updater = new Updater({
   current: app.getVersion(),
   install,
@@ -97,9 +101,9 @@ const updater = new Updater({
 });
 
 const voice = makeVoice(ctx);
-
 const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
 
+/** Repaints in the theme Settings name (or Omarchy's own): the page, the window and the tray icon. */
 function refreshPalette(): void {
   if (!ctx.service) return;
   ctx.palette = resolvePalette(ctx.service.getSettings().theme);
@@ -107,8 +111,6 @@ function refreshPalette(): void {
   if (ctx.win && !ctx.win.isDestroyed()) ctx.win.setBackgroundColor(ctx.palette.background);
   tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
 }
-
-// ------------------------------------------------------------------ tray
 
 const quit = new Quit(ctx, { talk, voice });
 const tray = new TrayController(ctx, () => void quit.fromTray());
@@ -187,4 +189,3 @@ if (!app.requestSingleInstanceLock()) {
 
   quit.handleEvents();
 }
-
