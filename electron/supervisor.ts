@@ -2,44 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
 import { whichBin } from "../src/core/engines.js";
+import type { PtyActivity, PtyAnswers, PtyAsk, PtyData, PtyExit, PtyLine, PtyOp, PtyProgram, PtySnapshot } from "./pty-protocol.js";
 
-export interface PtyData {
-  ptyId: string;
-  data: string;
-  first: number;
-  seq: number;
-}
+// The messages themselves are in pty-protocol.ts, which the host's JSDoc reads too.
+export type { PtyActivity, PtyData, PtyExit, PtyProgram, PtySnapshot } from "./pty-protocol.js";
 
-export interface PtyExit {
-  ptyId: string;
-  exitCode: number | null;
-  signal: number | null;
-}
-
-/** What holds a terminal's foreground now; argv is null when it is the process VibeForge started. */
-export interface PtyProgram {
-  ptyId: string;
-  argv: string[] | null;
-  /** Where that program runs, which can differ from where the shell started. */
-  cwd: string | null;
-}
-
-/** A terminal's output started flowing steadily (working) or stopped (quiet). */
-export interface PtyActivity {
-  ptyId: string;
-  working: boolean;
-}
-
-export interface PtySnapshot {
-  ansi: string;
-  plain: string;
-  seq: number;
-  cols: number;
-  rows: number;
-  alive: boolean;
-}
-
-type Waiter = { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void };
+type Waiter = { resolve: (answer: PtyAnswers[PtyOp]) => void; reject: (error: Error) => void };
 
 /**
  * Client for electron/pty-host.cjs. The host runs on the system Node, the one node-pty is
@@ -102,16 +70,16 @@ export class PtySupervisor {
   }
 
   private onLine(line: string): void {
-    let msg: Record<string, unknown>;
+    let msg: PtyLine;
     try {
       const parsed: unknown = JSON.parse(line);
       // JSON that isn't an object (a bare number some library printed) is no message.
       if (!parsed || typeof parsed !== "object") return;
-      msg = parsed as Record<string, unknown>;
+      msg = parsed as PtyLine;
     } catch {
       return;
     }
-    if (typeof msg.reqId === "string") {
+    if ("reqId" in msg) {
       const waiter = this.waiting.get(msg.reqId);
       if (!waiter) return;
       this.waiting.delete(msg.reqId);
@@ -147,14 +115,14 @@ export class PtySupervisor {
     }
   }
 
-  private request(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private request<A extends PtyAsk>(ask: A): Promise<PtyAnswers[A["op"]]> {
     const child = this.child;
     if (!child) return Promise.reject(new Error("The terminal host is not running. Restart VibeForge."));
     this.seq += 1;
     const reqId = `r${this.seq}`;
     return new Promise((resolve, reject) => {
-      this.waiting.set(reqId, { resolve, reject });
-      child.stdin.write(`${JSON.stringify({ ...body, reqId })}\n`);
+      this.waiting.set(reqId, { resolve: resolve as Waiter["resolve"], reject });
+      child.stdin.write(`${JSON.stringify({ ...ask, reqId })}\n`);
     });
   }
 
