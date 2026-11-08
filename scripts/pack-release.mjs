@@ -10,7 +10,7 @@
 // It packs the commit at HEAD, never uncommitted changes: git archive exports it into a scratch
 // folder, npm ci installs it there (building node-pty for this CPU) and Vite builds it. So it needs
 // what building from source needs (git, base-devel, python, Node 22.12+), and zstd.
-// VIBEFORGE_PACK_REF=v2.15.0 packs another commit or tag.
+// VIBEFORGE_PACK_REF=v2.14.1 packs another commit or tag.
 //
 // Entries are sorted, owned by root and dated to the commit, so packing a commit twice gives the
 // same tree. The archive holds one folder, vibeforge-<version>-linux-<arch>/.
@@ -26,22 +26,24 @@ import { pathToFileURL } from "node:url";
 const root = path.resolve(import.meta.dirname, "..");
 
 /**
- * What the running app reads from its folder. Vite bundles everything else (React, YAML, the cron
- * parser…) into dist and dist-electron. The terminal host (electron/pty-host.cjs) runs on the
- * person's own Node, and the main process loads electron/terminal-capture.cjs from disk too.
+ * What the running app reads from its folder: whole folders, so a file added to one ships without
+ * a change here. Vite bundles everything else (React, YAML, the cron parser…) into dist and
+ * dist-electron. From electron/ only the .cjs files run from disk: the terminal host, on the
+ * person's own Node, and the screen capture the main process loads too; its .ts files are built
+ * into dist-electron. scripts/ holds the launcher and `vibeforge tell` (talk.mjs).
  */
-export const APP_FILES = [
-  "package.json",
-  "LICENSE",
-  "dist",
-  "dist-electron",
-  "electron/pty-host.cjs",
-  "electron/terminal-capture.cjs",
-  "companion",
-  "resources",
-  "scripts/vibeforge",
-  "scripts/talk.mjs",
-];
+export const APP_FILES = ["package.json", "LICENSE", "dist", "dist-electron", "companion", "resources", "scripts", "electron/*.cjs"];
+
+/** True when the archive holds `file` (a path in the checkout), itself or inside a folder it ships. */
+export function ships(file) {
+  return APP_FILES.some((item) => {
+    if (item.includes("*")) {
+      const [dir, ext] = item.split("/*");
+      return path.posix.dirname(file) === dir && file.endsWith(ext);
+    }
+    return file === item || file.startsWith(`${item}/`);
+  });
+}
 
 /**
  * The packages loaded from node_modules at runtime, and the part of each that is used: Electron's
@@ -56,7 +58,13 @@ export const PACKAGES = {
 };
 
 /** Files run from disk, besides dist-electron; every module they load has to be in the archive. */
-export const ENTRIES = ["electron/pty-host.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"];
+export const ENTRIES = [
+  ...fs
+    .readdirSync(path.join(root, "electron"))
+    .filter((file) => file.endsWith(".cjs"))
+    .map((file) => `electron/${file}`),
+  "scripts/talk.mjs",
+];
 
 /** Bare and relative module names a script loads, as written. */
 export function specifiers(text) {
@@ -135,7 +143,16 @@ async function main(out) {
     fs.cpSync(from, to, { recursive: true, verbatimSymlinks: true });
   }
   step(`Assembling ${name}`);
-  for (const file of APP_FILES) ship(path.join(build, file), path.join(stage, file));
+  for (const item of APP_FILES) {
+    if (!item.includes("*")) {
+      ship(path.join(build, item), path.join(stage, item));
+      continue;
+    }
+    const [dir, ext] = item.split("/*");
+    for (const file of fs.readdirSync(path.join(build, dir)).filter((name) => name.endsWith(ext))) {
+      ship(path.join(build, dir, file), path.join(stage, dir, file));
+    }
+  }
   for (const [pkg, parts] of Object.entries(PACKAGES)) {
     for (const part of parts) ship(path.join(build, "node_modules", pkg, part), path.join(stage, "node_modules", pkg, part));
   }

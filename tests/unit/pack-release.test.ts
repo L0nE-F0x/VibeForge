@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { APP_FILES, ENTRIES, PACKAGES, provided, specifiers } from "../../scripts/pack-release.mjs";
+import { APP_FILES, ENTRIES, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
 
 // scripts/pack-release.mjs packs a list of files, not the whole checkout. These keep the list in
 // step with what the app reads from its folder at runtime, so a change that loads something new
@@ -9,8 +9,7 @@ import { APP_FILES, ENTRIES, PACKAGES, provided, specifiers } from "../../script
 
 const repo = path.resolve(import.meta.dirname, "..", "..");
 const read = (file: string) => fs.readFileSync(path.join(repo, file), "utf8");
-/** True when the archive holds `file`, itself or inside a folder it ships. */
-const shipped = (file: string) => APP_FILES.some((item) => file === item || file.startsWith(`${item}/`));
+const shipped = ships;
 const packageOf = (spec: string) =>
   spec
     .split("/")
@@ -20,8 +19,13 @@ const packageOf = (spec: string) =>
 describe("the ready-made build's file list", () => {
   it("names files that are there (the build makes dist and dist-electron)", () => {
     for (const file of APP_FILES.filter((item) => item !== "dist" && item !== "dist-electron")) {
-      expect(fs.existsSync(path.join(repo, file)), file).toBe(true);
+      expect(fs.existsSync(path.join(repo, file.replace(/\/\*.*$/, ""))), file).toBe(true);
     }
+    // Whole folders, so a module added to the phone page or the scripts ships with it.
+    expect(shipped("companion/js/new-module.js")).toBe(true);
+    expect(shipped("electron/pty-host.cjs")).toBe(true);
+    expect(shipped("electron/main.ts")).toBe(false);
+    expect(ENTRIES).toEqual(expect.arrayContaining(["electron/pty-host.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"]));
   });
 
   it("ships every module the terminal host and `vibeforge tell` load", () => {

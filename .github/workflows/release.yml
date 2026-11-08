@@ -101,7 +101,7 @@ jobs:
           cat assets/SHA256SUMS
       # The way a person gets it: the installer downloads the archive (from these files, laid out
       # like a release), checks it against SHA256SUMS and unpacks it into a scratch home. Then the
-      # smoke test runs from that installed copy, with this runner's Node as the terminals' Node.
+      # installed copy's own smoke test runs, with this runner's Node as the terminals' Node.
       - name: Install from the archive and smoke-test the installed copy
         run: |
           mkdir -p "$RUNNER_TEMP/releases/download" "$RUNNER_TEMP/home"
@@ -109,7 +109,6 @@ jobs:
           HOME="$RUNNER_TEMP/home" VIBEFORGE_RELEASES="file://$RUNNER_TEMP/releases" VIBEFORGE_VERSION="$GITHUB_REF_NAME" bash scripts/install.sh
           app="$RUNNER_TEMP/home/.local/share/vibeforge-app"
           test ! -e "$app/.git"
-          cp scripts/smoke.mjs "$app/scripts/smoke.mjs"
           xvfb-run -a --server-args="-screen 0 1600x1000x24" node "$app/scripts/smoke.mjs"
       - name: Publish, unless it already is
         env:
