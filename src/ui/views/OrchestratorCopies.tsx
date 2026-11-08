@@ -4,6 +4,7 @@ import type { MaestroCopy, Workspace } from "../../shared/api.js";
 import { call, useEngines, useWorkspaces } from "../api.js";
 import { DiffView } from "../components/RunDetail.js";
 import { Button, Notice, Sheet } from "../components/ui.js";
+import { applyConflictNote } from "../apply-note.js";
 import { diffFiles } from "../diff-files.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
@@ -24,7 +25,7 @@ function useCopyActions(copy: MaestroCopy) {
   const [apply, applying] = useAction(async () => {
     const result = await call("orchestrator.applyCopy", copy.id);
     if (!result.files.length) push("info", t("tasks.applyNothing"));
-    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), t("tasks.applyConflictsBody", { files: result.conflicts.join(", ") }));
+    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
     else push("success", t("tasks.applied", { workspace: from?.name ?? "" }), t.count("tasks.appliedBody", result.files.length));
     if (!result.conflicts.length) release();
   }, t("tasks.applyFailed"));

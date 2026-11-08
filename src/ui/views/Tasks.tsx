@@ -13,6 +13,7 @@ import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
 import { changesFor } from "../changes-text.js";
+import { applyConflictNote } from "../apply-note.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
   { status: "todo", label: "tasks.col.todo" },
@@ -232,16 +233,8 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     if (!task || !workspace) return;
     const result = await call("tasks.applyCopy", task.id);
     if (!result.files.length) push("info", t("tasks.applyNothing"));
-    else if (result.conflicts.length) {
-      // Files with markers to resolve, and files left as the workspace had them (a binary, a delete).
-      const kept = result.kept ?? [];
-      const marked = result.conflicts.filter((file) => !kept.includes(file));
-      const body = [
-        marked.length ? t("tasks.applyConflictsBody", { files: marked.join(", ") }) : "",
-        kept.length ? t("tasks.applyKeptBody", { files: kept.join(", ") }) : "",
-      ];
-      push("error", t("tasks.applyConflicts"), body.filter(Boolean).join(" "));
-    } else push("success", t("tasks.applied", { workspace: workspace.name }), t.count("tasks.appliedBody", result.files.length));
+    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
+    else push("success", t("tasks.applied", { workspace: workspace.name }), t.count("tasks.appliedBody", result.files.length));
   }, t("tasks.applyFailed"));
   const [discardCopy, discarding] = useAction(async () => {
     if (!task) return;
