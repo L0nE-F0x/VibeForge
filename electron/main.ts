@@ -21,7 +21,7 @@ import { gitActivity, githubActivity, type Activity, type ActivitySource } from 
 import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
-import { isAppPage, relaunchArgs, type AppPage } from "./guards.js";
+import { isAppPage, relaunchArgs, settleWithin, type AppPage } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -951,8 +951,12 @@ function companionWire() {
   };
 }
 
+/** How long a quit waits for the phone page's server to close before going on without it. */
+const COMPANION_STOP_MS = 2000;
+
 async function shutdown(): Promise<void> {
-  await stopCompanion();
+  const stopped = await settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`));
+  if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
   talk.dispose();
   voice.dispose();
   if (!service) return;

@@ -45,3 +45,21 @@ export function isAppPage(url: string, page: AppPage): boolean {
 export function relaunchArgs(argv: readonly string[]): string[] {
   return argv.slice(1).filter((arg) => arg !== HIDDEN_ARG);
 }
+
+/** Waits for `work` for at most `ms`: true when it settled in time, false when it didn't. Never rejects. */
+export function settleWithin(work: Promise<unknown>, ms: number, failed: (error: unknown) => void = () => undefined): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    work.then(
+      () => {
+        clearTimeout(timer);
+        resolve(true);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        failed(error);
+        resolve(true);
+      },
+    );
+  });
+}

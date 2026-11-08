@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isAppPage, relaunchArgs } from "../../electron/guards.js";
+import { isAppPage, relaunchArgs, settleWithin } from "../../electron/guards.js";
 
 describe("the window's own page", () => {
   const file = "/opt/Vibe Forge/dist/index.html";
@@ -52,3 +52,16 @@ describe("restarting", () => {
     expect(relaunchArgs(["/usr/lib/electron/electron"])).toEqual([]);
   });
 });
+
+describe("quitting", () => {
+  it("waits for a step only so long, and never lets its error stop the quit", async () => {
+    expect(await settleWithin(Promise.resolve(), 1000)).toBe(true);
+    const errors: unknown[] = [];
+    expect(await settleWithin(Promise.reject(new Error("closed twice")), 1000, (error) => errors.push(error))).toBe(true);
+    expect(String(errors[0])).toContain("closed twice");
+    const started = Date.now();
+    expect(await settleWithin(new Promise(() => undefined), 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
