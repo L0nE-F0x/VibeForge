@@ -332,7 +332,7 @@
         <div class="bento">
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-workflow" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
               <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
               <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It only starts CLIs you ask for.</p>
@@ -354,7 +354,7 @@
 
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-messages-square" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-messages-square" /></svg></span>
               <h3>Your agents talk to each other</h3>
               <p>Every terminal has <code>vibeforge</code> on its <code>PATH</code>. Claude Code can ask Grok for a second opinion with <code>vibeforge tell grok --wait</code>, or delegate a subtask to another agent with <code>vibeforge task</code>. Delegated tasks run on their own branch in a git worktree and report back with a patch when they finish. You can also make one CLI the lead so it hands subtasks to faster or cheaper agents, pausing for your approval unless you let it start automatically.</p>
               <p>Every message is labelled with who sent it, back-and-forth turns are capped so agents can't loop forever, and one click stops them. <b>Send to…</b> and <b>Ask … to review</b> on each pane's title bar do the same manually.</p>
@@ -384,7 +384,7 @@
 
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-smartphone" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-smartphone" /></svg></span>
               <h3>Your desk, on your phone</h3>
               <p>Turn on <b>Settings → Phone</b> and open it through Tailscale Serve. See who is working and who is waiting for you, read a CLI's screen, and send the next step or stop it. Start an agent, or any CLI on its own, from the couch.</p>
               <p>It listens on this computer only, asks for a pairing code once, and stays off until you turn it on.</p>
@@ -405,11 +405,11 @@
 
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-bot" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-bot" /></svg></span>
               <h3>Agents that aren't tied to one CLI</h3>
               <p>Each agent keeps its own instructions, a persistent memory file, installed skills, and the folders it's allowed to use. Switch it from Claude Code to Codex to Grok without rewriting your setup.</p>
             </div>
-            <div class="art art-agent">
+            <div class="art art-agent" aria-hidden="true">
               <div class="agent-card">
                 <span class="m-avatar xl">RN</span>
                 <div class="agent-meta">
@@ -429,11 +429,11 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-square-terminal" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-square-terminal" /></svg></span>
               <h3>Tiled like your desktop</h3>
               <p>Split terminals side by side, click files in the tree to insert their paths, and open dev-server links in a built-in browser pane beside your code.</p>
             </div>
-            <div class="art art-tiles">
+            <div class="art art-tiles" aria-hidden="true">
               <div class="tile"><i>shell</i><code>npm run dev</code><code class="dim">➜ localhost:5173</code></div>
               <div class="tile is-focused"><i>Claude Code</i><code>● Nav.tsx</code><code class="dim">✓ 18 passed</code></div>
               <div class="tile tile-web"><i>localhost</i><span class="web-block"></span><span class="web-line"></span><span class="web-line short"></span></div>
@@ -442,13 +442,13 @@
 
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-mic" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-mic" /></svg></span>
               <h3>Talk to your agents</h3>
               <p>
                 Hold <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd> to dictate into the active chat or terminal. Press <kbd>Super</kbd> <kbd>Alt</kbd> <kbd>V</kbd> from anywhere on your desktop to dictate to a chosen agent, and your words wait in its chat until you hit Enter. Transcribed locally with whisper.cpp.
               </p>
             </div>
-            <div class="art art-voice" data-voice-art>
+            <div class="art art-voice" data-voice-art aria-hidden="true">
               <div class="v-bar">
                 <span class="v-meter" data-voice-meter><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
                 <b>Listening</b>
@@ -462,11 +462,11 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-volume" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-volume" /></svg></span>
               <h3>And they answer out loud</h3>
               <p>When you dictate a prompt, Piper reads the first paragraph of the reply aloud in that agent's voice, right on your machine. Hold the dictate key again to interrupt.</p>
             </div>
-            <div class="art art-answer" data-answer-art>
+            <div class="art art-answer" data-answer-art aria-hidden="true">
               <div class="a-line"><svg><use href="#i-volume" /></svg><b>Test writer</b><span>Added four token expiry tests. All pass.</span></div>
               <div class="a-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
@@ -474,11 +474,11 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-calendar-clock" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-calendar-clock" /></svg></span>
               <h3>Agents on a schedule</h3>
               <p>Run agents on a cron schedule or a fixed interval for weekday changelogs, nightly audits, or recurring checks. Routines keep running in the system tray, and missed runs are logged instead of piling up after sleep.</p>
             </div>
-            <div class="art art-cron">
+            <div class="art art-cron" aria-hidden="true">
               <code class="cron">0 9 * * 1-5</code>
               <b>At 09:00, Monday through Friday</b>
               <div class="cron-next"><span>Mon 09:00</span><span>Tue 09:00</span><span>Wed 09:00</span></div>
@@ -487,13 +487,13 @@
 
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-git-compare" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-git-compare" /></svg></span>
               <h3>Review everything they touched</h3>
               <p>
                 Every run saves its final terminal screen, full transcript, prompt, and the git diff from start to finish, captured the moment it ends so later edits stay out of it. Click <b>Continue</b> to reopen the exact CLI session (<code>claude --resume</code>, <code>grok --resume</code>, and others).
               </p>
             </div>
-            <div class="art art-review">
+            <div class="art art-review" aria-hidden="true">
               <div class="rv-head">
                 <b>Weekday notes</b>
                 <span class="chip ok">Finished</span>
@@ -512,11 +512,11 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-kanban" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-kanban" /></svg></span>
               <h3>A task board you trigger</h3>
               <p>Queue up tasks and assign an agent without starting anything yet. Hit <b>Execute</b> when you're ready: the agent runs on its own branch in a git worktree, and the finished diff lands in <b>Review</b> to apply or discard.</p>
             </div>
-            <div class="art art-board">
+            <div class="art art-board" aria-hidden="true">
               <div class="col"><i>To do</i></div>
               <div class="col"><i>Running</i></div>
               <div class="col"><i>Review</i></div>
@@ -526,22 +526,22 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-terminal" /></svg></span>
               <h3>Full terminals, not a chat wrapper</h3>
               <p>WebGL xterm panes you can split and drag into place. <kbd>Ctrl</kbd> <kbd>V</kbd> pastes text, and clipboard screenshots go straight to CLIs like Claude Code, just like in Ghostty.</p>
             </div>
-            <div class="art art-keys">
+            <div class="art art-keys" aria-hidden="true">
               <span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">V</span>
             </div>
           </article>
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-shield" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-shield" /></svg></span>
               <h3>Local and private</h3>
               <p>No accounts, no API keys, no telemetry. VibeForge only checks GitHub for new releases (which you can turn off); optional features like plan usage limits and your GitHub commit graph stay off until you turn them on. Agents, skills, routines, and tasks are plain YAML and Markdown files you can edit in Neovim.</p>
             </div>
-            <div class="art art-private">
+            <div class="art art-private" aria-hidden="true">
               <span class="lock"><svg><use href="#i-lock" /></svg></span>
               <code>~/.config/vibeforge/agents/<br />release-notes/memory.md</code>
             </div>
@@ -549,11 +549,11 @@
 
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-refresh" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-refresh" /></svg></span>
               <h3>Updates in plain sight</h3>
               <p>When a new release is out, <b>Help</b> shows a badge. Click <b>Update</b> to read the release notes, watch the installer run in a real terminal, and restart.</p>
             </div>
-            <div class="art art-update" data-update-art>
+            <div class="art art-update" data-update-art aria-hidden="true">
               <div class="up-head"><b>Update VibeForge</b><span class="chip ok">2.13.1</span></div>
               <p class="up-line">VibeForge 2.13.1 is available. You have 2.13.0.</p>
               <div class="up-term">
@@ -568,7 +568,7 @@
 
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-activity" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-activity" /></svg></span>
               <h3>It glows when it's your turn</h3>
               <p>When a background CLI finishes or stops to ask a question, its workspace, chat, and sidebar icon glow like an ember until you check it. When VibeForge is unfocused, a soft sound and desktop notification take you straight there.</p>
             </div>
@@ -581,7 +581,7 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-rotate-ccw" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-rotate-ccw" /></svg></span>
               <h3>Instant delete with Undo</h3>
               <p>Deleting a chat, task, skill, or routine happens right away. Click <b>Undo</b> on the toast or press <kbd>Ctrl</kbd> <kbd>Z</kbd> to put it back.</p>
             </div>
@@ -592,11 +592,11 @@
 
           <article class="card reveal" data-glow>
             <div class="card-copy">
-              <span class="card-icon"><svg><use href="#i-languages" /></svg></span>
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-languages" /></svg></span>
               <h3>Seven languages</h3>
-              <p>Follows your system language automatically, or pick one in Settings.</p>
+              <p>English, German, Spanish, French, Brazilian Portuguese, Japanese and Simplified Chinese. VibeForge follows your system language, or you pick one in Settings.</p>
             </div>
-            <div class="art art-lang">
+            <div class="art art-lang" aria-hidden="true">
               <div class="lang-codes" data-lang-codes><span>EN</span><span>DE</span><span>ES</span><span>FR</span><span>PT</span><span>JA</span><span>ZH</span></div>
               <p class="lang-line"><i data-lang-line>3 runs to review</i></p>
             </div>
