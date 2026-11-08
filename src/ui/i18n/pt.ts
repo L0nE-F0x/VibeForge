@@ -1335,7 +1335,7 @@ export const pt: Catalog = {
   "orch.problem.noEngine": "{engine} não pode planejar aqui: não está instalado, ou não é Grok Build, Claude Code, Codex nem Antigravity.",
   "orch.problem.failed": "{engine} parou com um erro.",
   "orch.problem.unreadable": "{engine} respondeu, mas não com um plano que o VibeForge consiga ler. Tente dizer de outro jeito.",
-  "orch.problem.timeout": "{engine} levou mais de três minutos, então o VibeForge parou de esperar.",
+  "orch.problem.timeout": "{engine} levou mais de cinco minutos, então o VibeForge parou de esperar.",
   "orch.problem.stopped": "Parado.",
   "orch.plan.waiting": "Plano",
   "orch.plan.running": "Em andamento",

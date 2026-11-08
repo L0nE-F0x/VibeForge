@@ -1336,7 +1336,7 @@ export const ja: Catalog = {
   "orch.problem.noEngine": "{engine} はここで計画できません。インストールされていないか、Grok Build、Claude Code、Codex、Antigravity のいずれでもありません。",
   "orch.problem.failed": "{engine} がエラーで止まりました。",
   "orch.problem.unreadable": "{engine} は答えましたが、VibeForge が読める計画ではありませんでした。言い方を変えてみてください。",
-  "orch.problem.timeout": "{engine} が 3 分以上かかったため、VibeForge は待つのをやめました。",
+  "orch.problem.timeout": "{engine} が 5 分以上かかったため、VibeForge は待つのをやめました。",
   "orch.problem.stopped": "停止しました。",
   "orch.plan.waiting": "計画",
   "orch.plan.running": "実行中",

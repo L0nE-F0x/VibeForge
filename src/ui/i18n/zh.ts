@@ -1336,7 +1336,7 @@ export const zh: Catalog = {
   "orch.problem.noEngine": "{engine} 无法在这里制定计划：它没有安装，或者不是 Grok Build、Claude Code、Codex 或 Antigravity。",
   "orch.problem.failed": "{engine} 因错误而停止。",
   "orch.problem.unreadable": "{engine} 回答了，但不是 VibeForge 能读懂的计划。换个说法试试。",
-  "orch.problem.timeout": "{engine} 用了三分钟以上，所以 VibeForge 不再等待。",
+  "orch.problem.timeout": "{engine} 用了五分钟以上，所以 VibeForge 不再等待。",
   "orch.problem.stopped": "已停止。",
   "orch.plan.waiting": "计划",
   "orch.plan.running": "执行中",

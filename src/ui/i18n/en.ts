@@ -1348,7 +1348,7 @@ export const en = {
   "orch.problem.noEngine": "{engine} can't plan here: it isn't installed, or isn't Grok Build, Claude Code, Codex or Antigravity.",
   "orch.problem.failed": "{engine} stopped with an error.",
   "orch.problem.unreadable": "{engine} answered, but not with a plan VibeForge can read. Try saying it another way.",
-  "orch.problem.timeout": "{engine} took longer than three minutes, so VibeForge stopped waiting.",
+  "orch.problem.timeout": "{engine} took longer than five minutes, so VibeForge stopped waiting.",
   "orch.problem.stopped": "Stopped.",
   "orch.plan.waiting": "Plan",
   "orch.plan.running": "Working",
