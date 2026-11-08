@@ -466,7 +466,7 @@ export class OrchestratorDesk {
       if (!to) throw new Error("That CLI isn't running any more.");
       // The way every message to a CLI goes: in once it is idle and nobody is typing there, and
       // not at all after Stop. It is checked for its CLI once more as it goes in.
-      const sent = await this.messages.tell({ fromPty: null, to: to.handle, text: step.prompt });
+      const sent = await this.messages.tell({ fromPty: null, to: to.handle, text: step.prompt, fromPerson: true });
       if (!sent.ok) throw new Error(sent.error);
       return;
     }

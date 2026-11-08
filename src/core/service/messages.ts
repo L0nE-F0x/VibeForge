@@ -232,8 +232,13 @@ export class MessageDesk {
   // ---------------------------------------------------------------- tell
 
   /** `vibeforge tell <to> "…"`: a message from one CLI (or a terminal outside VibeForge) to another. */
-  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TellResult> {
-    if (!this.settings().on) return Promise.resolve({ ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." });
+  /**
+   * `fromPerson`: words a person sent through Maestro. They go in as typed, with no sender line, and
+   * aren't CLIs talking to each other: that setting and the message limit don't apply to them.
+   */
+  tell(input: { fromPty: string | null; to: string; text: string; wait?: boolean; timeoutMs?: number; gone?: AbortSignal; fromPerson?: boolean }): Promise<TellResult> {
+    const person = Boolean(input.fromPerson) && !input.fromPty;
+    if (!person && !this.settings().on) return Promise.resolve({ ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." });
     const list = this.list();
     const from = list.find((item) => item.ptyId === input.fromPty) ?? null;
     const found = resolveTarget(input.to, from?.ptyId ?? null, list);
@@ -249,9 +254,9 @@ export class MessageDesk {
     if (this.stopped.has(to.ptyId) || (from && this.stopped.has(from.ptyId))) {
       return Promise.resolve({ ok: false, error: `A person stopped the conversation with ${from && this.stopped.has(from.ptyId) ? "you" : to.label}. It starts again once they type in that terminal.` });
     }
-    const atLimit = this.atLimit(from?.ptyId ?? null, to.ptyId);
+    const atLimit = !person && this.atLimit(from?.ptyId ?? null, to.ptyId);
     const answer: Answer = input.wait ? "wait" : from ? "tell" : "none";
-    const body = messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.saveIfLong("messages", text) });
+    const body = person ? text : messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.saveIfLong("messages", text) });
     const note = () =>
       `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
 
