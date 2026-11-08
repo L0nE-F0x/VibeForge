@@ -922,6 +922,8 @@ supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
   // Every terminal died with the host. Record them, then bring the host back.
   for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
+  // Once quitting has begun the host stays down: a new one would start halfway through the quit.
+  if (quitting) return;
   const now = Date.now();
   hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
   if (hostCrashes.length > 3) {
@@ -931,7 +933,9 @@ supervisor.onCrash.add((message) => {
     return;
   }
   send("host-crash", message);
-  setTimeout(() => void startHost(), 1000);
+  setTimeout(() => {
+    if (!quitting) void startHost();
+  }, 1000);
 });
 
 function companionWire() {
