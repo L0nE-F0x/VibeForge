@@ -1,6 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
+import { pushOverlay } from "../overlays.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
 
@@ -271,16 +272,8 @@ export function SidePanel({
   const collapsed = narrow ? !floating : state.collapsed;
   useSelectionGlide(ref, !collapsed);
 
-  useEffect(() => {
-    if (!floating) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setFloating(false);
-    };
-    window.addEventListener("keydown", close, true);
-    return () => window.removeEventListener("keydown", close, true);
-  }, [floating]);
+  // Esc puts a floating panel away, unless a menu or dialog above it is the one open.
+  useEffect(() => (floating ? pushOverlay({ close: () => setFloating(false) }) : undefined), [floating]);
 
   // Picking a row in a floating panel puts it away again.
   const closeOnPick = (event: React.MouseEvent) => {

@@ -12,6 +12,7 @@ import { useAction, useNav, useOverlay } from "../state.js";
 import { SHOW_SHORTCUTS_EVENT } from "./Help.js";
 import { SETTINGS_SECTIONS } from "../settings-sections.js";
 import { FOLLOW, useThemes } from "./ThemePicker.js";
+import { useOverlayStack } from "./ui.js";
 
 // Ctrl+K: type part of a name and press Enter to land on any agent, chat, workspace, task,
 // routine, skill or view. Ctrl+Shift+K does the same from inside a terminal, where Ctrl+K
@@ -58,7 +59,10 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const runHits = useQuery(words.length >= RUN_SEARCH_MIN ? `switcher:runs:${words}` : null, ["runs"], () => call("runs.search", words, RUN_HITS)).data;
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   useOverlay(true);
+  // Esc closes it, and focus goes back to what had it (the terminal you were typing in).
+  useOverlayStack(box, onClose);
 
   const items = useMemo<Item[]>(() => {
     const agentName = (id: string | null) => agents?.find((agent) => agent.id === id)?.name;
@@ -171,11 +175,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   };
 
   const onKey = (event: React.KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    } else if (event.key === "ArrowDown" || (event.ctrlKey && event.key === "n")) {
+    if (event.key === "ArrowDown" || (event.ctrlKey && event.key === "n")) {
       event.preventDefault();
       setActive((index) => (listed.length ? (index + 1) % listed.length : 0));
     } else if (event.key === "ArrowUp" || (event.ctrlKey && event.key === "p")) {
@@ -189,7 +189,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <div className="scrim switcher-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="switcher" role="dialog" aria-modal aria-label={t("switcher.title")}>
+      <div ref={box} className="switcher" role="dialog" aria-modal aria-label={t("switcher.title")} tabIndex={-1}>
         <div className="switcher-input">
           <Search size={15} className="faint" />
           <input
