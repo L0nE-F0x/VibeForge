@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell } from "electron";
+import { app, clipboard, dialog, ipcMain, Menu, shell } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
-import { describeError, LogFile, PageErrors } from "../src/core/log.js";
+import { describeError, LogFile } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService } from "../src/core/team-service.js";
 import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
@@ -34,6 +34,7 @@ import { companionStatus, syncCompanion } from "./companion.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
+import { MainWindow } from "./window.js";
 
 const APP_ID = "dev.vibeforge.app";
 const REPO_URL = "https://github.com/L0nE-F0x/VibeForge";
@@ -68,9 +69,6 @@ const ctx = new MainContext({
   palette: resolvePalette("omarchy"),
 });
 const { send, svc, focusWindow, words, install } = ctx;
-/** Started by the login autostart entry: stay in the tray until opened. */
-const startHidden = process.argv.includes(HIDDEN_ARG);
-let trayNoticeShown = false;
 const notify = desktopNotifier(ctx);
 
 const host = deskHost(ctx, notify);
@@ -179,6 +177,14 @@ function refreshPalette(): void {
 
 const quit = new Quit(ctx, { talk, voice });
 const tray = new TrayController(ctx, () => void quit.fromTray());
+const mainWindow = new MainWindow(ctx, {
+  // Started by the login autostart entry: stay in the tray until opened.
+  startHidden: process.argv.includes(HIDDEN_ARG),
+  tray,
+  quit,
+  notify,
+  dock,
+});
 
 // ------------------------------------------------------------------ IPC
 
@@ -432,111 +438,6 @@ function registerIpc(): void {
   });
 }
 
-// ------------------------------------------------------------------ window
-
-/** What web pages may use: copying to the clipboard, as any browser lets them. */
-const WEB_PERMISSIONS = new Set(["clipboard-sanitized-write"]);
-/** VibeForge's own page also shows notifications. */
-const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
-
-/**
- * Electron grants every permission unless told otherwise, so a page in the browser dock could open
- * the microphone or read the clipboard without asking. Everything else is refused.
- */
-function guardPermissions(): void {
-  const allowed = (contents: Electron.WebContents | null, permission: string) =>
-    (ctx.win && contents === ctx.win.webContents ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
-  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(allowed(contents, permission)));
-  session.defaultSession.setPermissionCheckHandler((contents, permission) => allowed(contents, permission));
-}
-
-async function createWindow(): Promise<void> {
-  const icon = nativeImage.createFromPath(ctx.iconPath);
-  ctx.win = new BrowserWindow({
-    width: 1480,
-    height: 920,
-    // A tiling window manager will give this window whatever slice is left. These floors stay
-    // under a quarter of a laptop screen so the page actually becomes that size. The desk then
-    // pans sideways (see --screen-floor) instead of drawing past the edge of the tile.
-    minWidth: 280,
-    minHeight: 220,
-    title: "VibeForge",
-    backgroundColor: ctx.palette.background,
-    icon: icon.isEmpty() ? undefined : icon,
-    show: false,
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(ctx.appRoot, "dist-electron", "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
-  });
-  ctx.win.once("ready-to-show", () => {
-    if (!(startHidden && ctx.service?.getSettings().tray)) {
-      ctx.win?.show();
-      return;
-    }
-    // From the login autostart entry, the window waits in the tray, once something hosts one.
-    void tray.waitForHost(10_000).then((found) => {
-      if (found) return;
-      log.info("Started hidden, but nothing hosts the tray; showing the window");
-      ctx.win?.show();
-    });
-  });
-  ctx.win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-  // The window shows VibeForge's page and nothing else: a link or a script that points it at another
-  // page, a file:// one included, is refused, and web links open in the browser instead.
-  ctx.win.webContents.on("will-navigate", (event, url) => {
-    if (isAppPage(url, ctx.page)) return;
-    event.preventDefault();
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-  });
-  // Frames inside the page too (it has none of its own).
-  ctx.win.webContents.on("will-frame-navigate", (event) => {
-    if (event.isMainFrame || isAppPage(event.url, ctx.page)) return;
-    event.preventDefault();
-  });
-  ctx.win.on("close", (event) => {
-    if (ctx.quitting || !ctx.service) return;
-    if (tray.icon.shown && tray.host && ctx.service.getSettings().tray && ctx.service.getSettings().closeToTray) {
-      event.preventDefault();
-      ctx.win?.hide();
-      if (!trayNoticeShown && ctx.service.getSettings().notify) {
-        trayNoticeShown = true;
-        notify({ title: words.say("main.stillRunning"), body: words.say("main.stillRunningBody") });
-      }
-      return;
-    }
-    const live = ctx.service.listLive();
-    if (live.length === 0) return;
-    // The window stays while the question is up; a yes quits, which closes it.
-    event.preventDefault();
-    void quit.ask(live).then((yes) => {
-      if (!yes) return;
-      ctx.quitting = true;
-      app.quit();
-    });
-  });
-  const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
-  ctx.win.on("closed", () => {
-    pageErrors.flush();
-    dock.dispose();
-    ctx.win = null;
-  });
-  ctx.win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
-  ctx.win.webContents.on("console-message", (event) => {
-    if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
-  });
-  const page = ctx.page;
-  if (page.devUrl) await ctx.win.loadURL(page.devUrl);
-  else await ctx.win.loadFile(page.file);
-}
-
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
 async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unknown> {
   if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
@@ -594,7 +495,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire());
-    guardPermissions();
+    mainWindow.guardPermissions();
     registerIpc();
     tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
@@ -603,7 +504,7 @@ if (!app.requestSingleInstanceLock()) {
     tray.sync();
     tray.syncWords();
     const hostReady = hostLife.start();
-    await createWindow();
+    await mainWindow.create();
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig(roots.configRoot, (topics) => {

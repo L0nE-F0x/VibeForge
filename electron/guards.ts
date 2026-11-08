@@ -116,3 +116,16 @@ export function oneAtATime<A extends unknown[], T>(ask: (...args: A) => Promise<
     return pending;
   };
 }
+
+/** What web pages may use: copying to the clipboard, as any browser lets them. */
+const WEB_PERMISSIONS = new Set(["clipboard-sanitized-write"]);
+/** VibeForge's own page also shows notifications. */
+const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
+
+/**
+ * Electron grants every permission unless told otherwise, so a page in the browser dock could open
+ * the microphone or read the clipboard without asking. Everything else is refused.
+ */
+export function permissionAllowed(ownPage: boolean, permission: string): boolean {
+  return (ownPage ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
+}
