@@ -37,7 +37,7 @@ import {
   type Recorder,
 } from "../src/core/voice.js";
 import type { Dictation, DownloadKind, VoiceState, VoiceStatus } from "../src/shared/api.js";
-import { downloadFiles } from "./download.js";
+import { type Download, downloadFiles } from "./download.js";
 import { Speaker } from "./speech.js";
 
 const LEVEL_EVERY_MS = 60;
@@ -492,31 +492,33 @@ export class Voice {
 
   /** Downloads a whisper model or a Piper voice from Hugging Face; progress arrives as status changes. */
   startDownload(kind: DownloadKind, id: string): void {
-    const files =
+    const files: Download[] | null =
       kind === "model"
         ? (() => {
             const choice = MODEL_CATALOG.find((item) => item.id === id);
-            return choice ? { mb: choice.mb, list: [{ url: modelUrl(choice), target: path.join(this.modelDir(), choice.file) }] } : null;
+            return choice ? [{ url: modelUrl(choice), target: path.join(this.modelDir(), choice.file), bytes: choice.bytes, sha256: choice.sha256 }] : null;
           })()
         : (() => {
             const choice = VOICE_CATALOG.find((item) => item.id === id);
             if (!choice) return null;
             const urls = voiceUrls(choice);
             const base = path.join(this.voiceDir(), `${choice.id}.onnx`);
-            return { mb: choice.mb, list: [{ url: urls.model, target: base }, { url: urls.config, target: `${base}.json` }] };
+            return [
+              { url: urls.model, target: base, ...choice.model },
+              { url: urls.config, target: `${base}.json`, ...choice.config },
+            ];
           })();
     if (!files) throw new Error(`Unknown ${kind} ${id}`);
     if (this.download) throw new Error("Something is already downloading.");
     const abort = new AbortController();
-    const download = { kind, id, received: 0, total: files.mb * 1_000_000, abort };
+    const download = { kind, id, received: 0, total: files.reduce((sum, file) => sum + file.bytes, 0), abort };
     this.download = download;
     this.downloadError = null;
     this.opts.changed();
     let lastChanged = 0;
     this.opts.log.info(`Voice: downloading ${kind} ${id}`);
-    void downloadFiles(files.list, {
+    void downloadFiles(files, {
       signal: abort.signal,
-      expected: download.total,
       progress: (received, total) => {
         download.received = received;
         download.total = total;

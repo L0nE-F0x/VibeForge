@@ -955,6 +955,7 @@ export const en = {
   "core.noWhisper": "whisper.cpp is not installed. Settings → Voice shows how to add it.",
   "core.stillTranscribing": "Still turning the last recording into text.",
   "core.downloading": "Something is already downloading.",
+  "core.downloadMismatch": "{name} is not the file VibeForge expected (its size or checksum differs), so it was not kept.",
   "core.micUnreadable": "The microphone could not be read: {error}",
   "core.whisperSlow": "whisper-server did not start in time.",
   "core.ghMissing": "The GitHub CLI (gh) is not installed.",

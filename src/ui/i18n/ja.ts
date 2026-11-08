@@ -943,6 +943,7 @@ export const ja: Catalog = {
   "core.noWhisper": "whisper.cpp がインストールされていません。設定 → 音声 に追加方法があります。",
   "core.stillTranscribing": "前回の録音をまだ文字にしています。",
   "core.downloading": "すでに何かをダウンロード中です。",
+  "core.downloadMismatch": "{name} は VibeForge が想定したファイルではありません（サイズかチェックサムが違います）。そのため保存しませんでした。",
   "core.micUnreadable": "マイクを読み取れませんでした：{error}",
   "core.whisperSlow": "whisper-server が時間内に起動しませんでした。",
   "core.ghMissing": "GitHub CLI（gh）がインストールされていません。",

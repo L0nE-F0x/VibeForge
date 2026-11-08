@@ -943,6 +943,7 @@ export const zh: Catalog = {
   "core.noWhisper": "未安装 whisper.cpp。“设置 → 语音”中有添加方法。",
   "core.stillTranscribing": "仍在将上一段录音转为文字。",
   "core.downloading": "已有内容正在下载。",
+  "core.downloadMismatch": "{name} 不是 VibeForge 预期的文件（大小或校验和不符），因此没有保留。",
   "core.micUnreadable": "无法读取麦克风：{error}",
   "core.whisperSlow": "whisper-server 未能及时启动。",
   "core.ghMissing": "未安装 GitHub CLI（gh）。",

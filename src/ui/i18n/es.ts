@@ -942,6 +942,7 @@ export const es: Catalog = {
   "core.noWhisper": "whisper.cpp no está instalado. Ajustes → Voz explica cómo añadirlo.",
   "core.stillTranscribing": "Todavía se está convirtiendo en texto la última grabación.",
   "core.downloading": "Ya se está descargando algo.",
+  "core.downloadMismatch": "{name} no es el archivo que VibeForge esperaba (su tamaño o su suma de comprobación no coinciden), así que no se guardó.",
   "core.micUnreadable": "No se pudo leer el micrófono: {error}",
   "core.whisperSlow": "whisper-server no arrancó a tiempo.",
   "core.ghMissing": "La CLI de GitHub (gh) no está instalada.",

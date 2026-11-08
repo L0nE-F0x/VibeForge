@@ -942,6 +942,7 @@ export const de: Catalog = {
   "core.noWhisper": "whisper.cpp ist nicht installiert. Einstellungen → Stimme zeigt, wie du es hinzufügst.",
   "core.stillTranscribing": "Die letzte Aufnahme wird noch in Text umgewandelt.",
   "core.downloading": "Es wird bereits etwas heruntergeladen.",
+  "core.downloadMismatch": "{name} ist nicht die Datei, die VibeForge erwartet hat (Größe oder Prüfsumme weichen ab), deshalb wurde sie nicht behalten.",
   "core.micUnreadable": "Das Mikrofon ließ sich nicht lesen: {error}",
   "core.whisperSlow": "whisper-server ist nicht rechtzeitig gestartet.",
   "core.ghMissing": "Die GitHub-CLI (gh) ist nicht installiert.",
