@@ -32,12 +32,12 @@ Anything that goes over the network stays off until you turn it on:
 - Writing or assigning a task starts nothing. **Execute** does.
 - Maestro shows a plan as a card that waits for **Go**. **Just go** is a setting you choose.
 - Dictated words land in the box or terminal and wait for you to press Enter.
-- Work done in a task's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
+- Work done in a task's or Maestro's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
 - A task one CLI hands another waits for you under **Ask first**, the default. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
 
 ## Undo instead of "are you sure?"
 
-Deleting a chat, task, skill or routine happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>. VibeForge asks first only when something still running would be stopped, or work would be lost for good. A task that finds its folder busy waits its turn and starts on its own, instead of refusing.
+Deleting an agent, chat, task, skill or routine, or discarding a copy, happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>. VibeForge asks first only when something still running would be stopped, or work would be lost for good. A task that finds its folder busy waits its turn and starts on its own, instead of refusing.
 
 ## One engine per agent
 
