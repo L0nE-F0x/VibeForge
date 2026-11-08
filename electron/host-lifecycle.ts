@@ -124,14 +124,17 @@ export class HostLifecycle {
     supervisor.onExit.add((event) => {
       log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
       send("pty-exit", event);
-      void ctx.service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => this.parts.talk.exited(event.ptyId));
+      this.ended(event.ptyId, event.exitCode, event.signal);
     });
     supervisor.onProgram.add((event) => ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
     supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
     supervisor.onCrash.add((message) => {
       log.error(`The terminal host stopped: ${message}`);
       // Every terminal died with the host. Record them, then bring the host back.
-      for (const session of ctx.service?.listLive() ?? []) void ctx.service?.onPtyExit(session.ptyId, null, null);
+      for (const session of ctx.service?.listLive() ?? []) {
+        log.info(`Terminal ${session.ptyId} ended (the terminal host stopped)`);
+        this.ended(session.ptyId, null, null);
+      }
       // Once quitting has begun the host stays down: a new one would start halfway through the quit.
       if (ctx.quitting) return;
       const count = this.crashes.add(Date.now());
@@ -146,5 +149,10 @@ export class HostLifecycle {
         if (!ctx.quitting) void this.start();
       }, 1000);
     });
+  }
+
+  /** A terminal is over, however it ended: the core records it, then a spoken-answer wait on it ends. */
+  private ended(ptyId: string, exitCode: number | null, signal: number | null): void {
+    void this.ctx.service?.onPtyExit(ptyId, exitCode, signal).then(() => this.parts.talk.exited(ptyId));
   }
 }
