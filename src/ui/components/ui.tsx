@@ -22,7 +22,6 @@ import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
-import { Rich } from "../i18n/Rich.js";
 import { pushOverlay, returnFocus } from "../overlays.js";
 import { useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
 import { tipProps } from "./Tooltip.js";
@@ -674,10 +673,7 @@ export function Toasts() {
 export function ConfirmDialog() {
   const t = useT();
   const { request, settle } = useConfirmState();
-  const [typed, setTyped] = useState("");
-  useEffect(() => setTyped(""), [request]);
   if (!request) return null;
-  const blocked = Boolean(request.typeToConfirm) && typed.trim() !== request.typeToConfirm;
   return (
     <Modal
       title={request.title}
@@ -688,25 +684,13 @@ export function ConfirmDialog() {
           <Button variant="ghost" onClick={() => settle(false)}>
             {t("common.cancel")}
           </Button>
-          <Button variant={request.danger ? "danger" : "primary"} disabled={blocked} onClick={() => settle(true)} autoFocus={!request.typeToConfirm}>
+          <Button variant={request.danger ? "danger" : "primary"} onClick={() => settle(true)} autoFocus>
             {request.confirm ?? t("common.continue")}
           </Button>
         </>
       }
     >
       {request.body && <div className="muted" style={{ lineHeight: 1.55 }}>{request.body}</div>}
-      {request.typeToConfirm && (
-        <Field label={<Rich text={t("common.typeToConfirm", { name: request.typeToConfirm })} />}>
-          <Input
-            autoFocus
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !blocked) settle(true);
-            }}
-          />
-        </Field>
-      )}
     </Modal>
   );
 }

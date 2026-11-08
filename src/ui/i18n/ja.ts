@@ -963,7 +963,6 @@ export const ja: Catalog = {
   "status.failed": "失敗",
   "status.exit": "終了コード {code}",
   "common.secretNote": "パスワード、キー、トークンは書かないでください。この文章はそのまま CLI に渡されます。",
-  "common.typeToConfirm": "確認のため **{name}** と入力",
   "common.failed": "うまくいきませんでした",
   "common.copy": "コピー",
   "app.views": "ビュー",

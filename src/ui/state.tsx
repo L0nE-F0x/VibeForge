@@ -333,8 +333,6 @@ export interface ConfirmRequest {
   body?: ReactNode;
   confirm?: string;
   danger?: boolean;
-  /** Ask the person to type this before confirming. */
-  typeToConfirm?: string;
 }
 
 type PendingConfirm = ConfirmRequest & { resolve: (ok: boolean) => void };

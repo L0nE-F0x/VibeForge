@@ -975,7 +975,6 @@ export const en = {
   "status.failed": "Failed",
   "status.exit": "Exit {code}",
   "common.secretNote": "Don't put passwords, keys or tokens here. This text is handed to the CLI as plain text.",
-  "common.typeToConfirm": "Type **{name}** to confirm",
   "common.failed": "That did not work",
   "common.copy": "Copy",
   "app.views": "Views",

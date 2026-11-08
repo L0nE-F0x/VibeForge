@@ -962,7 +962,6 @@ export const de: Catalog = {
   "status.failed": "Fehlgeschlagen",
   "status.exit": "Exit {code}",
   "common.secretNote": "Keine Passwörter, Schlüssel oder Tokens hier eintragen. Dieser Text geht als Klartext an die CLI.",
-  "common.typeToConfirm": "Tippe **{name}** zur Bestätigung",
   "common.failed": "Das hat nicht geklappt",
   "common.copy": "Kopieren",
   "app.views": "Ansichten",

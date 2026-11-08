@@ -963,7 +963,6 @@ export const zh: Catalog = {
   "status.failed": "失败",
   "status.exit": "退出码 {code}",
   "common.secretNote": "不要在这里填写密码、密钥或令牌。这段文字会以明文交给 CLI。",
-  "common.typeToConfirm": "输入 **{name}** 以确认",
   "common.failed": "操作未成功",
   "common.copy": "复制",
   "app.views": "视图",

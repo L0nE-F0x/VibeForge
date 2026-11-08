@@ -963,7 +963,6 @@ export const fr: Catalog = {
   "status.failed": "Échouée",
   "status.exit": "Sortie {code}",
   "common.secretNote": "Ne mettez ni mots de passe, ni clés, ni jetons ici. Ce texte est transmis à la CLI en clair.",
-  "common.typeToConfirm": "Tapez **{name}** pour confirmer",
   "common.failed": "Cela n'a pas fonctionné",
   "common.copy": "Copier",
   "app.views": "Vues",
