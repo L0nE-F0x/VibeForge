@@ -23,18 +23,19 @@ import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Skeleton } from "../components/ui.js";
 import { boxOf, clipBox } from "../floating.js";
-import { t as translate, useT } from "../i18n/index.js";
+import { useT } from "../i18n/index.js";
 import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
 
 // ------------------------------------------------------------------ split layout
 
+/** `onRatio` follows a divider as it moves, then once more with `done` when it is let go or reset. */
 export function SplitView({
   node,
   onRatio,
   renderPane,
 }: {
   node: LayoutNode;
-  onRatio: (path: string, ratio: number) => void;
+  onRatio: (path: string, ratio: number, done: boolean) => void;
   renderPane: (pane: Extract<LayoutNode, { kind: "pane" }>) => ReactNode;
   path?: string;
 }) {
@@ -49,7 +50,7 @@ function SplitNode({
 }: {
   node: LayoutNode;
   path: string;
-  onRatio: (path: string, ratio: number) => void;
+  onRatio: (path: string, ratio: number, done: boolean) => void;
   renderPane: (pane: Extract<LayoutNode, { kind: "pane" }>) => ReactNode;
 }) {
   const t = useT();
@@ -61,17 +62,22 @@ function SplitNode({
     if (!box) return;
     event.preventDefault();
     setDragging(true);
+    let last: number | null = null;
     const move = (moveEvent: PointerEvent) => {
       const ratio = node.dir === "row" ? (moveEvent.clientX - box.left) / box.width : (moveEvent.clientY - box.top) / box.height;
-      onRatio(path, Math.min(0.85, Math.max(0.15, ratio)));
+      last = Math.min(0.85, Math.max(0.15, ratio));
+      onRatio(path, last, false);
     };
     const up = () => {
       setDragging(false);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (last !== null) onRatio(path, last, true);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
   return (
     <div ref={ref} className={`split dir-${node.dir}`}>
@@ -81,7 +87,7 @@ function SplitNode({
       <div
         className={`divider${dragging ? " dragging" : ""}`}
         onPointerDown={start}
-        onDoubleClick={() => onRatio(path, 0.5)}
+        onDoubleClick={() => onRatio(path, 0.5, true)}
         {...tipProps(t("split.resize"))}
       />
       <div className="split-cell" style={{ flex: `${1 - node.ratio} 1 0` }}>
@@ -117,7 +123,7 @@ function TreeLevel({
     };
   }, [dir, refreshKey]);
   if (!nodes) return depth === 0 ? <Skeleton rows={5} /> : null;
-  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{translate("files.empty")}</div>;
+  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{t("files.empty")}</div>;
   return (
     <>
       {nodes.map((node) => {
@@ -399,7 +405,7 @@ export function DockPanel({
       try {
         onUrl(workspaceId, next);
       } catch (error) {
-        fail(error, "That URL did not work");
+        fail(error, t("code.urlFailed"));
       }
     } else void call("dock.command", "reload");
   };
@@ -422,6 +428,7 @@ export function DockPanel({
         />
         <Input
           value={draft}
+          aria-label={t("dock.address")}
           placeholder="http://127.0.0.1:5173"
           onChange={(event) => setDraft(event.target.value)}
           onFocus={() => {

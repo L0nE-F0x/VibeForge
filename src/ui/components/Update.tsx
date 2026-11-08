@@ -128,7 +128,7 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
   );
 
   return (
-    <Modal title={t("updates.sheetTitle")} icon={Download} wide onClose={() => !running && onClose()} footer={footer}>
+    <Modal title={t("updates.sheetTitle")} icon={Download} wide terminal={Boolean(ptyId)} onClose={() => !running && onClose()} footer={footer}>
       <Notice tone={info.error ? "bad" : info.available ? "accent" : undefined}>
         {updateStatus(info, t)} {checkedAt(info, t)}
       </Notice>

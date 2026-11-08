@@ -7,7 +7,7 @@ import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from 
 import { usePtyAttention } from "../attention.js";
 import { coreText } from "../core-text.js";
 import { Composer } from "../components/Session.js";
-import { Button, Chip, Empty, Logo, Segmented, Select, Spinner } from "../components/ui.js";
+import { Button, Chip, Empty, Logo, Segmented, Select, Spinner, useOverlayStack } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
@@ -124,19 +124,13 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   const t = useT();
   const { go } = useNav();
   const view = useOrchestrator().data;
+  const box = useRef<HTMLDivElement>(null);
   useOverlay(true);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Esc closes it, and focus goes back to what had it (the terminal you were typing in).
+  useOverlayStack(box, onClose);
   return createPortal(
     <div className="scrim switcher-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="switcher orch-bar" role="dialog" aria-modal aria-label={t("orch.title")}>
+      <div ref={box} className="switcher orch-bar" role="dialog" aria-modal aria-label={t("orch.title")} tabIndex={-1}>
         <div className="orch-bar-head">
           <Workflow size={15} className="accent-text" />
           <strong>{t("orch.title")}</strong>

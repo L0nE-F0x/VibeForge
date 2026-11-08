@@ -44,13 +44,6 @@
   pointer-events: none;
 }
 
-.term-status {
-  position: absolute;
-  right: 12px;
-  bottom: 10px;
-  z-index: 3;
-}
-
 /* A chat: its header with every control, over the session. */
 .session-wrap {
   flex: 1;

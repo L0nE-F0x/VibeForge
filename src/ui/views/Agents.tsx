@@ -148,7 +148,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                 key={agent.id}
                 type="button"
                 className={`row${wants(agent.id) ? " needs-you" : ""}`}
-                aria-selected={agent.id === selected?.id}
+                aria-current={agent.id === selected?.id || undefined}
                 onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
               >
                 <Avatar name={agent.name} />
@@ -405,13 +405,13 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         }
       >
         <div className="list-scroll">
-          <button type="button" className="row" aria-selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+          <button type="button" className="row" aria-current={!chat || undefined} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
             <MessageSquarePlus size={15} className="accent-text" />
             <span className="row-title">{t("agents.newChat")}</span>
           </button>
           {chats.length > 0 && <div className="list-label">{t("agents.recent")}</div>}
           {chats.map((item) => (
-            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-selected={item.id === chat?.id} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
+            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-current={item.id === chat?.id || undefined} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
               <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{item.title}</span>

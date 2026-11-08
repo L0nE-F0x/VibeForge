@@ -1,6 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
+import { pushOverlay } from "../overlays.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
 
@@ -81,7 +82,8 @@ function useSelectionGlide(ref: React.RefObject<HTMLElement | null>, enabled: bo
   useEffect(() => {
     const root = ref.current;
     if (!root || !enabled || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const find = () => root.querySelector<HTMLElement>('.list-scroll [aria-selected="true"]');
+    // A list's buttons mark the open one with aria-current; options and tabs with aria-selected.
+    const find = () => root.querySelector<HTMLElement>('.list-scroll :is([aria-selected="true"], [aria-current="true"])');
     let last = find();
     const observer = new MutationObserver(() => {
       const next = find();
@@ -89,7 +91,7 @@ function useSelectionGlide(ref: React.RefObject<HTMLElement | null>, enabled: bo
       last = next;
       if (next && prev && next !== prev && prev.isConnected) glide(prev, next);
     });
-    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected"] });
+    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected", "aria-current"] });
     return () => observer.disconnect();
   }, [ref, enabled]);
 }
@@ -271,16 +273,8 @@ export function SidePanel({
   const collapsed = narrow ? !floating : state.collapsed;
   useSelectionGlide(ref, !collapsed);
 
-  useEffect(() => {
-    if (!floating) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setFloating(false);
-    };
-    window.addEventListener("keydown", close, true);
-    return () => window.removeEventListener("keydown", close, true);
-  }, [floating]);
+  // Esc puts a floating panel away, unless a menu or dialog above it is the one open.
+  useEffect(() => (floating ? pushOverlay({ close: () => setFloating(false) }) : undefined), [floating]);
 
   // Picking a row in a floating panel puts it away again.
   const closeOnPick = (event: React.MouseEvent) => {
@@ -362,7 +356,7 @@ export function StripItem({
   badge?: ReactNode;
 }) {
   return (
-    <button type="button" className="strip-item" aria-selected={selected} aria-current={selected || undefined} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
+    <button type="button" className="strip-item" aria-current={selected || undefined} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
       {children}
       {badge}
     </button>

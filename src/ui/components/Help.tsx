@@ -164,6 +164,7 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
       { keys: "Ctrl+Shift+B", text: "shortcuts.panel" },
       { keys: "Ctrl+Shift+/", text: "shortcuts.list" },
       { keys: "Esc", text: "shortcuts.closeDialog" },
+      { keys: "Shift+Esc", text: "shortcuts.closeFromTerminal" },
     ],
   },
   {

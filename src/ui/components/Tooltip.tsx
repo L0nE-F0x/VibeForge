@@ -33,6 +33,23 @@ function describe(element: HTMLElement): Tip {
   return { text: element.dataset.tip ?? "", kbd, rect: element.getBoundingClientRect(), side };
 }
 
+// While a tip shows, its element points at it with aria-describedby, so a screen reader reads it
+// after the element's name: its words when they aren't the name already, and its keys.
+const TIP_TEXT = "vf-tip-text";
+const TIP_KEYS = "vf-tip-keys";
+
+function describedBy(element: HTMLElement, ids: string[]): void {
+  const others = (element.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((id) => id && id !== TIP_TEXT && id !== TIP_KEYS);
+  const all = [...others, ...ids];
+  if (all.length) element.setAttribute("aria-describedby", all.join(" "));
+  else element.removeAttribute("aria-describedby");
+}
+
+function linkTip(element: HTMLElement, tip: Tip): void {
+  const named = element.getAttribute("aria-label")?.trim() === tip.text.trim();
+  describedBy(element, [...(named ? [] : [TIP_TEXT]), ...(tip.kbd.length ? [TIP_KEYS] : [])]);
+}
+
 export function TooltipLayer() {
   const [tip, setTip] = useState<Tip | null>(null);
   // A new tip renders off-screen first, so it is measured at its natural width.
@@ -47,16 +64,22 @@ export function TooltipLayer() {
   useEffect(() => {
     const hide = () => {
       window.clearTimeout(timer.current);
-      if (current.current) lastHidden.current = Date.now();
+      if (current.current) {
+        lastHidden.current = Date.now();
+        describedBy(current.current, []);
+      }
       current.current = null;
       setTip(null);
     };
     const show = (element: HTMLElement, immediate: boolean) => {
       window.clearTimeout(timer.current);
+      if (current.current && current.current !== element) describedBy(current.current, []);
       current.current = element;
       const reveal = () => {
         if (current.current !== element || !element.isConnected) return;
-        setTip(describe(element));
+        const next = describe(element);
+        linkTip(element, next);
+        setTip(next);
       };
       if (immediate) reveal();
       else timer.current = window.setTimeout(reveal, SHOW_DELAY);
@@ -111,9 +134,9 @@ export function TooltipLayer() {
   if (!tip) return null;
   return createPortal(
     <div ref={ref} className="tooltip" role="tooltip" style={box ? { left: box.left, top: box.top } : { left: -9999, top: -9999 }}>
-      <span>{tip.text}</span>
+      <span id={TIP_TEXT}>{tip.text}</span>
       {tip.kbd.length > 0 && (
-        <span className="tooltip-keys">
+        <span className="tooltip-keys" id={TIP_KEYS}>
           {tip.kbd.map((key) => (
             <kbd key={key}>{key}</kbd>
           ))}

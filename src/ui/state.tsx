@@ -337,32 +337,42 @@ export interface ConfirmRequest {
   typeToConfirm?: string;
 }
 
+type PendingConfirm = ConfirmRequest & { resolve: (ok: boolean) => void };
+
 interface Confirmer {
-  request: (ConfirmRequest & { resolve: (ok: boolean) => void }) | null;
+  request: PendingConfirm | null;
   ask: (request: ConfirmRequest) => Promise<boolean>;
   settle: (ok: boolean) => void;
+}
+
+/**
+ * One question on screen at a time. A second one takes its place and answers the first with
+ * "no", so whoever asked it isn't left waiting on a dialog that is gone.
+ */
+export function confirmSlot(show: (request: PendingConfirm | null) => void): Pick<Confirmer, "ask" | "settle"> {
+  let pending: PendingConfirm | null = null;
+  return {
+    ask: (next) =>
+      new Promise<boolean>((resolve) => {
+        const replaced = pending;
+        pending = { ...next, resolve };
+        show(pending);
+        replaced?.resolve(false);
+      }),
+    settle: (ok) => {
+      const answered = pending;
+      pending = null;
+      show(null);
+      answered?.resolve(ok);
+    },
+  };
 }
 
 const ConfirmContext = createContext<Confirmer | null>(null);
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<Confirmer["request"]>(null);
-  const ask = useCallback(
-    (next: ConfirmRequest) =>
-      new Promise<boolean>((resolve) => {
-        setRequest({ ...next, resolve });
-      }),
-    [],
-  );
-  const settle = useCallback(
-    (ok: boolean) => {
-      setRequest((current) => {
-        current?.resolve(ok);
-        return null;
-      });
-    },
-    [],
-  );
+  const [{ ask, settle }] = useState(() => confirmSlot(setRequest));
   const value = useMemo(() => ({ request, ask, settle }), [request, ask, settle]);
   return <ConfirmContext.Provider value={value}>{children}</ConfirmContext.Provider>;
 }
