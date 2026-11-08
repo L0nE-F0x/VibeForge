@@ -6,11 +6,13 @@
   publish = "."
   command = "echo 'static site, nothing to build'"
 
-# `curl -fsSL https://<this site>/install | bash` serves the installer from the repo.
+# `curl -fsSL https://<this site>/install | bash` gets the installer attached to the latest release
+# (release.yml), so a change to scripts/install.sh on main reaches people only once it is released.
+# curl -L and the in-app Update both follow the redirect.
 [[redirects]]
   from = "/install"
-  to = "https://raw.githubusercontent.com/L0nE-F0x/VibeForge/main/scripts/install.sh"
-  status = 200
+  to = "https://github.com/L0nE-F0x/VibeForge/releases/latest/download/install.sh"
+  status = 302
   force = true
 
 [[headers]]
