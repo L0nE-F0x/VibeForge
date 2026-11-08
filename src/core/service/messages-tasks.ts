@@ -68,6 +68,22 @@ export class HandedTasks {
     this.handedSince.delete(ptyId);
   }
 
+  /**
+   * Lets go of tasks that are gone and of terminals that ended: nothing asks about them again, and
+   * these lists would otherwise grow for as long as VibeForge runs. Done tasks stay while their
+   * terminal does, as one can still be executed again or applied from its copy. Run as a task is
+   * handed out, the only time the lists grow, so a deleted task's Undo has until the next one.
+   */
+  private forget(): void {
+    for (const [taskId, asker] of [...this.handed]) {
+      if (this.core.live.has(asker) && this.core.store.getTask(taskId)) continue;
+      this.handed.delete(taskId);
+      this.rewatched.delete(taskId);
+    }
+    for (const [taskId, asker] of [...this.proposed]) if (!this.core.live.has(asker)) this.proposed.delete(taskId);
+    for (const asker of [...this.handedSince.keys()]) if (!this.core.live.has(asker)) this.handedSince.delete(asker);
+  }
+
   /** `vibeforge task <agent> "…"`: a task for a VibeForge agent, in its own copy so it never works in the sender's folder. */
   async handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
     if (!this.settings().on) return { ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." };
@@ -102,6 +118,7 @@ export class HandedTasks {
     this.core.store.writeTask(task);
     this.core.emit("tasks");
     const asker = from?.ptyId ?? null;
+    this.forget();
     if (asker) this.handed.set(task.id, asker);
     const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
     if (input.start === false) return { ok: true, taskId: task.id, title, started: false, note: "It waits in To do until a person executes it." };

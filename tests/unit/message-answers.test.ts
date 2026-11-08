@@ -1,6 +1,8 @@
+import { getEventListeners } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SETTLE_MS } from "../../src/core/agent-talk.js";
 import { setup } from "./fixtures/service-harness.js";
 
 // Waiting for an answer with `tell --wait`: the cases agent-talk.test.ts doesn't reach.
@@ -51,6 +53,23 @@ describe("waiting for an answer", () => {
     const long = `\x07${"word ".repeat(2000)}`;
     const saved = /saved at (\S+)\. Read it first\./.exec(await late(long))?.[1] ?? "";
     expect(fs.readFileSync(saved, "utf8")).toBe(`${"word ".repeat(2000).trim()}\n`);
+    ctx.svc.close();
+  });
+
+  it("lets go of the sender's signal once the answer is in", async () => {
+    const { ctx, pass, a, b } = await clis();
+    ctx.host.screen = async () => "pasty> [Message from Argy]\n\nThe answer is 42.\n\npasty> ";
+    const gone = new AbortController();
+    const asked = ctx.svc.tell({ fromPty: a, to: "pasty", text: "What is it?", wait: true, gone: gone.signal });
+    await ctx.svc.pumpMessages();
+    expect(getEventListeners(gone.signal, "abort")).toHaveLength(1);
+    ctx.svc.onPtyActivity(b, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(b, false);
+    pass(SETTLE_MS + 100);
+    await ctx.svc.pumpMessages();
+    expect(await asked).toMatchObject({ ok: true, reply: expect.stringContaining("The answer is 42.") });
+    expect(getEventListeners(gone.signal, "abort")).toHaveLength(0);
     ctx.svc.close();
   });
 });

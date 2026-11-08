@@ -83,4 +83,23 @@ describe("handed-out tasks", () => {
     expect(fs.readdirSync(repo).sort()).toEqual([".git", "a.txt", "c.txt", "d.txt"]);
     ctx.svc.close();
   });
+
+  it("forgets tasks that are gone and terminals that ended, so what it keeps doesn't grow while VibeForge runs", async () => {
+    const { ctx, workspace, sender } = await team();
+    // What it keeps isn't shown anywhere, so this looks inside.
+    const kept = () => {
+      const desk = (ctx.svc as unknown as { messages: { handed: Record<"handed" | "proposed" | "handedSince", Map<string, unknown>> } }).messages.handed;
+      return { handed: [...desk.handed.keys()], proposed: [...desk.proposed.keys()], handedSince: [...desk.handedSince.keys()] };
+    };
+    const held = await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Held" });
+    const later = await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Later", start: false });
+    expect(kept()).toEqual({ handed: [held.ok && held.taskId, later.ok && later.taskId], proposed: [held.ok && held.taskId], handedSince: [sender] });
+    // One task is deleted, and the terminal that handed them out ends.
+    await ctx.svc.deleteTask(later.ok ? later.taskId : "");
+    await ctx.exit(sender);
+    const other = (await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" })).ptyId;
+    const next = await ctx.svc.handTask({ fromPty: other, agent: "helper", text: "Next" });
+    expect(kept()).toEqual({ handed: [next.ok && next.taskId], proposed: [next.ok && next.taskId], handedSince: [other] });
+    ctx.svc.close();
+  });
 });
