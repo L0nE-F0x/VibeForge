@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,11 +6,10 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, sess
 import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
-import { gitHead, snapshotGit } from "../src/core/vcs.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile, PageErrors } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
-import { TeamService, type DeskHost } from "../src/core/team-service.js";
+import { TeamService } from "../src/core/team-service.js";
 import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
@@ -21,16 +20,15 @@ import type { Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { watchConfig } from "./config-watch.js";
 import { Dock } from "./dock.js";
+import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { desktopNotifier } from "./notify.js";
 import { MainContext } from "./main-context.js";
 import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
-import { childEnv } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
-import { lastReply, watchReply } from "./replies.js";
 import { listenControl } from "./control.js";
 import { MainText } from "../src/core/main-text.js";
 import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
@@ -80,32 +78,7 @@ let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
 const notify = desktopNotifier(ctx);
 
-const host: DeskHost = {
-  spawn: async (request) => {
-    // The program's name only: the rest of the command line can hold a prompt.
-    const program = path.basename(request.argv[0] ?? "?");
-    try {
-      const spawned = await supervisor.spawn(request);
-      log.info(`Terminal ${spawned.ptyId} started: ${program} in ${request.cwd}`);
-      return spawned;
-    } catch (error) {
-      log.error(`Could not start ${program} in ${request.cwd}: ${describeError(error)}`);
-      throw error;
-    }
-  },
-  send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
-  screen: async (ptyId) => (await supervisor.snapshot(ptyId)).plain,
-  watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
-  lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
-  kill: (ptyId) => supervisor.kill(ptyId),
-  record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
-  resolveBin: (bin) => whichBin(bin),
-  // The core speaks English; its notes are put in the window's language here.
-  notify: (note) => notify({ ...note, body: words.coreText(note.body) }),
-  finished: (run) => send("run-finished", run),
-  snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
-  gitHead: (cwd) => gitHead(cwd),
-};
+const host = deskHost(ctx, notify);
 
 const dock = new Dock(
   () => ctx.win,
@@ -366,7 +339,7 @@ function handlers(): Handlers {
       dataRoot: roots.dataRoot,
       home: os.homedir(),
       hostRunning: supervisor.running,
-      hostError: supervisor.running ? null : hostError,
+      hostError: supervisor.running ? null : hostLife.error,
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
@@ -713,9 +686,6 @@ async function createWindow(): Promise<void> {
   else await ctx.win.loadFile(page.file);
 }
 
-/** Why the terminal host is down, for a page that loads after it happened. */
-let hostError: string | null = null;
-
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
 async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unknown> {
   if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
@@ -725,78 +695,8 @@ async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unkn
   return ctx.service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
 }
 
-/**
- * What every terminal starts with: the control socket, and `vibeforge` on PATH (a link to
- * scripts/vibeforge in the data folder), so a CLI in any terminal can run `vibeforge tell`.
- */
-function terminalEnv(): NodeJS.ProcessEnv {
-  const env = childEnv(process.env);
-  env.VIBEFORGE_SOCKET = voice.status().controlSocket;
-  const bin = path.join(roots.dataRoot, "bin");
-  const target = path.join(ctx.appRoot, "scripts", "vibeforge");
-  try {
-    fs.mkdirSync(bin, { recursive: true });
-    const link = path.join(bin, "vibeforge");
-    let current: string | null = null;
-    try {
-      current = fs.readlinkSync(link);
-    } catch {
-      /* not made yet */
-    }
-    if (fs.existsSync(target) && current !== target) {
-      fs.rmSync(link, { force: true });
-      fs.symlinkSync(target, link);
-    }
-    env.PATH = `${bin}${path.delimiter}${env.PATH ?? ""}`;
-  } catch (error) {
-    log.warn(`Could not put vibeforge on the terminals' PATH: ${describeError(error)}`);
-  }
-  return env;
-}
-
-async function startHost(): Promise<void> {
-  try {
-    await supervisor.start(ctx.appRoot, terminalEnv());
-    hostError = null;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(message);
-    log.error(`The terminal host did not start: ${message}`);
-    hostError = message;
-    send("host-crash", message);
-  }
-}
-
-supervisor.onData.add((event) => send("pty-data", event));
-supervisor.onExit.add((event) => {
-  log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
-  send("pty-exit", event);
-  void ctx.service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
-});
-supervisor.onProgram.add((event) => ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
-supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
-/** When the host last crashed, so one that keeps crashing isn't brought back forever. */
-let hostCrashes: number[] = [];
-
-supervisor.onCrash.add((message) => {
-  log.error(`The terminal host stopped: ${message}`);
-  // Every terminal died with the host. Record them, then bring the host back.
-  for (const session of ctx.service?.listLive() ?? []) void ctx.service?.onPtyExit(session.ptyId, null, null);
-  // Once quitting has begun the host stays down: a new one would start halfway through the quit.
-  if (ctx.quitting) return;
-  const now = Date.now();
-  hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
-  if (hostCrashes.length > 3) {
-    log.error("The terminal host keeps stopping; it stays off until VibeForge restarts");
-    hostError = `${message} It stopped ${hostCrashes.length} times in five minutes, so it stays off: restart VibeForge.`;
-    send("host-crash", hostError);
-    return;
-  }
-  send("host-crash", message);
-  setTimeout(() => {
-    if (!ctx.quitting) void startHost();
-  }, 1000);
-});
+const hostLife = new HostLifecycle(ctx, { voice, talk });
+hostLife.wire();
 
 function companionWire() {
   return {
@@ -897,7 +797,7 @@ if (!app.requestSingleInstanceLock()) {
     );
     syncTray();
     syncWords();
-    const hostReady = startHost();
+    const hostReady = hostLife.start();
     await createWindow();
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
