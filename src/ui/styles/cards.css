@@ -54,10 +54,10 @@
   background: var(--fg-3);
 }
 
+/* Its glow breathes on two layers (glow.css). */
 .dot.running {
+  position: relative;
   background: var(--accent);
-  box-shadow: var(--work-lit);
-  animation: ember-work 2.4s ease-in-out infinite;
 }
 
 .dot.exited {

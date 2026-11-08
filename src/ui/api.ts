@@ -43,6 +43,14 @@ export function useWindowFocused(): boolean {
   return focused;
 }
 
+/** Mark <html> with `unfocused` while the window doesn't have the keyboard: the glow holds still then. */
+export function markWindowFocus(): void {
+  const mark = () => document.documentElement.classList.toggle("unfocused", !document.hasFocus());
+  mark();
+  window.addEventListener("focus", mark);
+  window.addEventListener("blur", mark);
+}
+
 export function pathForFile(file: File): string {
   try {
     return bridge().pathForFile(file);

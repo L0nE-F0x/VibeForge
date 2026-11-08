@@ -31,14 +31,89 @@
   pointer-events: none;
 }
 
-@keyframes ember-breathe {
-  0%,
-  100% {
-    box-shadow: var(--ember-lit);
-  }
+/*
+ * Breathing without repainting: the bright and the dim shadow each sit still on a layer of their
+ * own (::after lit, ::before low) and only their opacity crossfades, which the compositor does
+ * alone. Animating box-shadow instead repainted the window every frame while a CLI ran.
+ */
+.dot.running,
+.ws-state:is(.working, .waiting),
+.rail-dot.waiting {
+  isolation: isolate;
+}
+
+/* Under the dot, as its own shadow was: a strip badge's outline stays on top. */
+.dot.running::before,
+.dot.running::after,
+.ws-state:is(.working, .waiting)::before,
+.ws-state:is(.working, .waiting)::after,
+.rail-dot.waiting::before,
+.rail-dot.waiting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.dot.running::before,
+.ws-state.working::before {
+  box-shadow: var(--work-low);
+  opacity: 0;
+  animation: ember-rise 2.4s ease-in-out infinite;
+}
+
+.dot.running::after,
+.ws-state.working::after {
+  box-shadow: var(--work-lit);
+  animation: ember-fall 2.4s ease-in-out infinite;
+}
+
+/* Waiting: dark while the dot itself flares, then breathing from lit. */
+.ws-state.waiting::before,
+.rail-dot.waiting::before {
+  box-shadow: var(--ember-low);
+  opacity: 0;
+  animation: ember-rise 2.2s ease-in-out 0.9s infinite;
+}
+
+.ws-state.waiting::after,
+.rail-dot.waiting::after {
+  box-shadow: var(--ember-lit);
+  animation: ember-hold 0.9s, ember-fall 2.2s ease-in-out 0.9s infinite;
+}
+
+/* From lit to dark and back, and the other way round: crossfaded, they breathe lit, low, lit. */
+@keyframes ember-fall {
   50% {
-    box-shadow: var(--ember-low);
+    opacity: 0;
   }
+}
+
+@keyframes ember-rise {
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ember-hold {
+  from,
+  to {
+    opacity: 0;
+  }
+}
+
+/* A window you aren't using holds its embers still, so it isn't repainted for nobody. */
+:root.unfocused :is(.dot.running, .ws-state.working)::before,
+:root.unfocused :is(.dot.running, .ws-state.working)::after,
+:root.unfocused :is(.ws-state.waiting, .rail-dot.waiting)::before,
+:root.unfocused .needs-you::before,
+:root.unfocused .rail-btn.wants-you > svg {
+  animation-play-state: paused;
+}
+
+:root.unfocused :is(.ws-state.waiting, .rail-dot.waiting)::after {
+  animation-play-state: running, paused;
 }
 
 @keyframes ember-flare {
@@ -49,16 +124,6 @@
   100% {
     box-shadow: var(--ember-lit);
     transform: none;
-  }
-}
-
-@keyframes ember-work {
-  0%,
-  100% {
-    box-shadow: var(--work-lit);
-  }
-  50% {
-    box-shadow: var(--work-low);
   }
 }
 
@@ -85,8 +150,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ws-state,
+  .ws-state::before,
+  .ws-state::after,
   .rail-dot,
+  .rail-dot::before,
+  .rail-dot::after,
   .dot,
+  .dot::before,
+  .dot::after,
   .needs-you::before,
   .rail-btn.wants-you > svg,
   .skeleton-head,
