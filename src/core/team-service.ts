@@ -252,7 +252,9 @@ export class TeamService extends ServiceCore {
 
   /** The live sessions for the window, each with who else is in its folder. */
   liveForView(): LiveSession[] {
-    return this.turns.withNeighbours().map((session) => ({ ...session, talk: this.messages.talkFor(session.ptyId) }));
+    const sessions = this.turns.withNeighbours();
+    const talk = this.messages.talkForEach(sessions.map((session) => session.ptyId));
+    return sessions.map((session) => ({ ...session, talk: talk.get(session.ptyId) ?? null }));
   }
 
   // ---------------------------------------------------------------- agents talking

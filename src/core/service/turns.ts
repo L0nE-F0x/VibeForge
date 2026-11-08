@@ -38,9 +38,12 @@ export class FolderTurns {
   private readonly queue = new Map<string, Turn>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private checking = false;
+  /** The workspaces' and agents' folders, read again only once either changes (not on every CLI going busy or quiet). */
+  private places: string[] | null = null;
 
   constructor(private readonly core: ServiceCore) {
     core.onChange((topics) => {
+      if (topics.includes("workspaces") || topics.includes("agents")) this.places = null;
       if (topics.includes("live")) void this.learnFolders();
     });
   }
@@ -73,9 +76,11 @@ export class FolderTurns {
 
   /** The live sessions, each with the other coding CLIs that share its folder. */
   withNeighbours(): LiveSession[] {
-    return this.core.listLive().map((session) => ({
+    const live = this.core.listLive();
+    const now = this.core.now().getTime();
+    return live.map((session) => ({
       ...session,
-      alsoHere: this.writersNow(sessionFolder(session), new Set([session.ptyId])).map((writer) => ({ ptyId: writer.ptyId, label: writer.label, agentId: writer.agentId })),
+      alsoHere: writersIn(live, sessionFolder(session), this.repos, now, new Set([session.ptyId])).map((writer) => ({ ptyId: writer.ptyId, label: writer.label, agentId: writer.agentId })),
     }));
   }
 
@@ -167,11 +172,11 @@ export class FolderTurns {
 
   /** Look up the repositories of folders that just appeared, so the views can say who overlaps. */
   private async learnFolders(): Promise<void> {
-    const places = [
-      ...this.core.listLive().map((session) => sessionFolder(session)),
+    this.places ??= [
       ...this.core.store.readWorkspaces().workspaces.map((workspace) => workspace.path),
       ...this.core.store.listAgents().flatMap((agent) => agent.places.slice(0, 1)),
     ];
+    const places = [...this.core.listLive().map((session) => sessionFolder(session)), ...this.places];
     const folders = [...new Set(places.map((folder) => path.resolve(folder)))];
     const unknown = folders.filter((folder) => !this.repos.has(folder));
     if (this.repos.size > 500) {

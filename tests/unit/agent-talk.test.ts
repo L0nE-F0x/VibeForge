@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { answerFromScreen, cleanText, Handles, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
 import { parseTalkRequest } from "../../src/core/control.js";
 import { LogFile } from "../../src/core/log.js";
@@ -408,6 +408,41 @@ describe("CLIs talking through VibeForge", () => {
     pass(4000);
     await ctx.svc.pumpMessages();
     expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, text: expect.stringContaining(path.join(ctx.dataRoot, "messages")) });
+    ctx.svc.close();
+  });
+
+  it("reads who is there once for the window's whole list, not once for each CLI in it", async () => {
+    const { ctx, pass, workspace, a, b } = await twoClis();
+    for (let n = 0; n < 6; n += 1) await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: n % 2 ? "argy" : "pasty" });
+    for (const name of ["Notes", "Docs"]) {
+      const agent = ctx.svc.saveAgent({ name, brief: "b", engine: "argy", places: [ctx.place] });
+      await ctx.svc.launchAgent(workspace.id, agent.id, null);
+    }
+    pass(6000);
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Hello" });
+    const reads = (["readEngineRows", "readSettings", "getAgent", "getRun"] as const).map((name) => [name, vi.spyOn(ctx.svc.store, name)] as const);
+    const live = ctx.svc.liveForView();
+    expect(live).toHaveLength(10);
+    expect(live.find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ with: ["Argy"], messages: 1 });
+    expect(Object.fromEntries(reads.map(([name, spy]) => [name, spy.mock.calls.length]))).toEqual({ readEngineRows: 1, readSettings: 1, getAgent: 2, getRun: 10 });
+    // Nothing going on between CLIs: nothing to read at all.
+    ctx.svc.stopTalk(a.ptyId);
+    for (const [, spy] of reads) spy.mockClear();
+    expect(ctx.svc.liveForView().every((item) => item.talk === null)).toBe(true);
+    expect(reads.every(([, spy]) => spy.mock.calls.length === 0)).toBe(true);
+
+    // Nor is every agent read again each time a CLI goes busy or quiet, only once one has changed.
+    const agents = vi.spyOn(ctx.svc.store, "listAgents");
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    for (const working of [true, false, true, false]) {
+      ctx.svc.onPtyActivity(b.ptyId, working);
+      await settle();
+    }
+    expect(agents).not.toHaveBeenCalled();
+    ctx.svc.saveAgent({ name: "Tests", brief: "b", engine: "argy", places: [ctx.place] });
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    await settle();
+    expect(agents).toHaveBeenCalledTimes(1);
     ctx.svc.close();
   });
 

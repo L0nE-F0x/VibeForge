@@ -28,7 +28,7 @@ import { createTask } from "../tasks.js";
 import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import { cwdAllowed } from "../places.js";
-import type { AgentTier, LiveSession, TalkState } from "../types.js";
+import type { AgentTier, EngineRow, LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
 import type { TaskDesk } from "./tasks.js";
 
@@ -183,21 +183,27 @@ export class MessageDesk {
 
   // ---------------------------------------------------------------- who is there
 
+  /** Every coding CLI that can be reached. The engines and each agent are read once for the lot, not once per CLI. */
   list(): Reachable[] {
+    const rows = this.core.store.readEngineRows();
+    const agents = new Map<string, string | null>();
     return reachable(
       [...this.core.live.values()],
       {
-        agent: (id) => this.core.store.getAgent(id)?.name ?? null,
-        engine: (session) => this.engineOf(session),
+        agent: (id) => {
+          if (!agents.has(id)) agents.set(id, this.core.store.getAgent(id)?.name ?? null);
+          return agents.get(id) ?? null;
+        },
+        engine: (session) => this.engineOf(session, rows),
       },
       this.handles,
     );
   }
 
-  private engineOf(session: LiveSession): { id: string; label: string; bin: string } | null {
+  private engineOf(session: LiveSession, rows: readonly EngineRow[] = this.core.store.readEngineRows()): { id: string; label: string; bin: string } | null {
     const id = session.programEngineId || (session.runId ? this.core.store.getRun(session.runId)?.engine : null) || null;
     if (!id) return null;
-    const row = this.core.store.readEngineRows().find((item) => item.id === id);
+    const row = rows.find((item) => item.id === id);
     return { id, label: row?.label ?? id, bin: row?.bin ?? id };
   }
 
@@ -734,7 +740,27 @@ export class MessageDesk {
 
   /** How a terminal is talking right now, for its pane. Null when it isn't. */
   talkFor(ptyId: string): TalkState | null {
+    return this.talkForEach([ptyId]).get(ptyId) ?? null;
+  }
+
+  /**
+   * How each of these terminals is talking, for the window's list of them. Who is there and the
+   * settings are read once for all of them: a refresh happens whenever any CLI goes busy or quiet.
+   */
+  talkForEach(ptyIds: readonly string[]): Map<string, TalkState | null> {
+    const out = new Map<string, TalkState | null>();
+    const busy = this.counts.size || this.pending.length || this.waiting.size || this.reviews.size || this.proposed.size;
+    if (!busy) {
+      for (const ptyId of ptyIds) out.set(ptyId, null);
+      return out;
+    }
     const list = this.list();
+    const max = this.settings().maxMessages;
+    for (const ptyId of ptyIds) out.set(ptyId, this.talkOf(ptyId, list, max));
+    return out;
+  }
+
+  private talkOf(ptyId: string, list: readonly Reachable[], max: number): TalkState | null {
     const name = (id: string) => list.find((item) => item.ptyId === id)?.label ?? null;
     const partners = new Map<string, number>();
     for (const [key, count] of this.counts) {
@@ -748,7 +774,6 @@ export class MessageDesk {
     const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
     const toStart = this.toStart(ptyId);
     if (!partners.size && !queued && !mine.length && !review && !toStart.length) return null;
-    const max = this.settings().maxMessages;
     return {
       with: [...partners.keys()].map(name).filter((label): label is string => Boolean(label)),
       messages: Math.max(0, ...partners.values()),
