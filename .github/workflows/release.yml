@@ -8,7 +8,8 @@ name: Release
 # published too; neither becomes "latest", which is what the installer and the in-app Update take.
 # Each release carries scripts/install.sh, the ready-made build the installer downloads
 # (vibeforge-<version>-linux-x64.tar.zst, from scripts/pack-release.mjs) and a SHA256SUMS for both.
-# The build is installed from its archive and smoke-tested from the installed copy before it is published.
+# The build is installed from its archive and smoke-tested from the installed copy before it is
+# published, as CI's smoke job does on every pull request.
 on:
   push:
     tags: ["v*.*.*"]
@@ -91,25 +92,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # npm ci, vite build, then only what the app runs (Electron, node-pty built here, dist, …).
-      - name: Pack the ready-made build
-        run: node scripts/pack-release.mjs assets
-      - name: The installer and the checksums
-        run: |
-          cp scripts/install.sh assets/install.sh
-          (cd assets && sha256sum install.sh vibeforge-*.tar.zst >SHA256SUMS)
-          cat assets/SHA256SUMS
-      # The way a person gets it: the installer downloads the archive (from these files, laid out
-      # like a release), checks it against SHA256SUMS and unpacks it into a scratch home. Then the
-      # installed copy's own smoke test runs, with this runner's Node as the terminals' Node.
-      - name: Install from the archive and smoke-test the installed copy
-        run: |
-          mkdir -p "$RUNNER_TEMP/releases/download" "$RUNNER_TEMP/home"
-          ln -s "$PWD/assets" "$RUNNER_TEMP/releases/download/$GITHUB_REF_NAME"
-          HOME="$RUNNER_TEMP/home" VIBEFORGE_RELEASES="file://$RUNNER_TEMP/releases" VIBEFORGE_VERSION="$GITHUB_REF_NAME" bash scripts/install.sh
-          app="$RUNNER_TEMP/home/.local/share/vibeforge-app"
-          test ! -e "$app/.git"
-          xvfb-run -a --server-args="-screen 0 1600x1000x24" node "$app/scripts/smoke.mjs"
+      # npm ci, vite build, then only what the app runs (Electron, node-pty built here, dist, …),
+      # with install.sh and SHA256SUMS beside it in assets/. Then the way a person gets it: the
+      # installer downloads the archive (laid out like a release), checks it against SHA256SUMS and
+      # unpacks it into a scratch home, and the installed copy's smoke test runs. CI's smoke job
+      # runs the same script on every pull request (scripts/build-release.sh).
+      - name: Pack the ready-made build, install it and smoke-test the installed copy
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh assets
       - name: Publish, unless it already is
         env:
           GH_TOKEN: ${{ github.token }}
