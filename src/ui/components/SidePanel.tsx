@@ -2,6 +2,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
 import { pushOverlay } from "../overlays.js";
+import { isShortcut } from "../shortcuts.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
 
@@ -231,8 +232,7 @@ export function SidePanel({
 
   // With a row focused (click one, or Tab in), ↑/↓ open the one above or below; Home/End the ends.
   const moveInList = (event: React.KeyboardEvent) => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    if (!isShortcut("list.move", event)) return;
     const row = (event.target as HTMLElement).closest<HTMLElement>(".list-scroll :is(.row, .run-row)");
     const list = row?.closest(".list-scroll");
     if (!row || !list) return;

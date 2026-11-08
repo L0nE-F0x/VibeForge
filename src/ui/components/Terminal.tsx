@@ -7,6 +7,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Drag
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
 import { appShortcut, clipboardKey, isWebLink } from "../terminal-keys.js";
+import { isShortcut } from "../shortcuts.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
 import { t as translate, useT } from "../i18n/index.js";
@@ -222,7 +223,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
 
     term.attachCustomKeyEventHandler((event) => {
       if (appShortcut(event)) return false;
-      if (onComposeRef.current && event.key === "Enter" && event.ctrlKey && event.shiftKey && !event.altKey) {
+      if (onComposeRef.current && isShortcut("terminal.write", event)) {
         if (event.type === "keydown") {
           event.preventDefault();
           onComposeRef.current();

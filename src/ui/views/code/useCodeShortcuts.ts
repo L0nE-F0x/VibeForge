@@ -1,25 +1,31 @@
 import { useEffect, useRef } from "react";
 import type { Workspace } from "../../../shared/api.js";
 import { overlayOpen } from "../../overlays.js";
+import { runShortcut, type ShortcutAction, type ShortcutIdIn } from "../../shortcuts.js";
 import type { WorkspacePanes } from "./useWorkspacePanes.js";
 
-/** Ctrl+Shift+D / E open a terminal right / below, W closes the focused one, M maximizes it; while Code is on screen. */
+/**
+ * Ctrl+Shift+D / E open a terminal right / below, W closes the focused one, M maximizes it; while
+ * Code is on screen. Under a menu or dialog they wait, so a key can't open or close a pane behind
+ * it, and holding one down is one press (shortcuts.ts says so).
+ */
 export function useCodeShortcuts(active: boolean, current: Workspace | null, panes: WorkspacePanes): void {
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => undefined);
   shortcuts.current = (event: KeyboardEvent) => {
-    if (!event.ctrlKey || !event.shiftKey || event.altKey || !current) return;
-    const key = event.key.toLowerCase();
-    if (key !== "m" && key !== "d" && key !== "e" && key !== "w") return;
-    // A menu or dialog is open: the keys mustn't open or close panes behind it.
-    if (overlayOpen()) return;
-    event.preventDefault();
-    // Holding the keys repeats them; one press is one pane.
-    if (event.repeat) return;
-    const { paneId, pane } = panes.focusedPane(current.id);
-    if (key === "m" && paneId) panes.toggleZoom(current.id, paneId);
-    else if (key === "d") panes.newTerminal(current, "row");
-    else if (key === "e") panes.newTerminal(current, "col");
-    else if (key === "w" && pane) void panes.closePane(current, pane);
+    if (!current) return;
+    const actions = {
+      "code.splitRight": () => panes.newTerminal(current, "row"),
+      "code.splitDown": () => panes.newTerminal(current, "col"),
+      "code.close": () => {
+        const { pane } = panes.focusedPane(current.id);
+        if (pane) void panes.closePane(current, pane);
+      },
+      "code.maximize": () => {
+        const { paneId } = panes.focusedPane(current.id);
+        if (paneId) panes.toggleZoom(current.id, paneId);
+      },
+    } satisfies Record<ShortcutIdIn<"code">, ShortcutAction>;
+    runShortcut(event, actions, overlayOpen);
   };
 
   useEffect(() => {

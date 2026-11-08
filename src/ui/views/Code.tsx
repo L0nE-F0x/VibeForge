@@ -11,6 +11,7 @@ import { Button, Empty } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
 import { panesOf, type PaneNode } from "../pane-layout.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { shortcutKeys } from "../shortcuts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { BranchDialog } from "./BranchDialog.js";
 import { CodeSide, useCodeSide } from "./code/CodeSide.js";
@@ -266,8 +267,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               </div>
               <MicButton size="sm" target={toolbarMic.target} hint={t("code.dictate")} disabled={!layouts[current.id]} />
               <span className="toolbar-sep" />
-              <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd="Ctrl+Shift+D" onClick={() => panes.newTerminal(current, "row")} />
-              <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd="Ctrl+Shift+E" onClick={() => panes.newTerminal(current, "col")} />
+              <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd={shortcutKeys("code.splitRight")} onClick={() => panes.newTerminal(current, "row")} />
+              <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd={shortcutKeys("code.splitDown")} onClick={() => panes.newTerminal(current, "col")} />
               <span className="toolbar-sep" />
               <Button size="sm" variant="ghost" icon={PanelRight} pressed={side.open} tip={t("code.sideTip")} onClick={() => side.setOpen(!side.open)} />
             </div>
@@ -284,7 +285,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         title={t("code.noPanes.title")}
                         actions={
                           <>
-                            <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => panes.openFirst(workspace, { type: "shell" })}>
+                            <Button variant="primary" icon={TerminalSquare} kbd={shortcutKeys("code.splitRight")} onClick={() => panes.openFirst(workspace, { type: "shell" })}>
                               {t("code.newTerminal")}
                             </Button>
                             {/* The CLIs found on this machine, one click each instead of a shell and typing. */}

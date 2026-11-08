@@ -7,6 +7,7 @@ import { tipProps } from "../../components/Tooltip.js";
 import { Button } from "../../components/ui.js";
 import { useT } from "../../i18n/index.js";
 import type { DropZone, PaneNode } from "../../pane-layout.js";
+import { shortcutKeys } from "../../shortcuts.js";
 import type { Runtime } from "./useWorkspacePanes.js";
 
 const PANE_MIME = "application/x-vibeforge-pane";
@@ -182,9 +183,9 @@ export const PaneView = memo(function PaneView({
             />
           )}
           {(canZoom || zoomed) && (
-            <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />
+            <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd={shortcutKeys("code.maximize")} onClick={onZoom} />
           )}
-          <Button size="sm" variant="ghost" icon={X} tip={t("pane.close")} kbd="Ctrl+Shift+W" onClick={onClose} />
+          <Button size="sm" variant="ghost" icon={X} tip={t("pane.close")} kbd={shortcutKeys("code.close")} onClick={onClose} />
         </div>
       </div>
       {dragging && dragging !== pane.id && (

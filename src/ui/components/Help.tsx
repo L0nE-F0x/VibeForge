@@ -2,6 +2,7 @@ import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, RefreshCw
 import type { AppInfo, Engine, Settings } from "../../shared/api.js";
 import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
+import { shortcutSheet } from "../shortcuts.js";
 import { useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 import { startTour } from "./Tour.js";
@@ -148,69 +149,10 @@ interface ShortcutRow {
   text: Key;
 }
 
+// Every key and gesture comes from the one list the app's key handlers read (shortcuts.ts); only
+// the legend of the desk's lights is the sheet's own.
 const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
-  {
-    group: "shortcuts.anywhere",
-    rows: [
-      { keys: "Ctrl+K", text: "shortcuts.switcher" },
-      { keys: "Ctrl+Shift+O", text: "shortcuts.orchestrator" },
-      { keys: "Ctrl+1…9", text: "shortcuts.switchViews" },
-      { keys: "Alt+1…9", text: "shortcuts.workspaces" },
-      { keys: "Ctrl+,", text: "shortcuts.settings" },
-      { keys: "Alt+←", text: "shortcuts.back" },
-      { keys: "Alt+→", text: "shortcuts.forward" },
-      { gesture: "shortcuts.sideButtons", text: "shortcuts.backForward" },
-      { keys: "↑/↓", text: "shortcuts.listMove" },
-      { keys: "Ctrl+Shift+B", text: "shortcuts.panel" },
-      { keys: "Ctrl+Shift+/", text: "shortcuts.list" },
-      { keys: "Esc", text: "shortcuts.closeDialog" },
-      { keys: "Shift+Esc", text: "shortcuts.closeFromTerminal" },
-    ],
-  },
-  {
-    group: "shortcuts.code",
-    rows: [
-      { keys: "Ctrl+Shift+D", text: "shortcuts.splitRight" },
-      { keys: "Ctrl+Shift+E", text: "shortcuts.splitDown" },
-      { keys: "Ctrl+Shift+W", text: "shortcuts.closePane" },
-      { keys: "Ctrl+Shift+M", text: "shortcuts.maximize" },
-      { gesture: "shortcuts.doubleClick", text: "shortcuts.maximizeTitle" },
-      { gesture: "shortcuts.drag", text: "shortcuts.movePane" },
-      { gesture: "shortcuts.drag", text: "shortcuts.moveWorkspace" },
-      { gesture: "shortcuts.doubleClick", text: "shortcuts.renameWorkspace" },
-    ],
-  },
-  {
-    group: "shortcuts.terminals",
-    rows: [
-      { keys: "Ctrl+C", text: "shortcuts.copy" },
-      { keys: "Ctrl+V", text: "shortcuts.paste" },
-      { keys: "Ctrl+C", text: "shortcuts.interrupt" },
-      { gesture: "shortcuts.dropFile", text: "shortcuts.drop" },
-      { keys: "Ctrl+Shift+Enter", text: "shortcuts.write" },
-    ],
-  },
-  {
-    group: "shortcuts.voice",
-    rows: [
-      { keys: "Ctrl+Shift+Space", text: "shortcuts.dictate" },
-      { keys: "Esc", text: "shortcuts.dictateCancel" },
-    ],
-  },
-  {
-    group: "shortcuts.editing",
-    rows: [
-      { keys: "Ctrl+S", text: "shortcuts.save" },
-      { keys: "Ctrl+Shift+I", text: "shortcuts.devtools" },
-    ],
-  },
-  {
-    group: "shortcuts.runs",
-    rows: [
-      { keys: "J", text: "shortcuts.nextRun" },
-      { keys: "K", text: "shortcuts.prevRun" },
-    ],
-  },
+  ...shortcutSheet(),
   {
     group: "shortcuts.marks",
     rows: [
