@@ -1,8 +1,8 @@
 # Status
 
-**2.14.0**, released 2026-11-08. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
+**2.14.1**, released 2026-11-08. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
 
-Every change runs `npm test` (468 tests at 2.14.0, including the real PTY host driven with `/bin/bash`) on Node 22, 24 and 26, the typecheck, lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`; the Release workflow publishes a tag only once those checks passed on its commit on `main`, and has published every tag from 1.3.0 to 2.14.0. Features are then driven in the built app over CDP with a scratch profile.
+Every change runs `npm test` (468 tests at 2.14.0, including the real PTY host driven with `/bin/bash`) on Node 22, 24 and 26, the typecheck, lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`; the Release workflow publishes a tag only once those checks passed on its commit on `main`, and has published every tag from 1.3.0 to 2.14.1. Features are then driven in the built app over CDP with a scratch profile.
 
 ## What has been checked
 
@@ -38,6 +38,6 @@ Every change runs `npm test` (468 tests at 2.14.0, including the real PTY host d
 
 - **The CLIs change under VibeForge.** Prompt flags, session-log formats (talk-back, `--wait`, token counts) and the plan-limit endpoints (Claude's OAuth usage, Grok's billing, Kimi's usages) aren't stable public APIs. Grok Build updated itself mid-trial in 2.11 and added a trust question.
 - **Plan limits use the CLIs' saved sign-ins.** They're only read, never renewed, but a provider could object. That is one reason the feature is off by default.
-- **Dependencies.** `npm audit` on 2026-11-08, after the audit fixes: no advisories, with or without dev tools (Electron 44.10.2, Vitest 5). CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Vite 8, Electron 45 and TypeScript 7 are still to do.
+- **Dependencies.** `npm audit` on 2026-11-08: no advisories, with or without dev tools, on Electron 45, Vite 8, Vitest 5 and TypeScript 7. CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Electron 45's tray, voice and notifications were checked only through the headless smoke and stand-in drives, not on the real bar.
 - **The control socket trusts the terminal a caller names.** A CLI can claim another pane's `VIBEFORGE_PTY`; a per-terminal token in the environment wouldn't stop that, because processes of the same user can read each other's environment.
 - **One machine.** Everything above was checked on the founder's Omarchy desktop; other Arch + Hyprland setups are untested.

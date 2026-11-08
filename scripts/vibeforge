@@ -103,7 +103,7 @@ source_is_newer() {
     find \
       "$ROOT/src" "$ROOT/electron" "$ROOT/resources" \
       "$ROOT/package.json" "$ROOT/package-lock.json" \
-      "$ROOT/vite.config.ts" "$ROOT/tsconfig.json" "$ROOT/tsconfig.node.json" \
+      "$ROOT/vite.config.mts" "$ROOT/tsconfig.json" "$ROOT/tsconfig.node.json" \
       "$ROOT/index.html" \
       -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 || true
   )"

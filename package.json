@@ -1,6 +1,6 @@
 {
   "name": "vibeforge",
-  "version": "2.14.0",
+  "version": "2.14.1",
   "private": true,
   "description": "VibeForge: an open-source desktop for Omarchy that runs Claude Code, Codex, Grok and the other coding CLIs you already use, side by side in real terminals, with agents, routines, tasks and Maestro.",
   "author": "Lone Fox (https://github.com/L0nE-F0x)",
@@ -52,7 +52,7 @@
     "@xterm/xterm": "^6.0.0",
     "cron-parser": "^5.10.4",
     "cronstrue": "^3.38.0",
-    "electron": "^44.10.2",
+    "electron": "^45.2.1",
     "lucide-react": "^1.70.0",
     "node-pty": "^1.0.0",
     "react": "^19.3.1",
@@ -64,11 +64,11 @@
     "@types/node": "^22.20.5",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
-    "@vitejs/plugin-react": "^5.0.2",
+    "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^5.1.0",
-    "typescript": "^5.9.2",
-    "vite": "^7.3.7",
-    "vite-plugin-electron": "^0.29.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-electron": "^1.2.0",
     "vitest": "^5.1.0"
   },
   "allowScripts": {
