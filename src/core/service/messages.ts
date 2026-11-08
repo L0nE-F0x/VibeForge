@@ -109,12 +109,15 @@ interface Pending {
   id: string;
   fromPty: string | null;
   toPty: string;
+  /** The CLI that was in front in `toPty` when it was put in line (see queue and cliIn): another one there now isn't sent it. */
+  cli?: string | null;
   text: string;
   enter: boolean;
   /** Counted against the two CLIs' limit (a person's draft and review steps aren't). */
   counts: boolean;
   waiter: WaitSpec | null;
-  delivered?: () => void;
+  /** It went in; `draft` when without Enter, as it was queued or because the two reached their limit while it waited. */
+  delivered?: (draft: boolean) => void;
   dropped: (why: string) => void;
 }
 
@@ -233,18 +236,15 @@ export class MessageDesk {
     if (this.stopped.has(to.ptyId) || (from && this.stopped.has(from.ptyId))) {
       return Promise.resolve({ ok: false, error: `A person stopped the conversation with ${from && this.stopped.has(from.ptyId) ? "you" : to.label}. It starts again once they type in that terminal.` });
     }
-    const key = pairKey(from?.ptyId ?? "outside", to.ptyId);
-    const atLimit = Boolean(from) && (this.counts.get(key) ?? 0) >= this.settings().maxMessages;
+    const atLimit = this.atLimit(from?.ptyId ?? null, to.ptyId);
     const answer: Answer = input.wait ? "wait" : from ? "tell" : "none";
     const body = messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.saveIfLong("messages", text) });
-    const note = atLimit
-      ? `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`
-      : undefined;
+    const note = () =>
+      `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
 
     return new Promise<TellResult>((resolve) => {
       const waitMs = Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS);
-      this.pending.push({
-        id: randomBytes(4).toString("hex"),
+      this.queue({
         fromPty: from?.ptyId ?? null,
         toPty: to.ptyId,
         text: body,
@@ -270,13 +270,14 @@ export class MessageDesk {
                 gone: input.gone,
               }
             : null,
-        delivered: input.wait && !atLimit ? undefined : () => resolve({ ok: true, to: to.handle, delivered: atLimit ? "draft" : "sent", note }),
+        // With --wait, an answer settles it, unless it went in as a draft (the limit came while it waited).
+        delivered: (draft) => {
+          if (draft || !input.wait) resolve({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? note() : undefined });
+        },
         dropped: (why) => resolve({ ok: false, error: why }),
       });
       // Busy for now: say so at once rather than holding the sender until there's room.
       if (!input.wait && !atLimit && !this.idle(to.ptyId)) {
-        const last = this.pending[this.pending.length - 1];
-        last.delivered = undefined;
         resolve({ ok: true, to: to.handle, delivered: "queued", note: `${to.label} is busy; your message goes in as soon as it's free.` });
       }
       this.core.emit("live");
@@ -439,8 +440,7 @@ export class MessageDesk {
     const file = this.saveFile("reviews", "patch", patch);
     review.phase = "reviewer";
     this.core.emit("live");
-    this.pending.push({
-      id: randomBytes(4).toString("hex"),
+    this.queue({
       fromPty: null,
       toPty: review.reviewerPty,
       text: reviewRequestText({ authorLabel, cwd: author.programCwd || author.cwd, patchPath: file, files: patchFiles(patch), round: review.round, rounds: review.rounds }),
@@ -460,8 +460,7 @@ export class MessageDesk {
           review.phase = "fixing";
           review.round += 1;
           review.since = this.nowMs();
-          this.pending.push({
-            id: randomBytes(4).toString("hex"),
+          this.queue({
             fromPty: null,
             toPty: review.authorPty,
             text: reviewReplyText({ reviewerLabel, reply, savedAt: this.saveIfLong("reviews", reply) }),
@@ -714,9 +713,9 @@ export class MessageDesk {
       applyWith: this.settings().leadApplies && !ended ? task.id : null,
       waiting,
     });
-    // Counted like any message between the two: past the limit it waits in the prompt for a person.
-    const atLimit = (this.counts.get(pairKey(taskPty, asker)) ?? 0) >= this.settings().maxMessages;
-    this.pending.push({ id: randomBytes(4).toString("hex"), fromPty: taskPty, toPty: asker, text, enter: !atLimit, counts: true, waiter: null, dropped: () => undefined });
+    // Counted like any message between the two: past the limit it waits in the prompt for a person
+    // (checked as it goes in, see pass).
+    this.queue({ fromPty: taskPty, toPty: asker, text, enter: true, counts: true, waiter: null, dropped: () => undefined });
     this.core.emit("live");
     void this.pump();
     return waiting;
@@ -800,9 +799,16 @@ export class MessageDesk {
       // Taken out while an earlier delivery was going in (Stop, or the CLI ended).
       if (!this.pending.includes(item)) continue;
       const session = this.core.live.get(item.toPty);
-      if (!session || !isCodingCli(session)) {
+      // Gone, or the terminal now runs another CLI than the one it was meant for (back at its shell and into a new one).
+      if (!session || !isCodingCli(session) || (item.cli != null && cliIn(session) !== item.cli)) {
         this.pending.splice(this.pending.indexOf(item), 1);
         item.dropped("That CLI isn't running any more.");
+        continue;
+      }
+      // Stopped since it was put in line: nothing goes to or from that terminal until a person types there.
+      if (this.stopped.has(item.toPty) || (item.fromPty && this.stopped.has(item.fromPty))) {
+        this.pending.splice(this.pending.indexOf(item), 1);
+        item.dropped("A person stopped this conversation.");
         continue;
       }
       if (busy.has(item.toPty) || !this.idle(item.toPty, now)) {
@@ -811,23 +817,37 @@ export class MessageDesk {
       }
       busy.add(item.toPty);
       this.pending.splice(this.pending.indexOf(item), 1);
+      // The limit is checked again now: messages queued while the CLI was busy all passed it then.
+      const enter = item.enter && !(item.counts && this.atLimit(item.fromPty, item.toPty));
       try {
-        await this.core.options.host.send(item.toPty, item.text, item.enter);
+        await this.core.options.host.send(item.toPty, item.text, enter);
       } catch {
         item.dropped("That CLI isn't running any more.");
         continue;
       }
       const sentAt = this.nowMs();
       this.lastSent.set(item.toPty, sentAt);
-      if (item.counts && item.enter) {
+      if (item.counts && enter) {
         const key = pairKey(item.fromPty ?? "outside", item.toPty);
         this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
       }
-      if (item.waiter) this.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
-      item.delivered?.();
+      // A draft waits for a person, so there's no answer to watch for.
+      if (item.waiter && enter) this.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
+      item.delivered?.(!enter);
       this.core.emit("live");
     }
     for (const [target, list] of [...this.waiting]) for (const waiter of [...list]) await this.checkWaiter(target, waiter, now);
+  }
+
+  /** Put a message in line for `toPty`, meant for the CLI in front there now. */
+  private queue(item: Omit<Pending, "id" | "cli">): void {
+    const session = this.core.live.get(item.toPty);
+    this.pending.push({ ...item, id: randomBytes(4).toString("hex"), cli: session ? cliIn(session) : null });
+  }
+
+  /** The two CLIs have traded as many messages as Settings allows without a person stepping in. */
+  private atLimit(fromPty: string | null, toPty: string): boolean {
+    return fromPty !== null && (this.counts.get(pairKey(fromPty, toPty)) ?? 0) >= this.settings().maxMessages;
   }
 
   private ensureTimer(): void {
@@ -916,8 +936,7 @@ export class MessageDesk {
     // The sender gave up waiting: the answer reaches it as a message instead.
     if (!waiter.forwardTo || !answered.reply?.trim()) return;
     const from = this.list().find((item) => item.ptyId === target);
-    this.pending.push({
-      id: randomBytes(4).toString("hex"),
+    this.queue({
       fromPty: target,
       toPty: waiter.forwardTo,
       text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text: cleanText(answered.reply), answer: "tell", savedAt: this.saveIfLong("messages", answered.reply) }),
@@ -961,6 +980,14 @@ export class MessageDesk {
     }
     return file;
   }
+}
+
+/**
+ * Which CLI is in front in a terminal: a run is its own CLI; in a shell, the coding CLI typed into
+ * it and when it started, so one that quit and another (or a new one) started there tells apart.
+ */
+function cliIn(session: LiveSession): string {
+  return session.kind === "run" ? `run|${session.startedAt}` : `${session.programEngineId ?? ""}|${session.cliSince ?? ""}`;
 }
 
 /**

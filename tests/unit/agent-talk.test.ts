@@ -321,6 +321,46 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("holds messages queued while the CLI was busy to the limit as they go in, not as they were queued", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 2, reviewRounds: 1 } });
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    for (const text of ["one", "two", "three"]) expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text })).toMatchObject({ delivered: "queued" });
+    const waiting = ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "four", wait: true });
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    for (let step = 0; step < 4; step += 1) {
+      pass(4000);
+      await ctx.svc.pumpMessages();
+    }
+    expect(ctx.sent.map((item) => [item.text.split("\n")[1], item.enter ?? true])).toEqual([
+      ["one", true],
+      ["two", true],
+      ["three", false],
+      ["four", false],
+    ]);
+    // The one waiting for an answer is told it's a draft now; nothing is watched for.
+    expect(await waiting).toMatchObject({ ok: true, delivered: "draft", note: expect.stringContaining("2 messages") });
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ messages: 2, held: true, queued: 0 });
+    ctx.svc.close();
+  });
+
+  it("doesn't paste a queued message into another CLI started in the same terminal", async () => {
+    const { ctx, pass, workspace, a } = await twoClis();
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(shell.ptyId, ["pasty"], ctx.place);
+    pass(6000);
+    ctx.svc.onPtyActivity(shell.ptyId, true);
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty-2", text: "for this one" })).toMatchObject({ delivered: "queued" });
+    // It quits, and the person starts Argy there.
+    ctx.svc.onPtyProgram(shell.ptyId, ["bash"], ctx.place);
+    ctx.svc.onPtyProgram(shell.ptyId, ["argy"], ctx.place);
+    pass(6000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === shell.ptyId)?.talk ?? null).toBeNull();
+    ctx.svc.close();
+  });
+
   it("doesn't paste into a CLI that has only just started and hasn't settled yet", async () => {
     let at = AT;
     const ctx = setup({ now: () => new Date(at) });
