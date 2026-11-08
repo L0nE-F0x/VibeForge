@@ -20,7 +20,7 @@ function line(kind: "const" | "let", name: string): string {
   return found;
 }
 
-type Answer = { ms: number; status?: number };
+type Answer = { ms: number; status?: number; body?: unknown };
 
 /** The page's own poll, run on its own against a link that answers as slowly as `answer` says. */
 function pagePoll(answer: (route: string) => Answer) {
@@ -38,7 +38,7 @@ function pagePoll(answer: (route: string) => Answer) {
       const status = reply.status ?? 200;
       const done = setTimeout(() => {
         open -= 1;
-        resolve({ ok: status < 400, status, json: async () => (route === "/api/desk" ? { workspaces: [] } : {}) });
+        resolve({ ok: status < 400, status, json: async () => reply.body ?? (route === "/api/desk" ? { workspaces: [] } : {}) });
       }, reply.ms);
       init.signal?.addEventListener("abort", () => {
         clearTimeout(done);
@@ -125,6 +125,22 @@ describe("the phone page's poll", () => {
     await vi.advanceTimersByTimeAsync(33_000);
     expect(link.page.state()).toMatchObject({ error: "", pollFailures: 0 });
     expect(link.fetches.slice(5).map((seen) => seen.at)).toEqual([135_000, 137_100]);
+    expect(link.most()).toBe(1);
+  });
+
+  it("keeps the desk when the session page's own read is refused, says why, and asks again without backing off", async () => {
+    let gone = true;
+    const link = pagePoll((route) => (route.startsWith("/api/session") && gone ? { ms: 100, status: 404, body: { error: "That session is gone." } } : { ms: 100 }));
+    link.page.setView("session");
+    await vi.advanceTimersByTimeAsync(300);
+    // The computer answered: the desk is fresh and the banner says what it said about the session.
+    expect(link.page.state()).toMatchObject({ desk: { workspaces: [] }, error: "That session is gone.", pollFailures: 0 });
+    await vi.advanceTimersByTimeAsync(4200);
+    // Two seconds after each poll, as when all is well, not the four, eight… of an offline computer.
+    expect(link.fetches.filter((seen) => seen.route === "/api/desk").map((seen) => seen.at)).toEqual([0, 2200, 4400]);
+    gone = false;
+    await vi.advanceTimersByTimeAsync(2400);
+    expect(link.page.state()).toMatchObject({ error: "", pollFailures: 0 });
     expect(link.most()).toBe(1);
   });
 });

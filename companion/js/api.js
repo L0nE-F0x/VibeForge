@@ -123,19 +123,31 @@ async function poll() {
       plansAt = Date.now();
       state.plans = (await call("/api/plans", { timeout }).catch(() => ({ plans: state.plans }))).plans ?? null;
     }
-    const next = state.view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(state.sessionQuery.ptyId)}&runId=${encodeURIComponent(state.sessionQuery.runId)}`, { timeout }) : null;
-    const nextOrch = state.view === "maestro" ? await call("/api/orchestrator", { timeout }) : null;
+    // The page on show reads more than the desk. A refusal there (a session that has gone) goes on the
+    // banner and the desk still updates: only a computer that can't be reached fails the whole poll.
+    let refused = "";
+    /** @param {string} route */
+    const more = (route) =>
+      call(route, { timeout }).catch((err) => {
+        if (err.offline) throw err;
+        refused = err.message;
+        return undefined;
+      });
+    const next = state.view === "session" ? await more(`/api/session?ptyId=${encodeURIComponent(state.sessionQuery.ptyId)}&runId=${encodeURIComponent(state.sessionQuery.runId)}`) : null;
+    const nextOrch = state.view === "maestro" ? await more("/api/orchestrator") : null;
     if (mine !== state.ticket) return;
     watch(payload);
     state.desk = payload;
-    if (state.view === "session") state.session = next;
-    if (state.view === "maestro") state.orch = nextOrch;
-    state.error = "";
+    // A refused read leaves what the page last showed.
+    if (state.view === "session" && next !== undefined) state.session = next;
+    if (state.view === "maestro" && nextOrch !== undefined) state.orch = nextOrch;
+    state.error = refused;
     pollFailures = 0;
   } catch (err) {
     if (mine !== state.ticket) return;
     state.error = err.message;
-    pollFailures += 1;
+    // Waiting longer is for a computer that doesn't answer; one that answered with a refusal is asked again as usual.
+    pollFailures = err.offline ? pollFailures + 1 : 0;
   }
   if (state.view !== shown) show();
   else update();
