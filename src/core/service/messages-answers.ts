@@ -19,8 +19,8 @@ export interface WaitSpec {
   sent?: string;
   deadline: number;
   done: (answered: Answered | null) => void;
-  /** The CLI went away, or a person pressed Stop. */
-  dropped?: (why: string) => void;
+  /** The CLI went away, or (`stopped`) a person pressed Stop on it or on the sender. */
+  dropped?: (why: string, stopped: boolean) => void;
   /** Aborts when the sender stops waiting early (its own tool timed out): the answer then goes to it as a message. */
   gone?: AbortSignal;
   /** Once the sender has stopped waiting: what to do with an answer or an end, and for how long to keep watching. Without it, an answer is forwarded as a message. */
@@ -179,7 +179,7 @@ export class Answers {
       if (ended) waiter.after?.ended();
       return;
     }
-    if (waiter.dropped) waiter.dropped(why);
+    if (waiter.dropped) waiter.dropped(why, !ended);
     else waiter.done(null);
   }
 }

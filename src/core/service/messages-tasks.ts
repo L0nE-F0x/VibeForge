@@ -36,8 +36,8 @@ export class HandedTasks {
   private readonly handedSince = new Map<string, number>();
   /** How many times each task has been watched again after a report that it waits for a person. */
   private readonly rewatched = new Map<string, number>();
-  /** `--wait` callers, by task, until its first answer. */
-  private readonly waitFor = new Map<string, (answered: Answered | null, ended: boolean) => void>();
+  /** `--wait` callers, by task, until its first answer; `end` when none will come: its CLI ended, or a person pressed Stop. */
+  private readonly waitFor = new Map<string, (answered: Answered | null, end: "ended" | "stopped" | null) => void>();
 
   constructor(
     private readonly core: ServiceCore,
@@ -147,11 +147,21 @@ export class HandedTasks {
     this.watchReport(taskId, launched.ptyId, asker, opts);
     if (!opts.wait) return { ok: true, taskId, title, started: true, note: `${note}${reports}` };
     return new Promise<TaskResult>((resolve) => {
-      this.waitFor.set(taskId, (answered, ended) =>
+      this.waitFor.set(taskId, (answered, end) =>
         resolve(
-          ended
+          end === "ended"
             ? { ok: true, taskId, title, started: true, reply: null, note: `It ended before ${name} answered. ${note}` }
-            : { ok: true, taskId, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${name} is still working on it. ${note}${reports}` },
+            : end === "stopped"
+              ? {
+                  ok: true,
+                  taskId,
+                  title,
+                  started: true,
+                  reply: null,
+                  // Stop holds the conversation, not the task: it goes on, and nothing of it comes back here.
+                  note: `A person stopped this conversation, so ${name}'s answer won't come back to you. It goes on in its own copy of ${workspace?.path ?? "the workspace"}; a person applies its changes from the task.`,
+                }
+              : { ok: true, taskId, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${name} is still working on it. ${note}${reports}` },
         ),
       );
     });
@@ -159,18 +169,18 @@ export class HandedTasks {
 
   /** Watches a started task's first answer (from `since`, its start by default); see startHanded. */
   private watchReport(taskId: string, ptyId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number }, since?: number): void {
-    const settle = (answered: Answered | null, ended: boolean) => {
+    const settle = (answered: Answered | null, end: "ended" | "stopped" | null) => {
       const waiting = this.waitFor.get(taskId);
       this.waitFor.delete(taskId);
-      waiting?.(answered, ended);
+      waiting?.(answered, end);
     };
     this.answers.watchAnswer(
       ptyId,
       {
         words: "",
         deadline: this.nowMs() + (opts.wait ? Math.max(1000, opts.timeoutMs ?? DEFAULT_WAIT_MS) : 0),
-        done: (answered) => settle(answered, false),
-        dropped: () => settle(null, true),
+        done: (answered) => settle(answered, null),
+        dropped: (_why, stopped) => settle(null, stopped ? "stopped" : "ended"),
         // Not waiting: the answer is a report from the start.
         gone: opts.wait ? undefined : AbortSignal.abort(),
         // Only from its start: once reported as waiting for a person, it has to move before it's heard from again.
