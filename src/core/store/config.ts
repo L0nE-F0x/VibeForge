@@ -194,12 +194,14 @@ export class Config {
 
   private loadEngineRows(): EngineRow[] {
     const file = path.join(this.configRoot, "engines.json");
-    if (!fs.existsSync(file)) {
+    const raw = readJson<{ engines?: unknown; seedRevision?: unknown } | unknown[] | null>(file, null);
+    if (!raw) {
+      // As with settings.json, only a missing file is written. One that doesn't parse, say a hand edit half done, is
+      // left for its author, and moved aside to engines.json.broken if the app saves engines before it is fixed.
       const seeded = seedEngines();
-      writeJson(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION });
+      if (!fs.existsSync(file)) writeJson(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION });
       return seeded;
     }
-    const raw = readJson<{ engines?: unknown; seedRevision?: unknown } | unknown[]>(file, { engines: [] });
     const saved = normalizeEngineRows(raw);
     const revision = raw && !Array.isArray(raw) && typeof raw.seedRevision === "number" ? raw.seedRevision : 1;
     const merged = mergeEngineRows(saved, revision);

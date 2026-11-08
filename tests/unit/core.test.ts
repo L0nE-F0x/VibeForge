@@ -551,6 +551,21 @@ describe("store", () => {
     expect(fs.readFileSync(file, "utf8")).toBe(halfEdited);
     store.close();
   });
+
+  it("leaves an engines.json that doesn't parse alone, reads the seeded engines meanwhile, and sets it aside only on a save", () => {
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "engines.json");
+    const halfEdited = '{ "engines": [ { "id": "claude", "label": "Mine",\n';
+    fs.writeFileSync(file, halfEdited);
+    const seeded = seedEngines().map((row) => row.id);
+    expect(store.readEngineRows().map((row) => row.id)).toEqual(seeded);
+    expect(fs.readFileSync(file, "utf8")).toBe(halfEdited);
+    expect(fs.existsSync(`${file}.broken`)).toBe(false);
+    store.writeEngineRows(store.readEngineRows());
+    expect(fs.readFileSync(`${file}.broken`, "utf8")).toBe(halfEdited);
+    expect(store.readEngineRows().map((row) => row.id)).toEqual(seeded);
+    store.close();
+  });
 });
 
 describe("files", () => {
