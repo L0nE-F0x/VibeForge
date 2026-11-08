@@ -61,6 +61,23 @@ function contrast(a, b) {
   return (light + 0.05) / (dark + 0.05);
 }
 
+function mix(a, b, amount) {
+  const channels = (hex) => [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+  const [x, y] = [channels(a), channels(b)];
+  return `#${x.map((value, index) => Math.round(value + (y[index] - value) * amount).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * Faint text is set small (9–11 px), so it has to read on panels as well as the page: the theme's
+ * muted colour, lifted toward its foreground until it reaches 4.6:1 on all three, as the app does.
+ */
+function faintText(theme) {
+  const worst = (color) => Math.min(...[theme.bg, theme.bgDark, theme.bgRaised].map((back) => contrast(color, back)));
+  let color = theme.fg3;
+  for (let amount = 0.05; worst(color) < 4.6 && amount <= 1; amount += 0.05) color = mix(theme.fg3, theme.fg, amount);
+  return color;
+}
+
 /** Text on the accent gradient: the theme's darkest colour or white, whichever reads better on both stops. */
 function onAccent(theme) {
   const score = (text) => Math.min(contrast(text, theme.accent), contrast(text, theme.accent2));
@@ -82,7 +99,7 @@ function applyTheme(id, { save = true } = {}) {
   set("--bg-raised", theme.bgRaised);
   set("--fg", theme.fg);
   set("--fg-2", theme.fg2);
-  set("--fg-3", theme.fg3);
+  set("--fg-3", faintText(theme));
   set("--accent", theme.accent);
   set("--accent-2", theme.accent2);
   set("--on-accent", onAccent(theme));

@@ -64,7 +64,7 @@
 @property --bg-raised { syntax: "<color>"; inherits: true; initial-value: #151518; }
 @property --fg { syntax: "<color>"; inherits: true; initial-value: #ffffff; }
 @property --fg-2 { syntax: "<color>"; inherits: true; initial-value: #a1a1aa; }
-@property --fg-3 { syntax: "<color>"; inherits: true; initial-value: #71717a; }
+@property --fg-3 { syntax: "<color>"; inherits: true; initial-value: #86868e; }
 @property --accent { syntax: "<color>"; inherits: true; initial-value: #ff6b35; }
 @property --accent-2 { syntax: "<color>"; inherits: true; initial-value: #fca311; }
 @property --on-accent { syntax: "<color>"; inherits: true; initial-value: #050506; }
