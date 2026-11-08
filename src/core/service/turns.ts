@@ -1,11 +1,14 @@
 import path from "node:path";
-import { isCodingCli, sessionFolder, writersIn, type Writer } from "../checkout.js";
+import { isCodingCli, sessionFolder, TURN_GRACE_MS, writersIn, type Writer } from "../checkout.js";
+import { isDirectory, readJson, writeJson } from "../fsx.js";
 import { repoRoot } from "../worktrees.js";
 import type { LiveSession } from "../types.js";
 import type { ServiceCore } from "./core.js";
 
 /** How often waiting work looks at its folder again. */
 const CHECK_MS = 3_000;
+/** A wait older than this when VibeForge starts again is let go: whoever asked has moved on. */
+const RESTORE_MS = 24 * 60 * 60 * 1000;
 
 /** Something that waits for its folder: a task's Execute or a routine's Run now. */
 interface Turn {
@@ -13,11 +16,19 @@ interface Turn {
   id: string;
   folder: string;
   since: string;
+  /**
+   * The due slot a routine's wait stands for, when its schedule (not a click) started it. Not kept
+   * past a restart: a slot due before VibeForge started is missed, as any other is.
+   */
+  slot?: string | null;
   /** Starts it. Called once the folder is free; it checks again itself, under the folder's lock. */
   start: () => Promise<unknown>;
   /** Tells the person the start failed, since nobody is watching when it happens. */
   failed: (message: string) => void;
 }
+
+/** A wait as it is kept in `<data>/waiting.json`, to pick it back up after a restart. */
+export type SavedTurn = Pick<Turn, "kind" | "id" | "folder" | "since">;
 
 export interface Waiting {
   since: string;
@@ -40,6 +51,12 @@ export class FolderTurns {
   private checking = false;
   /** The workspaces' and agents' folders, read again only once either changes (not on every CLI going busy or quiet). */
   private places: string[] | null = null;
+  /** What waiting.json holds now, so a wait joined again doesn't write it again. */
+  private saved: string | null = null;
+  /** VibeForge is quitting: its CLIs are ending, and a folder they free isn't a turn for anything to start in. */
+  private holding = false;
+  /** Waits put back on start hold off until then, so the CLIs the window opens again get their turn first. */
+  private startsAfter = 0;
 
   constructor(private readonly core: ServiceCore) {
     core.onChange((topics) => {
@@ -48,10 +65,65 @@ export class FolderTurns {
     });
   }
 
+  /** Lets go of the waits in memory; waiting.json keeps them for the next start. */
   close(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.queue.clear();
+  }
+
+  /** Quitting: nothing more starts, and what is waiting stays saved for the next start. */
+  hold(): void {
+    this.holding = true;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  private get file(): string {
+    return path.join(this.core.options.dataRoot, "waiting.json");
+  }
+
+  /** Keeps what is waiting for the next start. Best effort: a wait still works without it. */
+  private save(): void {
+    const waiting: SavedTurn[] = [...this.queue.values()].filter((turn) => !turn.slot).map(({ kind, id, folder, since }) => ({ kind, id, folder, since }));
+    const text = JSON.stringify(waiting);
+    if (text === this.saved) return;
+    try {
+      writeJson(this.file, { waiting });
+      this.saved = text;
+    } catch {
+      /* the next change tries again */
+    }
+  }
+
+  /**
+   * Puts back what was waiting when VibeForge last closed, in its old order and place in line.
+   * `resume` gives each its start again, or null when its task or routine is gone. A wait for a
+   * folder that's gone, or older than a day, is let go.
+   */
+  restore(resume: (saved: SavedTurn) => Pick<Turn, "start" | "failed"> | null): void {
+    const raw = readJson<{ waiting?: unknown } | null>(this.file, null);
+    const now = this.core.now().getTime();
+    for (const item of Array.isArray(raw?.waiting) ? raw.waiting : []) {
+      const saved = savedTurn(item);
+      if (!saved || now - Date.parse(saved.since) > RESTORE_MS || !isDirectory(saved.folder)) continue;
+      const key = `${saved.kind}:${saved.id}`;
+      if (this.queue.has(key)) continue;
+      const again = resume(saved);
+      if (again) this.queue.set(key, { ...saved, ...again });
+    }
+    // Written again only when something was let go: no file and nothing waiting stays that way.
+    this.saved = raw ? null : "[]";
+    this.save();
+    if (!this.queue.size) return;
+    this.startsAfter = now + TURN_GRACE_MS;
+    this.ensureTimer();
+  }
+
+  private ensureTimer(): void {
+    if (this.timer || this.holding) return;
+    this.timer = setInterval(() => void this.check(), CHECK_MS);
+    this.timer.unref?.();
   }
 
   /** The repository a folder belongs to, looked up once and remembered. */
@@ -120,14 +192,13 @@ export class FolderTurns {
     const key = `${turn.kind}:${turn.id}`;
     const since = this.queue.get(key)?.since ?? this.core.now().toISOString();
     this.queue.set(key, { ...turn, since });
-    if (!this.timer) {
-      this.timer = setInterval(() => void this.check(), CHECK_MS);
-      this.timer.unref?.();
-    }
+    this.save();
+    this.ensureTimer();
   }
 
   cancel(kind: Turn["kind"], id: string): boolean {
     const removed = this.queue.delete(`${kind}:${id}`);
+    if (removed) this.save();
     if (!this.queue.size && this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -144,7 +215,7 @@ export class FolderTurns {
 
   /** Start whatever is waiting for a folder that has come free, oldest first. */
   async check(): Promise<void> {
-    if (this.checking) return;
+    if (this.checking || this.holding || this.core.now().getTime() < this.startsAfter) return;
     this.checking = true;
     try {
       for (const [key, turn] of [...this.queue]) {
@@ -187,4 +258,13 @@ export class FolderTurns {
     await Promise.all(unknown.map((folder) => this.repoOf(folder)));
     this.core.emit("live", "tasks", "routines");
   }
+}
+
+/** One entry of waiting.json, or null when it isn't one (a hand edit, or a file from another version). */
+function savedTurn(value: unknown): SavedTurn | null {
+  const item = value as Partial<Record<keyof SavedTurn, unknown>> | null;
+  if (!item || (item.kind !== "task" && item.kind !== "routine")) return null;
+  if (typeof item.id !== "string" || !item.id || typeof item.folder !== "string" || !path.isAbsolute(item.folder)) return null;
+  if (typeof item.since !== "string" || !Number.isFinite(Date.parse(item.since))) return null;
+  return { kind: item.kind, id: item.id, folder: item.folder, since: item.since };
 }
