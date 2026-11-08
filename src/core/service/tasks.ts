@@ -8,7 +8,8 @@ import { taskPrompt } from "../preamble.js";
 import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace } from "../types.js";
 import { isSafeId } from "../slug.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import type { Bin } from "../trash.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, lockCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -101,12 +102,28 @@ export class TaskDesk {
     const copy = task.copy;
     const owned = copy ? ownedCopyPath(this.owner(id), copy.path) : null;
     const trusted = copy && owned ? await this.repoTrusted(task, copy) : false;
-    const bin = this.core.trash.stash(owned?.real ? [file, owned.real] : [file]);
+    // Locked first: a `git worktree prune` while it waits (another task's Execute runs one) would forget it.
+    const locked = copy && owned?.real && trusted ? await lockCopy(copy, this.owner(id)).catch(() => false) : false;
+    let bin: Bin;
+    try {
+      bin = this.core.trash.stash(owned?.real ? [file, owned.real] : [file]);
+    } catch (error) {
+      if (copy && locked) await unlockCopy(copy, this.owner(id)).catch(() => undefined);
+      throw error;
+    }
     this.core.emit("tasks");
     const deleted = this.core.keepForUndo(
       bin,
-      () => this.core.emit("tasks"),
-      copy && owned ? () => void removeCopy(copy, this.owner(id), trusted).catch(() => undefined) : undefined,
+      () => {
+        if (copy && locked) void unlockCopy(copy, this.owner(id)).catch(() => undefined);
+        this.core.emit("tasks");
+      },
+      copy && owned
+        ? () => {
+            // A new task given the same name since owns that folder and branch now.
+            if (!this.core.store.getTask(id)) void removeCopy(copy, this.owner(id), trusted).catch(() => undefined);
+          }
+        : undefined,
     );
     return copy && !owned ? { ...deleted, copyLeft: true } : deleted;
   }
@@ -271,7 +288,8 @@ export class TaskDesk {
       return folderInCopy(task.copy, workspace.path);
     }
     if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id));
+    // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
+    const copy = await createCopy(workspace.path, path.join(this.core.options.dataRoot, "worktrees", task.id), copyBranch(task.id), task.copy);
     const current = this.core.store.getTask(task.id) ?? task;
     this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
     return folderInCopy(copy, workspace.path);

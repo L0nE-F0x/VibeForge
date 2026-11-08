@@ -43,10 +43,11 @@ export class Trash {
     return { token, moved };
   }
 
-  /** Put a bin's files back where they were. A path taken again in the meantime is left alone. */
-  restore(bin: Bin): void {
-    restoreMoves(bin.moved);
+  /** Put a bin's files back where they were, and say which went back. A path taken again in the meantime is left alone. */
+  restore(bin: Bin): string[] {
+    const restored = restoreMoves(bin.moved);
     this.drop(bin);
+    return restored;
   }
 
   /** Delete a bin for good. */
@@ -55,12 +56,15 @@ export class Trash {
   }
 }
 
-function restoreMoves(moved: Bin["moved"]): void {
+function restoreMoves(moved: Bin["moved"]): string[] {
+  const restored: string[] = [];
   for (const { from, to } of [...moved].reverse()) {
     if (!fs.existsSync(to) || fs.existsSync(from)) continue;
     fs.mkdirSync(path.dirname(from), { recursive: true });
     move(to, from);
+    restored.push(from);
   }
+  return restored;
 }
 
 /** Rename, or copy and remove when the two paths are on different disks. */

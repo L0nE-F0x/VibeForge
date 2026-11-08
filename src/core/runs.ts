@@ -31,6 +31,11 @@ function safeSlug(slug: string): string {
   return cleaned || "run";
 }
 
+/** Where a run's folder is: always `<dataRoot>/runs/<id>`. Null for an id that could point elsewhere. */
+export function runDir(dataRoot: string, id: string): string | null {
+  return isSafeId(id) ? path.join(dataRoot, "runs", id) : null;
+}
+
 export function allocateRunDir(dataRoot: string, startedAt: Date, slug: string): { id: string; dir: string } {
   const root = path.join(dataRoot, "runs");
   fs.mkdirSync(root, { recursive: true });
@@ -109,9 +114,10 @@ export function writeRunMeta(meta: RunMeta): void {
   writeJson(path.join(meta.dir, RUN_FILES.meta), meta);
 }
 
+/** A run's meta.json. Its folder is the one it was read from, whatever path the file has in it. */
 export function readRunMeta(dir: string): RunMeta | null {
   const meta = normalizeRun(readJson<unknown>(path.join(dir, RUN_FILES.meta), null));
-  if (meta && !meta.dir) meta.dir = dir;
+  if (meta) meta.dir = dir;
   return meta;
 }
 
