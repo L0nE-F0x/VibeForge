@@ -810,12 +810,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   <div key={workspace.id} className={`canvas${zoomedPane ? " has-zoom" : ""}`} style={visible ? undefined : { display: "none" }}>
                     <SplitView
                       node={layout}
-                      onRatio={(path, ratio) =>
-                        setLayouts((prev) => {
-                          const node = prev[workspace.id];
-                          return node ? { ...prev, [workspace.id]: setRatioAt(node, path, ratio) } : prev;
-                        })
-                      }
+                      onRatio={(path, ratio, done) => {
+                        const node = layoutsRef.current[workspace.id];
+                        if (!node) return;
+                        const next = setRatioAt(node, path, ratio);
+                        // Saved once the divider is let go (or reset), not on every step of the drag.
+                        if (done) updateLayout(workspace.id, next);
+                        else setLayouts((prev) => ({ ...prev, [workspace.id]: next }));
+                      }}
                       renderPane={(pane) => {
                         const session = live.find((item) => item.ptyId === runtime[pane.id]?.ptyId);
                         // A launched CLI is its own run; a shell has one while a CLI typed into it is recorded.

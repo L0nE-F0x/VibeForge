@@ -28,13 +28,14 @@ import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js"
 
 // ------------------------------------------------------------------ split layout
 
+/** `onRatio` follows a divider as it moves, then once more with `done` when it is let go or reset. */
 export function SplitView({
   node,
   onRatio,
   renderPane,
 }: {
   node: LayoutNode;
-  onRatio: (path: string, ratio: number) => void;
+  onRatio: (path: string, ratio: number, done: boolean) => void;
   renderPane: (pane: Extract<LayoutNode, { kind: "pane" }>) => ReactNode;
   path?: string;
 }) {
@@ -49,7 +50,7 @@ function SplitNode({
 }: {
   node: LayoutNode;
   path: string;
-  onRatio: (path: string, ratio: number) => void;
+  onRatio: (path: string, ratio: number, done: boolean) => void;
   renderPane: (pane: Extract<LayoutNode, { kind: "pane" }>) => ReactNode;
 }) {
   const t = useT();
@@ -61,17 +62,22 @@ function SplitNode({
     if (!box) return;
     event.preventDefault();
     setDragging(true);
+    let last: number | null = null;
     const move = (moveEvent: PointerEvent) => {
       const ratio = node.dir === "row" ? (moveEvent.clientX - box.left) / box.width : (moveEvent.clientY - box.top) / box.height;
-      onRatio(path, Math.min(0.85, Math.max(0.15, ratio)));
+      last = Math.min(0.85, Math.max(0.15, ratio));
+      onRatio(path, last, false);
     };
     const up = () => {
       setDragging(false);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (last !== null) onRatio(path, last, true);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
   return (
     <div ref={ref} className={`split dir-${node.dir}`}>
@@ -81,7 +87,7 @@ function SplitNode({
       <div
         className={`divider${dragging ? " dragging" : ""}`}
         onPointerDown={start}
-        onDoubleClick={() => onRatio(path, 0.5)}
+        onDoubleClick={() => onRatio(path, 0.5, true)}
         {...tipProps(t("split.resize"))}
       />
       <div className="split-cell" style={{ flex: `${1 - node.ratio} 1 0` }}>
