@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-11-08
+
+**2.14.0: Maestro's work comes back for review, Apply works over your own edits, and a long list of fixes from a full audit: safer updates, a phone that disconnects when you say so, and a faster desk with many CLIs open.**
+
 ### Added
 
 - **Maestro's work comes back for review.** Each CLI a plan starts on a new branch now works in its own copy, as a task's does. When it's done, its step on the plan card and the **To review** list beside the conversation offer **Review** (the diff, file by file), **Apply** (its changes come into your workspace as uncommitted edits, and the copy, its branch and its workspace are tidied away) and **Discard** (with Undo). Before, those checkouts piled up beside your projects with no way back.
@@ -589,7 +593,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.14.0...HEAD
+[2.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.14.0
 [2.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.13.0
 [2.12.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.12.2
 [2.12.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.12.1
