@@ -25,7 +25,7 @@ import { MainContext } from "./main-context.js";
 import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
-import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
+import { childEnv } from "./shell-env.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
@@ -33,6 +33,7 @@ import { lastReply, watchReply } from "./replies.js";
 import { listenControl } from "./control.js";
 import { MainText } from "../src/core/main-text.js";
 import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
+import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
 
@@ -77,50 +78,6 @@ let waiting = 0;
 let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
 const notifications = new Set<Notification>();
-
-/** Puts the login shell's PATH ahead of Electron's, so CLIs installed through mise are found. */
-async function adoptShellPath(): Promise<void> {
-  const shellPath = await loadShellPath();
-  if (shellPath) process.env.PATH = mergePath(shellPath, process.env.PATH);
-  else log.warn(`Could not read PATH from the login shell (${process.env.SHELL || "/bin/bash"}); CLIs found only on that PATH will show as missing`);
-}
-
-/** "Omarchy 4.0.4-1 · Linux 7.2.5-3-omarchy" from pacman, os-release and the kernel, for bug reports. */
-function osDescription(): string {
-  let name = os.type();
-  try {
-    const release = fs.readFileSync("/etc/os-release", "utf8");
-    const pretty = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(release)?.[1];
-    if (pretty) name = pretty;
-  } catch {
-    /* not every system has os-release */
-  }
-  try {
-    // Omarchy ships as a pacman package (omarchy, or omarchy-dev on the edge channel).
-    const entry = fs.readdirSync("/var/lib/pacman/local").find((dir) => /^omarchy(-dev)?-\d/.test(dir));
-    if (entry) name = `Omarchy ${entry.replace(/^omarchy(-dev)?-/, "")}`;
-  } catch {
-    /* not an Arch system */
-  }
-  return `${name} · ${os.type()} ${os.release()}`;
-}
-
-function openPath(target: string): void {
-  const child = spawn("xdg-open", [target], { stdio: "ignore", detached: true });
-  child.on("error", () => undefined);
-  child.unref();
-}
-
-/** Omarchy's shell keeps its Do Not Disturb switch in this file. */
-function omarchyDoNotDisturb(): boolean {
-  const state = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(state, "omarchy", "notifications.json"), "utf8")) as { dnd?: unknown };
-    return parsed.dnd === true;
-  } catch {
-    return false;
-  }
-}
 
 /** A desktop notification; clicking it brings VibeForge up on the run or workspace it is about. */
 function notify(note: {
@@ -534,7 +491,7 @@ function handlers(): Handlers {
     "companion.status": () => companionStatus(),
     "engines.list": () => s().listEngines(),
     "engines.recheck": async () => {
-      await adoptShellPath();
+      await adoptShellPath(log);
       s().emit("engines", "agents", "routines", "tasks");
       return s().listEngines();
     },
@@ -978,7 +935,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${ctx.appRoot}`);
     Menu.setApplicationMenu(null);
-    await adoptShellPath();
+    await adoptShellPath(log);
     ctx.service = new TeamService({
       configRoot: roots.configRoot,
       dataRoot: roots.dataRoot,
