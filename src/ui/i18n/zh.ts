@@ -769,7 +769,7 @@ export const zh: Catalog = {
   "agents.updated": "智能体已更新",
   "agents.engineFromNext": "从下一个聊天开始使用 {engine}。",
   "agents.deleteTitle": "删除 {name}？",
-  "agents.deleteBody": "这会删除智能体、它的简介和记忆文件。它的运行、记录和聊天仍保留在磁盘和“运行”中。",
+  "agents.deleteBody": "这会删除智能体、它的简介、记忆文件和例行任务。它的运行、记录和聊天仍保留在磁盘和“运行”中。",
   "agents.delete": "删除智能体",
   "agents.deleteFailed": "无法删除智能体",
   "agents.engineChangeHint": "队友还是同一个。更改从下一次运行开始生效。",

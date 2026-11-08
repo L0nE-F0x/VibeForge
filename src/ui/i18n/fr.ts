@@ -769,7 +769,7 @@ export const fr: Catalog = {
   "agents.updated": "Agent mis à jour",
   "agents.engineFromNext": "{engine} est utilisé dès le prochain chat.",
   "agents.deleteTitle": "Supprimer {name} ?",
-  "agents.deleteBody": "Cela retire l'agent, son brief et son fichier de mémoire. Ses exécutions, transcriptions et chats restent sur le disque et dans Exécutions.",
+  "agents.deleteBody": "Cela retire l'agent, son brief, son fichier de mémoire et ses routines. Ses exécutions, transcriptions et chats restent sur le disque et dans Exécutions.",
   "agents.delete": "Supprimer l'agent",
   "agents.deleteFailed": "Impossible de supprimer l'agent",
   "agents.engineChangeHint": "Le coéquipier reste le même. Le changement s'applique à la prochaine exécution.",

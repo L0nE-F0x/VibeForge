@@ -768,7 +768,7 @@ export const es: Catalog = {
   "agents.updated": "Agente actualizado",
   "agents.engineFromNext": "{engine} se usa desde el próximo chat.",
   "agents.deleteTitle": "¿Eliminar a {name}?",
-  "agents.deleteBody": "Esto quita el agente, su brief y su archivo de memoria. Sus ejecuciones, transcripciones y chats se quedan en el disco y en Ejecuciones.",
+  "agents.deleteBody": "Esto quita el agente, su brief, su archivo de memoria y sus rutinas. Sus ejecuciones, transcripciones y chats se quedan en el disco y en Ejecuciones.",
   "agents.delete": "Eliminar agente",
   "agents.deleteFailed": "No se pudo eliminar el agente",
   "agents.engineChangeHint": "El compañero sigue siendo el mismo. El cambio se aplica a la próxima ejecución.",

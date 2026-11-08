@@ -196,6 +196,37 @@ describe("undo", () => {
     ctx.svc.close();
   });
 
+  it("puts back a deleted agent with its memory and routines, and a new one of that name starts without them", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    ctx.svc.writeMemory(agent.id, "- written by hand\n");
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    const other = await ctx.svc.saveAgent({ name: "Other", brief: "b", engine: "argy", places: [ctx.place] });
+    const theirs = ctx.svc.saveRoutine({ name: "Theirs", agentId: other.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    const routinesOf = (id: string) => ctx.svc.listRoutines().filter((item) => item.agentId === id).map((item) => item.id);
+
+    const { undo } = ctx.svc.deleteAgent(agent.id, "Notes");
+    expect(ctx.svc.getAgent(agent.id)).toBeNull();
+    expect(routinesOf(agent.id)).toEqual([]);
+    expect(routinesOf(other.id)).toEqual([theirs.id]);
+    ctx.svc.undoDelete(undo);
+    expect(ctx.svc.getAgent(agent.id)?.name).toBe("Notes");
+    expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
+    expect(routinesOf(agent.id)).toEqual([routine.id]);
+
+    // Deleted again, and a new agent takes the name (and so the id) while the Undo is still up.
+    const again = ctx.svc.deleteAgent(agent.id, "Notes");
+    const fresh = await agentIn(ctx);
+    expect(fresh.id).toBe(agent.id);
+    expect(routinesOf(fresh.id)).toEqual([]);
+    expect(ctx.svc.readMemory(fresh.id)).not.toContain("written by hand");
+    // Undo can't put the old one back over it, and its routines don't join the new one.
+    ctx.svc.undoDelete(again.undo);
+    expect(ctx.svc.getAgent(fresh.id)?.createdAt).toBe(fresh.createdAt);
+    expect(routinesOf(fresh.id)).toEqual([]);
+    ctx.svc.close();
+  });
+
   it("keeps a delete from an earlier session deleted", async () => {
     const ctx = setup();
     const skill = ctx.svc.saveSkill({ name: "Review" });

@@ -37,7 +37,7 @@ export class ServiceCore {
   /** Per live run: the files already changed when it started, so its own changes can be told apart. */
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
-  private readonly undoable = new Map<string, { bin: Bin; restore: () => void; timer: ReturnType<typeof setTimeout>; settle?: () => void }>();
+  private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: () => void }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   readonly settled: Promise<void>;
@@ -74,9 +74,9 @@ export class ServiceCore {
 
   /**
    * Keep a delete undoable for a while; after that its files go for good, and `settle` tidies
-   * whatever lived outside them (a task copy's git branch).
+   * whatever lived outside them (a task copy's git branch). `restore` hears which paths went back.
    */
-  keepForUndo(bin: Bin, restore: () => void, settle?: () => void): Deleted {
+  keepForUndo(bin: Bin, restore: (restored: string[]) => void, settle?: () => void): Deleted {
     const timer = setTimeout(() => {
       this.undoable.delete(bin.token);
       this.trash.drop(bin);
@@ -93,8 +93,7 @@ export class ServiceCore {
     if (!entry) throw new Error("It is too late to undo that.");
     clearTimeout(entry.timer);
     this.undoable.delete(token);
-    this.trash.restore(entry.bin);
-    entry.restore();
+    entry.restore(this.trash.restore(entry.bin));
   }
 
   // ---------------------------------------------------------------- events

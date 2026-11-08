@@ -58,8 +58,8 @@ export class TeamService extends ServiceCore {
     return this.library.saveAgent(input);
   }
 
-  deleteAgent(id: string, confirmName: string): void {
-    this.library.deleteAgent(id, confirmName);
+  deleteAgent(id: string, confirmName: string): Deleted {
+    return this.library.deleteAgent(id, confirmName);
   }
 
   readMemory(agentId: string): string {

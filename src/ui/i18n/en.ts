@@ -781,7 +781,7 @@ export const en = {
   "agents.updated": "Agent updated",
   "agents.engineFromNext": "{engine} runs from the next chat on.",
   "agents.deleteTitle": "Delete {name}?",
-  "agents.deleteBody": "This removes the agent, its brief and its memory file. Its runs, transcripts and chats stay on disk and in Runs.",
+  "agents.deleteBody": "This removes the agent, its brief, its memory file and its routines. Its runs, transcripts and chats stay on disk and in Runs.",
   "agents.delete": "Delete agent",
   "agents.deleteFailed": "Could not delete the agent",
   "agents.engineChangeHint": "The teammate stays the same. The change applies to the next run.",

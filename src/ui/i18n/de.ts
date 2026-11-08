@@ -768,7 +768,7 @@ export const de: Catalog = {
   "agents.updated": "Agent aktualisiert",
   "agents.engineFromNext": "{engine} läuft ab dem nächsten Chat.",
   "agents.deleteTitle": "{name} löschen?",
-  "agents.deleteBody": "Das entfernt den Agenten, sein Briefing und seine Gedächtnisdatei. Läufe, Transkripte und Chats bleiben auf der Festplatte und in Läufe.",
+  "agents.deleteBody": "Das entfernt den Agenten, sein Briefing, seine Gedächtnisdatei und seine Routinen. Läufe, Transkripte und Chats bleiben auf der Festplatte und in Läufe.",
   "agents.delete": "Agent löschen",
   "agents.deleteFailed": "Der Agent ließ sich nicht löschen",
   "agents.engineChangeHint": "Der Teamkollege bleibt derselbe. Die Änderung gilt ab dem nächsten Lauf.",

@@ -768,7 +768,7 @@ export const pt: Catalog = {
   "agents.updated": "Agente atualizado",
   "agents.engineFromNext": "{engine} roda a partir do próximo chat.",
   "agents.deleteTitle": "Excluir {name}?",
-  "agents.deleteBody": "Isso remove o agente, o briefing e o arquivo de memória. As execuções, transcrições e chats ficam no disco e em Execuções.",
+  "agents.deleteBody": "Isso remove o agente, o briefing, o arquivo de memória e as rotinas dele. As execuções, transcrições e chats ficam no disco e em Execuções.",
   "agents.delete": "Excluir agente",
   "agents.deleteFailed": "Não foi possível excluir o agente",
   "agents.engineChangeHint": "O colega continua o mesmo. A mudança vale a partir da próxima execução.",

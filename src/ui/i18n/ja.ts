@@ -769,7 +769,7 @@ export const ja: Catalog = {
   "agents.updated": "エージェントを更新しました",
   "agents.engineFromNext": "次のチャットから {engine} で動きます。",
   "agents.deleteTitle": "{name} を削除しますか？",
-  "agents.deleteBody": "エージェント、そのブリーフとメモリーファイルを削除します。実行、記録、チャットはディスクと「実行」に残ります。",
+  "agents.deleteBody": "エージェント、そのブリーフ、メモリーファイル、ルーティンを削除します。実行、記録、チャットはディスクと「実行」に残ります。",
   "agents.delete": "エージェントを削除",
   "agents.deleteFailed": "エージェントを削除できませんでした",
   "agents.engineChangeHint": "チームメイトはそのままです。変更は次の実行から適用されます。",

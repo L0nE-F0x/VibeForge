@@ -726,11 +726,6 @@ export class Store {
     writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
   }
 
-  deleteAgent(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "agents", id), { recursive: true, force: true });
-  }
-
   // ---------------------------------------------------------------- skills
 
   listSkills(): Skill[] {

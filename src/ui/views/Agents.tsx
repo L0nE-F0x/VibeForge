@@ -556,6 +556,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
+  const deleted = useDeleted();
   const engines = useEngines().data ?? [];
   const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
   const { name, engine, allow, voice, goodAt, tier } = form;
@@ -584,8 +585,9 @@ function SettingsTab({ agent }: { agent: Agent }) {
       typeToConfirm: agent.name,
     });
     if (!ok) return;
-    await call("agents.delete", agent.id, agent.name);
+    const result = await call("agents.delete", agent.id, agent.name);
     go({ view: "agents" });
+    deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));
   useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
 
