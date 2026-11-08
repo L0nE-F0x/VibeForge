@@ -9,10 +9,11 @@ import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js"
 import { clipboardKey } from "../terminal-keys.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
+import { WebglPool, type GlUser } from "../webgl-pool.js";
 
 export const PATH_MIME = "application/x-vibeforge-path";
-const MAX_WEBGL = 10;
-let webglInUse = 0;
+/** Under Chromium's limit of WebGL contexts per page; the other terminals draw with the DOM. */
+const webgl = new WebglPool(10);
 
 export interface TerminalHandle {
   focus(): void;
@@ -68,27 +69,38 @@ function baseOptions(fontFamily: string, fontSize: number): ITerminalOptions {
   };
 }
 
-function attachWebgl(term: XTerm): () => void {
-  if (webglInUse >= MAX_WEBGL) return () => undefined;
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => webgl.dispose());
-    term.loadAddon(webgl);
-    webglInUse += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      webglInUse -= 1;
+/** The terminal's seat in the WebGL pool: it draws with WebGL while it holds a slot. */
+function webglSeat(term: XTerm): GlUser {
+  let addon: WebglAddon | null = null;
+  const seat: GlUser = {
+    attach() {
       try {
-        webgl.dispose();
+        const next = new WebglAddon();
+        // The GPU dropped the context (a reset, or too many): back to the DOM renderer, and the
+        // slot goes to another terminal.
+        next.onContextLoss(() => {
+          if (addon !== next) return;
+          seat.detach();
+          webgl.lost(seat);
+        });
+        term.loadAddon(next);
+        addon = next;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    detach() {
+      const current = addon;
+      addon = null;
+      try {
+        current?.dispose();
       } catch {
         /* already gone */
       }
-    };
-  } catch {
-    return () => undefined;
-  }
+    },
+  };
+  return seat;
 }
 
 function useFileDrop(insert: (text: string) => void) {
@@ -142,6 +154,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const seatRef = useRef<GlUser | null>(null);
   const activeRef = useRef(active);
   const onExitRef = useRef(onExit);
   const onFocusRef = useRef(onFocus);
@@ -185,7 +198,9 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       else void call("app.openExternal", uri);
     }));
     term.open(host);
-    const releaseWebgl = attachWebgl(term);
+    const seat = webglSeat(term);
+    seatRef.current = seat;
+    webgl.add(seat, activeRef.current);
     termRef.current = term;
     fitRef.current = fit;
 
@@ -246,7 +261,10 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     });
     const binary = term.onBinary((data) => void call("pty.write", ptyId, data).catch(() => undefined));
     const focusSub = term.textarea ? (() => {
-      const handler = () => onFocusRef.current?.();
+      const handler = () => {
+        webgl.touch(seat);
+        onFocusRef.current?.();
+      };
       term.textarea!.addEventListener("focus", handler);
       return () => term.textarea?.removeEventListener("focus", handler);
     })() : () => undefined;
@@ -310,7 +328,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       input.dispose();
       binary.dispose();
       focusSub();
-      releaseWebgl();
+      webgl.remove(seat);
+      seatRef.current = null;
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -336,6 +355,11 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       /* hidden */
     }
   }, [fontFamily, fontSize]);
+
+  // On screen it asks for a WebGL slot; hidden, it gives its slot up once one on screen needs it.
+  useEffect(() => {
+    if (seatRef.current) webgl.show(seatRef.current, active);
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
