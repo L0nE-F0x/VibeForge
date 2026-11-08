@@ -17,7 +17,7 @@ import {
   Square,
   TerminalSquare,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
@@ -41,38 +41,53 @@ export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
 
 type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
 
-export function DiffView({ text }: { text: string }) {
+/** A diff, one row per line up to 20,000. Memoised: a big one is slow to build and rarely changes. */
+export const DiffView = memo(function DiffView({ text }: { text: string }) {
   const t = useT();
   const all = useMemo(() => text.split("\n"), [text]);
-  const lines = all.length > 20000 ? all.slice(0, 20000) : all;
+  const rows = useMemo(
+    () =>
+      (all.length > DIFF_CAP ? all.slice(0, DIFF_CAP) : all).map((line, index) => {
+        const kind = line.startsWith("diff --git")
+          ? "file"
+          : line.startsWith("#")
+            ? "meta"
+            : line.startsWith("@@")
+              ? "hunk"
+              : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
+                ? "meta"
+                : line.startsWith("+")
+                  ? "add"
+                  : line.startsWith("-")
+                    ? "del"
+                    : "";
+        return (
+          <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
+            {line || " "}
+          </div>
+        );
+      }),
+    [all],
+  );
   if (!text.trim()) return <Notice>{t("run.noDiff")}</Notice>;
   return (
     <>
-      <div className="diff">
-        {lines.map((line, index) => {
-          const kind = line.startsWith("diff --git")
-            ? "file"
-            : line.startsWith("#")
-              ? "meta"
-              : line.startsWith("@@")
-                ? "hunk"
-                : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
-                  ? "meta"
-                  : line.startsWith("+")
-                    ? "add"
-                    : line.startsWith("-")
-                      ? "del"
-                      : "";
-          return (
-            <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
-              {line || " "}
-            </div>
-          );
-        })}
-      </div>
-      {all.length > 20000 && <Notice>{t("run.diffCapped")}</Notice>}
+      <div className="diff">{rows}</div>
+      {all.length > DIFF_CAP && <Notice>{t("run.diffCapped")}</Notice>}
     </>
   );
+});
+
+const DIFF_CAP = 20000;
+
+/** How long a run took, or has taken so far. Only a running one ticks, and only this text re-renders. */
+function Elapsed({ start, end }: { start: string; end: string | null }) {
+  return end ? <>{duration(start, end)}</> : <Ticking start={start} />;
+}
+
+function Ticking({ start }: { start: string }) {
+  const now = useNow(1000);
+  return <>{duration(start, null, now)}</>;
 }
 
 function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null, t: Translator): string {
@@ -153,7 +168,6 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
-  const now = useNow(1000);
   const bundle = useQuery(`run:${runId}`, ["runs", "live"], () => call("runs.get", runId));
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
@@ -216,7 +230,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
           </div>
           <div className="sub truncate">
             {t(ORIGIN_KEY[run.origin])} · {engine?.label ?? run.engine} · <span className="mono">{tildify(run.cwd, home)}</span> · {t("run.started")}{" "}
-            <TimeAgo iso={run.startedAt} /> · {duration(run.startedAt, run.endedAt, now)}
+            <TimeAgo iso={run.startedAt} /> · <Elapsed start={run.startedAt} end={run.endedAt} />
           </div>
         </div>
         {canOpenElsewhere && !embedded && (
