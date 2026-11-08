@@ -317,7 +317,7 @@ export interface DeskMethods {
 
   "agents.list": () => Agent[];
   "agents.save": (input: AgentInput) => Agent;
-  "agents.delete": (id: string, confirmName: string) => Deleted;
+  "agents.delete": (id: string) => Deleted;
   "agents.readMemory": (id: string) => string;
   "agents.writeMemory": (id: string, text: string) => void;
 

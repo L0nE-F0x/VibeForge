@@ -557,7 +557,7 @@ function handlers(): Handlers {
 
     "agents.list": () => s().listAgents(),
     "agents.save": (input) => s().saveAgent(input),
-    "agents.delete": (id, confirmName) => s().deleteAgent(id, confirmName),
+    "agents.delete": (id) => s().deleteAgent(id),
     "agents.readMemory": (id) => s().readMemory(id),
     "agents.writeMemory": (id, text) => s().writeMemory(id, text),
 

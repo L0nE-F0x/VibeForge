@@ -35,8 +35,7 @@ describe("agents", () => {
     expect(() => ctx.svc.saveAgent({ name: "", brief: "b", engine: "argy", places: [ctx.place] })).toThrow(/name/);
     expect(() => ctx.svc.saveAgent({ name: "x", brief: "b", engine: "gone", places: [ctx.place] })).toThrow(/not on PATH/);
     expect(() => ctx.svc.saveAgent({ name: "x", brief: "b", engine: "argy", places: ["/definitely/not/here"] })).toThrow(/does not exist/);
-    expect(() => ctx.svc.deleteAgent(agent.id, "wrong")).toThrow(/Type the agent's name/);
-    ctx.svc.deleteAgent(agent.id, "Notes");
+    await ctx.svc.deleteAgent(agent.id);
     expect(ctx.svc.listAgents()).toEqual([]);
     ctx.svc.close();
   });
@@ -204,8 +203,12 @@ describe("undo", () => {
     const other = await ctx.svc.saveAgent({ name: "Other", brief: "b", engine: "argy", places: [ctx.place] });
     const theirs = ctx.svc.saveRoutine({ name: "Theirs", agentId: other.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
     const routinesOf = (id: string) => ctx.svc.listRoutines().filter((item) => item.agentId === id).map((item) => item.id);
+    // A chat with it is still going: deleting stops it first.
+    const sent = await ctx.svc.sendChat(ctx.svc.createChat({ agentId: agent.id }).id, "hi");
 
-    const { undo } = ctx.svc.deleteAgent(agent.id, "Notes");
+    const { undo } = await ctx.svc.deleteAgent(agent.id);
+    expect(ctx.killed).toEqual([sent.ptyId]);
+    expect(ctx.svc.getRun(sent.runId).run.status).not.toBe("running");
     expect(ctx.svc.getAgent(agent.id)).toBeNull();
     expect(routinesOf(agent.id)).toEqual([]);
     expect(routinesOf(other.id)).toEqual([theirs.id]);
@@ -215,7 +218,7 @@ describe("undo", () => {
     expect(routinesOf(agent.id)).toEqual([routine.id]);
 
     // Deleted again, and a new agent takes the name (and so the id) while the Undo is still up.
-    const again = ctx.svc.deleteAgent(agent.id, "Notes");
+    const again = await ctx.svc.deleteAgent(agent.id);
     const fresh = await agentIn(ctx);
     expect(fresh.id).toBe(agent.id);
     expect(routinesOf(fresh.id)).toEqual([]);
