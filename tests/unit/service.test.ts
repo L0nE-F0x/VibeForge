@@ -775,6 +775,48 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("keeps a deleted task's copy through a prune while Undo is up, and tidies it once Undo has passed", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    ctx.host.gitHead = (cwd) => gitHead(cwd);
+    ctx.host.snapshotGit = (cwd, start) => snapshotGit(cwd, 5000, start);
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const copyOf = (id: string) => ctx.svc.listTasks().find((item) => item.id === id)!.copy!;
+    const task = ctx.svc.saveTask({ title: "Edit", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const first = started(await ctx.svc.executeTask(task.id));
+    const copy = copyOf(task.id);
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "changed\n");
+    await ctx.exit(first.ptyId);
+
+    const { undo } = await ctx.svc.deleteTask(task.id);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    // While the Undo is up, another task's Execute prunes the repository's worktrees, and so does someone else.
+    const other = ctx.svc.saveTask({ title: "Other", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(other.id)).ptyId);
+    git(repo, "worktree", "prune");
+    expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${copy.path}\n`);
+
+    ctx.svc.undoDelete(undo);
+    await until(() => !git(repo, "worktree", "list", "--porcelain").includes("locked"));
+    expect(git(copy.path, "status", "--porcelain")).toBe(" M a.txt\n");
+    expect(await ctx.svc.applyTaskCopy(task.id)).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("changed\n");
+
+    // Deleted, and the app closes before Undo has passed: the copy, its lock and its branch all go.
+    const otherCopy = copyOf(other.id);
+    await ctx.svc.deleteTask(other.id);
+    ctx.svc.close();
+    await until(() => git(repo, "branch", "--list", `vibeforge/${other.id}`).trim() === "");
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
+  });
+
   it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
     const repo = tempDir();
     const git = (...args: string[]) =>

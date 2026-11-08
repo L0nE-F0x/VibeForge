@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, lockCopy, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -229,3 +229,50 @@ describe("applying a task's copy", () => {
     await expect(applyToWorkspace(copy, patch)).rejects.toThrow(/^The changes don't apply to the workspace/);
   });
 });
+
+/** The worktrees git has registered in `repo`, as `git worktree list --porcelain` shows them. */
+function worktrees(repo: string): string {
+  return git(repo, "worktree", "list", "--porcelain");
+}
+
+describe("making a task's copy", () => {
+  it("keeps a copy locked through a prune while it waits in the trash, and tidies it after", async () => {
+    const { repo, copy, owner, dataRoot } = await repoWithCopy({ "a.txt": LINES });
+    expect(await lockCopy(copy, owner)).toBe(true);
+    const aside = path.join(temp(), "in-the-trash");
+    fs.renameSync(copy.path, aside);
+    // Another task's copy being made prunes the repository's worktrees.
+    const other = await createCopy(repo, path.join(dataRoot, "worktrees", "task-2"), copyBranch("task-2"));
+    git(repo, "worktree", "prune");
+    expect(worktrees(repo)).toContain(`worktree ${copy.path}\n`);
+
+    // Undo: the folder is back, unlocked, and still a working copy.
+    fs.renameSync(aside, copy.path);
+    await unlockCopy(copy, owner);
+    expect(worktrees(repo)).not.toContain("locked");
+    expect(git(copy.path, "status", "--porcelain")).toBe("");
+
+    // Undo has passed: the trash empties, and the locked entry and the branch go with it.
+    await lockCopy(copy, owner);
+    fs.rmSync(copy.path, { recursive: true, force: true });
+    await removeCopy(copy, owner);
+    expect(worktrees(repo)).not.toContain(copy.path);
+    expect(git(repo, "branch", "--list", copy.branch).trim()).toBe("");
+    expect(worktrees(repo)).toContain(other.path);
+  });
+
+  it("clears a trash lock left by an app that has gone, and nobody else's", async () => {
+    const { repo, copy, dataRoot } = await repoWithCopy({ "a.txt": LINES });
+    const second = await createCopy(repo, path.join(dataRoot, "worktrees", "task-2"), copyBranch("task-2"));
+    const gone = spawnSync("true").pid;
+    git(repo, "worktree", "lock", "--reason", `VibeForge: in the trash until its Undo has passed (process ${gone})`, copy.path);
+    git(repo, "worktree", "lock", "--reason", "mine, hands off", second.path);
+    fs.rmSync(copy.path, { recursive: true, force: true });
+    fs.rmSync(second.path, { recursive: true, force: true });
+
+    await createCopy(repo, path.join(dataRoot, "worktrees", "task-3"), copyBranch("task-3"));
+    expect(worktrees(repo)).not.toContain(copy.path);
+    expect(worktrees(repo)).toContain("locked mine, hands off");
+  });
+});
+

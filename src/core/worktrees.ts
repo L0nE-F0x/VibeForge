@@ -187,6 +187,8 @@ async function makeCopy(repo: string, target: string, branch: string): Promise<W
   const head = await git(["rev-parse", "--verify", "-q", "HEAD"], repo);
   const base = head.stdout.trim();
   if (head.code !== 0 || !base) throw new Error("A separate copy needs at least one commit in the workspace.");
+  // Trash locks nothing can undo any more: their app has gone, or this copy is taking their folder.
+  await unlockOurs(repo, (entry) => samePlace(entry.path, target) || !lockerAlive(entry.locked ?? ""));
   // A copy deleted by hand leaves its entry behind, and git refuses to reuse its name.
   await git(["worktree", "prune"], repo);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -195,9 +197,76 @@ async function makeCopy(repo: string, target: string, branch: string): Promise<W
   return { path: path.resolve(target), branch, base, repo };
 }
 
+interface Registered {
+  path: string;
+  /** `refs/heads/…`, or null when detached. */
+  branch: string | null;
+  /** The lock's reason, "" for a lock without one, null when not locked. */
+  locked: string | null;
+}
+
+/** The repository's worktrees, as git has them registered. */
+async function registered(repo: string): Promise<Registered[]> {
+  const run = await git(["worktree", "list", "--porcelain", "-z"], repo);
+  if (run.code !== 0) return [];
+  const found: Registered[] = [];
+  for (const line of run.stdout.split("\0")) {
+    if (line.startsWith("worktree ")) found.push({ path: line.slice("worktree ".length), branch: null, locked: null });
+    const entry = found[found.length - 1];
+    if (!entry) continue;
+    if (line.startsWith("branch ")) entry.branch = line.slice("branch ".length);
+    else if (line === "locked" || line.startsWith("locked ")) entry.locked = line.slice("locked ".length);
+  }
+  return found;
+}
+
+function samePlace(a: string, b: string): boolean {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  const real = realTail(path.resolve(a));
+  return real !== null && real === realTail(path.resolve(b));
+}
+
 /** A commit id, never something git could read as an option. */
 function isCommitId(value: string): boolean {
   return /^[0-9a-f]{7,64}$/.test(value);
+}
+
+/** How a copy waiting in the trash is locked, with the process that can still undo it. */
+const TRASH_LOCK = "VibeForge: in the trash until its Undo has passed";
+
+function lockerAlive(reason: string): boolean {
+  const pid = Number(/\(process (\d+)\)$/.exec(reason)?.[1] ?? Number.NaN);
+  if (!Number.isInteger(pid) || pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Lift VibeForge's own trash locks on the worktrees `which` picks. Anyone else's lock stays. */
+async function unlockOurs(repo: string, which: (entry: Registered) => boolean): Promise<void> {
+  for (const entry of await registered(repo)) {
+    if (entry.locked?.startsWith(TRASH_LOCK) && which(entry)) await git(["worktree", "unlock", entry.path], repo);
+  }
+}
+
+/**
+ * Lock a task's copy before its folder moves to the trash, so a `git worktree prune` while Undo is
+ * on screen (another task's Execute runs one) doesn't forget it. True when it was locked.
+ */
+export async function lockCopy(copy: WorkingCopy, owner: CopyOwner): Promise<boolean> {
+  const real = ownedCopyPath(owner, copy.path)?.real;
+  if (!real) return false;
+  return withRepoLock(copy.repo, async () => (await git(["worktree", "lock", "--reason", `${TRASH_LOCK} (process ${process.pid})`, real], copy.repo)).code === 0);
+}
+
+/** Lift the trash lock once Undo has put the copy's folder back. */
+export async function unlockCopy(copy: WorkingCopy, owner: CopyOwner): Promise<void> {
+  const expected = expectedCopyPath(owner.dataRoot, owner.taskId);
+  if (!expected) return;
+  await withRepoLock(copy.repo, () => unlockOurs(copy.repo, (entry) => samePlace(entry.path, expected)));
 }
 
 /** Where `folder` (inside the repository) sits inside the copy. */
@@ -487,6 +556,9 @@ export async function removeCopy(copy: WorkingCopy, owner: CopyOwner, repoTruste
     return;
   }
   await withRepoLock(copy.repo, async () => {
+    // Out of the trash for good: its lock goes, so git can let go of it.
+    const expected = expectedCopyPath(owner.dataRoot, owner.taskId)!;
+    await unlockOurs(copy.repo, (entry) => samePlace(entry.path, expected));
     if (owned.real) {
       const removed = await git(["worktree", "remove", "--force", owned.real], copy.repo);
       if (removed.code !== 0) fs.rmSync(owned.real, { recursive: true, force: true });
