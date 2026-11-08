@@ -2,6 +2,7 @@ import { Bot, CalendarClock, History, House, KanbanSquare, MessagesSquare, Spark
 import type { Settings } from "../shared/api.js";
 import type { Key } from "./i18n/index.js";
 import type { ViewName } from "./state.js";
+import { numberedKeys } from "./shortcuts.js";
 
 export type RailView = Exclude<ViewName, "settings">;
 
@@ -36,5 +37,5 @@ export function railViews(rail: Settings["rail"] | undefined) {
 /** The Ctrl+number that opens a view, or null when it is hidden. */
 export function railKey(rail: Settings["rail"] | undefined, view: RailView): string | null {
   const at = railViews(rail).visible.findIndex((item) => item.view === view);
-  return at >= 0 && at < 9 ? `Ctrl+${at + 1}` : null;
+  return at >= 0 && at < 9 ? numberedKeys("app.views", at + 1) : null;
 }

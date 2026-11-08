@@ -2,7 +2,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
 import { pushOverlay } from "../overlays.js";
-import { isShortcut } from "../shortcuts.js";
+import { isShortcut, shortcutKeys } from "../shortcuts.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
 
@@ -298,7 +298,7 @@ export function SidePanel({
               size="sm"
               icon={PanelLeftOpen}
               tip={t("panel.show")}
-              kbd={primary ? "Ctrl+Shift+B" : undefined}
+              kbd={primary ? shortcutKeys("app.panel") : undefined}
               tipSide="right"
               onClick={() => (narrow ? setFloating(true) : update({ collapsed: false }))}
             />
@@ -315,7 +315,7 @@ export function SidePanel({
               size="sm"
               icon={PanelLeftClose}
               tip={t("panel.collapse")}
-              kbd={primary ? "Ctrl+Shift+B" : undefined}
+              kbd={primary ? shortcutKeys("app.panel") : undefined}
               onClick={() => (floating ? setFloating(false) : update({ collapsed: true }))}
             />
           </div>

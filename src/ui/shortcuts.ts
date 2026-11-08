@@ -36,7 +36,9 @@ export type ShortcutScope =
   /** A message with an Undo button (state.tsx). */
   | "toast"
   /** A list panel with a row focused (components/SidePanel.tsx). */
-  | "list";
+  | "list"
+  /** The welcome tour, while it is up (components/Tour.tsx). */
+  | "tour";
 
 export interface Shortcut {
   /** How the handlers and the tests name it. */
@@ -67,6 +69,8 @@ export interface Shortcut {
   readonly terminal?: "window" | "first" | "own";
   /** What else a "window" shortcut needs inside a terminal, where the program keeps the rest: plain Ctrl+K is its kill-line. */
   readonly inTerminal?: Chord;
+  /** Left off the sheet: keys that work only inside one guide, which shows them itself. */
+  readonly offSheet?: true;
 }
 
 const ctrlShift = (key: string): Chord => ({ ctrl: true, shift: true, alt: false, key });
@@ -120,6 +124,10 @@ const LIST = [
   // ---------------------------------------------------------------- runs
   { id: "runs.next", keys: "J", label: "shortcuts.nextRun", group: "shortcuts.runs", scope: "runs", paused: "typing", chord: { ctrl: false, shift: false, alt: false, meta: false, key: /^j$/ } },
   { id: "runs.prev", keys: "K", label: "shortcuts.prevRun", group: "shortcuts.runs", scope: "runs", paused: "typing", chord: { ctrl: false, shift: false, alt: false, meta: false, key: /^k$/ } },
+
+  // ---------------------------------------------------------------- the tour's own, while it is up
+  { id: "tour.back", keys: "←", label: "common.back", group: "shortcuts.anywhere", scope: "tour", paused: "never", chord: { key: "ArrowLeft" }, offSheet: true },
+  { id: "tour.next", keys: "→", label: "common.next", group: "shortcuts.anywhere", scope: "tour", paused: "never", chord: { key: /^(ArrowRight|Enter)$/ }, offSheet: true },
 ] as const satisfies readonly Shortcut[];
 
 type Entry = (typeof LIST)[number];
@@ -169,6 +177,11 @@ export function shortcutKeys(id: ShortcutId): string {
   return entry(id).keys ?? "";
 }
 
+/** One of a numbered shortcut's keys: the third view is "Ctrl+3". */
+export function numberedKeys(id: "app.views" | "app.workspaces", number: number): string {
+  return shortcutKeys(id).replace("1…9", String(number));
+}
+
 /** Every keyed shortcut a key event is, in the registry's order. */
 export function shortcutsFor(event: KeyLike): ShortcutId[] {
   return SHORTCUTS.filter((item) => item.chord && pressed(item.chord, event)).map((item) => item.id as ShortcutId);
@@ -207,6 +220,7 @@ export function runShortcut(
 export function shortcutSheet(): Array<{ group: Key; rows: Array<{ id: ShortcutId; keys?: string; gesture?: Key; text: Key }> }> {
   const sections = new Map<Key, Array<{ id: ShortcutId; keys?: string; gesture?: Key; text: Key }>>();
   for (const item of SHORTCUTS) {
+    if (item.offSheet) continue;
     const rows = sections.get(item.group) ?? [];
     rows.push({ id: item.id as ShortcutId, keys: item.keys, gesture: item.gesture, text: item.label });
     sections.set(item.group, rows);

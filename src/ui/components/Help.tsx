@@ -2,7 +2,7 @@ import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, RefreshCw
 import type { AppInfo, Engine, Settings } from "../../shared/api.js";
 import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
-import { shortcutSheet } from "../shortcuts.js";
+import { shortcutKeys, shortcutSheet } from "../shortcuts.js";
 import { useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 import { startTour } from "./Tour.js";
@@ -116,7 +116,7 @@ export function HelpPopover({ anchor, onClose }: { anchor: HTMLElement; onClose:
     ...(waiting ? ([{ label: t("help.updateTo", { version: waiting }), icon: Download, accent: true, onSelect: showUpdate }, "sep"] as Array<MenuItem | "sep">) : []),
     { label: t("help.tour"), icon: Compass, onSelect: startTour },
     { label: t("whichOne.title"), icon: WhichOneIcon, onSelect: showWhichOne },
-    { label: t("help.shortcuts"), icon: Keyboard, hint: "Ctrl+Shift+/", onSelect: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
+    { label: t("help.shortcuts"), icon: Keyboard, hint: shortcutKeys("app.shortcuts"), onSelect: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
     "sep",
     { label: t("help.feature"), icon: Lightbulb, onSelect: () => open(issueUrl("feature", info, engines)) },
     { label: t("help.bug"), icon: Bug, onSelect: () => open(issueUrl("bug", info, engines)) },
