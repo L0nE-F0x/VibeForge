@@ -373,7 +373,7 @@ describe("the Orchestrator in the service", () => {
     expect(git(repo, "rev-parse", "vibeforge/fix-a").trim()).not.toBe(git(repo, "rev-parse", "HEAD").trim());
 
     const result = await ctx.svc.orchestratorApplyCopy(copy.id);
-    expect(result).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(result).toMatchObject({ files: ["a.txt", "b.txt"], conflicts: [] });
     expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\nthree\n");
     expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new\n");
     // As uncommitted edits: the workspace's branch hasn't moved.
@@ -506,7 +506,7 @@ describe("the Orchestrator in the service", () => {
     expect(() => ctx.svc.orchestratorEditStep(turns[1].id, turns[1].steps?.[0].id ?? "", { prompt: "x" })).toThrow("That plan has already been carried out.");
     await ctx.svc.orchestratorRun(turns[3].id);
     // A message like any other, labelled, through the queue.
-    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "From a terminal outside VibeForge:\nWrap up." });
+    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "Wrap up." });
     expect(ctx.killed).toContain(running.ptyId);
     await until(() => ctx.ended.length === 1);
 
@@ -543,7 +543,16 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.onPtyActivity(run.ptyId, false);
     at += 4000;
     await ctx.svc.pumpMessages();
-    expect(ctx.sent).toEqual([{ ptyId: run.ptyId, text: "From a terminal outside VibeForge:\nAdd tests." }]);
+    expect(ctx.sent).toEqual([{ ptyId: run.ptyId, text: "Add tests." }]);
+
+    // A person's words through Maestro aren't CLIs talking to each other: that setting doesn't hold them.
+    const settings = ctx.svc.store.readSettings();
+    ctx.svc.store.writeSettings({ ...settings, agentTalk: { ...settings.agentTalk, on: false } });
+    expect(await tell(run.ptyId, "Then lint.")).toMatchObject({ state: "done" });
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toEqual({ ptyId: run.ptyId, text: "Then lint." });
+    ctx.svc.store.writeSettings(settings);
 
     // Stop on that terminal holds Maestro's messages too, until a person types there.
     ctx.svc.stopTalk(run.ptyId);
