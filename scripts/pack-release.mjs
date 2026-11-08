@@ -2,8 +2,9 @@
 // @ts-check
 // Packs the ready-made VibeForge a release carries: vibeforge-<version>-linux-<arch>.tar.zst, with
 // what the built app reads at runtime and nothing else, so installing and updating compile nothing.
-// release.yml runs it on every release tag; scripts/install.sh downloads the archive, checks it
-// against the release's SHA256SUMS and swaps it in.
+// scripts/build-release.sh runs it and then installs and smoke-tests the result (CI on every pull
+// request, release.yml for each tag); scripts/install.sh downloads the archive, checks it against
+// the release's SHA256SUMS and swaps it in.
 //
 //   node scripts/pack-release.mjs [out-dir]        (out-dir defaults to release/)
 //

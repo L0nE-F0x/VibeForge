@@ -66,4 +66,11 @@ describe("the ready-made build's file list", () => {
       else expect(shipped(part), part).toBe(true);
     }
   });
+
+  it("is packed and tried by one script, in CI's smoke job and in the release", () => {
+    for (const workflow of ["ci.yml", "release.yml"]) {
+      expect(read(path.join(".github", "workflows", workflow)), workflow).toMatch(/xvfb-run [^\n]*scripts\/build-release\.sh /);
+    }
+    expect(read("scripts/build-release.sh")).toContain("scripts/pack-release.mjs");
+  });
 });
