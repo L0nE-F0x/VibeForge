@@ -185,7 +185,7 @@ describe("talk: the control socket", () => {
     const a = controlSocketPath("/home/me/.local/share/vibeforge", "/run/user/1000", 1000);
     expect(a).toMatch(/^\/run\/user\/1000\/vibeforge-[0-9a-f]{8}\.sock$/);
     expect(controlSocketPath("/tmp/other", "/run/user/1000", 1000)).not.toBe(a);
-    expect(controlSocketPath("/x", undefined, 42)).toMatch(/^\/tmp\/vibeforge-42-[0-9a-f]{8}\.sock$/);
+    expect(controlSocketPath("/x", undefined, 42)).toMatch(/^\/tmp\/vibeforge-42\/vibeforge-[0-9a-f]{8}\.sock$/);
   });
 
   it("understands voice actions from the socket and from a second instance's arguments", () => {

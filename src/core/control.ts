@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 // The control socket: how `vibeforge --voice start` reaches the running window in a few
@@ -10,10 +11,41 @@ import path from "node:path";
 export const VOICE_ACTIONS = ["start", "stop", "cancel"] as const;
 export type VoiceAction = (typeof VOICE_ACTIONS)[number];
 
-export function controlSocketPath(dataRoot: string, runtimeDir: string | undefined, uid: number): string {
+/**
+ * Where the socket goes without XDG_RUNTIME_DIR: a folder in /tmp that only this user can enter,
+ * since a bare path in /tmp could be made first by anyone. `tmp` is for tests.
+ */
+export function fallbackSocketDir(uid: number, tmp = "/tmp"): string {
+  return path.join(tmp, `vibeforge-${uid}`);
+}
+
+export function controlSocketPath(dataRoot: string, runtimeDir: string | undefined, uid: number, tmp = "/tmp"): string {
   const tag = createHash("sha1").update(dataRoot).digest("hex").slice(0, 8);
   // Unix socket paths are limited to about 100 bytes, so the folder is hashed rather than used.
-  return runtimeDir ? path.join(runtimeDir, `vibeforge-${tag}.sock`) : path.join("/tmp", `vibeforge-${uid}-${tag}.sock`);
+  return path.join(runtimeDir || fallbackSocketDir(uid, tmp), `vibeforge-${tag}.sock`);
+}
+
+/**
+ * Readies the socket's folder when it is the /tmp fallback: made with mode 0700, or, when it is
+ * there already, a real folder this user owns, closed to everyone else. False when it belongs to
+ * someone else, whose socket it could be. scripts/vibeforge checks the same before connecting.
+ */
+export function prepareSocketDir(socketPath: string, uid: number, tmp = "/tmp"): boolean {
+  const dir = path.dirname(socketPath);
+  if (dir !== fallbackSocketDir(uid, tmp)) return true;
+  try {
+    fs.mkdirSync(dir, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") return false;
+  }
+  try {
+    const stat = fs.lstatSync(dir);
+    if (!stat.isDirectory() || stat.uid !== uid) return false;
+    if ((stat.mode & 0o777) !== 0o700) fs.chmodSync(dir, 0o700);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** "voice start" → "start"; anything else is ignored. */

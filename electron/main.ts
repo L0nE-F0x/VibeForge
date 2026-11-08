@@ -21,6 +21,7 @@ import { gitActivity, githubActivity, type Activity, type ActivitySource } from 
 import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
+import { isAppPage, relaunchArgs, settleWithin, type AppPage } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -71,6 +72,11 @@ function appRoot(): string {
 
 function iconPath(): string {
   return path.join(appRoot(), "resources", "icon.png");
+}
+
+/** The one page that runs with the preload's bridge. */
+function appPage(): AppPage {
+  return { file: path.join(appRoot(), "dist", "index.html"), devUrl: process.env.VITE_DEV_SERVER_URL };
 }
 
 const install = installKind(appRoot(), {
@@ -405,22 +411,39 @@ async function waitForTrayHost(ms: number): Promise<boolean> {
   return true;
 }
 
+/** The quit question while it is on screen, so a second close or Quit joins it instead of asking again. */
+let quitQuestion: Promise<boolean> | null = null;
+
+/**
+ * Asks whether to quit with terminals still running; true to quit. Never the blocking kind of
+ * dialog: while one held the main process, terminal output backed up and every CLI stalled.
+ */
+function askToQuit(live: Array<{ kind: string }>): Promise<boolean> {
+  if (quitQuestion) return quitQuestion;
+  const runs = live.filter((session) => session.kind === "run").length;
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
+    defaultId: 1,
+    cancelId: 1,
+    title: "VibeForge",
+    message: words.count("main.quit", live.length),
+    detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
+  };
+  quitQuestion = (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options))
+    .then(({ response }) => response === 0)
+    .finally(() => {
+      quitQuestion = null;
+    });
+  return quitQuestion;
+}
+
 /** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
 async function quitFromTray(): Promise<void> {
   const live = service?.listLive() ?? [];
   if (live.length && win) {
     focusWindow();
-    const runs = live.filter((session) => session.kind === "run").length;
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
-      defaultId: 1,
-      cancelId: 1,
-      title: "VibeForge",
-      message: words.count("main.quit", live.length),
-      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
-    });
-    if (response !== 0) return;
+    if (!(await askToQuit(live))) return;
   }
   quitting = true;
   app.quit();
@@ -482,7 +505,7 @@ function handlers(): Handlers {
     "app.restart": () => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
       log.info("Restarting");
-      app.relaunch();
+      app.relaunch({ args: relaunchArgs(process.argv) });
       quitting = true;
       app.quit();
     },
@@ -670,7 +693,8 @@ function handlers(): Handlers {
 function registerIpc(): void {
   const table = handlers() as Record<string, (...args: unknown[]) => unknown>;
   ipcMain.handle("vf:call", async (event, method: string, ...args: unknown[]) => {
-    if (!win || event.sender !== win.webContents) throw new Error("Not allowed.");
+    // The window's own page only: should anything else ever load in it, it gets no bridge.
+    if (!win || event.sender !== win.webContents || !isAppPage(event.senderFrame?.url ?? "", appPage())) throw new Error("Not allowed.");
     const handler = table[method];
     if (!handler) throw new Error(`Unknown call ${method}`);
     try {
@@ -781,12 +805,17 @@ async function createWindow(): Promise<void> {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // The window shows VibeForge's page and nothing else: a link or a script that points it at another
+  // page, a file:// one included, is refused, and web links open in the browser instead.
   win.webContents.on("will-navigate", (event, url) => {
-    const devUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devUrl && url.startsWith(devUrl)) return;
-    if (url.startsWith("file://")) return;
+    if (isAppPage(url, appPage())) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  // Frames inside the page too (it has none of its own).
+  win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame || isAppPage(event.url, appPage())) return;
+    event.preventDefault();
   });
   win.on("close", (event) => {
     if (quitting || !service) return;
@@ -800,19 +829,14 @@ async function createWindow(): Promise<void> {
       return;
     }
     const live = service.listLive();
-    const runs = live.filter((session) => session.kind === "run").length;
     if (live.length === 0) return;
-    const choice = dialog.showMessageBoxSync(win!, {
-      type: "question",
-      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
-      defaultId: 1,
-      cancelId: 1,
-      title: "VibeForge",
-      message: words.count("main.quit", live.length),
-      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
+    // The window stays while the question is up; a yes quits, which closes it.
+    event.preventDefault();
+    void askToQuit(live).then((quit) => {
+      if (!quit) return;
+      quitting = true;
+      app.quit();
     });
-    if (choice === 1) event.preventDefault();
-    else quitting = true;
   });
   const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
   win.on("closed", () => {
@@ -824,9 +848,9 @@ async function createWindow(): Promise<void> {
   win.webContents.on("console-message", (event) => {
     if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
   });
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) await win.loadURL(devUrl);
-  else await win.loadFile(path.join(appRoot(), "dist", "index.html"));
+  const page = appPage();
+  if (page.devUrl) await win.loadURL(page.devUrl);
+  else await win.loadFile(page.file);
 }
 
 /** Why the terminal host is down, for a page that loads after it happened. */
@@ -898,6 +922,8 @@ supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
   // Every terminal died with the host. Record them, then bring the host back.
   for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
+  // Once quitting has begun the host stays down: a new one would start halfway through the quit.
+  if (quitting) return;
   const now = Date.now();
   hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
   if (hostCrashes.length > 3) {
@@ -907,7 +933,9 @@ supervisor.onCrash.add((message) => {
     return;
   }
   send("host-crash", message);
-  setTimeout(() => void startHost(), 1000);
+  setTimeout(() => {
+    if (!quitting) void startHost();
+  }, 1000);
 });
 
 function companionWire() {
@@ -923,8 +951,12 @@ function companionWire() {
   };
 }
 
+/** How long a quit waits for the phone page's server to close before going on without it. */
+const COMPANION_STOP_MS = 2000;
+
 async function shutdown(): Promise<void> {
-  await stopCompanion();
+  const stopped = await settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`));
+  if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
   talk.dispose();
   voice.dispose();
   if (!service) return;
@@ -934,6 +966,23 @@ async function shutdown(): Promise<void> {
   service.shutdown();
   service.close();
   service = null;
+}
+
+/**
+ * Start failed: say why and where the log is, then exit. Staying on with no window and no tray
+ * would keep the single-instance lock, and every later launch would quietly do nothing.
+ */
+async function startFailed(error: unknown): Promise<void> {
+  console.error(error);
+  const detail = describeError(error);
+  log.error(`VibeForge could not start: ${detail}`);
+  try {
+    await words.use(service?.getSettings().language ?? "system", app.getLocale());
+  } catch {
+    /* English, then */
+  }
+  dialog.showErrorBox(words.say("main.startFailed"), words.say("main.startFailedBody", { error: detail.split("\n")[0], log: log.file }));
+  app.exit(1);
 }
 
 // ------------------------------------------------------------------ lifecycle
@@ -1032,7 +1081,7 @@ if (!app.requestSingleInstanceLock()) {
       stopControl();
       stopTrayWatch();
     });
-  });
+  }).catch(startFailed);
 
   app.on("before-quit", () => {
     quitting = true;

@@ -361,6 +361,20 @@ function toRow(meta: RunMeta): Array<string | number | null> {
   });
 }
 
+/** SQLite's "database disk image is malformed" (11) and "file is not a database" (26). */
+function isBrokenIndex(error: unknown): boolean {
+  const { code, errcode } = (error ?? {}) as { code?: unknown; errcode?: unknown };
+  return code === "ERR_SQLITE_ERROR" && typeof errcode === "number" && [11, 26].includes(errcode & 0xff);
+}
+
+/** Moves a damaged index (and its journal) to `index.sqlite.broken`, as writeJson does with a JSON file. */
+function setIndexAside(file: string): void {
+  const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
+  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+    if (fs.existsSync(`${file}${suffix}`)) fs.renameSync(`${file}${suffix}`, `${aside}${suffix}`);
+  }
+}
+
 export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
@@ -370,8 +384,19 @@ export class Store {
     this.configRoot = configRoot;
     this.dataRoot = dataRoot;
     ensureLayout(configRoot, dataRoot);
-    this.db = new DatabaseSync(path.join(dataRoot, "index.sqlite"));
-    this.migrate();
+    const index = path.join(dataRoot, "index.sqlite");
+    let db: DatabaseSync | null = null;
+    try {
+      db = this.db = new DatabaseSync(index);
+      this.migrate();
+    } catch (error) {
+      if (!isBrokenIndex(error)) throw error;
+      // The index only mirrors the run folders' meta.json, so a damaged one is set aside and built again from them.
+      db?.close();
+      setIndexAside(index);
+      this.db = new DatabaseSync(index);
+      this.migrate();
+    }
   }
 
   close(): void {
