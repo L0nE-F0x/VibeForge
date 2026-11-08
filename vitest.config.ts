@@ -1,21 +1,93 @@
 import { defineConfig } from 'vitest/config';
 
+// Line floors per file, set just under each one's coverage on 2026-11-08 (Node 26), so a change that
+// leaves code untested fails here instead of hiding in the total. Raise one when its tests improve;
+// a new file is held by its folder's total below.
+const floors: Record<string, number> = {
+  'src/core/activity.ts': 68,
+  'src/core/agent-talk.ts': 99,
+  'src/core/autostart.ts': 99,
+  'src/core/branches.ts': 88,
+  'src/core/checkout.ts': 99,
+  'src/core/companion-http.ts': 87,
+  'src/core/companion-orchestrator.ts': 99,
+  'src/core/companion-text.ts': 99,
+  'src/core/companion.ts': 93,
+  'src/core/control.ts': 96,
+  'src/core/engines.ts': 97,
+  'src/core/files.ts': 85,
+  'src/core/fsx.ts': 99,
+  'src/core/handoff.ts': 99,
+  'src/core/layout.ts': 99,
+  'src/core/log.ts': 94,
+  'src/core/main-text.ts': 90,
+  'src/core/orchestrator.ts': 97,
+  'src/core/places.ts': 99,
+  'src/core/plans.ts': 94,
+  'src/core/preamble.ts': 95,
+  'src/core/quota-alerts.ts': 96,
+  'src/core/replies.ts': 92,
+  'src/core/restore-screen.ts': 93,
+  'src/core/routines.ts': 92,
+  'src/core/run-markdown.ts': 99,
+  'src/core/run-storage.ts': 97,
+  'src/core/runs.ts': 94,
+  'src/core/service/chats.ts': 98,
+  'src/core/service/core.ts': 87,
+  'src/core/service/library.ts': 95,
+  'src/core/service/messages.ts': 90,
+  'src/core/service/orchestrator.ts': 73,
+  'src/core/service/routines.ts': 93,
+  'src/core/service/runs.ts': 78,
+  'src/core/service/shell-runs.ts': 96,
+  'src/core/service/tasks.ts': 96,
+  'src/core/service/turns.ts': 94,
+  'src/core/service/types.ts': 99,
+  'src/core/service/workspaces.ts': 90,
+  'src/core/session-prompts.ts': 89,
+  'src/core/slug.ts': 99,
+  'src/core/store.ts': 89,
+  'src/core/tasks.ts': 91,
+  'src/core/team-service.ts': 89,
+  'src/core/theme.ts': 88,
+  'src/core/themes-bundled.ts': 99,
+  'src/core/trash.ts': 77,
+  'src/core/updates.ts': 99,
+  'src/core/usage.ts': 93,
+  'src/core/vcs.ts': 89,
+  'src/core/voice.ts': 96,
+  'src/core/workspaces.ts': 91,
+  'src/core/worktrees.ts': 87,
+  'src/shared/changes.ts': 99,
+  'src/shared/dictation.ts': 99,
+  'src/shared/dock-url.ts': 99,
+  'src/shared/orchestrator.ts': 99,
+  'src/shared/pixel.ts': 91,
+  'src/shared/text.ts': 75,
+};
+
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    globalSetup: ['tests/global-setup.ts'],
     testTimeout: 20_000,
     hookTimeout: 20_000,
     pool: 'forks',
     fileParallelism: false,
-    // `npm run coverage`: what the tests reach. The core (storage, scheduler, the service) has a
-    // floor; the window and the main process are covered by the smoke test instead.
+    // `npm run coverage`: what the tests reach. The core (storage, scheduler, the service) and the
+    // code shared with the window have floors; the window and the main process are covered by the
+    // smoke test instead.
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}', 'electron/**/*.{ts,cjs}'],
       exclude: ['src/ui/i18n/*.ts'],
       reporter: ['text-summary', 'html'],
       reportsDirectory: 'coverage',
-      thresholds: { 'src/core/**': { lines: 85 } },
+      thresholds: {
+        'src/core/**': { lines: 85 },
+        'src/shared/**': { lines: 85 },
+        ...Object.fromEntries(Object.entries(floors).map(([file, lines]) => [file, { lines }])),
+      },
     },
   },
 });

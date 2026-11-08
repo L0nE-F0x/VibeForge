@@ -1,13 +1,30 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect } from "vitest";
+import { afterAll, expect } from "vitest";
 import { TeamService, type DeskHost, type Launched, type Queued, type SpawnRequest } from "../../../src/core/team-service.js";
 
 // The service against a PTY host that only records what it is asked, shared by the service tests.
 
+const folders: string[] = [];
+const services: TeamService[] = [];
+
+// The services a test file started stop, and the folders it made go, once the file is done.
+afterAll(() => {
+  for (const svc of services.splice(0)) {
+    try {
+      svc.close();
+    } catch {
+      /* the test closed it already */
+    }
+  }
+  for (const folder of folders.splice(0)) fs.rmSync(folder, { recursive: true, force: true });
+});
+
 export function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-svc-"));
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-svc-"));
+  folders.push(folder);
+  return folder;
 }
 
 export const INTERVAL = 5 * 60 * 1000;
@@ -66,6 +83,7 @@ export function setup(opts: { appStartedAt?: Date; configRoot?: string; dataRoot
     gitHead: async () => "abc1234",
   };
   svc = new TeamService({ configRoot, dataRoot, appStartedAt: opts.appStartedAt ?? new Date(9 * INTERVAL), now: opts.now ?? (() => new Date()), host });
+  services.push(svc);
   const exit = (ptyId: string, code = 0) => svc.onPtyExit(ptyId, code, null);
   return { svc, host, spawns, sent, killed, notes, ended, recorded, place, configRoot, dataRoot, exit };
 }
