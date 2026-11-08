@@ -663,6 +663,7 @@ export const en = {
   "tasks.appliedBody.other": "{count} files changed, not committed yet. The copy is gone.",
   "tasks.applyConflicts": "Applied, with conflicts to resolve",
   "tasks.applyConflictsBody": "{files} changed in the workspace too. They now have conflict markers; the copy stays until you discard it. Discarding it won't remove the markers.",
+  "tasks.applyKeptBody": "{files} couldn't be merged line by line (a binary file, or one that one side deleted), so the workspace's version was kept. The copy's version stays in the copy until you discard it.",
   "tasks.applyNothing": "The copy had no changes, so it was removed",
   "tasks.applyFailed": "Could not apply the changes",
   "tasks.discardCopy": "Discard copy",

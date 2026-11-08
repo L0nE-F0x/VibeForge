@@ -650,6 +650,7 @@ export const pt: Catalog = {
   "tasks.appliedBody.other": "{count} arquivos alterados, ainda sem commit. A cópia foi removida.",
   "tasks.applyConflicts": "Aplicado, com conflitos para resolver",
   "tasks.applyConflictsBody": "{files} também mudou no espaço de trabalho. Agora há marcadores de conflito; a cópia fica até você descartá-la. Descartá-la não remove os marcadores.",
+  "tasks.applyKeptBody": "{files} não pôde ser mesclado linha a linha (um arquivo binário, ou um que um dos lados apagou), então a versão do espaço de trabalho foi mantida. A versão da cópia fica na cópia até você descartá-la.",
   "tasks.applyNothing": "A cópia não tinha mudanças e foi removida",
   "tasks.applyFailed": "Não foi possível aplicar as mudanças",
   "tasks.discardCopy": "Descartar cópia",

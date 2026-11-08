@@ -651,6 +651,7 @@ export const zh: Catalog = {
   "tasks.appliedBody.other": "已更改 {count} 个文件，尚未提交。副本已删除。",
   "tasks.applyConflicts": "已应用，但有冲突需要解决",
   "tasks.applyConflictsBody": "{files} 在工作区中也被修改过，现已包含冲突标记；在你丢弃副本前它会一直保留。丢弃副本不会移除这些标记。",
+  "tasks.applyKeptBody": "{files} 无法逐行合并（二进制文件，或一方已删除的文件），因此保留了工作区中的版本。副本中的版本会一直保留在副本里，直到你丢弃它。",
   "tasks.applyNothing": "副本没有改动，已将其删除",
   "tasks.applyFailed": "无法应用改动",
   "tasks.discardCopy": "丢弃副本",

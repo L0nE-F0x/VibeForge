@@ -635,7 +635,7 @@ describe("runs", () => {
     expect(await ctx.svc.runDiff(launched.runId)).toContain("+TWO");
 
     const applied = await ctx.svc.applyTaskCopy(task.id);
-    expect(applied).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(applied).toEqual({ files: ["a.txt", "b.txt"], conflicts: [], kept: [] });
     expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
     expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new file\n");
     // Uncommitted in the workspace, for you to review and commit.
@@ -667,7 +667,7 @@ describe("runs", () => {
     const idle = started(await ctx.svc.executeTask(idleTask.id));
     const idleCopy = ctx.svc.listTasks().find((item) => item.id === idleTask.id)!.copy!;
     await ctx.exit(idle.ptyId);
-    expect(await ctx.svc.applyTaskCopy(idleTask.id)).toEqual({ files: [], conflicts: [] });
+    expect(await ctx.svc.applyTaskCopy(idleTask.id)).toEqual({ files: [], conflicts: [], kept: [] });
     expect(fs.existsSync(idleCopy.path)).toBe(false);
     expect(ctx.svc.listTasks().find((item) => item.id === idleTask.id)!).toMatchObject({ status: "done", copy: null });
 

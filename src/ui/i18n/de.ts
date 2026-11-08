@@ -650,6 +650,7 @@ export const de: Catalog = {
   "tasks.appliedBody.other": "{count} Dateien geändert, noch nicht committet. Die Kopie ist entfernt.",
   "tasks.applyConflicts": "Übernommen, mit Konflikten zum Auflösen",
   "tasks.applyConflictsBody": "{files} wurde auch im Arbeitsbereich geändert. Dort stehen jetzt Konfliktmarkierungen; die Kopie bleibt, bis du sie verwirfst. Verwerfen entfernt die Markierungen nicht.",
+  "tasks.applyKeptBody": "{files} ließ sich nicht Zeile für Zeile zusammenführen (eine Binärdatei oder eine Datei, die eine Seite gelöscht hat), also blieb die Fassung im Arbeitsbereich. Die Fassung der Kopie bleibt in der Kopie, bis du sie verwirfst.",
   "tasks.applyNothing": "Die Kopie hatte keine Änderungen und wurde entfernt",
   "tasks.applyFailed": "Die Änderungen ließen sich nicht übernehmen",
   "tasks.discardCopy": "Kopie verwerfen",

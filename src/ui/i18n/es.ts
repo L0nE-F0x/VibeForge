@@ -650,6 +650,7 @@ export const es: Catalog = {
   "tasks.appliedBody.other": "{count} archivos cambiados, aún sin confirmar. La copia ya no está.",
   "tasks.applyConflicts": "Aplicado, con conflictos por resolver",
   "tasks.applyConflictsBody": "{files} también cambió en el espacio de trabajo. Ahora tiene marcas de conflicto; la copia se queda hasta que la descartes. Descartarla no quita las marcas.",
+  "tasks.applyKeptBody": "{files} no se pudo combinar línea a línea (un archivo binario, o uno que un lado borró), así que se mantuvo la versión del espacio de trabajo. La versión de la copia sigue en la copia hasta que la descartes.",
   "tasks.applyNothing": "La copia no tenía cambios y se eliminó",
   "tasks.applyFailed": "No se pudieron aplicar los cambios",
   "tasks.discardCopy": "Descartar copia",
