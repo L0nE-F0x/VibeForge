@@ -127,6 +127,8 @@ export class HandedTasks {
    * otherwise, or once the wait is over, it goes to the CLI that handed it out as a report.
    */
   private async startHanded(taskId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number } = {}): Promise<TaskResult> {
+    // Out of the held ones while it starts, so a second Start can't start it twice; back if it doesn't.
+    const heldBy = this.proposed.get(taskId);
     this.proposed.delete(taskId);
     const task = this.core.store.getTask(taskId);
     if (!task) return { ok: false, error: "That task no longer exists." };
@@ -137,6 +139,7 @@ export class HandedTasks {
     try {
       launched = await this.tasks.executeTask(taskId);
     } catch (error) {
+      if (heldBy) this.proposed.set(taskId, heldBy);
       return { ok: true, taskId, title, started: false, note: `It couldn't start: ${error instanceof Error ? error.message : String(error)} It waits in To do.` };
     }
     const name = agent?.name ?? "The agent";

@@ -21,12 +21,12 @@ async function team() {
   const repo = gitRepo();
   const ctx = setup();
   const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
-  const helper = ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+  ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
   const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
   const talk = (ptyId: string) => ctx.svc.liveForView().find((item) => item.ptyId === ptyId)?.talk ?? null;
   const goAhead = (over: Partial<ReturnType<typeof ctx.svc.getSettings>["agentTalk"]> = {}) =>
     ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, handOff: "go", ...over } });
-  return { repo, ctx, workspace, helper, sender: sender.ptyId, talk, goAhead };
+  return { repo, ctx, workspace, sender: sender.ptyId, talk, goAhead };
 }
 
 /** Waits for work the service does on its own time (making a task's git copy). */
@@ -48,6 +48,22 @@ describe("handed-out tasks", () => {
     expect(result.ok && result.note).not.toContain("ended before");
     // The task itself goes on.
     expect(ctx.svc.listLive().some((item) => item.ptyId === taskPty())).toBe(true);
+    ctx.svc.close();
+  });
+
+  it("keeps a held task to start when its Start fails, so it can be started once fixed", async () => {
+    const { ctx, sender, talk } = await team();
+    const held = await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Add b.txt" });
+    const id = held.ok ? held.taskId : "";
+    // Its agent's CLI isn't on PATH for now: Start fails, and the task still waits for it.
+    const resolveBin = ctx.host.resolveBin;
+    ctx.host.resolveBin = () => null;
+    const failed = await ctx.svc.startHeldTasks(sender);
+    expect(failed).toMatchObject({ started: 0, failed: [expect.stringContaining("couldn't start")] });
+    expect(talk(sender)?.toStart).toEqual([{ taskId: id, title: "Add b.txt", agent: "Helper" }]);
+    ctx.host.resolveBin = resolveBin;
+    expect(await ctx.svc.startHeldTasks(sender)).toEqual({ started: 1, failed: [] });
+    expect(talk(sender)?.toStart ?? []).toEqual([]);
     ctx.svc.close();
   });
 });
