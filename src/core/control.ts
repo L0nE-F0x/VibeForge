@@ -62,6 +62,27 @@ export type TalkRequest =
   | { op: "task"; pty: string | null; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number }
   | { op: "apply"; pty: string | null; task: string };
 
+/** Any request can come back refused, with the reason. */
+export type TalkRefusal = { ok: false; error: string };
+
+/**
+ * The JSON line that answers each request, as scripts/talk.mjs reads it (through JSDoc).
+ * tests/unit/talk-answers.test.ts holds these to what the team service returns.
+ */
+export interface TalkAnswers {
+  who:
+    | {
+        ok: true;
+        you: string | null;
+        clis: Array<{ handle: string; label: string; folder: string; working: boolean; you: boolean }>;
+        agents: Array<{ name: string; handle: string; engine: string; goodAt: string; tier: string }>;
+      }
+    | TalkRefusal;
+  tell: { ok: true; to: string; delivered: "sent" | "draft" | "queued"; reply?: string | null; fromScreen?: boolean; timedOut?: boolean; note?: string } | TalkRefusal;
+  task: { ok: true; taskId: string; title: string; started: boolean; reply?: string | null; note?: string } | TalkRefusal;
+  apply: { ok: true; files: string[]; conflicts: string[]; note: string } | TalkRefusal;
+}
+
 /** The largest request line: a long message is still one line of JSON. */
 export const TALK_REQUEST_MAX = 512 * 1024;
 
