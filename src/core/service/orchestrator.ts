@@ -54,25 +54,61 @@ export interface BrainRun {
 /** Runs one headless turn of a CLI. The real one spawns it; tests hand in their own. */
 export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs?: number) => Promise<BrainRun>;
 
-const spawnBrain: BrainRunner = (argv, cwd, signal, timeoutMs = BRAIN_TIMEOUT_MS) =>
+/** How long a planner has to end after SIGTERM before its whole process group is killed. */
+const KILL_GRACE_MS = 3000;
+
+/**
+ * The real runner. The CLI leads a process group of its own, so Stop and the timeout reach
+ * whatever it started as well, and one that ignores SIGTERM is killed outright after a short
+ * grace instead of holding the turn open for good.
+ */
+export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs = BRAIN_TIMEOUT_MS, graceMs = KILL_GRACE_MS): Promise<BrainRun> =>
   new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, timeoutMs);
-    const abort = () => child.kill("SIGTERM");
-    signal.addEventListener("abort", abort, { once: true });
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
+    let finished = false;
+    let killTimer: NodeJS.Timeout | null = null;
+    const group = (name: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, name);
+      } catch {
+        /* already gone */
+      }
+    };
     const done = (code: number | null) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
+      if (killTimer) clearTimeout(killTimer);
+      signal.removeEventListener("abort", stop);
+      process.removeListener("exit", onQuit);
       resolve({ code, stdout, stderr, timedOut });
     };
+    function stop() {
+      if (finished || killTimer) return;
+      group("SIGTERM");
+      killTimer = setTimeout(() => {
+        group("SIGKILL");
+        // Something that left the group may still hold the pipes open; the turn ends anyway.
+        killTimer = setTimeout(() => done(null), graceMs);
+      }, graceMs);
+    }
+    // VibeForge quitting mid-turn takes the planner with it.
+    function onQuit() {
+      group("SIGKILL");
+    }
+    process.once("exit", onQuit);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeoutMs);
+    if (signal.aborted) stop();
+    else signal.addEventListener("abort", stop, { once: true });
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
       stderr += error.message;
       done(127);

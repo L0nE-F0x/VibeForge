@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
-import { agyModels, grokModels, type BrainRun } from "../../src/core/service/orchestrator.js";
+import { agyModels, grokModels, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
 
@@ -171,6 +171,65 @@ describe("the Orchestrator's plans", () => {
     expect(steps[2].asked).toBe("gemini · Dune");
     expect(stepIssue({ ...steps[0], prompt: " " }, context)).toBe("prompt");
     expect(stepIssue({ ...steps[4], target: "pty-9" }, context)).toBe("target");
+  });
+});
+
+/** Whether a process is still there; a zombie waiting for init counts as gone soon after. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Polls for up to three seconds, for a real process that is slow to start or to be reaped. */
+async function eventually(check: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 150 && !check(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(check()).toBe(true);
+}
+
+describe("the planning CLI's process", () => {
+  /** A stand-in planner that ignores SIGTERM and starts a child that does too, then hangs. */
+  function stubborn(): { bin: string; pidFile: string } {
+    const dir = tempDir();
+    const bin = path.join(dir, "stubborn");
+    const pidFile = path.join(dir, "child.pid");
+    fs.writeFileSync(bin, `#!/bin/bash\ntrap '' TERM\nsleep 60 &\necho $! > "${pidFile}"\nwait\n`, { mode: 0o755 });
+    return { bin, pidFile };
+  }
+
+  it("kills the whole group when a planner ignores SIGTERM past its timeout", async () => {
+    const { bin, pidFile } = stubborn();
+    const started = Date.now();
+    const turn = spawnBrain([bin], path.dirname(bin), new AbortController().signal, 300, 200);
+    await eventually(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() !== "");
+    const child = Number(fs.readFileSync(pidFile, "utf8"));
+    const run = await turn;
+    expect(run.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5000);
+    await eventually(() => !alive(child));
+  });
+
+  it("ends a turn that is stopped, even when the planner won't go quietly", async () => {
+    const { bin, pidFile } = stubborn();
+    const controller = new AbortController();
+    const turn = spawnBrain([bin], path.dirname(bin), controller.signal, 60_000, 200);
+    await eventually(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() !== "");
+    const child = Number(fs.readFileSync(pidFile, "utf8"));
+    controller.abort();
+    const run = await turn;
+    expect(run.timedOut).toBe(false);
+    await eventually(() => !alive(child));
+  });
+
+  it("reads what a planner prints, and a missing one as code 127", async () => {
+    const dir = tempDir();
+    const bin = path.join(dir, "says");
+    fs.writeFileSync(bin, '#!/bin/bash\necho "{\\"say\\":\\"hi\\"}"\necho oops >&2\n', { mode: 0o755 });
+    expect(await spawnBrain([bin], dir, new AbortController().signal)).toMatchObject({ code: 0, stdout: '{"say":"hi"}\n', stderr: "oops\n", timedOut: false });
+    expect((await spawnBrain([path.join(dir, "nothing-here")], dir, new AbortController().signal)).code).toBe(127);
   });
 });
 
