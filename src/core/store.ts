@@ -7,7 +7,7 @@ import { defaultCompanion, normalizeCompanion } from "./companion.js";
 import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
 import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
-import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from "./runs.js";
+import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta } from "./runs.js";
 import { isSafeId, slugify } from "./slug.js";
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../shared/text.js";
 import { TASK_STATUSES } from "./tasks.js";
@@ -408,7 +408,8 @@ export class Store {
     for (const dir of listRunDirs(this.dataRoot)) {
       if (known.has(path.basename(dir))) continue;
       const meta = readRunMeta(dir);
-      if (!meta) continue;
+      // A run's folder is named for its id; one that isn't (copied by hand) would be found in the wrong place.
+      if (!meta || meta.id !== path.basename(dir)) continue;
       meta.dir = dir;
       this.indexRun(meta);
       added += 1;
@@ -429,7 +430,7 @@ export class Store {
 
   /** The only way run state changes: meta.json and the index move together. */
   saveRun(meta: RunMeta): RunMeta {
-    const normalized = normalizeRun(meta);
+    const normalized = this.located(meta);
     if (!normalized) throw new Error("Run is not valid");
     writeRunMeta(normalized);
     this.indexRun(normalized);
@@ -438,7 +439,18 @@ export class Store {
 
   getRun(id: string): RunMeta | null {
     const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
-    return row ? normalizeRun(row) : null;
+    return row ? this.located(row) : null;
+  }
+
+  /**
+   * A run as the index or its meta.json has it, its folder worked out from the data folder and its
+   * id. The stored path is never used: a data folder restored under another $HOME still finds its
+   * runs, and nothing outside the data folder is ever read or deleted as one.
+   */
+  private located(value: unknown): RunMeta | null {
+    const run = normalizeRun(value);
+    if (run) run.dir = runDir(this.dataRoot, run.id) ?? "";
+    return run;
   }
 
   queryRuns(query: RunQuery = {}): RunMeta[] {
@@ -473,7 +485,7 @@ export class Store {
     const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
     const sql = `SELECT * FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY startedAt DESC LIMIT ${limit}`;
     return (this.db.prepare(sql).all(...params) as unknown[])
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
@@ -490,7 +502,7 @@ export class Store {
         .prepare(`SELECT * FROM runs WHERE status != 'running' AND id NOT IN (SELECT id FROM run_text) ORDER BY startedAt DESC LIMIT ${Math.max(1, Math.floor(limit))}`)
         .all() as unknown[]
     )
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
@@ -511,7 +523,7 @@ export class Store {
       )
       .all(match) as Array<Record<string, unknown>>;
     const found = rows.flatMap((row) => {
-      const run = normalizeRun(row);
+      const run = this.located(row);
       return run ? [{ run, snippet: typeof row.snippet === "string" ? row.snippet : "" }] : [];
     });
     if (found.length >= cap) return found;
@@ -524,20 +536,21 @@ export class Store {
   /** Every run in the index, newest first, with no limit: for tidying up, not for showing. */
   allRuns(): RunMeta[] {
     return (this.db.prepare("SELECT * FROM runs ORDER BY startedAt DESC").all() as unknown[])
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
-  /** Forget a run entirely: its index row and its folder. */
+  /** Forget a run entirely: its index row and its folder, which is only ever `<data>/runs/<id>`. */
   deleteRun(run: RunMeta): void {
     this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
     this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
-    if (run.dir) fs.rmSync(run.dir, { recursive: true, force: true });
+    const dir = runDir(this.dataRoot, run.id);
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }
 
   deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
-    if (!run.dir) return;
-    fs.rmSync(path.join(run.dir, RUN_FILES[file]), { force: true });
+    const dir = runDir(this.dataRoot, run.id);
+    if (dir) fs.rmSync(path.join(dir, RUN_FILES[file]), { force: true });
   }
 
   // ---------------------------------------------------------------- settings & engines

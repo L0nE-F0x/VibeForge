@@ -568,6 +568,40 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("finds runs in a data folder restored under another home, and deletes only inside it", () => {
+    const configRoot = tempDir();
+    const oldData = tempDir();
+    const store = new Store(configRoot, oldData);
+    const { id, dir } = allocateRunDir(oldData, new Date(), "restored");
+    store.saveRun(normalizeRun({ id, origin: "chat", title: "Restored", engine: "argy", startedAt: new Date().toISOString(), status: "exited", dir })!);
+    fs.writeFileSync(path.join(dir, "transcript.txt"), "what was said\n");
+    store.close();
+    // The data folder comes back somewhere else, index and all; something else now sits at the old path.
+    const newData = path.join(tempDir(), "data");
+    fs.renameSync(oldData, newData);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "not-a-run.txt"), "someone else's\n");
+
+    const restored = new Store(configRoot, newData);
+    const run = restored.getRun(id)!;
+    expect(run.dir).toBe(path.join(newData, "runs", id));
+    expect(restored.allRuns().map((item) => item.dir)).toEqual([run.dir]);
+    expect(restored.queryRuns({}).map((item) => item.dir)).toEqual([run.dir]);
+    expect(fs.readFileSync(path.join(run.dir, "transcript.txt"), "utf8")).toBe("what was said\n");
+    // A folder copied by hand, whose meta.json names another run, isn't taken for that run.
+    fs.cpSync(run.dir, path.join(newData, "runs", "copied-by-hand"), { recursive: true });
+    expect(restored.reindex()).toBe(0);
+    expect(restored.getRun(id)!.dir).toBe(run.dir);
+    // Whatever path a run record carries, deleting it only ever removes its folder in the data folder.
+    restored.deleteRunFile({ ...run, dir }, "transcript");
+    expect(fs.existsSync(path.join(run.dir, "transcript.txt"))).toBe(false);
+    restored.deleteRun({ ...run, dir: path.dirname(dir) });
+    expect(fs.existsSync(run.dir)).toBe(false);
+    expect(restored.getRun(id)).toBeNull();
+    expect(fs.readFileSync(path.join(dir, "not-a-run.txt"), "utf8")).toBe("someone else's\n");
+    restored.close();
+  });
+
   it("finds runs by the words in their transcript, including runs from before search", async () => {
     const ctx = setup();
     const agent = await agentIn(ctx);
