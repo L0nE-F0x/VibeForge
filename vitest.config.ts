@@ -36,6 +36,7 @@ const floors: Record<string, number> = {
   'src/core/service/core.ts': 87,
   'src/core/service/library.ts': 95,
   'src/core/service/messages-answers.ts': 93,
+  'src/core/service/messages-delivery.ts': 92,
   'src/core/service/messages-files.ts': 99,
   'src/core/service/messages-who.ts': 99,
   'src/core/service/messages.ts': 90,
