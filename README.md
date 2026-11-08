@@ -25,7 +25,7 @@
 
 ---
 
-VibeForge never calls a model API and never holds a key. Every engine is a CLI you are already signed in to; VibeForge gives them a home. It remembers **who** does the work (agents with a brief, memory and skills), **where** they may work (allowed folders), **when** work starts (routines), and **what to review** when it ends (every run keeps its final screen, a transcript and the git diff since it began). No accounts. No telemetry. Everything on disk is plain YAML and Markdown.
+VibeForge never calls a model API and never holds a key. Every engine is a CLI you are already signed in to; VibeForge gives them a home. It remembers **who** does the work (agents with a brief, memory and skills), **where** they may work (allowed folders), **when** work starts (routines), and **what to review** when it ends (every run keeps its final screen, a transcript and the git diff since it began). No accounts. No telemetry. Everything on disk is plain YAML and Markdown. What it will and won't do is in [the principles](docs/principles.md).
 
 ## Install
 
@@ -206,7 +206,7 @@ npm run build && npm run smoke    # the built app: every view, a language switch
                                   # (SMOKE_HEADLESS=1 draws no window; CI runs it under xvfb)
 ```
 
-The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` (Node 22.18+, which runs TypeScript as is) regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
+The code is in `src/core` (the service, storage, scheduler — plain Node), `src/ui` (React) and `electron/` (main process, preload, PTY host). The pixel font, mark and pixel fields live in `src/shared/pixel.ts`; `node scripts/brand.ts` (Node 22.18+, which runs TypeScript as is) regenerates the icon, the website's inline pixel art and the social image from it. The website is plain HTML/CSS/JS in `site/` and deploys to Netlify from `netlify.toml` with no build step; preview it with `python3 -m http.server -d site`. `docs/principles.md` holds the rules a change has to keep; `docs/original-brief.md` is the product brief VibeForge grew from; `docs/status.md` says what has been verified.
 
 ---
 

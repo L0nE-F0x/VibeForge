@@ -2,6 +2,8 @@
 
 VibeForge is an open-source desktop for Omarchy. It runs the coding CLIs already on your machine. Issues and pull requests are welcome.
 
+Read [the principles](docs/principles.md) before proposing a feature. They are why VibeForge holds no API keys, sends nothing by default except the update check, and waits for a person at each step. A change that breaks one needs a reason in its pull request.
+
 A short-lived branch and a clear pull request keep `main` readable once more than one person is changing it.
 
 ## Set up
