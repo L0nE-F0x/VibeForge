@@ -70,6 +70,8 @@ Skills are instructions, not a secret store. Plugins (GitHub, Linear, and a long
 
 ## 3. What ForgeDesk keeps, and what it leaves out
 
+> **Superseded in part (2026-11-08).** Several things this section leaves out have shipped: dictation and spoken answers (0.5.0), an update check and an in-app Update you press (0.3.0), CLIs messaging each other and handing out tasks (2.7.0), a phone page (2.1.0), and Maestro starting several CLIs from one request (2.12.0). Accounts, telemetry and model credentials are still out. [principles.md](principles.md) says what holds now; the text below is kept as it was written.
+
 Keep:
 
 - Three modes with the same organizers: teammate, folder, conversation.
@@ -480,6 +482,8 @@ Phase 4:
 ---
 
 ## 13. Out of scope
+
+> **Superseded in part (2026-11-08).** Voice, a phone page (a web page, not an app) and agent-to-agent messaging have shipped; see [principles.md](principles.md) for what holds now. The list below is kept as it was written.
 
 Cloud sync. Phone apps. Billing. Plugin OAuth. Voice. Simulator panes. Swarm presets. Agent-to-agent chat. Automatic memory writes. OS-level sandboxing. Catching up every missed routine. Editing source files in an in-app editor. Windows and macOS.
 
