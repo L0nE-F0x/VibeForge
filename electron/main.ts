@@ -7,7 +7,6 @@ import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile } from "../src/core/log.js";
-import { TICK_MS } from "../src/core/routines.js";
 import { TeamService } from "../src/core/team-service.js";
 import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
@@ -30,6 +29,7 @@ import { companionStatus, syncCompanion } from "./companion.js";
 import { Stats } from "./stats.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
+import { Disposables, startSchedules } from "./timers.js";
 import { Voice } from "./voice.js";
 import { MainWindow } from "./window.js";
 
@@ -143,10 +143,6 @@ const mainWindow = new MainWindow(ctx, {
 });
 
 // ------------------------------------------------------------------ IPC
-
-/** Run upkeep (compressing ended runs, Settings → Storage) waits for start to settle, then repeats. */
-const UPKEEP_FIRST_MS = 2 * 60 * 1000;
-const UPKEEP_EVERY_MS = 6 * 60 * 60 * 1000;
 
 /** Where the last folder picked sits, so the next folder dialog opens there. */
 let pickedBeside: string | null = null;
@@ -472,40 +468,12 @@ if (!app.requestSingleInstanceLock()) {
     // Checked again whenever the window comes forward, so it's current before a close.
     tray.refreshHost();
     ctx.win?.on("focus", () => tray.refreshHost());
-    const tick = () =>
-      void ctx.service
-        ?.tick()
-        .then((results) => {
-          for (const result of results) if (result.error) log.warn(`Routine ${result.routineId} could not start: ${result.error}`);
-        })
-        .catch((error: unknown) => {
-          console.error(error);
-          log.error(`Routine scheduler: ${describeError(error)}`);
-        });
-    const first = setTimeout(tick, 3000);
-    const timer = setInterval(tick, TICK_MS);
-    // Compress finished runs and apply Settings → Storage: shortly after start, then a few times a day.
-    const upkeep = () =>
-      void ctx.service
-        ?.maintainRuns()
-        .then((done) => {
-          if (done.compressed || done.removed) log.info(`Runs tidied: ${done.compressed} compressed, ${done.removed} removed, ${Math.round(done.freed / 1024 / 1024)} MB freed`);
-        })
-        .catch((error: unknown) => log.warn(`Run upkeep: ${describeError(error)}`));
-    const firstUpkeep = setTimeout(upkeep, UPKEEP_FIRST_MS);
-    const upkeepTimer = setInterval(upkeep, UPKEEP_EVERY_MS);
+    const timers = new Disposables();
+    startSchedules(ctx, timers);
     updater.start();
-    app.once("will-quit", () => {
-      clearTimeout(first);
-      clearInterval(timer);
-      clearTimeout(firstUpkeep);
-      clearInterval(upkeepTimer);
-      updater.stop();
-      stopThemeWatch();
-      stopConfigWatch();
-      stopControl();
-      stopTrayWatch();
-    });
+    // Stopped in this order at quit.
+    timers.add(() => updater.stop(), stopThemeWatch, stopConfigWatch, stopControl, stopTrayWatch);
+    app.once("will-quit", () => timers.dispose());
   }).catch((error: unknown) => quit.startFailed(error));
 
   quit.handleEvents();
