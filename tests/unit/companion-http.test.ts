@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { companionStatus, stopCompanion, syncCompanion, type CompanionWire } from "../../electron/companion.js";
 import { newCompanionToken } from "../../src/core/companion.js";
-import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
+import { hostAllowed, startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-phone-http-"));
@@ -149,6 +149,91 @@ describe("stopping the phone page", () => {
       polling.agent.destroy();
       waiting.agent.destroy();
       await stopCompanion();
+    }
+  });
+});
+
+/** One request with the Host a browser would send for the address it opened. */
+function ask(port: number, route: string, host: string, headers: Record<string, string> = {}) {
+  return new Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: route, headers: { ...headers, Host: host } }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("who the phone page answers", () => {
+  it("answers this computer's own names and the tailnet name Tailscale Serve passes on, nothing else", () => {
+    for (const host of ["127.0.0.1:4737", "localhost:4737", "[::1]:4737", "LOCALHOST:8080", "studio.tail1234.ts.net", "studio.tail1234.ts.net:8443", "Studio.Tail1234.TS.NET."]) {
+      expect(hostAllowed(host), host).toBe(true);
+    }
+    for (const host of [undefined, "", "evil.example:4737", "ts.net", "studio.tail1234.ts.net.evil.example", "127.0.0.1.evil.example", "localhost.evil.example:4737", "studio_x.ts.net", "studio.ts.net:port", "100.101.102.103:4737"]) {
+      expect(hostAllowed(host), String(host)).toBe(false);
+    }
+  });
+
+  it("refuses a page whose name was pointed at this computer, even with the code", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({ port: 0, token, root: path.join(import.meta.dirname, "../../companion"), icon: null, actions: actions() });
+    try {
+      const evil = `rebind.evil.example:${server.port}`;
+      for (const route of ["/", "/app.js", "/api/text", "/api/desk"]) {
+        const refused = await ask(server.port, route, evil, { Authorization: `Bearer ${token}` });
+        expect(refused.status, route).toBe(403);
+        expect(JSON.parse(refused.body).error).toContain("Tailscale Serve");
+      }
+      const served = await ask(server.port, "/", "studio.tail1234.ts.net");
+      expect(served.status).toBe(200);
+      // No other page may frame this one.
+      expect(served.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+      expect(served.headers["x-frame-options"]).toBe("DENY");
+      expect((await ask(server.port, "/api/desk", `localhost:${server.port}`, { Authorization: `Bearer ${token}` })).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("says nothing about this computer before the code matches", async () => {
+    const token = newCompanionToken();
+    const root = tempDir();
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root,
+      icon: path.join(root, "missing.png"),
+      actions: actions({
+        session: async () => {
+          throw new Error(`That session is gone from ${root}.`);
+        },
+      }),
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    try {
+      // The page's own files are missing here: reading them fails with the folder in the message.
+      for (const route of ["/", "/icon.png"]) {
+        const failed = await fetch(`${base}${route}`);
+        expect(failed.status, route).toBe(500);
+        const said = (await failed.json()).error as string;
+        expect(said).toBe("Something went wrong.");
+        expect(said).not.toContain(root);
+      }
+      // The page's own refusals still say what they are.
+      const bad = await fetch(`${base}/api/pair`, { method: "POST", body: "{ nope" });
+      expect(bad.status).toBe(400);
+      expect((await bad.json()).error).toBe("That was not valid.");
+      // A paired phone hears what the service said.
+      const paired = await fetch(`${base}/api/session?ptyId=p`, { headers: { Authorization: `Bearer ${token}` } });
+      expect(paired.status).toBe(400);
+      expect((await paired.json()).error).toContain("That session is gone from");
+    } finally {
+      await server.close();
     }
   });
 });

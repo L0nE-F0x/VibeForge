@@ -1124,6 +1124,7 @@ export const ja: Catalog = {
   "phone.error.working": "まだ作業中です。",
   "phone.error.choose": "ワークスペースと起動する相手を選んでください。",
   "phone.error.failed": "問題が起きました。",
+  "phone.error.host": "電話用のページは、Tailscale Serve が表示する https のアドレスか、このコンピュータの 127.0.0.1 で開いてください。",
   "phone.installTitle": "電話にアプリとして入れる",
   "phone.installBody": "入れると画面いっぱいになります。",
   "phone.install": "入れる",

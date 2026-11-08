@@ -182,10 +182,21 @@ function pagePath(root: string, name: string): string | null {
   return full;
 }
 
-/** What a request needs to know about the server it reached. */
+/** One request, and what it needs to know about the server it reached. */
 interface Served {
   /** True once the page is turned off or its code replaced: nothing more is done for anyone. */
   stopping(): boolean;
+  /** Set once the pairing code matched. Until then a failure says nothing about this computer. */
+  paired: boolean;
+}
+
+/**
+ * The names the page answers to: this computer's own (on any port, so a tunnel works too), and the
+ * tailnet name Tailscale Serve passes on (`<machine>.<tailnet>.ts.net`). Any other name is a page
+ * elsewhere that had its name pointed at this computer (DNS rebinding).
+ */
+export function hostAllowed(host: string | undefined): boolean {
+  return /^(127\.0\.0\.1|localhost|\[::1\]|([a-z0-9-]+\.)+ts\.net\.?)(:\d{1,5})?$/.test((host ?? "").trim().toLowerCase());
 }
 
 /** Thrown once the server is stopping: the request gets no answer, its connection is cut. */
@@ -197,6 +208,7 @@ function stillServing(served: Served): void {
 }
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
+  if (!hostAllowed(req.headers.host)) throw new CompanionHttpError("phone.error.host", 403);
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
   if (method === "GET" && url.pathname === "/icon.png") {
@@ -220,7 +232,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       "Content-Type": page.type,
       "Content-Length": body.length,
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'",
+      "Content-Security-Policy":
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+      // No other page may show this one in a frame and have the phone tap its buttons.
+      "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
     });
@@ -244,6 +259,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (!tokenMatches(opts.token, bearerToken(req.headers.authorization))) {
     throw new CompanionHttpError("phone.pairLead", 401);
   }
+  served.paired = true;
   if (method === "GET" && url.pathname === "/api/desk") {
     sendJson(res, 200, opts.actions.desk());
     return;
@@ -373,23 +389,26 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
   // Off, a new code and Quit all stop this server. A phone that was connected gets nothing more from it:
   // its connection would otherwise keep this handler, and the old code, for as long as it polls.
   let stopping = false;
-  const served: Served = { stopping: () => stopping };
   const server = http.createServer((req, res) => {
     if (stopping) {
       res.destroy();
       return;
     }
+    const served: Served = { stopping: () => stopping, paired: false };
     handle(req, res, opts, served).catch(async (error: unknown) => {
       if (res.headersSent || stopping || error instanceof Stopping) {
         res.destroy();
         return;
       }
-      // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply.
-      const status = error instanceof CompanionHttpError ? error.status : 400;
-      const extra = error instanceof CompanionHttpError ? error.extra : undefined;
+      // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply, to a paired phone.
+      // Before that, only the page's own refusals: a file that can't be read would name the install folder.
+      const known = error instanceof CompanionHttpError;
+      const status = known ? error.status : served.paired ? 400 : 500;
+      const extra = known ? error.extra : undefined;
       // What is left of a body too large to read is not read: the connection ends with the reply.
       if (status === 413) res.setHeader("Connection", "close");
-      const text = await errorText(error, languageOf(req, opts)).catch(() => "Something went wrong.");
+      const language = languageOf(req, opts);
+      const text = await (known || served.paired ? errorText(error, language) : phoneSay(language, "phone.error.failed")).catch(() => "Something went wrong.");
       if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });
   });

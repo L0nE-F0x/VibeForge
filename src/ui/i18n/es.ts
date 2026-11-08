@@ -1123,6 +1123,7 @@ export const es: Catalog = {
   "phone.error.working": "Sigue trabajando.",
   "phone.error.choose": "Elige un espacio de trabajo y a quién iniciar.",
   "phone.error.failed": "Algo salió mal.",
+  "phone.error.host": "Abre la página del teléfono en la dirección https que imprime Tailscale Serve, o en 127.0.0.1 en este equipo.",
   "phone.installTitle": "Instala esto como una app en el teléfono",
   "phone.installBody": "Así ocupa toda la pantalla.",
   "phone.install": "Instalar",

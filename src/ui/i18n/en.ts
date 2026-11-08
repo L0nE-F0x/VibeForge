@@ -1136,6 +1136,7 @@ export const en = {
   "phone.error.working": "Still working.",
   "phone.error.choose": "Choose a workspace and who to start.",
   "phone.error.failed": "Something went wrong.",
+  "phone.error.host": "Open the phone page at the https address Tailscale Serve prints, or at 127.0.0.1 on this computer.",
   "phone.installTitle": "Install this as an app on your phone",
   "phone.installBody": "It then fills the whole screen.",
   "phone.install": "Install",
