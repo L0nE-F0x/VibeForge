@@ -11,17 +11,18 @@ import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile, PageErrors } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService, type DeskHost } from "../src/core/team-service.js";
-import { listThemes, resolvePalette, watchOmarchyTheme, type Palette } from "../src/core/theme.js";
+import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
-import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
+import type { Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
-import { isAppPage, relaunchArgs, settleWithin, type AppPage } from "./guards.js";
+import { MainContext } from "./main-context.js";
+import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -53,10 +54,21 @@ if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibefor
 if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
 
 const supervisor = new PtySupervisor();
-let win: BrowserWindow | null = null;
-let service: TeamService | null = null;
-let palette: Palette = resolvePalette("omarchy");
-let quitting = false;
+const appRoot = app.getAppPath();
+const ctx = new MainContext({
+  roots,
+  log,
+  supervisor,
+  words: new MainText(),
+  appRoot,
+  install: installKind(appRoot, {
+    installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
+    marked: fs.existsSync(path.join(appRoot, INSTALLER_MARK)),
+    checkout: fs.existsSync(path.join(appRoot, ".git")),
+  }),
+  palette: resolvePalette("omarchy"),
+});
+const { send, svc, focusWindow, words, install } = ctx;
 let shutdownDone = false;
 /** Started by the login autostart entry: stay in the tray until opened. */
 const startHidden = process.argv.includes(HIDDEN_ARG);
@@ -65,25 +77,6 @@ let waiting = 0;
 let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
 const notifications = new Set<Notification>();
-
-function appRoot(): string {
-  return app.getAppPath();
-}
-
-function iconPath(): string {
-  return path.join(appRoot(), "resources", "icon.png");
-}
-
-/** The one page that runs with the preload's bridge. */
-function appPage(): AppPage {
-  return { file: path.join(appRoot(), "dist", "index.html"), devUrl: process.env.VITE_DEV_SERVER_URL };
-}
-
-const install = installKind(appRoot(), {
-  installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
-  marked: fs.existsSync(path.join(appRoot(), INSTALLER_MARK)),
-  checkout: fs.existsSync(path.join(appRoot(), ".git")),
-});
 
 /** Puts the login shell's PATH ahead of Electron's, so CLIs installed through mise are found. */
 async function adoptShellPath(): Promise<void> {
@@ -112,26 +105,10 @@ function osDescription(): string {
   return `${name} · ${os.type()} ${os.release()}`;
 }
 
-function send<K extends keyof DeskEvents>(event: K, payload: DeskEvents[K]): void {
-  if (win && !win.isDestroyed()) win.webContents.send(`vf:${event}`, payload);
-}
-
-function svc(): TeamService {
-  if (!service) throw new Error("VibeForge is still starting.");
-  return service;
-}
-
 function openPath(target: string): void {
   const child = spawn("xdg-open", [target], { stdio: "ignore", detached: true });
   child.on("error", () => undefined);
   child.unref();
-}
-
-function focusWindow(): void {
-  if (!win) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
 }
 
 /** Omarchy's shell keeps its Do Not Disturb switch in this file. */
@@ -159,8 +136,8 @@ function notify(note: {
 }): void {
   if (Notification.isSupported()) {
     // VibeForge plays its own sounds, so the desktop's would be a second one for the same moment.
-    const silent = Boolean(service?.getSettings().sounds.on);
-    const notification = new Notification({ title: note.title, body: note.body, icon: iconPath(), silent });
+    const silent = Boolean(ctx.service?.getSettings().sounds.on);
+    const notification = new Notification({ title: note.title, body: note.body, icon: ctx.iconPath, silent });
     notifications.add(notification);
     notification.on("click", () => {
       focusWindow();
@@ -208,17 +185,17 @@ const host: DeskHost = {
 };
 
 const dock = new Dock(
-  () => win,
+  () => ctx.win,
   (state) => send("dock", state),
   (workspaceId, url) => {
     // The view names its workspace, so a page that moves while another workspace is on screen
     // is stored on the one that owns it.
-    const row = service?.listWorkspaces().workspaces.find((item) => item.id === workspaceId);
-    if (!service || !row) return;
+    const row = ctx.service?.listWorkspaces().workspaces.find((item) => item.id === workspaceId);
+    if (!ctx.service || !row) return;
     const next = savedDockUrl(workspaceId, workspaceId, url, row.dockUrl);
     if (!next) return;
     try {
-      service.updateWorkspace(workspaceId, { dockUrl: next });
+      ctx.service.updateWorkspace(workspaceId, { dockUrl: next });
     } catch (error) {
       log.warn(`Could not remember the browser address: ${describeError(error)}`);
     }
@@ -250,8 +227,8 @@ async function planSummary(fresh: boolean) {
 let activity: { key: string; at: number; value: Promise<Activity> } | null = null;
 
 function activityFor(source: ActivitySource, fresh: boolean): Promise<Activity> | null {
-  if (source === "off" || !service) return null;
-  const paths = service.listWorkspaces().workspaces.map((workspace) => workspace.path);
+  if (source === "off" || !ctx.service) return null;
+  const paths = ctx.service.listWorkspaces().workspaces.map((workspace) => workspace.path);
   // Adding or removing a workspace changes what git counts.
   const key = source === "github" ? source : `${source}:${paths.join("\n")}`;
   const maxAge = source === "github" ? 30 * 60_000 : 5 * 60_000;
@@ -271,10 +248,10 @@ function activityFor(source: ActivitySource, fresh: boolean): Promise<Activity> 
 const updater = new Updater({
   current: app.getVersion(),
   install,
-  command: updateCommand(install, appRoot(), process.env.VIBEFORGE_UPDATE_COMMAND),
+  command: updateCommand(install, ctx.appRoot, process.env.VIBEFORGE_UPDATE_COMMAND),
   url: process.env.VIBEFORGE_UPDATE_URL || RELEASES_URL,
   log,
-  enabled: () => service?.getSettings().checkUpdates ?? false,
+  enabled: () => ctx.service?.getSettings().checkUpdates ?? false,
   changed: () => send("changed", ["updates"]),
 });
 
@@ -289,42 +266,39 @@ const voice = new Voice({
   speaking: () => send("changed", ["voice"]),
   // Settings' language, or the desktop's: a voice in it is preferred.
   language: () => {
-    const chosen = service?.getSettings().language ?? "system";
+    const chosen = ctx.service?.getSettings().language ?? "system";
     return (chosen === "system" ? app.getLocale() : chosen).slice(0, 2).toLowerCase();
   },
   controlSocket: controlSocketPath(roots.dataRoot, process.env.XDG_RUNTIME_DIR, process.getuid?.() ?? 0),
   // The installed launcher when it is on PATH (it is a link to scripts/vibeforge), else the script itself.
-  launcher: () => (whichBin("vibeforge") ? "vibeforge" : path.join(appRoot(), "scripts", "vibeforge")),
+  launcher: () => (whichBin("vibeforge") ? "vibeforge" : path.join(ctx.appRoot, "scripts", "vibeforge")),
 });
 
-const talk = new Talk({ voice, service: () => service, log, send: (event) => send("voice-talk", event) });
+const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
 
 function refreshPalette(): void {
-  if (!service) return;
-  palette = resolvePalette(service.getSettings().theme);
-  send("palette", palette);
-  if (win && !win.isDestroyed()) win.setBackgroundColor(palette.background);
-  tray.recolor(palette.accent2, palette.darkerBackground);
+  if (!ctx.service) return;
+  ctx.palette = resolvePalette(ctx.service.getSettings().theme);
+  send("palette", ctx.palette);
+  if (ctx.win && !ctx.win.isDestroyed()) ctx.win.setBackgroundColor(ctx.palette.background);
+  tray.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
 }
 
 // ------------------------------------------------------------------ tray
 
 const autostartPath = autostartFile(process.env, os.homedir());
-const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${appRoot()}"`);
-
-/** The main process's own words, in the window's language. */
-const words = new MainText();
+const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${ctx.appRoot}"`);
 
 /** Follow Settings' language (or the desktop's), then rebuild the tray menu in it. */
 function syncWords(): void {
-  if (!service) return;
+  if (!ctx.service) return;
   void words
-    .use(service.getSettings().language, app.getLocale())
+    .use(ctx.service.getSettings().language, app.getLocale())
     .then(syncTray)
     .catch((error: unknown) => log.warn(`Translations: ${describeError(error)}`));
 }
 
-const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.darkerBackground }, {
+const tray = new TrayIcon(ctx.iconPath, { mark: ctx.palette.accent2, outline: ctx.palette.darkerBackground }, {
   open: () => focusWindow(),
   goAnywhere: () => {
     focusWindow();
@@ -340,9 +314,9 @@ const tray = new TrayIcon(iconPath(), { mark: palette.accent2, outline: palette.
     send("open-view", { view: "settings" });
   },
   setSounds: (on) => {
-    if (service) service.saveSettings({ sounds: { ...service.getSettings().sounds, on } });
+    if (ctx.service) ctx.service.saveSettings({ sounds: { ...ctx.service.getSettings().sounds, on } });
   },
-  setNotify: (on) => service?.saveSettings({ notify: on }),
+  setNotify: (on) => ctx.service?.saveSettings({ notify: on }),
   setAutostart: (on) => {
     setAutostart(on);
     syncTray();
@@ -360,14 +334,14 @@ function setAutostart(on: boolean): void {
 }
 
 function trayState(): TrayState {
-  const settings = service!.getSettings();
-  return { language: words.language, live: service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
+  const settings = ctx.service!.getSettings();
+  return { language: words.language, live: ctx.service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
 }
 
 function syncTray(): void {
-  if (!service) return;
+  if (!ctx.service) return;
   try {
-    if (service.getSettings().tray) tray.show(trayState());
+    if (ctx.service.getSettings().tray) tray.show(trayState());
     // Electron can't take an icon out of the bar's tray while it runs (the entry stays behind,
     // dead), so switching it off applies from the next start; until then it keeps working.
     else if (tray.shown) tray.update(trayState());
@@ -430,7 +404,7 @@ function askToQuit(live: Array<{ kind: string }>): Promise<boolean> {
     message: words.count("main.quit", live.length),
     detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
   };
-  quitQuestion = (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options))
+  quitQuestion = (ctx.win ? dialog.showMessageBox(ctx.win, options) : dialog.showMessageBox(options))
     .then(({ response }) => response === 0)
     .finally(() => {
       quitQuestion = null;
@@ -440,12 +414,12 @@ function askToQuit(live: Array<{ kind: string }>): Promise<boolean> {
 
 /** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
 async function quitFromTray(): Promise<void> {
-  const live = service?.listLive() ?? [];
-  if (live.length && win) {
+  const live = ctx.service?.listLive() ?? [];
+  if (live.length && ctx.win) {
     focusWindow();
     if (!(await askToQuit(live))) return;
   }
-  quitting = true;
+  ctx.quitting = true;
   app.quit();
 }
 
@@ -475,11 +449,11 @@ function handlers(): Handlers {
       node: process.versions.node,
       os: osDescription(),
       repo: REPO_URL,
-      appPath: appRoot(),
+      appPath: ctx.appRoot,
       install,
       logFile: log.file,
     }),
-    "app.palette": () => palette,
+    "app.palette": () => ctx.palette,
     "app.themes": () => listThemes(),
     "app.openPath": (target) => openPath(target),
     "app.openExternal": (url) => {
@@ -488,25 +462,25 @@ function handlers(): Handlers {
     "app.pickFolder": async (title) => {
       // Electron opens dialogs in Downloads unless told where. Projects sit side by side, so start
       // beside the folder picked last, or beside the newest workspace.
-      const newest = service?.listWorkspaces().workspaces.at(-1)?.path;
+      const newest = ctx.service?.listWorkspaces().workspaces.at(-1)?.path;
       const start = [pickedBeside, newest && path.dirname(newest)].find((dir): dir is string => Boolean(dir && fs.existsSync(dir)));
       const options = {
         title: title || words.say("main.chooseFolder"),
         defaultPath: start ?? os.homedir(),
         properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
       };
-      const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+      const result = ctx.win ? await dialog.showOpenDialog(ctx.win, options) : await dialog.showOpenDialog(options);
       const picked = result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
       if (picked) pickedBeside = path.dirname(picked);
       return picked;
     },
     "app.pathExists": (target) => fs.existsSync(target),
-    "app.toggleDevTools": () => win?.webContents.toggleDevTools(),
+    "app.toggleDevTools": () => ctx.win?.webContents.toggleDevTools(),
     "app.restart": () => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
       log.info("Restarting");
       app.relaunch({ args: relaunchArgs(process.argv) });
-      quitting = true;
+      ctx.quitting = true;
       app.quit();
     },
     "app.copyText": (text) => clipboard.writeText(text),
@@ -520,7 +494,7 @@ function handlers(): Handlers {
     "plans.summary": (fresh) => planSummary(Boolean(fresh)),
     "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
-      if (service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
+      if (ctx.service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
     "app.autostart": () => readAutostart(autostartPath),
@@ -670,11 +644,11 @@ function handlers(): Handlers {
 
     // Anything the window writes is a person: typing, a paste, dictation, the Write box.
     "pty.write": (ptyId, data) => {
-      service?.onHumanInput(ptyId, data);
+      ctx.service?.onHumanInput(ptyId, data);
       return supervisor.write(ptyId, data);
     },
     "pty.send": (ptyId, text) => {
-      service?.onHumanInput(ptyId, "\r");
+      ctx.service?.onHumanInput(ptyId, "\r");
       return supervisor.send(ptyId, text);
     },
     "talk.sendDraft": (fromPty, toPty, what, selection) => s().sendDraft({ fromPty, toPty, what, selection }),
@@ -697,7 +671,7 @@ function registerIpc(): void {
   const table = handlers() as Record<string, (...args: unknown[]) => unknown>;
   ipcMain.handle("vf:call", async (event, method: string, ...args: unknown[]) => {
     // The window's own page only: should anything else ever load in it, it gets no bridge.
-    if (!win || event.sender !== win.webContents || !isAppPage(event.senderFrame?.url ?? "", appPage())) throw new Error("Not allowed.");
+    if (!ctx.win || event.sender !== ctx.win.webContents || !isAppPage(event.senderFrame?.url ?? "", ctx.page)) throw new Error("Not allowed.");
     const handler = table[method];
     if (!handler) throw new Error(`Unknown call ${method}`);
     try {
@@ -737,7 +711,7 @@ function watchConfig(): () => void {
       timer = setTimeout(() => {
         const topics = [...pending];
         pending.clear();
-        service?.emit(...topics);
+        ctx.service?.emit(...topics);
         if (topics.includes("settings")) refreshPalette();
       }, 250);
     });
@@ -763,14 +737,14 @@ const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
  */
 function guardPermissions(): void {
   const allowed = (contents: Electron.WebContents | null, permission: string) =>
-    (win && contents === win.webContents ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
+    (ctx.win && contents === ctx.win.webContents ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(allowed(contents, permission)));
   session.defaultSession.setPermissionCheckHandler((contents, permission) => allowed(contents, permission));
 }
 
 async function createWindow(): Promise<void> {
-  const icon = nativeImage.createFromPath(iconPath());
-  win = new BrowserWindow({
+  const icon = nativeImage.createFromPath(ctx.iconPath);
+  ctx.win = new BrowserWindow({
     width: 1480,
     height: 920,
     // A tiling window manager will give this window whatever slice is left. These floors stay
@@ -779,21 +753,21 @@ async function createWindow(): Promise<void> {
     minWidth: 280,
     minHeight: 220,
     title: "VibeForge",
-    backgroundColor: palette.background,
+    backgroundColor: ctx.palette.background,
     icon: icon.isEmpty() ? undefined : icon,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(appRoot(), "dist-electron", "preload.js"),
+      preload: path.join(ctx.appRoot, "dist-electron", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
     },
   });
-  win.once("ready-to-show", () => {
-    if (!(startHidden && service?.getSettings().tray)) {
-      win?.show();
+  ctx.win.once("ready-to-show", () => {
+    if (!(startHidden && ctx.service?.getSettings().tray)) {
+      ctx.win?.show();
       return;
     }
     // From the login autostart entry, the window waits in the tray, once something hosts one.
@@ -801,59 +775,59 @@ async function createWindow(): Promise<void> {
       trayHost = found;
       if (found) return;
       log.info("Started hidden, but nothing hosts the tray; showing the window");
-      win?.show();
+      ctx.win?.show();
     });
   });
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  ctx.win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
   // The window shows VibeForge's page and nothing else: a link or a script that points it at another
   // page, a file:// one included, is refused, and web links open in the browser instead.
-  win.webContents.on("will-navigate", (event, url) => {
-    if (isAppPage(url, appPage())) return;
+  ctx.win.webContents.on("will-navigate", (event, url) => {
+    if (isAppPage(url, ctx.page)) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
   // Frames inside the page too (it has none of its own).
-  win.webContents.on("will-frame-navigate", (event) => {
-    if (event.isMainFrame || isAppPage(event.url, appPage())) return;
+  ctx.win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame || isAppPage(event.url, ctx.page)) return;
     event.preventDefault();
   });
-  win.on("close", (event) => {
-    if (quitting || !service) return;
-    if (tray.shown && trayHost && service.getSettings().tray && service.getSettings().closeToTray) {
+  ctx.win.on("close", (event) => {
+    if (ctx.quitting || !ctx.service) return;
+    if (tray.shown && trayHost && ctx.service.getSettings().tray && ctx.service.getSettings().closeToTray) {
       event.preventDefault();
-      win?.hide();
-      if (!trayNoticeShown && service.getSettings().notify) {
+      ctx.win?.hide();
+      if (!trayNoticeShown && ctx.service.getSettings().notify) {
         trayNoticeShown = true;
         notify({ title: words.say("main.stillRunning"), body: words.say("main.stillRunningBody") });
       }
       return;
     }
-    const live = service.listLive();
+    const live = ctx.service.listLive();
     if (live.length === 0) return;
     // The window stays while the question is up; a yes quits, which closes it.
     event.preventDefault();
     void askToQuit(live).then((quit) => {
       if (!quit) return;
-      quitting = true;
+      ctx.quitting = true;
       app.quit();
     });
   });
   const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
-  win.on("closed", () => {
+  ctx.win.on("closed", () => {
     pageErrors.flush();
     dock.dispose();
-    win = null;
+    ctx.win = null;
   });
-  win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
-  win.webContents.on("console-message", (event) => {
+  ctx.win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
+  ctx.win.webContents.on("console-message", (event) => {
     if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
   });
-  const page = appPage();
-  if (page.devUrl) await win.loadURL(page.devUrl);
-  else await win.loadFile(page.file);
+  const page = ctx.page;
+  if (page.devUrl) await ctx.win.loadURL(page.devUrl);
+  else await ctx.win.loadFile(page.file);
 }
 
 /** Why the terminal host is down, for a page that loads after it happened. */
@@ -861,11 +835,11 @@ let hostError: string | null = null;
 
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
 async function answerTalk(request: TalkRequest, gone: AbortSignal): Promise<unknown> {
-  if (!service) return { ok: false, error: "VibeForge is still starting." };
-  if (request.op === "who") return { ok: true, ...service.whoIsHere(request.pty) };
-  if (request.op === "tell") return service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
-  if (request.op === "apply") return service.applyHandedTask({ fromPty: request.pty, task: request.task });
-  return service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
+  if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
+  if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(request.pty) };
+  if (request.op === "tell") return ctx.service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
+  if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: request.pty, task: request.task });
+  return ctx.service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
 }
 
 /**
@@ -876,7 +850,7 @@ function terminalEnv(): NodeJS.ProcessEnv {
   const env = childEnv(process.env);
   env.VIBEFORGE_SOCKET = voice.status().controlSocket;
   const bin = path.join(roots.dataRoot, "bin");
-  const target = path.join(appRoot(), "scripts", "vibeforge");
+  const target = path.join(ctx.appRoot, "scripts", "vibeforge");
   try {
     fs.mkdirSync(bin, { recursive: true });
     const link = path.join(bin, "vibeforge");
@@ -899,7 +873,7 @@ function terminalEnv(): NodeJS.ProcessEnv {
 
 async function startHost(): Promise<void> {
   try {
-    await supervisor.start(appRoot(), terminalEnv());
+    await supervisor.start(ctx.appRoot, terminalEnv());
     hostError = null;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -914,19 +888,19 @@ supervisor.onData.add((event) => send("pty-data", event));
 supervisor.onExit.add((event) => {
   log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
   send("pty-exit", event);
-  void service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
+  void ctx.service?.onPtyExit(event.ptyId, event.exitCode, event.signal).then(() => talk.exited(event.ptyId));
 });
-supervisor.onProgram.add((event) => service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
-supervisor.onActivity.add((event) => service?.onPtyActivity(event.ptyId, event.working));
+supervisor.onProgram.add((event) => ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
+supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
 /** When the host last crashed, so one that keeps crashing isn't brought back forever. */
 let hostCrashes: number[] = [];
 
 supervisor.onCrash.add((message) => {
   log.error(`The terminal host stopped: ${message}`);
   // Every terminal died with the host. Record them, then bring the host back.
-  for (const session of service?.listLive() ?? []) void service?.onPtyExit(session.ptyId, null, null);
+  for (const session of ctx.service?.listLive() ?? []) void ctx.service?.onPtyExit(session.ptyId, null, null);
   // Once quitting has begun the host stays down: a new one would start halfway through the quit.
-  if (quitting) return;
+  if (ctx.quitting) return;
   const now = Date.now();
   hostCrashes = [...hostCrashes.filter((at) => now - at < 5 * 60_000), now];
   if (hostCrashes.length > 3) {
@@ -937,7 +911,7 @@ supervisor.onCrash.add((message) => {
   }
   send("host-crash", message);
   setTimeout(() => {
-    if (!quitting) void startHost();
+    if (!ctx.quitting) void startHost();
   }, 1000);
 });
 
@@ -945,8 +919,8 @@ function companionWire() {
   return {
     service: svc(),
     supervisor,
-    root: path.join(appRoot(), "companion"),
-    icon: iconPath(),
+    root: path.join(ctx.appRoot, "companion"),
+    icon: ctx.iconPath,
     log: (line: string) => log.info(line),
     plans: () => planSummary(false),
     hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
@@ -962,13 +936,13 @@ async function shutdown(): Promise<void> {
   if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
   talk.dispose();
   voice.dispose();
-  if (!service) return;
-  service.prepareShutdown();
+  if (!ctx.service) return;
+  ctx.service.prepareShutdown();
   await supervisor.shutdown(7000);
-  await Promise.race([service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
-  service.shutdown();
-  service.close();
-  service = null;
+  await Promise.race([ctx.service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
+  ctx.service.shutdown();
+  ctx.service.close();
+  ctx.service = null;
 }
 
 /**
@@ -980,7 +954,7 @@ async function startFailed(error: unknown): Promise<void> {
   const detail = describeError(error);
   log.error(`VibeForge could not start: ${detail}`);
   try {
-    await words.use(service?.getSettings().language ?? "system", app.getLocale());
+    await words.use(ctx.service?.getSettings().language ?? "system", app.getLocale());
   } catch {
     /* English, then */
   }
@@ -1002,27 +976,27 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
-    log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${appRoot()}`);
+    log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${ctx.appRoot}`);
     Menu.setApplicationMenu(null);
     await adoptShellPath();
-    service = new TeamService({
+    ctx.service = new TeamService({
       configRoot: roots.configRoot,
       dataRoot: roots.dataRoot,
       appStartedAt: new Date(),
       now: () => new Date(),
       host,
     });
-    service.onChange((topics) => {
+    ctx.service.onChange((topics) => {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) syncTray();
       if (topics.includes("settings")) syncCompanion(companionWire());
       if (topics.includes("settings")) syncWords();
     });
-    palette = resolvePalette(service.getSettings().theme);
+    ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire());
     guardPermissions();
     registerIpc();
-    tray.recolor(palette.accent2, palette.darkerBackground);
+    tray.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
     // login) gets the icon again instead of leaving VibeForge running with nothing to open it from.
     const stopTrayWatch = watchTrayHost(
@@ -1046,12 +1020,12 @@ if (!app.requestSingleInstanceLock()) {
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig();
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), answerTalk);
-    win?.on("focus", refreshPalette);
+    ctx.win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
     refreshTrayHost();
-    win?.on("focus", refreshTrayHost);
+    ctx.win?.on("focus", refreshTrayHost);
     const tick = () =>
-      void service
+      void ctx.service
         ?.tick()
         .then((results) => {
           for (const result of results) if (result.error) log.warn(`Routine ${result.routineId} could not start: ${result.error}`);
@@ -1064,7 +1038,7 @@ if (!app.requestSingleInstanceLock()) {
     const timer = setInterval(tick, TICK_MS);
     // Compress finished runs and apply Settings → Storage: shortly after start, then a few times a day.
     const upkeep = () =>
-      void service
+      void ctx.service
         ?.maintainRuns()
         .then((done) => {
           if (done.compressed || done.removed) log.info(`Runs tidied: ${done.compressed} compressed, ${done.removed} removed, ${Math.round(done.freed / 1024 / 1024)} MB freed`);
@@ -1087,7 +1061,7 @@ if (!app.requestSingleInstanceLock()) {
   }).catch(startFailed);
 
   app.on("before-quit", () => {
-    quitting = true;
+    ctx.quitting = true;
   });
 
   app.on("will-quit", (event) => {
