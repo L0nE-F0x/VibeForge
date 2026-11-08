@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
+import type { Send } from "./main-context.js";
 
 // Small rules the main process keeps, pure so the tests can reach them without Electron.
 
@@ -62,4 +63,26 @@ export function settleWithin(work: Promise<unknown>, ms: number, failed: (error:
       },
     );
   });
+}
+
+/** What a desktop notification is about: a click opens the most specific place it names. */
+export interface NoteTarget {
+  runId?: string;
+  taskId?: string;
+  routineId?: string;
+  workspaceId?: string | null;
+  chatId?: string | null;
+  agentId?: string | null;
+  /** Handed back to the page as it came, in "open-route". */
+  route?: unknown;
+}
+
+/** Tells the page to open what a clicked notification is about. */
+export function openNote(note: NoteTarget, send: Send): void {
+  if (note.route) send("open-route", { route: note.route });
+  else if (note.taskId) send("open-route", { route: { view: "tasks", taskId: note.taskId } });
+  else if (note.routineId) send("open-route", { route: { view: "routines", routineId: note.routineId } });
+  else if (note.runId) send("open-run", { runId: note.runId });
+  else if (note.chatId) send("open-chat", { chatId: note.chatId, agentId: note.agentId ?? null });
+  else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
 }

@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, session, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell } from "electron";
 import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
@@ -21,6 +21,7 @@ import { gitActivity, githubActivity, type Activity, type ActivitySource } from 
 import type { Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
+import { desktopNotifier } from "./notify.js";
 import { MainContext } from "./main-context.js";
 import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
@@ -77,42 +78,7 @@ const startHidden = process.argv.includes(HIDDEN_ARG);
 let waiting = 0;
 let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
-const notifications = new Set<Notification>();
-
-/** A desktop notification; clicking it brings VibeForge up on the run or workspace it is about. */
-function notify(note: {
-  title: string;
-  body: string;
-  runId?: string;
-  taskId?: string;
-  routineId?: string;
-  workspaceId?: string | null;
-  chatId?: string | null;
-  agentId?: string | null;
-  route?: unknown;
-}): void {
-  if (Notification.isSupported()) {
-    // VibeForge plays its own sounds, so the desktop's would be a second one for the same moment.
-    const silent = Boolean(ctx.service?.getSettings().sounds.on);
-    const notification = new Notification({ title: note.title, body: note.body, icon: ctx.iconPath, silent });
-    notifications.add(notification);
-    notification.on("click", () => {
-      focusWindow();
-      if (note.route) send("open-route", { route: note.route });
-      else if (note.taskId) send("open-route", { route: { view: "tasks", taskId: note.taskId } });
-      else if (note.routineId) send("open-route", { route: { view: "routines", routineId: note.routineId } });
-      else if (note.runId) send("open-run", { runId: note.runId });
-      else if (note.chatId) send("open-chat", { chatId: note.chatId, agentId: note.agentId ?? null });
-      else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
-    });
-    notification.on("close", () => notifications.delete(notification));
-    notification.show();
-    return;
-  }
-  const child = spawn("notify-send", ["-a", "VibeForge", note.title, note.body], { stdio: "ignore", detached: true });
-  child.on("error", () => undefined);
-  child.unref();
-}
+const notify = desktopNotifier(ctx);
 
 const host: DeskHost = {
   spawn: async (request) => {
