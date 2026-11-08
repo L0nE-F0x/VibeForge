@@ -11,7 +11,7 @@
 # It builds from source instead (git clone, npm ci and a Vite build, which need git, base-devel and
 # python) when VIBEFORGE_FROM_SOURCE=1, when VIBEFORGE_BRANCH names a branch to follow
 # (VIBEFORGE_BRANCH=main for unreleased work), when the release has no ready-made build (older ones
-# don't) or none for this CPU. It says which way it went. VIBEFORGE_VERSION=v2.15.0 installs that
+# don't) or none for this CPU. It says which way it went. VIBEFORGE_VERSION=vX.Y.Z installs that
 # release instead of the newest. `--uninstall` removes the command, launcher entry and login entry
 # but keeps your agents, routines and runs.
 #

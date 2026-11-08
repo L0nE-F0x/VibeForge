@@ -80,6 +80,16 @@ User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under `Unreleas
 
 Pushing a `vX.Y.Z` tag publishes its GitHub Release (`.github/workflows/release.yml`): the notes are that version's CHANGELOG section, word for word, which is what the in-app Update shows. The tag has to match `package.json`. `npm run release-notes X.Y.Z` prints the same notes locally.
 
+The release also carries the ready-made build the installer downloads, `vibeforge-X.Y.Z-linux-x64.tar.zst`, so nobody compiles anything to install or update. `release.yml` makes it once the tagged commit's checks have passed: `scripts/pack-release.mjs` exports the commit, runs `npm ci` and the build in a scratch folder, and packs only what the app runs (the list is in the script, and `tests/unit/pack-release.test.ts` keeps it in step with the files the app opens). The workflow then installs the archive with `scripts/install.sh` into a scratch home, runs the smoke test from that installed copy, and publishes the archive with `install.sh` and a `SHA256SUMS` for both. To build and try one on your machine:
+
+```bash
+node scripts/pack-release.mjs        # packs the last commit (not uncommitted changes) into release/
+v=$(node -p 'require("./package.json").version')
+mkdir -p /tmp/vf-rel/download && ln -sfn "$PWD/release" "/tmp/vf-rel/download/v$v"
+cp scripts/install.sh release/ && (cd release && sha256sum install.sh "vibeforge-$v-linux-x64.tar.zst" >SHA256SUMS)
+HOME=$(mktemp -d) VIBEFORGE_RELEASES=file:///tmp/vf-rel VIBEFORGE_VERSION="v$v" bash scripts/install.sh
+```
+
 ## Pull requests
 
 Open a pull request for anything beyond a typo.
