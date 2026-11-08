@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Which one do I use?** Ten lines from what you want to where to do it: a quick question goes to Chat, an agent's work in its own copy to Tasks, a job on a schedule to Routines, a CLI asking another to Settings → Agents together, and so on. It's a step in the welcome tour, an item in Help in the rail (where each place is a link), and a section of the README.
+
 ## [2.14.1] - 2026-11-08
 
 **2.14.1: VibeForge runs on Electron 45.**
