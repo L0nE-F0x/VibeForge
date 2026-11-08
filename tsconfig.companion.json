@@ -1,0 +1,20 @@
+{
+  // The phone page (companion/), plain ES modules the browser loads as they are, checked as
+  // JavaScript. Its payload types come from src/core through JSDoc imports, which only the checker
+  // reads (hence node's types). sw.js and mic-worklet.js run in a worker's scope, not the page's.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    // The page only ever catches its own Errors and fetch's.
+    "useUnknownInCatchVariables": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["companion/app.js", "companion/js/*.js"]
+}

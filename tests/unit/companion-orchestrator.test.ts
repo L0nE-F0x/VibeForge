@@ -251,7 +251,7 @@ describe("the phone page's Orchestrator routes", () => {
   });
 
   it("sends the computer no more than three minutes of the phone's speech", () => {
-    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/js/mic.js"), "utf8");
     const constants = page.match(/^const (MIC_MAX_SECONDS|HEAR_RATE) = .*$/gm) ?? [];
     const toPcm = page.match(/^function toPcm\([\s\S]*?^}$/m)?.[0];
     expect(constants).toHaveLength(2);

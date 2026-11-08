@@ -369,7 +369,9 @@ describe("a shell's foreground, read at the moment of sending", () => {
 });
 
 describe("the phone page's pixel art", () => {
-  const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+  // The page is app.js and its modules in companion/js.
+  const root = path.join(import.meta.dirname, "../../companion");
+  const page = ["app.js", ...fs.readdirSync(path.join(root, "js")).map((name) => `js/${name}`)].map((name) => fs.readFileSync(path.join(root, name), "utf8")).join("\n");
 
   it("draws the same plan marks as the desktop", () => {
     for (const rows of Object.values(PLAN_MARKS)) {
