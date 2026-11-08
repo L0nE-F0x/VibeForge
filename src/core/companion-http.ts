@@ -19,6 +19,9 @@ const BODY_MAX = 64_000;
 /** Speech from the phone: 16 kHz mono s16le, as long as a recording on the computer may be. */
 export const HEAR_MAX = MAX_SECONDS * BYTES_PER_SECOND;
 
+/** A recording that ran a moment past the cap is cut to it; one this long is not speech. */
+export const HEAR_READ_MAX = HEAR_MAX + 10 * BYTES_PER_SECOND;
+
 export interface SessionPayload {
   ptyId: string | null;
   runId: string | null;
@@ -122,14 +125,21 @@ function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-async function readRaw(req: http.IncomingMessage, max: number): Promise<Buffer> {
+/** A body of at most `max` bytes, refused before reading when it says it is longer. Only the first `keep` are kept. */
+async function readRaw(req: http.IncomingMessage, max: number, keep = max): Promise<Buffer> {
+  if (Number(req.headers["content-length"]) > max) throw new CompanionHttpError("phone.error.tooLarge", 413);
   const chunks: Buffer[] = [];
   let size = 0;
+  let kept = 0;
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
     if (size > max) throw new CompanionHttpError("phone.error.tooLarge", 413);
-    chunks.push(buf);
+    if (kept < keep) {
+      const part = buf.subarray(0, keep - kept);
+      chunks.push(part);
+      kept += part.length;
+    }
   }
   return Buffer.concat(chunks);
 }
@@ -258,7 +268,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   if (url.pathname === "/api/orchestrator/hear") {
-    const pcm = await readRaw(req, HEAR_MAX);
+    const pcm = await readRaw(req, HEAR_READ_MAX, HEAR_MAX);
     stillServing(served);
     sendJson(res, 200, await opts.actions.hear(pcm));
     return;
@@ -377,6 +387,8 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
       // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply.
       const status = error instanceof CompanionHttpError ? error.status : 400;
       const extra = error instanceof CompanionHttpError ? error.extra : undefined;
+      // What is left of a body too large to read is not read: the connection ends with the reply.
+      if (status === 413) res.setHeader("Connection", "close");
       const text = await errorText(error, languageOf(req, opts)).catch(() => "Something went wrong.");
       if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });

@@ -1595,7 +1595,8 @@ function toPcm(chunks, length, rate) {
     at += chunk.length;
   }
   const ratio = rate / HEAR_RATE;
-  const out = new Int16Array(Math.floor(length / ratio));
+  // The cap is checked every 200 ms, so a recording that reached it runs a little over: the computer takes three minutes exactly.
+  const out = new Int16Array(Math.min(Math.floor(length / ratio), HEAR_RATE * MIC_MAX_SECONDS));
   for (let i = 0; i < out.length; i += 1) {
     const start = Math.floor(i * ratio);
     const end = Math.min(length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
