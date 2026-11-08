@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
+import type { TrayWaiter } from "../src/shared/api.js";
 import type { Send } from "./main-context.js";
 
 // Small rules the main process keeps, pure so the tests can reach them without Electron.
@@ -85,4 +86,21 @@ export function openNote(note: NoteTarget, send: Send): void {
   else if (note.runId) send("open-run", { runId: note.runId });
   else if (note.chatId) send("open-chat", { chatId: note.chatId, agentId: note.agentId ?? null });
   else if (note.workspaceId) send("open-workspace", { workspaceId: note.workspaceId });
+}
+
+/** Who is waiting, as the page reported it: a whole count, and at most eight names of 80 characters. */
+export function attentionFrom(state: { count: number; waiters: TrayWaiter[] } | null | undefined): { count: number; waiters: TrayWaiter[] } {
+  const count = Math.max(0, Math.floor(Number(state?.count) || 0));
+  const waiters = Array.isArray(state?.waiters)
+    ? state.waiters.slice(0, 8).map((waiter) => ({ label: String(waiter?.label ?? "").slice(0, 80), route: waiter?.route ?? null }))
+    : [];
+  return { count, waiters };
+}
+
+/**
+ * dbus-send's answer to whether the tray watcher's name has an owner. Without dbus-send there's
+ * no telling, so the settings decide, as before.
+ */
+export function trayHostAnswer(error: { code?: unknown } | null, stdout: string): boolean {
+  return error ? error.code === "ENOENT" : /boolean true/.test(stdout);
 }

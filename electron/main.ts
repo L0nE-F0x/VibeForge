@@ -1,9 +1,8 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell } from "electron";
-import { autostartFile, HIDDEN_ARG, launcherCommand, readAutostart, writeAutostart } from "../src/core/autostart.js";
+import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { whichBin } from "../src/core/engines.js";
 import { listDir } from "../src/core/files.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
@@ -16,7 +15,7 @@ import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
 import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
-import type { Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
+import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { watchConfig } from "./config-watch.js";
 import { Dock } from "./dock.js";
@@ -24,8 +23,7 @@ import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { desktopNotifier } from "./notify.js";
 import { MainContext } from "./main-context.js";
 import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
-import { TrayIcon, type TrayState } from "./tray.js";
-import { watchTrayHost } from "./tray-host.js";
+import { TrayController } from "./tray-controller.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
@@ -72,9 +70,6 @@ const { send, svc, focusWindow, words, install } = ctx;
 let shutdownDone = false;
 /** Started by the login autostart entry: stay in the tray until opened. */
 const startHidden = process.argv.includes(HIDDEN_ARG);
-/** CLIs and chats waiting for you, as the page counts and names them. */
-let waiting = 0;
-let waiters: TrayWaiter[] = [];
 let trayNoticeShown = false;
 const notify = desktopNotifier(ctx);
 
@@ -177,109 +172,12 @@ function refreshPalette(): void {
   ctx.palette = resolvePalette(ctx.service.getSettings().theme);
   send("palette", ctx.palette);
   if (ctx.win && !ctx.win.isDestroyed()) ctx.win.setBackgroundColor(ctx.palette.background);
-  tray.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
+  tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
 }
 
 // ------------------------------------------------------------------ tray
 
-const autostartPath = autostartFile(process.env, os.homedir());
-const launcher = () => launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${ctx.appRoot}"`);
-
-/** Follow Settings' language (or the desktop's), then rebuild the tray menu in it. */
-function syncWords(): void {
-  if (!ctx.service) return;
-  void words
-    .use(ctx.service.getSettings().language, app.getLocale())
-    .then(syncTray)
-    .catch((error: unknown) => log.warn(`Translations: ${describeError(error)}`));
-}
-
-const tray = new TrayIcon(ctx.iconPath, { mark: ctx.palette.accent2, outline: ctx.palette.darkerBackground }, {
-  open: () => focusWindow(),
-  goAnywhere: () => {
-    focusWindow();
-    send("open-switcher", true);
-  },
-  openWaiter: (index) => {
-    const waiter = waiters[index];
-    focusWindow();
-    if (waiter) send("open-route", { route: waiter.route });
-  },
-  settings: () => {
-    focusWindow();
-    send("open-view", { view: "settings" });
-  },
-  setSounds: (on) => {
-    if (ctx.service) ctx.service.saveSettings({ sounds: { ...ctx.service.getSettings().sounds, on } });
-  },
-  setNotify: (on) => ctx.service?.saveSettings({ notify: on }),
-  setAutostart: (on) => {
-    setAutostart(on);
-    syncTray();
-  },
-  quit: () => void quitFromTray(),
-}, words);
-
-function setAutostart(on: boolean): void {
-  try {
-    writeAutostart(autostartPath, on, launcher());
-    log.info(`Start at login ${on ? "on" : "off"} (${autostartPath})`);
-  } catch (error) {
-    log.warn(`Could not change the autostart entry: ${describeError(error)}`);
-  }
-}
-
-function trayState(): TrayState {
-  const settings = ctx.service!.getSettings();
-  return { language: words.language, live: ctx.service!.liveCount(), waiting, waiters: waiters.map((waiter) => waiter.label), sounds: settings.sounds.on, notify: settings.notify, autostart: readAutostart(autostartPath) };
-}
-
-function syncTray(): void {
-  if (!ctx.service) return;
-  try {
-    if (ctx.service.getSettings().tray) tray.show(trayState());
-    // Electron can't take an icon out of the bar's tray while it runs (the entry stays behind,
-    // dead), so switching it off applies from the next start; until then it keeps working.
-    else if (tray.shown) tray.update(trayState());
-  } catch (error) {
-    log.warn(`The tray icon: ${describeError(error)}`);
-  }
-}
-
-/**
- * Whether anything hosts tray icons. Omarchy's bar does; a bar without a tray doesn't, and a window
- * closed to the tray there could only come back by launching VibeForge again.
- */
-let trayHost = true;
-
-function findTrayHost(): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(
-      "dbus-send",
-      ["--session", "--print-reply", "--dest=org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", "string:org.kde.StatusNotifierWatcher"],
-      { timeout: 2000 },
-      // Without dbus-send there's no telling, so the settings decide, as before.
-      (error, stdout) => resolve(error ? error.code === "ENOENT" : /boolean true/.test(stdout)),
-    );
-  });
-}
-
-function refreshTrayHost(): void {
-  void findTrayHost().then((found) => {
-    if (found !== trayHost) log.info(found ? "A tray host is back; closing the window keeps VibeForge in the tray" : "Nothing hosts the tray; closing the window quits VibeForge");
-    trayHost = found;
-  });
-}
-
-/** At login the bar can come up after VibeForge, so a missing tray host gets a few seconds to appear. */
-async function waitForTrayHost(ms: number): Promise<boolean> {
-  const until = Date.now() + ms;
-  while (!(await findTrayHost())) {
-    if (Date.now() >= until) return false;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return true;
-}
+const tray = new TrayController(ctx, () => void quitFromTray());
 
 /** The quit question while it is on screen, so a second close or Quit joins it instead of asking again. */
 let quitQuestion: Promise<boolean> | null = null;
@@ -393,22 +291,13 @@ function handlers(): Handlers {
       if (ctx.service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
-    "app.autostart": () => readAutostart(autostartPath),
+    "app.autostart": () => tray.autostart,
     "app.setAutostart": (on) => {
-      setAutostart(on);
-      syncTray();
-      return readAutostart(autostartPath);
+      tray.setAutostart(on);
+      tray.sync();
+      return tray.autostart;
     },
-    "app.attention": (state) => {
-      const next = Math.max(0, Math.floor(Number(state?.count) || 0));
-      const named = Array.isArray(state?.waiters)
-        ? state.waiters.slice(0, 8).map((waiter) => ({ label: String(waiter?.label ?? "").slice(0, 80), route: waiter?.route ?? null }))
-        : [];
-      if (next === waiting && JSON.stringify(named) === JSON.stringify(waiters)) return;
-      waiting = next;
-      waiters = named;
-      syncTray();
-    },
+    "app.attention": (state) => tray.attention(state),
     "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
 
     "updates.get": () => updater.get(),
@@ -627,8 +516,7 @@ async function createWindow(): Promise<void> {
       return;
     }
     // From the login autostart entry, the window waits in the tray, once something hosts one.
-    void waitForTrayHost(10_000).then((found) => {
-      trayHost = found;
+    void tray.waitForHost(10_000).then((found) => {
       if (found) return;
       log.info("Started hidden, but nothing hosts the tray; showing the window");
       ctx.win?.show();
@@ -652,7 +540,7 @@ async function createWindow(): Promise<void> {
   });
   ctx.win.on("close", (event) => {
     if (ctx.quitting || !ctx.service) return;
-    if (tray.shown && trayHost && ctx.service.getSettings().tray && ctx.service.getSettings().closeToTray) {
+    if (tray.icon.shown && tray.host && ctx.service.getSettings().tray && ctx.service.getSettings().closeToTray) {
       event.preventDefault();
       ctx.win?.hide();
       if (!trayNoticeShown && ctx.service.getSettings().notify) {
@@ -771,32 +659,20 @@ if (!app.requestSingleInstanceLock()) {
     });
     ctx.service.onChange((topics) => {
       send("changed", topics);
-      if (topics.includes("settings") || topics.includes("live")) syncTray();
+      if (topics.includes("settings") || topics.includes("live")) tray.sync();
       if (topics.includes("settings")) syncCompanion(companionWire());
-      if (topics.includes("settings")) syncWords();
+      if (topics.includes("settings")) tray.syncWords();
     });
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire());
     guardPermissions();
     registerIpc();
-    tray.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
+    tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
     // login) gets the icon again instead of leaving VibeForge running with nothing to open it from.
-    const stopTrayWatch = watchTrayHost(
-      (owner) => {
-        trayHost = owner !== "";
-        if (!owner || !tray.shown) return;
-        log.info("A new tray host; adding the icon to it");
-        try {
-          tray.remake();
-        } catch (error) {
-          log.warn(`The tray icon: ${describeError(error)}`);
-        }
-      },
-      (message) => log.warn(message),
-    );
-    syncTray();
-    syncWords();
+    const stopTrayWatch = tray.watchHost();
+    tray.sync();
+    tray.syncWords();
     const hostReady = hostLife.start();
     await createWindow();
     await hostReady;
@@ -808,8 +684,8 @@ if (!app.requestSingleInstanceLock()) {
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), answerTalk);
     ctx.win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
-    refreshTrayHost();
-    ctx.win?.on("focus", refreshTrayHost);
+    tray.refreshHost();
+    ctx.win?.on("focus", () => tray.refreshHost());
     const tick = () =>
       void ctx.service
         ?.tick()
