@@ -1223,6 +1223,8 @@ export const ja: Catalog = {
   "main.chooseFolder": "フォルダーを選択",
   "main.stillRunning": "VibeForge はまだ動いています",
   "main.stillRunningBody": "ターミナルとルーティンと一緒にトレイにあります。終了はそのメニューから。",
+  "main.startFailed": "VibeForge を起動できませんでした",
+  "main.startFailedBody": "{error}\n\n詳しくは VibeForge のログにあります: {log}",
   "tray.menu.open": "VibeForge を開く",
   "tray.menu.goAnywhere": "どこへでも移動…",
   "tray.menu.sounds": "サウンド",

@@ -1223,6 +1223,8 @@ export const fr: Catalog = {
   "main.chooseFolder": "Choisir un dossier",
   "main.stillRunning": "VibeForge tourne encore",
   "main.stillRunningBody": "Il est dans la zone de notification avec tes terminaux et routines. Quitte depuis son menu.",
+  "main.startFailed": "VibeForge n'a pas pu démarrer",
+  "main.startFailedBody": "{error}\n\nLe journal de VibeForge donne les détails : {log}",
   "tray.menu.open": "Ouvrir VibeForge",
   "tray.menu.goAnywhere": "Aller à…",
   "tray.menu.sounds": "Sons",

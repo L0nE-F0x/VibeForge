@@ -1223,6 +1223,8 @@ export const zh: Catalog = {
   "main.chooseFolder": "选择文件夹",
   "main.stillRunning": "VibeForge 仍在运行",
   "main.stillRunningBody": "它和你的终端、例程一起在托盘里。从它的菜单退出。",
+  "main.startFailed": "VibeForge 无法启动",
+  "main.startFailedBody": "{error}\n\n详细信息在 VibeForge 的日志里：{log}",
   "tray.menu.open": "打开 VibeForge",
   "tray.menu.goAnywhere": "跳转到任意位置…",
   "tray.menu.sounds": "声音",

@@ -1235,6 +1235,8 @@ export const en = {
   "main.chooseFolder": "Choose a folder",
   "main.stillRunning": "VibeForge is still running",
   "main.stillRunningBody": "It's in the tray with your terminals and routines. Quit from its menu.",
+  "main.startFailed": "VibeForge could not start",
+  "main.startFailedBody": "{error}\n\nVibeForge's log has the details: {log}",
   "tray.menu.open": "Open VibeForge",
   "tray.menu.goAnywhere": "Go to anything…",
   "tray.menu.sounds": "Sounds",

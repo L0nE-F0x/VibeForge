@@ -948,6 +948,23 @@ async function shutdown(): Promise<void> {
   service = null;
 }
 
+/**
+ * Start failed: say why and where the log is, then exit. Staying on with no window and no tray
+ * would keep the single-instance lock, and every later launch would quietly do nothing.
+ */
+async function startFailed(error: unknown): Promise<void> {
+  console.error(error);
+  const detail = describeError(error);
+  log.error(`VibeForge could not start: ${detail}`);
+  try {
+    await words.use(service?.getSettings().language ?? "system", app.getLocale());
+  } catch {
+    /* English, then */
+  }
+  dialog.showErrorBox(words.say("main.startFailed"), words.say("main.startFailedBody", { error: detail.split("\n")[0], log: log.file }));
+  app.exit(1);
+}
+
 // ------------------------------------------------------------------ lifecycle
 
 if (!app.requestSingleInstanceLock()) {
@@ -1044,7 +1061,7 @@ if (!app.requestSingleInstanceLock()) {
       stopControl();
       stopTrayWatch();
     });
-  });
+  }).catch(startFailed);
 
   app.on("before-quit", () => {
     quitting = true;

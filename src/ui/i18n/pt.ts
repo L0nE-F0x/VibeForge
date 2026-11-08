@@ -1222,6 +1222,8 @@ export const pt: Catalog = {
   "main.chooseFolder": "Escolha uma pasta",
   "main.stillRunning": "O VibeForge ainda está rodando",
   "main.stillRunningBody": "Ele está na bandeja com seus terminais e rotinas. Saia pelo menu dele.",
+  "main.startFailed": "O VibeForge não conseguiu iniciar",
+  "main.startFailedBody": "{error}\n\nO log do VibeForge tem os detalhes: {log}",
   "tray.menu.open": "Abrir o VibeForge",
   "tray.menu.goAnywhere": "Ir para qualquer coisa…",
   "tray.menu.sounds": "Sons",
