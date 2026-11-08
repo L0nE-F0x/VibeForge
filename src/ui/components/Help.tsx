@@ -6,6 +6,7 @@ import { useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 import { startTour } from "./Tour.js";
 import { showUpdate } from "./Update.js";
+import { showWhichOne, WhichOneIcon } from "./WhichOne.js";
 import { Menu, Modal, Popover, type MenuItem } from "./ui.js";
 
 // Help lives in the rail: the tour, the shortcut sheet, updates, and a way to reach the project.
@@ -113,6 +114,7 @@ export function HelpPopover({ anchor, onClose }: { anchor: HTMLElement; onClose:
   const items: Array<MenuItem | "sep"> = [
     ...(waiting ? ([{ label: t("help.updateTo", { version: waiting }), icon: Download, accent: true, onSelect: showUpdate }, "sep"] as Array<MenuItem | "sep">) : []),
     { label: t("help.tour"), icon: Compass, onSelect: startTour },
+    { label: t("whichOne.title"), icon: WhichOneIcon, onSelect: showWhichOne },
     { label: t("help.shortcuts"), icon: Keyboard, hint: "Ctrl+Shift+/", onSelect: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
     "sep",
     { label: t("help.feature"), icon: Lightbulb, onSelect: () => open(issueUrl("feature", info, engines)) },

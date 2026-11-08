@@ -347,6 +347,63 @@
   border-bottom: 0;
 }
 
+/* "Which one do I use?" (WhichOne.tsx): what you want on the left, the place for it on the right. */
+.which-one {
+  display: flex;
+  flex-direction: column;
+}
+
+.which-row {
+  align-items: baseline;
+  line-height: 1.45;
+}
+
+.which-row > svg {
+  flex: none;
+  align-self: center;
+  color: var(--accent);
+}
+
+.which-use {
+  flex: none;
+  max-width: 46%;
+  text-align: right;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.which-use button {
+  font-weight: inherit;
+  text-align: inherit;
+  border-bottom: 1px dotted var(--line-2);
+  transition: color 0.12s;
+}
+
+.which-use button:hover {
+  color: var(--accent);
+  border-bottom-color: currentColor;
+}
+
+.which-use button:focus-visible {
+  color: var(--accent-2);
+  outline: 1px solid var(--focus-line);
+  outline-offset: 2px;
+}
+
+/* In the tour the list sits in the same well as a step's keys, and scrolls in a short window. */
+.tour-card .which-one {
+  max-height: calc(100vh - 230px);
+  overflow-y: auto;
+  padding: 2px 12px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.tour-card .which-row {
+  padding: 5px 0;
+}
+
 .about-env {
   margin: 0;
   padding: 10px 12px;
