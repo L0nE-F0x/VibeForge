@@ -301,6 +301,16 @@ describe("the installer with ready-made builds", () => {
     expect(leftovers(home2)).toEqual([]);
   });
 
+  it("stops with the installed copy as it was when the download fails part-way", () => {
+    publish("2.2.1");
+    fs.rmSync(path.join(srv, "releases", "download", "v2.2.1", `vibeforge-2.2.1-linux-${arch}.tar.zst`));
+    const result = installReleased(home2, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("The download stopped part-way");
+    expect(built(app(home2))).toBe("2.0.0");
+    expect(leftovers(home2)).toEqual([]);
+  });
+
   it("installs the release VIBEFORGE_VERSION names instead of the latest", () => {
     publish("2.3.0");
     const result = installReleased(home2, { path: noBuildPath(), env: { VIBEFORGE_VERSION: "2.1.0" } });

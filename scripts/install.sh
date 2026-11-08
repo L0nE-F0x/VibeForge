@@ -119,7 +119,11 @@ fetch_archive() {
   [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || die "$tag's SHA256SUMS does not read as checksums, so nothing was installed."
 
   step "Downloading VibeForge ${tag#v}, ready-made for linux-$arch"
-  curl -fSL --retry 2 --connect-timeout 20 --progress-bar -o "$FETCHED/$file" "$RELEASES/download/$tag/$file" ||
+  # A progress bar in a terminal (the app's Update runs this in one), none in a log. A download
+  # that stalls for a minute gives up instead of waiting forever.
+  local progress=(-sS)
+  [[ -t 2 ]] && progress=(--progress-bar)
+  curl -fL "${progress[@]}" --retry 2 --connect-timeout 20 --speed-limit 1024 --speed-time 60 -o "$FETCHED/$file" "$RELEASES/download/$tag/$file" ||
     die "The download stopped part-way. Check the network, then run this again."
   actual=$(sha256sum "$FETCHED/$file")
   actual="${actual%% *}"
