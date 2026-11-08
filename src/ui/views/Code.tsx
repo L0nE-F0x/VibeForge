@@ -32,7 +32,7 @@ import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "
 import { useT } from "../i18n/index.js";
 import { overlayOpen } from "../overlays.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
-import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
+import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { BranchDialog } from "./BranchDialog.js";
 import { TalkButton, TalkChip, type TalkTarget } from "../components/TalkMenu.js";
 import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
@@ -70,6 +70,20 @@ function isCodingCli(session: LiveSession): boolean {
   return session.kind === "run" || Boolean(session.programEngineId);
 }
 
+/**
+ * State whose latest value is in its ref the moment it is set, not a render later. Code that
+ * places several panes in a row (two CLIs a plan starts together) reads each one's result.
+ */
+function useSyncedState<T extends object>(initial: T): [T, { readonly current: T }, (update: (prev: T) => T) => void] {
+  const [state, setState] = useState(initial);
+  const ref = useRef(state);
+  const set = useCallback((update: (prev: T) => T) => {
+    ref.current = update(ref.current);
+    setState(ref.current);
+  }, []);
+  return [state, ref, set];
+}
+
 function readLocal<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -103,9 +117,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   const [currentId, setCurrentId] = useState<string | null>(null);
   // Per workspace: its pane tree, null once every pane has been closed, missing until loaded.
-  const [layouts, setLayouts] = useState<Record<string, LayoutNode | null>>({});
-  const [runtime, setRuntime] = useState<Record<string, Runtime>>({});
-  const [focus, setFocus] = useState<Record<string, string>>({});
+  const [layouts, layoutsRef, setLayouts] = useSyncedState<Record<string, LayoutNode | null>>({});
+  const [runtime, runtimeRef, setRuntime] = useSyncedState<Record<string, Runtime>>({});
+  const [focus, focusRef, setFocus] = useSyncedState<Record<string, string>>({});
   const [side, setSide] = useState(() => readLocal<{ open: boolean; tab: "files" | "browser"; width: number }>("vf.code.side", { open: true, tab: "files", width: 320 }));
   // The address a click or the bar just asked for, shown before the workspace file catches up.
   const [pendingDock, setPendingDock] = useState<{ id: string; url: string } | null>(null);
@@ -117,12 +131,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [branchFor, setBranchFor] = useState<Workspace | null>(null);
   const terminals = useRef(new Map<string, TerminalHandle>());
   const starting = useRef(new Set<string>());
-  const layoutsRef = useRef(layouts);
-  layoutsRef.current = layouts;
-  const runtimeRef = useRef(runtime);
-  runtimeRef.current = runtime;
-  const focusRef = useRef(focus);
-  focusRef.current = focus;
   const liveRef = useRef(live);
   liveRef.current = live;
   const fontSizeRef = useRef(13);
@@ -187,14 +195,20 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   // ---------------------------------------------------------------- panes
 
-  const patchRuntime = useCallback((paneId: string, patch: Partial<Runtime>) => {
-    setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
-  }, []);
+  const patchRuntime = useCallback(
+    (paneId: string, patch: Partial<Runtime>) => {
+      setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
+    },
+    [setRuntime],
+  );
 
-  const updateLayout = useCallback((workspaceId: string, next: LayoutNode | null) => {
-    setLayouts((prev) => ({ ...prev, [workspaceId]: next }));
-    void call("layouts.save", workspaceId, next).catch(() => undefined);
-  }, []);
+  const updateLayout = useCallback(
+    (workspaceId: string, next: LayoutNode | null) => {
+      setLayouts((prev) => ({ ...prev, [workspaceId]: next }));
+      void call("layouts.save", workspaceId, next).catch(() => undefined);
+    },
+    [setLayouts],
+  );
 
   /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
   const startPane = useCallback(
@@ -234,7 +248,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         starting.current.delete(pane.id);
       }
     },
-    [fail, patchRuntime],
+    [fail, patchRuntime, setFocus],
   );
 
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
@@ -256,7 +270,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     return () => {
       cancelled = true;
     };
-  }, [opened, current, startPane]);
+  }, [opened, current, startPane, setLayouts, setFocus]);
 
   // Jumping here for a specific session: focus its pane, or give it one. The switch to the
   // route's workspace lands a render later, so until then `current` is the one being left.
@@ -282,16 +296,15 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     return engines.find((engine) => title.startsWith(engine.label))?.id ?? settings?.defaultEngine ?? "";
   }
 
+  /** Give a session that is already running a pane: a new one beside the focused pane. */
   function adopt(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch) {
-    const layout = layoutsRef.current[workspace.id];
-    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
-    if (!layout) updateLayout(workspace.id, pane);
-    else {
-      const target = focus[workspace.id] ?? panesOf(layout)[0].id;
-      updateLayout(workspace.id, replacePane(layout, target, { kind: "split", dir: "row", ratio: 0.5, a: panesOf(layout).find((item) => item.id === target) ?? layout, b: pane }));
-    }
-    patchRuntime(pane.id, { ptyId, runId, state: "live" });
-    setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
+    show(workspace, ptyId, runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id] }));
+  }
+
+  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }) {
+    if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
+    patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
+    setFocus((prev) => ({ ...prev, [workspace.id]: spot.paneId }));
   }
 
   // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
@@ -314,7 +327,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         .catch(() => null)
         .then((saved) => {
           if (!(workspace.id in layoutsRef.current)) {
-            layoutsRef.current = { ...layoutsRef.current, [workspace.id]: saved };
             setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
             for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
           }
@@ -326,17 +338,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   /** Into a pane of the same CLI that has nothing running (left from last time), or a new one beside. */
   function place(workspace: Workspace, session: LiveSession, launch: PaneLaunch) {
-    const layout = layoutsRef.current[workspace.id];
-    const idle = (layout ? panesOf(layout) : []).find((pane) => {
-      const state = runtimeRef.current[pane.id]?.state ?? "idle";
-      return pane.launch.type === "engine" && launch.type === "engine" && pane.launch.engineId === launch.engineId && (state === "idle" || state === "exited");
-    });
-    if (!idle) {
-      adopt(workspace, session.ptyId, session.runId, launch);
-      return;
-    }
-    patchRuntime(idle.id, { ptyId: session.ptyId, runId: session.runId, state: "live", exitText: null });
-    setFocus((prev) => ({ ...prev, [workspace.id]: idle.id }));
+    const idle = (paneId: string) => {
+      const state = runtimeRef.current[paneId]?.state ?? "idle";
+      return state === "idle" || state === "exited";
+    };
+    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }));
   }
 
   /** The first pane of a workspace whose panes were all closed. */
