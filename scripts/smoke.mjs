@@ -69,11 +69,21 @@ const args = [root, `--user-data-dir=${path.join(scratch, "profile")}`];
 if (process.env.CI) args.push("--no-sandbox");
 // SMOKE_HEADLESS=1 draws nowhere at all, for a run on a desktop you're using.
 if (process.env.SMOKE_HEADLESS === "1") args.push("--ozone-platform=headless");
+// The real config, data and cache folders stay out of reach too: the app reads plan limits, usage
+// and the login entry through them. XDG_STATE_HOME stays: mise keeps its trust record there.
+const realHome = os.homedir();
 const app = attach ? null : spawn(electron, args, {
   cwd: root,
   env: {
     ...process.env,
     HOME: home,
+    XDG_CONFIG_HOME: path.join(scratch, "xdg-config"),
+    XDG_DATA_HOME: path.join(scratch, "xdg-data"),
+    XDG_CACHE_HOME: path.join(scratch, "xdg-cache"),
+    // mise's shims (Node on Omarchy) find its tools and settings through the two above; without
+    // these they install Node afresh into the scratch folder.
+    MISE_DATA_DIR: process.env.MISE_DATA_DIR || path.join(process.env.XDG_DATA_HOME || path.join(realHome, ".local", "share"), "mise"),
+    MISE_CONFIG_DIR: process.env.MISE_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(realHome, ".config"), "mise"),
     VIBEFORGE_CONFIG: config,
     VIBEFORGE_DATA: path.join(scratch, "data"),
     VIBEFORGE_DEBUG: "1",
