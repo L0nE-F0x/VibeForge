@@ -87,7 +87,7 @@ It speaks English, Deutsch, Español, Français, Português (Brasil), 日本語 
 
 ## Works with
 
-Anything with a command line. The defaults know how to hand a first prompt to **Claude Code**, **Codex**, **Grok**, **Cursor Agent**, **Antigravity CLI**, **OpenCode** and **Muse** as an argument, and paste it into **Copilot**, **Kimi**, **Crush**, **Pi**, **Hermes** or any other CLI once it's ready. Add your own in Settings or in `~/.config/vibeforge/engines.json`:
+Anything with a command line. The defaults know how to hand a first prompt to **Claude Code**, **Codex**, **Grok**, **Cursor Agent**, **Antigravity CLI**, **OpenCode**, **Copilot**, **Muse** and **Pi** as an argument, and paste it into **Kimi**, **Crush**, **Hermes** or any other CLI once it's ready. Add your own in Settings or in `~/.config/vibeforge/engines.json`:
 
 ```json
 { "id": "claude", "label": "Claude Code", "bin": "claude", "args": [],
