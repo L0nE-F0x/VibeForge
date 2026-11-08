@@ -30,12 +30,14 @@ Every change runs `npm test` (329 tests at 2.13.0, including the real PTY host d
 - Allowed folders are a policy in the prompt, not a sandbox.
 - No token counts from Cursor Agent or Crush: neither keeps per-call counts that can be added up.
 - Turning the tray off applies from the next start. Electron names every tray item `chrome_status_icon_1`, so a pin can also catch another Electron app's icon.
-- Waiting turns, and which terminal handed out which task, live in memory. Quitting drops the turns, and after a restart a lead CLI can't `vibeforge apply` tasks it handed out before; Apply on the task still works.
+- Which terminal handed out which task lives in memory: after a restart a lead CLI can't `vibeforge apply` tasks it handed out before (Apply on the task still works). Tasks and routines waiting for their folder are kept in `waiting.json` and survive a restart.
+- Maestro's checkouts made before 2.14 (`<project>.worktrees/<branch>`) get no Apply or Discard; remove them by hand.
 - The phone page buzzes only while it is open; a locked phone would need Web Push.
 
 ## Risks
 
 - **The CLIs change under VibeForge.** Prompt flags, session-log formats (talk-back, `--wait`, token counts) and the plan-limit endpoints (Claude's OAuth usage, Grok's billing, Kimi's usages) aren't stable public APIs. Grok Build updated itself mid-trial in 2.11 and added a trust question.
 - **Plan limits use the CLIs' saved sign-ins.** They're only read, never renewed, but a provider could object. That is one reason the feature is off by default.
-- **Dependencies.** `npm audit` on 2026-11-08: Electron 44.4.5, which the app runs on, has two advisories fixed in 44.9.1. The rest are build and test tools (Vite, Vitest).
+- **Dependencies.** `npm audit` on 2026-11-08, after the audit fixes: no advisories, with or without dev tools (Electron 44.10.2, Vitest 5). CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Vite 8, Electron 45 and TypeScript 7 are still to do.
+- **The control socket trusts the terminal a caller names.** A CLI can claim another pane's `VIBEFORGE_PTY`; a per-terminal token in the environment wouldn't stop that, because processes of the same user can read each other's environment.
 - **One machine.** Everything above was checked on the founder's Omarchy desktop; other Arch + Hyprland setups are untested.

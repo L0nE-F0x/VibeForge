@@ -6,9 +6,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Maestro's work comes back for review.** Each CLI a plan starts on a new branch now works in its own copy, as a task's does. When it's done, its step on the plan card and the **To review** list beside the conversation offer **Review** (the diff, file by file), **Apply** (its changes come into your workspace as uncommitted edits, and the copy, its branch and its workspace are tidied away) and **Discard** (with Undo). Before, those checkouts piled up beside your projects with no way back.
+- **Undo when you delete an agent.** Its folder, memory and routines go to the trash together, and **Undo** brings them all back. You no longer type its name to delete it; VibeForge asks only when a CLI is running as that agent.
+- **Shift+Esc closes a sheet from inside its terminal.** Esc typed into a terminal now reaches the CLI (Claude Code uses it to stop a turn) instead of closing the sheet around it.
+- **Maestro in the first-run tour,** with Ctrl+Shift+O, and the tour's view keys now read Ctrl+1…9.
+- **The principles, written down.** [docs/principles.md](docs/principles.md) says what VibeForge does and won't do, and names the update check as the one networked call that is on by default. [SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
+
 ### Changed
 
-- **No more example prompts in Maestro.** The three sample sentences under "Tell VibeForge what to start" are gone from the Orchestrator, its bar and the phone's Maestro page. The box and its hint are all you see now.
+- **One name: Maestro.** The page, Settings, shortcuts, messages and the README all call it Maestro now, in every language.
+- **No more example prompts in Maestro.** The three sample sentences under "Tell VibeForge what to start" are gone from Maestro, its bar and the phone's Maestro page. The box and its hint are all you see now.
+- **Maestro plans with a CLI you have.** Until you pick a planner in Settings → Maestro, it uses Grok Build when that's installed, else the first of Claude Code, Codex and Antigravity CLI that is. Before, a machine without Grok Build was told nothing could plan.
+- **A message from Maestro to a running CLI waits for it to be free,** through the same queue as CLIs' messages to each other, and goes in as you wrote it. It no longer lands mid-turn, after Stop, or at a bare shell prompt once the CLI has quit.
+- **Faster with many CLIs open.** Token counts read the CLIs' logs in slices, so a first scan of gigabytes no longer freezes the window. Settings, engines and agents are read from disk only when they change. The run page, lists and toasts re-render only when what they show changes. The fast terminal renderer goes to the terminals you can see. The glow costs less to draw and rests while VibeForge isn't the focused window. Reply watching reads only what's new in a log.
+- **A pane that floods output keeps memory in check.** The terminal host holds back a program that prints faster than its screen can follow, instead of growing without limit.
+- **Tasks and routines waiting for their folder survive a restart,** and take their turn again once the CLIs the window reopens have started.
+- **Saved messages and patches are kept for three days,** not just the newest forty, and never while a message still points at one.
+- **Whisper's server stops after two idle minutes,** not ten.
+- **The website loads nothing from Google.** Its fonts are served by the site itself. It also gained a favicon, a sitemap, a 404 page, clearer faint text and a page screen readers can follow.
+- **Updates can't leave VibeForge broken.** The installer builds an update beside the installed copy and swaps it in only once the build has worked; the copy it replaced stays in `~/.local/share/vibeforge-app.previous`. A download of the installer that is cut off runs nothing. `--uninstall` also removes Start at login, and the installer finds Muse, Pi and Hermes among your CLIs.
+- **Releases come only from a tested commit on `main`,** and each one carries `install.sh` and its SHA-256.
+
+### Fixed
+
+- **`vibeforge apply` reaches the app.** A lead CLI's `vibeforge apply <task>` started a second VibeForge, which quietly closed, so the lead was told nothing and nothing was applied.
+- **An update with no network says it failed.** It used to say "Updated" and offer a restart into the same version.
+- **Apply works over your uncommitted edits.** Applying a task's copy failed with "The changes don't apply" whenever you had uncommitted edits in a file the copy also changed. Each file is now merged three ways against what's on disk: changes to different lines both go in, the same lines get conflict markers, and a binary or a file one side deleted keeps your version and says so. Git's own index is never touched.
+- **Escape closes only the top layer.** Esc on a task's menu, or on a question over a sheet, used to close the sheet too.
+- **Focus comes back** after closing Ctrl+K or the Ctrl+Shift+O bar, so you can type into the terminal again without clicking it.
+- **Shortcuts wait under dialogs.** Ctrl+Shift+D, E, W and M no longer act behind a dialog, holding Ctrl+Shift+D opens one shell rather than one per key repeat, and a second question no longer leaves the first unanswered.
+- **Pane sizes are kept** after a restart.
+- **Two CLIs a plan starts in the same workspace each get a pane.** One of them could end up running with nowhere to see it.
+- **Links in terminals open.** Clicking a link a CLI prints (Claude Code, gh and compilers do) showed a warning and then nothing. The exit line under an ended terminal is translated too.
+- **Agent talk keeps to its limit.** Messages queued while a CLI was busy all slipped past the limit on how many CLIs may send without a person, and a terminal's automatic answers to a CLI counted as a person typing, which lifted Stop.
+- **Undo after deleting a task brings back a working copy,** even if another task tidied the repository's copies in the meantime. A copy's branch that already has commits is kept under a new name rather than reset.
+- **Runs show after you restore the data folder under another home folder,** and cleaning up never reaches outside the data folder.
+- **Restart after an update opens the window,** not a hidden copy in the tray, when VibeForge was started at login.
+- **A broken run index no longer stops VibeForge opening.** It's set aside and rebuilt; a start that still fails says why and where the log is, instead of leaving a copy with no window.
+- **Closing with live terminals no longer stalls them** while VibeForge asks, and **Quit no longer hangs** on a connected phone or brings the terminal host back mid-quit.
+- **A model download on a full disk fails and can be tried again,** instead of hanging until restart.
+- **On the phone, a recording that reaches three minutes is kept,** not refused, and the page keeps updating on a slow link instead of stalling.
+
+### Security
+
+- **Electron 44.10.2,** which fixes two high-severity advisories in the version 2.13.0 ran on.
+- **Only VibeForge's own page gets the app's bridge.** A link or script pointing the window at another page, a file on disk included, is refused, and calls from any other page are turned away.
+- **Turning the phone page off, or making a new code, disconnects a phone at once.** A phone that kept polling used to keep control with the old code. The page also answers only to this computer's own names and its tailnet name, can't be shown in another site's frame, and says nothing about this computer before pairing.
+- **settings.json, which holds the phone code, is readable by you only.**
+- **Whisper models and Piper voices are pinned to a release and checked** against their size and SHA-256 before they're used.
+- **The control socket's fallback lives in a private folder** when there's no runtime folder, and VibeForge's debugging switch is kept out of terminals and planners.
 
 ## [2.13.0] - 2026-11-07
 
