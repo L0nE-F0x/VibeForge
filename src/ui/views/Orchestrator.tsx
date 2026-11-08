@@ -473,7 +473,7 @@ function TeamPanel() {
   }, t("orch.stopFailed"));
 
   return (
-    <div className="vstack" style={{ gap: 8, minHeight: 0 }}>
+    <div className="vstack" style={{ gap: 8, minHeight: 0, flex: 1 }}>
       <CopyList copies={copies} workspaces={workspaces} />
       <div className="orch-team-head">
         <span className="section-title" style={{ margin: 0 }}>
