@@ -57,6 +57,11 @@ function searchableText(text: string): string {
   return clean.length <= INDEXED_CHARS * 2 ? clean : `${clean.slice(0, INDEXED_CHARS)}\n…\n${clean.slice(-INDEXED_CHARS)}`;
 }
 
+/** A LIMIT from a caller: a whole number from 0 up, kept between 1 and `max`; anything else (NaN, -3, 2.5) is `fallback`. */
+function rowLimit(value: number | undefined, fallback: number, max: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? Math.max(1, Math.min(value, max)) : fallback;
+}
+
 /** Typed text inside a LIKE pattern as itself: its `%`, `_` and the escape character `\` escaped. */
 function likeText(text: string): string {
   return text.replace(/[\\%_]/g, "\\$&");
@@ -228,7 +233,7 @@ export class RunIndex {
       const like = `%${likeText(query.search.trim())}%`;
       params.push(like, like, like);
     }
-    const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
+    const limit = rowLimit(query.limit, 200, 2000);
     const sql = `SELECT * FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY startedAt DESC LIMIT ${limit}`;
     return (this.db.prepare(sql).all(...params) as unknown[])
       .map((row) => this.located(row))
@@ -260,7 +265,7 @@ export class RunIndex {
   searchRuns(text: string, limit = 50): Array<{ run: RunMeta; snippet: string }> {
     const match = matchExpression(text);
     if (!match) return [];
-    const cap = Math.max(1, Math.min(Math.floor(limit), 500));
+    const cap = rowLimit(limit, 50, 500);
     const rows = this.db
       .prepare(
         `SELECT runs.*, snippet(run_text, -1, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 14) AS snippet

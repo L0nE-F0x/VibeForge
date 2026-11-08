@@ -64,6 +64,18 @@ describe("the run index", () => {
     expect(titles("back\\slash")).toEqual(["back\\slash"]);
     store.close();
   });
+
+  it("reads a limit that isn't a whole number, or is below zero, as the default", () => {
+    const store = storeWithRuns(["Notes one", "Notes two", "Notes three"]);
+    for (const limit of [Number.NaN, -3, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(store.queryRuns({ limit })).toHaveLength(3);
+      expect(store.searchRuns("notes", limit)).toHaveLength(3);
+    }
+    expect(store.queryRuns({ limit: 2 }).map((run) => run.title)).toEqual(["Notes three", "Notes two"]);
+    expect(store.queryRuns({ limit: 0 })).toHaveLength(1);
+    expect(store.searchRuns("notes", 1)).toHaveLength(1);
+    store.close();
+  });
 });
 
 /** A store with one finished run per title, a minute apart, the first title oldest. */
