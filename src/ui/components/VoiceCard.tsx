@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import type { DownloadKind, VoiceSettings, VoiceStatus } from "../../shared/api.js";
 import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useSettings } from "../api.js";
+import { coreText } from "../core-text.js";
 import { LANGUAGES, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useToast } from "../state.js";
@@ -69,7 +70,7 @@ function Downloads({ status, kind, items, hint }: { status: VoiceStatus; kind: D
       )}
       {status.downloadError && !download && (
         <Notice tone="bad">
-          {t("voice.downloadFailed")}: {status.downloadError}
+          {t("voice.downloadFailed")}: {coreText(status.downloadError)}
         </Notice>
       )}
       <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
