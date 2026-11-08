@@ -35,7 +35,13 @@ VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data \
   node_modules/electron/dist/electron . --user-data-dir=$dev/profile
 ```
 
-`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA` stand in for `~/.config/vibeforge` and `~/.local/share/vibeforge`, which also gives the copy its own control socket: its terminals talk to it, and Super+Alt+V still reaches your installed VibeForge. `--user-data-dir` moves Electron's profile and its one-copy lock. The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
+`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA` stand in for `~/.config/vibeforge` and `~/.local/share/vibeforge`, which also gives the copy its own control socket: its terminals talk to it, and Super+Alt+V still reaches your installed VibeForge. `--user-data-dir` moves Electron's profile and its one-copy lock. `npm start` takes no Electron flags; for hot reload, set `VIBEFORGE_PROFILE` and it passes `--user-data-dir` for you:
+
+```bash
+VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data VIBEFORGE_PROFILE=$dev/profile npm start
+```
+
+The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
 
 ## Issues
 
