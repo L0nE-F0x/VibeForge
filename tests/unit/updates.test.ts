@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -34,10 +35,36 @@ describe("updates", () => {
   });
 
   it("builds the update command for each kind, quoting paths", () => {
-    expect(updateCommand("installer", "/home/me/My Apps/vf")).toBe(`curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME='/home/me/My Apps/vf' bash`);
+    expect(updateCommand("installer", "/home/me/My Apps/vf")).toBe(`set -o pipefail; curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME='/home/me/My Apps/vf' bash`);
     expect(updateCommand("checkout", "/home/me/VibeForge")).toBe("cd /home/me/VibeForge && git pull --ff-only && npm install --no-audit --no-fund && npm run build");
     expect(updateCommand("other", "/usr/lib/vibeforge")).toBeNull();
     expect(updateCommand("other", "/usr/lib/vibeforge", "yay -Syu vibeforge")).toBe("yay -Syu vibeforge");
+  });
+
+  it("fails the installer's update when the download or the install fails", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-update-"));
+    const app = path.join(dir, "My App");
+    const command = updateCommand("installer", app) as string;
+    // A stand-in curl: CURL_SAYS is what it "downloads", CURL_EXIT how it ends.
+    fs.mkdirSync(path.join(dir, "bin"));
+    fs.writeFileSync(path.join(dir, "bin", "curl"), '#!/bin/bash\nprintf %s "$CURL_SAYS"\nexit "$CURL_EXIT"\n', { mode: 0o755 });
+    // The terminal runs it the way the service does: bash -c.
+    const run = (says: string, exit = 0) =>
+      spawnSync("/bin/bash", ["-c", command], {
+        encoding: "utf8",
+        env: { PATH: `${path.join(dir, "bin")}:/usr/bin:/bin`, CURL_SAYS: says, CURL_EXIT: String(exit) },
+      });
+
+    const installed = run('echo "installing into $VIBEFORGE_HOME"\n');
+    expect(installed.status).toBe(0);
+    expect(installed.stdout).toBe(`installing into ${app}\n`);
+    // No network: curl fails and sends nothing.
+    expect(run("", 6).status).not.toBe(0);
+    // Cut off part-way: the installer's main() never got its closing brace.
+    expect(run('main() {\n  echo "half"\n', 18).status).not.toBe(0);
+    // The installer itself failing.
+    expect(run("exit 1\n").status).toBe(1);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 

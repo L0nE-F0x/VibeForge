@@ -55,12 +55,14 @@ export function installKind(appRoot: string, found: { installerHome: string; mar
 }
 
 /**
- * The shell command that updates this copy, shown and run in a terminal, or null when it updates
- * some other way (a distro package). `override` is for packagers and tests.
+ * The shell command that updates this copy, shown and run in a terminal (bash), or null when it
+ * updates some other way (a distro package). `override` is for packagers and tests.
  */
 export function updateCommand(kind: InstallKind, appRoot: string, override?: string): string | null {
   if (override?.trim()) return override.trim();
-  if (kind === "installer") return `curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME=${shellQuote(appRoot)} bash`;
+  // pipefail: with no network curl fails and bash reads nothing, which on its own exits 0, and
+  // the dialog would offer a restart into the old version.
+  if (kind === "installer") return `set -o pipefail; curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME=${shellQuote(appRoot)} bash`;
   if (kind === "checkout") return `cd ${shellQuote(appRoot)} && git pull --ff-only && npm install --no-audit --no-fund && npm run build`;
   return null;
 }
