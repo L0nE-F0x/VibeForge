@@ -57,6 +57,11 @@ function searchableText(text: string): string {
   return clean.length <= INDEXED_CHARS * 2 ? clean : `${clean.slice(0, INDEXED_CHARS)}\n…\n${clean.slice(-INDEXED_CHARS)}`;
 }
 
+/** Typed text inside a LIKE pattern as itself: its `%`, `_` and the escape character `\` escaped. */
+function likeText(text: string): string {
+  return text.replace(/[\\%_]/g, "\\$&");
+}
+
 /** Typed words as an FTS5 query: every word must appear, each matching the start of a word. */
 export function matchExpression(text: string): string | null {
   const words = text.match(/[\p{L}\p{N}_]+/gu);
@@ -219,8 +224,8 @@ export class RunIndex {
       params.push(query.since);
     }
     if (query.search?.trim()) {
-      where.push("(title LIKE ? OR prompt LIKE ? OR cwd LIKE ?)");
-      const like = `%${query.search.trim()}%`;
+      where.push("(title LIKE ? ESCAPE '\\' OR prompt LIKE ? ESCAPE '\\' OR cwd LIKE ? ESCAPE '\\')");
+      const like = `%${likeText(query.search.trim())}%`;
       params.push(like, like, like);
     }
     const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
