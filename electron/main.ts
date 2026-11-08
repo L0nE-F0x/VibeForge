@@ -21,7 +21,7 @@ import { gitActivity, githubActivity, type Activity, type ActivitySource } from 
 import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
-import { isAppPage, type AppPage } from "./guards.js";
+import { isAppPage, relaunchArgs, type AppPage } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -488,7 +488,7 @@ function handlers(): Handlers {
     "app.restart": () => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
       log.info("Restarting");
-      app.relaunch();
+      app.relaunch({ args: relaunchArgs(process.argv) });
       quitting = true;
       app.quit();
     },

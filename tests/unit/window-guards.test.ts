@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { isAppPage } from "../../electron/guards.js";
+import { isAppPage, relaunchArgs } from "../../electron/guards.js";
 
 describe("the window's own page", () => {
   const file = "/opt/Vibe Forge/dist/index.html";
@@ -42,5 +42,13 @@ describe("the window's own page", () => {
     expect(isAppPage(own, dev)).toBe(false);
     // A file:// "dev server" has no origin to match.
     expect(isAppPage("file:///tmp/evil.html", { file, devUrl: "file:///tmp/" })).toBe(false);
+  });
+});
+
+describe("restarting", () => {
+  it("comes back as a window, even when this copy started hidden at login", () => {
+    expect(relaunchArgs(["/usr/lib/electron/electron", "/opt/vibeforge", "--hidden"])).toEqual(["/opt/vibeforge"]);
+    expect(relaunchArgs(["/usr/lib/electron/electron", "/opt/vibeforge", "--ozone-platform=wayland"])).toEqual(["/opt/vibeforge", "--ozone-platform=wayland"]);
+    expect(relaunchArgs(["/usr/lib/electron/electron"])).toEqual([]);
   });
 });

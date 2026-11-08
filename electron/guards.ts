@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { HIDDEN_ARG } from "../src/core/autostart.js";
 
 // Small rules the main process keeps, pure so the tests can reach them without Electron.
 
@@ -35,4 +36,12 @@ export function isAppPage(url: string, page: AppPage): boolean {
     // A host other than localhost, or an encoded slash.
     return false;
   }
+}
+
+/**
+ * The arguments a restart starts with: this copy's own, minus --hidden, so a copy started at login
+ * comes back as a window rather than in the tray.
+ */
+export function relaunchArgs(argv: readonly string[]): string[] {
+  return argv.slice(1).filter((arg) => arg !== HIDDEN_ARG);
 }
