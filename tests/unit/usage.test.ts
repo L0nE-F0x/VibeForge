@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { UsageScanner } from "../../src/core/usage.js";
+import { describe, expect, it, vi } from "vitest";
+import { SLICE_BYTES, UsageScanner } from "../../src/core/usage.js";
 
 function write(file: string, text: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -108,6 +108,66 @@ describe("usage", () => {
     fs.appendFileSync(session, `${claudeLine("m4", at(0), { input_tokens: 1, output_tokens: 1 })}\n`);
     const second = await scanner.scan();
     expect(second.sources.find((source) => source.id === "claude")!.periods.today.tokens.total).toBe(1162);
+  });
+
+  it("reads a large log a slice at a time, with a turn for the app between slices", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-usage-"));
+    const file = path.join(home, ".claude", "projects", "-p", "big.jsonl");
+    const call = { input_tokens: 10, output_tokens: 5 };
+    // Long lines of tool output between the calls, as in a real session. Two-byte characters
+    // throughout, so some slice ends in the middle of one.
+    const lines: string[] = [];
+    for (let index = 0; index < 400; index += 1) {
+      lines.push(JSON.stringify({ type: "user", timestamp: at(0), message: { content: "é".repeat(5001) } }));
+      lines.push(claudeLine(`m${index}`, at(0), call, "claude-ü"));
+    }
+    write(file, `${lines.join("\n")}\n`);
+    const size = fs.statSync(file).size;
+    expect(size).toBeGreaterThan(3 * SLICE_BYTES);
+
+    const reads: Array<{ length: number; position: number }> = [];
+    const open = fs.promises.open;
+    const spy = vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      const read = handle.read.bind(handle) as (buffer: Buffer, offset: number, length: number, position: number) => Promise<{ bytesRead: number }>;
+      Object.assign(handle, {
+        read: (buffer: Buffer, offset: number, length: number, position: number) => {
+          reads.push({ length, position });
+          return read(buffer, offset, length, position);
+        },
+      });
+      return handle;
+    });
+    let turns = 0;
+    let ticking = true;
+    const tick = () => {
+      if (!ticking) return;
+      turns += 1;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+    try {
+      const scanner = new UsageScanner(home, { now: () => NOW, env: {} });
+      const [claude] = (await scanner.scan()).sources;
+      expect(claude.periods.today.models).toEqual([{ model: "claude-ü", total: 400 * 15 }]);
+      expect(Math.max(...reads.map((item) => item.length))).toBe(SLICE_BYTES);
+      expect(reads.length).toBe(Math.ceil(size / SLICE_BYTES));
+      expect(turns).toBeGreaterThanOrEqual(reads.length);
+
+      // A line still being written waits for the next pass, which reads only what was added.
+      const late = claudeLine("late", at(0), call, "claude-ü");
+      fs.appendFileSync(file, late.slice(0, 40));
+      reads.length = 0;
+      expect((await scanner.scan()).sources[0].periods.today.tokens.total).toBe(400 * 15);
+      expect(reads).toEqual([{ length: 40, position: size }]);
+      fs.appendFileSync(file, `${late.slice(40)}\n`);
+      reads.length = 0;
+      expect((await scanner.scan()).sources[0].periods.today.tokens.total).toBe(401 * 15);
+      expect(reads).toEqual([{ length: Buffer.byteLength(late) + 1, position: size }]);
+    } finally {
+      ticking = false;
+      spy.mockRestore();
+    }
   });
 
   it("counts Kimi Code's usage records, turn and session alike", async () => {
