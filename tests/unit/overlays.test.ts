@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { escapeTop, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/overlays.js";
+import { confirmSlot } from "../../src/ui/state.js";
 
 /** A keydown as the overlay stack sees it, recording what was done to it. */
 function keydown(key: string, init: { defaultPrevented?: boolean; isComposing?: boolean } = {}) {
@@ -84,5 +85,27 @@ describe("the overlay stack", () => {
     expect(closed).toEqual(["upper"]);
     lower();
     expect(overlayOpen()).toBe(true);
+  });
+});
+
+describe("the confirm dialog", () => {
+  it("answers the open question with no when a second one replaces it", async () => {
+    const shown: Array<string | null> = [];
+    const slot = confirmSlot((request) => shown.push(request?.title ?? null));
+    const first = slot.ask({ title: "Close this terminal?" });
+    const second = slot.ask({ title: "Remove the workspace?" });
+    await expect(first).resolves.toBe(false);
+    expect(shown).toEqual(["Close this terminal?", "Remove the workspace?"]);
+    slot.settle(true);
+    await expect(second).resolves.toBe(true);
+    expect(shown.at(-1)).toBeNull();
+  });
+
+  it("settles once: a late settle with nothing open changes nothing", async () => {
+    const slot = confirmSlot(() => undefined);
+    const asked = slot.ask({ title: "Stop all?" });
+    slot.settle(false);
+    slot.settle(true);
+    await expect(asked).resolves.toBe(false);
   });
 });

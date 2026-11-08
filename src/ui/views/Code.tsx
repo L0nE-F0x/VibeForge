@@ -30,6 +30,7 @@ import { shellNumber, workspaceMark, WorkspaceState } from "../components/Worksp
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
+import { overlayOpen } from "../overlays.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
 import { movePane, panesOf, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
 import { BranchDialog } from "./BranchDialog.js";
@@ -407,6 +408,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   shortcuts.current = (event: KeyboardEvent) => {
     if (!event.ctrlKey || !event.shiftKey || event.altKey || !current) return;
     const key = event.key.toLowerCase();
+    if (key !== "m" && key !== "d" && key !== "e" && key !== "w") return;
+    // A menu or dialog is open: the keys mustn't open or close panes behind it.
+    if (overlayOpen()) return;
+    event.preventDefault();
+    // Holding the keys repeats them; one press is one pane.
+    if (event.repeat) return;
     const layout = layoutsRef.current[current.id];
     const paneId = focusRef.current[current.id];
     const pane = layout && paneId ? panesOf(layout).find((item) => item.id === paneId) : undefined;
@@ -414,8 +421,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     else if (key === "d") newTerminal(current, "row");
     else if (key === "e") newTerminal(current, "col");
     else if (key === "w" && pane) void closePane(current, pane);
-    else return;
-    event.preventDefault();
   };
 
   // ---------------------------------------------------------------- dictation
