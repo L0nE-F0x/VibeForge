@@ -38,6 +38,6 @@ Every change runs `npm test` (468 tests at 2.14.0, including the real PTY host d
 
 - **The CLIs change under VibeForge.** Prompt flags, session-log formats (talk-back, `--wait`, token counts) and the plan-limit endpoints (Claude's OAuth usage, Grok's billing, Kimi's usages) aren't stable public APIs. Grok Build updated itself mid-trial in 2.11 and added a trust question.
 - **Plan limits use the CLIs' saved sign-ins.** They're only read, never renewed, but a provider could object. That is one reason the feature is off by default.
-- **Dependencies.** `npm audit` on 2026-11-08, after the audit fixes: no advisories, with or without dev tools (Electron 44.10.2, Vitest 5). CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Vite 8, Electron 45 and TypeScript 7 are still to do.
+- **Dependencies.** `npm audit` on 2026-11-08: no advisories, with or without dev tools, on Electron 45, Vite 8, Vitest 5 and TypeScript 7. CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Electron 45's tray, voice and notifications were checked only through the headless smoke and stand-in drives, not on the real bar.
 - **The control socket trusts the terminal a caller names.** A CLI can claim another pane's `VIBEFORGE_PTY`; a per-terminal token in the environment wouldn't stop that, because processes of the same user can read each other's environment.
 - **One machine.** Everything above was checked on the founder's Omarchy desktop; other Arch + Hyprland setups are untested.

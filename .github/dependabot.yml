@@ -1,7 +1,7 @@
 # Weekly update pull requests: one for the npm minor and patch versions, one for the GitHub
 # Actions pins (ci.yml and release.yml pin each action to a commit). A new major version comes on
-# its own, since each needs its own look (vite 8, Electron 45, TypeScript 7). A version has to be a
-# week old first, so a bad publish is usually caught and pulled before it gets here.
+# its own, since each needs its own look, except Vite's and Vitest's, which only work as a set. A
+# version has to be a week old first, so a bad publish is usually caught and pulled before it gets here.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -14,6 +14,9 @@ updates:
       npm:
         patterns: ["*"]
         update-types: [minor, patch]
+      vite-majors:
+        patterns: ["vite", "@vitejs/*", "vite-plugin-electron", "vitest", "@vitest/*"]
+        update-types: [major]
     ignore:
       # @types/node stays on the oldest Node line the tests and the build run on (package.json).
       - dependency-name: "@types/node"
