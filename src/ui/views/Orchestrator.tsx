@@ -11,7 +11,6 @@ import { Button, Chip, Empty, Logo, Segmented, Select, Spinner, useOverlayStack 
 import { tipProps } from "../components/Tooltip.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
-import { setDraft } from "../voice.js";
 
 // Talk to VibeForge itself: say or type what to start where, and the CLI chosen in Settings
 // (Grok Build by default) turns it into a plan that VibeForge carries out. The full view has the
@@ -159,8 +158,6 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
 
 // ------------------------------------------------------------------ the conversation
 
-const EXAMPLES: Key[] = ["orch.example.start", "orch.example.two", "orch.example.ask"];
-
 function Conversation({ view, compact, onEscape }: { view: View | undefined; compact?: boolean; onEscape?: () => void }) {
   const t = useT();
   const { go } = useNav();
@@ -192,13 +189,6 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
                 {t("orch.empty.body", { engine: engineLabel })}
               </Empty>
             )}
-            <div className="orch-examples">
-              {EXAMPLES.map((key) => (
-                <button key={key} type="button" className="orch-example" onClick={() => setDraft(DRAFT_KEY, t(key))}>
-                  {t(key)}
-                </button>
-              ))}
-            </div>
           </div>
         )}
         {view && !view.engineReady && (
