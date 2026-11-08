@@ -172,7 +172,21 @@ function pagePath(root: string, name: string): string | null {
   return full;
 }
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions): Promise<void> {
+/** What a request needs to know about the server it reached. */
+interface Served {
+  /** True once the page is turned off or its code replaced: nothing more is done for anyone. */
+  stopping(): boolean;
+}
+
+/** Thrown once the server is stopping: the request gets no answer, its connection is cut. */
+class Stopping extends Error {}
+
+/** A body has been read, so the reply would act now: not on a server that is going away. */
+function stillServing(served: Served): void {
+  if (served.stopping()) throw new Stopping();
+}
+
+async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
   if (method === "GET" && url.pathname === "/icon.png") {
@@ -212,6 +226,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   if (method === "POST" && url.pathname === "/api/pair") {
     const body = (await readBody(req)) as { token?: unknown };
+    stillServing(served);
     if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
     sendJson(res, 200, { ok: true });
     return;
@@ -244,6 +259,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   if (url.pathname === "/api/orchestrator/hear") {
     const pcm = await readRaw(req, HEAR_MAX);
+    stillServing(served);
     sendJson(res, 200, await opts.actions.hear(pcm));
     return;
   }
@@ -262,6 +278,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     engine?: unknown;
     mode?: unknown;
   };
+  stillServing(served);
   if (url.pathname.startsWith("/api/orchestrator/")) {
     await orchestratorPost(url.pathname.slice("/api/orchestrator/".length), body, opts.actions.orchestrator);
     sendJson(res, 200, { ok: true });
@@ -343,9 +360,17 @@ async function errorText(error: unknown, language: PhoneLanguage): Promise<strin
 
 /** The phone page and its API, on loopback. The caller binds the address. */
 export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string }): Promise<CompanionHttp> {
+  // Off, a new code and Quit all stop this server. A phone that was connected gets nothing more from it:
+  // its connection would otherwise keep this handler, and the old code, for as long as it polls.
+  let stopping = false;
+  const served: Served = { stopping: () => stopping };
   const server = http.createServer((req, res) => {
-    handle(req, res, opts).catch(async (error: unknown) => {
-      if (res.headersSent) {
+    if (stopping) {
+      res.destroy();
+      return;
+    }
+    handle(req, res, opts, served).catch(async (error: unknown) => {
+      if (res.headersSent || stopping || error instanceof Stopping) {
         res.destroy();
         return;
       }
@@ -366,7 +391,10 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
         port,
         close: () =>
           new Promise((done) => {
+            stopping = true;
             server.close(() => done());
+            // A phone polling every two seconds never goes idle, so close alone would wait on it forever.
+            server.closeAllConnections();
           }),
       });
     });
