@@ -137,10 +137,11 @@
   box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
+/* It flares once, then breathes on two layers (glow.css). */
 .rail-dot.waiting {
   background: var(--ember-core);
-  box-shadow: var(--ember-lit);
-  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
+  box-shadow: none;
+  animation: ember-flare 0.9s ease-out;
 }
 
 .rail-dot.done {

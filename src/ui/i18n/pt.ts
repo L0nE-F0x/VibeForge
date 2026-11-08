@@ -1028,6 +1028,7 @@ export const pt: Catalog = {
   "run.transcriptNote": "Texto puro do terminal, gravado ao fim da execução.",
   "run.transcriptLater": "A transcrição é gravada quando a execução termina.",
   "run.noTranscript": "Nenhuma transcrição foi gravada para esta execução.",
+  "run.noScreen": "Nada foi capturado nesta execução.",
   "run.openRunFolder": "Abrir pasta da execução",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` enviar · `Shift`+`Enter` nova linha",

@@ -1029,6 +1029,7 @@ export const ja: Catalog = {
   "run.transcriptNote": "実行終了時に書き出した、ターミナルのプレーンテキスト。",
   "run.transcriptLater": "記録は実行の終了時に書き出されます。",
   "run.noTranscript": "この実行の記録は書き出されていません。",
+  "run.noScreen": "この実行では何も取り込まれませんでした。",
   "run.openRunFolder": "実行フォルダーを開く",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` 送信 · `Shift`+`Enter` 改行",

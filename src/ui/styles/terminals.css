@@ -629,6 +629,7 @@
 
 /* A workspace's terminals as one pixel: open, working, waiting for you, finished. */
 .ws-state {
+  position: relative;
   width: 7px;
   height: 7px;
   flex: none;
@@ -636,10 +637,9 @@
   background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
+/* Working and waiting breathe on two layers (glow.css); waiting flares once first. */
 .ws-state.working {
   background: var(--accent);
-  box-shadow: var(--work-lit);
-  animation: ember-work 2.4s ease-in-out infinite;
 }
 
 .ws-state.waiting {
@@ -647,8 +647,7 @@
   height: 9px;
   margin: 0 2px;
   background: var(--ember-core);
-  box-shadow: var(--ember-lit);
-  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
+  animation: ember-flare 0.9s ease-out;
 }
 
 .ws-state.done {

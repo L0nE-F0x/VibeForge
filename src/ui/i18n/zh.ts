@@ -1029,6 +1029,7 @@ export const zh: Catalog = {
   "run.transcriptNote": "运行结束时写下的终端纯文本。",
   "run.transcriptLater": "记录会在运行结束时写入。",
   "run.noTranscript": "此运行没有写入记录。",
+  "run.noScreen": "此运行没有捕获到任何内容。",
   "run.openRunFolder": "打开运行文件夹",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` 发送 · `Shift`+`Enter` 换行",

@@ -222,13 +222,15 @@ export interface Toast {
 }
 
 interface Toaster {
-  toasts: Toast[];
   push: (kind: ToastKind, title: string, body?: string, action?: ToastAction) => void;
   dismiss: (id: number) => void;
   fail: (error: unknown, title?: string) => void;
 }
 
+// Two contexts: the actions never change, so the many components that raise toasts don't
+// re-render when one comes or goes. Only <Toasts> reads the list.
 const ToastContext = createContext<Toaster | null>(null);
+const ToastListContext = createContext<Toast[]>([]);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -262,14 +264,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
   const fail = useCallback((error: unknown, title = translate("common.failed")) => push("error", title, errorText(error)), [push]);
-  const value = useMemo(() => ({ toasts, push, dismiss, fail }), [toasts, push, dismiss, fail]);
-  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+  const actions = useMemo(() => ({ push, dismiss, fail }), [push, dismiss, fail]);
+  return (
+    <ToastContext.Provider value={actions}>
+      <ToastListContext.Provider value={toasts}>{children}</ToastListContext.Provider>
+    </ToastContext.Provider>
+  );
 }
 
 export function useToast(): Toaster {
   const toaster = useContext(ToastContext);
   if (!toaster) throw new Error("useToast outside ToastProvider");
   return toaster;
+}
+
+/** The toasts on screen, for <Toasts>: reading them re-renders on every toast. */
+export function useToastList(): Toast[] {
+  return useContext(ToastListContext);
 }
 
 /**

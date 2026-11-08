@@ -246,6 +246,8 @@ export function DockPanel({
   // The address to give the view. `url` is what this workspace last saved; once the page moves,
   // follow that, so a resize does not load the address from before the move.
   const reported = useRef(url);
+  /** The bounds and page last sent with dock.show; null once the view was hidden. */
+  const shown = useRef<string | null>(null);
   const covered = useDockCovered();
   if (seenUrl !== url) {
     setSeenUrl(url);
@@ -277,17 +279,20 @@ export function DockPanel({
     const node = viewRef.current;
     if (!node || !visible) {
       setDockArea(null);
+      shown.current = null;
       void call("dock.hide").catch(() => undefined);
       return;
     }
     if (!url) {
       setDockArea(null);
+      shown.current = null;
       // An empty address tells the dock to stop storing this page, so a later move cannot refill it.
       void call("dock.show", { x: 0, y: 0, width: 0, height: 0 }, "", workspaceId).catch(() => undefined);
       return;
     }
     if (mine?.error) {
       setDockArea(null);
+      shown.current = null;
       void call("dock.hide", workspaceId).catch(() => undefined);
       return;
     }
@@ -301,6 +306,7 @@ export function DockPanel({
     const width = visibleBox ? visibleBox.right - visibleBox.left : 0;
     const height = visibleBox ? visibleBox.bottom - visibleBox.top : 0;
     if (!visibleBox || width < 8 || height < 8) {
+      shown.current = null;
       void call("dock.hide", workspaceId).catch(() => undefined);
       return;
     }
@@ -308,6 +314,10 @@ export function DockPanel({
     // Ask the registry, not `covered`: publishing the area can itself make the dock covered.
     if (!dockCovered()) {
       const target = reported.current || url;
+      // Already there with this page: nothing to tell the main process.
+      const next = `${visibleBox.left} ${visibleBox.top} ${width} ${height} ${workspaceId} ${target}`;
+      if (shown.current === next) return;
+      shown.current = next;
       void call("dock.show", { x: visibleBox.left, y: visibleBox.top, width, height }, target, workspaceId).catch(() => undefined);
     }
   }, [visible, url, workspaceId, covered, mine?.error]);
@@ -319,9 +329,11 @@ export function DockPanel({
     const observer = new ResizeObserver(() => place());
     observer.observe(node);
     window.addEventListener("resize", place);
-    // Panning the desk moves the placeholder. Fold a burst of scroll events into one frame.
+    // Panning the desk moves the placeholder. Only a scroll of something the panel sits in moves
+    // it; a terminal or a list scrolling doesn't. A burst of them folds into one frame.
     let frame = 0;
-    const onScroll = () => {
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Node) || !event.target.contains(node)) return;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(place);
     };
@@ -357,6 +369,7 @@ export function DockPanel({
         }
       }
       // Without a still (the page never painted), the panel's own background shows instead.
+      shown.current = null;
       void call("dock.hide", workspaceId).catch(() => undefined);
     })();
     return () => {

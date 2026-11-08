@@ -321,6 +321,8 @@ export type Topic =
   | "engines"
   | "settings"
   | "live"
+  /** Only a coding CLI going busy or quiet: the live list and who waits behind whom. */
+  | "working"
   | "updates"
   | "voice"
   | "orchestrator";

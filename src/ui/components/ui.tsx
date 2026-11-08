@@ -23,7 +23,7 @@ import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
-import { useConfirmState, useDockArea, useLayer, useOverlay, useToast } from "../state.js";
+import { useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -637,7 +637,8 @@ const TOAST_EDGE = 16;
 
 export function Toasts() {
   const t = useT();
-  const { toasts, dismiss } = useToast();
+  const toasts = useToastList();
+  const { dismiss } = useToast();
   const dock = useDockArea();
   const ref = useRef<HTMLDivElement>(null);
   // The stack sits bottom right, or just left of the browser dock when it would land on it.
