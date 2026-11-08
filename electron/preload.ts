@@ -18,3 +18,13 @@ contextBridge.exposeInMainWorld("vibeforge", {
     return webUtils.getPathForFile(file);
   },
 });
+
+// A file dropped anywhere but a terminal, a composer or a pane is refused here, so it can never be
+// opened as the page. Electron's navigateOnDragDrop is off as well; this is the second lock. The
+// page's own drop targets run first and cancel dragover themselves, so they still take drops.
+window.addEventListener("dragover", (event) => {
+  if (event.defaultPrevented) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+});
+window.addEventListener("drop", (event) => event.preventDefault());

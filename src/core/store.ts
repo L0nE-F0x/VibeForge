@@ -7,7 +7,7 @@ import { defaultCompanion, normalizeCompanion } from "./companion.js";
 import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
 import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
-import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, writeRunMeta } from "./runs.js";
+import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta } from "./runs.js";
 import { isSafeId, slugify } from "./slug.js";
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../shared/text.js";
 import { TASK_STATUSES } from "./tasks.js";
@@ -122,7 +122,7 @@ export function defaultSettings(): Settings {
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
-    orchestrator: { engine: "grok", mode: "plan", model: "" },
+    orchestrator: { engine: "", mode: "plan", model: "" },
   };
 }
 
@@ -361,6 +361,64 @@ function toRow(meta: RunMeta): Array<string | number | null> {
   });
 }
 
+/** SQLite's "database disk image is malformed" (11) and "file is not a database" (26). */
+function isBrokenIndex(error: unknown): boolean {
+  const { code, errcode } = (error ?? {}) as { code?: unknown; errcode?: unknown };
+  return code === "ERR_SQLITE_ERROR" && typeof errcode === "number" && [11, 26].includes(errcode & 0xff);
+}
+
+/** Moves a damaged index (and its journal) to `index.sqlite.broken`, as writeJson does with a JSON file. */
+function setIndexAside(file: string): void {
+  const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
+  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+    if (fs.existsSync(`${file}${suffix}`)) fs.renameSync(`${file}${suffix}`, `${aside}${suffix}`);
+  }
+}
+
+// ---------------------------------------------------------------- read cache
+
+/**
+ * How long after a change a file is still parsed on every read. A second change within the same
+ * tick of the file system's clock, at the same size, could keep the first one's stamp.
+ */
+const SETTLE_MS = 2000;
+
+/** What identifies a file's contents without reading them; null when there is no such file. */
+function fileStamp(file: string): { key: string; settled: boolean } | null {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return null;
+    return { key: `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, settled: Date.now() - stat.mtimeMs > SETTLE_MS };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Settings, engines and agents as last parsed, kept while their file is unchanged on disk. The
+ * services read them hundreds of times a refresh, and a stat costs far less than parsing again.
+ * These are files people edit by hand, so the stamp (inode, size, modify and change times) is
+ * checked on every read, and the store's own writes drop the entry at once. Every read gets its
+ * own copy, so a caller changing what it got can't change what the next one sees.
+ */
+class ReadCache {
+  private readonly entries = new Map<string, { key: string; value: unknown }>();
+
+  read<T>(file: string, load: () => T): T {
+    const stamp = fileStamp(file);
+    const hit = this.entries.get(file);
+    if (stamp && hit?.key === stamp.key) return structuredClone(hit.value) as T;
+    const value = load();
+    if (stamp?.settled) this.entries.set(file, { key: stamp.key, value: structuredClone(value) });
+    else this.entries.delete(file);
+    return value;
+  }
+
+  forget(file: string): void {
+    this.entries.delete(file);
+  }
+}
+
 export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
@@ -370,8 +428,19 @@ export class Store {
     this.configRoot = configRoot;
     this.dataRoot = dataRoot;
     ensureLayout(configRoot, dataRoot);
-    this.db = new DatabaseSync(path.join(dataRoot, "index.sqlite"));
-    this.migrate();
+    const index = path.join(dataRoot, "index.sqlite");
+    let db: DatabaseSync | null = null;
+    try {
+      db = this.db = new DatabaseSync(index);
+      this.migrate();
+    } catch (error) {
+      if (!isBrokenIndex(error)) throw error;
+      // The index only mirrors the run folders' meta.json, so a damaged one is set aside and built again from them.
+      db?.close();
+      setIndexAside(index);
+      this.db = new DatabaseSync(index);
+      this.migrate();
+    }
   }
 
   close(): void {
@@ -408,7 +477,8 @@ export class Store {
     for (const dir of listRunDirs(this.dataRoot)) {
       if (known.has(path.basename(dir))) continue;
       const meta = readRunMeta(dir);
-      if (!meta) continue;
+      // A run's folder is named for its id; one that isn't (copied by hand) would be found in the wrong place.
+      if (!meta || meta.id !== path.basename(dir)) continue;
       meta.dir = dir;
       this.indexRun(meta);
       added += 1;
@@ -429,7 +499,7 @@ export class Store {
 
   /** The only way run state changes: meta.json and the index move together. */
   saveRun(meta: RunMeta): RunMeta {
-    const normalized = normalizeRun(meta);
+    const normalized = this.located(meta);
     if (!normalized) throw new Error("Run is not valid");
     writeRunMeta(normalized);
     this.indexRun(normalized);
@@ -438,7 +508,18 @@ export class Store {
 
   getRun(id: string): RunMeta | null {
     const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
-    return row ? normalizeRun(row) : null;
+    return row ? this.located(row) : null;
+  }
+
+  /**
+   * A run as the index or its meta.json has it, its folder worked out from the data folder and its
+   * id. The stored path is never used: a data folder restored under another $HOME still finds its
+   * runs, and nothing outside the data folder is ever read or deleted as one.
+   */
+  private located(value: unknown): RunMeta | null {
+    const run = normalizeRun(value);
+    if (run) run.dir = runDir(this.dataRoot, run.id) ?? "";
+    return run;
   }
 
   queryRuns(query: RunQuery = {}): RunMeta[] {
@@ -473,7 +554,7 @@ export class Store {
     const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
     const sql = `SELECT * FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY startedAt DESC LIMIT ${limit}`;
     return (this.db.prepare(sql).all(...params) as unknown[])
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
@@ -490,7 +571,7 @@ export class Store {
         .prepare(`SELECT * FROM runs WHERE status != 'running' AND id NOT IN (SELECT id FROM run_text) ORDER BY startedAt DESC LIMIT ${Math.max(1, Math.floor(limit))}`)
         .all() as unknown[]
     )
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
@@ -511,7 +592,7 @@ export class Store {
       )
       .all(match) as Array<Record<string, unknown>>;
     const found = rows.flatMap((row) => {
-      const run = normalizeRun(row);
+      const run = this.located(row);
       return run ? [{ run, snippet: typeof row.snippet === "string" ? row.snippet : "" }] : [];
     });
     if (found.length >= cap) return found;
@@ -524,32 +605,39 @@ export class Store {
   /** Every run in the index, newest first, with no limit: for tidying up, not for showing. */
   allRuns(): RunMeta[] {
     return (this.db.prepare("SELECT * FROM runs ORDER BY startedAt DESC").all() as unknown[])
-      .map((row) => normalizeRun(row))
+      .map((row) => this.located(row))
       .filter((run): run is RunMeta => run !== null);
   }
 
-  /** Forget a run entirely: its index row and its folder. */
+  /** Forget a run entirely: its index row and its folder, which is only ever `<data>/runs/<id>`. */
   deleteRun(run: RunMeta): void {
     this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
     this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
-    if (run.dir) fs.rmSync(run.dir, { recursive: true, force: true });
+    const dir = runDir(this.dataRoot, run.id);
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }
 
   deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
-    if (!run.dir) return;
-    fs.rmSync(path.join(run.dir, RUN_FILES[file]), { force: true });
+    const dir = runDir(this.dataRoot, run.id);
+    if (dir) fs.rmSync(path.join(dir, RUN_FILES[file]), { force: true });
   }
 
   // ---------------------------------------------------------------- settings & engines
 
+  private readonly cache = new ReadCache();
+
   readSettings(): Settings {
+    return this.cache.read(path.join(this.configRoot, "settings.json"), () => this.loadSettings());
+  }
+
+  private loadSettings(): Settings {
     const file = path.join(this.configRoot, "settings.json");
     const defaults = defaultSettings();
     const raw = readJson<Partial<Settings> | null>(file, null);
     if (!raw) {
       // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its
       // author, and moved aside to settings.json.broken if the app saves settings before it is fixed.
-      if (!fs.existsSync(file)) writeJson(file, defaults);
+      if (!fs.existsSync(file)) writeJson(file, defaults, { mode: 0o600 });
       return defaults;
     }
     return {
@@ -602,10 +690,15 @@ export class Store {
   }
 
   writeSettings(settings: Settings): void {
-    writeJson(path.join(this.configRoot, "settings.json"), settings);
+    writeJson(path.join(this.configRoot, "settings.json"), settings, { mode: 0o600 });
+    this.cache.forget(path.join(this.configRoot, "settings.json"));
   }
 
   readEngineRows(): EngineRow[] {
+    return this.cache.read(path.join(this.configRoot, "engines.json"), () => this.loadEngineRows());
+  }
+
+  private loadEngineRows(): EngineRow[] {
     const file = path.join(this.configRoot, "engines.json");
     if (!fs.existsSync(file)) {
       const seeded = seedEngines();
@@ -625,6 +718,7 @@ export class Store {
     const raw = readJson<{ seedRevision?: unknown }>(file, {});
     const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
     writeJson(file, { engines: normalizeEngineRows(rows), seedRevision: revision });
+    this.cache.forget(file);
   }
 
   // ---------------------------------------------------------------- workspaces & layouts
@@ -688,7 +782,8 @@ export class Store {
 
   getAgent(id: string): Agent | null {
     if (!isSafeId(id)) return null;
-    return normalizeAgent(id, readYaml(path.join(this.configRoot, "agents", id, "agent.yaml")));
+    const file = path.join(this.configRoot, "agents", id, "agent.yaml");
+    return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
   }
 
   writeAgent(agent: Agent): void {
@@ -697,6 +792,7 @@ export class Store {
     const memoryPath = path.join(dir, "memory.md");
     if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
     writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
+    this.cache.forget(path.join(dir, "agent.yaml"));
   }
 
   readMemory(agentId: string): string {
@@ -711,11 +807,6 @@ export class Store {
   writeMemory(agentId: string, text: string): void {
     if (!isSafeId(agentId)) throw new Error("Agent is missing");
     writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
-  }
-
-  deleteAgent(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "agents", id), { recursive: true, force: true });
   }
 
   // ---------------------------------------------------------------- skills

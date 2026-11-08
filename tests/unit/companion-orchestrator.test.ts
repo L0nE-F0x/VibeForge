@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { request } from "node:http";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { orchestratorFor } from "../../electron/companion.js";
 import { newCompanionToken } from "../../src/core/companion.js";
-import { HEAR_MAX, startCompanionHttp, type CompanionActions, type OrchestratorActions, type StepPatch } from "../../src/core/companion-http.js";
+import { HEAR_MAX, HEAR_READ_MAX, startCompanionHttp, type CompanionActions, type OrchestratorActions, type StepPatch } from "../../src/core/companion-http.js";
 import { buildPhoneOrchestrator, orchestratorDictationWords, PHONE_TURNS } from "../../src/core/companion-orchestrator.js";
 import type { OrchestratorTurn, OrchestratorView } from "../../src/core/orchestrator.js";
 import type { BrainRun } from "../../src/core/service/orchestrator.js";
@@ -182,7 +183,7 @@ describe("the phone page's Orchestrator routes", () => {
   it("says why the desk refused, in the phone's language", async () => {
     const orchestrator = desk({
       ask: () => {
-        throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+        throw new Error("Maestro is still answering. Wait for it, or stop it.");
       },
       view: () => ({
         engineId: "grok",
@@ -211,7 +212,7 @@ describe("the phone page's Orchestrator routes", () => {
     }
   });
 
-  it("hears up to three minutes of speech from the phone and refuses more", async () => {
+  it("hears up to three minutes of speech from the phone, cuts a recording that ran over, and refuses what isn't one", async () => {
     const heard: Buffer[] = [];
     const { http, base, token } = await server(desk(), async (pcm) => {
       heard.push(pcm);
@@ -226,11 +227,44 @@ describe("the phone page's Orchestrator routes", () => {
       expect(await answer.json()).toEqual({ text: "Start Claude in shop.", empty: null });
       expect(heard[0].equals(speech)).toBe(true);
       expect(HEAR_MAX).toBe(180 * 32_000);
-      expect((await send(Buffer.alloc(HEAR_MAX + 2))).status).toBe(413);
-      expect(heard).toHaveLength(1);
+      // The page checks its cap five times a second: at 48 kHz it stopped at 5,764,436 bytes, and the speech was lost.
+      const over = Buffer.alloc(5_764_436, 3);
+      expect((await send(over)).status).toBe(200);
+      expect(heard[1].equals(over.subarray(0, HEAR_MAX))).toBe(true);
+      expect(heard).toHaveLength(2);
+      expect((await send(Buffer.alloc(HEAR_READ_MAX + 2))).status).toBe(413);
+      expect(heard).toHaveLength(2);
+      // Far too long is refused on what it says it is, before any of it is read.
+      const claimed = await new Promise<number>((resolve, reject) => {
+        const req = request(`${base}/api/orchestrator/hear`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Length": String(HEAR_MAX * 10) } }, (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        req.on("error", reject);
+        req.write(Buffer.alloc(1000));
+      });
+      expect(claimed).toBe(413);
+      expect(heard).toHaveLength(2);
     } finally {
       await http.close();
     }
+  });
+
+  it("sends the computer no more than three minutes of the phone's speech", () => {
+    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+    const constants = page.match(/^const (MIC_MAX_SECONDS|HEAR_RATE) = .*$/gm) ?? [];
+    const toPcm = page.match(/^function toPcm\([\s\S]*?^}$/m)?.[0];
+    expect(constants).toHaveLength(2);
+    expect(toPcm).toBeTruthy();
+    const make = new Function(`${constants.join("\n")}\n${toPcm}\nreturn toPcm;`)() as (chunks: Float32Array[], length: number, rate: number) => Int16Array;
+    // 48 kHz, stopped by the page's timer a moment after three minutes.
+    const length = 2_882_218 * 3;
+    const chunks: Float32Array[] = [];
+    for (let at = 0; at < length; at += 4096) chunks.push(new Float32Array(4096).fill(0.25));
+    const pcm = make(chunks, length, 48_000);
+    expect(pcm.byteLength).toBe(HEAR_MAX);
+    expect(pcm[pcm.length - 1]).toBe(Math.trunc(0.25 * 0x7fff));
+    expect(make([new Float32Array(48_000).fill(0.25)], 48_000, 48_000).length).toBe(16_000);
   });
 
   it("serves the mic's worklet as a script from the page itself", async () => {
@@ -273,7 +307,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     phone.ask("Start Argy in shop on a branch called blah and do A, B and C");
     // Back at once; the planner is still thinking.
     expect(phone.view()).toMatchObject({ thinking: true, hear: true });
-    expect(() => phone.ask("and another")).toThrow("The Orchestrator is still answering. Wait for it, or stop it.");
+    expect(() => phone.ask("and another")).toThrow("Maestro is still answering. Wait for it, or stop it.");
     await until(() => answers.length === 1);
     answers[0]({ code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Starting it.", steps: [{ kind: "start", engine: "nobody", workspace: "shop", branch: "blah", prompt: "Do A, B and C." }] } }), stderr: "", timedOut: false });
     await until(() => !phone.view().thinking);
@@ -292,7 +326,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     expect(view.turns.at(-1)?.plan).toBe("done");
     expect(done).toMatchObject({ state: "done", live: true });
     expect(done?.runId).toBeTruthy();
-    const copy = path.join(path.dirname(repo), "shop.worktrees", "blah");
+    const copy = path.join(ctx.dataRoot, "worktrees", "blah");
     expect(ctx.spawns[0].cwd).toBe(copy);
     expect(ctx.spawns[0].argv.at(-1)).toBe("Do A and B.");
     expect(view.running[0]).toMatchObject({ ptyId: done?.ptyId, name: "Argy", workspace: "shop · blah", orchestrated: true, stop: "end" });

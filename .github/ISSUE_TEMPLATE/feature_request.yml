@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: What are you trying to do?
-      description: The workflow or annoyance behind the idea. This matters more than the solution.
+      description: The workflow or annoyance behind the idea. This matters more than the solution. [The principles](https://github.com/L0nE-F0x/VibeForge/blob/main/docs/principles.md) say what VibeForge won't do, such as call a model API or turn on a networked feature by default.
       placeholder: When I run three agents on the same repo I lose track of…
     validations:
       required: true
@@ -24,11 +24,18 @@ body:
         - Agents
         - Code (terminals, panes, files, browser dock)
         - Chat
-        - Tasks
+        - Tasks or a task's own copy
         - Routines
         - Skills
         - Runs
-        - Settings or theme
+        - Maestro
+        - Agents together
+        - Phone page
+        - Voice
+        - Plan limits or tokens
+        - Tray, notifications or sounds
+        - Settings, theme or language
+        - Install or Update
         - A new CLI to support
         - Something new
   - type: textarea

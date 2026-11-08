@@ -160,6 +160,7 @@ export class RoutineDesk {
           kind: "routine",
           id,
           folder: cwd,
+          slot: scheduledAt,
           start: () => this.fire(id, scheduledAt && this.slotAfterWait(id, scheduledAt), size),
           failed: (message) => this.failedStart(routine, agent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
         });

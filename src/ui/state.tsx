@@ -18,7 +18,7 @@ export type Route =
   | { view: "routines"; routineId?: string }
   | { view: "skills"; skillId?: string }
   | { view: "runs"; runId?: string; filter?: RunFilter }
-  | { view: "orchestrator" }
+  | { view: "orchestrator"; copyId?: string }
   | { view: "settings"; section?: string };
 
 export type RunFilter = "review" | "all" | "live";
@@ -222,13 +222,15 @@ export interface Toast {
 }
 
 interface Toaster {
-  toasts: Toast[];
   push: (kind: ToastKind, title: string, body?: string, action?: ToastAction) => void;
   dismiss: (id: number) => void;
   fail: (error: unknown, title?: string) => void;
 }
 
+// Two contexts: the actions never change, so the many components that raise toasts don't
+// re-render when one comes or goes. Only <Toasts> reads the list.
 const ToastContext = createContext<Toaster | null>(null);
+const ToastListContext = createContext<Toast[]>([]);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -262,14 +264,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
   const fail = useCallback((error: unknown, title = translate("common.failed")) => push("error", title, errorText(error)), [push]);
-  const value = useMemo(() => ({ toasts, push, dismiss, fail }), [toasts, push, dismiss, fail]);
-  return <ToastContext.Provider value={value}>{children}</ToastContext.Provider>;
+  const actions = useMemo(() => ({ push, dismiss, fail }), [push, dismiss, fail]);
+  return (
+    <ToastContext.Provider value={actions}>
+      <ToastListContext.Provider value={toasts}>{children}</ToastListContext.Provider>
+    </ToastContext.Provider>
+  );
 }
 
 export function useToast(): Toaster {
   const toaster = useContext(ToastContext);
   if (!toaster) throw new Error("useToast outside ToastProvider");
   return toaster;
+}
+
+/** The toasts on screen, for <Toasts>: reading them re-renders on every toast. */
+export function useToastList(): Toast[] {
+  return useContext(ToastListContext);
 }
 
 /**
@@ -322,36 +333,44 @@ export interface ConfirmRequest {
   body?: ReactNode;
   confirm?: string;
   danger?: boolean;
-  /** Ask the person to type this before confirming. */
-  typeToConfirm?: string;
 }
 
+type PendingConfirm = ConfirmRequest & { resolve: (ok: boolean) => void };
+
 interface Confirmer {
-  request: (ConfirmRequest & { resolve: (ok: boolean) => void }) | null;
+  request: PendingConfirm | null;
   ask: (request: ConfirmRequest) => Promise<boolean>;
   settle: (ok: boolean) => void;
+}
+
+/**
+ * One question on screen at a time. A second one takes its place and answers the first with
+ * "no", so whoever asked it isn't left waiting on a dialog that is gone.
+ */
+export function confirmSlot(show: (request: PendingConfirm | null) => void): Pick<Confirmer, "ask" | "settle"> {
+  let pending: PendingConfirm | null = null;
+  return {
+    ask: (next) =>
+      new Promise<boolean>((resolve) => {
+        const replaced = pending;
+        pending = { ...next, resolve };
+        show(pending);
+        replaced?.resolve(false);
+      }),
+    settle: (ok) => {
+      const answered = pending;
+      pending = null;
+      show(null);
+      answered?.resolve(ok);
+    },
+  };
 }
 
 const ConfirmContext = createContext<Confirmer | null>(null);
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<Confirmer["request"]>(null);
-  const ask = useCallback(
-    (next: ConfirmRequest) =>
-      new Promise<boolean>((resolve) => {
-        setRequest({ ...next, resolve });
-      }),
-    [],
-  );
-  const settle = useCallback(
-    (ok: boolean) => {
-      setRequest((current) => {
-        current?.resolve(ok);
-        return null;
-      });
-    },
-    [],
-  );
+  const [{ ask, settle }] = useState(() => confirmSlot(setRequest));
   const value = useMemo(() => ({ request, ask, settle }), [request, ask, settle]);
   return <ConfirmContext.Provider value={value}>{children}</ConfirmContext.Provider>;
 }

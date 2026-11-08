@@ -13,6 +13,7 @@ import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
 import { changesFor } from "../changes-text.js";
+import { applyConflictNote } from "../apply-note.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
   { status: "todo", label: "tasks.col.todo" },
@@ -232,7 +233,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     if (!task || !workspace) return;
     const result = await call("tasks.applyCopy", task.id);
     if (!result.files.length) push("info", t("tasks.applyNothing"));
-    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), t("tasks.applyConflictsBody", { files: result.conflicts.join(", ") }));
+    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
     else push("success", t("tasks.applied", { workspace: workspace.name }), t.count("tasks.appliedBody", result.files.length));
   }, t("tasks.applyFailed"));
   const [discardCopy, discarding] = useAction(async () => {
@@ -275,7 +276,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
         ) : (
           task && <Chip tone={task.status === "done" ? "ok" : task.status === "review" ? "warn" : task.status === "running" ? "accent" : undefined}>{statusLabel}</Chip>
         )}
-        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
+        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t(live ? "common.closeEscTerminal" : "common.closeEsc")} />
       </div>
       {live && (
         <div style={{ height: "46vh", display: "flex", flexDirection: "column", borderBottom: "1px solid var(--line)" }}>

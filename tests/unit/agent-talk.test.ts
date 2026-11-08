@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { answerFromScreen, cleanText, Handles, messageText, reachable, resolveTarget, screenTail, SETTLE_MS, type Names } from "../../src/core/agent-talk.js";
 import { parseTalkRequest } from "../../src/core/control.js";
 import { LogFile } from "../../src/core/log.js";
@@ -318,6 +318,131 @@ describe("CLIs talking through VibeForge", () => {
 
     ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: false, maxMessages: 2, reviewRounds: 1 } });
     expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "seven" })).toMatchObject({ ok: false, error: expect.stringContaining("turned off") });
+    ctx.svc.close();
+  });
+
+  it("holds messages queued while the CLI was busy to the limit as they go in, not as they were queued", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 2, reviewRounds: 1 } });
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    for (const text of ["one", "two", "three"]) expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text })).toMatchObject({ delivered: "queued" });
+    const waiting = ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "four", wait: true });
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    for (let step = 0; step < 4; step += 1) {
+      pass(4000);
+      await ctx.svc.pumpMessages();
+    }
+    expect(ctx.sent.map((item) => [item.text.split("\n")[1], item.enter ?? true])).toEqual([
+      ["one", true],
+      ["two", true],
+      ["three", false],
+      ["four", false],
+    ]);
+    // The one waiting for an answer is told it's a draft now; nothing is watched for.
+    expect(await waiting).toMatchObject({ ok: true, delivered: "draft", note: expect.stringContaining("2 messages") });
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ messages: 2, held: true, queued: 0 });
+    ctx.svc.close();
+  });
+
+  it("doesn't paste a queued message into another CLI started in the same terminal", async () => {
+    const { ctx, pass, workspace, a } = await twoClis();
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(shell.ptyId, ["pasty"], ctx.place);
+    pass(6000);
+    ctx.svc.onPtyActivity(shell.ptyId, true);
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty-2", text: "for this one" })).toMatchObject({ delivered: "queued" });
+    // It quits, and the person starts Argy there.
+    ctx.svc.onPtyProgram(shell.ptyId, ["bash"], ctx.place);
+    ctx.svc.onPtyProgram(shell.ptyId, ["argy"], ctx.place);
+    pass(6000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === shell.ptyId)?.talk ?? null).toBeNull();
+    ctx.svc.close();
+  });
+
+  it("doesn't take a terminal's answers to a CLI's questions for a person typing", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 1, reviewRounds: 1 } });
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "one" });
+    pass(4000);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ held: true });
+    // Cursor position, device attributes, a colour, the terminal's name, a mode, an arrow key.
+    for (const reply of ["\x1b[12;40R", "\x1b[?62;22c\x1b[>0;276;0c", "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\", "\x1bP>|xterm.js(6.0.0)\x1b\\", "\x1b[?2004;1$y", "\x1b[A", "\x1b"]) {
+      ctx.svc.onHumanInput(b.ptyId, reply);
+    }
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ held: true });
+    // Nor do they hold messages back as if a person were halfway through typing.
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "two" })).toMatchObject({ delivered: "draft" });
+
+    // Nor do they lift a Stop.
+    ctx.svc.stopTalk(b.ptyId);
+    ctx.svc.onHumanInput(b.ptyId, "\x1b[12;40R");
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "three" })).toMatchObject({ ok: false, error: expect.stringContaining("stopped") });
+    // A pasted line is a person.
+    ctx.svc.onHumanInput(b.ptyId, "\x1b[200~go on\x1b[201~\r");
+    pass(4000);
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "four" })).toMatchObject({ delivered: "sent" });
+    ctx.svc.close();
+  });
+
+  it("keeps saved messages for days, and one a waiting message points at for as long as it waits", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    const long = (word: string) => `${word} `.repeat(3000);
+    const dir = path.join(ctx.dataRoot, "messages");
+    // Fifty long messages in a row: more than the old cap of forty, all kept.
+    for (let n = 0; n < 50; n += 1) {
+      await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: long(`m${n}`) });
+      pass(4000);
+    }
+    expect(fs.readdirSync(dir)).toHaveLength(50);
+    // One waits in line for a busy CLI for days; the others go once they're old.
+    ctx.svc.onHumanInput(a.ptyId, "\r");
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: long("held") });
+    pass(4 * 24 * 60 * 60 * 1000);
+    await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: long("new") });
+    const left = fs.readdirSync(dir).map((name) => fs.readFileSync(path.join(dir, name), "utf8").split(" ")[0]);
+    expect(left.sort()).toEqual(["held", "new"]);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, text: expect.stringContaining(path.join(ctx.dataRoot, "messages")) });
+    ctx.svc.close();
+  });
+
+  it("reads who is there once for the window's whole list, not once for each CLI in it", async () => {
+    const { ctx, pass, workspace, a, b } = await twoClis();
+    for (let n = 0; n < 6; n += 1) await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: n % 2 ? "argy" : "pasty" });
+    for (const name of ["Notes", "Docs"]) {
+      const agent = ctx.svc.saveAgent({ name, brief: "b", engine: "argy", places: [ctx.place] });
+      await ctx.svc.launchAgent(workspace.id, agent.id, null);
+    }
+    pass(6000);
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Hello" });
+    const reads = (["readEngineRows", "readSettings", "getAgent", "getRun"] as const).map((name) => [name, vi.spyOn(ctx.svc.store, name)] as const);
+    const live = ctx.svc.liveForView();
+    expect(live).toHaveLength(10);
+    expect(live.find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ with: ["Argy"], messages: 1 });
+    expect(Object.fromEntries(reads.map(([name, spy]) => [name, spy.mock.calls.length]))).toEqual({ readEngineRows: 1, readSettings: 1, getAgent: 2, getRun: 10 });
+    // Nothing going on between CLIs: nothing to read at all.
+    ctx.svc.stopTalk(a.ptyId);
+    for (const [, spy] of reads) spy.mockClear();
+    expect(ctx.svc.liveForView().every((item) => item.talk === null)).toBe(true);
+    expect(reads.every(([, spy]) => spy.mock.calls.length === 0)).toBe(true);
+
+    // Nor is every agent read again each time a CLI goes busy or quiet, only once one has changed.
+    const agents = vi.spyOn(ctx.svc.store, "listAgents");
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    for (const working of [true, false, true, false]) {
+      ctx.svc.onPtyActivity(b.ptyId, working);
+      await settle();
+    }
+    expect(agents).not.toHaveBeenCalled();
+    ctx.svc.saveAgent({ name: "Tests", brief: "b", engine: "argy", places: [ctx.place] });
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    await settle();
+    expect(agents).toHaveBeenCalledTimes(1);
     ctx.svc.close();
   });
 

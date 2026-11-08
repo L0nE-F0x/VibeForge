@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
+import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSkills } from "../api.js";
 import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
@@ -148,7 +148,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                 key={agent.id}
                 type="button"
                 className={`row${wants(agent.id) ? " needs-you" : ""}`}
-                aria-selected={agent.id === selected?.id}
+                aria-current={agent.id === selected?.id || undefined}
                 onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
               >
                 <Avatar name={agent.name} />
@@ -405,13 +405,13 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
         }
       >
         <div className="list-scroll">
-          <button type="button" className="row" aria-selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+          <button type="button" className="row" aria-current={!chat || undefined} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
             <MessageSquarePlus size={15} className="accent-text" />
             <span className="row-title">{t("agents.newChat")}</span>
           </button>
           {chats.length > 0 && <div className="list-label">{t("agents.recent")}</div>}
           {chats.map((item) => (
-            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-selected={item.id === chat?.id} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
+            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-current={item.id === chat?.id || undefined} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
               <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{item.title}</span>
@@ -556,6 +556,8 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
+  const deleted = useDeleted();
+  const running = (useLive().data ?? []).some((session) => session.agentId === agent.id && session.runId);
   const engines = useEngines().data ?? [];
   const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
   const { name, engine, allow, voice, goodAt, tier } = form;
@@ -576,16 +578,14 @@ function SettingsTab({ agent }: { agent: Agent }) {
     if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
   const [remove, removing] = useAction(async () => {
-    const ok = await confirm({
-      title: t("agents.deleteTitle", { name: agent.name }),
-      body: t("agents.deleteBody"),
-      confirm: t("agents.delete"),
-      danger: true,
-      typeToConfirm: agent.name,
-    });
-    if (!ok) return;
-    await call("agents.delete", agent.id, agent.name);
+    // Deleting is undone from the toast. Only a running session asks first: stopping it can't be undone.
+    if (running) {
+      const ok = await confirm({ title: t("common.deleteNamed", { name: agent.name }), body: t("agents.deleteRunningBody"), confirm: t("common.stopAndDelete"), danger: true });
+      if (!ok) return;
+    }
+    const result = await call("agents.delete", agent.id);
     go({ view: "agents" });
+    deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));
   useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
 

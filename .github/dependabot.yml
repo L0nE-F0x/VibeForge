@@ -1,0 +1,35 @@
+# Weekly update pull requests: one for the npm minor and patch versions, one for the GitHub
+# Actions pins (ci.yml and release.yml pin each action to a commit). A new major version comes on
+# its own, since each needs its own look (vite 8, Electron 45, TypeScript 7). A version has to be a
+# week old first, so a bad publish is usually caught and pulled before it gets here.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # @types/node stays on the oldest Node line the tests and the build run on (package.json).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

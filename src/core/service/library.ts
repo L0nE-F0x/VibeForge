@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { isDirectory } from "../fsx.js";
 import { agentTier, oneLine } from "../store.js";
@@ -53,12 +54,29 @@ export class LibraryDesk {
     return agent;
   }
 
-  deleteAgent(id: string, confirmName: string): void {
+  /**
+   * Delete an agent, Undo-able: its folder (brief, memory) and its routines go to the trash
+   * together, so Undo brings them all back and a new agent given the same name starts without them.
+   * Anything running as it is stopped first; that part can't be undone.
+   */
+  async deleteAgent(id: string): Promise<Deleted> {
     const agent = this.core.store.getAgent(id);
     if (!agent) throw new Error("That agent no longer exists.");
-    if (confirmName.trim() !== agent.name) throw new Error("Type the agent's name exactly to delete it.");
-    this.core.store.deleteAgent(id);
+    for (const session of this.core.listLive()) {
+      if (session.agentId !== id || !session.runId) continue;
+      const exited = this.core.waitForExit(session.ptyId, 6000);
+      await this.core.stopRun(session.runId);
+      await exited;
+    }
+    const folder = path.join(this.core.options.configRoot, "agents", agent.id);
+    const routines = this.core.store.listRoutines().flatMap((routine) => (routine.agentId === id ? (this.core.store.pathOf("routine", routine.id) ?? []) : []));
+    const bin = this.core.trash.stash([folder, ...routines]);
     this.core.emit("agents", "routines", "tasks", "chats");
+    return this.core.keepForUndo(bin, (restored) => {
+      // A new agent took the name meanwhile, so this one can't come back; nor do its routines, to join that one.
+      if (!restored.includes(folder)) for (const file of routines) if (restored.includes(file)) fs.rmSync(file, { force: true });
+      this.core.emit("agents", "routines", "tasks", "chats");
+    });
   }
 
   readMemory(agentId: string): string {

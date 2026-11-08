@@ -2,6 +2,8 @@
 
 VibeForge is an open-source desktop for Omarchy. It runs the coding CLIs already on your machine. Issues and pull requests are welcome.
 
+Read [the principles](docs/principles.md) before proposing a feature. They are why VibeForge holds no API keys, sends nothing by default except the update check, and waits for a person at each step. A change that breaks one needs a reason in its pull request.
+
 A short-lived branch and a clear pull request keep `main` readable once more than one person is changing it.
 
 ## Set up
@@ -20,9 +22,32 @@ npm run coverage     # the tests again, with a floor on src/core (CI runs this o
 npm run build && npm run smoke   # the built app, driven over DevTools (SMOKE_HEADLESS=1: no window)
 ```
 
+### Beside an installed VibeForge
+
+Electron runs one VibeForge per profile folder, and the profile is `~/.config/VibeForge` unless it's told otherwise. So a dev copy started while your installed VibeForge runs only brings that window forward and quits. Without its own folders it would also read and write your real agents, runs and settings.
+
+Give the dev copy its own folders, as `scripts/smoke.mjs` does:
+
+```bash
+dev=~/vibeforge-dev   # any folder; VibeForge fills it on first start
+npm run build
+VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data \
+  node_modules/electron/dist/electron . --user-data-dir=$dev/profile
+```
+
+`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA` stand in for `~/.config/vibeforge` and `~/.local/share/vibeforge`, which also gives the copy its own control socket: its terminals talk to it, and Super+Alt+V still reaches your installed VibeForge. `--user-data-dir` moves Electron's profile and its one-copy lock. `npm start` takes no Electron flags; for hot reload, set `VIBEFORGE_PROFILE` and it passes `--user-data-dir` for you:
+
+```bash
+VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data VIBEFORGE_PROFILE=$dev/profile npm start
+```
+
+The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
+
 ## Issues
 
 Use the [bug](https://github.com/L0nE-F0x/VibeForge/issues/new?template=bug_report.yml) and [feature](https://github.com/L0nE-F0x/VibeForge/issues/new?template=feature_request.yml) templates. **Help → Copy diagnostics** inside the app fills in versions and the end of VibeForge's own log. Read it and remove anything private before you paste.
+
+A security problem goes to a private report, as [SECURITY.md](SECURITY.md) says, not to an issue.
 
 | Label | Meaning |
 | --- | --- |

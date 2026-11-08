@@ -48,8 +48,9 @@ export function companionStatus(): CompanionStatus {
   return status;
 }
 
-export function syncCompanion(wire: CompanionWire): void {
-  void enqueue(() => apply(wire));
+/** Brings the page in line with Settings. The promise is for tests; the app doesn't wait on it. */
+export function syncCompanion(wire: CompanionWire): Promise<void> {
+  return enqueue(() => apply(wire));
 }
 
 export function stopCompanion(): Promise<void> {
@@ -60,10 +61,17 @@ export function stopCompanion(): Promise<void> {
   });
 }
 
+/** How long a stop waits for the phones it cut to finish closing. The port is free at once. */
+const CLOSE_WAIT_MS = 2000;
+
 async function closeServer(): Promise<void> {
   const current = server;
   server = null;
-  if (current) await current.close();
+  if (!current) return;
+  // Never longer than this: the next page (a new code, Off then On) and Quit wait in the same queue.
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([current.close(), new Promise<void>((done) => (timer = setTimeout(done, CLOSE_WAIT_MS)))]);
+  clearTimeout(timer);
 }
 
 async function apply(wire: CompanionWire): Promise<void> {
@@ -167,7 +175,7 @@ export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" 
     },
     ask: (text) => {
       // The answer takes a while (one turn of the planning CLI). It arrives as a turn the page polls for.
-      if (service.orchestratorView().thinking) throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+      if (service.orchestratorView().thinking) throw new Error("Maestro is still answering. Wait for it, or stop it.");
       void service.orchestratorAsk(text).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
     },
     stopThinking: () => service.orchestratorStopThinking(),

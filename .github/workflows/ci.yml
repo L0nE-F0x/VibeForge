@@ -8,55 +8,96 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run. A commit on main always runs to the end:
+# release.yml publishes a tag only once these checks passed on its commit.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Node 22 is the current LTS and satisfies the README's Node floor (20.19+ or 22.12+, from Vite).
+# Actions are pinned to a commit; Dependabot (.github/dependabot.yml) moves the pins.
 # The Electron binary is not used by npm test or npm run typecheck.
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
 jobs:
-  test:
-    name: test
+  # The terminal host and the build run on each person's own Node, so the tests run on every line
+  # they may have: 22, 24, and 26 (the current LTS) with the coverage floors (vitest.config.ts),
+  # which were measured there. Node 20.19, which the installer still accepts, is past its end of
+  # life, and vitest 5 doesn't run on it.
+  test-node:
+    name: test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      # The tests, with the core's coverage floor (vitest.config.ts).
-      - run: npm run coverage
+      - run: npm run ${{ matrix.node == 26 && 'coverage' || 'test' }}
+
+  # The check main requires: one name, whichever Node versions run above.
+  test:
+    name: test
+    needs: test-node
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Node version passed
+        env:
+          RESULT: ${{ needs.test-node.result }}
+        run: test "$RESULT" = success
 
   lint:
     name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      # Node 24 for its npm (11.19): the npm 10 that comes with Node 22 has no approve-scripts.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
           cache: npm
       - run: npm ci
       # Bug-shaped rules only (biome.json); nothing is reformatted.
       - run: npm run lint
+      # What ships (the dependencies, Electron among them) has no known high or critical advisory.
+      - run: npm audit --omit=dev --audit-level=high
+      # A dependency that starts running an install script needs a person to approve it first,
+      # in package.json's allowScripts (npm approve-scripts <package>).
+      - name: No install script that nobody approved
+        run: |
+          pending="$(npm approve-scripts --allow-scripts-pending --json | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => console.log(JSON.parse(s).allowScripts.map((p) => p.name).join(" ")))')"
+          if [ -n "$pending" ]; then
+            echo "::error::Install scripts not approved in package.json's allowScripts: $pending. Review them, then run npm approve-scripts."
+            exit 1
+          fi
 
   typecheck:
     name: typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The app, the Vite and Vitest configs, and scripts/*.mjs.
       - run: npm run typecheck
 
   # The built app, started under a virtual display: every view opens, the language switches,
@@ -69,8 +110,10 @@ jobs:
       # This job runs Electron, so it needs the binary the other jobs skip.
       ELECTRON_SKIP_BINARY_DOWNLOAD: ""
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm

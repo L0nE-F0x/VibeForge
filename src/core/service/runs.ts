@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isDirectory } from "../fsx.js";
@@ -9,10 +10,17 @@ import { runMarkdown } from "../run-markdown.js";
 import { compressRun, folderBytes, hasRunFile, planCleanup, readRunText } from "../run-storage.js";
 import { grokHome, museHome, readGrokPrompts, readMusePrompts } from "../session-prompts.js";
 import type { RunQuery } from "../store.js";
+import type { RunMeta } from "../types.js";
 import { type Launched, REVIEW_ORIGINS, type RunBundle, type RunHit, type RunUpkeep, type RunView, type StorageSummary, type TermSize, TWO_DAYS_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { ChatDesk } from "./chats.js";
 import type { TaskDesk } from "./tasks.js";
+
+/**
+ * A run folder changed this recently is measured again on every pass: a change within the same
+ * tick of the file system's clock would leave its modified time as it was.
+ */
+const SETTLE_MS = 2000;
 
 /** The run index as the app reads it: lists, the review inbox, one run's files, its diff, and continuing it. */
 export class RunDesk {
@@ -24,6 +32,12 @@ export class RunDesk {
 
   /** The tidy-up pass in progress, if any. */
   private upkeep: Promise<RunUpkeep> | null = null;
+
+  /**
+   * Each ended run's folder size, kept while the folder holds still: compressing, removing a file
+   * or saving the run's meta.json (a write and rename) all move the folder's modified time.
+   */
+  private readonly sizes = new Map<string, { mtimeMs: number; bytes: number }>();
 
   listRuns(query: RunQuery = {}): RunView[] {
     return this.core.store.queryRuns(query).map((run) => this.core.view(run));
@@ -58,6 +72,8 @@ export class RunDesk {
       } catch {
         /* the stored files still open */
       }
+      // A repaired frame is written over the old one, which leaves the folder's time alone.
+      this.sizes.delete(bundle.run.id);
     }
     if (!files.preamble.trim() && bundle.run.cwd && (bundle.run.engine === "grok" || bundle.run.engine === "muse")) {
       try {
@@ -218,22 +234,41 @@ export class RunDesk {
     const keep = new Set<string>(this.inbox().map((run) => run.id));
     for (const chat of this.core.store.listChats()) if (chat.runIds.length) keep.add(chat.runIds[chat.runIds.length - 1]);
     for (const task of this.core.store.listTasks()) if (task.runIds.length) keep.add(task.runIds[task.runIds.length - 1]);
-    const doomed = planCleanup(
-      runs.map((run) => ({ run, bytes: folderBytes(run.dir) })),
-      rule,
-      this.core.now(),
-      keep,
-    );
+    // Only a size limit needs every run's size; otherwise only the runs removed are measured.
+    const candidates: Array<{ run: RunMeta; bytes: number }> = [];
+    for (const run of runs) candidates.push({ run, bytes: rule.maxMb > 0 ? await this.runBytes(run) : 0 });
+    const doomed = planCleanup(candidates, rule, this.core.now(), keep);
     for (const { run, bytes } of doomed) {
       // Still ended, and still not picked up again, since the list was read.
       const latest = this.core.store.getRun(run.id);
       if (!latest || latest.status === "running" || this.core.ptyByRun.has(run.id)) continue;
+      const freed = rule.maxMb > 0 ? bytes : folderBytes(latest.dir);
       this.core.store.deleteRun(latest);
+      this.sizes.delete(run.id);
       result.removed += 1;
-      result.freed += bytes;
+      result.freed += freed;
     }
+    const ended = new Set(runs.map((run) => run.id));
+    for (const id of this.sizes.keys()) if (!ended.has(id)) this.sizes.delete(id);
     if (result.removed) this.core.emit("runs");
     return result;
+  }
+
+  /** A run folder's size: measured again only when the folder has changed since the last pass. */
+  private async runBytes(run: RunMeta): Promise<number> {
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await fs.promises.stat(run.dir)).mtimeMs;
+    } catch {
+      this.sizes.delete(run.id);
+      return 0;
+    }
+    const kept = this.sizes.get(run.id);
+    if (kept && kept.mtimeMs === mtimeMs) return kept.bytes;
+    const bytes = folderBytes(run.dir);
+    if (Date.now() - mtimeMs > SETTLE_MS) this.sizes.set(run.id, { mtimeMs, bytes });
+    else this.sizes.delete(run.id);
+    return bytes;
   }
 
   storageSummary(): StorageSummary {

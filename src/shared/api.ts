@@ -50,9 +50,9 @@ import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
-import type { OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue } from "../core/orchestrator.js";
+import type { MaestroCopy, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue } from "../core/orchestrator.js";
 
-export type { OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue };
+export type { MaestroCopy, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue };
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
 export type { ApplyResult, WorkingCopy, BranchList };
@@ -317,7 +317,7 @@ export interface DeskMethods {
 
   "agents.list": () => Agent[];
   "agents.save": (input: AgentInput) => Agent;
-  "agents.delete": (id: string, confirmName: string) => void;
+  "agents.delete": (id: string) => Deleted;
   "agents.readMemory": (id: string) => string;
   "agents.writeMemory": (id: string, text: string) => void;
 
@@ -400,6 +400,10 @@ export interface DeskMethods {
   "orchestrator.cancel": (turnId: string) => void;
   "orchestrator.editStep": (turnId: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>) => void;
   "orchestrator.removeStep": (turnId: string, stepId: string) => void;
+  /** A step's copy: its changes, Apply into the workspace it came from, or Discard (undone with undo.delete). */
+  "orchestrator.copyDiff": (copyId: string) => string;
+  "orchestrator.applyCopy": (copyId: string) => ApplyResult;
+  "orchestrator.discardCopy": (copyId: string) => Deleted;
 
   "voice.status": () => VoiceStatus;
   "voice.start": () => void;

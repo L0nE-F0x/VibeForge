@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
 import { describeError, type LogFile } from "../src/core/log.js";
-import { parseControl, parseTalkRequest, TALK_REQUEST_MAX, type TalkRequest, type VoiceAction } from "../src/core/control.js";
+import { parseControl, parseTalkRequest, prepareSocketDir, TALK_REQUEST_MAX, type TalkRequest, type VoiceAction } from "../src/core/control.js";
 
 const VOICE_LINE_MAX = 4096;
 
@@ -16,6 +17,10 @@ export function listenControl(
   /** `gone` aborts when the asker hangs up before its answer (a CLI's tool timed out, say). */
   onTalk: (request: TalkRequest, gone: AbortSignal) => Promise<unknown>,
 ): () => void {
+  if (!prepareSocketDir(socketPath, process.getuid?.() ?? 0)) {
+    log.warn(`Control socket: ${path.dirname(socketPath)} belongs to someone else, so VibeForge doesn't listen there`);
+    return () => undefined;
+  }
   // A socket left by a crashed run would make listen fail; nothing else could be using this path.
   try {
     fs.rmSync(socketPath, { force: true });

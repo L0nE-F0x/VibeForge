@@ -10,22 +10,32 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 
-# The path matches src/core/control.ts. One socket per data folder.
+# The path matches src/core/control.ts. One socket per data folder. Without XDG_RUNTIME_DIR it sits
+# in a /tmp folder only this user can enter; when someone else made that folder, there's no path.
 control_sock() {
-  local data tag
+  local data tag dir
   data="${VIBEFORGE_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/vibeforge}"
   tag="$(printf %s "$data" | sha1sum | cut -c1-8)"
   if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
-    printf '%s\n' "$XDG_RUNTIME_DIR/vibeforge-$tag.sock"
+    dir="$XDG_RUNTIME_DIR"
   else
-    printf '%s\n' "/tmp/vibeforge-$(id -u)-$tag.sock"
+    dir="/tmp/vibeforge-$(id -u)"
+    mkdir -m 700 "$dir" 2>/dev/null || true
+    if [[ -L "$dir" || ! -d "$dir" || ! -O "$dir" ]]; then
+      echo "vibeforge: $dir isn't yours, so its control socket isn't used" >&2
+      return 0
+    fi
+    [[ "$(stat -c %a "$dir")" == 700 ]] || chmod 700 "$dir"
   fi
+  printf '%s\n' "$dir/vibeforge-$tag.sock"
 }
 
-# `vibeforge tell|who|task …`, from a coding CLI in a VibeForge terminal: talk to the other CLIs
-# through the running window. scripts/talk.mjs has the details (`vibeforge help`).
+# `vibeforge tell|who|task|apply …`, from a coding CLI in a VibeForge terminal: talk to the other CLIs
+# through the running window. scripts/talk.mjs has the details (`vibeforge help`). Every command it
+# takes is listed here: one that isn't would start a second window, which quits at once
+# (tests/unit/launcher.test.ts checks).
 case "${1:-}" in
-  tell | who | task | help | --help | -h)
+  tell | who | task | apply | help | --help | -h)
     command -v node >/dev/null 2>&1 || { echo "vibeforge: node is not on PATH" >&2; exit 1; }
     VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec node "$ROOT/scripts/talk.mjs" "$@"
     ;;

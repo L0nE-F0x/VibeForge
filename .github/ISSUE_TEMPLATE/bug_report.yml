@@ -30,19 +30,25 @@ body:
         - Agents
         - Code (terminals, panes, files, browser dock)
         - Chat
-        - Tasks
+        - Tasks or a task's own copy (Apply, Discard)
         - Routines
         - Skills
-        - Runs
+        - Runs (review, Continue, search)
+        - Maestro (plans, Running list)
+        - Agents together (vibeforge tell, task, reviews)
+        - Phone page
+        - Voice (dictation, talk-back)
+        - Plan limits or tokens
+        - Tray, notifications or sounds
+        - Ctrl+K or keyboard shortcuts
         - Settings, theme or language
-        - Updates
-        - Installer or startup
+        - Install or Update
         - Something else
   - type: input
     id: version
     attributes:
       label: VibeForge version
-      placeholder: "0.3.0"
+      placeholder: "2.13.0"
     validations:
       required: true
   - type: textarea

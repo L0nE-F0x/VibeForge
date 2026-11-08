@@ -6,13 +6,15 @@ import { Terminal as XTerm, type ITerminalOptions } from "@xterm/xterm";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type DragEvent } from "react";
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
-import { clipboardKey } from "../terminal-keys.js";
+import { appShortcut, clipboardKey, isWebLink } from "../terminal-keys.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
+import { t as translate, useT } from "../i18n/index.js";
+import { WebglPool, type GlUser } from "../webgl-pool.js";
 
 export const PATH_MIME = "application/x-vibeforge-path";
-const MAX_WEBGL = 10;
-let webglInUse = 0;
+/** Under Chromium's limit of WebGL contexts per page; the other terminals draw with the DOM. */
+const webgl = new WebglPool(10);
 
 export interface TerminalHandle {
   focus(): void;
@@ -38,17 +40,6 @@ export function estimateTermSize(element: HTMLElement | null, fontSize: number, 
   };
 }
 
-/** App shortcuts that must reach the window instead of the program in the terminal. */
-function isAppShortcut(event: KeyboardEvent): boolean {
-  if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
-  if (event.ctrlKey && !event.altKey && event.key === ",") return true;
-  // Ctrl+Shift+K opens the switcher; plain Ctrl+K stays the program's (kill to end of line).
-  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewlko]$/i.test(event.key) || event.code === "Slash")) return true;
-  // Alt+1…9 jumps between workspaces.
-  if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
-  return false;
-}
-
 function baseOptions(fontFamily: string, fontSize: number): ITerminalOptions {
   return {
     fontFamily: `"${fontFamily}", "JetBrainsMono Nerd Font", "JetBrains Mono", monospace`,
@@ -68,27 +59,38 @@ function baseOptions(fontFamily: string, fontSize: number): ITerminalOptions {
   };
 }
 
-function attachWebgl(term: XTerm): () => void {
-  if (webglInUse >= MAX_WEBGL) return () => undefined;
-  try {
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => webgl.dispose());
-    term.loadAddon(webgl);
-    webglInUse += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      webglInUse -= 1;
+/** The terminal's seat in the WebGL pool: it draws with WebGL while it holds a slot. */
+function webglSeat(term: XTerm): GlUser {
+  let addon: WebglAddon | null = null;
+  const seat: GlUser = {
+    attach() {
       try {
-        webgl.dispose();
+        const next = new WebglAddon();
+        // The GPU dropped the context (a reset, or too many): back to the DOM renderer, and the
+        // slot goes to another terminal.
+        next.onContextLoss(() => {
+          if (addon !== next) return;
+          seat.detach();
+          webgl.lost(seat);
+        });
+        term.loadAddon(next);
+        addon = next;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    detach() {
+      const current = addon;
+      addon = null;
+      try {
+        current?.dispose();
       } catch {
         /* already gone */
       }
-    };
-  } catch {
-    return () => undefined;
-  }
+    },
+  };
+  return seat;
 }
 
 function useFileDrop(insert: (text: string) => void) {
@@ -142,6 +144,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const seatRef = useRef<GlUser | null>(null);
   const activeRef = useRef(active);
   const onExitRef = useRef(onExit);
   const onFocusRef = useRef(onFocus);
@@ -174,18 +177,24 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     if (!host) return;
     let disposed = false;
     const { fontFamily: family, fontSize: size, palette: initialPalette } = optionsRef.current;
-    const term = new XTerm({ ...baseOptions(family, size), theme: xtermTheme(initialPalette) });
+    // Typed-out addresses (the web-links addon) and OSC 8 hyperlinks (Claude Code, gh and compilers
+    // print them) open the same way: http(s) only, in the workspace's browser or the system one.
+    const openLink = (uri: string) => {
+      if (!isWebLink(uri)) return;
+      const open = onLinkRef.current;
+      if (open) open(uri);
+      else void call("app.openExternal", uri);
+    };
+    const term = new XTerm({ ...baseOptions(family, size), theme: xtermTheme(initialPalette), linkHandler: { activate: (_event, uri) => openLink(uri) } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    term.loadAddon(new WebLinksAddon((_event, uri) => {
-      const open = onLinkRef.current;
-      if (open) open(uri);
-      else void call("app.openExternal", uri);
-    }));
+    term.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)));
     term.open(host);
-    const releaseWebgl = attachWebgl(term);
+    const seat = webglSeat(term);
+    seatRef.current = seat;
+    webgl.add(seat, activeRef.current);
     termRef.current = term;
     fitRef.current = fit;
 
@@ -212,7 +221,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     observer.observe(host);
 
     term.attachCustomKeyEventHandler((event) => {
-      if (isAppShortcut(event)) return false;
+      if (appShortcut(event)) return false;
       if (onComposeRef.current && event.key === "Enter" && event.ctrlKey && event.shiftKey && !event.altKey) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -246,7 +255,10 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     });
     const binary = term.onBinary((data) => void call("pty.write", ptyId, data).catch(() => undefined));
     const focusSub = term.textarea ? (() => {
-      const handler = () => onFocusRef.current?.();
+      const handler = () => {
+        webgl.touch(seat);
+        onFocusRef.current?.();
+      };
       term.textarea!.addEventListener("focus", handler);
       return () => term.textarea?.removeEventListener("focus", handler);
     })() : () => undefined;
@@ -265,8 +277,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     });
     const offExit = onPtyExit(ptyId, (info) => {
       if (disposed) return;
-      const how = info.signal ? `stopped (signal ${info.signal})` : `exited with code ${info.exitCode ?? "?"}`;
-      term.write(`\r\n\x1b[2m[process ${how}]\x1b[0m\r\n`);
+      const how = info.signal ? translate("pane.exitSignal", { signal: info.signal }) : translate("pane.exitCode", { code: info.exitCode ?? "?" });
+      term.write(`\r\n\x1b[2m[${how}]\x1b[0m\r\n`);
       setEnded(how);
       onExitRef.current?.(info);
     });
@@ -310,7 +322,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       input.dispose();
       binary.dispose();
       focusSub();
-      releaseWebgl();
+      webgl.remove(seat);
+      seatRef.current = null;
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -336,6 +349,11 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       /* hidden */
     }
   }, [fontFamily, fontSize]);
+
+  // On screen it asks for a WebGL slot; hidden, it gives its slot up once one on screen needs it.
+  useEffect(() => {
+    if (seatRef.current) webgl.show(seatRef.current, active);
+  }, [active]);
 
   useEffect(() => {
     if (!active) return;
@@ -367,7 +385,9 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
 });
 
 /** A read-only terminal that replays a finished run's final screen. */
-export function ReplayTerminal({ ansi, emptyText = "Nothing was captured for this run." }: { ansi: string; emptyText?: string }) {
+export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; emptyText?: string }) {
+  const t = useT();
+  const emptyText = given ?? t("run.noScreen");
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const settings = useSettings().data;
@@ -379,12 +399,15 @@ export function ReplayTerminal({ ansi, emptyText = "Nothing was captured for thi
     const host = hostRef.current;
     if (!host) return;
     let disposed = false;
-    const term = new XTerm({ ...baseOptions(family, size), cursorBlink: false, disableStdin: true, theme: xtermTheme(palette) });
+    const openLink = (uri: string) => {
+      if (isWebLink(uri)) void call("app.openExternal", uri);
+    };
+    const term = new XTerm({ ...baseOptions(family, size), cursorBlink: false, disableStdin: true, theme: xtermTheme(palette), linkHandler: { activate: (_event, uri) => openLink(uri) } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    term.loadAddon(new WebLinksAddon((_event, uri) => void call("app.openExternal", uri)));
+    term.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)));
     term.open(host);
     termRef.current = term;
     const doFit = () => {

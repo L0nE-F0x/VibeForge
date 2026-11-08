@@ -18,7 +18,8 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const inbox = useInbox();
   const typed = useDebounced(search.trim(), 160);
   const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: 300 }));
-  const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200));
+  // One entry per text typed: not kept once the search moves on.
+  const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false });
   const searching = filter === "all" && typed !== "";
 
   useEffect(() => {

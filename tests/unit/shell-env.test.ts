@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadShellPath, mergePath, parseShellPath } from "../../electron/shell-env.js";
+import { childEnv, loadShellPath, mergePath, parseShellPath } from "../../electron/shell-env.js";
 
 const M = "__VIBEFORGE_PATH__";
 
@@ -29,5 +29,22 @@ describe("login-shell PATH", () => {
     const shell = fakeShell(`eval "$2"`);
     expect(await loadShellPath(4000, shell)).toBe(parseShellPath(`${M}${process.env.PATH}${M}`));
     expect(await loadShellPath(200, fakeShell("sleep 5"))).toBeNull();
+  });
+});
+
+describe("the terminals' environment", () => {
+  it("keeps the user's variables and drops Electron's, Vite's and VibeForge's debug switches", () => {
+    const env = childEnv({
+      PATH: "/usr/bin",
+      HOME: "/home/me",
+      VIBEFORGE_DATA: "/data",
+      VIBEFORGE_DEBUG: "1",
+      VIBEFORGE_DEBUG_PORT: "9223",
+      ELECTRON_RUN_AS_NODE: "1",
+      VITE_DEV_SERVER_URL: "http://localhost:5173",
+      CHROME_DESKTOP: "vibeforge.desktop",
+      VIBEFORGE_ENV_PROBE: "1",
+    });
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/me", VIBEFORGE_DATA: "/data" });
   });
 });

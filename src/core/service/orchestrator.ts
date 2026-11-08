@@ -10,19 +10,25 @@ import {
   brainKind,
   canOrchestrate,
   KNOWN_MODELS,
+  plannerFor,
   STRICT_PLAN_SCHEMA,
   signedOut,
   orchestratorRules,
   readBrainOutput,
   resolvePlan,
   stepIssue,
+  type MaestroCopy,
   type OrchestratorStep,
   type OrchestratorTurn,
   type OrchestratorView,
   type PlanContext,
 } from "../orchestrator.js";
 import { isGitRepo } from "../vcs.js";
+import type { ApplyResult } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
+import type { MessageDesk } from "./messages.js";
+import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
+import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
 
 /** One planning turn can think for a while (Antigravity's first took 80 s); past this it is given up on. */
@@ -54,25 +60,74 @@ export interface BrainRun {
 /** Runs one headless turn of a CLI. The real one spawns it; tests hand in their own. */
 export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs?: number) => Promise<BrainRun>;
 
-const spawnBrain: BrainRunner = (argv, cwd, signal, timeoutMs = BRAIN_TIMEOUT_MS) =>
+/** How long a planner has to end after SIGTERM before its whole process group is killed. */
+const KILL_GRACE_MS = 3000;
+
+/**
+ * The environment a planner runs in: VibeForge's own, less what is VibeForge's or Electron's
+ * business (its DevTools port, ELECTRON_RUN_AS_NODE), which a CLI has no use for.
+ */
+export function plannerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === "VIBEFORGE_DEBUG" || key === "VIBEFORGE_DEBUG_PORT" || key.startsWith("ELECTRON_")) continue;
+    clean[key] = value;
+  }
+  return { ...clean, NO_COLOR: "1" };
+}
+
+/**
+ * The real runner. The CLI leads a process group of its own, so Stop and the timeout reach
+ * whatever it started as well, and one that ignores SIGTERM is killed outright after a short
+ * grace instead of holding the turn open for good.
+ */
+export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs = BRAIN_TIMEOUT_MS, graceMs = KILL_GRACE_MS): Promise<BrainRun> =>
   new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: plannerEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, timeoutMs);
-    const abort = () => child.kill("SIGTERM");
-    signal.addEventListener("abort", abort, { once: true });
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
+    let finished = false;
+    let killTimer: NodeJS.Timeout | null = null;
+    const group = (name: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, name);
+      } catch {
+        /* already gone */
+      }
+    };
     const done = (code: number | null) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
+      if (killTimer) clearTimeout(killTimer);
+      signal.removeEventListener("abort", stop);
+      process.removeListener("exit", onQuit);
       resolve({ code, stdout, stderr, timedOut });
     };
+    function stop() {
+      if (finished || killTimer) return;
+      group("SIGTERM");
+      killTimer = setTimeout(() => {
+        group("SIGKILL");
+        // Something that left the group may still hold the pipes open; the turn ends anyway.
+        killTimer = setTimeout(() => done(null), graceMs);
+      }, graceMs);
+    }
+    // VibeForge quitting mid-turn takes the planner with it.
+    function onQuit() {
+      group("SIGKILL");
+    }
+    process.once("exit", onQuit);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, timeoutMs);
+    if (signal.aborted) stop();
+    else signal.addEventListener("abort", stop, { once: true });
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
       stderr += error.message;
       done(127);
@@ -92,13 +147,16 @@ export class OrchestratorDesk {
   private thinking: AbortController | null = null;
   /** Models each planner listed, kept for this run of VibeForge. */
   private readonly models = new Map<string, string[]>();
+  private readonly copies: MaestroCopies;
   runner: BrainRunner = spawnBrain;
 
   constructor(
     private readonly core: ServiceCore,
     private readonly workspaces: WorkspaceDesk,
+    private readonly messages: MessageDesk,
   ) {
     this.conversation = this.load();
+    this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
   }
 
   private get dir(): string {
@@ -131,15 +189,22 @@ export class OrchestratorDesk {
     return this.core.store.readSettings().orchestrator;
   }
 
+  /** The CLI that plans right now: the one picked, or until then the first one here that can (plannerFor). */
+  private planner(): string {
+    const rows = this.core.store.readEngineRows().map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
+    return plannerFor(this.settings().engine, rows);
+  }
+
   view(): OrchestratorView {
     const { engine, mode } = this.settings();
-    const row = this.core.store.readEngineRows().find((item) => item.id === engine);
+    const planner = this.planner();
     return {
-      engineId: engine,
-      engineReady: Boolean(row && canOrchestrate(row) && this.core.resolveEngine(engine)),
+      engineId: planner || engine,
+      engineReady: Boolean(planner),
       mode,
       thinking: this.thinking !== null,
       turns: this.conversation.turns,
+      copies: this.copies.list(),
     };
   }
 
@@ -172,7 +237,7 @@ export class OrchestratorDesk {
   async ask(text: string): Promise<void> {
     const words = text.trim();
     if (!words) return;
-    if (this.thinking) throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+    if (this.thinking) throw new Error("Maestro is still answering. Wait for it, or stop it.");
     const now = this.core.now().toISOString();
     this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
     const controller = new AbortController();
@@ -187,14 +252,17 @@ export class OrchestratorDesk {
   }
 
   private answer(turn: Omit<OrchestratorTurn, "id" | "at" | "from">): OrchestratorTurn {
-    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", by: this.settings().engine, ...turn };
+    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", by: this.planner() || this.settings().engine, ...turn };
     this.conversation.turns.push(full);
     return full;
   }
 
   private async think(words: string, signal: AbortSignal): Promise<void> {
-    const { engine: engineId, mode, model } = this.settings();
-    const engine = this.core.resolveEngine(engineId);
+    const { engine: picked, mode, model: chosen } = this.settings();
+    const engineId = this.planner();
+    // A model picked for another planner means nothing to this one.
+    const model = engineId === picked ? chosen : "";
+    const engine = engineId ? this.core.resolveEngine(engineId) : null;
     if (!engine || !canOrchestrate(engine.row)) {
       this.answer({ text: "", problem: "noEngine" });
       return;
@@ -277,7 +345,7 @@ export class OrchestratorDesk {
   clear(): void {
     this.thinking?.abort();
     this.thinking = null;
-    this.conversation = { sessionId: randomUUID(), engineId: this.settings().engine, begun: false, turns: [] };
+    this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
     this.save();
   }
 
@@ -318,6 +386,31 @@ export class OrchestratorDesk {
     this.save();
   }
 
+  // ---------------------------------------------------------------- copies
+
+  /** A step's copy: everything it changed, as Apply would bring it in. */
+  copyDiff(copyId: string): Promise<string> {
+    return this.copies.diff(copyId);
+  }
+
+  /** Apply a step's copy into the workspace it came from (see MaestroCopies.apply). */
+  applyCopy(copyId: string): Promise<ApplyResult> {
+    return this.copies.apply(copyId);
+  }
+
+  /** Throw a step's copy away, with Undo (see MaestroCopies.discard). */
+  discardCopy(copyId: string): Promise<Deleted> {
+    return this.copies.discard(copyId);
+  }
+
+  /** The step that made a copy says what became of it, while that plan is still in the conversation. */
+  private copySettled(copy: MaestroCopy, outcome: CopyOutcome): void {
+    const step = this.conversation.turns.find((turn) => turn.id === copy.turnId)?.steps?.find((item) => item.id === copy.stepId);
+    if (!step) return;
+    step.outcome = outcome;
+    this.save();
+  }
+
   /** Go: carry the plan out, one step after another. A step that fails doesn't stop the rest. */
   async run(turnIdValue: string): Promise<void> {
     const turn = this.plan(turnIdValue);
@@ -334,7 +427,7 @@ export class OrchestratorDesk {
       step.state = "running";
       this.save();
       try {
-        await this.carryOut(step);
+        await this.carryOut(turn, step);
         step.state = "done";
       } catch (error) {
         step.state = "failed";
@@ -346,15 +439,18 @@ export class OrchestratorDesk {
     this.save();
   }
 
-  private async carryOut(step: OrchestratorStep): Promise<void> {
+  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
     if (step.kind === "start") {
       const workspace = this.core.workspaceById(step.workspaceId);
       if (!workspace) throw new Error("That workspace is gone.");
       let workspaceId = workspace.id;
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
-        const opened = await this.workspaces.openNewBranch(workspace.id, step.branch.trim());
-        workspaceId = opened.workspaceId;
-        step.branch = opened.opened.branch;
+        // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
+        const copy = await this.copies.make({ turnId: turn.id, stepId: step.id, engineId: step.engineId, prompt: step.prompt, branch: step.branch, workspace });
+        step.copyId = copy.id;
+        step.branch = copy.branch;
+        workspaceId = copy.openedWorkspaceId;
+        this.save();
       }
       step.openedWorkspaceId = workspaceId;
       const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, prompt: step.prompt, orchestrated: true, ...START_SIZE });
@@ -363,7 +459,15 @@ export class OrchestratorDesk {
     }
     if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "tell") {
-      await this.core.options.host.send(step.target, step.prompt, true);
+      // Looked at again now: a pane whose CLI has quit since the plan was made is a bare shell,
+      // and the message would run there as a command.
+      const session = this.core.live.get(step.target);
+      const to = session && isCodingCli(session) ? this.messages.list().find((item) => item.ptyId === step.target) : undefined;
+      if (!to) throw new Error("That CLI isn't running any more.");
+      // The way every message to a CLI goes: in once it is idle and nobody is typing there, and
+      // not at all after Stop. It is checked for its CLI once more as it goes in.
+      const sent = await this.messages.tell({ fromPty: null, to: to.handle, text: step.prompt, fromPerson: true });
+      if (!sent.ok) throw new Error(sent.error);
       return;
     }
     await this.core.killPty(step.target);

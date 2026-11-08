@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // A smoke test of the built app: start it with a throwaway profile, open every view, change the
 // language, use Ctrl+K and a real shell, and fail on any error the page reports. It drives the
 // window over the DevTools protocol, so nothing but Node and the built app is needed.
@@ -69,11 +70,21 @@ const args = [root, `--user-data-dir=${path.join(scratch, "profile")}`];
 if (process.env.CI) args.push("--no-sandbox");
 // SMOKE_HEADLESS=1 draws nowhere at all, for a run on a desktop you're using.
 if (process.env.SMOKE_HEADLESS === "1") args.push("--ozone-platform=headless");
+// The real config, data and cache folders stay out of reach too: the app reads plan limits, usage
+// and the login entry through them. XDG_STATE_HOME stays: mise keeps its trust record there.
+const realHome = os.homedir();
 const app = attach ? null : spawn(electron, args, {
   cwd: root,
   env: {
     ...process.env,
     HOME: home,
+    XDG_CONFIG_HOME: path.join(scratch, "xdg-config"),
+    XDG_DATA_HOME: path.join(scratch, "xdg-data"),
+    XDG_CACHE_HOME: path.join(scratch, "xdg-cache"),
+    // mise's shims (Node on Omarchy) find its tools and settings through the two above; without
+    // these they install Node afresh into the scratch folder.
+    MISE_DATA_DIR: process.env.MISE_DATA_DIR || path.join(process.env.XDG_DATA_HOME || path.join(realHome, ".local", "share"), "mise"),
+    MISE_CONFIG_DIR: process.env.MISE_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(realHome, ".config"), "mise"),
     VIBEFORGE_CONFIG: config,
     VIBEFORGE_DATA: path.join(scratch, "data"),
     VIBEFORGE_DEBUG: "1",
@@ -94,7 +105,7 @@ async function pageTarget() {
   for (let tries = 0; tries < 150; tries += 1) {
     if (exited) throw new Error(`The app exited during start.\n${appOutput}`);
     try {
-      const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      const targets = /** @type {Array<{ type: string, url: string, webSocketDebuggerUrl: string }>} */ (await (await fetch(`http://127.0.0.1:${port}/json`)).json());
       const page = targets.find((target) => target.type === "page" && target.url.includes("index.html"));
       if (page) return page;
     } catch {
@@ -105,12 +116,14 @@ async function pageTarget() {
   throw new Error("The window never appeared.");
 }
 
+/** @type {WebSocket | undefined} */
 let socket;
 let nextId = 0;
 const waiting = new Map();
 
 function send(method, params = {}, timeoutMs = 10_000) {
   const id = ++nextId;
+  if (!socket) throw new Error("DevTools is not connected.");
   socket.send(JSON.stringify({ id, method, params }));
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -148,12 +161,13 @@ async function key(keyName, code, modifiers = 0) {
 
 async function main() {
   const target = await pageTarget();
-  socket = new WebSocket(target.webSocketDebuggerUrl);
+  const devtools = new WebSocket(target.webSocketDebuggerUrl);
+  socket = devtools;
   await new Promise((resolve, reject) => {
-    socket.onopen = resolve;
-    socket.onerror = () => reject(new Error("Could not reach DevTools."));
+    devtools.onopen = resolve;
+    devtools.onerror = () => reject(new Error("Could not reach DevTools."));
   });
-  socket.onmessage = (event) => {
+  devtools.onmessage = (event) => {
     const message = JSON.parse(event.data);
     if (message.id && waiting.has(message.id)) {
       const { resolve, reject, timer } = waiting.get(message.id);

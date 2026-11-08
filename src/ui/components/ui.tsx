@@ -22,8 +22,8 @@ import { initials, shortAgo, timeAgo } from "../../shared/text.js";
 import { useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
-import { Rich } from "../i18n/Rich.js";
-import { useConfirmState, useDockArea, useLayer, useOverlay, useToast } from "../state.js";
+import { pushOverlay, returnFocus } from "../overlays.js";
+import { useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -246,7 +246,8 @@ export function Chip({ tone, children, title, icon: Icon }: { tone?: "accent" | 
 export function StatusDot({ status, title }: { status: RunStatus | "idle" | null | undefined; title?: string }) {
   const t = useT();
   const label = title ?? (status && status !== "idle" ? t(STATUS_KEY[status]) : undefined);
-  return <span className={cx("dot", status ?? "idle")} {...tipProps(label)} />;
+  // A screen reader hears what the colour says; a dot that says nothing is left out.
+  return <span className={cx("dot", status ?? "idle")} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true} {...tipProps(label)} />;
 }
 
 export const STATUS_KEY: Record<RunStatus, Key> = {
@@ -391,58 +392,35 @@ export function Logo({ size = 22 }: { size?: number }) {
 
 // ------------------------------------------------------------------ overlays
 
-function useEscape(onClose: () => void, enabled = true): void {
-  useEffect(() => {
-    if (!enabled) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [onClose, enabled]);
-}
-
 /**
- * Keyboard focus for a dialog: it moves in when the dialog opens, Tab stays inside it, and it
- * goes back to where it was (the button that opened it) when the dialog closes.
+ * An overlay on the app's one stack (overlays.ts): Escape closes it only while it is on top, and
+ * when it closes, focus goes back to what had it (the button that opened it, the terminal). A
+ * dialog (`trap`) also takes focus when it opens and keeps Tab inside; a menu leaves focus be.
  */
-export function useDialogFocus(ref: RefObject<HTMLElement | null>): void {
+export function useOverlayStack(ref: RefObject<HTMLElement | null>, onClose: () => void, { trap = true }: { trap?: boolean } = {}): void {
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Read while rendering, before a field inside marked autoFocus takes focus.
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  // That field, so a second mount (React's dev check) hands focus back to it.
+  const autoFocused = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (!node.contains(document.activeElement)) {
-      // Something marked autoFocus has already taken it; otherwise the dialog itself.
-      node.focus({ preventScroll: true });
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const outside = (element: HTMLElement | null) => (element && element !== document.body && !node?.contains(element) ? element : null);
+    // A menu item that opened this has gone with its menu; the menu put focus back on its button.
+    const before = (opener?.isConnected ? outside(opener) : null) ?? outside(active);
+    const pop = pushOverlay({ close: () => close.current(), node: () => ref.current, trap });
+    if (trap && node) {
+      if (active && node.contains(active)) autoFocused.current = active;
+      else if (autoFocused.current?.isConnected && node.contains(autoFocused.current)) autoFocused.current.focus({ preventScroll: true });
+      else node.focus({ preventScroll: true });
     }
-    const focusable = () =>
-      [...node.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')].filter(
-        (item) => item.getClientRects().length > 0,
-      );
-    const onKey = (event: KeyboardEvent) => {
-      // A terminal inside the dialog keeps Tab for its program.
-      if (event.key !== "Tab" || event.defaultPrevented || (event.target as HTMLElement | null)?.closest(".xterm")) return;
-      const items = focusable();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === node)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    node.addEventListener("keydown", onKey);
     return () => {
-      node.removeEventListener("keydown", onKey);
-      if (before?.isConnected) before.focus({ preventScroll: true });
+      pop();
+      returnFocus(before, node);
     };
-  }, [ref]);
+  }, [ref, trap, opener]);
 }
 
 export function Modal({
@@ -452,6 +430,7 @@ export function Modal({
   children,
   footer,
   wide,
+  terminal,
 }: {
   title: ReactNode;
   icon?: LucideIcon;
@@ -459,13 +438,14 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  /** It holds a terminal, where Escape is the program's and Shift+Esc closes the dialog. */
+  terminal?: boolean;
 }) {
   const t = useT();
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
   useOverlay(true);
-  useEscape(onClose);
-  useDialogFocus(ref);
+  useOverlayStack(ref, onClose);
   return createPortal(
     <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={ref} className={cx("modal", wide && "wide")} role="dialog" aria-modal aria-labelledby={titleId} tabIndex={-1}>
@@ -474,7 +454,7 @@ export function Modal({
           <h2 className="grow" id={titleId}>
             {title}
           </h2>
-          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
+          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t(terminal ? "common.closeEscTerminal" : "common.closeEsc")} />
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -487,8 +467,7 @@ export function Modal({
 export function Sheet({ onClose, children, width, label }: { onClose: () => void; children: ReactNode; width?: number; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useOverlay(true);
-  useEscape(onClose);
-  useDialogFocus(ref);
+  useOverlayStack(ref, onClose);
   return createPortal(
     <>
       <div className="sheet-scrim" onMouseDown={onClose} />
@@ -538,8 +517,8 @@ export function Popover({
   align?: "start" | "end";
   tall?: boolean;
 }) {
-  useEscape(onClose);
   const ref = useRef<HTMLDivElement>(null);
+  useOverlayStack(ref, onClose, { trap: false });
   const [pos, setPos] = useState<Box | null>(null);
   useLayer(pos);
   const place = useCallback(() => {
@@ -637,7 +616,8 @@ const TOAST_EDGE = 16;
 
 export function Toasts() {
   const t = useT();
-  const { toasts, dismiss } = useToast();
+  const toasts = useToastList();
+  const { dismiss } = useToast();
   const dock = useDockArea();
   const ref = useRef<HTMLDivElement>(null);
   // The stack sits bottom right, or just left of the browser dock when it would land on it.
@@ -693,10 +673,7 @@ export function Toasts() {
 export function ConfirmDialog() {
   const t = useT();
   const { request, settle } = useConfirmState();
-  const [typed, setTyped] = useState("");
-  useEffect(() => setTyped(""), [request]);
   if (!request) return null;
-  const blocked = Boolean(request.typeToConfirm) && typed.trim() !== request.typeToConfirm;
   return (
     <Modal
       title={request.title}
@@ -707,25 +684,13 @@ export function ConfirmDialog() {
           <Button variant="ghost" onClick={() => settle(false)}>
             {t("common.cancel")}
           </Button>
-          <Button variant={request.danger ? "danger" : "primary"} disabled={blocked} onClick={() => settle(true)} autoFocus={!request.typeToConfirm}>
+          <Button variant={request.danger ? "danger" : "primary"} onClick={() => settle(true)} autoFocus>
             {request.confirm ?? t("common.continue")}
           </Button>
         </>
       }
     >
       {request.body && <div className="muted" style={{ lineHeight: 1.55 }}>{request.body}</div>}
-      {request.typeToConfirm && (
-        <Field label={<Rich text={t("common.typeToConfirm", { name: request.typeToConfirm })} />}>
-          <Input
-            autoFocus
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !blocked) settle(true);
-            }}
-          />
-        </Field>
-      )}
     </Modal>
   );
 }

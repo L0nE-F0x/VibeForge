@@ -8,6 +8,8 @@ const { Terminal } = require("@xterm/headless");
 const { SerializeAddon } = require("@xterm/addon-serialize");
 
 const SCROLLBACK_LINES = 10000;
+/** The most output parsed in one go, so one busy pane doesn't hold up the others for long. */
+const BATCH_CHARS = 256 * 1024;
 /** Leave-alternate: 1049 (xterm), 1047, or 47. */
 const ALT_EXIT = /\x1b\[\?(?:\d+;)*(?:1049|1047|47)l/;
 
@@ -19,6 +21,11 @@ function attachCapture(sink) {
   sink.chain = null;
   sink.kept = null;
   sink.hold = "";
+  // Characters written but not parsed yet, so the host can hold back a pane that floods output.
+  // `onDrain` hears each time some of them are done.
+  sink.pending = 0;
+  sink.onDrain = null;
+  sink.waiting = null;
 }
 
 function writeParsed(term, data) {
@@ -101,10 +108,27 @@ function writeSegments(sink, data) {
 }
 
 function captureWrite(sink, data) {
+  sink.pending += data.length;
+  // Output waiting behind a write still being parsed joins one batch: a pty hands over a few
+  // KB at a time, and a parse per piece left a flood ever further behind.
+  const waiting = sink.waiting;
+  if (waiting && waiting.size < BATCH_CHARS) {
+    waiting.parts.push(data);
+    waiting.size += data.length;
+    return;
+  }
+  const batch = { parts: [data], size: data.length };
+  sink.waiting = batch;
   const run = () => {
-    const pending = `${sink.hold || ""}${data}`;
+    if (sink.waiting === batch) sink.waiting = null;
+    const pending = `${sink.hold || ""}${batch.parts.join("")}`;
     sink.hold = "";
-    return writeSegments(sink, pending).catch((error) => log("mirror:", error.message));
+    return writeSegments(sink, pending)
+      .catch((error) => log("mirror:", error.message))
+      .then(() => {
+        sink.pending -= batch.size;
+        if (sink.onDrain) sink.onDrain();
+      });
   };
   sink.chain = sink.chain ? sink.chain.then(run, run) : run();
 }

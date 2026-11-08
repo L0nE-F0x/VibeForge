@@ -19,6 +19,9 @@ const BODY_MAX = 64_000;
 /** Speech from the phone: 16 kHz mono s16le, as long as a recording on the computer may be. */
 export const HEAR_MAX = MAX_SECONDS * BYTES_PER_SECOND;
 
+/** A recording that ran a moment past the cap is cut to it; one this long is not speech. */
+export const HEAR_READ_MAX = HEAR_MAX + 10 * BYTES_PER_SECOND;
+
 export interface SessionPayload {
   ptyId: string | null;
   runId: string | null;
@@ -122,14 +125,21 @@ function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-async function readRaw(req: http.IncomingMessage, max: number): Promise<Buffer> {
+/** A body of at most `max` bytes, refused before reading when it says it is longer. Only the first `keep` are kept. */
+async function readRaw(req: http.IncomingMessage, max: number, keep = max): Promise<Buffer> {
+  if (Number(req.headers["content-length"]) > max) throw new CompanionHttpError("phone.error.tooLarge", 413);
   const chunks: Buffer[] = [];
   let size = 0;
+  let kept = 0;
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
     if (size > max) throw new CompanionHttpError("phone.error.tooLarge", 413);
-    chunks.push(buf);
+    if (kept < keep) {
+      const part = buf.subarray(0, keep - kept);
+      chunks.push(part);
+      kept += part.length;
+    }
   }
   return Buffer.concat(chunks);
 }
@@ -172,7 +182,33 @@ function pagePath(root: string, name: string): string | null {
   return full;
 }
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions): Promise<void> {
+/** One request, and what it needs to know about the server it reached. */
+interface Served {
+  /** True once the page is turned off or its code replaced: nothing more is done for anyone. */
+  stopping(): boolean;
+  /** Set once the pairing code matched. Until then a failure says nothing about this computer. */
+  paired: boolean;
+}
+
+/**
+ * The names the page answers to: this computer's own (on any port, so a tunnel works too), and the
+ * tailnet name Tailscale Serve passes on (`<machine>.<tailnet>.ts.net`). Any other name is a page
+ * elsewhere that had its name pointed at this computer (DNS rebinding).
+ */
+export function hostAllowed(host: string | undefined): boolean {
+  return /^(127\.0\.0\.1|localhost|\[::1\]|([a-z0-9-]+\.)+ts\.net\.?)(:\d{1,5})?$/.test((host ?? "").trim().toLowerCase());
+}
+
+/** Thrown once the server is stopping: the request gets no answer, its connection is cut. */
+class Stopping extends Error {}
+
+/** A body has been read, so the reply would act now: not on a server that is going away. */
+function stillServing(served: Served): void {
+  if (served.stopping()) throw new Stopping();
+}
+
+async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
+  if (!hostAllowed(req.headers.host)) throw new CompanionHttpError("phone.error.host", 403);
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
   if (method === "GET" && url.pathname === "/icon.png") {
@@ -196,7 +232,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       "Content-Type": page.type,
       "Content-Length": body.length,
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'",
+      "Content-Security-Policy":
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+      // No other page may show this one in a frame and have the phone tap its buttons.
+      "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
     });
@@ -212,6 +251,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   if (method === "POST" && url.pathname === "/api/pair") {
     const body = (await readBody(req)) as { token?: unknown };
+    stillServing(served);
     if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
     sendJson(res, 200, { ok: true });
     return;
@@ -219,6 +259,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (!tokenMatches(opts.token, bearerToken(req.headers.authorization))) {
     throw new CompanionHttpError("phone.pairLead", 401);
   }
+  served.paired = true;
   if (method === "GET" && url.pathname === "/api/desk") {
     sendJson(res, 200, opts.actions.desk());
     return;
@@ -243,7 +284,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   if (url.pathname === "/api/orchestrator/hear") {
-    const pcm = await readRaw(req, HEAR_MAX);
+    const pcm = await readRaw(req, HEAR_READ_MAX, HEAR_MAX);
+    stillServing(served);
     sendJson(res, 200, await opts.actions.hear(pcm));
     return;
   }
@@ -262,6 +304,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     engine?: unknown;
     mode?: unknown;
   };
+  stillServing(served);
   if (url.pathname.startsWith("/api/orchestrator/")) {
     await orchestratorPost(url.pathname.slice("/api/orchestrator/".length), body, opts.actions.orchestrator);
     sendJson(res, 200, { ok: true });
@@ -343,16 +386,29 @@ async function errorText(error: unknown, language: PhoneLanguage): Promise<strin
 
 /** The phone page and its API, on loopback. The caller binds the address. */
 export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string }): Promise<CompanionHttp> {
+  // Off, a new code and Quit all stop this server. A phone that was connected gets nothing more from it:
+  // its connection would otherwise keep this handler, and the old code, for as long as it polls.
+  let stopping = false;
   const server = http.createServer((req, res) => {
-    handle(req, res, opts).catch(async (error: unknown) => {
-      if (res.headersSent) {
+    if (stopping) {
+      res.destroy();
+      return;
+    }
+    const served: Served = { stopping: () => stopping, paired: false };
+    handle(req, res, opts, served).catch(async (error: unknown) => {
+      if (res.headersSent || stopping || error instanceof Stopping) {
         res.destroy();
         return;
       }
-      // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply.
-      const status = error instanceof CompanionHttpError ? error.status : 400;
-      const extra = error instanceof CompanionHttpError ? error.extra : undefined;
-      const text = await errorText(error, languageOf(req, opts)).catch(() => "Something went wrong.");
+      // The service throws a sentence ("Atlas is not allowed in Notes"). That is the reply, to a paired phone.
+      // Before that, only the page's own refusals: a file that can't be read would name the install folder.
+      const known = error instanceof CompanionHttpError;
+      const status = known ? error.status : served.paired ? 400 : 500;
+      const extra = known ? error.extra : undefined;
+      // What is left of a body too large to read is not read: the connection ends with the reply.
+      if (status === 413) res.setHeader("Connection", "close");
+      const language = languageOf(req, opts);
+      const text = await (known || served.paired ? errorText(error, language) : phoneSay(language, "phone.error.failed")).catch(() => "Something went wrong.");
       if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });
   });
@@ -366,7 +422,10 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
         port,
         close: () =>
           new Promise((done) => {
+            stopping = true;
             server.close(() => done());
+            // A phone polling every two seconds never goes idle, so close alone would wait on it forever.
+            server.closeAllConnections();
           }),
       });
     });

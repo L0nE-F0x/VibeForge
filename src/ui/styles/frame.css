@@ -31,13 +31,6 @@
   background: var(--bg-deep);
 }
 
-.rail-sep {
-  width: 28px;
-  height: 1px;
-  background: var(--line);
-  margin: 6px 0;
-}
-
 .rail-btn {
   position: relative;
   width: 54px;
@@ -137,10 +130,11 @@
   box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
+/* It flares once, then breathes on two layers (glow.css). */
 .rail-dot.waiting {
   background: var(--ember-core);
-  box-shadow: var(--ember-lit);
-  animation: ember-flare 0.9s ease-out, ember-breathe 2.2s ease-in-out 0.9s infinite;
+  box-shadow: none;
+  animation: ember-flare 0.9s ease-out;
 }
 
 .rail-dot.done {
@@ -311,7 +305,7 @@
   border: 1px solid var(--sel-line);
 }
 
-[data-gliding][aria-selected="true"] {
+[data-gliding]:is([aria-selected="true"], [aria-current="true"]) {
   background-color: transparent !important;
   border-color: transparent !important;
 }

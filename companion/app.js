@@ -26,6 +26,14 @@ let known = new Map();
 let primed = false;
 let timer = 0;
 let ticket = 0;
+/** The poll: one at a time, the next two seconds after the last one ends, slower while the computer doesn't answer. */
+const POLL_MS = 2000;
+const POLL_SLOWEST_MS = 16_000;
+/** A poll that takes longer gives up, so a stalled link shows as offline instead of a page that stops. */
+const POLL_TIMEOUT_MS = 15_000;
+let polling = false;
+let pollAgain = false;
+let pollFailures = 0;
 /** The page's words in the phone's language, from the app's own catalogs (GET /api/text). */
 let words = {};
 let language = "en";
@@ -121,13 +129,22 @@ async function loadWords() {
 async function call(path, options = {}) {
   const headers = { ...(options.body ? { "Content-Type": "application/json" } : {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
+  // A poll gives up after `timeout`; what a person tapped waits for its answer.
+  const abort = options.timeout ? new AbortController() : null;
+  const limit = abort ? window.setTimeout(() => abort.abort(), options.timeout) : 0;
   let response;
+  let body;
   try {
-    response = await fetch(path, { method: options.method || "GET", headers, body: options.body });
+    response = await fetch(path, { method: options.method || "GET", headers, body: options.body, signal: abort?.signal });
+    body = await response.json().catch(() => {
+      if (abort?.signal.aborted) throw new Error("timed out");
+      return {};
+    });
   } catch {
     throw Object.assign(new Error(t("phone.offline")), { offline: true });
+  } finally {
+    window.clearTimeout(limit);
   }
-  const body = await response.json().catch(() => ({}));
   if (response.status === 401 && path !== "/api/pair") {
     forget();
     throw new Error(body.error || t("phone.pairLead"));
@@ -145,7 +162,7 @@ function forget() {
   localStorage.removeItem(TOKEN_KEY);
   desk = null;
   session = null;
-  window.clearInterval(timer);
+  window.clearTimeout(timer);
   timer = 0;
   if (view !== "pair") {
     view = "pair";
@@ -189,38 +206,66 @@ function watch(payload) {
   primed = true;
 }
 
+/**
+ * Polls now, and the next poll follows when this one is done. One already on its way is not overtaken:
+ * on a slow link, polls every two seconds regardless dropped each other and the page stopped changing.
+ */
 async function refresh() {
   if (!token || view === "pair") return;
+  if (polling) {
+    pollAgain = true;
+    return;
+  }
+  polling = true;
+  window.clearTimeout(timer);
+  timer = 0;
+  try {
+    await poll();
+  } finally {
+    polling = false;
+    if (pollAgain) {
+      pollAgain = false;
+      void refresh();
+    } else schedule(Math.min(POLL_SLOWEST_MS, POLL_MS * 2 ** pollFailures));
+  }
+}
+
+async function poll() {
   const mine = ++ticket;
   const shown = view;
+  const timeout = POLL_TIMEOUT_MS;
   try {
-    const payload = await call("/api/desk");
+    const payload = await call("/api/desk", { timeout });
+    // A change of page has already replaced what this one would show: the next poll asks for that page.
+    if (mine !== ticket) return;
     // Plan limits move slowly, and reading them may ask the providers: once a minute is plenty.
     if (Date.now() - plansAt > PLANS_EVERY_MS) {
       plansAt = Date.now();
-      plans = (await call("/api/plans").catch(() => ({ plans }))).plans ?? null;
+      plans = (await call("/api/plans", { timeout }).catch(() => ({ plans }))).plans ?? null;
     }
-    const next = view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`) : null;
-    const nextOrch = view === "maestro" ? await call("/api/orchestrator") : null;
-    // A newer poll, or a change of page, has already replaced what this one would show.
+    const next = view === "session" ? await call(`/api/session?ptyId=${encodeURIComponent(sessionQuery.ptyId)}&runId=${encodeURIComponent(sessionQuery.runId)}`, { timeout }) : null;
+    const nextOrch = view === "maestro" ? await call("/api/orchestrator", { timeout }) : null;
     if (mine !== ticket) return;
     watch(payload);
     desk = payload;
     if (view === "session") session = next;
     if (view === "maestro") orch = nextOrch;
     error = "";
+    pollFailures = 0;
   } catch (err) {
     if (mine !== ticket) return;
     error = err.message;
+    pollFailures += 1;
   }
   if (view !== shown) show();
   else update();
 }
 
-function schedule() {
-  window.clearInterval(timer);
+function schedule(delay = POLL_MS) {
+  window.clearTimeout(timer);
+  timer = 0;
   if (!token) return;
-  timer = window.setInterval(() => void refresh(), 2000);
+  timer = window.setTimeout(() => void refresh(), delay);
 }
 
 /** Runs one action with the buttons held. Returns what the action returned, or false when it failed. */
@@ -321,7 +366,6 @@ async function pair(code) {
     busy = false;
     primed = false;
     known = new Map();
-    schedule();
     setView("home");
   } catch (err) {
     error = err.message;
@@ -921,7 +965,6 @@ const pendingSteps = new Map();
 /** Step changes go one after another, and Go waits for them. */
 let stepQueue = Promise.resolve();
 
-const ORCH_EXAMPLES = ["orch.example.start", "orch.example.two", "orch.example.ask"];
 const ISSUE_KEYS = { workspace: "orch.issue.workspace", engine: "orch.issue.engine", engineMissing: "orch.issue.engineMissing", target: "orch.issue.target", prompt: "orch.issue.prompt" };
 const PLAN_TONE = { waiting: "waiting", running: "working", done: "done", cancelled: "done", replaced: "done" };
 
@@ -976,24 +1019,6 @@ function maestroPage() {
     { class: "orch-start", hidden: true },
     el("h2", {}, t("orch.empty.title")),
     parts.startBody,
-    el(
-      "div",
-      { class: "orch-examples" },
-      ORCH_EXAMPLES.map((key) =>
-        el(
-          "button",
-          {
-            class: "orch-example",
-            type: "button",
-            onclick: () => {
-              orchDraft = t(key);
-              parts.box.value = orchDraft;
-            },
-          },
-          t(key),
-        ),
-      ),
-    ),
   );
   parts.notReady = el("div", { class: "orch-problem", hidden: true });
   parts.turnList = el("div", { class: "orch-list" });
@@ -1595,7 +1620,8 @@ function toPcm(chunks, length, rate) {
     at += chunk.length;
   }
   const ratio = rate / HEAR_RATE;
-  const out = new Int16Array(Math.floor(length / ratio));
+  // The cap is checked every 200 ms, so a recording that reached it runs a little over: the computer takes three minutes exactly.
+  const out = new Int16Array(Math.min(Math.floor(length / ratio), HEAR_RATE * MIC_MAX_SECONDS));
   for (let i = 0; i < out.length; i += 1) {
     const start = Math.floor(i * ratio);
     const end = Math.min(length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
@@ -1806,11 +1832,13 @@ if ("serviceWorker" in navigator) {
   void navigator.serviceWorker.register("/sw.js");
 }
 
+// Back on the page after the phone was locked: what changed shows now, not at the next poll.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void refresh();
+});
+
 void loadWords().then(() => {
   show();
   offerInstall();
-  if (token) {
-    schedule();
-    void refresh();
-  }
+  if (token) void refresh();
 });

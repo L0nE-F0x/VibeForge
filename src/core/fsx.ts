@@ -1,11 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export interface WriteOptions {
+  /** The file's mode, say 0o600 for one only its owner may read. It replaces an existing file's mode too. */
+  mode?: number;
+}
+
 /** Write through a temp file and rename, so a crash never leaves half a YAML file behind. */
-export function writeFileAtomic(file: string, text: string): void {
+export function writeFileAtomic(file: string, text: string, options: WriteOptions = {}): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
-  fs.writeFileSync(temp, text);
+  fs.writeFileSync(temp, text, options.mode === undefined ? undefined : { mode: options.mode });
+  // The umask, or a temp file left by a crash, would otherwise decide.
+  if (options.mode !== undefined) fs.chmodSync(temp, options.mode);
   fs.renameSync(temp, file);
 }
 
@@ -21,12 +28,12 @@ export function readJson<T>(file: string, fallback: T): T {
  * Write a JSON file. One that is there and doesn't parse (a hand edit half done) is moved aside to
  * `<name>.broken` first, so saving from the app never loses what its author wrote.
  */
-export function writeJson(file: string, value: unknown): void {
-  setAsideBroken(file);
-  writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
+export function writeJson(file: string, value: unknown, options: WriteOptions = {}): void {
+  setAsideBroken(file, options);
+  writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`, options);
 }
 
-function setAsideBroken(file: string): void {
+function setAsideBroken(file: string, options: WriteOptions): void {
   let text: string;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -39,6 +46,7 @@ function setAsideBroken(file: string): void {
   } catch {
     const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
     fs.renameSync(file, aside);
+    if (options.mode !== undefined) fs.chmodSync(aside, options.mode);
   }
 }
 

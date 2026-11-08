@@ -30,7 +30,7 @@ export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunV
   // The dot says how it went; a chip only for what didn't simply finish.
   const clean = run.status === "exited" && !run.exitCode;
   return (
-    <button type="button" className="run-row" aria-selected={selected} aria-current={selected || undefined} onClick={onClick}>
+    <button type="button" className="run-row" aria-current={selected || undefined} onClick={onClick}>
       <span className={`dot ${run.status}`} />
       <span className="vstack grow" style={{ gap: 1 }}>
         {compact ? (

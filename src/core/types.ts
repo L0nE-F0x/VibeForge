@@ -168,7 +168,7 @@ export interface Settings {
 }
 
 export interface OrchestratorSettings {
-  /** The engine that turns what the person says into a plan (Grok Build or Claude Code). */
+  /** The engine that turns what the person says into a plan; empty until one is picked (see plannerFor). */
   engine: string;
   /** "plan" shows the plan with a Go button; "go" carries it out at once. */
   mode: "plan" | "go";
@@ -321,6 +321,8 @@ export type Topic =
   | "engines"
   | "settings"
   | "live"
+  /** Only a coding CLI going busy or quiet: the live list and who waits behind whom. */
+  | "working"
   | "updates"
   | "voice"
   | "orchestrator";

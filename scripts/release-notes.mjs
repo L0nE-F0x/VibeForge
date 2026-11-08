@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The notes for one version: its section of CHANGELOG.md, word for word, which is what the GitHub
 // Release shows and the in-app Update reads.
 //

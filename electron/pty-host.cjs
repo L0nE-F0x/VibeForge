@@ -27,12 +27,18 @@ const PROGRAM_POLL_MS = 1000;
 const ACTIVITY_TICK_MS = 1000;
 const WORK_ROWS = 3;
 const QUIET_TICKS = 3;
+// A pane that prints faster than its mirror parses or the app reads (cat of a big log) is paused
+// at the pty, the way a real terminal is: the program waits on its write, and the host holds at
+// most about this much per terminal instead of all of it.
+const PENDING_HIGH = 8 * 1024 * 1024;
+const PENDING_LOW = 2 * 1024 * 1024;
+const PAUSED_LOOK_MS = 50;
 
 /** @type {Map<string, any>} */
 const sessions = new Map();
 
-function send(message) {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+function send(message, written) {
+  process.stdout.write(`${JSON.stringify(message)}\n`, written);
 }
 
 function reply(reqId, body) {
@@ -148,6 +154,7 @@ function startRecording(session, runDir) {
           mirror.loadAddon(serializer);
           const rec = { runDir, mirror, serializer, scrollFd: null, scrollBytes: 0, scrollFile: null };
           attachCapture(rec);
+          rec.onDrain = () => relieve(session);
           // Seed with the screen as it is now, then publish the recording so later output lands in it.
           mirror.write(session.serializer.serialize({ scrollback: 0 }), () => {
             openScrollback(rec);
@@ -223,9 +230,58 @@ function flush(session) {
   clearTimeout(session.flushTimer);
   session.flushTimer = null;
   if (session.batch.length === 0) return;
-  send({ event: "data", ptyId: session.id, data: session.batch.join(""), first: session.batchFirst, seq: session.seq });
+  const data = session.batch.join("");
+  send({ event: "data", ptyId: session.id, data, first: session.batchFirst, seq: session.seq }, () => {
+    session.unsent -= data.length;
+    relieve(session);
+  });
   session.batch = [];
   session.batchFirst = null;
+}
+
+// ------------------------------------------------------------------ flow control
+
+/** Output this terminal holds: not yet read by the app, or not yet parsed by a mirror. */
+function pendingOf(session) {
+  return session.unsent + session.pending + (session.rec ? session.rec.pending : 0);
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function throttle(session) {
+  if (session.paused || session.gone || pendingOf(session) <= PENDING_HIGH) return;
+  session.paused = true;
+  session.term.pause();
+  // node-pty drops what is still unread 200 ms after the program exits, so a paused pane keeps
+  // looking for that and lets the rest through.
+  session.pauseTimer = setInterval(() => {
+    if (alive(session.pid)) return;
+    session.gone = true;
+    release(session);
+  }, PAUSED_LOOK_MS);
+}
+
+function relieve(session) {
+  if (session.paused && pendingOf(session) < PENDING_LOW) release(session);
+}
+
+function release(session) {
+  clearInterval(session.pauseTimer);
+  session.pauseTimer = null;
+  if (!session.paused) return;
+  session.paused = false;
+  try {
+    session.term.resume();
+  } catch {
+    /* the pty closed underneath us */
+  }
 }
 
 // ------------------------------------------------------------------ sessions
@@ -270,8 +326,13 @@ function spawnSession(msg) {
     changes: 0,
     stillTicks: 0,
     working: false,
+    unsent: 0,
+    paused: false,
+    pauseTimer: null,
+    gone: false,
   };
   attachCapture(session);
+  session.onDrain = () => relieve(session);
   openScrollback(session);
   sessions.set(id, session);
 
@@ -279,6 +340,7 @@ function spawnSession(msg) {
     session.seq += 1;
     if (session.batchFirst === null) session.batchFirst = session.seq;
     session.batch.push(data);
+    session.unsent += data.length;
     captureWrite(session, data);
     appendScrollback(session, data);
     if (session.rec) {
@@ -288,6 +350,7 @@ function spawnSession(msg) {
     notePasteActivity(session);
     session.dirty = true;
     if (!session.flushTimer) session.flushTimer = setTimeout(() => flush(session), FLUSH_MS);
+    throttle(session);
   });
 
   term.onExit(({ exitCode, signal }) => {
@@ -302,6 +365,8 @@ function spawnSession(msg) {
 function finish(session, exitCode, signal) {
   if (session.exited) return;
   session.exited = true;
+  session.gone = true;
+  release(session);
   for (const timer of session.killTimers) clearTimeout(timer);
   if (session.paste) clearPasteTimers(session.paste);
   flush(session);

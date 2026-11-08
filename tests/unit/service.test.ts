@@ -35,8 +35,7 @@ describe("agents", () => {
     expect(() => ctx.svc.saveAgent({ name: "", brief: "b", engine: "argy", places: [ctx.place] })).toThrow(/name/);
     expect(() => ctx.svc.saveAgent({ name: "x", brief: "b", engine: "gone", places: [ctx.place] })).toThrow(/not on PATH/);
     expect(() => ctx.svc.saveAgent({ name: "x", brief: "b", engine: "argy", places: ["/definitely/not/here"] })).toThrow(/does not exist/);
-    expect(() => ctx.svc.deleteAgent(agent.id, "wrong")).toThrow(/Type the agent's name/);
-    ctx.svc.deleteAgent(agent.id, "Notes");
+    await ctx.svc.deleteAgent(agent.id);
     expect(ctx.svc.listAgents()).toEqual([]);
     ctx.svc.close();
   });
@@ -193,6 +192,41 @@ describe("undo", () => {
     expect(fs.existsSync(run.cwd)).toBe(true);
     expect(fs.readFileSync(path.join(run.dir, "transcript.txt"), "utf8")).toBe("what was said");
     expect(() => ctx.svc.undoDelete(deleted[0].undo)).toThrow(/too late/);
+    ctx.svc.close();
+  });
+
+  it("puts back a deleted agent with its memory and routines, and a new one of that name starts without them", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    ctx.svc.writeMemory(agent.id, "- written by hand\n");
+    const routine = ctx.svc.saveRoutine({ name: "Notes", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    const other = await ctx.svc.saveAgent({ name: "Other", brief: "b", engine: "argy", places: [ctx.place] });
+    const theirs = ctx.svc.saveRoutine({ name: "Theirs", agentId: other.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    const routinesOf = (id: string) => ctx.svc.listRoutines().filter((item) => item.agentId === id).map((item) => item.id);
+    // A chat with it is still going: deleting stops it first.
+    const sent = await ctx.svc.sendChat(ctx.svc.createChat({ agentId: agent.id }).id, "hi");
+
+    const { undo } = await ctx.svc.deleteAgent(agent.id);
+    expect(ctx.killed).toEqual([sent.ptyId]);
+    expect(ctx.svc.getRun(sent.runId).run.status).not.toBe("running");
+    expect(ctx.svc.getAgent(agent.id)).toBeNull();
+    expect(routinesOf(agent.id)).toEqual([]);
+    expect(routinesOf(other.id)).toEqual([theirs.id]);
+    ctx.svc.undoDelete(undo);
+    expect(ctx.svc.getAgent(agent.id)?.name).toBe("Notes");
+    expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
+    expect(routinesOf(agent.id)).toEqual([routine.id]);
+
+    // Deleted again, and a new agent takes the name (and so the id) while the Undo is still up.
+    const again = await ctx.svc.deleteAgent(agent.id);
+    const fresh = await agentIn(ctx);
+    expect(fresh.id).toBe(agent.id);
+    expect(routinesOf(fresh.id)).toEqual([]);
+    expect(ctx.svc.readMemory(fresh.id)).not.toContain("written by hand");
+    // Undo can't put the old one back over it, and its routines don't join the new one.
+    ctx.svc.undoDelete(again.undo);
+    expect(ctx.svc.getAgent(fresh.id)?.createdAt).toBe(fresh.createdAt);
+    expect(routinesOf(fresh.id)).toEqual([]);
     ctx.svc.close();
   });
 
@@ -568,6 +602,40 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("finds runs in a data folder restored under another home, and deletes only inside it", () => {
+    const configRoot = tempDir();
+    const oldData = tempDir();
+    const store = new Store(configRoot, oldData);
+    const { id, dir } = allocateRunDir(oldData, new Date(), "restored");
+    store.saveRun(normalizeRun({ id, origin: "chat", title: "Restored", engine: "argy", startedAt: new Date().toISOString(), status: "exited", dir })!);
+    fs.writeFileSync(path.join(dir, "transcript.txt"), "what was said\n");
+    store.close();
+    // The data folder comes back somewhere else, index and all; something else now sits at the old path.
+    const newData = path.join(tempDir(), "data");
+    fs.renameSync(oldData, newData);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "not-a-run.txt"), "someone else's\n");
+
+    const restored = new Store(configRoot, newData);
+    const run = restored.getRun(id)!;
+    expect(run.dir).toBe(path.join(newData, "runs", id));
+    expect(restored.allRuns().map((item) => item.dir)).toEqual([run.dir]);
+    expect(restored.queryRuns({}).map((item) => item.dir)).toEqual([run.dir]);
+    expect(fs.readFileSync(path.join(run.dir, "transcript.txt"), "utf8")).toBe("what was said\n");
+    // A folder copied by hand, whose meta.json names another run, isn't taken for that run.
+    fs.cpSync(run.dir, path.join(newData, "runs", "copied-by-hand"), { recursive: true });
+    expect(restored.reindex()).toBe(0);
+    expect(restored.getRun(id)!.dir).toBe(run.dir);
+    // Whatever path a run record carries, deleting it only ever removes its folder in the data folder.
+    restored.deleteRunFile({ ...run, dir }, "transcript");
+    expect(fs.existsSync(path.join(run.dir, "transcript.txt"))).toBe(false);
+    restored.deleteRun({ ...run, dir: path.dirname(dir) });
+    expect(fs.existsSync(run.dir)).toBe(false);
+    expect(restored.getRun(id)).toBeNull();
+    expect(fs.readFileSync(path.join(dir, "not-a-run.txt"), "utf8")).toBe("someone else's\n");
+    restored.close();
+  });
+
   it("finds runs by the words in their transcript, including runs from before search", async () => {
     const ctx = setup();
     const agent = await agentIn(ctx);
@@ -635,7 +703,7 @@ describe("runs", () => {
     expect(await ctx.svc.runDiff(launched.runId)).toContain("+TWO");
 
     const applied = await ctx.svc.applyTaskCopy(task.id);
-    expect(applied).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(applied).toEqual({ files: ["a.txt", "b.txt"], conflicts: [], kept: [] });
     expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
     expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new file\n");
     // Uncommitted in the workspace, for you to review and commit.
@@ -667,7 +735,7 @@ describe("runs", () => {
     const idle = started(await ctx.svc.executeTask(idleTask.id));
     const idleCopy = ctx.svc.listTasks().find((item) => item.id === idleTask.id)!.copy!;
     await ctx.exit(idle.ptyId);
-    expect(await ctx.svc.applyTaskCopy(idleTask.id)).toEqual({ files: [], conflicts: [] });
+    expect(await ctx.svc.applyTaskCopy(idleTask.id)).toEqual({ files: [], conflicts: [], kept: [] });
     expect(fs.existsSync(idleCopy.path)).toBe(false);
     expect(ctx.svc.listTasks().find((item) => item.id === idleTask.id)!).toMatchObject({ status: "done", copy: null });
 
@@ -772,6 +840,73 @@ describe("runs", () => {
     expect(fs.readFileSync(path.join(other, "a.txt"), "utf8")).toBe("theirs\n");
     expect(git(other, "status", "--porcelain")).toBe("");
     expect(git(other, "branch", "--list", `vibeforge/${fourth.id}`).trim()).not.toBe("");
+    ctx.svc.close();
+  });
+
+  it("keeps a deleted task's copy through a prune while Undo is up, and tidies it once Undo has passed", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    ctx.host.gitHead = (cwd) => gitHead(cwd);
+    ctx.host.snapshotGit = (cwd, start) => snapshotGit(cwd, 5000, start);
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const copyOf = (id: string) => ctx.svc.listTasks().find((item) => item.id === id)!.copy!;
+    const task = ctx.svc.saveTask({ title: "Edit", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const first = started(await ctx.svc.executeTask(task.id));
+    const copy = copyOf(task.id);
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "changed\n");
+    await ctx.exit(first.ptyId);
+
+    const { undo } = await ctx.svc.deleteTask(task.id);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    // While the Undo is up, another task's Execute prunes the repository's worktrees, and so does someone else.
+    const other = ctx.svc.saveTask({ title: "Other", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(other.id)).ptyId);
+    git(repo, "worktree", "prune");
+    expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${copy.path}\n`);
+
+    ctx.svc.undoDelete(undo);
+    await until(() => !git(repo, "worktree", "list", "--porcelain").includes("locked"));
+    expect(git(copy.path, "status", "--porcelain")).toBe(" M a.txt\n");
+    expect(await ctx.svc.applyTaskCopy(task.id)).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("changed\n");
+
+    // Deleted, and the app closes before Undo has passed: the copy, its lock and its branch all go.
+    const otherCopy = copyOf(other.id);
+    await ctx.svc.deleteTask(other.id);
+    ctx.svc.close();
+    await until(() => git(repo, "branch", "--list", `vibeforge/${other.id}`).trim() === "");
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
+  });
+
+  it("picks a task's copy back up, commits and all, when its folder was deleted by hand", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Edit", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const copy = ctx.svc.listTasks().find((item) => item.id === task.id)!.copy!;
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "agent's work\n");
+    git(copy.path, "commit", "-qam", "agent");
+    fs.rmSync(copy.path, { recursive: true, force: true });
+
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    expect(ctx.svc.listTasks().find((item) => item.id === task.id)!.copy).toEqual(copy);
+    expect(fs.readFileSync(path.join(copy.path, "a.txt"), "utf8")).toBe("agent's work\n");
+    expect(await ctx.svc.applyTaskCopy(task.id)).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
     ctx.svc.close();
   });
 
@@ -958,6 +1093,22 @@ describe("change events", () => {
     ctx.svc.addWorkspace(ctx.place);
     await Promise.resolve();
     expect(seen).toEqual([["agents", "routines", "tasks", "workspaces"]]);
+    ctx.svc.close();
+  });
+
+  it("tells a CLI going busy or quiet on its own topic, so runs and chats aren't read again", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const started = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    await Promise.resolve();
+    const seen: string[][] = [];
+    ctx.svc.onChange((topics) => seen.push([...topics].sort()));
+    ctx.svc.onPtyActivity(started.ptyId, true);
+    await Promise.resolve();
+    ctx.svc.onPtyActivity(started.ptyId, false);
+    await Promise.resolve();
+    expect(seen).toEqual([["working"], ["working"]]);
+    expect(ctx.svc.listLive().find((session) => session.ptyId === started.ptyId)?.working).toBe(false);
     ctx.svc.close();
   });
 });

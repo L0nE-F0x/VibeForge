@@ -2,20 +2,31 @@ name: Release
 
 # Pushing a version tag publishes its GitHub Release, with the notes taken word for word from
 # that version's section of CHANGELOG.md (scripts/release-notes.mjs). The in-app Update shows them.
+#
+# Only a commit on main whose CI passed (test, typecheck, lint and smoke) is published. A tag with
+# a hyphen (v2.14.0-rc.1) is a pre-release, and a fix to an older line (2.12.3 after 2.13.0) is
+# published too; neither becomes "latest", which is what the installer and the in-app Update take.
+# Each release carries scripts/install.sh and a SHA256SUMS file for it.
 on:
   push:
     tags: ["v*.*.*"]
 
 permissions:
   contents: write
+  checks: read
 
 jobs:
   release:
     name: release
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Most of it is waiting for CI on the tagged commit.
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      # All history and tags: whether the commit is on main, and which tag is the newest.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: The tag matches package.json
         run: |
           version="$(node -p 'require("./package.json").version')"
@@ -23,13 +34,72 @@ jobs:
             echo "::error::The tag is $GITHUB_REF_NAME but package.json says $version."
             exit 1
           fi
-      - run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > notes.md
+      - name: The tagged commit is on main
+        run: |
+          commit="$(git rev-parse "$GITHUB_REF^{commit}")"
+          if ! git merge-base --is-ancestor "$commit" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is on $commit, which is not on main. Tag a commit on main."
+            exit 1
+          fi
+          echo "COMMIT=$commit" >>"$GITHUB_ENV"
+      - name: CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # CI starts when the commit lands on main, so it may still be running: wait up to 30 minutes.
+          for attempt in $(seq 60); do
+            waiting=""
+            for check in test typecheck lint smoke; do
+              state="$(gh api "repos/$GITHUB_REPOSITORY/commits/$COMMIT/check-runs?check_name=$check&filter=latest&per_page=100" --jq '
+                [.check_runs[] | select(.app.slug == "github-actions")] as $runs
+                | if ($runs | length) == 0 then "missing"
+                  elif any($runs[]; .conclusion == "success") then "success"
+                  elif any($runs[]; .status != "completed") then "running"
+                  else $runs[0].conclusion end')"
+              case "$state" in
+                success) ;;
+                missing | running) waiting="$waiting $check" ;;
+                *)
+                  echo "::error::The $check check on $COMMIT ended: $state. Fix main, then tag a commit whose checks pass."
+                  exit 1
+                  ;;
+              esac
+            done
+            if [ -z "$waiting" ]; then
+              echo "test, typecheck, lint and smoke passed on $COMMIT."
+              exit 0
+            fi
+            echo "Waiting for:$waiting (attempt $attempt)"
+            sleep 30
+          done
+          echo "::error::These checks on $COMMIT did not pass within 30 minutes:$waiting"
+          exit 1
+      - name: The notes, the installer and its checksum
+        run: |
+          if ! node scripts/release-notes.mjs "$GITHUB_REF_NAME" >notes.md; then
+            case "$GITHUB_REF_NAME" in
+              # A pre-release may not have a CHANGELOG section of its own yet.
+              *-*) printf 'A pre-release of what comes next. CHANGELOG.md lists it under Unreleased.\n' >notes.md ;;
+              *) exit 1 ;;
+            esac
+          fi
+          mkdir assets
+          cp scripts/install.sh assets/install.sh
+          (cd assets && sha256sum install.sh >SHA256SUMS)
+          cat assets/SHA256SUMS
       - name: Publish, unless it already is
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "$GITHUB_REF_NAME is already published; leaving it as it is."
-          else
-            gh release create "$GITHUB_REF_NAME" --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+            exit 0
           fi
+          newest="$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -v -e - | head -n 1)"
+          case "$GITHUB_REF_NAME" in
+            *-*) kind=(--prerelease --latest=false) ;;
+            "$newest") kind=(--latest) ;;
+            *) kind=(--latest=false) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" assets/install.sh assets/SHA256SUMS \
+            --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag "${kind[@]}"

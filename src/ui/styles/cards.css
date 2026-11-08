@@ -54,10 +54,10 @@
   background: var(--fg-3);
 }
 
+/* Its glow breathes on two layers (glow.css). */
 .dot.running {
+  position: relative;
   background: var(--accent);
-  box-shadow: var(--work-lit);
-  animation: ember-work 2.4s ease-in-out infinite;
 }
 
 .dot.exited {
@@ -80,35 +80,11 @@
   min-width: 0;
 }
 
-.card.interactive {
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.12s, border-color 0.12s, box-shadow 0.15s;
-  display: block;
-  width: 100%;
-}
-
-.card.interactive:hover {
-  background: var(--hover-fill);
-  border-color: var(--hover-line);
-}
-
-.card.interactive:focus-visible {
-  background: var(--focus-fill);
-  border-color: var(--focus-line);
-}
-
 .card h3 {
   margin: 0;
   font-size: var(--fs-md);
   font-weight: 620;
   letter-spacing: -0.005em;
-}
-
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 10px;
 }
 
 .row {
@@ -137,7 +113,7 @@
   color: var(--fg);
 }
 
-.row[aria-selected="true"] {
+.row:is([aria-selected="true"], [aria-current="true"]) {
   background: var(--sel-fill);
   border-color: var(--sel-line);
   color: var(--fg);

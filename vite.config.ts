@@ -27,9 +27,18 @@ export default defineConfig({
     react(),
     contentSecurityPolicy(),
     electron({
-      // Every `node:` import stays external. The plugin only knows the built-ins of the Node doing
-      // the build, and Node 22 doesn't list node:sqlite, so building there would bundle a stub.
-      main: { entry: "electron/main.ts", vite: { build: { rollupOptions: { external: [/^node:/] } } } },
+      main: {
+        entry: "electron/main.ts",
+        // VIBEFORGE_PROFILE gives `npm start` its own Electron profile, which holds the one-copy lock, so a
+        // dev copy can run beside an installed VibeForge (CONTRIBUTING.md). Unset, Electron starts as before.
+        onstart: ({ startup }) => {
+          const profile = process.env.VIBEFORGE_PROFILE;
+          return startup([".", "--no-sandbox", ...(profile ? [`--user-data-dir=${profile}`] : [])]);
+        },
+        // Every `node:` import stays external. The plugin only knows the built-ins of the Node doing
+        // the build, and Node 22 doesn't list node:sqlite, so building there would bundle a stub.
+        vite: { build: { rollupOptions: { external: [/^node:/] } } },
+      },
       preload: { input: "electron/preload.ts" },
     }),
   ],

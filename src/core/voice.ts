@@ -73,7 +73,13 @@ export function cliArgs(opts: { model: string; file: string; language: string; p
 
 // ------------------------------------------------------------------ models
 
-export interface ModelChoice {
+/** What a downloaded file must be to be kept: its exact size and SHA-256, as Hugging Face lists them. */
+export interface PinnedFile {
+  bytes: number;
+  sha256: string;
+}
+
+export interface ModelChoice extends PinnedFile {
   id: string;
   file: string;
   /** Rough download size, for the button. */
@@ -81,17 +87,30 @@ export interface ModelChoice {
   englishOnly: boolean;
 }
 
+/**
+ * The commit of ggerganov/whisper.cpp on Hugging Face that models come from. A branch can move
+ * under the hashes below; a commit can't. whisper.cpp parses the file natively, so it is checked first.
+ */
+export const WHISPER_COMMIT = "5359861c739e955e79d9a303bcbc70fb988958b1";
+
 /** Models offered for download: ggml files from the whisper.cpp project on Hugging Face. */
 export const MODEL_CATALOG: ModelChoice[] = [
-  { id: "base.en", file: "ggml-base.en.bin", mb: 142, englishOnly: true },
-  { id: "small.en", file: "ggml-small.en.bin", mb: 466, englishOnly: true },
-  { id: "base", file: "ggml-base.bin", mb: 142, englishOnly: false },
-  { id: "small", file: "ggml-small.bin", mb: 466, englishOnly: false },
-  { id: "large-v3-turbo-q5_0", file: "ggml-large-v3-turbo-q5_0.bin", mb: 547, englishOnly: false },
+  { id: "base.en", file: "ggml-base.en.bin", mb: 142, englishOnly: true, bytes: 147_964_211, sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002" },
+  { id: "small.en", file: "ggml-small.en.bin", mb: 466, englishOnly: true, bytes: 487_614_201, sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d" },
+  { id: "base", file: "ggml-base.bin", mb: 142, englishOnly: false, bytes: 147_951_465, sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe" },
+  { id: "small", file: "ggml-small.bin", mb: 466, englishOnly: false, bytes: 487_601_967, sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b" },
+  {
+    id: "large-v3-turbo-q5_0",
+    file: "ggml-large-v3-turbo-q5_0.bin",
+    mb: 547,
+    englishOnly: false,
+    bytes: 574_041_195,
+    sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+  },
 ];
 
 export function modelUrl(choice: ModelChoice): string {
-  return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${choice.file}`;
+  return `https://huggingface.co/ggerganov/whisper.cpp/resolve/${WHISPER_COMMIT}/${choice.file}`;
 }
 
 /** Where models are looked for: VibeForge's own folder first, then other whisper.cpp users (Omarchy's Voxtype among them). */
@@ -293,23 +312,92 @@ export interface VoiceChoice {
   mb: number;
   /** Language code, as the app's language picker uses them. */
   language: string;
+  /** The .onnx file and its .onnx.json, as they are at PIPER_COMMIT. */
+  model: PinnedFile;
+  config: PinnedFile;
 }
+
+/** The commit of rhasspy/piper-voices on Hugging Face that voices come from, for the same reason as WHISPER_COMMIT. */
+export const PIPER_COMMIT = "e7229f7d33a10e145e109b886d661984201ac3c4";
 
 /** Voices offered for download: a few clear ones for each language VibeForge speaks. Japanese has none in Piper yet. */
 export const VOICE_CATALOG: VoiceChoice[] = [
-  { id: "en_US-lessac-medium", dir: "en/en_US/lessac/medium", mb: 63, language: "en" },
-  { id: "en_US-ryan-high", dir: "en/en_US/ryan/high", mb: 121, language: "en" },
-  { id: "en_GB-alan-medium", dir: "en/en_GB/alan/medium", mb: 63, language: "en" },
-  { id: "en_GB-jenny_dioco-medium", dir: "en/en_GB/jenny_dioco/medium", mb: 63, language: "en" },
-  { id: "de_DE-thorsten-medium", dir: "de/de_DE/thorsten/medium", mb: 63, language: "de" },
-  { id: "es_ES-davefx-medium", dir: "es/es_ES/davefx/medium", mb: 63, language: "es" },
-  { id: "fr_FR-siwis-medium", dir: "fr/fr_FR/siwis/medium", mb: 63, language: "fr" },
-  { id: "pt_BR-faber-medium", dir: "pt/pt_BR/faber/medium", mb: 63, language: "pt" },
-  { id: "zh_CN-huayan-medium", dir: "zh/zh_CN/huayan/medium", mb: 63, language: "zh" },
+  {
+    id: "en_US-lessac-medium",
+    dir: "en/en_US/lessac/medium",
+    mb: 63,
+    language: "en",
+    model: { bytes: 63_201_294, sha256: "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f" },
+    config: { bytes: 4_885, sha256: "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0" },
+  },
+  {
+    id: "en_US-ryan-high",
+    dir: "en/en_US/ryan/high",
+    mb: 121,
+    language: "en",
+    model: { bytes: 120_786_792, sha256: "b3990d7606e183ec8dbfba70a4607074f162de1a0c412e0180d1ff60bb154eca" },
+    config: { bytes: 4_166, sha256: "c6d3b98f08315cb4bebf0d49d50fc4ff491b503c64b940cd3d5ca28543b48011" },
+  },
+  {
+    id: "en_GB-alan-medium",
+    dir: "en/en_GB/alan/medium",
+    mb: 63,
+    language: "en",
+    model: { bytes: 63_201_294, sha256: "0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330" },
+    config: { bytes: 4_888, sha256: "c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e" },
+  },
+  {
+    id: "en_GB-jenny_dioco-medium",
+    dir: "en/en_GB/jenny_dioco/medium",
+    mb: 63,
+    language: "en",
+    model: { bytes: 63_201_294, sha256: "469c630d209e139dd392a66bf4abde4ab86390a0269c1e47b4e5d7ce81526b01" },
+    config: { bytes: 4_895, sha256: "a9a7a93a317c9a3cb6563e37eb057df9ef09c06188a8a4341b0fcb58cba54dd4" },
+  },
+  {
+    id: "de_DE-thorsten-medium",
+    dir: "de/de_DE/thorsten/medium",
+    mb: 63,
+    language: "de",
+    model: { bytes: 63_201_294, sha256: "7e64762d8e5118bb578f2eea6207e1a35a8e0c30595010b666f983fc87bb7819" },
+    config: { bytes: 4_819, sha256: "974adee790533adb273a1ac88f49027d2a1b8f0f2cf4905954a4791e79264e85" },
+  },
+  {
+    id: "es_ES-davefx-medium",
+    dir: "es/es_ES/davefx/medium",
+    mb: 63,
+    language: "es",
+    model: { bytes: 63_201_294, sha256: "6658b03b1a6c316ee4c265a9896abc1393353c2d9e1bca7d66c2c442e222a917" },
+    config: { bytes: 4_817, sha256: "0e0dda87c732f6f38771ff274a6380d9252f327dca77aa2963d5fbdf9ec54842" },
+  },
+  {
+    id: "fr_FR-siwis-medium",
+    dir: "fr/fr_FR/siwis/medium",
+    mb: 63,
+    language: "fr",
+    model: { bytes: 63_201_294, sha256: "641d1ab097da2b81128c076810edb052b385decc8be3381814802a64a73baf99" },
+    config: { bytes: 4_875, sha256: "39479916c2db192b5ac9764daddd0c744d83e023ad890c6976c0633ae4df8959" },
+  },
+  {
+    id: "pt_BR-faber-medium",
+    dir: "pt/pt_BR/faber/medium",
+    mb: 63,
+    language: "pt",
+    model: { bytes: 63_201_294, sha256: "858555e3a064209c57088fe6bd70c4c3dc54d03eaa00c45d5ecaf43a33f95aa7" },
+    config: { bytes: 4_855, sha256: "7e694de195ae3fc36dd732c445eb04fb49b649854893cb5506b978f0d50a1d6f" },
+  },
+  {
+    id: "zh_CN-huayan-medium",
+    dir: "zh/zh_CN/huayan/medium",
+    mb: 63,
+    language: "zh",
+    model: { bytes: 63_201_294, sha256: "9929917bf8cabb26fd528ea44d3a6699c11e87317a14765312420be230be0f3d" },
+    config: { bytes: 4_822, sha256: "d521dc45504a8ccc99e325822b35946dd701840bfb07e3dbb31a40929ed6a82b" },
+  },
 ];
 
 export function voiceUrls(choice: VoiceChoice): { model: string; config: string } {
-  const base = `https://huggingface.co/rhasspy/piper-voices/resolve/main/${choice.dir}/${choice.id}.onnx`;
+  const base = `https://huggingface.co/rhasspy/piper-voices/resolve/${PIPER_COMMIT}/${choice.dir}/${choice.id}.onnx`;
   return { model: base, config: `${base}.json` };
 }
 

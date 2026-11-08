@@ -63,7 +63,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
         <div className="list-scroll">
           {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
           {list.map((skill) => (
-            <button key={skill.id} type="button" className="row" aria-selected={skill.id === selected?.id} onClick={() => go({ view: "skills", skillId: skill.id })}>
+            <button key={skill.id} type="button" className="row" aria-current={skill.id === selected?.id || undefined} onClick={() => go({ view: "skills", skillId: skill.id })}>
               <Sparkles size={14} className="accent-text" style={{ flex: "none" }} />
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{skill.name}</span>
