@@ -12,7 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ### Changed
 
-- **Installing and updating take seconds, with nothing to compile.** Each release now carries a ready-made build for x86-64 Linux. The installer downloads it (about 100 MB), checks it against the release's SHA256SUMS and swaps it in, so `git`, `base-devel` and `python` are no longer needed and any Node from 20 on will do. It still builds from source for a release without one, on another CPU, with `VIBEFORGE_BRANCH`, or when you set `VIBEFORGE_FROM_SOURCE=1`, and says which way it went. Your next update switches over by itself; the git checkout it replaces stays in `~/.local/share/vibeforge-app.previous`.
+- **Installing and updating take seconds, with nothing to compile.** Each release now carries a ready-made build for x86-64 Linux. The installer downloads it (about 100 MB), checks it against the release's SHA256SUMS and swaps it in, so `git`, `base-devel` and `python` are no longer needed and any Node from 20 on will do. It still builds from source for a release without one, on another CPU, with `VIBEFORGE_BRANCH`, or when you set `VIBEFORGE_FROM_SOURCE=1`, and says which way it went. A copy the installer made switches over at its next update, and the git checkout it replaces stays in `~/.local/share/vibeforge-app.previous`. A git checkout you build yourself keeps building.
+- **The website's Maestro screenshot** shows Maestro as it is now: its name, and a plan whose steps wait for Review, Apply or Discard.
+- **Under the hood:** the five largest files (the main process, the message desk, the store, the Code view and the phone page) are split into parts with one job each, every keyboard shortcut comes from one list that also feeds the terminal pass-through and the Help sheet (which now lists Ctrl+Z), and the terminal host, `vibeforge tell` and the phone page are type-checked like the rest of the code. Nothing changes in how they work.
+
+### Fixed
+
+- **Maestro's Running list** no longer shows a scrollbar when everything fits (seen at 1.25 scale).
+- **A half-edited `engines.json` is left for you to finish,** as `settings.json` already was, instead of being set aside the moment VibeForge read it. Run search takes `%` and `_` as plain characters.
+- **Agent talk:** Stop during `vibeforge task --wait` says a person stopped it, not that the task ended; a handed-out task whose Start fails stays in "N to start"; `vibeforge apply <title>` picks the asking CLI's own task when two share a title; a late answer is cleaned before it's sent and saved.
+- **Terminals lost when the terminal host crashes** end like any other, so a spoken answer waiting on one stops waiting.
+- **On the phone:** pairing with the computer out of reach says so in your language and lets you try again; Send clears only the box it sent from; a session that's gone no longer slows the desk's updates.
 
 ## [2.14.1] - 2026-11-08
 
