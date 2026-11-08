@@ -1,56 +1,29 @@
-import path from "node:path";
-import { readJson, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
 import type { RUN_FILES } from "./runs.js";
-import { isSafeId } from "./slug.js";
+import { Chats } from "./store/chats.js";
 import { Config } from "./store/config.js";
-import { str, strList, strOrNull } from "./store/fields.js";
 import { Library } from "./store/library.js";
 import { ReadCache } from "./store/read-cache.js";
 import { RunIndex, type RunQuery } from "./store/run-index.js";
 import type { WorkspaceFile } from "./workspaces.js";
-import type {
-  Agent,
-  ChatRecord,
-  EngineRow,
-  LayoutNode,
-  Routine,
-  RunMeta,
-  Settings,
-  Skill,
-  Task,
-} from "./types.js";
+import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task } from "./types.js";
 
 export { defaultSettings } from "./store/config.js";
 export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument } from "./store/library.js";
 export { matchExpression, type RunQuery } from "./store/run-index.js";
 
-function normalizeChat(value: unknown): ChatRecord | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const id = str(record.id);
-  if (!isSafeId(id)) return null;
-  const runIds = strList(record.runIds);
-  const legacy = strOrNull(record.runId);
-  if (legacy && !runIds.includes(legacy)) runIds.push(legacy);
-  return {
-    id,
-    title: str(record.title) || "Chat",
-    agentId: strOrNull(record.agentId),
-    engine: str(record.engine),
-    cwd: str(record.cwd),
-    runIds,
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
+/**
+ * Everything VibeForge keeps on disk, behind one API: the run index, the config folder's JSON
+ * files, the hand-edited library and the chats. Each lives in `./store/`; this class opens them
+ * and passes each call on.
+ */
 export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
   private readonly runs: RunIndex;
   private readonly config: Config;
   private readonly library: Library;
+  private readonly chats: Chats;
 
   constructor(configRoot: string, dataRoot: string) {
     this.configRoot = configRoot;
@@ -60,6 +33,7 @@ export class Store {
     const cache = new ReadCache();
     this.config = new Config(configRoot, cache);
     this.library = new Library(configRoot, cache);
+    this.chats = new Chats(dataRoot);
   }
 
   close(): void {
@@ -224,33 +198,21 @@ export class Store {
     this.library.deleteTask(id);
   }
 
-  // ---------------------------------------------------------------- chats
-
-  private chatFile(): string {
-    return path.join(this.dataRoot, "chats.json");
-  }
+  // ---------------------------------------------------------------- chats (store/chats.ts)
 
   listChats(): ChatRecord[] {
-    const raw = readJson<unknown>(this.chatFile(), null);
-    const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
-    if (!Array.isArray(list)) return [];
-    return list
-      .map(normalizeChat)
-      .filter((chat): chat is ChatRecord => chat !== null)
-      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    return this.chats.listChats();
   }
 
   getChat(id: string): ChatRecord | null {
-    return this.listChats().find((chat) => chat.id === id) ?? null;
+    return this.chats.getChat(id);
   }
 
   writeChat(chat: ChatRecord): void {
-    const chats = this.listChats().filter((item) => item.id !== chat.id);
-    chats.push(chat);
-    writeJson(this.chatFile(), { chats });
+    this.chats.writeChat(chat);
   }
 
   deleteChat(id: string): void {
-    writeJson(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
+    this.chats.deleteChat(id);
   }
 }
