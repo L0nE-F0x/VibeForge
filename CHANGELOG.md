@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Fixed
 
 - **Maestro's Running list** no longer shows a scrollbar when everything fits (seen at 1.25 scale).
+- **A terminal no longer takes focus from a menu or dialog you just opened.** When a CLI appeared on screen while Ctrl+K or a dialog was open, the new terminal took the keyboard and Esc stopped closing what you had open.
 - **A half-edited `engines.json` is left for you to finish,** as `settings.json` already was, instead of being set aside the moment VibeForge read it. Run search takes `%` and `_` as plain characters.
 - **Agent talk:** Stop during `vibeforge task --wait` says a person stopped it, not that the task ended; a handed-out task whose Start fails stays in "N to start"; `vibeforge apply <title>` picks the asking CLI's own task when two share a title; a late answer is cleaned before it's sent and saved.
 - **Terminals lost when the terminal host crashes** end like any other, so a spoken answer waiting on one stops waiting.
