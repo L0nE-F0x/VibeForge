@@ -47,6 +47,7 @@ const floors: Record<string, number> = {
   'src/core/session-prompts.ts': 89,
   'src/core/slug.ts': 99,
   'src/core/store.ts': 89,
+  'src/core/store/read-cache.ts': 99,
   'src/core/tasks.ts': 91,
   'src/core/team-service.ts': 89,
   'src/core/theme.ts': 88,
