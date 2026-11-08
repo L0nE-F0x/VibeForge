@@ -13,8 +13,11 @@ type Message = Record<string, unknown>;
 class Host {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly waiting = new Map<string, (msg: Message) => void>();
+  private readonly lines: readline.Interface;
   private seq = 0;
   readonly events: Message[] = [];
+  /** What each terminal printed, counted rather than kept: a flood would fill the test's memory. */
+  readonly printed = new Map<string, number>();
   readonly ready: Promise<void>;
 
   constructor() {
@@ -22,11 +25,13 @@ class Host {
       env: { ...process.env, PS1: "$ ", HISTFILE: "/dev/null" },
     });
     const lines = readline.createInterface({ input: this.child.stdout });
+    this.lines = lines;
     this.ready = new Promise((resolve) => {
       lines.on("line", (line) => {
         const msg = JSON.parse(line) as Message;
         if (msg.event === "ready") resolve();
         if (typeof msg.reqId === "string") this.waiting.get(msg.reqId)?.(msg);
+        else if (msg.event === "data") this.printed.set(String(msg.ptyId), (this.printed.get(String(msg.ptyId)) ?? 0) + String(msg.data).length);
         else this.events.push(msg);
       });
     });
@@ -52,6 +57,21 @@ class Host {
       if (Date.now() - start > timeoutMs) throw new Error("timed out");
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+  }
+
+  /** Stop reading the host for a while, the way a busy Electron main process does. */
+  async hold(ms: number): Promise<void> {
+    this.lines.pause();
+    this.child.stdout.pause();
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    this.lines.resume();
+    this.child.stdout.resume();
+  }
+
+  /** The host's peak memory so far, in MB (Linux). */
+  peakMb(): number {
+    const status = fs.readFileSync(`/proc/${this.child.pid}/status`, "utf8");
+    return Number(status.match(/VmHWM:\s+(\d+)/)?.[1] ?? 0) / 1024;
   }
 
   exitOf(ptyId: string): Message | undefined {
@@ -227,6 +247,47 @@ describe("pty host", () => {
     expect(transcript).toContain("KEEP-SCREEN");
     expect(fs.readFileSync(path.join(runDir, "terminal.ansi"), "utf8")).toContain("KEEP-SCREEN");
   });
+
+  it("holds back a terminal that floods output, and still reports its exit at once", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", "yes FLOOD-0123456789"], runDir })).ptyId);
+    await host.until(() => (host.printed.get(pty) ?? 0) > 0);
+    const before = host.peakMb();
+    // The app stops reading for a while, the pane printing as fast as it can, and the pane is
+    // closed while it is held back. Before the host paused a pane it grew ~600 MB here, and the
+    // exit waited minutes for the mirror to catch up.
+    let killed = 0;
+    const kill = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        killed = Date.now();
+        void host.request({ op: "kill", ptyId: pty });
+        resolve();
+      }, 1500),
+    );
+    await host.hold(2500);
+    await kill;
+    await host.until(() => Boolean(host.exitOf(pty)), 30000);
+    const exitMs = Date.now() - killed;
+    const grown = host.peakMb() - before;
+    expect(grown).toBeLessThan(150);
+    expect(exitMs).toBeLessThan(4500);
+    expect(host.printed.get(pty)).toBeGreaterThan(1_000_000);
+    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toContain("FLOOD-0123456789");
+  }, 60000);
+
+  it("lets all of a held-back pane's output through to the end", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const size = 40_000_000;
+    const script = `head -c ${size} /dev/zero | tr '\\0' x; echo; echo FLOOD-END`;
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", script], runDir })).ptyId);
+    await host.hold(1500);
+    await host.until(() => Boolean(host.exitOf(pty)), 30000);
+    // Every byte, with the pty's \r\n for each \n.
+    expect(host.printed.get(pty)).toBe(size + "\r\nFLOOD-END\r\n".length);
+    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toContain("FLOOD-END");
+  }, 60000);
 
   it("reports a program's own exit code and rejects unknown requests", async () => {
     const host = await startHost();
