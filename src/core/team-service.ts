@@ -6,7 +6,7 @@ import { TaskDesk } from "./service/tasks.js";
 import { ChatDesk } from "./service/chats.js";
 import { RunDesk } from "./service/runs.js";
 import { ShellRecorder } from "./service/shell-runs.js";
-import { FolderTurns } from "./service/turns.js";
+import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
 import type { OrchestratorStep, OrchestratorView } from "./orchestrator.js";
@@ -17,7 +17,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
-import type { AgentInput, ChatView, Deleted, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -36,6 +36,38 @@ export class TeamService extends ServiceCore {
   private readonly shellRuns = new ShellRecorder(this);
   private readonly messages = new MessageDesk(this, this.tasks);
   readonly orchestrator = new OrchestratorDesk(this, this.workspaces);
+
+  constructor(options: DeskOptions) {
+    super(options);
+    // What was waiting for its folder when VibeForge last closed waits again.
+    this.turns.restore((saved) => this.resumeWait(saved));
+  }
+
+  /** A task's Execute or a routine's Run now, saved while it waited, with its start again; null once it's gone. */
+  private resumeWait(saved: SavedTurn): { start: () => Promise<unknown>; failed: (message: string) => void } | null {
+    if (saved.kind === "task") {
+      const task = this.store.getTask(saved.id);
+      if (!task) return null;
+      return {
+        start: () => this.tasks.executeTask(saved.id),
+        failed: (message) => this.options.host.notify({ title: task.title, body: message, taskId: saved.id }),
+      };
+    }
+    const routine = this.store.getRoutine(saved.id);
+    if (!routine) return null;
+    return {
+      start: () => this.routines.runRoutineNow(saved.id),
+      failed: (message) => {
+        if (this.store.readSettings().notify && routine.notify) this.options.host.notify({ title: routine.name, body: message, routineId: saved.id });
+      },
+    };
+  }
+
+  override prepareShutdown(): void {
+    // The CLIs are about to end, which frees their folders: nothing waiting should start now.
+    this.turns.hold();
+    super.prepareShutdown();
+  }
 
   override close(): void {
     this.turns.close();
@@ -252,7 +284,9 @@ export class TeamService extends ServiceCore {
 
   /** The live sessions for the window, each with who else is in its folder. */
   liveForView(): LiveSession[] {
-    return this.turns.withNeighbours().map((session) => ({ ...session, talk: this.messages.talkFor(session.ptyId) }));
+    const sessions = this.turns.withNeighbours();
+    const talk = this.messages.talkForEach(sessions.map((session) => session.ptyId));
+    return sessions.map((session) => ({ ...session, talk: talk.get(session.ptyId) ?? null }));
   }
 
   // ---------------------------------------------------------------- agents talking

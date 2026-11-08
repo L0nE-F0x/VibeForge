@@ -28,7 +28,7 @@ import { createTask } from "../tasks.js";
 import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import { cwdAllowed } from "../places.js";
-import type { AgentTier, LiveSession, TalkState } from "../types.js";
+import type { AgentTier, EngineRow, LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
 import type { TaskDesk } from "./tasks.js";
 
@@ -54,9 +54,16 @@ const REPORT_MS = 4 * 60 * 60 * 1000;
 const STUCK_MS = 30_000;
 /** Reports of a task waiting for a person, after each of which its answer is watched for again. */
 const MAX_REWATCH = 3;
-const KEEP_FILES = 40;
-/** Focus in/out (CSI I, CSI O) and mouse reports (X10 and SGR), which a terminal sends on its own. */
-const TERMINAL_REPORTS = /\x1b\[[IO]|\x1b\[M[\s\S]{3}|\x1b\[<\d+;\d+;\d+[mM]/g;
+/** Saved messages and patches stay this long: a CLI handed a path may read it a good while later. */
+const KEEP_FILES_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * Escape sequences: all a terminal ever writes back on its own. Focus in/out, mouse reports (X10
+ * first, its three bytes can be anything), and its answers to a CLI's questions: cursor position,
+ * device attributes, colours, its name (CSI, OSC, DCS and the other string sequences, SS3 and the
+ * two-byte ones). Arrows, F-keys and a bare Esc are these too, so they aren't a person stepping in;
+ * a letter, Backspace or Enter is.
+ */
+const ESCAPES = /\x1b\[M[\s\S]{3}|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[\]P_^X][\s\S]*?(?:\x07|\x1b\\|$)|\x1bO[\s\S]|\x1b[ -/]*[0-~]/g;
 
 export type TellResult =
   | { ok: true; to: string; delivered: "sent" | "draft" | "queued"; reply?: string | null; fromScreen?: boolean; timedOut?: boolean; note?: string }
@@ -109,12 +116,15 @@ interface Pending {
   id: string;
   fromPty: string | null;
   toPty: string;
+  /** The CLI that was in front in `toPty` when it was put in line (see queue and cliIn): another one there now isn't sent it. */
+  cli?: string | null;
   text: string;
   enter: boolean;
   /** Counted against the two CLIs' limit (a person's draft and review steps aren't). */
   counts: boolean;
   waiter: WaitSpec | null;
-  delivered?: () => void;
+  /** It went in; `draft` when without Enter, as it was queued or because the two reached their limit while it waited. */
+  delivered?: (draft: boolean) => void;
   dropped: (why: string) => void;
 }
 
@@ -173,21 +183,27 @@ export class MessageDesk {
 
   // ---------------------------------------------------------------- who is there
 
+  /** Every coding CLI that can be reached. The engines and each agent are read once for the lot, not once per CLI. */
   list(): Reachable[] {
+    const rows = this.core.store.readEngineRows();
+    const agents = new Map<string, string | null>();
     return reachable(
       [...this.core.live.values()],
       {
-        agent: (id) => this.core.store.getAgent(id)?.name ?? null,
-        engine: (session) => this.engineOf(session),
+        agent: (id) => {
+          if (!agents.has(id)) agents.set(id, this.core.store.getAgent(id)?.name ?? null);
+          return agents.get(id) ?? null;
+        },
+        engine: (session) => this.engineOf(session, rows),
       },
       this.handles,
     );
   }
 
-  private engineOf(session: LiveSession): { id: string; label: string; bin: string } | null {
+  private engineOf(session: LiveSession, rows: readonly EngineRow[] = this.core.store.readEngineRows()): { id: string; label: string; bin: string } | null {
     const id = session.programEngineId || (session.runId ? this.core.store.getRun(session.runId)?.engine : null) || null;
     if (!id) return null;
-    const row = this.core.store.readEngineRows().find((item) => item.id === id);
+    const row = rows.find((item) => item.id === id);
     return { id, label: row?.label ?? id, bin: row?.bin ?? id };
   }
 
@@ -233,18 +249,15 @@ export class MessageDesk {
     if (this.stopped.has(to.ptyId) || (from && this.stopped.has(from.ptyId))) {
       return Promise.resolve({ ok: false, error: `A person stopped the conversation with ${from && this.stopped.has(from.ptyId) ? "you" : to.label}. It starts again once they type in that terminal.` });
     }
-    const key = pairKey(from?.ptyId ?? "outside", to.ptyId);
-    const atLimit = Boolean(from) && (this.counts.get(key) ?? 0) >= this.settings().maxMessages;
+    const atLimit = this.atLimit(from?.ptyId ?? null, to.ptyId);
     const answer: Answer = input.wait ? "wait" : from ? "tell" : "none";
     const body = messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.saveIfLong("messages", text) });
-    const note = atLimit
-      ? `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`
-      : undefined;
+    const note = () =>
+      `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
 
     return new Promise<TellResult>((resolve) => {
       const waitMs = Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS);
-      this.pending.push({
-        id: randomBytes(4).toString("hex"),
+      this.queue({
         fromPty: from?.ptyId ?? null,
         toPty: to.ptyId,
         text: body,
@@ -270,13 +283,14 @@ export class MessageDesk {
                 gone: input.gone,
               }
             : null,
-        delivered: input.wait && !atLimit ? undefined : () => resolve({ ok: true, to: to.handle, delivered: atLimit ? "draft" : "sent", note }),
+        // With --wait, an answer settles it, unless it went in as a draft (the limit came while it waited).
+        delivered: (draft) => {
+          if (draft || !input.wait) resolve({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? note() : undefined });
+        },
         dropped: (why) => resolve({ ok: false, error: why }),
       });
       // Busy for now: say so at once rather than holding the sender until there's room.
       if (!input.wait && !atLimit && !this.idle(to.ptyId)) {
-        const last = this.pending[this.pending.length - 1];
-        last.delivered = undefined;
         resolve({ ok: true, to: to.handle, delivered: "queued", note: `${to.label} is busy; your message goes in as soon as it's free.` });
       }
       this.core.emit("live");
@@ -339,10 +353,12 @@ export class MessageDesk {
 
   /** A person typed into a terminal: its counts start again, and a Stop on it is lifted. */
   onHumanInput(ptyId: string, data: string): void {
-    // A terminal reports focus and the mouse as input too (Claude Code asks for focus events):
-    // clicking a pane isn't a person stepping into the conversation.
-    if (!data.replace(TERMINAL_REPORTS, "")) return;
-    this.lastHuman.set(ptyId, { at: this.nowMs(), sent: /[\r\n]/.test(data) });
+    // A terminal reports focus and the mouse as input too (Claude Code asks for focus events), and
+    // answers what a CLI asks it (where the cursor is, what it can do): clicking a pane, or a CLI
+    // drawing its screen, isn't a person stepping into the conversation.
+    const typed = data.replace(ESCAPES, "").replace(/\x1b/g, "");
+    if (!typed) return;
+    this.lastHuman.set(ptyId, { at: this.nowMs(), sent: /[\r\n]/.test(typed) });
     this.handedSince.delete(ptyId);
     let changed = this.stopped.delete(ptyId);
     for (const key of [...this.counts.keys()]) {
@@ -439,8 +455,7 @@ export class MessageDesk {
     const file = this.saveFile("reviews", "patch", patch);
     review.phase = "reviewer";
     this.core.emit("live");
-    this.pending.push({
-      id: randomBytes(4).toString("hex"),
+    this.queue({
       fromPty: null,
       toPty: review.reviewerPty,
       text: reviewRequestText({ authorLabel, cwd: author.programCwd || author.cwd, patchPath: file, files: patchFiles(patch), round: review.round, rounds: review.rounds }),
@@ -460,8 +475,7 @@ export class MessageDesk {
           review.phase = "fixing";
           review.round += 1;
           review.since = this.nowMs();
-          this.pending.push({
-            id: randomBytes(4).toString("hex"),
+          this.queue({
             fromPty: null,
             toPty: review.authorPty,
             text: reviewReplyText({ reviewerLabel, reply, savedAt: this.saveIfLong("reviews", reply) }),
@@ -714,9 +728,9 @@ export class MessageDesk {
       applyWith: this.settings().leadApplies && !ended ? task.id : null,
       waiting,
     });
-    // Counted like any message between the two: past the limit it waits in the prompt for a person.
-    const atLimit = (this.counts.get(pairKey(taskPty, asker)) ?? 0) >= this.settings().maxMessages;
-    this.pending.push({ id: randomBytes(4).toString("hex"), fromPty: taskPty, toPty: asker, text, enter: !atLimit, counts: true, waiter: null, dropped: () => undefined });
+    // Counted like any message between the two: past the limit it waits in the prompt for a person
+    // (checked as it goes in, see pass).
+    this.queue({ fromPty: taskPty, toPty: asker, text, enter: true, counts: true, waiter: null, dropped: () => undefined });
     this.core.emit("live");
     void this.pump();
     return waiting;
@@ -726,7 +740,27 @@ export class MessageDesk {
 
   /** How a terminal is talking right now, for its pane. Null when it isn't. */
   talkFor(ptyId: string): TalkState | null {
+    return this.talkForEach([ptyId]).get(ptyId) ?? null;
+  }
+
+  /**
+   * How each of these terminals is talking, for the window's list of them. Who is there and the
+   * settings are read once for all of them: a refresh happens whenever any CLI goes busy or quiet.
+   */
+  talkForEach(ptyIds: readonly string[]): Map<string, TalkState | null> {
+    const out = new Map<string, TalkState | null>();
+    const busy = this.counts.size || this.pending.length || this.waiting.size || this.reviews.size || this.proposed.size;
+    if (!busy) {
+      for (const ptyId of ptyIds) out.set(ptyId, null);
+      return out;
+    }
     const list = this.list();
+    const max = this.settings().maxMessages;
+    for (const ptyId of ptyIds) out.set(ptyId, this.talkOf(ptyId, list, max));
+    return out;
+  }
+
+  private talkOf(ptyId: string, list: readonly Reachable[], max: number): TalkState | null {
     const name = (id: string) => list.find((item) => item.ptyId === id)?.label ?? null;
     const partners = new Map<string, number>();
     for (const [key, count] of this.counts) {
@@ -740,7 +774,6 @@ export class MessageDesk {
     const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
     const toStart = this.toStart(ptyId);
     if (!partners.size && !queued && !mine.length && !review && !toStart.length) return null;
-    const max = this.settings().maxMessages;
     return {
       with: [...partners.keys()].map(name).filter((label): label is string => Boolean(label)),
       messages: Math.max(0, ...partners.values()),
@@ -800,9 +833,16 @@ export class MessageDesk {
       // Taken out while an earlier delivery was going in (Stop, or the CLI ended).
       if (!this.pending.includes(item)) continue;
       const session = this.core.live.get(item.toPty);
-      if (!session || !isCodingCli(session)) {
+      // Gone, or the terminal now runs another CLI than the one it was meant for (back at its shell and into a new one).
+      if (!session || !isCodingCli(session) || (item.cli != null && cliIn(session) !== item.cli)) {
         this.pending.splice(this.pending.indexOf(item), 1);
         item.dropped("That CLI isn't running any more.");
+        continue;
+      }
+      // Stopped since it was put in line: nothing goes to or from that terminal until a person types there.
+      if (this.stopped.has(item.toPty) || (item.fromPty && this.stopped.has(item.fromPty))) {
+        this.pending.splice(this.pending.indexOf(item), 1);
+        item.dropped("A person stopped this conversation.");
         continue;
       }
       if (busy.has(item.toPty) || !this.idle(item.toPty, now)) {
@@ -811,23 +851,37 @@ export class MessageDesk {
       }
       busy.add(item.toPty);
       this.pending.splice(this.pending.indexOf(item), 1);
+      // The limit is checked again now: messages queued while the CLI was busy all passed it then.
+      const enter = item.enter && !(item.counts && this.atLimit(item.fromPty, item.toPty));
       try {
-        await this.core.options.host.send(item.toPty, item.text, item.enter);
+        await this.core.options.host.send(item.toPty, item.text, enter);
       } catch {
         item.dropped("That CLI isn't running any more.");
         continue;
       }
       const sentAt = this.nowMs();
       this.lastSent.set(item.toPty, sentAt);
-      if (item.counts && item.enter) {
+      if (item.counts && enter) {
         const key = pairKey(item.fromPty ?? "outside", item.toPty);
         this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
       }
-      if (item.waiter) this.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
-      item.delivered?.();
+      // A draft waits for a person, so there's no answer to watch for.
+      if (item.waiter && enter) this.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
+      item.delivered?.(!enter);
       this.core.emit("live");
     }
     for (const [target, list] of [...this.waiting]) for (const waiter of [...list]) await this.checkWaiter(target, waiter, now);
+  }
+
+  /** Put a message in line for `toPty`, meant for the CLI in front there now. */
+  private queue(item: Omit<Pending, "id" | "cli">): void {
+    const session = this.core.live.get(item.toPty);
+    this.pending.push({ ...item, id: randomBytes(4).toString("hex"), cli: session ? cliIn(session) : null });
+  }
+
+  /** The two CLIs have traded as many messages as Settings allows without a person stepping in. */
+  private atLimit(fromPty: string | null, toPty: string): boolean {
+    return fromPty !== null && (this.counts.get(pairKey(fromPty, toPty)) ?? 0) >= this.settings().maxMessages;
   }
 
   private ensureTimer(): void {
@@ -916,8 +970,7 @@ export class MessageDesk {
     // The sender gave up waiting: the answer reaches it as a message instead.
     if (!waiter.forwardTo || !answered.reply?.trim()) return;
     const from = this.list().find((item) => item.ptyId === target);
-    this.pending.push({
-      id: randomBytes(4).toString("hex"),
+    this.queue({
       fromPty: target,
       toPty: waiter.forwardTo,
       text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text: cleanText(answered.reply), answer: "tell", savedAt: this.saveIfLong("messages", answered.reply) }),
@@ -953,14 +1006,44 @@ export class MessageDesk {
     const stamp = this.core.now().toISOString().replace(/[:.]/g, "-");
     const file = path.join(dir, `${stamp}-${randomBytes(3).toString("hex")}.${ext}`);
     writeFileAtomic(file, text.endsWith("\n") ? text : `${text}\n`);
+    this.tidy(dir);
+    return file;
+  }
+
+  /** Old saved files go, but never one a message still in line, or one still being answered, points at. */
+  private tidy(dir: string): void {
     try {
-      const names = fs.readdirSync(dir).sort();
-      for (const name of names.slice(0, Math.max(0, names.length - KEEP_FILES))) fs.rmSync(path.join(dir, name), { force: true });
+      const cutoff = this.nowMs() - KEEP_FILES_MS;
+      const named = [...this.pending.map((item) => item.text), ...[...this.waiting.values()].flat().map((waiter) => waiter.sent ?? "")].join("\n");
+      for (const name of fs.readdirSync(dir)) {
+        const file = path.join(dir, name);
+        if (savedAt(name, file) >= cutoff || named.includes(file)) continue;
+        fs.rmSync(file, { force: true });
+      }
     } catch {
       /* tidying is best effort */
     }
-    return file;
   }
+}
+
+/** When a saved file was written: the time its name starts with (see saveFile), else its own. */
+function savedAt(name: string, file: string): number {
+  const stamp = /^(\d{4}-\d\d-\d\dT\d\d)-(\d\d)-(\d\d)-(\d{3})Z-/.exec(name);
+  const at = stamp ? Date.parse(`${stamp[1]}:${stamp[2]}:${stamp[3]}.${stamp[4]}Z`) : Number.NaN;
+  if (Number.isFinite(at)) return at;
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Which CLI is in front in a terminal: a run is its own CLI; in a shell, the coding CLI typed into
+ * it and when it started, so one that quit and another (or a new one) started there tells apart.
+ */
+function cliIn(session: LiveSession): string {
+  return session.kind === "run" ? `run|${session.startedAt}` : `${session.programEngineId ?? ""}|${session.cliSince ?? ""}`;
 }
 
 /**
