@@ -212,4 +212,4 @@ The code is in `src/core` (the service, storage, scheduler — plain Node), `src
 
 VibeForge is an independent project. It is not affiliated with Omarchy, Anthropic, OpenAI, xAI, Google, Meta, Moonshot, GitHub, Tailscale or any CLI it runs; their names are used only to say what VibeForge works with. Released under the [MIT license](LICENSE).
 
-Contributing notes are in [CONTRIBUTING.md](CONTRIBUTING.md). Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).
+Contributing notes are in [CONTRIBUTING.md](CONTRIBUTING.md), and how to report a security problem is in [SECURITY.md](SECURITY.md). Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).

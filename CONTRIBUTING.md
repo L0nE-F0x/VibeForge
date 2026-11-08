@@ -47,6 +47,8 @@ The copy gets its own tray icon. Turn the phone page on in only one of them, sin
 
 Use the [bug](https://github.com/L0nE-F0x/VibeForge/issues/new?template=bug_report.yml) and [feature](https://github.com/L0nE-F0x/VibeForge/issues/new?template=feature_request.yml) templates. **Help → Copy diagnostics** inside the app fills in versions and the end of VibeForge's own log. Read it and remove anything private before you paste.
 
+A security problem goes to a private report, as [SECURITY.md](SECURITY.md) says, not to an issue.
+
 | Label | Meaning |
 | --- | --- |
 | `bug` | Something does not work |
