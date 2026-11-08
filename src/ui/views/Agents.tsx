@@ -18,7 +18,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useQuery, useSkills } from "../api.js";
+import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSkills } from "../api.js";
 import { useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
@@ -557,6 +557,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const deleted = useDeleted();
+  const running = (useLive().data ?? []).some((session) => session.agentId === agent.id && session.runId);
   const engines = useEngines().data ?? [];
   const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
   const { name, engine, allow, voice, goodAt, tier } = form;
@@ -577,15 +578,12 @@ function SettingsTab({ agent }: { agent: Agent }) {
     if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
   const [remove, removing] = useAction(async () => {
-    const ok = await confirm({
-      title: t("agents.deleteTitle", { name: agent.name }),
-      body: t("agents.deleteBody"),
-      confirm: t("agents.delete"),
-      danger: true,
-      typeToConfirm: agent.name,
-    });
-    if (!ok) return;
-    const result = await call("agents.delete", agent.id, agent.name);
+    // Deleting is undone from the toast. Only a running session asks first: stopping it can't be undone.
+    if (running) {
+      const ok = await confirm({ title: t("common.deleteNamed", { name: agent.name }), body: t("agents.deleteRunningBody"), confirm: t("common.stopAndDelete"), danger: true });
+      if (!ok) return;
+    }
+    const result = await call("agents.delete", agent.id);
     go({ view: "agents" });
     deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));

@@ -57,11 +57,17 @@ export class LibraryDesk {
   /**
    * Delete an agent, Undo-able: its folder (brief, memory) and its routines go to the trash
    * together, so Undo brings them all back and a new agent given the same name starts without them.
+   * Anything running as it is stopped first; that part can't be undone.
    */
-  deleteAgent(id: string, confirmName: string): Deleted {
+  async deleteAgent(id: string): Promise<Deleted> {
     const agent = this.core.store.getAgent(id);
     if (!agent) throw new Error("That agent no longer exists.");
-    if (confirmName.trim() !== agent.name) throw new Error("Type the agent's name exactly to delete it.");
+    for (const session of this.core.listLive()) {
+      if (session.agentId !== id || !session.runId) continue;
+      const exited = this.core.waitForExit(session.ptyId, 6000);
+      await this.core.stopRun(session.runId);
+      await exited;
+    }
     const folder = path.join(this.core.options.configRoot, "agents", agent.id);
     const routines = this.core.store.listRoutines().flatMap((routine) => (routine.agentId === id ? (this.core.store.pathOf("routine", routine.id) ?? []) : []));
     const bin = this.core.trash.stash([folder, ...routines]);
