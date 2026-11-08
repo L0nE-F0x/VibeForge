@@ -33,6 +33,8 @@ export type ShortcutScope =
   | "runs"
   /** An open editor: an agent, skill, task or routine. */
   | "form"
+  /** A message with an Undo button (state.tsx). */
+  | "toast"
   /** A list panel with a row focused (components/SidePanel.tsx). */
   | "list";
 
@@ -112,6 +114,7 @@ const LIST = [
 
   // ---------------------------------------------------------------- editing
   { id: "form.save", keys: "Ctrl+S", label: "shortcuts.save", group: "shortcuts.editing", scope: "form", paused: "never", chord: { ctrl: true, key: "s" } },
+  { id: "toast.undo", keys: "Ctrl+Z", label: "shortcuts.undo", group: "shortcuts.editing", scope: "toast", paused: "typing", chord: { ctrl: true, shift: false, alt: false, meta: false, key: "z" } },
   { id: "app.devtools", keys: "Ctrl+Shift+I", label: "shortcuts.devtools", group: "shortcuts.editing", scope: "app", paused: "never", chord: { ctrl: true, shift: true, key: "i" }, terminal: "window", inTerminal: { alt: false } },
 
   // ---------------------------------------------------------------- runs

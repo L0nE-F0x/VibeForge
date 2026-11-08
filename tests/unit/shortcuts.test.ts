@@ -39,6 +39,7 @@ const HANDLERS: Record<ShortcutScope, string[]> = {
   voice: ["src/ui/voice.tsx"],
   runs: ["src/ui/views/Runs.tsx"],
   form: ["src/ui/views/Agents.tsx"],
+  toast: ["src/ui/state.tsx"],
   list: ["src/ui/components/SidePanel.tsx"],
 };
 
@@ -105,6 +106,8 @@ describe("the shortcut registry", () => {
       [press("Enter", { ctrl: true, shift: true }), ["terminal.write"]],
       [press(" ", { ctrl: true, shift: true }, "Space"), ["voice.dictate"]],
       [press("s", { ctrl: true }), ["form.save"]],
+      [press("z", { ctrl: true }), ["toast.undo"]],
+      [press("Z", { ctrl: true, shift: true }), []],
       [press("j"), ["runs.next"]],
       [press("k"), ["runs.prev"]],
       // Caps Lock on: J and K stay letters to type.
@@ -117,7 +120,7 @@ describe("the shortcut registry", () => {
   });
 
   it("never gives one key to two of the window's listeners, so the order they run in can't matter", () => {
-    const window: ShortcutScope[] = ["app", "code", "form", "runs", "list"];
+    const window: ShortcutScope[] = ["app", "code", "form", "toast", "runs", "list"];
     for (const event of sweep()) {
       const claimed = shortcutsFor(event).filter((id) => window.includes(SHORTCUTS.find((item) => item.id === id)!.scope));
       expect(claimed.length, `${JSON.stringify(event)}: ${claimed.join(", ")}`).toBeLessThanOrEqual(1);
@@ -141,6 +144,7 @@ describe("what a terminal lets through", () => {
       press(" ", { ctrl: true, shift: true }, "Space"),
       press("Enter", { ctrl: true, shift: true }),
       press("s", { ctrl: true }),
+      press("z", { ctrl: true }),
     ])
       expect(appShortcut(event), JSON.stringify(event)).toBe(false);
   });

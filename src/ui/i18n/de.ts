@@ -140,6 +140,7 @@ export const de: Catalog = {
   "shortcuts.drop": "Pfad einfügen",
   "shortcuts.write": "Im Terminal eines Chats: eine längere Nachricht schreiben",
   "shortcuts.save": "Agent, Skill, Aufgabe oder Routine speichern",
+  "shortcuts.undo": "Rückgängig, solange eine Meldung es anbietet",
   "shortcuts.devtools": "Entwicklerwerkzeuge",
   "shortcuts.doubleClick": "Doppelklick",
   "shortcuts.drag": "Ziehen",
