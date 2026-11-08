@@ -3,9 +3,10 @@ import { escapeTop, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/ov
 import { confirmSlot } from "../../src/ui/state.js";
 
 /** A keydown as the overlay stack sees it, recording what was done to it. */
-function keydown(key: string, init: { defaultPrevented?: boolean; isComposing?: boolean; target?: { closest: (selector: string) => unknown } } = {}) {
+function keydown(key: string, init: { shiftKey?: boolean; defaultPrevented?: boolean; isComposing?: boolean; target?: { closest: (selector: string) => unknown } } = {}) {
   const event = {
     key,
+    shiftKey: init.shiftKey ?? false,
     target: init.target ?? null,
     defaultPrevented: init.defaultPrevented ?? false,
     isComposing: init.isComposing ?? false,
@@ -76,6 +77,16 @@ describe("the overlay stack", () => {
     // Focus on the sheet's own controls: Escape closes it as before.
     const button = { closest: () => null };
     expect(escapeTop(keydown("Escape", { target: button }))).toBe(true);
+    expect(closed).toEqual(["task sheet"]);
+  });
+
+  it("closes the top overlay on Shift+Escape from inside a terminal, and keeps it from the CLI", () => {
+    const closed: string[] = [];
+    open(closed, "task sheet");
+    const terminal = { closest: (selector: string) => (selector === ".xterm" ? {} : null) };
+    const event = keydown("Escape", { shiftKey: true, target: terminal });
+    expect(escapeTop(event)).toBe(true);
+    expect(event.defaultPrevented && event.stopped).toBe(true);
     expect(closed).toEqual(["task sheet"]);
   });
 

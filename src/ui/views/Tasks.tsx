@@ -275,7 +275,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
         ) : (
           task && <Chip tone={task.status === "done" ? "ok" : task.status === "review" ? "warn" : task.status === "running" ? "accent" : undefined}>{statusLabel}</Chip>
         )}
-        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
+        <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t(live ? "common.closeEscTerminal" : "common.closeEsc")} />
       </div>
       {live && (
         <div style={{ height: "46vh", display: "flex", flexDirection: "column", borderBottom: "1px solid var(--line)" }}>

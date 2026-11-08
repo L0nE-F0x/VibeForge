@@ -35,7 +35,7 @@ export function overlayOpen(): boolean {
   return stack.length > 0;
 }
 
-type EscapeEvent = Pick<KeyboardEvent, "key" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation"> & {
+type EscapeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation"> & {
   target: EventTarget | { closest?: (selector: string) => unknown } | null;
 };
 
@@ -47,13 +47,14 @@ function inTerminal(target: EscapeEvent["target"]): boolean {
 
 /**
  * Escape closes the top overlay and nothing under it. False when it wasn't one for us. In a
- * terminal (a task sheet's live CLI) Escape is the program's: Claude Code stops on it. The way
- * out is then the overlay's close button, or Escape once focus has left the terminal.
+ * terminal (a task sheet's live CLI) Escape is the program's: Claude Code stops on it. There
+ * Shift+Escape closes the overlay instead; a terminal sends the same byte for both, so no CLI
+ * can be waiting for Shift+Escape, and Omarchy binds only Super+Escape.
  */
 export function escapeTop(event: EscapeEvent): boolean {
   // Taken already: dictation drops its words on Escape (voice.tsx), the tour closes itself.
   if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return false;
-  if (inTerminal(event.target)) return false;
+  if (inTerminal(event.target) && !event.shiftKey) return false;
   const top = topOverlay();
   if (!top) return false;
   event.preventDefault();

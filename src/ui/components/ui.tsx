@@ -431,6 +431,7 @@ export function Modal({
   children,
   footer,
   wide,
+  terminal,
 }: {
   title: ReactNode;
   icon?: LucideIcon;
@@ -438,6 +439,8 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  /** It holds a terminal, where Escape is the program's and Shift+Esc closes the dialog. */
+  terminal?: boolean;
 }) {
   const t = useT();
   const titleId = useId();
@@ -452,7 +455,7 @@ export function Modal({
           <h2 className="grow" id={titleId}>
             {title}
           </h2>
-          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t("common.closeEsc")} />
+          <Button variant="ghost" size="sm" icon={X} onClick={onClose} title={t(terminal ? "common.closeEscTerminal" : "common.closeEsc")} />
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
