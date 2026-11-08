@@ -15,6 +15,7 @@ import {
   Palette,
   Rocket,
   SquareTerminal,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -63,7 +64,7 @@ const STEPS: Step[] = [
     icon: Compass,
     keys: [
       ["Ctrl+K", "shortcuts.switcher"],
-      ["Ctrl+1…8", "shortcuts.switchViews"],
+      ["Ctrl+1…9", "shortcuts.switchViews"],
       ["Alt+←", "shortcuts.back"],
     ],
   },
@@ -135,6 +136,16 @@ const STEPS: Step[] = [
     target: [".board", ".stage"],
     side: "bottom",
     icon: KanbanSquare,
+  },
+  {
+    id: "maestro",
+    title: "tour.maestro.title",
+    body: "tour.maestro.body",
+    route: { view: "orchestrator" },
+    target: [".orch-talk", ".stage"],
+    side: "left",
+    icon: Workflow,
+    keys: [["Ctrl+Shift+O", "shortcuts.orchestrator"]],
   },
   {
     id: "runs",

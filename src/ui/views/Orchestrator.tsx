@@ -9,11 +9,12 @@ import { coreText } from "../core-text.js";
 import { Composer } from "../components/Session.js";
 import { Button, Chip, Empty, Logo, Segmented, Select, Spinner, useOverlayStack } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
+import { CopyActions, CopyList, CopySheet } from "./OrchestratorCopies.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
 
-// Talk to VibeForge itself: say or type what to start where, and the CLI chosen in Settings
-// (Grok Build by default) turns it into a plan that VibeForge carries out. The full view has the
+// Maestro: say or type what to start where, and the planner (the CLI picked in Settings, or the
+// first one here that can plan) turns it into a plan that VibeForge carries out. The full view has the
 // conversation and the team; Ctrl+Shift+O opens the same conversation over any view.
 
 export const OPEN_ORCHESTRATOR_EVENT = "vibeforge:open-orchestrator";
@@ -65,6 +66,7 @@ function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[])
 
 export function OrchestratorView() {
   const t = useT();
+  const { route } = useNav();
   const view = useOrchestrator().data;
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
@@ -72,7 +74,8 @@ export function OrchestratorView() {
   const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "" } }), t("settings.saveFailed"));
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const planners = engines.filter((engine) => canOrchestrate(engine));
-  const engineId = settings?.orchestrator.engine ?? "grok";
+  // The planner in use: the one picked, or until then the first one on this machine.
+  const engineId = view?.engineId ?? settings?.orchestrator.engine ?? "";
 
   return (
     <div className="view">
@@ -112,6 +115,7 @@ export function OrchestratorView() {
           </aside>
         </div>
       </div>
+      {route.view === "orchestrator" && route.copyId && <CopySheet copyId={route.copyId} copies={view?.copies} />}
     </div>
   );
 }
@@ -194,7 +198,7 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
         {view && !view.engineReady && (
           <div className="orch-problem">
             <CircleAlert size={14} />
-            <span className="grow">{t("orch.notReady", { engine: engineLabel })}</span>
+            <span className="grow">{t("orch.notReady")}</span>
             <Button size="sm" onClick={() => go({ view: "settings", section: "orchestrator" })}>
               {t("orch.openSettings")}
             </Button>
@@ -342,6 +346,8 @@ function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; s
   const target = live.find((item) => item.ptyId === step.target);
   const Icon = step.kind === "start" ? Play : step.kind === "tell" ? MessageSquare : Square;
   const opened = step.ptyId ? live.find((item) => item.ptyId === step.ptyId) : undefined;
+  const copies = useOrchestrator().data?.copies ?? [];
+  const copy = step.kind === "start" && !editable ? copies.find((item) => item.id === step.copyId || item.stepId === step.id) : undefined;
 
   return (
     <div className={`orch-step step-${step.state}${issue ? " has-issue" : ""}`}>
@@ -400,6 +406,10 @@ function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; s
         {issue && <span className="orch-issue">{t(ISSUE_KEY[issue], { asked: step.asked || "?" })}</span>}
         {step.state === "failed" && step.error && <span className="orch-issue">{coreText(step.error)}</span>}
         {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
+        {copy && <CopyActions copy={copy} onLeave={leaveBar} />}
+        {!copy && step.outcome && (
+          <span className="faint">{step.outcome === "applied" ? t("orch.outcome.applied", { workspace: workspace?.name ?? "" }) : t("orch.outcome.discarded")}</span>
+        )}
       </div>
       {step.state === "done" && step.kind === "start" && step.ptyId && (
         <Button size="sm" icon={SquareTerminal} disabled={!opened} onClick={() => {
@@ -454,6 +464,7 @@ function TeamPanel() {
   const attention = usePtyAttention();
   const clis = live.filter(isCodingCli).sort((a, b) => Number(Boolean(b.orchestrated)) - Number(Boolean(a.orchestrated)) || a.startedAt.localeCompare(b.startedAt));
   const own = clis.filter((session) => session.orchestrated);
+  const copies = useOrchestrator().data?.copies ?? [];
   const [stop] = useAction(async (ptyId: string) => call("pty.kill", ptyId), t("orch.stopFailed"));
   const [stopAll, stoppingAll] = useAction(async () => {
     const ok = await confirm({ title: t.count("orch.stopAllTitle", own.length), body: t("orch.stopAllBody"), confirm: t("orch.stopAll"), danger: true });
@@ -463,6 +474,7 @@ function TeamPanel() {
 
   return (
     <div className="vstack" style={{ gap: 8, minHeight: 0 }}>
+      <CopyList copies={copies} workspaces={workspaces} />
       <div className="orch-team-head">
         <span className="section-title" style={{ margin: 0 }}>
           {t("orch.team")}

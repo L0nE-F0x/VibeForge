@@ -309,3 +309,21 @@
 .orch-bar .composer {
   background: transparent;
 }
+
+/* A step's copy: review it, apply it, or throw it away, as a task's copy offers. */
+.orch-copy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.orch-review-list {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 40%;
+  overflow: auto;
+  margin-bottom: 6px;
+}

@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
-import { agyModels, grokModels, type BrainRun } from "../../src/core/service/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannerFor, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
+import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
 
@@ -97,6 +97,17 @@ describe("the Orchestrator's plans", () => {
     expect(readBrainOutput(JSON.stringify({ session_id: "c1", structured_output: { say: "Hi.", steps: [] } })).sessionId).toBe("c1");
   });
 
+  it("plans with the CLI picked while it's here, else Grok Build, else the first one that can", () => {
+    const here = (ids: string[]) => [grok, claude, codex, kimi].map((row) => ({ ...row, available: ids.includes(row.id) }));
+    // Only Claude Code installed: it plans, whatever was left in Settings from before.
+    expect(plannerFor("", here(["claude", "kimi"]))).toBe("claude");
+    expect(plannerFor("grok", here(["claude"]))).toBe("claude");
+    expect(plannerFor("codex", here(["grok", "claude", "codex"]))).toBe("codex");
+    expect(plannerFor("", here(["claude", "grok"]))).toBe("grok");
+    expect(plannerFor("kimi", here(["kimi"]))).toBe("");
+    expect(plannerFor("", here([]))).toBe("");
+  });
+
   it("lists the models Grok Build and Antigravity print", () => {
     expect(grokModels("You are logged in with grok.com.\n\nDefault model: grok-4.7\n\nAvailable models:\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n")).toEqual(["grok-4.7", "grok-4.7-build-fast", "grok-4.6"]);
     expect(agyModels("Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)\n")).toEqual(["gemini-4-argon-medium", "claude-sonnet-5-5-low"]);
@@ -174,6 +185,70 @@ describe("the Orchestrator's plans", () => {
   });
 });
 
+/** Whether a process is still there; a zombie waiting for init counts as gone soon after. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Polls for up to three seconds, for a real process that is slow to start or to be reaped. */
+async function eventually(check: () => boolean): Promise<void> {
+  for (let tries = 0; tries < 150 && !check(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(check()).toBe(true);
+}
+
+describe("the planning CLI's process", () => {
+  /** A stand-in planner that ignores SIGTERM and starts a child that does too, then hangs. */
+  function stubborn(): { bin: string; pidFile: string } {
+    const dir = tempDir();
+    const bin = path.join(dir, "stubborn");
+    const pidFile = path.join(dir, "child.pid");
+    fs.writeFileSync(bin, `#!/bin/bash\ntrap '' TERM\nsleep 60 &\necho $! > "${pidFile}"\nwait\n`, { mode: 0o755 });
+    return { bin, pidFile };
+  }
+
+  it("kills the whole group when a planner ignores SIGTERM past its timeout", async () => {
+    const { bin, pidFile } = stubborn();
+    const started = Date.now();
+    const turn = spawnBrain([bin], path.dirname(bin), new AbortController().signal, 300, 200);
+    await eventually(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() !== "");
+    const child = Number(fs.readFileSync(pidFile, "utf8"));
+    const run = await turn;
+    expect(run.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(5000);
+    await eventually(() => !alive(child));
+  });
+
+  it("ends a turn that is stopped, even when the planner won't go quietly", async () => {
+    const { bin, pidFile } = stubborn();
+    const controller = new AbortController();
+    const turn = spawnBrain([bin], path.dirname(bin), controller.signal, 60_000, 200);
+    await eventually(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() !== "");
+    const child = Number(fs.readFileSync(pidFile, "utf8"));
+    controller.abort();
+    const run = await turn;
+    expect(run.timedOut).toBe(false);
+    await eventually(() => !alive(child));
+  });
+
+  it("runs a planner without VibeForge's debug port or Electron's variables", () => {
+    const env = plannerEnv({ PATH: "/usr/bin", HOME: "/home/x", VIBEFORGE_DEBUG: "1", VIBEFORGE_DEBUG_PORT: "9223", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" });
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x", NO_COLOR: "1" });
+  });
+
+  it("reads what a planner prints, and a missing one as code 127", async () => {
+    const dir = tempDir();
+    const bin = path.join(dir, "says");
+    fs.writeFileSync(bin, '#!/bin/bash\necho "{\\"say\\":\\"hi\\"}"\necho oops >&2\n', { mode: 0o755 });
+    expect(await spawnBrain([bin], dir, new AbortController().signal)).toMatchObject({ code: 0, stdout: '{"say":"hi"}\n', stderr: "oops\n", timedOut: false });
+    expect((await spawnBrain([path.join(dir, "nothing-here")], dir, new AbortController().signal)).code).toBe(127);
+  });
+});
+
 function gitRepo(): string {
   const dir = path.join(tempDir(), "shop");
   fs.mkdirSync(dir);
@@ -184,8 +259,8 @@ function gitRepo(): string {
 }
 
 /** The harness with a "grok" row that plans (its bin resolves), and a planner that answers from a list. */
-function withPlanner(answers: Array<Record<string, unknown> | string>) {
-  const ctx = setup();
+function withPlanner(answers: Array<Record<string, unknown> | string>, opts: Parameters<typeof setup>[0] = {}) {
+  const ctx = setup(opts);
   const file = path.join(ctx.configRoot, "engines.json");
   const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
   engines.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] });
@@ -201,8 +276,30 @@ function withPlanner(answers: Array<Record<string, unknown> | string>) {
   return { ...ctx, calls };
 }
 
+/** A repository with one committed file, and the shell git commands for it and its copies. */
+function repoWithFile(): { repo: string; git: (cwd: string, ...args: string[]) => string } {
+  const repo = gitRepo();
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" });
+  fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+  git(repo, "add", "a.txt");
+  git(repo, "commit", "-qm", "a");
+  return { repo, git };
+}
+
+/** Plan one start step on `branch` in the shop workspace, Go, and hand back the step and its copy. */
+async function startInCopy(ctx: ReturnType<typeof withPlanner>, branch: string) {
+  await ctx.svc.orchestratorAsk(`start argy on ${branch}`);
+  const turn = ctx.svc.orchestratorView().turns.at(-1);
+  await ctx.svc.orchestratorRun(turn?.id ?? "");
+  const view = ctx.svc.orchestratorView();
+  const step = view.turns.find((item) => item.id === turn?.id)?.steps?.[0];
+  const copy = view.copies?.find((item) => item.id === step?.copyId);
+  if (!step || !copy) throw new Error("no copy");
+  return { step, copy };
+}
+
 describe("the Orchestrator in the service", () => {
-  it("plans, waits for Go, then starts the CLI on a new branch in its own folder", async () => {
+  it("plans, waits for Go, then starts the CLI on a new branch in its own copy", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([{ say: "Starting Argy in shop on blah.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "blah", prompt: "Do A, B and C." }] }, { say: "Nothing else to do.", steps: [] }]);
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
@@ -225,9 +322,12 @@ describe("the Orchestrator in the service", () => {
     const step = view.turns[1].steps?.[0];
     expect(view.turns[1].plan).toBe("done");
     expect(step?.state).toBe("done");
-    const copy = path.join(path.dirname(repo), "shop.worktrees", "blah");
+    // A copy the way a task gets one: in VibeForge's worktrees folder, on a vibeforge/ branch.
+    const copy = path.join(ctx.dataRoot, "worktrees", "blah");
     expect(fs.existsSync(copy)).toBe(true);
-    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: copy, encoding: "utf8" }).trim()).toBe("blah");
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: copy, encoding: "utf8" }).trim()).toBe("vibeforge/blah");
+    expect(step).toMatchObject({ branch: "vibeforge/blah", copyId: "blah" });
+    expect(view.copies).toEqual([expect.objectContaining({ id: "blah", name: "blah", stepId: step?.id, workspaceId: workspace.id, openedWorkspaceId: step?.openedWorkspaceId, path: copy, branch: "vibeforge/blah" })]);
     // The workspace's own folder stays where it was.
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe("main");
     const workspaces = ctx.svc.listWorkspaces();
@@ -247,6 +347,117 @@ describe("the Orchestrator in the service", () => {
     expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("Nothing else to do.");
     expect(ctx.svc.orchestratorView().turns.at(-1)?.steps).toBeUndefined();
     ctx.svc.close();
+  });
+
+  it("brings a step's work back for review: its diff, then Apply into the workspace, which tidies the copy away", async () => {
+    const { repo, git } = repoWithFile();
+    const plan = (branch: string) => ({ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch, prompt: "Change a." }] });
+    const ctx = withPlanner([plan("fix-a"), plan("fix-a")]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const { step, copy } = await startInCopy(ctx, "fix-a");
+    // The CLI works in its copy: one commit and an edit not committed yet, and a new file.
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    git(copy.path, "commit", "-qam", "two");
+    fs.appendFileSync(path.join(copy.path, "a.txt"), "three\n");
+    fs.writeFileSync(path.join(copy.path, "b.txt"), "new\n");
+    const diff = await ctx.svc.orchestratorCopyDiff(copy.id);
+    expect(diff).toContain("+TWO");
+    expect(diff).toContain("+three");
+    expect(diff).toContain("b/b.txt");
+    // Nothing reaches the workspace until Apply.
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+
+    // A second step asking for the same branch gets its own name; the first copy's branch is left alone.
+    const second = await startInCopy(ctx, "fix-a");
+    expect(second.copy).toMatchObject({ id: "fix-a-2", branch: "vibeforge/fix-a-2" });
+    expect(git(repo, "rev-parse", "vibeforge/fix-a").trim()).not.toBe(git(repo, "rev-parse", "HEAD").trim());
+
+    const result = await ctx.svc.orchestratorApplyCopy(copy.id);
+    expect(result).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\nthree\n");
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new\n");
+    // As uncommitted edits: the workspace's branch hasn't moved.
+    expect(git(repo, "log", "--format=%s").trim().split("\n")[0]).toBe("a");
+    // Its CLI ended first; its copy, branch and workspace are gone, and the step says so.
+    expect(ctx.killed).toContain(step.ptyId);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(git(repo, "branch", "--list", "vibeforge/fix-a").trim()).toBe("");
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.id)).toEqual([workspace.id, second.copy.openedWorkspaceId]);
+    const view = ctx.svc.orchestratorView();
+    expect(view.copies?.map((item) => item.id)).toEqual(["fix-a-2"]);
+    expect(view.turns.flatMap((turn) => turn.steps ?? []).find((item) => item.id === step.id)?.outcome).toBe("applied");
+    await expect(ctx.svc.orchestratorApplyCopy(copy.id)).rejects.toThrow("That copy is gone.");
+    ctx.svc.close();
+  });
+
+  it("discards a copy with its workspace, puts both back on Undo, and drops the branch once Undo has passed", async () => {
+    const { repo, git } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "try-it", prompt: "Try it." }] }]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const { step, copy } = await startInCopy(ctx, "try-it");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "changed\n");
+    ctx.svc.saveLayout(copy.openedWorkspaceId ?? "", { kind: "pane", id: "p1", launch: { type: "shell" } });
+
+    const deleted = await ctx.svc.orchestratorDiscardCopy(copy.id);
+    expect(deleted.copyLeft).toBeUndefined();
+    expect(ctx.killed).toContain(step.ptyId);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.id)).toEqual([workspace.id]);
+    expect(ctx.svc.orchestratorView().copies).toEqual([]);
+    expect(ctx.svc.orchestratorView().turns[1].steps?.[0].outcome).toBe("discarded");
+    // The workspace never saw any of it.
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+
+    ctx.svc.undoDelete(deleted.undo);
+    expect(fs.readFileSync(path.join(copy.path, "a.txt"), "utf8")).toBe("changed\n");
+    expect(ctx.svc.listWorkspaces().workspaces.find((item) => item.id === copy.openedWorkspaceId)).toMatchObject({ name: "shop · try-it", path: copy.path });
+    expect(ctx.svc.getLayout(copy.openedWorkspaceId ?? "")).toMatchObject({ id: "p1" });
+    expect(ctx.svc.orchestratorView().copies?.map((item) => item.id)).toEqual(["try-it"]);
+    expect(ctx.svc.orchestratorView().turns[1].steps?.[0].outcome).toBeNull();
+    expect(await ctx.svc.orchestratorCopyDiff(copy.id)).toContain("+changed");
+
+    // Discarded again; closing ends the chance to undo, and the branch goes with it.
+    await ctx.svc.orchestratorDiscardCopy(copy.id);
+    expect(git(repo, "branch", "--list", "vibeforge/try-it").trim()).not.toBe("");
+    ctx.svc.close();
+    for (let tries = 0; tries < 150 && git(repo, "branch", "--list", "vibeforge/try-it").trim(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(git(repo, "branch", "--list", "vibeforge/try-it").trim()).toBe("");
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain("try-it");
+  });
+
+  it("keeps a copy that conflicts, keeps copies through a new conversation, and never touches a folder that isn't its own", async () => {
+    const { repo, git } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "clash", prompt: "Change a." }] }]);
+    ctx.svc.addWorkspace(repo);
+    const { copy } = await startInCopy(ctx, "clash");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nfrom the copy\n");
+    // The workspace moved on underneath, on the same line.
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nfrom the workspace\n");
+    git(repo, "commit", "-qam", "meanwhile");
+    const result = await ctx.svc.orchestratorApplyCopy(copy.id);
+    expect(result.conflicts).toEqual(["a.txt"]);
+    expect(fs.existsSync(copy.path)).toBe(true);
+    expect(ctx.svc.orchestratorView().copies?.map((item) => item.id)).toEqual(["clash"]);
+
+    // New: the conversation starts over, the copy still waits.
+    ctx.svc.orchestratorClear();
+    expect(ctx.svc.orchestratorView()).toMatchObject({ turns: [], copies: [expect.objectContaining({ id: "clash" })] });
+    ctx.svc.close();
+
+    // A list edited by hand to point somewhere else: Apply refuses, Discard only forgets it.
+    const elsewhere = tempDir();
+    fs.writeFileSync(path.join(elsewhere, "keep.txt"), "mine\n");
+    const file = path.join(ctx.dataRoot, "orchestrator", "copies.json");
+    const saved = JSON.parse(fs.readFileSync(file, "utf8")) as { copies: Array<Record<string, unknown>> };
+    saved.copies[0].path = elsewhere;
+    fs.writeFileSync(file, JSON.stringify(saved));
+    const again = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await expect(again.svc.orchestratorApplyCopy("clash")).rejects.toThrow("This copy is not in VibeForge's worktrees folder, so it was left alone.");
+    await expect(again.svc.orchestratorCopyDiff("clash")).rejects.toThrow();
+    expect((await again.svc.orchestratorDiscardCopy("clash")).copyLeft).toBe(true);
+    expect(fs.readFileSync(path.join(elsewhere, "keep.txt"), "utf8")).toBe("mine\n");
+    expect(again.svc.orchestratorView().copies).toEqual([]);
+    again.svc.close();
   });
 
   it("carries a plan out at once under Just go, and keeps one that needs a person", async () => {
@@ -273,9 +484,12 @@ describe("the Orchestrator in the service", () => {
   });
 
   it("tells and stops running CLIs, replaces a waiting plan, and says when it can't read the answer", async () => {
-    const ctx = withPlanner([]);
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
     const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
     const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    // Past the moment a CLI that just started is left to draw its first screen.
+    at += 6000;
     const answers: Array<Record<string, unknown> | string> = [
       { say: "First idea.", steps: [{ kind: "stop", target: running.ptyId }] },
       { say: "Telling it, then closing it.", steps: [{ kind: "tell", target: running.ptyId, prompt: "Wrap up." }, { kind: "stop", target: running.ptyId }] },
@@ -291,7 +505,8 @@ describe("the Orchestrator in the service", () => {
     expect(turns[1].plan).toBe("replaced");
     expect(() => ctx.svc.orchestratorEditStep(turns[1].id, turns[1].steps?.[0].id ?? "", { prompt: "x" })).toThrow("That plan has already been carried out.");
     await ctx.svc.orchestratorRun(turns[3].id);
-    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "Wrap up." });
+    // A message like any other, labelled, through the queue.
+    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "From a terminal outside VibeForge:\nWrap up." });
     expect(ctx.killed).toContain(running.ptyId);
     await until(() => ctx.ended.length === 1);
 
@@ -300,6 +515,52 @@ describe("the Orchestrator in the service", () => {
 
     ctx.svc.orchestratorClear();
     expect(ctx.svc.orchestratorView().turns).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("tells a CLI only once it is free, never after Stop, and never into a shell whose CLI has quit", async () => {
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const run = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(shell.ptyId, ["pasty"], ctx.place);
+    at += 6000;
+    const plans: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: plans.shift() }), stderr: "", timedOut: false });
+    const tell = async (target: string, prompt: string) => {
+      plans.push({ say: "Telling it.", steps: [{ kind: "tell", target, prompt }] });
+      await ctx.svc.orchestratorAsk("tell it");
+      const turn = ctx.svc.orchestratorView().turns.at(-1);
+      await ctx.svc.orchestratorRun(turn?.id ?? "");
+      return ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps?.[0];
+    };
+
+    // Busy: it waits in the queue, and goes in once the CLI has been quiet a moment.
+    ctx.svc.onPtyActivity(run.ptyId, true);
+    expect(await tell(run.ptyId, "Add tests.")).toMatchObject({ state: "done" });
+    expect(ctx.sent).toEqual([]);
+    ctx.svc.onPtyActivity(run.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toEqual([{ ptyId: run.ptyId, text: "From a terminal outside VibeForge:\nAdd tests." }]);
+
+    // Stop on that terminal holds Maestro's messages too, until a person types there.
+    ctx.svc.stopTalk(run.ptyId);
+    at += 4000;
+    expect(await tell(run.ptyId, "And docs.")).toMatchObject({ state: "failed", error: expect.stringContaining("A person stopped the conversation") });
+
+    // The shell's CLI quits while the message waits for it: nothing is typed at the bare prompt.
+    ctx.svc.onPtyActivity(shell.ptyId, true);
+    expect(await tell(shell.ptyId, "rm -rf build")).toMatchObject({ state: "done" });
+    ctx.svc.onPtyProgram(shell.ptyId, null, ctx.place);
+    ctx.svc.onPtyActivity(shell.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
+    // And one planned while it ran is checked again at Go.
+    expect(await tell(shell.ptyId, "ls")).toMatchObject({ state: "skipped" });
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
     ctx.svc.close();
   });
 
@@ -344,6 +605,29 @@ describe("the Orchestrator in the service", () => {
     expect(ctx.svc.orchestratorView().engineReady).toBe(false);
     await ctx.svc.orchestratorAsk("hi");
     expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ from: "vibeforge", problem: "noEngine" });
+    ctx.svc.close();
+  });
+
+  it("plans with Claude Code on a machine that only has Claude Code, until another is picked", async () => {
+    const ctx = setup();
+    const file = path.join(ctx.configRoot, "engines.json");
+    const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+    engines.engines.push({ id: "grok", label: "Grok Build", bin: "grok", args: [] }, { id: "claude", label: "Claude Code", bin: "pasty", args: [] });
+    fs.writeFileSync(file, JSON.stringify(engines));
+    expect(ctx.svc.getSettings().orchestrator.engine).toBe("");
+    expect(ctx.svc.orchestratorView()).toMatchObject({ engineId: "claude", engineReady: true });
+    const calls: string[][] = [];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: JSON.stringify({ structured_output: { say: "Hello.", steps: [] } }), stderr: "", timedOut: false };
+    };
+    // A model left over for a planner that isn't here isn't handed to this one.
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7" } });
+    await ctx.svc.orchestratorAsk("hi");
+    expect(calls[0][0]).toBe("/usr/bin/pasty");
+    expect(calls[0]).toContain("--print");
+    expect(calls[0]).not.toContain("grok-4.7");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ by: "claude", text: "Hello." });
     ctx.svc.close();
   });
 

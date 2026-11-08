@@ -18,7 +18,7 @@ export type Route =
   | { view: "routines"; routineId?: string }
   | { view: "skills"; skillId?: string }
   | { view: "runs"; runId?: string; filter?: RunFilter }
-  | { view: "orchestrator" }
+  | { view: "orchestrator"; copyId?: string }
   | { view: "settings"; section?: string };
 
 export type RunFilter = "review" | "all" | "live";

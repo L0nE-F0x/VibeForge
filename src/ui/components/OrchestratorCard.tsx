@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { canOrchestrate } from "../../shared/orchestrator.js";
+import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
@@ -17,12 +17,14 @@ export function OrchestratorCard() {
   if (!settings) return null;
   const current = settings.orchestrator;
   const planners = engines.filter((engine) => canOrchestrate(engine));
+  // Until one is picked, the first planner on this machine is the one shown (and used).
+  const engineId = plannerFor(current.engine, engines) || current.engine;
   return (
     <div className="card vstack" style={{ gap: 14 }}>
       <div className="form-grid">
         <Field label={t("orch.planner")} hint={t("orch.plannerHint")}>
-          <Select value={current.engine} onChange={(event) => void save({ ...current, engine: event.target.value, model: "" })}>
-            {!planners.some((engine) => engine.id === current.engine) && <option value={current.engine}>{current.engine}</option>}
+          <Select value={engineId} onChange={(event) => void save({ ...current, engine: event.target.value, model: "" })}>
+            {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
             {planners.map((engine) => (
               <option key={engine.id} value={engine.id}>
                 {engine.label}
@@ -32,7 +34,7 @@ export function OrchestratorCard() {
           </Select>
         </Field>
         <Field label={t("orch.model")} hint={t("orch.modelHint")}>
-          <ModelPick key={current.engine} engineId={current.engine} value={current.model} onChange={(model) => void save({ ...current, model })} />
+          <ModelPick key={engineId} engineId={engineId} value={engineId === current.engine ? current.model : ""} onChange={(model) => void save({ ...current, engine: engineId, model })} />
         </Field>
         <Field label={t("orch.modeLabel")} hint={current.mode === "plan" ? t("orch.mode.planHint") : t("orch.mode.goHint")}>
           <Segmented

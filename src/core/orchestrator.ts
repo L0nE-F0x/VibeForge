@@ -1,9 +1,9 @@
 /**
- * The Orchestrator: a person talks to VibeForge (typed or dictated), one of their own coding CLIs
- * (Grok Build by default) turns that into steps, and VibeForge carries the steps out. The CLI only
- * ever writes a plan, in one headless turn with its tools off; starting, telling and stopping
- * CLIs is VibeForge's own code, so the plan card and its Go button stay in charge. It never picks
- * an engine by itself: the person names them (no routing, see docs/status.md).
+ * Maestro (the Orchestrator in code): a person talks to VibeForge (typed or dictated), one of
+ * their own coding CLIs (see plannerFor) turns that into steps, and VibeForge carries them out.
+ * The CLI only ever writes a plan, in one headless turn with its tools off; starting, telling and
+ * stopping CLIs is VibeForge's own code, so the plan card and its Go button stay in charge. It
+ * never picks an engine by itself: the person names them (no routing, see docs/status.md).
  */
 
 import path from "node:path";
@@ -171,7 +171,7 @@ export function orchestratorRules(context: PlanContext): string {
     ? context.running.map((item) => `- ${item.id}: ${item.engine} in ${item.workspace} (${item.folder}), ${item.working ? "working" : "waiting for input"}${item.orchestrated ? ", you started it" : ""}`).join("\n")
     : "- none";
   return [
-    "You are the Orchestrator inside VibeForge, a desktop app where a person runs several coding CLIs at once.",
+    "You are Maestro, the orchestrator inside VibeForge, a desktop app where a person runs several coding CLIs at once.",
     "The person talks to you, often by voice, so expect dictation slips: misheard names, missing punctuation. Match names generously.",
     "You never write code, read files or use tools yourself. You turn what the person asks into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
     "",

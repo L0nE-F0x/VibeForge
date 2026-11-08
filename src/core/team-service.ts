@@ -35,7 +35,7 @@ export class TeamService extends ServiceCore {
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
   private readonly messages = new MessageDesk(this, this.tasks);
-  readonly orchestrator = new OrchestratorDesk(this, this.workspaces);
+  readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages);
 
   constructor(options: DeskOptions) {
     super(options);
@@ -208,6 +208,18 @@ export class TeamService extends ServiceCore {
 
   orchestratorRemoveStep(turnId: string, stepId: string): void {
     this.orchestrator.removeStep(turnId, stepId);
+  }
+
+  orchestratorCopyDiff(copyId: string): Promise<string> {
+    return this.orchestrator.copyDiff(copyId);
+  }
+
+  orchestratorApplyCopy(copyId: string): Promise<ApplyResult> {
+    return this.orchestrator.applyCopy(copyId);
+  }
+
+  orchestratorDiscardCopy(copyId: string): Promise<Deleted> {
+    return this.orchestrator.discardCopy(copyId);
   }
 
   // ---------------------------------------------------------------- routines

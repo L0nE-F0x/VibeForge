@@ -183,7 +183,7 @@ describe("the phone page's Orchestrator routes", () => {
   it("says why the desk refused, in the phone's language", async () => {
     const orchestrator = desk({
       ask: () => {
-        throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+        throw new Error("Maestro is still answering. Wait for it, or stop it.");
       },
       view: () => ({
         engineId: "grok",
@@ -307,7 +307,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     phone.ask("Start Argy in shop on a branch called blah and do A, B and C");
     // Back at once; the planner is still thinking.
     expect(phone.view()).toMatchObject({ thinking: true, hear: true });
-    expect(() => phone.ask("and another")).toThrow("The Orchestrator is still answering. Wait for it, or stop it.");
+    expect(() => phone.ask("and another")).toThrow("Maestro is still answering. Wait for it, or stop it.");
     await until(() => answers.length === 1);
     answers[0]({ code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Starting it.", steps: [{ kind: "start", engine: "nobody", workspace: "shop", branch: "blah", prompt: "Do A, B and C." }] } }), stderr: "", timedOut: false });
     await until(() => !phone.view().thinking);
@@ -326,7 +326,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     expect(view.turns.at(-1)?.plan).toBe("done");
     expect(done).toMatchObject({ state: "done", live: true });
     expect(done?.runId).toBeTruthy();
-    const copy = path.join(path.dirname(repo), "shop.worktrees", "blah");
+    const copy = path.join(ctx.dataRoot, "worktrees", "blah");
     expect(ctx.spawns[0].cwd).toBe(copy);
     expect(ctx.spawns[0].argv.at(-1)).toBe("Do A and B.");
     expect(view.running[0]).toMatchObject({ ptyId: done?.ptyId, name: "Argy", workspace: "shop · blah", orchestrated: true, stop: "end" });
