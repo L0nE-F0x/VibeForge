@@ -2,6 +2,7 @@
 // Before the desk: pairing with the code from the computer, and the landing page a paired phone
 // opens on, with how it works and the phone's own settings.
 
+import { checkCode } from "./api.js";
 import { wordmark } from "./art.js";
 import { forgetSeen } from "./buzz.js";
 import { el, sheet } from "./dom.js";
@@ -37,13 +38,7 @@ async function pair(code) {
   state.error = "";
   update();
   try {
-    const response = await fetch("/api/pair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: given }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || t("phone.codeWrong"));
+    await checkCode(given);
     state.token = given;
     localStorage.setItem(TOKEN_KEY, state.token);
     state.busy = false;

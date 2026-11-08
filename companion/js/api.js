@@ -22,7 +22,7 @@ const PLANS_EVERY_MS = 60_000;
 /**
  * The computer's answer, read as JSON. A refusal throws with what it said; a link that fails throws `offline`.
  * @param {string} path
- * @param {{ method?: string, body?: string, timeout?: number }} [options]
+ * @param {{ method?: string, body?: string, timeout?: number, refused?: string }} [options] `refused`: what a refusal that gives no reason means here.
  * @returns {Promise<any>}
  */
 export async function call(path, options = {}) {
@@ -51,8 +51,17 @@ export async function call(path, options = {}) {
     forget();
     throw new Error(body.error || t("phone.pairLead"));
   }
-  if (!response.ok) throw Object.assign(new Error(body.error || t("phone.error.failed")), { working: body.working === true });
+  if (!response.ok) throw Object.assign(new Error(body.error || options.refused || t("phone.error.failed")), { working: body.working === true });
   return body;
+}
+
+/**
+ * Asks the computer whether a pairing code is its own. It gives up as a poll does, so a link that
+ * doesn't answer says the computer is offline and Continue comes back.
+ * @param {string} code
+ */
+export function checkCode(code) {
+  return call("/api/pair", { method: "POST", body: JSON.stringify({ token: code }), timeout: POLL_TIMEOUT_MS, refused: t("phone.codeWrong") });
 }
 
 /**
