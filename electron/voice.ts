@@ -41,8 +41,12 @@ import { type Download, downloadFiles } from "./download.js";
 import { Speaker } from "./speech.js";
 
 const LEVEL_EVERY_MS = 60;
-/** whisper-server is stopped after this long without a recording, to give its memory back. */
-const SERVER_IDLE_MS = 10 * 60 * 1000;
+/**
+ * whisper-server is stopped after this long unused, to give its memory back and close its port: it
+ * listens on loopback with no key, so any program here could use it while it runs. The next
+ * recording loads it again while the person is still speaking.
+ */
+const SERVER_IDLE_MS = 2 * 60 * 1000;
 const SERVER_READY_MS = 90_000;
 const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
@@ -88,6 +92,8 @@ export class Voice {
   private transcribing = false;
   private server: Server | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  /** Requests whisper-server is answering now; it isn't stopped under them. */
+  private serverUses = 0;
   private download: { kind: DownloadKind; id: string; received: number; total: number; abort: AbortController } | null = null;
   private downloadError: string | null = null;
   readonly speaker: Speaker;
@@ -110,6 +116,8 @@ export class Voice {
       controlSocket: string;
       /** The command that runs VibeForge, for keybindings. */
       launcher: () => string;
+      /** For tests: how long whisper-server is kept unused. */
+      serverIdleMs?: number;
     },
   ) {
     this.speaker = new Speaker({ log: opts.log, resolveBin: opts.resolveBin, speaking: opts.speaking });
@@ -438,7 +446,11 @@ export class Voice {
 
   private touchServer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.stopServer(), SERVER_IDLE_MS);
+    this.idleTimer = setTimeout(() => {
+      // A recording (up to three minutes) or an answer on its way still needs it.
+      if (this.recording || this.serverUses > 0) this.touchServer();
+      else this.stopServer();
+    }, this.opts.serverIdleMs ?? SERVER_IDLE_MS);
     this.idleTimer.unref();
   }
 
@@ -456,12 +468,17 @@ export class Voice {
     form.append("response_format", "json");
     form.append("language", language);
     if (prompt) form.append("prompt", prompt);
-    const response = await fetch(`http://127.0.0.1:${server.port}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
-    if (!response.ok) throw new Error(`whisper-server answered ${response.status}`);
-    const json = (await response.json()) as { text?: unknown; error?: unknown };
-    if (typeof json.error === "string") throw new Error(`whisper-server: ${json.error}`);
-    this.touchServer();
-    return typeof json.text === "string" ? json.text : "";
+    this.serverUses += 1;
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.port}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS) });
+      if (!response.ok) throw new Error(`whisper-server answered ${response.status}`);
+      const json = (await response.json()) as { text?: unknown; error?: unknown };
+      if (typeof json.error === "string") throw new Error(`whisper-server: ${json.error}`);
+      return typeof json.text === "string" ? json.text : "";
+    } finally {
+      this.serverUses -= 1;
+      this.touchServer();
+    }
   }
 
   private async viaCli(bin: string, model: string, language: string, pcm: Buffer, prompt: string): Promise<string> {
