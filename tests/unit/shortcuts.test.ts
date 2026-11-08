@@ -41,7 +41,17 @@ const HANDLERS: Record<ShortcutScope, string[]> = {
   form: ["src/ui/views/Agents.tsx"],
   toast: ["src/ui/state.tsx"],
   list: ["src/ui/components/SidePanel.tsx"],
+  tour: ["src/ui/components/Tour.tsx"],
 };
+
+/** Every UI source file but the registry and the translations, whose sentences name keys in each language's words. */
+function uiSources(dir = "src/ui"): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return full === "src/ui/i18n" ? [] : uiSources(full);
+    return /\.(ts|tsx)$/.test(entry.name) && full !== "src/ui/shortcuts.ts" ? [full] : [];
+  });
+}
 
 describe("the shortcut registry", () => {
   it("names each shortcut once, with its keys or a gesture", () => {
@@ -56,15 +66,29 @@ describe("the shortcut registry", () => {
   });
 
   it("puts every shortcut on the sheet once, under its heading, in the registry's order", () => {
+    const onSheet = SHORTCUTS.filter((item) => !item.offSheet);
+    expect(onSheet.length).toBeGreaterThan(30);
     const sheet = shortcutSheet();
     expect(sheet.map((section) => section.group)).toEqual(["shortcuts.anywhere", "shortcuts.code", "shortcuts.terminals", "shortcuts.voice", "shortcuts.editing", "shortcuts.runs"]);
-    expect(sheet.flatMap((section) => section.rows.map((row) => row.id))).toEqual(SHORTCUTS.map((item) => item.id));
+    expect(sheet.flatMap((section) => section.rows.map((row) => row.id))).toEqual(onSheet.map((item) => item.id));
     const row = sheet[0].rows.find((item) => item.id === "app.shortcuts");
     expect(row).toEqual({ id: "app.shortcuts", keys: "Ctrl+Shift+/", gesture: undefined, text: "shortcuts.list" });
-    // The sheet has no keys of its own to drift from the handlers.
-    const help = fs.readFileSync("src/ui/components/Help.tsx", "utf8");
-    expect(help).toContain("...shortcutSheet()");
-    expect(help).not.toMatch(/\{ keys: "/);
+    expect(fs.readFileSync("src/ui/components/Help.tsx", "utf8")).toContain("...shortcutSheet()");
+  });
+
+  it("has no keycaps written by hand outside it: tooltips, hints, the sheet and the tour all ask it", () => {
+    const found: string[] = [];
+    for (const file of uiSources()) {
+      // Comments may name keys; only code is looked at.
+      const code = fs.readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+      const keycaps = [
+        /["'`](?:Ctrl|Alt|Shift|Super|Meta)\+/g,
+        /\bkbd(?:=|:\s*)["'`]/g,
+        /\b(?:kbd|hint|keys):\s*\[*\s*["'`](?:Esc|Enter|Space|[←→↑↓]|[A-Z])["'`]/g,
+      ];
+      for (const pattern of keycaps) for (const match of code.matchAll(pattern)) found.push(`${file}: ${code.slice(match.index, match.index + 40).split("\n")[0]}`);
+    }
+    expect(found).toEqual([]);
   });
 
   it("has every key on the sheet acted on where its scope says", () => {
@@ -87,9 +111,10 @@ describe("the shortcut registry", () => {
       [press("3", { alt: true }, "Digit3"), ["app.workspaces"]],
       [press("#", { alt: true, shift: true }, "Digit3"), []],
       [press(",", { ctrl: true }, "Comma"), ["app.settings"]],
-      [press("ArrowLeft", { alt: true }), ["app.back"]],
-      [press("ArrowLeft", { alt: true, ctrl: true }), ["app.back"]],
-      [press("ArrowRight", { alt: true }), ["app.forward"]],
+      // While the tour is up, its own listener takes the arrows first, as it always did.
+      [press("ArrowLeft", { alt: true }), ["app.back", "tour.back"]],
+      [press("ArrowLeft", { alt: true, ctrl: true }), ["app.back", "tour.back"]],
+      [press("ArrowRight", { alt: true }), ["app.forward", "tour.next"]],
       [press("O", { ctrl: true, shift: true }), ["app.orchestrator"]],
       [press("?", { ctrl: true, shift: true }, "Slash"), ["app.shortcuts"]],
       [press("B", { ctrl: true, shift: true }), ["app.panel"]],
@@ -103,7 +128,7 @@ describe("the shortcut registry", () => {
       [press("Escape", { shift: true }), ["overlay.close", "overlay.closeFromTerminal", "voice.cancel"]],
       [press("c", { ctrl: true }), ["terminal.copy"]],
       [press("v", { ctrl: true }), ["terminal.paste"]],
-      [press("Enter", { ctrl: true, shift: true }), ["terminal.write"]],
+      [press("Enter", { ctrl: true, shift: true }), ["terminal.write", "tour.next"]],
       [press(" ", { ctrl: true, shift: true }, "Space"), ["voice.dictate"]],
       [press("s", { ctrl: true }), ["form.save"]],
       [press("z", { ctrl: true }), ["toast.undo"]],

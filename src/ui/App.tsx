@@ -20,7 +20,7 @@ import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
 import { overlayOpen } from "./overlays.js";
-import { runShortcut, shortcutKeys, type ShortcutAction, type ShortcutIdIn } from "./shortcuts.js";
+import { numberedKeys, runShortcut, shortcutKeys, type ShortcutAction, type ShortcutIdIn } from "./shortcuts.js";
 import { CodeView } from "./views/Code.js";
 import { HomeView } from "./views/Home.js";
 import { OPEN_ORCHESTRATOR_EVENT, OrchestratorBar, OrchestratorView } from "./views/Orchestrator.js";
@@ -311,7 +311,7 @@ function Rail() {
             className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
-            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
+            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? numberedKeys("app.views", index + 1) : undefined, side: "right" })}
             onClick={() => open(item.view)}
             onContextMenu={(event) => {
               event.preventDefault();

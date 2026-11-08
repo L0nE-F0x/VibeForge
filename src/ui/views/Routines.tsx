@@ -12,6 +12,7 @@ import { coreText } from "../core-text.js";
 import { writerNames } from "../components/Occupancy.js";
 import { changesFor } from "../changes-text.js";
 import { scheduleText } from "../schedule-text.js";
+import { shortcutKeys } from "../shortcuts.js";
 
 const CRON_PRESETS: Array<{ label: Key; expr: string }> = [
   { label: "routines.preset.weekdays", expr: "0 9 * * 1-5" },
@@ -221,7 +222,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
       <div className="page-head">
         <CalendarClock size={17} className="accent-text" />
         <h1 className="grow">{routine ? t("routines.editTitle", { name: routine.name }) : t("routines.newTitle")}</h1>
-        <Button variant="ghost" size="sm" icon={X} tip={t("common.close")} kbd="Esc" onClick={onClose} />
+        <Button variant="ghost" size="sm" icon={X} tip={t("common.close")} kbd={shortcutKeys("overlay.close")} onClick={onClose} />
       </div>
       <div className="page-body vstack" style={{ gap: 16 }}>
         <div className="form-grid">
@@ -313,7 +314,7 @@ function RoutineEditor({ routine, onClose }: { routine: RoutineView | null; onCl
         >
           {t("common.cancel")}
         </Button>
-        <Button variant="primary" icon={Save} busy={saving} disabled={!ready} kbd="Ctrl+S" tip={routine ? t("routines.save") : t("routines.create")} onClick={() => void save()}>
+        <Button variant="primary" icon={Save} busy={saving} disabled={!ready} kbd={shortcutKeys("form.save")} tip={routine ? t("routines.save") : t("routines.create")} onClick={() => void save()}>
           {routine ? t("routines.save") : t("routines.create")}
         </Button>
       </div>

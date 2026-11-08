@@ -12,13 +12,13 @@ import { tipProps } from "../components/Tooltip.js";
 import { CopyActions, CopyList, CopySheet } from "./OrchestratorCopies.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
+import { shortcutKeys } from "../shortcuts.js";
 
 // Maestro: say or type what to start where, and the planner (the CLI picked in Settings, or the
 // first one here that can plan) turns it into a plan that VibeForge carries out. The full view has the
 // conversation and the team; Ctrl+Shift+O opens the same conversation over any view.
 
 export const OPEN_ORCHESTRATOR_EVENT = "vibeforge:open-orchestrator";
-export const ORCHESTRATOR_KEYS = "Ctrl+Shift+O";
 const DRAFT_KEY = "orchestrator";
 
 /** Put the bar away: "Open in Code" on the bar opens the terminal, so the bar mustn't stay over it. */
@@ -149,7 +149,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           >
             {t("orch.openView")}
           </Button>
-          <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd="Esc" onClick={onClose} />
+          <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd={shortcutKeys("overlay.close")} onClick={onClose} />
         </div>
         <LeaveBar.Provider value={onClose}>
           <Conversation view={view} compact onEscape={onClose} />

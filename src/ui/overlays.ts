@@ -37,6 +37,18 @@ export function overlayOpen(): boolean {
   return stack.length > 0;
 }
 
+/**
+ * Whether something may take focus on its own (a terminal or a chat box as it appears): not from
+ * under a menu or dialog it isn't part of. Taken from the switcher, Esc and Enter would go to
+ * the terminal behind it instead.
+ */
+export function mayTakeFocus(element: Element | null): boolean {
+  const top = topOverlay();
+  if (!top) return true;
+  const node = top.node?.();
+  return Boolean(element && node?.contains(element));
+}
+
 type EscapeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation"> & {
   target: EventTarget | { closest?: (selector: string) => unknown } | null;
 };

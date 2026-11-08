@@ -20,6 +20,7 @@ import { tipProps } from "../components/Tooltip.js";
 import { PINNED, railViews, type RailView } from "../rail.js";
 import { useAction, useNav, useToast, type Route } from "../state.js";
 import { SETTINGS_SECTIONS, sectionAnchor } from "../settings-sections.js";
+import { shortcutKeys } from "../shortcuts.js";
 import { useT } from "../i18n/index.js";
 
 function toRow(engine: Engine | EngineRow): EngineRow {
@@ -484,7 +485,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
               <Button icon={Compass} onClick={startTour} tip={t("settings.replayTourTip")}>
                 {t("settings.replayTour")}
               </Button>
-              <Button icon={Keyboard} kbd="Ctrl+Shift+/" tip={t("settings.shortcutsTip")} onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>
+              <Button icon={Keyboard} kbd={shortcutKeys("app.shortcuts")} tip={t("settings.shortcutsTip")} onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>
                 {t("help.shortcuts")}
               </Button>
               <span className="grow" />

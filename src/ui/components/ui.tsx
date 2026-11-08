@@ -24,6 +24,7 @@ import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
 import { pushOverlay, returnFocus } from "../overlays.js";
 import { useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
+import { shortcutKeys } from "../shortcuts.js";
 import { tipProps } from "./Tooltip.js";
 
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -656,7 +657,7 @@ export function Toasts() {
                   toast.action?.run();
                 }}
                 tip={toast.action.label}
-                kbd="Ctrl+Z"
+                kbd={shortcutKeys("toast.undo")}
               >
                 {toast.action.label}
               </Button>

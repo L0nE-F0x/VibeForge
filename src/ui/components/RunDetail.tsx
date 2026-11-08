@@ -30,6 +30,7 @@ import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { diffFiles } from "../diff-files.js";
 import { changesFor } from "../changes-text.js";
+import { shortcutKeys } from "../shortcuts.js";
 
 export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
   "agent-chat": "origin.agent-chat",
@@ -267,7 +268,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
           </Button>
         )}
         {onNext && (
-          <Button size="sm" icon={ChevronsRight} tip={t("runs.nextTip")} kbd="J" onClick={onNext}>
+          <Button size="sm" icon={ChevronsRight} tip={t("runs.nextTip")} kbd={shortcutKeys("runs.next")} onClick={onNext}>
             {narrow ? null : t("runs.next")}
           </Button>
         )}
