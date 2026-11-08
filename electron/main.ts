@@ -11,10 +11,6 @@ import { TICK_MS } from "../src/core/routines.js";
 import { TeamService } from "../src/core/team-service.js";
 import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
-import { UsageScanner } from "../src/core/usage.js";
-import { PlanWatcher } from "../src/core/plans.js";
-import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
-import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { watchConfig } from "./config-watch.js";
@@ -31,6 +27,7 @@ import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/contr
 import { listenControl } from "./control.js";
 import { MainText } from "../src/core/main-text.js";
 import { companionStatus, syncCompanion } from "./companion.js";
+import { Stats } from "./stats.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
@@ -91,48 +88,7 @@ const dock = new Dock(
   },
 );
 
-const usage = new UsageScanner(os.homedir(), { ledger: path.join(roots.dataRoot, "usage-days.json") });
-const plans = new PlanWatcher({ home: os.homedir(), file: path.join(roots.dataRoot, "plans.json"), agent: `VibeForge/${app.getVersion()}` });
-/** What was already announced about plan limits, so each step is told once per window. */
-const quotaAlerts = new QuotaAlerts(path.join(roots.dataRoot, "quota-alerts.json"));
-
-async function planSummary(fresh: boolean) {
-  const settings = svc().getSettings();
-  const local = settings.usage
-    ? (await usage.scan()).sources.filter((source) => source.limits.length).map((source) => ({ id: source.id, limits: source.limits, at: source.limitsAt }))
-    : [];
-  if (!settings.planLimits && !local.length) return null;
-  const summary = await plans.summary({ network: settings.planLimits, local, fresh });
-  if (settings.quotaAlerts && settings.notify) {
-    for (const alert of quotaAlerts.check(summary)) {
-      log.info(`Plan alert: ${alert.plan} ${alert.window} at ${Math.floor(alert.percent)}%`);
-      notify(quotaNote(alert, Date.now(), words.alerts()));
-    }
-  }
-  return summary;
-}
-
-// The graph changes slowly: git is read again after 5 minutes, GitHub after 30.
-let activity: { key: string; at: number; value: Promise<Activity> } | null = null;
-
-function activityFor(source: ActivitySource, fresh: boolean): Promise<Activity> | null {
-  if (source === "off" || !ctx.service) return null;
-  const paths = ctx.service.listWorkspaces().workspaces.map((workspace) => workspace.path);
-  // Adding or removing a workspace changes what git counts.
-  const key = source === "github" ? source : `${source}:${paths.join("\n")}`;
-  const maxAge = source === "github" ? 30 * 60_000 : 5 * 60_000;
-  if (!fresh && activity?.key === key && Date.now() - activity.at < maxAge) return activity.value;
-  const now = new Date();
-  const value =
-    source === "github"
-      ? githubActivity(now).then((result) => {
-          log.info(result.error ? `GitHub activity not read: ${result.error}` : "GitHub activity read");
-          return result;
-        })
-      : gitActivity(paths, now);
-  activity = { key, at: Date.now(), value };
-  return value;
-}
+const stats = new Stats(ctx, notify, app.getVersion());
 
 const updater = new Updater({
   current: app.getVersion(),
@@ -253,9 +209,9 @@ function handlers(): Handlers {
       // An item's types list what's on offer without fetching the image itself.
       image: (await clipboard.read()).some((item) => item.types.some((type) => type.startsWith("image/"))),
     }),
-    "usage.summary": () => (s().getSettings().usage ? usage.scan() : null),
-    "plans.summary": (fresh) => planSummary(Boolean(fresh)),
-    "activity.get": (fresh) => activityFor(s().getSettings().activity, Boolean(fresh)),
+    "usage.summary": () => (s().getSettings().usage ? stats.usage.scan() : null),
+    "plans.summary": (fresh) => stats.planSummary(Boolean(fresh)),
+    "activity.get": (fresh) => stats.activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
       if (ctx.service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
     },
@@ -457,7 +413,7 @@ function companionWire() {
     root: path.join(ctx.appRoot, "companion"),
     icon: ctx.iconPath,
     log: (line: string) => log.info(line),
-    plans: () => planSummary(false),
+    plans: () => stats.planSummary(false),
     hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
     canHear: () => voice.canTranscribe(),
   };
