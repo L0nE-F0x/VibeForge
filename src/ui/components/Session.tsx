@@ -15,6 +15,7 @@ import { Rich } from "../i18n/Rich.js";
 import { coreText } from "../core-text.js";
 import { expectAnswer, expectOnEnter, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
 import { changesFor } from "../changes-text.js";
+import { mayTakeFocus } from "../overlays.js";
 
 // ------------------------------------------------------------------ composer
 
@@ -112,7 +113,7 @@ export function Composer({
   }, [text]);
 
   useEffect(() => {
-    if (autoFocus) ref.current?.focus();
+    if (autoFocus && mayTakeFocus(ref.current)) ref.current?.focus();
   }, [autoFocus]);
 
   async function submit() {

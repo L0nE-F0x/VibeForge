@@ -7,6 +7,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Drag
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
 import { appShortcut, clipboardKey, isWebLink } from "../terminal-keys.js";
+import { mayTakeFocus } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
@@ -308,7 +309,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
         }
         queue.length = 0;
         refit();
-        if (autoFocus) term.focus();
+        if (autoFocus && mayTakeFocus(host)) term.focus();
       })
       .catch(() => {
         if (!disposed) setEnded("ended");
@@ -368,7 +369,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       } catch {
         /* not laid out yet */
       }
-      if (autoFocus) term.focus();
+      if (autoFocus && mayTakeFocus(hostRef.current)) term.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [active, autoFocus, ptyId]);
