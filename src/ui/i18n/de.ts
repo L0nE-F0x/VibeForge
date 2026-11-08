@@ -173,6 +173,8 @@ export const de: Catalog = {
   "tour.chat.body": "Wegwerf-Unterhaltungen mit jeder CLI in einem leeren, temporären Ordner, wenn du kein Projekt brauchst.",
   "tour.tasks.title": "Aufgaben und Routinen",
   "tour.tasks.body": "Schreibe eine Aufgabe und weise sie einem Agenten zu. Nichts startet, bevor du auf Ausführen drückst. Fertige Arbeit landet mit ihrem Diff in der Prüfung. Routinen starten Agenten nach Zeitplan, solange VibeForge läuft, auch im Tray.",
+  "tour.maestro.title": "Maestro: sag, was starten soll",
+  "tour.maestro.body": "Sag oder tippe, welche CLIs wo woran arbeiten sollen. Eine deiner eigenen CLIs macht daraus einen Plan, den du vor Los noch ändern kannst. Jede CLI arbeitet dann in einer eigenen Kopie auf einem neuen Branch, und ihre Änderungen kommen hierher zurück, zum Prüfen, Übernehmen oder Verwerfen.",
   "tour.runs.title": "Läufe: jede Sitzung, aufbewahrt",
   "tour.runs.body": "Jede CLI, die du in ein Terminal tippst, und jeder Prozess, den VibeForge startet, hinterlässt seinen letzten Bildschirm, ein Transkript und den Git-Diff seit seinem Start. Fortsetzen öffnet genau diese Sitzung wieder.",
   "tour.room.title": "Schaffe Platz",

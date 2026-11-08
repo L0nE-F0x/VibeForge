@@ -174,6 +174,8 @@ export const zh: Catalog = {
   "tour.chat.body": "在空的临时文件夹中与任何 CLI 进行一次性对话，适合不需要项目的时候。",
   "tour.tasks.title": "任务与例行任务",
   "tour.tasks.body": "写下任务并分配给智能体。在你点击执行之前，什么都不会开始。完成的工作会带着差异进入审阅。VibeForge 运行期间（包括在托盘里），例行任务会按计划启动智能体。",
+  "tour.maestro.title": "Maestro：说出要启动什么",
+  "tour.maestro.body": "说出或输入要在哪里启动哪些 CLI、做什么。你自己的某个 CLI 会把它变成计划，你可以在点“执行”之前修改。之后每个 CLI 都在新分支上的独立副本中工作，它的改动会回到这里，由你审阅、应用或丢弃。",
   "tour.runs.title": "运行记录：每个会话都会保留",
   "tour.runs.body": "你在终端里输入的每个 CLI，以及 VibeForge 启动的每个进程，都会留下最后的画面、文字记录，以及自开始以来的 git 差异。点击继续可以准确地重新打开那个会话。",
   "tour.room.title": "腾出空间",

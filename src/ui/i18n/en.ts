@@ -179,6 +179,8 @@ export const en = {
   "tour.chat.body": "Throwaway conversations with any CLI in an empty scratch folder, for when you don't need a project.",
   "tour.tasks.title": "Tasks and Routines",
   "tour.tasks.body": "Write a task and assign it to an agent. Nothing starts until you press Execute. Finished work lands in Review with its diff. Routines start agents on a schedule while VibeForge is running, in the tray too.",
+  "tour.maestro.title": "Maestro: say what to start",
+  "tour.maestro.body": "Say or type which CLIs to start, where, and on what. One of your own CLIs turns it into a plan you can change before Go. Each CLI then works in its own copy on a new branch, and its changes come back here to review, apply or discard.",
   "tour.runs.title": "Runs: every session, kept",
   "tour.runs.body": "Every CLI you type into a terminal, and every process VibeForge starts, leaves behind its final screen, a transcript and the git diff since it began. Continue reopens the exact session.",
   "tour.room.title": "Make room",

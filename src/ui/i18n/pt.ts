@@ -173,6 +173,8 @@ export const pt: Catalog = {
   "tour.chat.body": "Conversas descartáveis com qualquer CLI em uma pasta temporária vazia, para quando você não precisa de um projeto.",
   "tour.tasks.title": "Tarefas e rotinas",
   "tour.tasks.body": "Escreva uma tarefa e atribua a um agente. Nada começa até você clicar em Executar. O trabalho concluído vai para Revisão com o diff. As rotinas iniciam agentes em um horário agendado enquanto o VibeForge está rodando, inclusive na bandeja.",
+  "tour.maestro.title": "Maestro: diga o que iniciar",
+  "tour.maestro.body": "Diga ou digite quais CLIs iniciar, onde e no quê. Uma das suas próprias CLIs transforma isso num plano que você pode mudar antes de Ir. Cada CLI então trabalha na própria cópia numa branch nova, e as mudanças voltam aqui para você revisar, aplicar ou descartar.",
   "tour.runs.title": "Histórico: cada sessão, guardada",
   "tour.runs.body": "Cada CLI que você digita em um terminal, e cada processo que o VibeForge inicia, deixa a tela final, uma transcrição e o diff do git desde o início. Continuar reabre exatamente aquela sessão.",
   "tour.room.title": "Abra espaço",
