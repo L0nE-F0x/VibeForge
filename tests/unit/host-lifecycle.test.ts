@@ -126,7 +126,8 @@ describe("the terminal host's lifecycle", () => {
     expect(lines()).toContain("INFO  Terminal p1 ended (the terminal host stopped)");
     expect(lines()).toContain("INFO  Terminal p2 ended (the terminal host stopped)");
     expect(sent).toEqual([["host-crash", "The terminal host stopped (SIGKILL)."]]);
-    expect(lines()).toContain("ERROR The terminal host stopped: The terminal host stopped (SIGKILL).");
+    expect(lines()).toContain("ERROR The terminal host stopped (SIGKILL).");
+    expect(lines().join("\n")).not.toContain("stopped: The terminal host stopped");
     expect(supervisor.starts).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(supervisor.starts).toHaveLength(1);

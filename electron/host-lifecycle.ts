@@ -129,7 +129,8 @@ export class HostLifecycle {
     supervisor.onProgram.add((event) => ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
     supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
     supervisor.onCrash.add((message) => {
-      log.error(`The terminal host stopped: ${message}`);
+      // The supervisor's message already says so: "The terminal host stopped (SIGKILL)."
+      log.error(message);
       // Every terminal died with the host. Record them, then bring the host back.
       for (const session of ctx.service?.listLive() ?? []) {
         log.info(`Terminal ${session.ptyId} ended (the terminal host stopped)`);
