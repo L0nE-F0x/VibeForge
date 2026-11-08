@@ -67,6 +67,16 @@ export function canOrchestrate(row: Pick<EngineRow, "id" | "bin">): boolean {
 export type BrainKind = "grok" | "claude" | "codex" | "agy";
 
 /**
+ * The CLI that plans: the one picked in Settings while it is on this machine; until one is picked
+ * (or once it's gone), Grok Build, else the first CLI here that can plan, so a machine with only
+ * Claude Code plans with Claude Code. Empty when none can.
+ */
+export function plannerFor(picked: string, engines: ReadonlyArray<Pick<EngineRow, "id" | "bin"> & { available: boolean }>): string {
+  const usable = engines.filter((engine) => engine.available && canOrchestrate(engine));
+  return (usable.find((engine) => engine.id === picked) ?? usable.find((engine) => brainKind(engine) === "grok") ?? usable[0])?.id ?? "";
+}
+
+/**
  * Which planner a CLI is: the four frontier labs' own CLIs, each with a headless turn, output held
  * to a JSON schema, and a way to keep it from changing anything. Grok Build, Claude Code, Codex,
  * and Antigravity CLI (Google's, for Gemini).

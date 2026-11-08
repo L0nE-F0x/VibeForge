@@ -1338,7 +1338,7 @@ export const en = {
   "orch.example.ask": "What's running right now?",
   "orch.empty.title": "Tell VibeForge what to start",
   "orch.empty.body": "Name the CLI, the workspace and the work. {engine} turns it into a plan; each CLI gets its own copy of the workspace on a new branch, in Code.",
-  "orch.notReady": "{engine} isn't on this machine, so nothing can plan yet. Pick Grok Build, Claude Code, Codex or Antigravity in Settings.",
+  "orch.notReady": "No CLI that can plan is on this machine yet. Install Grok Build, Claude Code, Codex or Antigravity CLI, and Maestro plans with it.",
   "orch.openSettings": "Settings",
   "orch.thinking": "{engine} is planning…",
   "orch.stop": "Stop",

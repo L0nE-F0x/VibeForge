@@ -1326,7 +1326,7 @@ export const fr: Catalog = {
   "orch.example.ask": "Qu'est-ce qui tourne en ce moment ?",
   "orch.empty.title": "Dites à VibeForge quoi lancer",
   "orch.empty.body": "Nommez la CLI, l'espace de travail et le travail. {engine} en fait un plan ; chaque CLI reçoit sa propre copie de l'espace de travail sur une nouvelle branche, dans Code.",
-  "orch.notReady": "{engine} n'est pas sur cette machine, donc rien ne peut encore planifier. Choisissez Grok Build, Claude Code, Codex ou Antigravity dans les Réglages.",
+  "orch.notReady": "Aucune CLI capable de planifier n'est encore sur cette machine. Installez Grok Build, Claude Code, Codex ou Antigravity CLI, et Maestro planifiera avec.",
   "orch.openSettings": "Réglages",
   "orch.thinking": "{engine} planifie…",
   "orch.stop": "Arrêter",

@@ -1326,7 +1326,7 @@ export const ja: Catalog = {
   "orch.example.ask": "今、何が動いている？",
   "orch.empty.title": "何を起動するか VibeForge に伝えましょう",
   "orch.empty.body": "CLI、ワークスペース、作業内容を伝えてください。{engine} が計画にし、各 CLI はコードビューで新しいブランチ上のワークスペースのコピーを受け取ります。",
-  "orch.notReady": "{engine} がこのマシンにないため、まだ計画できません。設定で Grok Build、Claude Code、Codex、Antigravity のいずれかを選んでください。",
+  "orch.notReady": "このマシンにはまだ計画できる CLI がありません。Grok Build、Claude Code、Codex、Antigravity CLI のいずれかを入れると、Maestro はそれで計画します。",
   "orch.openSettings": "設定",
   "orch.thinking": "{engine} が計画中…",
   "orch.stop": "停止",

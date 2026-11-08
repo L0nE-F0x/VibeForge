@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannerFor, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
 import { agyModels, grokModels, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
@@ -95,6 +95,17 @@ describe("the Orchestrator's plans", () => {
     expect(signedOut("Invalid API key · Please run /login")).toBe(true);
     expect(signedOut("rate limited, try again")).toBe(false);
     expect(readBrainOutput(JSON.stringify({ session_id: "c1", structured_output: { say: "Hi.", steps: [] } })).sessionId).toBe("c1");
+  });
+
+  it("plans with the CLI picked while it's here, else Grok Build, else the first one that can", () => {
+    const here = (ids: string[]) => [grok, claude, codex, kimi].map((row) => ({ ...row, available: ids.includes(row.id) }));
+    // Only Claude Code installed: it plans, whatever was left in Settings from before.
+    expect(plannerFor("", here(["claude", "kimi"]))).toBe("claude");
+    expect(plannerFor("grok", here(["claude"]))).toBe("claude");
+    expect(plannerFor("codex", here(["grok", "claude", "codex"]))).toBe("codex");
+    expect(plannerFor("", here(["claude", "grok"]))).toBe("grok");
+    expect(plannerFor("kimi", here(["kimi"]))).toBe("");
+    expect(plannerFor("", here([]))).toBe("");
   });
 
   it("lists the models Grok Build and Antigravity print", () => {
@@ -403,6 +414,29 @@ describe("the Orchestrator in the service", () => {
     expect(ctx.svc.orchestratorView().engineReady).toBe(false);
     await ctx.svc.orchestratorAsk("hi");
     expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ from: "vibeforge", problem: "noEngine" });
+    ctx.svc.close();
+  });
+
+  it("plans with Claude Code on a machine that only has Claude Code, until another is picked", async () => {
+    const ctx = setup();
+    const file = path.join(ctx.configRoot, "engines.json");
+    const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+    engines.engines.push({ id: "grok", label: "Grok Build", bin: "grok", args: [] }, { id: "claude", label: "Claude Code", bin: "pasty", args: [] });
+    fs.writeFileSync(file, JSON.stringify(engines));
+    expect(ctx.svc.getSettings().orchestrator.engine).toBe("");
+    expect(ctx.svc.orchestratorView()).toMatchObject({ engineId: "claude", engineReady: true });
+    const calls: string[][] = [];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: JSON.stringify({ structured_output: { say: "Hello.", steps: [] } }), stderr: "", timedOut: false };
+    };
+    // A model left over for a planner that isn't here isn't handed to this one.
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7" } });
+    await ctx.svc.orchestratorAsk("hi");
+    expect(calls[0][0]).toBe("/usr/bin/pasty");
+    expect(calls[0]).toContain("--print");
+    expect(calls[0]).not.toContain("grok-4.7");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ by: "claude", text: "Hello." });
     ctx.svc.close();
   });
 

@@ -1326,7 +1326,7 @@ export const zh: Catalog = {
   "orch.example.ask": "现在有什么在运行？",
   "orch.empty.title": "告诉 VibeForge 要启动什么",
   "orch.empty.body": "说出 CLI、工作区和要做的事。{engine} 会把它变成计划；每个 CLI 都会在代码视图中获得工作区在新分支上的独立副本。",
-  "orch.notReady": "这台机器上没有 {engine}，所以还无法制定计划。请在设置中选择 Grok Build、Claude Code、Codex 或 Antigravity。",
+  "orch.notReady": "这台机器上还没有能制定计划的 CLI。装上 Grok Build、Claude Code、Codex 或 Antigravity CLI 中的一个，Maestro 就用它来计划。",
   "orch.openSettings": "设置",
   "orch.thinking": "{engine} 正在制定计划…",
   "orch.stop": "停止",

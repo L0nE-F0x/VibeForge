@@ -73,7 +73,8 @@ export function OrchestratorView() {
   const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "" } }), t("settings.saveFailed"));
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const planners = engines.filter((engine) => canOrchestrate(engine));
-  const engineId = settings?.orchestrator.engine ?? "grok";
+  // The planner in use: the one picked, or until then the first one on this machine.
+  const engineId = view?.engineId ?? settings?.orchestrator.engine ?? "";
 
   return (
     <div className="view">
@@ -210,7 +211,7 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
         {view && !view.engineReady && (
           <div className="orch-problem">
             <CircleAlert size={14} />
-            <span className="grow">{t("orch.notReady", { engine: engineLabel })}</span>
+            <span className="grow">{t("orch.notReady")}</span>
             <Button size="sm" onClick={() => go({ view: "settings", section: "orchestrator" })}>
               {t("orch.openSettings")}
             </Button>

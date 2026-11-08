@@ -10,6 +10,7 @@ import {
   brainKind,
   canOrchestrate,
   KNOWN_MODELS,
+  plannerFor,
   STRICT_PLAN_SCHEMA,
   signedOut,
   orchestratorRules,
@@ -167,12 +168,18 @@ export class OrchestratorDesk {
     return this.core.store.readSettings().orchestrator;
   }
 
+  /** The CLI that plans right now: the one picked, or until then the first one here that can (plannerFor). */
+  private planner(): string {
+    const rows = this.core.store.readEngineRows().map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
+    return plannerFor(this.settings().engine, rows);
+  }
+
   view(): OrchestratorView {
     const { engine, mode } = this.settings();
-    const row = this.core.store.readEngineRows().find((item) => item.id === engine);
+    const planner = this.planner();
     return {
-      engineId: engine,
-      engineReady: Boolean(row && canOrchestrate(row) && this.core.resolveEngine(engine)),
+      engineId: planner || engine,
+      engineReady: Boolean(planner),
       mode,
       thinking: this.thinking !== null,
       turns: this.conversation.turns,
@@ -223,14 +230,17 @@ export class OrchestratorDesk {
   }
 
   private answer(turn: Omit<OrchestratorTurn, "id" | "at" | "from">): OrchestratorTurn {
-    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", by: this.settings().engine, ...turn };
+    const full: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", by: this.planner() || this.settings().engine, ...turn };
     this.conversation.turns.push(full);
     return full;
   }
 
   private async think(words: string, signal: AbortSignal): Promise<void> {
-    const { engine: engineId, mode, model } = this.settings();
-    const engine = this.core.resolveEngine(engineId);
+    const { engine: picked, mode, model: chosen } = this.settings();
+    const engineId = this.planner();
+    // A model picked for another planner means nothing to this one.
+    const model = engineId === picked ? chosen : "";
+    const engine = engineId ? this.core.resolveEngine(engineId) : null;
     if (!engine || !canOrchestrate(engine.row)) {
       this.answer({ text: "", problem: "noEngine" });
       return;
@@ -313,7 +323,7 @@ export class OrchestratorDesk {
   clear(): void {
     this.thinking?.abort();
     this.thinking = null;
-    this.conversation = { sessionId: randomUUID(), engineId: this.settings().engine, begun: false, turns: [] };
+    this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
     this.save();
   }
 
