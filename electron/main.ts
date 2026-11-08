@@ -12,7 +12,6 @@ import { describeError, LogFile, PageErrors } from "../src/core/log.js";
 import { TICK_MS } from "../src/core/routines.js";
 import { TeamService, type DeskHost } from "../src/core/team-service.js";
 import { listThemes, resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
-import type { Topic } from "../src/core/types.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { UsageScanner } from "../src/core/usage.js";
 import { PlanWatcher } from "../src/core/plans.js";
@@ -20,6 +19,7 @@ import { quotaNote, QuotaAlerts } from "../src/core/quota-alerts.js";
 import { gitActivity, githubActivity, type Activity, type ActivitySource } from "../src/core/activity.js";
 import type { Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
+import { watchConfig } from "./config-watch.js";
 import { Dock } from "./dock.js";
 import { desktopNotifier } from "./notify.js";
 import { MainContext } from "./main-context.js";
@@ -607,46 +607,6 @@ function registerIpc(): void {
   });
 }
 
-// ------------------------------------------------------------------ watching config
-
-function watchConfig(): () => void {
-  const pending = new Set<Topic>();
-  let timer: NodeJS.Timeout | null = null;
-  let watcher: fs.FSWatcher | null = null;
-  const map = (file: string): Topic[] => {
-    const first = file.split(path.sep)[0];
-    if (file.endsWith(".tmp") || first === "layouts") return [];
-    if (first === "agents") return ["agents", "routines", "tasks"];
-    if (first === "skills") return ["skills", "agents"];
-    if (first === "routines") return ["routines"];
-    if (first === "tasks") return ["tasks"];
-    if (file === "engines.json") return ["engines", "agents", "routines", "tasks"];
-    if (file === "settings.json") return ["settings"];
-    if (file === "workspaces.json") return ["workspaces"];
-    return [];
-  };
-  try {
-    watcher = fs.watch(roots.configRoot, { recursive: true, persistent: false }, (_type, file) => {
-      if (!file) return;
-      for (const topic of map(String(file))) pending.add(topic);
-      if (!pending.size) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const topics = [...pending];
-        pending.clear();
-        ctx.service?.emit(...topics);
-        if (topics.includes("settings")) refreshPalette();
-      }, 250);
-    });
-  } catch {
-    watcher = null;
-  }
-  return () => {
-    if (timer) clearTimeout(timer);
-    watcher?.close();
-  };
-}
-
 // ------------------------------------------------------------------ window
 
 /** What web pages may use: copying to the clipboard, as any browser lets them. */
@@ -941,7 +901,10 @@ if (!app.requestSingleInstanceLock()) {
     await createWindow();
     await hostReady;
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
-    const stopConfigWatch = watchConfig();
+    const stopConfigWatch = watchConfig(roots.configRoot, (topics) => {
+      ctx.service?.emit(...topics);
+      if (topics.includes("settings")) refreshPalette();
+    });
     const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), answerTalk);
     ctx.win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
