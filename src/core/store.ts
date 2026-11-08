@@ -1,156 +1,29 @@
-import fs from "node:fs";
 import path from "node:path";
-import { parse, stringify } from "yaml";
-import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
+import { readJson, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
 import type { RUN_FILES } from "./runs.js";
-import { isSafeId, slugify } from "./slug.js";
+import { isSafeId } from "./slug.js";
 import { Config } from "./store/config.js";
-import { bool, str, strList, strOrNull } from "./store/fields.js";
+import { str, strList, strOrNull } from "./store/fields.js";
+import { Library } from "./store/library.js";
 import { ReadCache } from "./store/read-cache.js";
 import { RunIndex, type RunQuery } from "./store/run-index.js";
-import { TASK_STATUSES } from "./tasks.js";
 import type { WorkspaceFile } from "./workspaces.js";
-import type { WorkingCopy } from "./worktrees.js";
 import type {
   Agent,
-  AgentTier,
   ChatRecord,
   EngineRow,
   LayoutNode,
   Routine,
   RunMeta,
-  Schedule,
   Settings,
   Skill,
   Task,
-  TaskStatus,
 } from "./types.js";
 
 export { defaultSettings } from "./store/config.js";
+export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument } from "./store/library.js";
 export { matchExpression, type RunQuery } from "./store/run-index.js";
-
-export const MEMORY_STARTER =
-  "<!-- Preferences, decisions, constraints, and lessons that should still matter next week. Dated bullets. No secrets. VibeForge adds this file to every run of this agent. -->\n";
-
-function schedule(value: unknown): Schedule {
-  if (value && typeof value === "object") {
-    const record = value as { kind?: unknown; expr?: unknown; minutes?: unknown };
-    if (record.kind === "cron") return { kind: "cron", expr: str(record.expr).trim() };
-    if (record.kind === "every") return { kind: "every", minutes: Number(record.minutes) };
-  }
-  return { kind: "every", minutes: 0 };
-}
-
-function yamlText(value: unknown): string {
-  return stringify(value, { lineWidth: 0 });
-}
-
-function readYaml(file: string): unknown {
-  try {
-    return parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-/** A "good at" line: one line, short enough for a roster. */
-export function oneLine(text: string, max = 160): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-export function agentTier(value: unknown): AgentTier {
-  return value === "fast" || value === "everyday" || value === "strong" ? value : "";
-}
-
-function normalizeAgent(id: string, value: unknown): Agent | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return {
-    id,
-    name: str(record.name) || id,
-    engine: str(record.engine),
-    brief: str(record.brief),
-    memoryFile: "memory.md",
-    places: strList(record.places),
-    skills: strList(record.skills),
-    allowRoutines: bool(record.allowRoutines, true),
-    voice: str(record.voice).trim(),
-    goodAt: oneLine(str(record.goodAt)),
-    tier: agentTier(record.tier),
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
-export function parseSkill(id: string, text: string): Skill {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { id, name: id, description: "", body: text.trim() };
-  let front: { name?: unknown; description?: unknown } | null;
-  try {
-    front = parse(match[1]) as { name?: unknown; description?: unknown } | null;
-  } catch {
-    front = null;
-  }
-  return {
-    id,
-    name: str(front?.name, id) || id,
-    description: str(front?.description),
-    body: match[2].replace(/^\s*\n/, "").trimEnd(),
-  };
-}
-
-export function skillDocument(skill: Skill): string {
-  const front = yamlText({ name: skill.name, description: skill.description }).trimEnd();
-  return `---\n${front}\n---\n\n${skill.body.trim()}\n`;
-}
-
-function normalizeRoutine(id: string, value: unknown): Routine | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return {
-    id,
-    name: str(record.name) || id,
-    agentId: str(record.agentId),
-    enabled: bool(record.enabled, true),
-    schedule: schedule(record.schedule),
-    prompt: str(record.prompt),
-    notify: bool(record.notify, true),
-    lastFiredAt: strOrNull(record.lastFiredAt),
-    lastMissedAt: strOrNull(record.lastMissedAt),
-    shareCheckout: record.shareCheckout === true,
-  };
-}
-
-function normalizeTask(id: string, value: unknown): Task | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const status = str(record.status, "todo") as TaskStatus;
-  return {
-    id,
-    title: str(record.title) || id,
-    body: str(record.body),
-    status: TASK_STATUSES.includes(status) ? status : "todo",
-    agentId: strOrNull(record.agentId),
-    workspaceId: strOrNull(record.workspaceId),
-    runIds: strList(record.runIds),
-    isolated: record.isolated === true,
-    copy: workingCopy(record.copy),
-    shareCheckout: record.shareCheckout === true,
-    sourceRunId: strOrNull(record.sourceRunId),
-    askedBy: strOrNull(record.askedBy),
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
-function workingCopy(value: unknown): WorkingCopy | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const [copyPath, branch, base, repo] = [record.path, record.branch, record.base, record.repo].map((item) => str(item));
-  if (!path.isAbsolute(copyPath) || !path.isAbsolute(repo) || !/^vibeforge\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{7,64}$/.test(base)) return null;
-  return { path: copyPath, branch, base, repo };
-}
 
 function normalizeChat(value: unknown): ChatRecord | null {
   if (!value || typeof value !== "object") return null;
@@ -176,15 +49,17 @@ export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
   private readonly runs: RunIndex;
-  private readonly cache = new ReadCache();
   private readonly config: Config;
+  private readonly library: Library;
 
   constructor(configRoot: string, dataRoot: string) {
     this.configRoot = configRoot;
     this.dataRoot = dataRoot;
     ensureLayout(configRoot, dataRoot);
     this.runs = new RunIndex(dataRoot);
-    this.config = new Config(configRoot, this.cache);
+    const cache = new ReadCache();
+    this.config = new Config(configRoot, cache);
+    this.library = new Library(configRoot, cache);
   }
 
   close(): void {
@@ -267,166 +142,86 @@ export class Store {
     this.config.writeLayout(workspaceId, layout);
   }
 
-  // ---------------------------------------------------------------- agents
+  // ---------------------------------------------------------------- agents, skills, routines & tasks (store/library.ts)
 
   uniqueId(dir: string, base: string, extension: string): string {
-    const root = slugify(base);
-    const taken = (id: string) => fs.existsSync(path.join(dir, `${id}${extension}`));
-    if (!taken(root)) return root;
-    let count = 2;
-    while (taken(`${root}-${count}`)) count += 1;
-    return `${root}-${count}`;
+    return this.library.uniqueId(dir, base, extension);
   }
 
   listAgents(): Agent[] {
-    const root = path.join(this.configRoot, "agents");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getAgent(entry.name))
-      .filter((agent): agent is Agent => agent !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listAgents();
   }
 
   getAgent(id: string): Agent | null {
-    if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "agents", id, "agent.yaml");
-    return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
+    return this.library.getAgent(id);
   }
 
   writeAgent(agent: Agent): void {
-    const dir = path.join(this.configRoot, "agents", agent.id);
-    fs.mkdirSync(dir, { recursive: true });
-    const memoryPath = path.join(dir, "memory.md");
-    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
-    writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
-    this.cache.forget(path.join(dir, "agent.yaml"));
+    this.library.writeAgent(agent);
   }
 
   readMemory(agentId: string): string {
-    if (!isSafeId(agentId)) return "";
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "agents", agentId, "memory.md"), "utf8");
-    } catch {
-      return "";
-    }
+    return this.library.readMemory(agentId);
   }
 
   writeMemory(agentId: string, text: string): void {
-    if (!isSafeId(agentId)) throw new Error("Agent is missing");
-    writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
+    this.library.writeMemory(agentId, text);
   }
 
-  // ---------------------------------------------------------------- skills
-
   listSkills(): Skill[] {
-    const root = path.join(this.configRoot, "skills");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getSkill(entry.name))
-      .filter((skill): skill is Skill => skill !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listSkills();
   }
 
   getSkill(id: string): Skill | null {
-    const raw = this.readSkillRaw(id);
-    return raw === null ? null : parseSkill(id, raw);
+    return this.library.getSkill(id);
   }
 
   readSkillRaw(id: string): string | null {
-    if (!isSafeId(id)) return null;
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "skills", id, "SKILL.md"), "utf8");
-    } catch {
-      return null;
-    }
+    return this.library.readSkillRaw(id);
   }
 
   writeSkill(skill: Skill): void {
-    writeFileAtomic(path.join(this.configRoot, "skills", skill.id, "SKILL.md"), skillDocument(skill));
+    this.library.writeSkill(skill);
   }
 
-  /** Where a skill, routine or task lives on disk, for moving it aside (see Trash). Null for a bad id. */
   pathOf(kind: "skill" | "routine" | "task", id: string): string | null {
-    if (!isSafeId(id)) return null;
-    if (kind === "skill") return path.join(this.configRoot, "skills", id);
-    return path.join(this.configRoot, kind === "routine" ? "routines" : "tasks", `${id}.yaml`);
+    return this.library.pathOf(kind, id);
   }
 
   deleteSkill(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "skills", id), { recursive: true, force: true });
+    this.library.deleteSkill(id);
   }
 
-  // ---------------------------------------------------------------- routines
-
   listRoutines(): Routine[] {
-    return this.listYaml("routines", (id, value) => normalizeRoutine(id, value)).sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listRoutines();
   }
 
   getRoutine(id: string): Routine | null {
-    if (!isSafeId(id)) return null;
-    return normalizeRoutine(id, readYaml(path.join(this.configRoot, "routines", `${id}.yaml`)));
+    return this.library.getRoutine(id);
   }
 
   writeRoutine(routine: Routine): void {
-    writeFileAtomic(path.join(this.configRoot, "routines", `${routine.id}.yaml`), yamlText(routine));
+    this.library.writeRoutine(routine);
   }
 
   deleteRoutine(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "routines", `${id}.yaml`), { force: true });
+    this.library.deleteRoutine(id);
   }
 
-  // ---------------------------------------------------------------- tasks
-
   listTasks(): Task[] {
-    return this.listYaml("tasks", (id, value) => normalizeTask(id, value)).sort((a, b) =>
-      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
-    );
+    return this.library.listTasks();
   }
 
   getTask(id: string): Task | null {
-    if (!isSafeId(id)) return null;
-    return normalizeTask(id, readYaml(path.join(this.configRoot, "tasks", `${id}.yaml`)));
+    return this.library.getTask(id);
   }
 
   writeTask(task: Task): void {
-    writeFileAtomic(path.join(this.configRoot, "tasks", `${task.id}.yaml`), yamlText(task));
+    this.library.writeTask(task);
   }
 
   deleteTask(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "tasks", `${id}.yaml`), { force: true });
-  }
-
-  private listYaml<T>(folder: string, normalize: (id: string, value: unknown) => T | null): T[] {
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(path.join(this.configRoot, folder));
-    } catch {
-      return [];
-    }
-    const items: T[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".yaml")) continue;
-      const id = entry.slice(0, -5);
-      if (!isSafeId(id)) continue;
-      const item = normalize(id, readYaml(path.join(this.configRoot, folder, entry)));
-      if (item) items.push(item);
-    }
-    return items;
+    this.library.deleteTask(id);
   }
 
   // ---------------------------------------------------------------- chats
