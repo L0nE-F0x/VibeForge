@@ -276,6 +276,7 @@ export const ja: Catalog = {
   "files.insertOpen": "{name}：クリックでフォーカス中のターミナルにパスを挿入、ダブルクリックで開く",
   "files.insert": "パスを挿入",
   "files.open": "既定のアプリで開く",
+  "dock.address": "ページのアドレス",
   "dock.forward": "進む",
   "dock.reload": "再読み込み",
   "dock.stop": "停止",

@@ -283,6 +283,7 @@ export const en = {
   "files.insertOpen": "{name}: click to insert its path into the focused terminal, double-click to open it",
   "files.insert": "Insert the path",
   "files.open": "Open with the default app",
+  "dock.address": "Page address",
   "dock.forward": "Forward",
   "dock.reload": "Reload",
   "dock.stop": "Stop",

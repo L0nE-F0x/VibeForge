@@ -275,6 +275,7 @@ export const de: Catalog = {
   "files.insertOpen": "{name}: Klicken fügt den Pfad ins fokussierte Terminal ein, Doppelklick öffnet die Datei",
   "files.insert": "Pfad einfügen",
   "files.open": "Mit der Standard-App öffnen",
+  "dock.address": "Seitenadresse",
   "dock.forward": "Vorwärts",
   "dock.reload": "Neu laden",
   "dock.stop": "Stoppen",

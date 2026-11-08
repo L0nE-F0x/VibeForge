@@ -415,6 +415,7 @@ export function DockPanel({
         />
         <Input
           value={draft}
+          aria-label={t("dock.address")}
           placeholder="http://127.0.0.1:5173"
           onChange={(event) => setDraft(event.target.value)}
           onFocus={() => {

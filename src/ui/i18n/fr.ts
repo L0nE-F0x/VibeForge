@@ -276,6 +276,7 @@ export const fr: Catalog = {
   "files.insertOpen": "{name} : cliquez pour insérer son chemin dans le terminal actif, double-cliquez pour l'ouvrir",
   "files.insert": "Insérer le chemin",
   "files.open": "Ouvrir avec l'application par défaut",
+  "dock.address": "Adresse de la page",
   "dock.forward": "Suivant",
   "dock.reload": "Recharger",
   "dock.stop": "Arrêter",

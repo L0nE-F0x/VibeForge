@@ -311,7 +311,7 @@
   border: 1px solid var(--sel-line);
 }
 
-[data-gliding][aria-selected="true"] {
+[data-gliding]:is([aria-selected="true"], [aria-current="true"]) {
   background-color: transparent !important;
   border-color: transparent !important;
 }

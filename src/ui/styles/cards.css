@@ -137,7 +137,7 @@
   color: var(--fg);
 }
 
-.row[aria-selected="true"] {
+.row:is([aria-selected="true"], [aria-current="true"]) {
   background: var(--sel-fill);
   border-color: var(--sel-line);
   color: var(--fg);

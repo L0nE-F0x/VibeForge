@@ -675,7 +675,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
                   role="button"
                   tabIndex={0}
-                  aria-selected={workspace.id === currentId}
+                  aria-current={workspace.id === currentId ? "true" : undefined}
                   draggable={renaming !== workspace.id}
                   onClick={() => select(workspace)}
                   onDoubleClick={() => setRenaming(workspace.id)}
@@ -1014,11 +1014,11 @@ function PaneView({
           </span>
         )}
         {state === "live" ? (
-          <span className="dot running" {...tipProps(t("pane.running"))} />
+          <span className="dot running" role="img" aria-label={t("pane.running")} {...tipProps(t("pane.running"))} />
         ) : state === "exited" ? (
-          <span className="dot stopped" {...tipProps(t("pane.exited"))} />
+          <span className="dot stopped" role="img" aria-label={t("pane.exited")} {...tipProps(t("pane.exited"))} />
         ) : (
-          <span className="dot" {...tipProps(t("pane.idle"))} />
+          <span className="dot" role="img" aria-label={t("pane.idle")} {...tipProps(t("pane.idle"))} />
         )}
         <span className="pane-title truncate">{shown}</span>
         {shown !== title && <span className="pane-sub truncate">{title}</span>}

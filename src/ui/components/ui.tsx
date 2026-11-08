@@ -247,7 +247,8 @@ export function Chip({ tone, children, title, icon: Icon }: { tone?: "accent" | 
 export function StatusDot({ status, title }: { status: RunStatus | "idle" | null | undefined; title?: string }) {
   const t = useT();
   const label = title ?? (status && status !== "idle" ? t(STATUS_KEY[status]) : undefined);
-  return <span className={cx("dot", status ?? "idle")} {...tipProps(label)} />;
+  // A screen reader hears what the colour says; a dot that says nothing is left out.
+  return <span className={cx("dot", status ?? "idle")} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true} {...tipProps(label)} />;
 }
 
 export const STATUS_KEY: Record<RunStatus, Key> = {

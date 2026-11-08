@@ -276,6 +276,7 @@ export const zh: Catalog = {
   "files.insertOpen": "{name}：单击将路径插入当前终端，双击打开",
   "files.insert": "插入路径",
   "files.open": "用默认应用打开",
+  "dock.address": "页面地址",
   "dock.forward": "前进",
   "dock.reload": "重新加载",
   "dock.stop": "停止",

@@ -275,6 +275,7 @@ export const es: Catalog = {
   "files.insertOpen": "{name}: haz clic para insertar su ruta en el terminal enfocado, doble clic para abrirlo",
   "files.insert": "Insertar la ruta",
   "files.open": "Abrir con la aplicación predeterminada",
+  "dock.address": "Dirección de la página",
   "dock.forward": "Adelante",
   "dock.reload": "Recargar",
   "dock.stop": "Detener",

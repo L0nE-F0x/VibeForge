@@ -99,7 +99,7 @@
   border-color: var(--focus-line);
 }
 
-.strip-item[aria-selected="true"] {
+.strip-item[aria-current="true"] {
   background: var(--sel-fill);
   border-color: var(--sel-line);
   color: var(--fg);

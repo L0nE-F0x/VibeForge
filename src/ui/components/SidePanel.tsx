@@ -82,7 +82,8 @@ function useSelectionGlide(ref: React.RefObject<HTMLElement | null>, enabled: bo
   useEffect(() => {
     const root = ref.current;
     if (!root || !enabled || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const find = () => root.querySelector<HTMLElement>('.list-scroll [aria-selected="true"]');
+    // A list's buttons mark the open one with aria-current; options and tabs with aria-selected.
+    const find = () => root.querySelector<HTMLElement>('.list-scroll :is([aria-selected="true"], [aria-current="true"])');
     let last = find();
     const observer = new MutationObserver(() => {
       const next = find();
@@ -90,7 +91,7 @@ function useSelectionGlide(ref: React.RefObject<HTMLElement | null>, enabled: bo
       last = next;
       if (next && prev && next !== prev && prev.isConnected) glide(prev, next);
     });
-    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected"] });
+    observer.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["aria-selected", "aria-current"] });
     return () => observer.disconnect();
   }, [ref, enabled]);
 }
@@ -355,7 +356,7 @@ export function StripItem({
   badge?: ReactNode;
 }) {
   return (
-    <button type="button" className="strip-item" aria-selected={selected} aria-current={selected || undefined} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
+    <button type="button" className="strip-item" aria-current={selected || undefined} aria-label={label} onClick={onClick} {...tipProps(label, { side: "right" })}>
       {children}
       {badge}
     </button>
