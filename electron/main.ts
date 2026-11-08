@@ -22,14 +22,15 @@ import { Dock } from "./dock.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { desktopNotifier } from "./notify.js";
 import { MainContext } from "./main-context.js";
-import { isAppPage, relaunchArgs, settleWithin } from "./guards.js";
+import { isAppPage, relaunchArgs } from "./guards.js";
+import { Quit } from "./quit.js";
 import { TrayController } from "./tray-controller.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Updater } from "./updater.js";
 import { controlSocketPath, voiceArg, type TalkRequest } from "../src/core/control.js";
 import { listenControl } from "./control.js";
 import { MainText } from "../src/core/main-text.js";
-import { companionStatus, stopCompanion, syncCompanion } from "./companion.js";
+import { companionStatus, syncCompanion } from "./companion.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
 import { Voice } from "./voice.js";
@@ -67,7 +68,6 @@ const ctx = new MainContext({
   palette: resolvePalette("omarchy"),
 });
 const { send, svc, focusWindow, words, install } = ctx;
-let shutdownDone = false;
 /** Started by the login autostart entry: stay in the tray until opened. */
 const startHidden = process.argv.includes(HIDDEN_ARG);
 let trayNoticeShown = false;
@@ -177,45 +177,8 @@ function refreshPalette(): void {
 
 // ------------------------------------------------------------------ tray
 
-const tray = new TrayController(ctx, () => void quitFromTray());
-
-/** The quit question while it is on screen, so a second close or Quit joins it instead of asking again. */
-let quitQuestion: Promise<boolean> | null = null;
-
-/**
- * Asks whether to quit with terminals still running; true to quit. Never the blocking kind of
- * dialog: while one held the main process, terminal output backed up and every CLI stalled.
- */
-function askToQuit(live: Array<{ kind: string }>): Promise<boolean> {
-  if (quitQuestion) return quitQuestion;
-  const runs = live.filter((session) => session.kind === "run").length;
-  const options: Electron.MessageBoxOptions = {
-    type: "question",
-    buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
-    defaultId: 1,
-    cancelId: 1,
-    title: "VibeForge",
-    message: words.count("main.quit", live.length),
-    detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
-  };
-  quitQuestion = (ctx.win ? dialog.showMessageBox(ctx.win, options) : dialog.showMessageBox(options))
-    .then(({ response }) => response === 0)
-    .finally(() => {
-      quitQuestion = null;
-    });
-  return quitQuestion;
-}
-
-/** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
-async function quitFromTray(): Promise<void> {
-  const live = ctx.service?.listLive() ?? [];
-  if (live.length && ctx.win) {
-    focusWindow();
-    if (!(await askToQuit(live))) return;
-  }
-  ctx.quitting = true;
-  app.quit();
-}
+const quit = new Quit(ctx, { talk, voice });
+const tray = new TrayController(ctx, () => void quit.fromTray());
 
 // ------------------------------------------------------------------ IPC
 
@@ -553,8 +516,8 @@ async function createWindow(): Promise<void> {
     if (live.length === 0) return;
     // The window stays while the question is up; a yes quits, which closes it.
     event.preventDefault();
-    void askToQuit(live).then((quit) => {
-      if (!quit) return;
+    void quit.ask(live).then((yes) => {
+      if (!yes) return;
       ctx.quitting = true;
       app.quit();
     });
@@ -597,40 +560,6 @@ function companionWire() {
     hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
     canHear: () => voice.canTranscribe(),
   };
-}
-
-/** How long a quit waits for the phone page's server to close before going on without it. */
-const COMPANION_STOP_MS = 2000;
-
-async function shutdown(): Promise<void> {
-  const stopped = await settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`));
-  if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
-  talk.dispose();
-  voice.dispose();
-  if (!ctx.service) return;
-  ctx.service.prepareShutdown();
-  await supervisor.shutdown(7000);
-  await Promise.race([ctx.service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
-  ctx.service.shutdown();
-  ctx.service.close();
-  ctx.service = null;
-}
-
-/**
- * Start failed: say why and where the log is, then exit. Staying on with no window and no tray
- * would keep the single-instance lock, and every later launch would quietly do nothing.
- */
-async function startFailed(error: unknown): Promise<void> {
-  console.error(error);
-  const detail = describeError(error);
-  log.error(`VibeForge could not start: ${detail}`);
-  try {
-    await words.use(ctx.service?.getSettings().language ?? "system", app.getLocale());
-  } catch {
-    /* English, then */
-  }
-  dialog.showErrorBox(words.say("main.startFailed"), words.say("main.startFailedBody", { error: detail.split("\n")[0], log: log.file }));
-  app.exit(1);
 }
 
 // ------------------------------------------------------------------ lifecycle
@@ -720,22 +649,8 @@ if (!app.requestSingleInstanceLock()) {
       stopControl();
       stopTrayWatch();
     });
-  }).catch(startFailed);
+  }).catch((error: unknown) => quit.startFailed(error));
 
-  app.on("before-quit", () => {
-    ctx.quitting = true;
-  });
-
-  app.on("will-quit", (event) => {
-    if (shutdownDone) return;
-    event.preventDefault();
-    void shutdown().finally(() => {
-      shutdownDone = true;
-      // On the next turn: with no terminal host to wait for, shutdown settles while Electron is
-      // still inside this event, where a quit is ignored and the app would stay on, windowless.
-      setImmediate(() => app.quit());
-    });
-  });
-
-  app.on("window-all-closed", () => app.quit());
+  quit.handleEvents();
 }
+

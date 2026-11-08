@@ -104,3 +104,15 @@ export function attentionFrom(state: { count: number; waiters: TrayWaiter[] } | 
 export function trayHostAnswer(error: { code?: unknown } | null, stdout: string): boolean {
   return error ? error.code === "ENOENT" : /boolean true/.test(stdout);
 }
+
+/** Asks one at a time: a call while an answer is still out gets that answer instead of a second question. */
+export function oneAtATime<A extends unknown[], T>(ask: (...args: A) => Promise<T>): (...args: A) => Promise<T> {
+  let pending: Promise<T> | null = null;
+  return (...args) => {
+    if (pending) return pending;
+    pending = ask(...args).finally(() => {
+      pending = null;
+    });
+    return pending;
+  };
+}
