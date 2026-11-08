@@ -18,7 +18,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { RunView } from "../../shared/api.js";
+import type { RunView, Topic } from "../../shared/api.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
@@ -164,11 +164,19 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   );
 }
 
+const RUNNING_TOPICS: Topic[] = ["runs", "live", "working"];
+const DONE_TOPICS: Topic[] = ["runs"];
+
 export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded?: boolean; /** While reviewing: open the next run waiting. */ onNext?: () => void }) {
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
-  const bundle = useQuery(`run:${runId}`, ["runs", "live"], () => call("runs.get", runId));
+  // A running run follows its terminal; a finished one changes only when the runs do. Its files
+  // are large and don't move with the clock, so the 30 s refresh skips them and they aren't kept.
+  const bundle = useQuery(`run:${runId}`, (data) => (data?.run.status === "running" ? RUNNING_TOPICS : DONE_TOPICS), () => call("runs.get", runId), {
+    keep: false,
+    poll: false,
+  });
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const [tab, setTab] = useState<Tab>("session");

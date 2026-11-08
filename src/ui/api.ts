@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { coreText } from "./core-text.js";
+import { QueryCache, type QueryOptions, type Topics } from "./query-cache.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
 
 declare global {
@@ -102,93 +103,22 @@ export function ptyExitInfo(ptyId: string): DeskEvents["pty-exit"] | null {
 }
 
 // ------------------------------------------------------------------ shared query cache
-// Each query is keyed, fetched once for every component that reads it, and refetched
-// when the main process reports a change to one of its topics.
+// Each query is keyed, fetched once for every component that reads it, and refetched when the
+// main process reports a change to one of the topics its readers follow (query-cache.ts).
 
-interface Entry {
-  key: string;
-  topics: Topic[];
-  fetcher: () => Promise<unknown>;
-  data: unknown;
-  error: string | null;
-  loaded: boolean;
-  inflight: Promise<void> | null;
-  stale: boolean;
-  subscribers: Set<() => void>;
-  snapshot: { data: unknown; error: string | null; loaded: boolean };
-}
-
-const cache = new Map<string, Entry>();
+const cache = new QueryCache(errorText);
 let changesWired = false;
-
-function publish(entry: Entry): void {
-  entry.snapshot = { data: entry.data, error: entry.error, loaded: entry.loaded };
-  for (const notify of entry.subscribers) notify();
-}
-
-function load(entry: Entry): Promise<void> {
-  if (entry.inflight) {
-    entry.stale = true;
-    return entry.inflight;
-  }
-  entry.stale = false;
-  entry.inflight = entry
-    .fetcher()
-    .then(
-      (data) => {
-        entry.data = data;
-        entry.error = null;
-      },
-      (error: unknown) => {
-        entry.error = errorText(error);
-      },
-    )
-    .finally(() => {
-      entry.loaded = true;
-      entry.inflight = null;
-      publish(entry);
-      if (entry.stale && entry.subscribers.size) void load(entry);
-    });
-  return entry.inflight;
-}
 
 function wireChanges(): void {
   if (changesWired || !window.vibeforge) return;
   changesWired = true;
   on("changed", (topics) => invalidate(topics));
   // Relative times, next fires and the two-day inbox window move on their own.
-  setInterval(() => {
-    for (const entry of cache.values()) if (entry.subscribers.size) void load(entry);
-  }, 30_000);
+  setInterval(() => cache.refresh(), 30_000);
 }
 
 export function invalidate(topics: Topic[]): void {
-  for (const entry of cache.values()) {
-    if (!entry.topics.some((topic) => topics.includes(topic))) continue;
-    if (entry.subscribers.size) void load(entry);
-    else entry.loaded = false;
-  }
-}
-
-function entryFor(key: string, topics: Topic[], fetcher: () => Promise<unknown>): Entry {
-  let entry = cache.get(key);
-  if (!entry) {
-    entry = {
-      key,
-      topics,
-      fetcher,
-      data: undefined,
-      error: null,
-      loaded: false,
-      inflight: null,
-      stale: false,
-      subscribers: new Set(),
-      snapshot: { data: undefined, error: null, loaded: false },
-    };
-    cache.set(key, entry);
-  }
-  entry.fetcher = fetcher;
-  return entry;
+  cache.invalidate(topics);
 }
 
 export interface Query<T> {
@@ -198,26 +128,31 @@ export interface Query<T> {
   reload: () => Promise<void>;
 }
 
-export function useQuery<T>(key: string | null, topics: Topic[], fetcher: () => Promise<T>): Query<T> {
+/**
+ * Read `key` through the shared cache. `topics` can depend on what was read last (a run follows
+ * its terminal only while it runs); the query is read again when one of them changes.
+ */
+export function useQuery<T>(
+  key: string | null,
+  topics: Topic[] | ((data: T | undefined) => Topic[]),
+  fetcher: () => Promise<T>,
+  options?: QueryOptions,
+): Query<T> {
   wireChanges();
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
-  const entry = key ? entryFor(key, topics, () => fetcherRef.current()) : null;
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      if (!entry) return () => undefined;
-      entry.subscribers.add(notify);
-      if (!entry.loaded && !entry.inflight) void load(entry);
-      return () => entry.subscribers.delete(notify);
-    },
-    [key],
-  );
+  const entry = key ? cache.entry(key, topics as Topics, () => fetcherRef.current(), options) : null;
+  const wanted = entry?.topics ?? NO_TOPICS;
+  const follow = wanted.join(" ");
+  // A new key or a new set of topics subscribes again.
+  const subscribe = useCallback((notify: () => void) => (entry ? cache.subscribe(entry, notify, wanted) : () => undefined), [key, follow]);
   const snapshot = useSyncExternalStore(subscribe, () => entry?.snapshot ?? EMPTY);
-  const reload = useCallback(() => (entry ? load(entry) : Promise.resolve()), [entry]);
+  const reload = useCallback(() => (entry ? cache.load(entry) : Promise.resolve()), [entry]);
   return { data: snapshot.data as T | undefined, error: snapshot.error, loaded: snapshot.loaded, reload };
 }
 
 const EMPTY = { data: undefined, error: null, loaded: false };
+const NO_TOPICS: readonly Topic[] = [];
 
 /** `value`, once it has stopped changing for `ms`: for search boxes that ask the main process. */
 export function useDebounced<T>(value: T, ms: number): T {
@@ -245,11 +180,12 @@ export const useEngines = () => useQuery("engines", ["engines"], () => call("eng
 export const useSettings = () => useQuery("settings", ["settings"], () => call("settings.get"));
 export const useAgents = () => useQuery("agents", ["agents"], () => call("agents.list"));
 export const useSkills = () => useQuery("skills", ["skills"], () => call("skills.list"));
-export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live"], () => call("routines.list"));
-export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live"], () => call("tasks.list"));
+// A CLI going busy or quiet ("working") changes who a task or routine waits behind, and the live list.
+export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live", "working"], () => call("routines.list"));
+export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live", "working"], () => call("tasks.list"));
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
-export const useLive = () => useQuery("live", ["live"], () => call("live.list"));
+export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
 export const useAppInfo = () => useQuery("app-info", [], () => call("app.info"));
 export const useUpdate = () => useQuery("updates", ["updates"], () => call("updates.get"));
 export const useActivity = () => useQuery("activity", ["settings", "workspaces"], () => call("activity.get"));

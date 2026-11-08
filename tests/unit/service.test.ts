@@ -960,4 +960,20 @@ describe("change events", () => {
     expect(seen).toEqual([["agents", "routines", "tasks", "workspaces"]]);
     ctx.svc.close();
   });
+
+  it("tells a CLI going busy or quiet on its own topic, so runs and chats aren't read again", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const started = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    await Promise.resolve();
+    const seen: string[][] = [];
+    ctx.svc.onChange((topics) => seen.push([...topics].sort()));
+    ctx.svc.onPtyActivity(started.ptyId, true);
+    await Promise.resolve();
+    ctx.svc.onPtyActivity(started.ptyId, false);
+    await Promise.resolve();
+    expect(seen).toEqual([["working"], ["working"]]);
+    expect(ctx.svc.listLive().find((session) => session.ptyId === started.ptyId)?.working).toBe(false);
+    ctx.svc.close();
+  });
 });

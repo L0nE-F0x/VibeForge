@@ -37,7 +37,8 @@ export class ShellRecorder {
     if (session.kind === "shell" && !session.programEngineId && working) return;
     if (Boolean(session.working) === working) return;
     this.core.live.set(ptyId, { ...session, working, quietAt: working ? (session.quietAt ?? null) : this.core.now().toISOString() });
-    this.core.emit("live");
+    // Its own topic: the flips come often, and runs, chats and an open run's files don't change with them.
+    this.core.emit("working");
   }
 
   // ---------------------------------------------------------------- runs typed into a shell
