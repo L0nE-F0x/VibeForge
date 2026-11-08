@@ -9,20 +9,20 @@ import {
   reviewReplyText,
   reviewRequestText,
   screenTail,
-  answerFromScreen,
   SETTLE_MS,
   taskReportText,
   type Answer,
   type Reachable,
 } from "../agent-talk.js";
 import { isCodingCli } from "../checkout.js";
-import { replyLogFor, type ReplyLog } from "../replies.js";
+import { replyLogFor } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
 import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import type { LiveSession, TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
+import { Answers, type Answered, type WaitSpec } from "./messages-answers.js";
 import { SavedFiles } from "./messages-files.js";
 import { Roster, type WhoResult } from "./messages-who.js";
 import type { TaskDesk } from "./tasks.js";
@@ -39,12 +39,8 @@ const PUMP_MS = 1000;
 /** A CLI that just went quiet, or was just sent something, isn't sent the next message straight away. */
 const IDLE_MS = 1500;
 const BETWEEN_MS = 3000;
-/** A CLI whose log should have the answer, but doesn't after this long quiet, is read from its screen. */
-const LOG_PATIENCE_MS = 30_000;
 /** A CLI that hasn't gone quiet once since it started may still be drawing its first screen. */
 const BOOT_MS = 5000;
-/** An answer still not in this long after the sender stopped waiting is given up on. */
-const LATE_ANSWER_MS = 30 * 60 * 1000;
 /** How long a handed-out task is watched for its first answer, to report it to the CLI that handed it out. */
 const REPORT_MS = 4 * 60 * 60 * 1000;
 /** A handed-out task's CLI that hasn't moved since it started counts as quiet after this long. */
@@ -65,40 +61,6 @@ export type TellResult =
   | { ok: false; error: string };
 
 export type TaskResult = { ok: true; taskId: string; title: string; started: boolean; reply?: string | null; note?: string } | { ok: false; error: string };
-
-type Answered = { reply: string | null; fromScreen: boolean };
-
-/** What waiting for an answer is for: `done` gets the answer, or null once the deadline passes. */
-interface WaitSpec {
-  /** The first line of what was sent, to find that prompt in the CLI's log. */
-  words: string;
-  /** All of what was sent, to find where the answer starts on a screen. */
-  sent?: string;
-  deadline: number;
-  done: (answered: Answered | null) => void;
-  /** The CLI went away, or a person pressed Stop. */
-  dropped?: (why: string) => void;
-  /** Aborts when the sender stops waiting early (its own tool timed out): the answer then goes to it as a message. */
-  gone?: AbortSignal;
-  /** Once the sender has stopped waiting: what to do with an answer or an end, and for how long to keep watching. Without it, an answer is forwarded as a message. */
-  after?: { answered: (answered: Answered) => void; ended: () => void; forMs: number };
-  /**
-   * A CLI that drew one screen and never moved (a trust question as it starts) never goes "quiet":
-   * it counts as quiet this long after the watch began.
-   */
-  stuckMs?: number;
-}
-
-interface Waiter extends WaitSpec {
-  /** When the message was pasted; the answer is the turn after it. */
-  since: number;
-  abort: AbortController;
-  logKind: ReplyLog | null;
-  reading: boolean;
-  /** The deadline passed and the sender was told; the answer goes to `forwardTo` as a message. */
-  gaveUp: boolean;
-  forwardTo: string | null;
-}
 
 interface Pending {
   id: string;
@@ -129,7 +91,6 @@ interface Review {
 
 export class MessageDesk {
   private readonly pending: Pending[] = [];
-  private readonly waiting = new Map<string, Waiter[]>();
   private readonly counts = new Map<string, number>();
   private readonly stopped = new Set<string>();
   private readonly lastHuman = new Map<string, { at: number; sent: boolean }>();
@@ -150,19 +111,21 @@ export class MessageDesk {
   private again = false;
   private readonly roster: Roster;
   private readonly files: SavedFiles;
+  private readonly answers: Answers;
 
   constructor(
     private readonly core: ServiceCore,
     private readonly tasks: TaskDesk,
   ) {
     this.roster = new Roster(core);
-    this.files = new SavedFiles(core, () => [...this.pending.map((item) => item.text), ...[...this.waiting.values()].flat().map((waiter) => waiter.sent ?? "")]);
+    this.answers = new Answers(core, this.roster, () => this.ensureTimer(), (from, to, reply) => this.forward(from, to, reply));
+    this.files = new SavedFiles(core, () => [...this.pending.map((item) => item.text), ...this.answers.texts()]);
   }
 
   close(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    for (const list of this.waiting.values()) for (const waiter of list) waiter.abort.abort();
+    this.answers.close();
   }
 
   private settings() {
@@ -340,9 +303,7 @@ export class MessageDesk {
       this.pending.splice(i, 1);
       item.dropped("A person stopped this conversation.");
     }
-    for (const [target, list] of [...this.waiting]) {
-      for (const waiter of [...list]) if (target === ptyId || waiter.forwardTo === ptyId) this.dropWaiter(target, waiter, "A person stopped this conversation.", false);
-    }
+    this.answers.stop(ptyId);
     for (const [id, review] of this.reviews) if (review.authorPty === ptyId || review.reviewerPty === ptyId) this.reviews.delete(id);
     this.core.emit("live");
   }
@@ -507,15 +468,8 @@ export class MessageDesk {
     if (asker) this.handedSince.set(asker, handedNow);
     if (talk.handOff === "ask") return held("It waits for the person to press Start on your terminal's title bar (Ask first, in VibeForge's Settings → Agents together).");
     if (asker && handedNow > talk.maxHandOffs) return held(`You've handed out ${talk.maxHandOffs} tasks since the person last wrote to you, so this one waits for them to press Start.`);
-    if (asker && this.workingFor(asker) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
+    if (asker && this.answers.reportingTo(asker) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
     return this.startHanded(task.id, asker, input);
-  }
-
-  /** Tasks this CLI handed out that are still working: started, and not reported back yet. */
-  private workingFor(asker: string): number {
-    let count = 0;
-    for (const list of this.waiting.values()) for (const waiter of list) if (waiter.after && waiter.forwardTo === asker) count += 1;
-    return count;
   }
 
   /**
@@ -560,7 +514,7 @@ export class MessageDesk {
       this.waitFor.delete(taskId);
       waiting?.(answered, ended);
     };
-    this.watchAnswer(
+    this.answers.watchAnswer(
       ptyId,
       {
         words: "",
@@ -709,7 +663,7 @@ export class MessageDesk {
    */
   talkForEach(ptyIds: readonly string[]): Map<string, TalkState | null> {
     const out = new Map<string, TalkState | null>();
-    const busy = this.counts.size || this.pending.length || this.waiting.size || this.reviews.size || this.proposed.size;
+    const busy = this.counts.size || this.pending.length || this.answers.size || this.reviews.size || this.proposed.size;
     if (!busy) {
       for (const ptyId of ptyIds) out.set(ptyId, null);
       return out;
@@ -729,11 +683,10 @@ export class MessageDesk {
       if (b === ptyId && a !== "outside") partners.set(a, count);
     }
     const queued = this.pending.filter((item) => item.toPty === ptyId || item.fromPty === ptyId).length;
-    const mine = this.waiting.get(ptyId) ?? [];
-    const reporting = mine.find((waiter) => waiter.after && waiter.forwardTo);
+    const waited = this.answers.waitedOn(ptyId);
     const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
     const toStart = this.toStart(ptyId);
-    if (!partners.size && !queued && !mine.length && !review && !toStart.length) return null;
+    if (!partners.size && !queued && !waited.any && !review && !toStart.length) return null;
     return {
       with: [...partners.keys()].map(name).filter((label): label is string => Boolean(label)),
       messages: Math.max(0, ...partners.values()),
@@ -749,7 +702,7 @@ export class MessageDesk {
             rounds: review.rounds,
           }
         : null,
-      reportsTo: reporting?.forwardTo ? name(reporting.forwardTo) : null,
+      reportsTo: waited.reportsTo ? name(waited.reportsTo) : null,
       toStart,
     };
   }
@@ -775,7 +728,7 @@ export class MessageDesk {
       } finally {
         // In the same step as the last look at `again`, so a call in between can't be lost.
         this.running = null;
-        if (!this.pending.length && !this.waiting.size && !this.reviews.size && this.timer) {
+        if (!this.pending.length && !this.answers.size && !this.reviews.size && this.timer) {
           clearInterval(this.timer);
           this.timer = null;
         }
@@ -826,11 +779,11 @@ export class MessageDesk {
         this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
       }
       // A draft waits for a person, so there's no answer to watch for.
-      if (item.waiter && enter) this.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
+      if (item.waiter && enter) this.answers.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
       item.delivered?.(!enter);
       this.core.emit("live");
     }
-    for (const [target, list] of [...this.waiting]) for (const waiter of [...list]) await this.checkWaiter(target, waiter, now);
+    await this.answers.check(now);
   }
 
   /** Put a message in line for `toPty`, meant for the CLI in front there now. */
@@ -861,96 +814,19 @@ export class MessageDesk {
     return !human || human.sent || now - human.at >= HUMAN_DRAFT_MS;
   }
 
-  /**
-   * Waits for the answer to what was just sent to `target`: from its own log when VibeForge reads
-   * that CLI's logs, else the end of its screen once it has worked and gone quiet. Past the
-   * deadline the sender is told it's still going, and the answer follows as a message.
-   */
-  private watchAnswer(target: string, spec: WaitSpec, since: number, forwardTo: string | null = null): void {
-    const session = this.core.live.get(target);
-    const engine = session ? this.roster.engineOf(session) : null;
-    const watch = this.core.options.host.watchReply;
-    const logKind = engine && watch ? replyLogFor(engine.id, engine.bin) : null;
-    const waiter: Waiter = { ...spec, since, abort: new AbortController(), logKind, reading: false, gaveUp: Boolean(spec.gone?.aborted), forwardTo };
-    // A sender that hangs up early has stopped waiting, as if its deadline had passed.
-    spec.gone?.addEventListener("abort", () => (waiter.gaveUp = true), { once: true });
-    this.waiting.set(target, [...(this.waiting.get(target) ?? []), waiter]);
-    // Checked every second from now: a CLI that never moves would otherwise never be looked at again.
-    this.ensureTimer();
-    if (logKind && session && watch) {
-      const cwd = session.programCwd || (session.runId ? this.core.store.getRun(session.runId)?.cwd : null) || session.cwd;
-      void watch({ kind: logKind, cwd, since: since - 2000, words: spec.words, signal: waiter.abort.signal })
-        .then((reply) => {
-          if (reply !== null) this.finishWaiter(target, waiter, { reply, fromScreen: false });
-        })
-        .catch(() => undefined);
-    }
-  }
-
-  private async checkWaiter(target: string, waiter: Waiter, now: number): Promise<void> {
-    const session = this.core.live.get(target);
-    if (!session || !isCodingCli(session)) return this.dropWaiter(target, waiter, "That CLI isn't running any more.");
-    const quietAt = Date.parse(session.quietAt ?? "");
-    const quietSince = quietAt > waiter.since ? quietAt : waiter.stuckMs && !session.quietAt ? waiter.since + waiter.stuckMs : Number.NaN;
-    const answered = !session.working && Number.isFinite(quietSince) && now - quietSince >= (waiter.logKind ? LOG_PATIENCE_MS : SETTLE_MS);
-    if (answered && !waiter.reading) {
-      waiter.reading = true;
-      const screen = await this.core.options.host.screen?.(target).catch(() => "");
-      const reply = cleanText(answerFromScreen(screen ?? "", waiter.sent ?? ""));
-      return this.finishWaiter(target, waiter, { reply, fromScreen: true });
-    }
-    if (!waiter.gaveUp && now >= waiter.deadline) {
-      waiter.gaveUp = true;
-      waiter.done(null);
-    }
-    // Its answer never came (the CLI never took the message up): stop looking, or the pane says it's waiting forever.
-    if (waiter.gaveUp && now >= waiter.deadline + (waiter.after?.forMs ?? LATE_ANSWER_MS)) this.takeWaiter(target, waiter);
-  }
-
-  private takeWaiter(target: string, waiter: Waiter): boolean {
-    const list = this.waiting.get(target);
-    if (!list?.includes(waiter)) return false;
-    list.splice(list.indexOf(waiter), 1);
-    if (!list.length) this.waiting.delete(target);
-    waiter.abort.abort();
-    this.core.emit("live");
-    return true;
-  }
-
-  private finishWaiter(target: string, waiter: Waiter, answered: Answered): void {
-    if (!this.takeWaiter(target, waiter)) return;
-    if (!waiter.gaveUp) {
-      waiter.done(answered);
-      return;
-    }
-    if (waiter.after) {
-      waiter.after.answered(answered);
-      return;
-    }
-    // The sender gave up waiting: the answer reaches it as a message instead.
-    if (!waiter.forwardTo || !answered.reply?.trim()) return;
+  /** An answer that came after its sender stopped waiting: to the sender as a message. */
+  private forward(target: string, to: string, reply: string): void {
     const from = this.list().find((item) => item.ptyId === target);
     this.queue({
       fromPty: target,
-      toPty: waiter.forwardTo,
-      text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text: cleanText(answered.reply), answer: "tell", savedAt: this.files.saveIfLong("messages", answered.reply) }),
+      toPty: to,
+      text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text: cleanText(reply), answer: "tell", savedAt: this.files.saveIfLong("messages", reply) }),
       enter: true,
       counts: true,
       waiter: null,
       dropped: () => undefined,
     });
     void this.pump();
-  }
-
-  /** The CLI went away (or, with `ended` false, a person pressed Stop): nothing more will come. */
-  private dropWaiter(target: string, waiter: Waiter, why: string, ended = true): void {
-    if (!this.takeWaiter(target, waiter)) return;
-    if (waiter.gaveUp) {
-      if (ended) waiter.after?.ended();
-      return;
-    }
-    if (waiter.dropped) waiter.dropped(why);
-    else waiter.done(null);
   }
 }
 
