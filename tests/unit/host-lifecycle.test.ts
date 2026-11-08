@@ -123,11 +123,22 @@ describe("the terminal host's lifecycle", () => {
       ["p1", null, null],
       ["p2", null, null],
     ]);
+    expect(lines()).toContain("INFO  Terminal p1 ended (the terminal host stopped)");
+    expect(lines()).toContain("INFO  Terminal p2 ended (the terminal host stopped)");
     expect(sent).toEqual([["host-crash", "The terminal host stopped (SIGKILL)."]]);
-    expect(lines()).toContain("ERROR The terminal host stopped: The terminal host stopped (SIGKILL).");
+    expect(lines()).toContain("ERROR The terminal host stopped (SIGKILL).");
+    expect(lines().join("\n")).not.toContain("stopped: The terminal host stopped");
     expect(supervisor.starts).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(supervisor.starts).toHaveLength(1);
+  });
+
+  it("ends a spoken-answer wait on a terminal that died with the host, as on any exit", async () => {
+    vi.useFakeTimers();
+    const { supervisor, exited } = setUp();
+    supervisor.crash("The terminal host stopped (SIGKILL).");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(exited).toEqual(["p1", "p2"]);
   });
 
   it("leaves the host down once a quit has begun, even one that starts within that second", async () => {
