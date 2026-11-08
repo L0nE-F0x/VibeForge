@@ -4,9 +4,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.13.0, 2026-11-07, is the lates
 
 ## Next up
 
-- [ ] **Codex as the Orchestrator's planner, signed in.** Built to Codex's JSON lines and tested against its real "not signed in" answer; a real plan from it isn't checked, as Codex isn't signed in on this machine.
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
-- [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to the Orchestrator, and a per-workspace strip in Code (the Running list in the Orchestrator covers Stop all for now).
+- [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Maestro, and a per-workspace strip in Code (the Running list in Maestro covers Stop all for now).
 
 ## Only checked with stand-ins
 
@@ -14,9 +13,11 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 - Dictation and talk-back with a real microphone and speakers, including talk-back from a CLI typed into a Code terminal.
 - The 0.8.0 sounds on real speakers.
-- The tray on the real bar: the amber corner, pinning it from the tray's arrow, and Start at login across a real login.
+- The tray's amber corner and pinning it from the tray's arrow, on the real bar. (The tray and its menu were checked by hand on 2026-09-28.)
+- The 2.8.1 Start at login fix across a real login. A real login found the missing icon; the fix was checked against a stand-in tray host.
 - Settings → Storage's first upkeep on a large real run folder.
 - A task in its own copy on a repository Claude Code hasn't trusted yet.
+- **Codex as Maestro's planner.** Built to Codex's JSON lines and tested against its real "not signed in" answer. Codex isn't signed in on this machine, so a real plan from it waits for someone who uses Codex.
 
 ## Parked
 
@@ -26,5 +27,5 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 ## Known rough edges
 
-- `npm audit` (2026-09-28, on Electron 44): only Vitest's advisory, which is dev-only (fixing it is a major bump, not urgent).
-- **No tokens from Cursor Agent or Crush** (looked at 2026-10-26, see `status.md`). Cursor Agent only gets its counts from Cursor's server and hands them to hooks; Crush overwrites each session's count with the latest context size. Revisit if either starts keeping a per-call log.
+- `npm audit` (2026-11-08): 11 advisories. Electron 44.4.5 is the one that reaches users, since the app runs on it: two advisories, fixed in 44.9.1, which `npm audit fix` picks up. Vite, undici and source-map-js are build tools with fixes in range; Vitest's (and the coverage packages under it) need Vitest 5, a major bump. `npm audit --omit=dev` finds nothing because Electron is a dev dependency.
+- **No tokens from Cursor Agent or Crush** (looked at 2026-10-26, see `archive/status-log.md`). Cursor Agent only gets its counts from Cursor's server and hands them to hooks; Crush overwrites each session's count with the latest context size. Revisit if either starts keeping a per-call log.

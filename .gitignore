@@ -8,5 +8,6 @@ dist-electron/
 .netlify/
 .vibeforge-installer
 coverage/
-# Handoffs, audits and design notes kept on this machine only
-docs/archive/
+# Handoffs, audits and design notes kept on this machine only (the old status log is shared)
+docs/archive/*
+!docs/archive/status-log.md
