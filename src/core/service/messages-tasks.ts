@@ -253,7 +253,10 @@ export class HandedTasks {
     const talk = this.settings();
     if (!talk.on) return { ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." };
     if (!talk.leadApplies) return { ok: false, error: "A person applies handed-out tasks' changes. VibeForge's Settings → Agents together can let the CLI that handed one out do it." };
-    const task = this.core.store.getTask(input.task) ?? this.core.store.listTasks().find((item) => item.title === input.task) ?? null;
+    // By id, else by title: of tasks with that title, the one this CLI handed out (another CLI's may share it).
+    const byId = this.core.store.getTask(input.task);
+    const titled = byId ? [] : this.core.store.listTasks().filter((item) => item.title === input.task);
+    const task = byId ?? titled.find((item) => input.fromPty && this.handed.get(item.id) === input.fromPty) ?? titled[0] ?? null;
     if (!task) return { ok: false, error: `No task called "${input.task}".` };
     if (!input.fromPty || this.handed.get(task.id) !== input.fromPty) return { ok: false, error: "Only the CLI that handed this task out can apply it. A person can apply it from the task in VibeForge." };
     if (!task.copy) return { ok: false, error: "This task has no changes of its own to apply." };

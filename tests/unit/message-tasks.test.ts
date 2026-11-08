@@ -66,4 +66,21 @@ describe("handed-out tasks", () => {
     expect(talk(sender)?.toStart ?? []).toEqual([]);
     ctx.svc.close();
   });
+
+  it("applies by title the task this CLI handed out, when another CLI handed out one of the same title", async () => {
+    const { repo, ctx, workspace, sender, goAhead } = await team();
+    goAhead({ leadApplies: true });
+    const other = (await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" })).ptyId;
+    for (const [from, file] of [
+      [other, "c.txt"],
+      [sender, "d.txt"],
+    ]) {
+      expect(await ctx.svc.handTask({ fromPty: from, agent: "helper", text: "Add a file" })).toMatchObject({ ok: true, started: true });
+      fs.writeFileSync(path.join(ctx.spawns.at(-1)!.cwd, file), "new\n");
+    }
+    expect(await ctx.svc.applyHandedTask({ fromPty: sender, task: "Add a file" })).toMatchObject({ ok: true, files: ["d.txt"] });
+    expect(await ctx.svc.applyHandedTask({ fromPty: other, task: "Add a file" })).toMatchObject({ ok: true, files: ["c.txt"] });
+    expect(fs.readdirSync(repo).sort()).toEqual([".git", "a.txt", "c.txt", "d.txt"]);
+    ctx.svc.close();
+  });
 });
