@@ -4,8 +4,9 @@
 //   node scripts/brand.ts
 //
 // Writes resources/icon.svg and icon.png, site/assets/icon.svg, apple-touch-icon.png, og.svg and
-// og.png, and the inline wordmark and marks in site/index.html (between brand:* markers). PNGs
-// need rsvg-convert (librsvg); the OG text uses JetBrains Mono from the system.
+// og.png, site/favicon.ico, and the inline wordmark and marks in site/index.html and site/404.html
+// (between brand:* markers). PNGs need rsvg-convert (librsvg); the OG text uses JetBrains Mono
+// from the system.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -40,6 +41,33 @@ function png(svgFile: string, pngFile: string, width: number): void {
   }
 }
 
+/** An .ico holding one PNG per size, which every browser that still asks for /favicon.ico reads. */
+function favicon(svgFile: string, icoFile: string, sizes: number[]): void {
+  let pngs: Buffer[];
+  try {
+    pngs = sizes.map((size) => execFileSync("rsvg-convert", ["-w", String(size), "-h", String(size), path.join(root, svgFile)]));
+  } catch {
+    console.warn(`rsvg-convert is missing: ${icoFile} not updated`);
+    return;
+  }
+  const head = Buffer.alloc(6 + 16 * sizes.length);
+  head.writeUInt16LE(1, 2);
+  head.writeUInt16LE(sizes.length, 4);
+  let offset = head.length;
+  sizes.forEach((size, i) => {
+    const entry = 6 + 16 * i;
+    head.writeUInt8(size % 256, entry);
+    head.writeUInt8(size % 256, entry + 1);
+    head.writeUInt16LE(1, entry + 4);
+    head.writeUInt16LE(32, entry + 6);
+    head.writeUInt32LE(pngs[i].length, entry + 8);
+    head.writeUInt32LE(offset, entry + 12);
+    offset += pngs[i].length;
+  });
+  fs.writeFileSync(path.join(root, icoFile), Buffer.concat([head, ...pngs]));
+  console.log("wrote", icoFile);
+}
+
 // ---- the icon: the mark on near-black, framed by the accent gradient
 const m = mark();
 const iconPx = 32;
@@ -55,6 +83,7 @@ write("resources/icon.svg", icon);
 write("site/assets/icon.svg", icon);
 png("resources/icon.svg", "resources/icon.png", 512);
 png("resources/icon.svg", "site/assets/apple-touch-icon.png", 180);
+favicon("resources/icon.svg", "site/favicon.ico", [16, 32, 48]);
 
 // ---- the social image
 const w = wordmark();
@@ -84,20 +113,22 @@ function inline(art: Art, px: number, className: string, label?: string): string
   return `<svg class="${className}" viewBox="0 0 ${art.width} ${art.height}" width="${art.width * px}" height="${art.height * px}" shape-rendering="crispEdges" ${a11y}>${cells}</svg>`;
 }
 
-const pagePath = path.join(root, "site/index.html");
-let page = fs.readFileSync(pagePath, "utf8");
 const blocks: Record<string, string> = {
   wordmark: inline(w, 16, "wordmark", "VibeForge"),
   mark: inline(m, 2, "mark"),
   "mark-large": inline(m, 8, "mark-large"),
 };
-for (const [name, svg] of Object.entries(blocks)) {
-  const pattern = new RegExp(`(<!-- brand:${name} -->)[\\s\\S]*?(<!-- /brand:${name} -->)`, "g");
-  let count = 0;
-  page = page.replace(pattern, (_all, open: string, close: string) => {
-    count += 1;
-    return `${open}${svg}${close}`;
-  });
-  console.log(`site/index.html: ${count} × brand:${name}`);
+for (const file of ["site/index.html", "site/404.html"]) {
+  const pagePath = path.join(root, file);
+  let page = fs.readFileSync(pagePath, "utf8");
+  for (const [name, svg] of Object.entries(blocks)) {
+    const pattern = new RegExp(`(<!-- brand:${name} -->)[\\s\\S]*?(<!-- /brand:${name} -->)`, "g");
+    let count = 0;
+    page = page.replace(pattern, (_all, open: string, close: string) => {
+      count += 1;
+      return `${open}${svg}${close}`;
+    });
+    console.log(`${file}: ${count} × brand:${name}`);
+  }
+  fs.writeFileSync(pagePath, page);
 }
-fs.writeFileSync(pagePath, page);
