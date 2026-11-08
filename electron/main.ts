@@ -411,22 +411,39 @@ async function waitForTrayHost(ms: number): Promise<boolean> {
   return true;
 }
 
+/** The quit question while it is on screen, so a second close or Quit joins it instead of asking again. */
+let quitQuestion: Promise<boolean> | null = null;
+
+/**
+ * Asks whether to quit with terminals still running; true to quit. Never the blocking kind of
+ * dialog: while one held the main process, terminal output backed up and every CLI stalled.
+ */
+function askToQuit(live: Array<{ kind: string }>): Promise<boolean> {
+  if (quitQuestion) return quitQuestion;
+  const runs = live.filter((session) => session.kind === "run").length;
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
+    defaultId: 1,
+    cancelId: 1,
+    title: "VibeForge",
+    message: words.count("main.quit", live.length),
+    detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
+  };
+  quitQuestion = (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options))
+    .then(({ response }) => response === 0)
+    .finally(() => {
+      quitQuestion = null;
+    });
+  return quitQuestion;
+}
+
 /** Quit from the tray menu; running terminals are asked about first, as when closing the window. */
 async function quitFromTray(): Promise<void> {
   const live = service?.listLive() ?? [];
   if (live.length && win) {
     focusWindow();
-    const runs = live.filter((session) => session.kind === "run").length;
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
-      defaultId: 1,
-      cancelId: 1,
-      title: "VibeForge",
-      message: words.count("main.quit", live.length),
-      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
-    });
-    if (response !== 0) return;
+    if (!(await askToQuit(live))) return;
   }
   quitting = true;
   app.quit();
@@ -812,19 +829,14 @@ async function createWindow(): Promise<void> {
       return;
     }
     const live = service.listLive();
-    const runs = live.filter((session) => session.kind === "run").length;
     if (live.length === 0) return;
-    const choice = dialog.showMessageBoxSync(win!, {
-      type: "question",
-      buttons: [words.say("main.quitStop"), words.say("main.quitKeep")],
-      defaultId: 1,
-      cancelId: 1,
-      title: "VibeForge",
-      message: words.count("main.quit", live.length),
-      detail: words.say(runs ? "main.quitRuns" : "main.quitCloses"),
+    // The window stays while the question is up; a yes quits, which closes it.
+    event.preventDefault();
+    void askToQuit(live).then((quit) => {
+      if (!quit) return;
+      quitting = true;
+      app.quit();
     });
-    if (choice === 1) event.preventDefault();
-    else quitting = true;
   });
   const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
   win.on("closed", () => {
