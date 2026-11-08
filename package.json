@@ -1,6 +1,6 @@
 {
   "name": "vibeforge",
-  "version": "2.14.0",
+  "version": "2.14.1",
   "private": true,
   "description": "VibeForge: an open-source desktop for Omarchy that runs Claude Code, Codex, Grok and the other coding CLIs you already use, side by side in real terminals, with agents, routines, tasks and Maestro.",
   "author": "Lone Fox (https://github.com/L0nE-F0x)",

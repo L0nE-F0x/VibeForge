@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-11-08
+
+**2.14.1: VibeForge runs on Electron 45.**
+
+### Changed
+
+- **Electron 45** (Chromium 156 and Node 24.22), the newest line, for its security fixes. VibeForge is now built with Vite 8 and checked with TypeScript 7. Nothing changes in how the app works.
+
 ## [2.14.0] - 2026-11-08
 
 **2.14.0: Maestro's work comes back for review, Apply works over your own edits, and a long list of fixes from a full audit: safer updates, a phone that disconnects when you say so, and a faster desk with many CLIs open.**
@@ -593,7 +601,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.14.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.14.1...HEAD
+[2.14.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.14.1
 [2.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.14.0
 [2.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.13.0
 [2.12.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.12.2
