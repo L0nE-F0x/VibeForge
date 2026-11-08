@@ -68,7 +68,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.7",
-    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron": "^1.2.0",
     "vitest": "^5.1.0"
   },
   "allowScripts": {
