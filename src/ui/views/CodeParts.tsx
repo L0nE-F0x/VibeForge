@@ -23,7 +23,7 @@ import { PATH_MIME } from "../components/Terminal.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Input, Skeleton } from "../components/ui.js";
 import { boxOf, clipBox } from "../floating.js";
-import { t as translate, useT } from "../i18n/index.js";
+import { useT } from "../i18n/index.js";
 import { dockCovered, setDockArea, useDockCovered, useToast } from "../state.js";
 
 // ------------------------------------------------------------------ split layout
@@ -123,7 +123,7 @@ function TreeLevel({
     };
   }, [dir, refreshKey]);
   if (!nodes) return depth === 0 ? <Skeleton rows={5} /> : null;
-  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{translate("files.empty")}</div>;
+  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{t("files.empty")}</div>;
   return (
     <>
       {nodes.map((node) => {
@@ -392,7 +392,7 @@ export function DockPanel({
       try {
         onUrl(workspaceId, next);
       } catch (error) {
-        fail(error, "That URL did not work");
+        fail(error, t("code.urlFailed"));
       }
     } else void call("dock.command", "reload");
   };
