@@ -97,7 +97,8 @@ describe("store read cache", () => {
     expect(store.readEngineRows().some((row) => row.id === "codex")).toBe(false);
     store.writeAgent({ ...agent("ada", "Ada"), goodAt: "tests" });
     expect(store.getAgent("ada")?.goodAt).toBe("tests");
-    store.deleteAgent("ada");
+    // Deleting goes through the trash (library.ts): the folder is moved away, and the next read sees it gone.
+    fs.rmSync(path.join(store.configRoot, "agents", "ada"), { recursive: true });
     expect(store.getAgent("ada")).toBeNull();
   });
 
