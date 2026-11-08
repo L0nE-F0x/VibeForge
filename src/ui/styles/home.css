@@ -634,7 +634,7 @@
   border-color: var(--focus-line);
 }
 
-.run-row[aria-selected="true"] {
+.run-row[aria-current="true"] {
   background: var(--sel-fill);
   border-color: var(--sel-line);
 }
@@ -684,7 +684,7 @@
   border-color: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
-.list-compact .run-row[aria-selected="true"] {
+.list-compact .run-row[aria-current="true"] {
   background: var(--sel-fill);
   border-color: var(--sel-line);
 }

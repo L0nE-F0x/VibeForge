@@ -107,7 +107,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
               className={`row${chatAttention.get(item.id)?.attention === "waiting" ? " needs-you" : ""}`}
               role="button"
               tabIndex={0}
-              aria-selected={item.id === chat?.id}
+              aria-current={item.id === chat?.id || undefined}
               onClick={() => go({ view: "chat", chatId: item.id })}
               onKeyDown={(event) => event.key === "Enter" && go({ view: "chat", chatId: item.id })}
             >
