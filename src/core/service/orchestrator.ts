@@ -237,7 +237,7 @@ export class OrchestratorDesk {
   async ask(text: string): Promise<void> {
     const words = text.trim();
     if (!words) return;
-    if (this.thinking) throw new Error("The Orchestrator is still answering. Wait for it, or stop it.");
+    if (this.thinking) throw new Error("Maestro is still answering. Wait for it, or stop it.");
     const now = this.core.now().toISOString();
     this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
     const controller = new AbortController();

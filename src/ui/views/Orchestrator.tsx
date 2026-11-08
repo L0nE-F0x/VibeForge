@@ -14,8 +14,8 @@ import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
 import { setDraft } from "../voice.js";
 
-// Talk to VibeForge itself: say or type what to start where, and the CLI chosen in Settings
-// (Grok Build by default) turns it into a plan that VibeForge carries out. The full view has the
+// Maestro: say or type what to start where, and the planner (the CLI picked in Settings, or the
+// first one here that can plan) turns it into a plan that VibeForge carries out. The full view has the
 // conversation and the team; Ctrl+Shift+O opens the same conversation over any view.
 
 export const OPEN_ORCHESTRATOR_EVENT = "vibeforge:open-orchestrator";
