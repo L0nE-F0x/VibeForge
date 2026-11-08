@@ -52,7 +52,7 @@
     "@xterm/xterm": "^6.0.0",
     "cron-parser": "^5.10.4",
     "cronstrue": "^3.38.0",
-    "electron": "^44.10.2",
+    "electron": "^45.2.1",
     "lucide-react": "^1.70.0",
     "node-pty": "^1.0.0",
     "react": "^19.3.1",
