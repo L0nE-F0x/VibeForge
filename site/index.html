@@ -4,18 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VibeForge — your coding agents, forged into one desk</title>
-    <meta name="description" content="An open-source desktop app for Omarchy that runs Claude Code, Codex, Grok, and your other coding CLIs side by side, each on its own branch in a git worktree. Includes saved agents, scheduled routines, and git diffs to review. No accounts, no API keys, no telemetry." />
+    <meta name="description" content="An open-source desktop for Omarchy that runs Claude Code, Codex, Grok and the other coding CLIs you already use, side by side in real terminals. No accounts, no API keys, no telemetry." />
     <meta name="theme-color" content="#09090b" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vibe-forge.net/" />
     <meta property="og:title" content="VibeForge — your coding agents, forged into one desk" />
-    <meta property="og:description" content="Run several coding CLIs at once, each on its own branch in a git worktree, in one open-source desktop app for Omarchy." />
-    <meta property="og:image" content="https://vibe-forge.net/assets/og.png" />
+    <meta property="og:description" content="An open-source desktop for Omarchy that runs Claude Code, Codex, Grok and the other coding CLIs you already use, side by side in real terminals." />
+    <meta property="og:image" content="https://vibe-forge.net/assets/og.png?v=2.13.0-1" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="The VibeForge pixel wordmark in ember and amber: your coding agents, forged into one desk." />
+    <meta property="og:image:alt" content="The VibeForge pixel wordmark in ember and amber: your coding agents, forged into one desk. Claude Code, Codex, Grok and your other CLIs, side by side. For Omarchy." />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://vibe-forge.net/assets/og.png" />
+    <meta name="twitter:image" content="https://vibe-forge.net/assets/og.png?v=2.13.0-1" />
     <link rel="canonical" href="https://vibe-forge.net/" />
     <link rel="icon" href="favicon.ico" sizes="32x32" />
     <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
@@ -334,12 +334,12 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
-              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
+              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere to open Maestro, VibeForge's orchestrator, and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
               <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It only starts CLIs you ask for.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">
-                <div class="or-head"><svg><use href="#i-workflow" /></svg><b>Orchestrator</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
+                <div class="or-head"><svg><use href="#i-workflow" /></svg><b>Maestro</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
                 <div class="or-you">In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.</div>
                 <div class="or-say">Starting Claude Code on fix-nav and Codex on checkout-tests in web-app.</div>
                 <div class="or-plan">
@@ -623,13 +623,13 @@
               <img src="assets/app-home.webp?v=2.12.1" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=2.12.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of the Orchestrator from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=2.12.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of Maestro's code from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
               <img src="assets/app-tasks.webp?v=2.12.1" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace, the finished ones with their diff." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-maestro.webp?v=2.12.1" width="1890" height="1138" alt="The Orchestrator: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it shows the plan, both steps done with Open in Code, and the Running list beside it marks the two it started." loading="lazy" />
+              <img src="assets/app-maestro.webp?v=2.12.1" width="1890" height="1138" alt="Maestro: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it shows the plan, both steps done with Open in Code, and the Running list beside it marks the two it started." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs.</p>
@@ -725,7 +725,7 @@
             <dl class="keys">
               <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Jump to any agent, chat, workspace, task, routine, or skill, or search past runs by transcript</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>9</kbd></dt><dd>Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs, Maestro</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Open Orchestrator from any view to launch CLIs on new branches</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Open Maestro from any view to start CLIs on new branches</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd>/<kbd>E</kbd></dt><dd>Split a new terminal to the right or below</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>M</kbd></dt><dd>Maximize the focused pane</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Z</kbd></dt><dd>Undo a delete while its toast is up</dd></div>

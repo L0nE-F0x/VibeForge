@@ -98,7 +98,7 @@ const og = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" vi
   <text x="${ogX + m.width * 6 + 18}" y="131" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="24" fill="${APEX.ash}">vibe-forge.net</text>
   ${rects(w, ogPx, ogX, ogY, (y) => SHADES[shade(y, w.height)])}
   <text x="${ogX}" y="${ogY + 7 * ogPx + 78}" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="36" font-weight="600" fill="${APEX.fg}">Your coding agents, forged into one desk.</text>
-  <text x="${ogX}" y="${ogY + 7 * ogPx + 128}" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="23" fill="${APEX.ash}">Claude Code, Codex, Grok and every CLI you use, as a team. For Omarchy.</text>
+  <text x="${ogX}" y="${ogY + 7 * ogPx + 128}" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="23" fill="${APEX.ash}">Claude Code, Codex, Grok and your other CLIs, side by side. For Omarchy.</text>
   <rect x="${ogX}" y="552" width="14" height="14" fill="${APEX.accent}"/>
   <text x="${ogX + 26}" y="565" font-family="JetBrainsMono Nerd Font, JetBrains Mono, monospace" font-size="20" fill="${APEX.ash}">open source · no accounts · no keys · no telemetry</text>
 </svg>
