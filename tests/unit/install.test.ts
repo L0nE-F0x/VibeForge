@@ -1,4 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +8,8 @@ import { seedEngines } from "../../src/core/engines.js";
 
 // scripts/install.sh, run in a scratch home against a stand-in VibeForge repo: its npm ci makes
 // Electron and node-pty's files and its build writes dist, so each release can be made to fail
-// the way a dropped network or a broken build would.
+// the way a dropped network or a broken build would. Its ready-made builds come from a stand-in
+// release server on this computer, which answers like GitHub's releases.
 
 const repo = path.resolve(import.meta.dirname, "..", "..");
 const script = fs.readFileSync(path.join(repo, "scripts", "install.sh"), "utf8");
@@ -56,22 +58,23 @@ fs.writeFileSync("dist-electron/main.js", ${JSON.stringify(version)});
   git("tag", `v${version}`);
 }
 
-function install(args: string[] = [], opts: { path?: string; stdin?: string } = {}) {
+function install(args: string[] = [], opts: { path?: string; stdin?: string; home?: string; env?: Record<string, string> } = {}) {
   const result = spawnSync("bash", opts.stdin === undefined ? [path.join(repo, "scripts", "install.sh"), ...args] : ["-s", "--", ...args], {
     encoding: "utf8",
     input: opts.stdin,
     env: {
-      HOME: home,
+      HOME: opts.home ?? home,
       PATH: opts.path ?? `${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
       VIBEFORGE_REPO: fake,
       NPM_CONFIG_UPDATE_NOTIFIER: "false",
       GIT_CONFIG_NOSYSTEM: "1",
+      ...opts.env,
     },
   });
   return { status: result.status, out: `${result.stdout}${result.stderr}` };
 }
 
-const app = () => path.join(home, ".local", "share", "vibeforge-app");
+const app = (inHome = home) => path.join(inHome, ".local", "share", "vibeforge-app");
 const built = (folder: string) => fs.readFileSync(path.join(folder, "dist-electron", "main.js"), "utf8");
 
 beforeAll(() => {
@@ -159,5 +162,198 @@ describe("the installer", () => {
   it("looks for every CLI VibeForge knows", () => {
     const scan = /for cli in ([^;]+); do/.exec(script)?.[1].trim().split(/\s+/);
     expect(scan?.sort()).toEqual(seedEngines().map((engine) => engine.bin).sort());
+  });
+});
+
+// ------------------------------------------------------------------ ready-made builds
+
+/** A stand-in for GitHub's releases: /latest redirects to the tag in `latest`, files are served as they are. */
+const SERVER = `
+const fs = require("fs"), http = require("http"), path = require("path");
+const root = process.argv[1];
+http.createServer((req, res) => {
+  const url = new URL(req.url, "http://localhost");
+  if (url.pathname === "/releases/latest") {
+    let tag = "";
+    try { tag = fs.readFileSync(path.join(root, "latest"), "utf8").trim(); } catch {}
+    res.writeHead(302, { location: tag ? "/releases/tag/" + tag : "/releases" });
+    return res.end();
+  }
+  fs.readFile(path.join(root, path.normalize(url.pathname)), (error, data) => {
+    res.writeHead(error ? 404 : 200);
+    res.end(error ? "Not Found" : data);
+  });
+}).listen(0, "127.0.0.1", function () { console.log(this.address().port); });
+`;
+
+/** What the installer looks for on this CPU. */
+const arch = process.arch === "arm64" ? "arm64" : "x64";
+let srv = "";
+let releases = "";
+let server: ChildProcess | undefined;
+/** Stand-ins for everything a build from source runs: an archive install that calls one fails. */
+let nobuild = "";
+
+const sha256 = (file: string) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+
+/**
+ * Publishes a release on the stand-in server and makes it the latest. `sums` breaks it: a wrong
+ * checksum, a SHA256SUMS without the archive (a release from before ready-made builds), or none.
+ */
+function publish(version: string, sums: "good" | "bad" | "no-archive" | "none" = "good") {
+  const tag = `v${version}`;
+  const files = path.join(srv, "releases", "download", tag);
+  const name = `vibeforge-${version}-linux-${arch}`;
+  const tree = path.join(dir, "trees", name);
+  const write = (file: string, text: string, mode = 0o644) => {
+    fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
+    fs.writeFileSync(path.join(tree, file), text, { mode });
+  };
+  write("package.json", JSON.stringify({ name: "vibeforge", version }));
+  write("dist/index.html", "");
+  write("dist-electron/main.js", version);
+  write("node_modules/electron/dist/electron", "#!/bin/sh\n", 0o755);
+  write("node_modules/node-pty/build/Release/pty.node", "");
+  write("scripts/vibeforge", "#!/bin/sh\n", 0o755);
+  write("resources/icon.png", "");
+  write("resources/icon.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>");
+  write(".vibeforge-installer", "");
+  fs.mkdirSync(files, { recursive: true });
+  const archive = path.join(files, `${name}.tar.zst`);
+  execFileSync("tar", ["--zstd", "-cf", archive, "-C", path.dirname(tree), name]);
+  fs.writeFileSync(path.join(files, "install.sh"), script);
+  const lines = [`${sha256(path.join(files, "install.sh"))}  install.sh`];
+  if (sums === "good") lines.push(`${sha256(archive)}  ${name}.tar.zst`);
+  if (sums === "bad") lines.push(`${"0".repeat(64)}  ${name}.tar.zst`);
+  if (sums !== "none") fs.writeFileSync(path.join(files, "SHA256SUMS"), `${lines.join("\n")}\n`);
+  fs.writeFileSync(path.join(srv, "latest"), tag);
+}
+
+/** The installer against the stand-in releases, in its own home. */
+function installReleased(inHome: string, opts: { path?: string; env?: Record<string, string> } = {}) {
+  return install([], { home: inHome, path: opts.path, env: { VIBEFORGE_RELEASES: releases, ...opts.env } });
+}
+
+const noBuildPath = () => `${nobuild}:${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
+const leftovers = (inHome: string) => [".next", ".download"].filter((end) => fs.existsSync(`${app(inHome)}${end}`));
+
+describe("the installer with ready-made builds", () => {
+  let home2 = "";
+
+  beforeAll(async () => {
+    srv = path.join(dir, "server");
+    nobuild = path.join(dir, "nobuild");
+    home2 = path.join(dir, "home2");
+    for (const folder of [srv, nobuild, home2]) fs.mkdirSync(folder, { recursive: true });
+    for (const tool of ["git", "make", "g++", "python3", "npm"]) {
+      fs.writeFileSync(path.join(nobuild, tool), `#!/bin/sh\necho "the installer ran ${tool}" >&2\nexit 99\n`, { mode: 0o755 });
+    }
+    const child = spawn(process.execPath, ["-e", SERVER, srv], { stdio: ["ignore", "pipe", "inherit"] });
+    server = child;
+    const port = await new Promise<string>((resolve) => child.stdout?.once("data", (chunk: Buffer) => resolve(chunk.toString().trim())));
+    releases = `http://127.0.0.1:${port}/releases`;
+  });
+
+  afterAll(() => {
+    server?.kill();
+  });
+
+  it("installs the latest release's ready-made build with no git, compiler or npm", () => {
+    publish("2.0.0");
+    const result = installReleased(home2, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).not.toContain("the installer ran");
+    expect(result.out).toContain(`Downloading VibeForge 2.0.0, ready-made for linux-${arch}`);
+    expect(result.out).toContain("From the release's ready-made build.");
+    expect(result.out).toContain("VibeForge 2.0.0 is installed.");
+    expect(built(app(home2))).toBe("2.0.0");
+    expect(fs.existsSync(path.join(app(home2), ".vibeforge-installer"))).toBe(true);
+    expect(fs.existsSync(path.join(app(home2), ".git"))).toBe(false);
+    expect(fs.readlinkSync(path.join(home2, ".local", "bin", "vibeforge"))).toBe(path.join(app(home2), "scripts", "vibeforge"));
+    expect(leftovers(home2)).toEqual([]);
+  });
+
+  it("updates an install that is still a git checkout, keeping the checkout as .previous", () => {
+    const home3 = path.join(dir, "home3");
+    fs.mkdirSync(home3);
+    // What the installer made before releases carried a build: a clone of the newest tag.
+    let result = install([], { home: home3 });
+    expect(result.status, result.out).toBe(0);
+    expect(fs.existsSync(path.join(app(home3), ".git"))).toBe(true);
+    const before = built(app(home3));
+    publish("2.1.0");
+    result = installReleased(home3, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    expect(built(app(home3))).toBe("2.1.0");
+    expect(fs.existsSync(path.join(app(home3), ".git"))).toBe(false);
+    expect(built(`${app(home3)}.previous`)).toBe(before);
+    expect(fs.existsSync(path.join(`${app(home3)}.previous`, ".git"))).toBe(true);
+    expect(leftovers(home3)).toEqual([]);
+  });
+
+  it("refuses a download that doesn't match SHA256SUMS and leaves the installed copy as it was", () => {
+    publish("2.2.0", "bad");
+    const result = installReleased(home2, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("does not match v2.2.0's SHA256SUMS");
+    expect(result.out).toContain("is unchanged");
+    expect(built(app(home2))).toBe("2.0.0");
+    expect(leftovers(home2)).toEqual([]);
+  });
+
+  it("stops with the installed copy as it was when the download fails part-way", () => {
+    publish("2.2.1");
+    fs.rmSync(path.join(srv, "releases", "download", "v2.2.1", `vibeforge-2.2.1-linux-${arch}.tar.zst`));
+    const result = installReleased(home2, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("The download stopped part-way");
+    expect(built(app(home2))).toBe("2.0.0");
+    expect(leftovers(home2)).toEqual([]);
+  });
+
+  it("installs the release VIBEFORGE_VERSION names instead of the latest", () => {
+    publish("2.3.0");
+    const result = installReleased(home2, { path: noBuildPath(), env: { VIBEFORGE_VERSION: "2.1.0" } });
+    expect(result.status, result.out).toBe(0);
+    expect(built(app(home2))).toBe("2.1.0");
+    expect(built(`${app(home2)}.previous`)).toBe("2.0.0");
+  });
+
+  it("builds from source when the release has no ready-made build, and says so", () => {
+    // A release from before these builds: a SHA256SUMS for install.sh only, or none at all.
+    release("2.4.0");
+    publish("2.4.0", "no-archive");
+    let result = installReleased(home2);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain(`Building from source: the v2.4.0 release has no ready-made build for linux-${arch}`);
+    expect(result.out).toContain("Built from source on this computer.");
+    expect(built(app(home2))).toBe("2.4.0");
+    // The ready-made copy it replaced had no history, so this one is a fresh clone.
+    expect(fs.existsSync(path.join(app(home2), ".git"))).toBe(true);
+    expect(built(`${app(home2)}.previous`)).toBe("2.1.0");
+    release("2.5.0");
+    publish("2.5.0", "none");
+    result = installReleased(home2);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Building from source: the v2.5.0 release has no ready-made build");
+    expect(built(app(home2))).toBe("2.5.0");
+    expect(leftovers(home2)).toEqual([]);
+  });
+
+  it("builds from source when asked to, or on a CPU with no ready-made build", () => {
+    release("2.6.0");
+    publish("2.6.0");
+    let result = installReleased(home2, { env: { VIBEFORGE_FROM_SOURCE: "1" } });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Building from source: VIBEFORGE_FROM_SOURCE=1");
+    expect(built(app(home2))).toBe("2.6.0");
+    expect(fs.existsSync(path.join(app(home2), ".git"))).toBe(true);
+    const cpu = path.join(dir, "riscv");
+    fs.mkdirSync(cpu, { recursive: true });
+    fs.writeFileSync(path.join(cpu, "uname"), '#!/bin/sh\n[ "$1" = -m ] && echo riscv64 && exit 0\nexec /usr/bin/uname "$@"\n', { mode: 0o755 });
+    result = installReleased(home2, { path: `${cpu}:${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin` });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Building from source: there is no ready-made build for riscv64");
+    expect(built(app(home2))).toBe("2.6.0");
   });
 });

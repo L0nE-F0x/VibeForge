@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 - **Which one do I use?** Ten lines from what you want to where to do it: a quick question goes to Chat, an agent's work in its own copy to Tasks, a job on a schedule to Routines, a CLI asking another to Settings → Agents together, and so on. It's a step in the welcome tour, an item in Help in the rail (where each place is a link), and a section of the README.
 
+### Changed
+
+- **Installing and updating take seconds, with nothing to compile.** Each release now carries a ready-made build for x86-64 Linux. The installer downloads it (about 100 MB), checks it against the release's SHA256SUMS and swaps it in, so `git`, `base-devel` and `python` are no longer needed and any Node from 20 on will do. It still builds from source for a release without one, on another CPU, with `VIBEFORGE_BRANCH`, or when you set `VIBEFORGE_FROM_SOURCE=1`, and says which way it went. Your next update switches over by itself; the git checkout it replaces stays in `~/.local/share/vibeforge-app.previous`.
+
 ## [2.14.1] - 2026-11-08
 
 **2.14.1: VibeForge runs on Electron 45.**
