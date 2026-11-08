@@ -361,6 +361,31 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("doesn't take a terminal's answers to a CLI's questions for a person typing", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, maxMessages: 1, reviewRounds: 1 } });
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "one" });
+    pass(4000);
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ held: true });
+    // Cursor position, device attributes, a colour, the terminal's name, a mode, an arrow key.
+    for (const reply of ["\x1b[12;40R", "\x1b[?62;22c\x1b[>0;276;0c", "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\", "\x1bP>|xterm.js(6.0.0)\x1b\\", "\x1b[?2004;1$y", "\x1b[A", "\x1b"]) {
+      ctx.svc.onHumanInput(b.ptyId, reply);
+    }
+    expect(ctx.svc.liveForView().find((item) => item.ptyId === b.ptyId)?.talk).toMatchObject({ held: true });
+    // Nor do they hold messages back as if a person were halfway through typing.
+    expect(await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: "two" })).toMatchObject({ delivered: "draft" });
+
+    // Nor do they lift a Stop.
+    ctx.svc.stopTalk(b.ptyId);
+    ctx.svc.onHumanInput(b.ptyId, "\x1b[12;40R");
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "three" })).toMatchObject({ ok: false, error: expect.stringContaining("stopped") });
+    // A pasted line is a person.
+    ctx.svc.onHumanInput(b.ptyId, "\x1b[200~go on\x1b[201~\r");
+    pass(4000);
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "four" })).toMatchObject({ delivered: "sent" });
+    ctx.svc.close();
+  });
+
   it("doesn't paste into a CLI that has only just started and hasn't settled yet", async () => {
     let at = AT;
     const ctx = setup({ now: () => new Date(at) });
