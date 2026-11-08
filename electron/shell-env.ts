@@ -35,13 +35,17 @@ export function mergePath(preferred: string | null, current: string | undefined)
   return out.join(path.delimiter);
 }
 
-/** The environment terminals inherit: the user's, minus what Electron and Vite add. */
+/**
+ * VibeForge's own debug switches. VIBEFORGE_DEBUG opens a DevTools port on the window; a terminal
+ * that kept it would hand it on to any VibeForge started from there.
+ */
+const NOT_INHERITED = new Set(["CHROME_DESKTOP", "VIBEFORGE_ENV_PROBE", "VIBEFORGE_DEBUG", "VIBEFORGE_DEBUG_PORT"]);
+
+/** The environment terminals inherit: the user's, minus what Electron, Vite and VibeForge's debugging add. */
 export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   for (const key of Object.keys(out)) {
-    if (key.startsWith("ELECTRON_") || key.startsWith("VITE_") || key === "CHROME_DESKTOP" || key === "VIBEFORGE_ENV_PROBE") {
-      delete out[key];
-    }
+    if (key.startsWith("ELECTRON_") || key.startsWith("VITE_") || NOT_INHERITED.has(key)) delete out[key];
   }
   return out;
 }
