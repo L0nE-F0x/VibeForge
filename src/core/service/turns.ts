@@ -60,8 +60,10 @@ export class FolderTurns {
 
   constructor(private readonly core: ServiceCore) {
     core.onChange((topics) => {
-      if (topics.includes("workspaces") || topics.includes("agents")) this.places = null;
-      if (topics.includes("live")) void this.learnFolders();
+      const placesChanged = topics.includes("workspaces") || topics.includes("agents");
+      if (placesChanged) this.places = null;
+      // A new workspace or agent folder is learned at once, not at the next CLI starting or ending.
+      if (placesChanged || topics.includes("live")) void this.learnFolders();
     });
   }
 
