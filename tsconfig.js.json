@@ -1,0 +1,11 @@
+{
+  // The plain JavaScript that ships and runs as written, with no build: the terminal host and its
+  // mirrors (started on the system Node) and `vibeforge tell|who|task|apply`. Like the scripts, but
+  // with implicit any caught too. Each file starts with // @ts-check so editors check it as well.
+  "extends": "./tsconfig.scripts.json",
+  "compilerOptions": {
+    "noImplicitAny": true
+  },
+  "include": ["electron/pty-host.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"],
+  "exclude": []
+}

@@ -1,3 +1,4 @@
+// @ts-check
 "use strict";
 // VibeForge PTY host. Electron starts this with the system Node because node-pty is built
 // for that Node. It owns every terminal: the process, a headless mirror of its screen, and
@@ -34,21 +35,98 @@ const PENDING_HIGH = 8 * 1024 * 1024;
 const PENDING_LOW = 2 * 1024 * 1024;
 const PAUSED_LOOK_MS = 50;
 
-/** @type {Map<string, any>} */
+// The messages are typed in pty-protocol.ts, which the window's side (supervisor.ts) uses too.
+/** @import { PtyAnswer, PtyLine, PtyOp, PtyRequest } from "./pty-protocol.js" */
+/** @import { Capture, CaptureState } from "./terminal-capture.cjs" */
+
+/**
+ * A run folder's terminal files and the mirror that writes them (see the scrollback file below).
+ * @typedef {Capture & {
+ *   runDir: string | null,
+ *   scrollFd: number | null,
+ *   scrollBytes: number,
+ *   scrollFile: string | null,
+ * }} Sink
+ */
+
+/**
+ * A prompt waiting for the program to settle before it is pasted.
+ * @typedef {object} Paste
+ * @property {string} text
+ * @property {NodeJS.Timeout | undefined} quietTimer
+ * @property {NodeJS.Timeout | undefined} capTimer
+ * @property {boolean} done
+ * @property {() => void} deliver
+ */
+
+/**
+ * One terminal: its process, its mirror and its files.
+ * @typedef {Sink & {
+ *   id: string,
+ *   pid: number,
+ *   cwd: string,
+ *   argv: string[],
+ *   term: import("node-pty").IPty,
+ *   cols: number,
+ *   rows: number,
+ *   seq: number,
+ *   batch: string[],
+ *   batchFirst: number | null,
+ *   flushTimer: NodeJS.Timeout | undefined,
+ *   exited: boolean,
+ *   killTimers: NodeJS.Timeout[],
+ *   paste: Paste | null,
+ *   rec: Sink | null,
+ *   dirty: boolean,
+ *   screen: { rows: string[], base: number } | null,
+ *   reflowed?: boolean,
+ *   changes: number,
+ *   stillTicks: number,
+ *   working: boolean,
+ *   unsent: number,
+ *   paused: boolean,
+ *   pauseTimer: NodeJS.Timeout | undefined,
+ *   gone: boolean,
+ *   exitWaiters?: Array<() => void>,
+ *   programKey?: string,
+ * }} Session
+ */
+
+/** @type {Map<string, Session>} */
 const sessions = new Map();
 
+/**
+ * @param {PtyLine} message
+ * @param {(error?: Error | null) => void} [written]
+ */
 function send(message, written) {
   process.stdout.write(`${JSON.stringify(message)}\n`, written);
 }
 
-function reply(reqId, body) {
-  send({ reqId, ...body });
+/**
+ * Answer a request with what its op promises.
+ * @template {PtyOp} Op
+ * @param {{ reqId: string, op: Op }} msg
+ * @param {PtyAnswer<Op>} body
+ */
+function reply(msg, body) {
+  send({ reqId: msg.reqId, ...body });
 }
 
+/** @param {...unknown} parts */
 function log(...parts) {
   process.stderr.write(`${parts.join(" ")}\n`);
 }
 
+/** @param {unknown} error */
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @param {number} pid
+ * @param {NodeJS.Signals} signal
+ */
 function signalGroup(pid, signal) {
   if (!pid || pid <= 0) return;
   try {
@@ -67,6 +145,7 @@ function signalGroup(pid, signal) {
 // A session's own run folder and a recording inside a shell (below) both keep these files; each
 // is a "sink": { runDir, mirror, serializer, scrollFd, scrollBytes, scrollFile }.
 
+/** @param {Sink} sink */
 function openScrollback(sink) {
   if (!sink.runDir) return;
   const file = path.join(sink.runDir, "scrollback.txt");
@@ -75,11 +154,15 @@ function openScrollback(sink) {
     sink.scrollBytes = fs.fstatSync(sink.scrollFd).size;
     sink.scrollFile = file;
   } catch (error) {
-    log("scrollback:", error.message);
+    log("scrollback:", messageOf(error));
     sink.scrollFd = null;
   }
 }
 
+/**
+ * @param {Sink} sink
+ * @param {string} data
+ */
 function appendScrollback(sink, data) {
   if (sink.scrollFd == null) return;
   try {
@@ -88,28 +171,38 @@ function appendScrollback(sink, data) {
     sink.scrollBytes += bytes.length;
     if (sink.scrollBytes > MAX_SCROLLBACK_BYTES + SCROLLBACK_SLACK_BYTES) trimScrollback(sink);
   } catch (error) {
-    log("scrollback:", error.message);
+    log("scrollback:", messageOf(error));
   }
 }
 
-/** Keep the last 2 MB. Trimming in 512 KB steps keeps the rewrite rare. */
+/**
+ * Keep the last 2 MB. Trimming in 512 KB steps keeps the rewrite rare.
+ * @param {Sink} sink
+ */
 function trimScrollback(sink) {
   const writing = sink.scrollFd;
+  const file = sink.scrollFile;
+  // openScrollback sets both, so this only stops the checker asking.
+  if (writing == null || file == null) return;
   // Until it reopens, the file is closed: a failure below (the run folder deleted) stops the capture.
   sink.scrollFd = null;
   fs.closeSync(writing);
-  const size = fs.statSync(sink.scrollFile).size;
+  const size = fs.statSync(file).size;
   const keep = Math.min(size, MAX_SCROLLBACK_BYTES);
   const buffer = Buffer.alloc(keep);
-  const fd = fs.openSync(sink.scrollFile, "r");
+  const fd = fs.openSync(file, "r");
   fs.readSync(fd, buffer, 0, keep, size - keep);
   fs.closeSync(fd);
-  fs.writeFileSync(sink.scrollFile, buffer);
-  sink.scrollFd = fs.openSync(sink.scrollFile, "a");
+  fs.writeFileSync(file, buffer);
+  sink.scrollFd = fs.openSync(file, "a");
   sink.scrollBytes = keep;
 }
 
-/** The final screen and a text transcript, once the mirror has caught up; then the scrollback closes. */
+/**
+ * The final screen and a text transcript, once the mirror has caught up; then the scrollback closes.
+ * @param {Sink} sink
+ * @param {() => void} done
+ */
 function closeSink(sink, done) {
   captureFinish(sink)
     .then((captured) => {
@@ -118,7 +211,7 @@ function closeSink(sink, done) {
           fs.writeFileSync(path.join(sink.runDir, "terminal.ansi"), captured.ansi);
           fs.writeFileSync(path.join(sink.runDir, "transcript.txt"), captured.transcript);
         } catch (error) {
-          log("artifacts:", error.message);
+          log("artifacts:", messageOf(error));
         }
       }
       if (sink.scrollFd != null) {
@@ -132,7 +225,7 @@ function closeSink(sink, done) {
       done();
     })
     .catch((error) => {
-      log("artifacts:", error.message);
+      log("artifacts:", messageOf(error));
       done();
     });
 }
@@ -143,6 +236,11 @@ function closeSink(sink, done) {
 // foreground until the prompt comes back, into its own run folder, through a second mirror
 // that starts from what the screen showed then.
 
+/**
+ * @param {Session} session
+ * @param {string} runDir
+ * @returns {Promise<void>}
+ */
 function startRecording(session, runDir) {
   return stopRecording(session)
     .then(() => captureSynced(session))
@@ -152,7 +250,10 @@ function startRecording(session, runDir) {
           const mirror = new Terminal({ cols: session.cols, rows: session.rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
           const serializer = new SerializeAddon();
           mirror.loadAddon(serializer);
-          const rec = { runDir, mirror, serializer, scrollFd: null, scrollBytes: 0, scrollFile: null };
+          /** @type {Omit<Sink, keyof CaptureState>} */
+          const files = { runDir, mirror, serializer, scrollFd: null, scrollBytes: 0, scrollFile: null };
+          // attachCapture adds the rest.
+          const rec = /** @type {Sink} */ (files);
           attachCapture(rec);
           rec.onDrain = () => relieve(session);
           // Seed with the screen as it is now, then publish the recording so later output lands in it.
@@ -165,6 +266,10 @@ function startRecording(session, runDir) {
     );
 }
 
+/**
+ * @param {Session} session
+ * @returns {Promise<void>}
+ */
 function stopRecording(session) {
   const rec = session.rec;
   if (!rec) return Promise.resolve();
@@ -179,13 +284,20 @@ function stopRecording(session) {
 
 // ------------------------------------------------------------------ input
 
+/**
+ * @param {Session} session
+ * @param {string} data
+ */
 function writeInput(session, data) {
   if (session.exited) return;
   session.term.write(data);
 }
 
-/** Paste text the way a terminal does, then press Enter. */
-/** Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first). */
+/**
+ * Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first).
+ * @param {Session} session
+ * @param {string} text
+ */
 function sendText(session, text, enter = true) {
   if (session.exited) return;
   const clean = String(text).replace(/\r\n/g, "\n").replace(/\x1b\[20[01]~/g, "");
@@ -197,14 +309,17 @@ function sendText(session, text, enter = true) {
   }
 }
 
+/** @param {Paste} paste */
 function clearPasteTimers(paste) {
   clearTimeout(paste.quietTimer);
   clearTimeout(paste.capTimer);
 }
 
+/**
+ * @param {Session} session
+ * @param {string} text
+ */
 function armPaste(session, text) {
-  const paste = { text, quietTimer: null, capTimer: null, done: false };
-  session.paste = paste;
   const deliver = () => {
     if (paste.done || session.exited) return;
     paste.done = true;
@@ -212,11 +327,14 @@ function armPaste(session, text) {
     session.paste = null;
     session.mirror.write("", () => sendText(session, paste.text));
   };
-  paste.deliver = deliver;
+  /** @type {Paste} */
+  const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, deliver };
+  session.paste = paste;
   paste.quietTimer = setTimeout(deliver, PASTE_FIRST_OUTPUT_MS);
   paste.capTimer = setTimeout(deliver, PASTE_MAX_WAIT_MS);
 }
 
+/** @param {Session} session */
 function notePasteActivity(session) {
   const paste = session.paste;
   if (!paste || paste.done) return;
@@ -226,10 +344,12 @@ function notePasteActivity(session) {
 
 // ------------------------------------------------------------------ output batching
 
+/** @param {Session} session */
 function flush(session) {
   clearTimeout(session.flushTimer);
-  session.flushTimer = null;
-  if (session.batch.length === 0) return;
+  session.flushTimer = undefined;
+  // A batch always has its first chunk's number; the second test is for the checker.
+  if (session.batch.length === 0 || session.batchFirst === null) return;
   const data = session.batch.join("");
   send({ event: "data", ptyId: session.id, data, first: session.batchFirst, seq: session.seq }, () => {
     session.unsent -= data.length;
@@ -241,20 +361,25 @@ function flush(session) {
 
 // ------------------------------------------------------------------ flow control
 
-/** Output this terminal holds: not yet read by the app, or not yet parsed by a mirror. */
+/**
+ * Output this terminal holds: not yet read by the app, or not yet parsed by a mirror.
+ * @param {Session} session
+ */
 function pendingOf(session) {
   return session.unsent + session.pending + (session.rec ? session.rec.pending : 0);
 }
 
+/** @param {number} pid */
 function alive(pid) {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return error.code === "EPERM";
+    return /** @type {NodeJS.ErrnoException} */ (error).code === "EPERM";
   }
 }
 
+/** @param {Session} session */
 function throttle(session) {
   if (session.paused || session.gone || pendingOf(session) <= PENDING_HIGH) return;
   session.paused = true;
@@ -268,13 +393,15 @@ function throttle(session) {
   }, PAUSED_LOOK_MS);
 }
 
+/** @param {Session} session */
 function relieve(session) {
   if (session.paused && pendingOf(session) < PENDING_LOW) release(session);
 }
 
+/** @param {Session} session */
 function release(session) {
   clearInterval(session.pauseTimer);
-  session.pauseTimer = null;
+  session.pauseTimer = undefined;
   if (!session.paused) return;
   session.paused = false;
   try {
@@ -286,6 +413,7 @@ function release(session) {
 
 // ------------------------------------------------------------------ sessions
 
+/** @param {Extract<PtyRequest, { op: "spawn" }>} msg */
 function spawnSession(msg) {
   const argv = Array.isArray(msg.argv) && msg.argv.length ? msg.argv.map(String) : [process.env.SHELL || "/bin/bash"];
   const cols = Math.max(2, Number(msg.cols) || 120);
@@ -293,13 +421,15 @@ function spawnSession(msg) {
   const runDir = typeof msg.runDir === "string" && msg.runDir ? msg.runDir : null;
   const id = crypto.randomUUID();
   // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in.
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id };
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
   const mirror = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
   const serializer = new SerializeAddon();
   mirror.loadAddon(serializer);
-  const session = {
+  /** @type {Omit<Session, keyof CaptureState>} */
+  const fields = {
     id,
     pid: term.pid,
     cwd: msg.cwd,
@@ -313,7 +443,7 @@ function spawnSession(msg) {
     seq: 0,
     batch: [],
     batchFirst: null,
-    flushTimer: null,
+    flushTimer: undefined,
     exited: false,
     killTimers: [],
     paste: null,
@@ -328,9 +458,11 @@ function spawnSession(msg) {
     working: false,
     unsent: 0,
     paused: false,
-    pauseTimer: null,
+    pauseTimer: undefined,
     gone: false,
   };
+  // attachCapture adds the rest.
+  const session = /** @type {Session} */ (fields);
   attachCapture(session);
   session.onDrain = () => relieve(session);
   openScrollback(session);
@@ -362,6 +494,11 @@ function spawnSession(msg) {
   return session;
 }
 
+/**
+ * @param {Session} session
+ * @param {number} exitCode
+ * @param {number | undefined} signal
+ */
 function finish(session, exitCode, signal) {
   if (session.exited) return;
   session.exited = true;
@@ -372,7 +509,7 @@ function finish(session, exitCode, signal) {
   flush(session);
   // A recording in progress is written before the exit is reported, so its run finds its files.
   stopRecording(session)
-    .then(() => new Promise((resolve) => closeSink(session, resolve)))
+    .then(() => /** @type {Promise<void>} */ (new Promise((resolve) => closeSink(session, resolve))))
     .then(() => {
       send({ event: "exit", ptyId: session.id, exitCode: exitCode ?? null, signal: signal || null });
       sessions.delete(session.id);
@@ -382,6 +519,7 @@ function finish(session, exitCode, signal) {
     });
 }
 
+/** @param {Session} session */
 function killSession(session) {
   if (session.exited || session.killTimers.length) return;
   // What closing a terminal window does: hang up, then ask, then insist.
@@ -390,6 +528,11 @@ function killSession(session) {
   session.killTimers.push(setTimeout(() => signalGroup(session.pid, "SIGKILL"), 4000));
 }
 
+/**
+ * @param {Session} session
+ * @param {number} timeoutMs
+ * @returns {Promise<void>}
+ */
 function waitForExit(session, timeoutMs) {
   if (session.exited) return Promise.resolve();
   return new Promise((resolve) => {
@@ -404,26 +547,28 @@ function waitForExit(session, timeoutMs) {
 
 // ------------------------------------------------------------------ requests
 
+/** @param {{ ptyId: string }} msg */
 function need(msg) {
   const session = sessions.get(msg.ptyId);
   if (!session || session.exited) throw new Error("That session has ended.");
   return session;
 }
 
+/** @param {PtyRequest} msg */
 async function handle(msg) {
   switch (msg.op) {
     case "spawn": {
       const session = spawnSession(msg);
-      reply(msg.reqId, { ok: true, ptyId: session.id, pid: session.pid });
+      reply(msg, { ok: true, ptyId: session.id, pid: session.pid });
       return;
     }
     case "write":
       writeInput(need(msg), String(msg.data ?? ""));
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     case "send":
       sendText(need(msg), String(msg.text ?? ""), msg.enter !== false);
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     case "resize": {
       const session = sessions.get(msg.ptyId);
@@ -443,33 +588,33 @@ async function handle(msg) {
           }
         }
       }
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     }
     case "kill": {
       const session = sessions.get(msg.ptyId);
       if (session) killSession(session);
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     }
     case "record": {
       const session = need(msg);
       if (typeof msg.runDir === "string" && msg.runDir) await startRecording(session, msg.runDir);
       else await stopRecording(session);
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     }
     case "snapshot": {
       const session = sessions.get(msg.ptyId);
       if (!session || session.exited) {
-        reply(msg.reqId, { ok: true, ansi: "", seq: 0, cols: 0, rows: 0, alive: false });
+        reply(msg, { ok: true, ansi: "", seq: 0, cols: 0, rows: 0, alive: false });
         return;
       }
       flush(session);
       const seq = session.seq;
       captureSynced(session).then(
         () => {
-          reply(msg.reqId, {
+          reply(msg, {
             ok: true,
             ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
             plain: recentText(session, 160),
@@ -479,12 +624,12 @@ async function handle(msg) {
             alive: true,
           });
         },
-        (error) => reply(msg.reqId, { ok: false, error: error.message }),
+        (error) => reply(msg, { ok: false, error: messageOf(error) }),
       );
       return;
     }
     case "list":
-      reply(msg.reqId, {
+      reply(msg, {
         ok: true,
         ptys: [...sessions.values()].map((session) => ({ ptyId: session.id, pid: session.pid, cwd: session.cwd, argv: session.argv })),
       });
@@ -492,29 +637,34 @@ async function handle(msg) {
     case "foreground": {
       const session = sessions.get(msg.ptyId);
       if (!session || session.exited) {
-        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+        reply(msg, { ok: true, known: false, argv: null, cwd: null });
         return;
       }
       try {
         const found = readForeground(session);
-        reply(msg.reqId, { ok: true, known: true, argv: found ? found.argv : null, cwd: found ? found.cwd : null });
+        reply(msg, { ok: true, known: true, argv: found ? found.argv : null, cwd: found ? found.cwd : null });
       } catch {
-        reply(msg.reqId, { ok: true, known: false, argv: null, cwd: null });
+        reply(msg, { ok: true, known: false, argv: null, cwd: null });
       }
       return;
     }
     case "shutdown":
       await shutdown();
-      reply(msg.reqId, { ok: true });
+      reply(msg, { ok: true });
       return;
     default:
-      throw new Error(`Unknown op ${msg.op}`);
+      // Not one the window sends: whatever came down the line.
+      throw new Error(`Unknown op ${/** @type {{ op?: unknown }} */ (msg).op}`);
   }
 }
 
 // ------------------------------------------------------------------ working or quiet
 
-/** The last lines a person would read, including a little of what scrolled off the screen. */
+/**
+ * The last lines a person would read, including a little of what scrolled off the screen.
+ * @param {Session} session
+ * @param {number} maxLines
+ */
 function recentText(session, maxLines) {
   const buffer = session.mirror.buffer.active;
   const end = buffer.baseY + session.rows;
@@ -532,6 +682,7 @@ function recentText(session, maxLines) {
   return lines.join("\n");
 }
 
+/** @param {Session} session */
 function screenRows(session) {
   const buffer = session.mirror.buffer.active;
   const rows = [];
@@ -539,7 +690,10 @@ function screenRows(session) {
   return { rows, base: buffer.baseY };
 }
 
-/** Rows whose text differs from the last look, allowing for lines that scrolled up since. */
+/**
+ * Rows whose text differs from the last look, allowing for lines that scrolled up since.
+ * @param {Session} session
+ */
 function changedRows(session) {
   if (!session.dirty) return 0;
   session.dirty = false;
@@ -585,6 +739,8 @@ setInterval(() => {
 /**
  * The command line of whatever holds the terminal's foreground, when that isn't the process
  * VibeForge started: `claude` typed into a shell, say. Linux only (/proc); null elsewhere.
+ * @param {Session} session
+ * @returns {{ argv: string[], cwd: string | null } | null}
  */
 function readForeground(session) {
   const stat = fs.readFileSync(`/proc/${session.pid}/stat`, "utf8");
@@ -593,6 +749,7 @@ function readForeground(session) {
   if (!(tpgid > 0) || tpgid === session.pid) return null;
   const argv = fs.readFileSync(`/proc/${tpgid}/cmdline`, "utf8").split("\0").filter(Boolean);
   if (!argv.length) return null;
+  /** @type {string | null} */
   let cwd = null;
   try {
     cwd = fs.readlinkSync(`/proc/${tpgid}/cwd`);
@@ -602,6 +759,7 @@ function readForeground(session) {
   return { argv, cwd };
 }
 
+/** @param {Session} session */
 function foreground(session) {
   try {
     return readForeground(session);
@@ -621,6 +779,7 @@ setInterval(() => {
   }
 }, PROGRAM_POLL_MS).unref();
 
+/** @type {Promise<void[]> | null} */
 let shuttingDown = null;
 
 function shutdown() {
@@ -633,6 +792,7 @@ function shutdown() {
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on("line", (line) => {
+  /** @type {PtyRequest} What the window sends; anything else is refused in handle. */
   let msg;
   try {
     msg = JSON.parse(line);
@@ -642,8 +802,8 @@ rl.on("line", (line) => {
   Promise.resolve()
     .then(() => handle(msg))
     .catch((error) => {
-      const text = error instanceof Error ? error.message : String(error);
-      if (msg && msg.reqId) reply(msg.reqId, { ok: false, error: text });
+      const text = messageOf(error);
+      if (msg && msg.reqId) send({ reqId: msg.reqId, ok: false, error: text });
       else log("pty-host:", text);
     });
 });
