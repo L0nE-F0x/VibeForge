@@ -104,7 +104,10 @@ export class PtySupervisor {
   private onLine(line: string): void {
     let msg: Record<string, unknown>;
     try {
-      msg = JSON.parse(line) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(line);
+      // JSON that isn't an object (a bare number some library printed) is no message.
+      if (!parsed || typeof parsed !== "object") return;
+      msg = parsed as Record<string, unknown>;
     } catch {
       return;
     }
