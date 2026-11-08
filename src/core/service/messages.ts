@@ -1,13 +1,9 @@
-import { randomBytes } from "node:crypto";
 import {
   cleanText,
   DEFAULT_WAIT_MS,
   messageText,
   resolveTarget,
-  reviewReplyText,
-  reviewRequestText,
   screenTail,
-  SETTLE_MS,
   taskReportText,
   type Answer,
   type Reachable,
@@ -16,13 +12,14 @@ import { isCodingCli } from "../checkout.js";
 import { replyLogFor } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
-import { diffSince, isGitRepo, leaveOutUntouched } from "../vcs.js";
+import { isGitRepo } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import type { TalkState } from "../types.js";
 import type { ServiceCore } from "./core.js";
 import { Answers, type Answered } from "./messages-answers.js";
 import { Delivery, typedIn } from "./messages-delivery.js";
 import { SavedFiles } from "./messages-files.js";
+import { changesOf, Reviews } from "./messages-review.js";
 import { Roster, type WhoResult } from "./messages-who.js";
 import type { TaskDesk } from "./tasks.js";
 
@@ -47,19 +44,7 @@ export type TellResult =
 
 export type TaskResult = { ok: true; taskId: string; title: string; started: boolean; reply?: string | null; note?: string } | { ok: false; error: string };
 
-interface Review {
-  id: string;
-  authorPty: string;
-  reviewerPty: string;
-  round: number;
-  rounds: number;
-  phase: "author" | "reviewer" | "fixing";
-  /** When the phase began; the author has to work and go quiet after it before the next round. */
-  since: number;
-}
-
 export class MessageDesk {
-  private readonly reviews = new Map<string, Review>();
   /** Handed-out tasks and the terminal that handed each one out, which hears back from it. */
   private readonly handed = new Map<string, string>();
   /** Handed-out tasks waiting for a person to press Start, by the terminal that handed them out. */
@@ -77,6 +62,7 @@ export class MessageDesk {
   private readonly files: SavedFiles;
   private readonly answers: Answers;
   private readonly delivery: Delivery;
+  private readonly reviews: Reviews;
 
   constructor(
     private readonly core: ServiceCore,
@@ -86,6 +72,7 @@ export class MessageDesk {
     this.answers = new Answers(core, this.roster, () => this.ensureTimer(), (from, to, reply) => this.forward(from, to, reply));
     this.delivery = new Delivery(core, this.answers);
     this.files = new SavedFiles(core, () => [...this.delivery.texts(), ...this.answers.texts()]);
+    this.reviews = new Reviews(core, this.roster, this.delivery, this.files, () => void this.pump());
   }
 
   close(): void {
@@ -196,7 +183,7 @@ export class MessageDesk {
     if (input.what === "selection") text = cleanText(input.selection ?? "");
     else if (input.what === "reply") text = await this.lastAnswer(from);
     else {
-      const patch = await this.changesOf(from.ptyId);
+      const patch = await changesOf(this.core, from.ptyId);
       if (patch.trim()) {
         const file = this.files.saveFile("reviews", "patch", patch);
         const files = patchFiles(patch);
@@ -227,17 +214,6 @@ export class MessageDesk {
     return cleanText(screenTail(screen ?? ""));
   }
 
-  /** What this CLI changed: the folder's changes since it started, less files already changed then that it hasn't touched. */
-  private async changesOf(ptyId: string): Promise<string> {
-    const session = this.core.live.get(ptyId);
-    if (!session) return "";
-    const run = session.runId ? this.core.store.getRun(session.runId) : null;
-    const cwd = run?.cwd || session.programCwd || session.cwd;
-    const before = session.runId ? await this.core.dirtyAtStart.get(session.runId) : null;
-    const patch = await diffSince(cwd, run?.gitStart ?? null).catch(() => "");
-    return leaveOutUntouched(patch, cwd, before);
-  }
-
   // ---------------------------------------------------------------- a person steps in
 
   /** A person typed into a terminal: its counts start again, and a Stop on it is lifted. */
@@ -253,7 +229,7 @@ export class MessageDesk {
   stop(ptyId: string): void {
     this.delivery.stop(ptyId);
     this.answers.stop(ptyId);
-    for (const [id, review] of this.reviews) if (review.authorPty === ptyId || review.reviewerPty === ptyId) this.reviews.delete(id);
+    this.reviews.stop(ptyId);
     this.core.emit("live");
   }
 
@@ -264,105 +240,8 @@ export class MessageDesk {
    * the review back. `changes` says whether the author has changed anything yet; without, the
    * review waits for its next turn.
    */
-  async startReview(authorPty: string, reviewerPty: string): Promise<{ changes: boolean }> {
-    const author = this.core.live.get(authorPty);
-    const reviewer = this.core.live.get(reviewerPty);
-    if (!author || !reviewer || !isCodingCli(author) || !isCodingCli(reviewer)) throw new Error("That CLI isn't running any more.");
-    if (authorPty === reviewerPty) throw new Error("Pick another CLI to review the changes.");
-    const changes = Boolean((await this.changesOf(authorPty)).trim());
-    for (const [id, review] of this.reviews) if (review.authorPty === authorPty) this.reviews.delete(id);
-    this.delivery.unstop(authorPty);
-    this.delivery.unstop(reviewerPty);
-    const id = randomBytes(4).toString("hex");
-    this.reviews.set(id, {
-      id,
-      authorPty,
-      reviewerPty,
-      round: 1,
-      rounds: this.settings().reviewRounds,
-      phase: "author",
-      since: 0,
-    });
-    this.core.emit("live");
-    void this.pump();
-    return { changes };
-  }
-
-  private async stepReview(key: string, review: Review, now: number): Promise<void> {
-    const author = this.core.live.get(review.authorPty);
-    const reviewer = this.core.live.get(review.reviewerPty);
-    if (!author || !reviewer || !isCodingCli(author) || !isCodingCli(reviewer)) {
-      this.reviews.delete(key);
-      this.core.emit("live");
-      return;
-    }
-    if (review.phase === "reviewer") return;
-    // The author's turn is over: it went quiet a while ago, and (after the first round) worked since the last step.
-    const quietAt = Date.parse(author.quietAt ?? "");
-    const settled = !author.working && (review.since === 0 || quietAt > review.since) && now - (Number.isFinite(quietAt) ? quietAt : 0) >= SETTLE_MS;
-    if (!settled) return;
-    if (review.phase === "fixing") {
-      if (review.round > review.rounds) {
-        this.reviews.delete(key);
-        this.core.emit("live");
-        return;
-      }
-      review.phase = "author";
-    }
-    const patch = await this.changesOf(review.authorPty);
-    const list = this.list();
-    const authorLabel = list.find((item) => item.ptyId === review.authorPty)?.label ?? "The other CLI";
-    const reviewerLabel = list.find((item) => item.ptyId === review.reviewerPty)?.label ?? "The reviewer";
-    if (!this.reviews.has(key)) return;
-    if (!patch.trim()) {
-      // Nothing yet: asked before the author has changed anything, so wait for its next turn. A
-      // turn that ends with nothing changed ends the review.
-      if (review.since === 0) review.since = now;
-      else this.reviews.delete(key);
-      this.core.emit("live");
-      return;
-    }
-    const file = this.files.saveFile("reviews", "patch", patch);
-    review.phase = "reviewer";
-    this.core.emit("live");
-    this.delivery.queue({
-      fromPty: null,
-      toPty: review.reviewerPty,
-      text: reviewRequestText({ authorLabel, cwd: author.programCwd || author.cwd, patchPath: file, files: patchFiles(patch), round: review.round, rounds: review.rounds }),
-      enter: true,
-      counts: false,
-      waiter: {
-        words: "[Review request from VibeForge",
-        deadline: now + 30 * 60 * 1000,
-        done: (answered) => {
-          if (!this.reviews.has(key)) return;
-          if (!answered?.reply?.trim()) {
-            this.reviews.delete(key);
-            this.core.emit("live");
-            return;
-          }
-          const reply = cleanText(answered.reply);
-          review.phase = "fixing";
-          review.round += 1;
-          review.since = this.nowMs();
-          this.delivery.queue({
-            fromPty: null,
-            toPty: review.authorPty,
-            text: reviewReplyText({ reviewerLabel, reply, savedAt: this.files.saveIfLong("reviews", reply) }),
-            enter: true,
-            counts: false,
-            waiter: null,
-            delivered: () => {
-              review.since = this.nowMs();
-            },
-            dropped: () => this.reviews.delete(key),
-          });
-          this.core.emit("live");
-          void this.pump();
-        },
-      },
-      dropped: () => this.reviews.delete(key),
-    });
+  startReview(authorPty: string, reviewerPty: string): Promise<{ changes: boolean }> {
+    return this.reviews.startReview(authorPty, reviewerPty);
   }
 
   // ---------------------------------------------------------------- task
@@ -628,7 +507,7 @@ export class MessageDesk {
     const partners = this.delivery.partnersOf(ptyId);
     const queued = this.delivery.queuedFor(ptyId);
     const waited = this.answers.waitedOn(ptyId);
-    const review = [...this.reviews.values()].find((item) => item.authorPty === ptyId || item.reviewerPty === ptyId) ?? null;
+    const review = this.reviews.viewFor(ptyId, name);
     const toStart = this.toStart(ptyId);
     if (!partners.size && !queued && !waited.any && !review && !toStart.length) return null;
     return {
@@ -637,15 +516,7 @@ export class MessageDesk {
       max,
       queued,
       held: [...partners.values()].some((count) => count >= max),
-      review: review
-        ? {
-            role: review.authorPty === ptyId ? "author" : "reviewer",
-            other: name(review.authorPty === ptyId ? review.reviewerPty : review.authorPty) ?? "",
-            phase: review.phase,
-            round: Math.min(review.round, review.rounds),
-            rounds: review.rounds,
-          }
-        : null,
+      review,
       reportsTo: waited.reportsTo ? name(waited.reportsTo) : null,
       toStart,
     };
@@ -684,7 +555,7 @@ export class MessageDesk {
 
   private async pass(): Promise<void> {
     const now = this.nowMs();
-    for (const [key, review] of [...this.reviews]) await this.stepReview(key, review, now);
+    await this.reviews.step(now);
     await this.delivery.deliver(now);
     await this.answers.check(now);
   }
