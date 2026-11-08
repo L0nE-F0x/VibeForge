@@ -72,7 +72,16 @@ note() {
   command -v notify-send >/dev/null 2>&1 && notify-send -a VibeForge "VibeForge" "$1" || true
 }
 
-[[ -x "$ROOT/node_modules/electron/dist/electron" ]] || fail "Electron is missing. In $ROOT run: npm install"
+# How to put a missing part back: an installer copy has no source to build, so it installs again.
+put_back() {
+  if [[ -e "$ROOT/.vibeforge-installer" ]]; then
+    printf 'Install VibeForge again: curl -fsSL https://vibe-forge.net/install | VIBEFORGE_HOME=%q bash' "$ROOT"
+  else
+    printf 'In %s run: %s' "$ROOT" "$1"
+  fi
+}
+
+[[ -x "$ROOT/node_modules/electron/dist/electron" ]] || fail "Electron is missing. $(put_back "npm install")"
 command -v node >/dev/null 2>&1 || fail "node is not on PATH; the terminal host needs it."
 
 # A connect with no line is ignored by the control server. A stale socket file fails the connect.
@@ -146,7 +155,7 @@ if needs_build; then
   fi
 fi
 
-[[ -f "$ROOT/dist/index.html" && -f "$ROOT/dist-electron/main.js" ]] || fail "The app is not built. In $ROOT run: npm run build"
+[[ -f "$ROOT/dist/index.html" && -f "$ROOT/dist-electron/main.js" ]] || fail "The app is not built. $(put_back "npm run build")"
 
 cd "$ROOT"
 exec "$ROOT/node_modules/electron/dist/electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"

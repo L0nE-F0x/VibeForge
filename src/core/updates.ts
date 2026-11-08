@@ -6,7 +6,7 @@ import { shellQuote } from "../shared/text.js";
 
 export const RELEASES_URL = "https://api.github.com/repos/L0nE-F0x/VibeForge/releases/latest";
 export const INSTALL_URL = "https://vibe-forge.net/install";
-/** The installer leaves this file in the copy it manages. */
+/** The installer leaves this file in the copy it manages; each release's ready-made build carries it too. */
 export const INSTALLER_MARK = ".vibeforge-installer";
 
 export interface Release {

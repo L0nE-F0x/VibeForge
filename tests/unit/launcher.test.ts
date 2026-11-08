@@ -74,9 +74,9 @@ afterAll(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function launch(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function launch(args: string[], app = "app"): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn("bash", [path.join(dir, "app", "scripts", "vibeforge"), ...args], {
+    const child = spawn("bash", [path.join(dir, app, "scripts", "vibeforge"), ...args], {
       env: {
         PATH: `${path.join(dir, "bin")}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
         HOME: path.join(dir, "home"),
@@ -118,6 +118,19 @@ describe("the vibeforge launcher", () => {
   it("still falls through to the window for anything else", async () => {
     const result = await launch(["--hidden"]);
     expect(result.stderr).toContain("VibeForge: Electron is missing");
+    expect(result.stderr).toContain("npm install");
+    expect(result.code).toBe(1);
+  });
+
+  it("tells an installer copy, which has no source to build, to install again", async () => {
+    const copy = path.join(dir, "installed copy");
+    fs.mkdirSync(path.join(copy, "scripts"), { recursive: true });
+    fs.copyFileSync(path.join(dir, "app", "scripts", "vibeforge"), path.join(copy, "scripts", "vibeforge"));
+    fs.writeFileSync(path.join(copy, ".vibeforge-installer"), "");
+    const result = await launch(["--hidden"], "installed copy");
+    expect(result.stderr).toContain("VibeForge: Electron is missing. Install VibeForge again: curl -fsSL https://vibe-forge.net/install | VIBEFORGE_HOME=");
+    expect(result.stderr).toContain("installed\\ copy bash");
+    expect(result.stderr).not.toContain("npm install");
     expect(result.code).toBe(1);
   });
 });
