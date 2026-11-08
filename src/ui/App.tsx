@@ -9,6 +9,7 @@ import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
+import { WhichOneSheet } from "./components/WhichOne.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
@@ -232,6 +233,7 @@ function Guides() {
     <>
       {tour && <Tour onClose={closeTour} />}
       {shortcuts && !tour && <ShortcutsModal onClose={closeShortcuts} />}
+      {!tour && <WhichOneSheet />}
       {update && !tour && <UpdateSheet appPath={appPath} onClose={() => setUpdate(false)} />}
     </>
   );

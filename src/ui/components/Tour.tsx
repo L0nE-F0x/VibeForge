@@ -18,13 +18,14 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { useEngines } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useNav, useOverlay, type Route } from "../state.js";
 import { Button, Logo, cx } from "./ui.js";
+import { WhichOne, WhichOneIcon } from "./WhichOne.js";
 
 // The welcome tour: a card that walks the rail and each view, with a spotlight on the part
 // being described. It opens by itself until it has been finished or skipped once, and Help
@@ -49,6 +50,8 @@ interface Step {
   title?: Key;
   body?: Key;
   keys?: Array<[string, Key]>;
+  /** Shown under the body, in a card this wide. */
+  extra?: { content: ComponentType; width: number };
 }
 
 const LIST_PANEL = ".view.split-list > .list-panel-slot > .list-panel";
@@ -165,6 +168,15 @@ const STEPS: Step[] = [
     side: "right",
     icon: PanelLeftClose,
     keys: [["Ctrl+Shift+B", "shortcuts.panel"]],
+  },
+  {
+    id: "which",
+    title: "whichOne.title",
+    body: "tour.whichOne.body",
+    target: [".rail"],
+    side: "right",
+    icon: WhichOneIcon,
+    extra: { content: WhichOne, width: 600 },
   },
   {
     id: "help",
@@ -315,6 +327,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
 
   const tourSteps = STEPS.length - 2;
   const stepNo = index;
+  const width = step.extra ? Math.min(step.extra.width, window.innerWidth - 32) : CARD_W;
 
   return createPortal(
     <div className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label={t("tour.label")}>
@@ -340,10 +353,10 @@ export function Tour({ onClose }: { onClose: () => void }) {
           className="tour-card"
           style={
             missing
-              ? { left: "50%", top: "50%", width: CARD_W, transform: "translate(-50%, -50%)" }
+              ? { left: "50%", top: "50%", width, transform: "translate(-50%, -50%)" }
               : cardHere
-                ? { left: cardHere.left, top: cardHere.top, width: CARD_W }
-                : { left: 0, top: 0, width: CARD_W, visibility: "hidden" }
+                ? { left: cardHere.left, top: cardHere.top, width }
+                : { left: 0, top: 0, width, visibility: "hidden" }
           }
         >
           <div className="tour-card-head">
@@ -357,6 +370,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
           </div>
           <h3>{step.title && t(step.title)}</h3>
           <p>{step.body && <Rich text={t(step.body)} />}</p>
+          {step.extra && <step.extra.content />}
           {step.keys && (
             <div className="tour-keys">
               {step.keys.map(([keys, text]) => (

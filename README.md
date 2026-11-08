@@ -55,6 +55,23 @@ npm run build       # production build, when you want it now
 
 </details>
 
+## Which one do I use?
+
+What you want, and where to do it. The welcome tour shows the same list, and so does **Help → Which one do I use?** in the rail, where each place is a link.
+
+| You want | Use |
+| --- | --- |
+| A quick question, no project | **Chat** |
+| Work in a project while you watch: type `claude` or any CLI in a terminal | **Code**, where each CLI you type is kept as a run |
+| An agent's work in its own copy, brought back for review | **Tasks**: **Execute** starts it, **Apply** brings its changes in |
+| An agent's job on a schedule | **Routines** |
+| A teammate with a brief, memory and skills | **Agents** · **Skills** |
+| Say or type what to start where, and have it set up | **Maestro**, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> from any view |
+| One CLI asking another, or handing an agent a task: `vibeforge tell`, `vibeforge task` | **Settings → Agents together**, which can also make one CLI [the lead](#agents-together) |
+| Look back at a session, then Continue it or Hand it off to an agent | **Runs** |
+| Start and steer CLIs from the couch, on your phone | **Settings → Phone** ([how](#phone)) |
+| Dictate to an agent from any app: hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | **Settings → Voice**, which adds the key to Hyprland |
+
 ## What's inside
 
 | View | What it is for |
