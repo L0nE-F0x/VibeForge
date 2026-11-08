@@ -54,7 +54,8 @@ const REPORT_MS = 4 * 60 * 60 * 1000;
 const STUCK_MS = 30_000;
 /** Reports of a task waiting for a person, after each of which its answer is watched for again. */
 const MAX_REWATCH = 3;
-const KEEP_FILES = 40;
+/** Saved messages and patches stay this long: a CLI handed a path may read it a good while later. */
+const KEEP_FILES_MS = 3 * 24 * 60 * 60 * 1000;
 /**
  * Escape sequences: all a terminal ever writes back on its own. Focus in/out, mouse reports (X10
  * first, its three bytes can be anything), and its answers to a CLI's questions: cursor position,
@@ -980,13 +981,35 @@ export class MessageDesk {
     const stamp = this.core.now().toISOString().replace(/[:.]/g, "-");
     const file = path.join(dir, `${stamp}-${randomBytes(3).toString("hex")}.${ext}`);
     writeFileAtomic(file, text.endsWith("\n") ? text : `${text}\n`);
+    this.tidy(dir);
+    return file;
+  }
+
+  /** Old saved files go, but never one a message still in line, or one still being answered, points at. */
+  private tidy(dir: string): void {
     try {
-      const names = fs.readdirSync(dir).sort();
-      for (const name of names.slice(0, Math.max(0, names.length - KEEP_FILES))) fs.rmSync(path.join(dir, name), { force: true });
+      const cutoff = this.nowMs() - KEEP_FILES_MS;
+      const named = [...this.pending.map((item) => item.text), ...[...this.waiting.values()].flat().map((waiter) => waiter.sent ?? "")].join("\n");
+      for (const name of fs.readdirSync(dir)) {
+        const file = path.join(dir, name);
+        if (savedAt(name, file) >= cutoff || named.includes(file)) continue;
+        fs.rmSync(file, { force: true });
+      }
     } catch {
       /* tidying is best effort */
     }
-    return file;
+  }
+}
+
+/** When a saved file was written: the time its name starts with (see saveFile), else its own. */
+function savedAt(name: string, file: string): number {
+  const stamp = /^(\d{4}-\d\d-\d\dT\d\d)-(\d\d)-(\d\d)-(\d{3})Z-/.exec(name);
+  const at = stamp ? Date.parse(`${stamp[1]}:${stamp[2]}:${stamp[3]}.${stamp[4]}Z`) : Number.NaN;
+  if (Number.isFinite(at)) return at;
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
   }
 }
 

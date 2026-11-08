@@ -386,6 +386,31 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("keeps saved messages for days, and one a waiting message points at for as long as it waits", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    const long = (word: string) => `${word} `.repeat(3000);
+    const dir = path.join(ctx.dataRoot, "messages");
+    // Fifty long messages in a row: more than the old cap of forty, all kept.
+    for (let n = 0; n < 50; n += 1) {
+      await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: long(`m${n}`) });
+      pass(4000);
+    }
+    expect(fs.readdirSync(dir)).toHaveLength(50);
+    // One waits in line for a busy CLI for days; the others go once they're old.
+    ctx.svc.onHumanInput(a.ptyId, "\r");
+    ctx.svc.onPtyActivity(b.ptyId, true);
+    await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: long("held") });
+    pass(4 * 24 * 60 * 60 * 1000);
+    await ctx.svc.tell({ fromPty: b.ptyId, to: "argy", text: long("new") });
+    const left = fs.readdirSync(dir).map((name) => fs.readFileSync(path.join(dir, name), "utf8").split(" ")[0]);
+    expect(left.sort()).toEqual(["held", "new"]);
+    ctx.svc.onPtyActivity(b.ptyId, false);
+    pass(4000);
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, text: expect.stringContaining(path.join(ctx.dataRoot, "messages")) });
+    ctx.svc.close();
+  });
+
   it("doesn't paste into a CLI that has only just started and hasn't settled yet", async () => {
     let at = AT;
     const ctx = setup({ now: () => new Date(at) });
