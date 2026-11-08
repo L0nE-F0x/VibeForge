@@ -343,11 +343,14 @@ export class MessageDesk {
 
   /** An answer that came after its sender stopped waiting: to the sender as a message. */
   private forward(target: string, to: string, reply: string): void {
+    // Cleaned before it's measured and saved, as a report's answer is: a log's answer can carry a terminal's bytes.
+    const text = cleanText(reply);
+    if (!text) return;
     const from = this.list().find((item) => item.ptyId === target);
     this.delivery.queue({
       fromPty: target,
       toPty: to,
-      text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text: cleanText(reply), answer: "tell", savedAt: this.files.saveIfLong("messages", reply) }),
+      text: messageText({ fromLabel: from?.label ?? "The other CLI", fromHandle: from?.handle ?? null, text, answer: "tell", savedAt: this.files.saveIfLong("messages", text) }),
       enter: true,
       counts: true,
       waiter: null,
