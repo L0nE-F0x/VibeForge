@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **No more example prompts in Maestro.** The three sample sentences under "Tell VibeForge what to start" are gone from the Orchestrator, its bar and the phone's Maestro page. The box and its hint are all you see now.
+
 ## [2.13.0] - 2026-11-07
 
 **2.13.0: Maestro on your phone. Say what to start where, from the couch, and your computer plans it and sets it up.**

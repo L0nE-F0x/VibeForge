@@ -921,7 +921,6 @@ const pendingSteps = new Map();
 /** Step changes go one after another, and Go waits for them. */
 let stepQueue = Promise.resolve();
 
-const ORCH_EXAMPLES = ["orch.example.start", "orch.example.two", "orch.example.ask"];
 const ISSUE_KEYS = { workspace: "orch.issue.workspace", engine: "orch.issue.engine", engineMissing: "orch.issue.engineMissing", target: "orch.issue.target", prompt: "orch.issue.prompt" };
 const PLAN_TONE = { waiting: "waiting", running: "working", done: "done", cancelled: "done", replaced: "done" };
 
@@ -976,24 +975,6 @@ function maestroPage() {
     { class: "orch-start", hidden: true },
     el("h2", {}, t("orch.empty.title")),
     parts.startBody,
-    el(
-      "div",
-      { class: "orch-examples" },
-      ORCH_EXAMPLES.map((key) =>
-        el(
-          "button",
-          {
-            class: "orch-example",
-            type: "button",
-            onclick: () => {
-              orchDraft = t(key);
-              parts.box.value = orchDraft;
-            },
-          },
-          t(key),
-        ),
-      ),
-    ),
   );
   parts.notReady = el("div", { class: "orch-problem", hidden: true });
   parts.turnList = el("div", { class: "orch-list" });

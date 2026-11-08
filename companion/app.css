@@ -918,26 +918,6 @@ html.keyboard .credit { display: none; }
 
 .orch-start p { margin: 0; }
 
-.orch-examples { display: flex; flex-direction: column; gap: 6px; }
-
-.orch-example {
-  min-height: 44px;
-  padding: 10px 12px;
-  border: 1px dashed var(--line-2);
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  text-align: left;
-  transition: border-color 0.12s, background-color 0.12s, color 0.12s;
-}
-
-.orch-example:active, .orch-example:focus-visible {
-  outline: none;
-  border-color: var(--hover-line);
-  background: var(--hover-fill);
-  color: var(--fg);
-}
-
 .orch-list { display: flex; flex-direction: column; gap: 12px; }
 
 .orch-turn { display: flex; align-items: flex-start; gap: 10px; }
