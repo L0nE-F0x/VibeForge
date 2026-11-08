@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { app, Menu } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
-import { controlSocketPath, voiceArg } from "../src/core/control.js";
-import { whichBin } from "../src/core/engines.js";
+import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile } from "../src/core/log.js";
 import { MainText } from "../src/core/main-text.js";
@@ -28,7 +27,7 @@ import { Talk } from "./talk.js";
 import { Disposables, startSchedules } from "./timers.js";
 import { TrayController } from "./tray-controller.js";
 import { Updater } from "./updater.js";
-import { Voice } from "./voice.js";
+import { companionWire, makeVoice } from "./voice-phone.js";
 import { MainWindow } from "./window.js";
 
 const APP_ID = "dev.vibeforge.app";
@@ -62,7 +61,7 @@ const ctx = new MainContext({
   }),
   palette: resolvePalette("omarchy"),
 });
-const { send, svc, focusWindow, install } = ctx;
+const { send, focusWindow, install } = ctx;
 const notify = desktopNotifier(ctx);
 
 const host = deskHost(ctx, notify);
@@ -97,24 +96,7 @@ const updater = new Updater({
   changed: () => send("changed", ["updates"]),
 });
 
-const voice = new Voice({
-  log,
-  home: os.homedir(),
-  dataRoot: roots.dataRoot,
-  settings: () => svc().getSettings().voice,
-  resolveBin: (bin) => whichBin(bin),
-  state: (state) => send("voice", state),
-  changed: () => send("changed", ["voice"]),
-  speaking: () => send("changed", ["voice"]),
-  // Settings' language, or the desktop's: a voice in it is preferred.
-  language: () => {
-    const chosen = ctx.service?.getSettings().language ?? "system";
-    return (chosen === "system" ? app.getLocale() : chosen).slice(0, 2).toLowerCase();
-  },
-  controlSocket: controlSocketPath(roots.dataRoot, process.env.XDG_RUNTIME_DIR, process.getuid?.() ?? 0),
-  // The installed launcher when it is on PATH (it is a link to scripts/vibeforge), else the script itself.
-  launcher: () => (whichBin("vibeforge") ? "vibeforge" : path.join(ctx.appRoot, "scripts", "vibeforge")),
-});
+const voice = makeVoice(ctx);
 
 const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
 
@@ -141,19 +123,6 @@ const mainWindow = new MainWindow(ctx, {
 
 const hostLife = new HostLifecycle(ctx, { voice, talk });
 hostLife.wire();
-
-function companionWire() {
-  return {
-    service: svc(),
-    supervisor,
-    root: path.join(ctx.appRoot, "companion"),
-    icon: ctx.iconPath,
-    log: (line: string) => log.info(line),
-    plans: () => stats.planSummary(false),
-    hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
-    canHear: () => voice.canTranscribe(),
-  };
-}
 
 // ------------------------------------------------------------------ lifecycle
 
@@ -182,11 +151,11 @@ if (!app.requestSingleInstanceLock()) {
     ctx.service.onChange((topics) => {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) tray.sync();
-      if (topics.includes("settings")) syncCompanion(companionWire());
+      if (topics.includes("settings")) syncCompanion(companionWire(ctx, stats, voice));
       if (topics.includes("settings")) tray.syncWords();
     });
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
-    syncCompanion(companionWire());
+    syncCompanion(companionWire(ctx, stats, voice));
     mainWindow.guardPermissions();
     registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, dock, notify, refreshPalette });
     tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
