@@ -22,6 +22,21 @@ npm run coverage     # the tests again, with a floor on src/core (CI runs this o
 npm run build && npm run smoke   # the built app, driven over DevTools (SMOKE_HEADLESS=1: no window)
 ```
 
+### Beside an installed VibeForge
+
+Electron runs one VibeForge per profile folder, and the profile is `~/.config/VibeForge` unless it's told otherwise. So a dev copy started while your installed VibeForge runs only brings that window forward and quits. Without its own folders it would also read and write your real agents, runs and settings.
+
+Give the dev copy its own folders, as `scripts/smoke.mjs` does:
+
+```bash
+dev=~/vibeforge-dev   # any folder; VibeForge fills it on first start
+npm run build
+VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data \
+  node_modules/electron/dist/electron . --user-data-dir=$dev/profile
+```
+
+`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA` stand in for `~/.config/vibeforge` and `~/.local/share/vibeforge`, which also gives the copy its own control socket: its terminals talk to it, and Super+Alt+V still reaches your installed VibeForge. `--user-data-dir` moves Electron's profile and its one-copy lock. The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
+
 ## Issues
 
 Use the [bug](https://github.com/L0nE-F0x/VibeForge/issues/new?template=bug_report.yml) and [feature](https://github.com/L0nE-F0x/VibeForge/issues/new?template=feature_request.yml) templates. **Help → Copy diagnostics** inside the app fills in versions and the end of VibeForge's own log. Read it and remove anything private before you paste.
