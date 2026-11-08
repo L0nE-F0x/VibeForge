@@ -116,19 +116,6 @@
   letter-spacing: 0.02em;
 }
 
-.strip-count {
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 0;
-  background: var(--accent);
-  color: var(--on-accent);
-  font: 700 9.5px/15px var(--font-ui);
-}
-
 .strip-live {
   position: absolute;
   top: 2px;

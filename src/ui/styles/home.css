@@ -688,9 +688,3 @@
   background: var(--sel-fill);
   border-color: var(--sel-line);
 }
-
-.engine-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}

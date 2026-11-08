@@ -194,7 +194,6 @@ select:focus-visible,
 .rail-btn:focus-visible,
 .segmented button:focus-visible,
 .tab:focus-visible,
-.card.interactive:focus-visible,
 .row:focus-visible,
 .menu-item:focus-visible,
 .tree-row:focus-visible,
@@ -254,13 +253,6 @@ select:focus-visible,
 
 .accent-text {
   color: var(--accent);
-}
-
-.grad-text {
-  background: var(--gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
 .truncate {
