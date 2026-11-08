@@ -549,7 +549,7 @@ export class Store {
     if (!raw) {
       // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its
       // author, and moved aside to settings.json.broken if the app saves settings before it is fixed.
-      if (!fs.existsSync(file)) writeJson(file, defaults);
+      if (!fs.existsSync(file)) writeJson(file, defaults, { mode: 0o600 });
       return defaults;
     }
     return {
@@ -602,7 +602,7 @@ export class Store {
   }
 
   writeSettings(settings: Settings): void {
-    writeJson(path.join(this.configRoot, "settings.json"), settings);
+    writeJson(path.join(this.configRoot, "settings.json"), settings, { mode: 0o600 });
   }
 
   readEngineRows(): EngineRow[] {

@@ -283,6 +283,8 @@ describe("launching an agent from the phone", () => {
     expect(off.companion.enabled).toBe(false);
     expect(off.companion.token).toBe(on.companion.token);
     expect(off.companion.nudges).toEqual(defaultCompanion().nudges);
+    // The code is in settings.json, so only its owner may read it, even when ~/.config is a dotfiles repo.
+    expect(fs.statSync(path.join(ctx.svc.store.configRoot, "settings.json")).mode & 0o777).toBe(0o600);
   });
 });
 
