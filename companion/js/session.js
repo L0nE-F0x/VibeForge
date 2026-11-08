@@ -136,12 +136,15 @@ export function updateSession() {
 }
 
 /**
- * Sends the next instruction, and clears the box once it has gone through.
+ * Sends the next instruction, and clears the box it came from once it has gone through.
  * @param {string} text
  */
 async function sendText(text) {
   const words = text.trim();
   if (!words || !state.session) return;
+  // By the time the computer answers, another page (another session) may be on show: the answer is only this one's.
+  const from = parts;
+  const asked = state.sessionQuery;
   let force = false;
   if (state.session.state === "working") {
     if (!window.confirm(t("phone.sendAnyway"))) return;
@@ -158,11 +161,11 @@ async function sendText(text) {
       if (!window.confirm(t("phone.sendAnyway"))) return false;
       result = await post("/api/send", { ...query, text: words, force: true });
     }
-    state.sessionQuery = { ptyId: result.ptyId || "", runId: result.runId || query.runId };
-    parts.stick = true;
+    if (state.sessionQuery === asked) state.sessionQuery = { ptyId: result.ptyId || "", runId: result.runId || query.runId };
+    from.stick = true;
     return true;
   });
-  if (sent && parts.prompt) parts.prompt.value = "";
+  if (sent) from.prompt.value = "";
 }
 
 async function stopSession() {

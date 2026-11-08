@@ -87,3 +87,64 @@ describe("pairing from the phone", () => {
     expect(asked.at(-1)).toBe('/api/pair {"token":"vf_right"}');
   });
 });
+
+describe("sending the next instruction from the phone", () => {
+  type Box = { value: string };
+  type Parts = { prompt: Box; stick: boolean };
+
+  /** The page's own sendText() and withBusy(), with the computer's answer held until `answer`. */
+  function sending() {
+    const script = [
+      `const state = { busy: false, error: "", view: "session", session: { state: "waiting", ptyId: "pa", runId: "ra" }, sessionQuery: { ptyId: "pa", runId: "ra" } };`,
+      `let parts = { prompt: { value: "Run the tests." }, stick: false };`,
+      `let answer; const sent = [];`,
+      `function post(route, body) { sent.push(body); return new Promise((resolve) => { answer = resolve; }); }`,
+      `const t = (key) => key;`,
+      `function update() {}`,
+      `function show() {}`,
+      `function refresh() {}`,
+      pick("api.js", "withBusy"),
+      pick("session.js", "sendText"),
+      // What tapping Send does, and what opening another session does to the page on show.
+      `globalThis.page = { send: () => sendText(parts.prompt.value), open(query, next) { state.sessionQuery = query; parts = next; }, answer: (result) => answer(result), state, sent, parts: () => parts };`,
+    ].join("\n");
+    const context = vm.createContext({ window: { confirm: () => true } });
+    vm.runInContext(script, context);
+    return context.page as {
+      send(): Promise<void>;
+      open(query: { ptyId: string; runId: string }, next: Parts): void;
+      answer(result: { ptyId: string; runId: string }): void;
+      state: { sessionQuery: { ptyId: string; runId: string }; busy: boolean };
+      sent: Array<{ text: string }>;
+      parts(): Parts;
+    };
+  }
+
+  it("clears its own box once the instruction has gone through, and follows the session it went to", async () => {
+    const page = sending();
+    const box = page.parts().prompt;
+    const done = page.send();
+    expect(page.sent[0].text).toBe("Run the tests.");
+    page.answer({ ptyId: "pa2", runId: "ra" });
+    await done;
+    expect(box.value).toBe("");
+    expect(page.parts().stick).toBe(true);
+    expect(page.state.sessionQuery).toEqual({ ptyId: "pa2", runId: "ra" });
+  });
+
+  it("leaves another session's box, and which session is on show, alone when the answer comes after a change of page", async () => {
+    const page = sending();
+    const box = page.parts().prompt;
+    const done = page.send();
+    // Back, and another session opened, with something typed in its box, before the computer answers.
+    const other = { prompt: { value: "Not sent yet." }, stick: false };
+    page.open({ ptyId: "pb", runId: "" }, other);
+    page.answer({ ptyId: "pa2", runId: "ra" });
+    await done;
+    expect(other.prompt.value).toBe("Not sent yet.");
+    expect(other.stick).toBe(false);
+    expect(page.state.sessionQuery).toEqual({ ptyId: "pb", runId: "" });
+    expect(box.value).toBe("");
+    expect(page.state.busy).toBe(false);
+  });
+});
