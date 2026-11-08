@@ -43,7 +43,7 @@ describe("the ready-made build's file list", () => {
     const joins: string[] = [];
     const sources = fs.readdirSync(path.join(repo, "electron"), { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".ts"));
     for (const file of sources) {
-      for (const [, args] of read(path.join("electron", file)).matchAll(/path\.join\(appRoot(?:\(\))?,\s*((?:"[^"]+"\s*,?\s*)+)\)/g)) {
+      for (const [, args] of read(path.join("electron", file)).matchAll(/path\.join\((?:[\w.]+\.)?appRoot(?:\(\))?,\s*((?:"[^"]+"\s*,?\s*)+)\)/g)) {
         joins.push([...args.matchAll(/"([^"]+)"/g)].map((match) => match[1]).join("/"));
       }
     }

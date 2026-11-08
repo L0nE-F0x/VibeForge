@@ -70,6 +70,8 @@ export const ENTRIES = [
 /** Bare and relative module names a script loads, as written. */
 export function specifiers(text) {
   const found = new Set();
+  // Comments load nothing: a JSDoc `@import … from "./types.js"` is for the type checker only.
+  text = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   for (const pattern of [/\brequire\(\s*["'`]([^"'`]+)["'`]\s*\)/g, /\bfrom\s*["']([^"']+)["']/g, /\bimport\(\s*["']([^"']+)["']\s*\)/g, /^\s*import\s*["']([^"']+)["']/gm]) {
     for (const [, spec] of text.matchAll(pattern)) found.add(spec);
   }

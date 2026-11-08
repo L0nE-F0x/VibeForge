@@ -28,7 +28,7 @@ describe("what a config file change touches", () => {
 
 describe("watching the config folder", () => {
   let dir = "";
-  let stop = () => undefined as void;
+  let stop: () => void = () => {};
   afterEach(() => {
     stop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
