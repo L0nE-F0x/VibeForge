@@ -21,6 +21,7 @@ import { gitActivity, githubActivity, type Activity, type ActivitySource } from 
 import type { DeskEvents, Method, MethodArgs, MethodResult, TrayWaiter } from "../src/shared/api.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { Dock } from "./dock.js";
+import { isAppPage, type AppPage } from "./guards.js";
 import { TrayIcon, type TrayState } from "./tray.js";
 import { watchTrayHost } from "./tray-host.js";
 import { childEnv, loadShellPath, mergePath } from "./shell-env.js";
@@ -71,6 +72,11 @@ function appRoot(): string {
 
 function iconPath(): string {
   return path.join(appRoot(), "resources", "icon.png");
+}
+
+/** The one page that runs with the preload's bridge. */
+function appPage(): AppPage {
+  return { file: path.join(appRoot(), "dist", "index.html"), devUrl: process.env.VITE_DEV_SERVER_URL };
 }
 
 const install = installKind(appRoot(), {
@@ -670,7 +676,8 @@ function handlers(): Handlers {
 function registerIpc(): void {
   const table = handlers() as Record<string, (...args: unknown[]) => unknown>;
   ipcMain.handle("vf:call", async (event, method: string, ...args: unknown[]) => {
-    if (!win || event.sender !== win.webContents) throw new Error("Not allowed.");
+    // The window's own page only: should anything else ever load in it, it gets no bridge.
+    if (!win || event.sender !== win.webContents || !isAppPage(event.senderFrame?.url ?? "", appPage())) throw new Error("Not allowed.");
     const handler = table[method];
     if (!handler) throw new Error(`Unknown call ${method}`);
     try {
@@ -781,12 +788,17 @@ async function createWindow(): Promise<void> {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // The window shows VibeForge's page and nothing else: a link or a script that points it at another
+  // page, a file:// one included, is refused, and web links open in the browser instead.
   win.webContents.on("will-navigate", (event, url) => {
-    const devUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devUrl && url.startsWith(devUrl)) return;
-    if (url.startsWith("file://")) return;
+    if (isAppPage(url, appPage())) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  });
+  // Frames inside the page too (it has none of its own).
+  win.webContents.on("will-frame-navigate", (event) => {
+    if (event.isMainFrame || isAppPage(event.url, appPage())) return;
+    event.preventDefault();
   });
   win.on("close", (event) => {
     if (quitting || !service) return;
@@ -824,9 +836,9 @@ async function createWindow(): Promise<void> {
   win.webContents.on("console-message", (event) => {
     if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
   });
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl) await win.loadURL(devUrl);
-  else await win.loadFile(path.join(appRoot(), "dist", "index.html"));
+  const page = appPage();
+  if (page.devUrl) await win.loadURL(page.devUrl);
+  else await win.loadFile(page.file);
 }
 
 /** Why the terminal host is down, for a page that loads after it happened. */
