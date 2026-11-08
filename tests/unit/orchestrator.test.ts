@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannerFor, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
-import { agyModels, grokModels, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
+import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
 
@@ -233,6 +233,11 @@ describe("the planning CLI's process", () => {
     const run = await turn;
     expect(run.timedOut).toBe(false);
     await eventually(() => !alive(child));
+  });
+
+  it("runs a planner without VibeForge's debug port or Electron's variables", () => {
+    const env = plannerEnv({ PATH: "/usr/bin", HOME: "/home/x", VIBEFORGE_DEBUG: "1", VIBEFORGE_DEBUG_PORT: "9223", ELECTRON_RUN_AS_NODE: "1", ELECTRON_NO_ATTACH_CONSOLE: "1" });
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x", NO_COLOR: "1" });
   });
 
   it("reads what a planner prints, and a missing one as code 127", async () => {

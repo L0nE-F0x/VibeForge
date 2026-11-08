@@ -64,13 +64,26 @@ export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, tim
 const KILL_GRACE_MS = 3000;
 
 /**
+ * The environment a planner runs in: VibeForge's own, less what is VibeForge's or Electron's
+ * business (its DevTools port, ELECTRON_RUN_AS_NODE), which a CLI has no use for.
+ */
+export function plannerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key === "VIBEFORGE_DEBUG" || key === "VIBEFORGE_DEBUG_PORT" || key.startsWith("ELECTRON_")) continue;
+    clean[key] = value;
+  }
+  return { ...clean, NO_COLOR: "1" };
+}
+
+/**
  * The real runner. The CLI leads a process group of its own, so Stop and the timeout reach
  * whatever it started as well, and one that ignores SIGTERM is killed outright after a short
  * grace instead of holding the turn open for good.
  */
 export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs = BRAIN_TIMEOUT_MS, graceMs = KILL_GRACE_MS): Promise<BrainRun> =>
   new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: plannerEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
