@@ -17,14 +17,18 @@ import {
   readBrainOutput,
   resolvePlan,
   stepIssue,
+  type MaestroCopy,
   type OrchestratorStep,
   type OrchestratorTurn,
   type OrchestratorView,
   type PlanContext,
 } from "../orchestrator.js";
 import { isGitRepo } from "../vcs.js";
+import type { ApplyResult } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { MessageDesk } from "./messages.js";
+import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
+import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
 
 /** One planning turn can think for a while (Antigravity's first took 80 s); past this it is given up on. */
@@ -130,6 +134,7 @@ export class OrchestratorDesk {
   private thinking: AbortController | null = null;
   /** Models each planner listed, kept for this run of VibeForge. */
   private readonly models = new Map<string, string[]>();
+  private readonly copies: MaestroCopies;
   runner: BrainRunner = spawnBrain;
 
   constructor(
@@ -138,6 +143,7 @@ export class OrchestratorDesk {
     private readonly messages: MessageDesk,
   ) {
     this.conversation = this.load();
+    this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
   }
 
   private get dir(): string {
@@ -185,6 +191,7 @@ export class OrchestratorDesk {
       mode,
       thinking: this.thinking !== null,
       turns: this.conversation.turns,
+      copies: this.copies.list(),
     };
   }
 
@@ -366,6 +373,31 @@ export class OrchestratorDesk {
     this.save();
   }
 
+  // ---------------------------------------------------------------- copies
+
+  /** A step's copy: everything it changed, as Apply would bring it in. */
+  copyDiff(copyId: string): Promise<string> {
+    return this.copies.diff(copyId);
+  }
+
+  /** Apply a step's copy into the workspace it came from (see MaestroCopies.apply). */
+  applyCopy(copyId: string): Promise<ApplyResult> {
+    return this.copies.apply(copyId);
+  }
+
+  /** Throw a step's copy away, with Undo (see MaestroCopies.discard). */
+  discardCopy(copyId: string): Promise<Deleted> {
+    return this.copies.discard(copyId);
+  }
+
+  /** The step that made a copy says what became of it, while that plan is still in the conversation. */
+  private copySettled(copy: MaestroCopy, outcome: CopyOutcome): void {
+    const step = this.conversation.turns.find((turn) => turn.id === copy.turnId)?.steps?.find((item) => item.id === copy.stepId);
+    if (!step) return;
+    step.outcome = outcome;
+    this.save();
+  }
+
   /** Go: carry the plan out, one step after another. A step that fails doesn't stop the rest. */
   async run(turnIdValue: string): Promise<void> {
     const turn = this.plan(turnIdValue);
@@ -382,7 +414,7 @@ export class OrchestratorDesk {
       step.state = "running";
       this.save();
       try {
-        await this.carryOut(step);
+        await this.carryOut(turn, step);
         step.state = "done";
       } catch (error) {
         step.state = "failed";
@@ -394,15 +426,18 @@ export class OrchestratorDesk {
     this.save();
   }
 
-  private async carryOut(step: OrchestratorStep): Promise<void> {
+  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
     if (step.kind === "start") {
       const workspace = this.core.workspaceById(step.workspaceId);
       if (!workspace) throw new Error("That workspace is gone.");
       let workspaceId = workspace.id;
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
-        const opened = await this.workspaces.openNewBranch(workspace.id, step.branch.trim());
-        workspaceId = opened.workspaceId;
-        step.branch = opened.opened.branch;
+        // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
+        const copy = await this.copies.make({ turnId: turn.id, stepId: step.id, engineId: step.engineId, prompt: step.prompt, branch: step.branch, workspace });
+        step.copyId = copy.id;
+        step.branch = copy.branch;
+        workspaceId = copy.openedWorkspaceId;
+        this.save();
       }
       step.openedWorkspaceId = workspaceId;
       const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, prompt: step.prompt, orchestrated: true, ...START_SIZE });

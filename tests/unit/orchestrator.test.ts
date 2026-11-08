@@ -271,8 +271,30 @@ function withPlanner(answers: Array<Record<string, unknown> | string>, opts: Par
   return { ...ctx, calls };
 }
 
+/** A repository with one committed file, and the shell git commands for it and its copies. */
+function repoWithFile(): { repo: string; git: (cwd: string, ...args: string[]) => string } {
+  const repo = gitRepo();
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" });
+  fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+  git(repo, "add", "a.txt");
+  git(repo, "commit", "-qm", "a");
+  return { repo, git };
+}
+
+/** Plan one start step on `branch` in the shop workspace, Go, and hand back the step and its copy. */
+async function startInCopy(ctx: ReturnType<typeof withPlanner>, branch: string) {
+  await ctx.svc.orchestratorAsk(`start argy on ${branch}`);
+  const turn = ctx.svc.orchestratorView().turns.at(-1);
+  await ctx.svc.orchestratorRun(turn?.id ?? "");
+  const view = ctx.svc.orchestratorView();
+  const step = view.turns.find((item) => item.id === turn?.id)?.steps?.[0];
+  const copy = view.copies?.find((item) => item.id === step?.copyId);
+  if (!step || !copy) throw new Error("no copy");
+  return { step, copy };
+}
+
 describe("the Orchestrator in the service", () => {
-  it("plans, waits for Go, then starts the CLI on a new branch in its own folder", async () => {
+  it("plans, waits for Go, then starts the CLI on a new branch in its own copy", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([{ say: "Starting Argy in shop on blah.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "blah", prompt: "Do A, B and C." }] }, { say: "Nothing else to do.", steps: [] }]);
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
@@ -295,9 +317,12 @@ describe("the Orchestrator in the service", () => {
     const step = view.turns[1].steps?.[0];
     expect(view.turns[1].plan).toBe("done");
     expect(step?.state).toBe("done");
-    const copy = path.join(path.dirname(repo), "shop.worktrees", "blah");
+    // A copy the way a task gets one: in VibeForge's worktrees folder, on a vibeforge/ branch.
+    const copy = path.join(ctx.dataRoot, "worktrees", "blah");
     expect(fs.existsSync(copy)).toBe(true);
-    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: copy, encoding: "utf8" }).trim()).toBe("blah");
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: copy, encoding: "utf8" }).trim()).toBe("vibeforge/blah");
+    expect(step).toMatchObject({ branch: "vibeforge/blah", copyId: "blah" });
+    expect(view.copies).toEqual([expect.objectContaining({ id: "blah", name: "blah", stepId: step?.id, workspaceId: workspace.id, openedWorkspaceId: step?.openedWorkspaceId, path: copy, branch: "vibeforge/blah" })]);
     // The workspace's own folder stays where it was.
     expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe("main");
     const workspaces = ctx.svc.listWorkspaces();
@@ -317,6 +342,117 @@ describe("the Orchestrator in the service", () => {
     expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("Nothing else to do.");
     expect(ctx.svc.orchestratorView().turns.at(-1)?.steps).toBeUndefined();
     ctx.svc.close();
+  });
+
+  it("brings a step's work back for review: its diff, then Apply into the workspace, which tidies the copy away", async () => {
+    const { repo, git } = repoWithFile();
+    const plan = (branch: string) => ({ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch, prompt: "Change a." }] });
+    const ctx = withPlanner([plan("fix-a"), plan("fix-a")]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const { step, copy } = await startInCopy(ctx, "fix-a");
+    // The CLI works in its copy: one commit and an edit not committed yet, and a new file.
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    git(copy.path, "commit", "-qam", "two");
+    fs.appendFileSync(path.join(copy.path, "a.txt"), "three\n");
+    fs.writeFileSync(path.join(copy.path, "b.txt"), "new\n");
+    const diff = await ctx.svc.orchestratorCopyDiff(copy.id);
+    expect(diff).toContain("+TWO");
+    expect(diff).toContain("+three");
+    expect(diff).toContain("b/b.txt");
+    // Nothing reaches the workspace until Apply.
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+
+    // A second step asking for the same branch gets its own name; the first copy's branch is left alone.
+    const second = await startInCopy(ctx, "fix-a");
+    expect(second.copy).toMatchObject({ id: "fix-a-2", branch: "vibeforge/fix-a-2" });
+    expect(git(repo, "rev-parse", "vibeforge/fix-a").trim()).not.toBe(git(repo, "rev-parse", "HEAD").trim());
+
+    const result = await ctx.svc.orchestratorApplyCopy(copy.id);
+    expect(result).toEqual({ files: ["a.txt", "b.txt"], conflicts: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\nthree\n");
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new\n");
+    // As uncommitted edits: the workspace's branch hasn't moved.
+    expect(git(repo, "log", "--format=%s").trim().split("\n")[0]).toBe("a");
+    // Its CLI ended first; its copy, branch and workspace are gone, and the step says so.
+    expect(ctx.killed).toContain(step.ptyId);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(git(repo, "branch", "--list", "vibeforge/fix-a").trim()).toBe("");
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.id)).toEqual([workspace.id, second.copy.openedWorkspaceId]);
+    const view = ctx.svc.orchestratorView();
+    expect(view.copies?.map((item) => item.id)).toEqual(["fix-a-2"]);
+    expect(view.turns.flatMap((turn) => turn.steps ?? []).find((item) => item.id === step.id)?.outcome).toBe("applied");
+    await expect(ctx.svc.orchestratorApplyCopy(copy.id)).rejects.toThrow("That copy is gone.");
+    ctx.svc.close();
+  });
+
+  it("discards a copy with its workspace, puts both back on Undo, and drops the branch once Undo has passed", async () => {
+    const { repo, git } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "try-it", prompt: "Try it." }] }]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const { step, copy } = await startInCopy(ctx, "try-it");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "changed\n");
+    ctx.svc.saveLayout(copy.openedWorkspaceId ?? "", { kind: "pane", id: "p1", launch: { type: "shell" } });
+
+    const deleted = await ctx.svc.orchestratorDiscardCopy(copy.id);
+    expect(deleted.copyLeft).toBeUndefined();
+    expect(ctx.killed).toContain(step.ptyId);
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.id)).toEqual([workspace.id]);
+    expect(ctx.svc.orchestratorView().copies).toEqual([]);
+    expect(ctx.svc.orchestratorView().turns[1].steps?.[0].outcome).toBe("discarded");
+    // The workspace never saw any of it.
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+
+    ctx.svc.undoDelete(deleted.undo);
+    expect(fs.readFileSync(path.join(copy.path, "a.txt"), "utf8")).toBe("changed\n");
+    expect(ctx.svc.listWorkspaces().workspaces.find((item) => item.id === copy.openedWorkspaceId)).toMatchObject({ name: "shop · try-it", path: copy.path });
+    expect(ctx.svc.getLayout(copy.openedWorkspaceId ?? "")).toMatchObject({ id: "p1" });
+    expect(ctx.svc.orchestratorView().copies?.map((item) => item.id)).toEqual(["try-it"]);
+    expect(ctx.svc.orchestratorView().turns[1].steps?.[0].outcome).toBeNull();
+    expect(await ctx.svc.orchestratorCopyDiff(copy.id)).toContain("+changed");
+
+    // Discarded again; closing ends the chance to undo, and the branch goes with it.
+    await ctx.svc.orchestratorDiscardCopy(copy.id);
+    expect(git(repo, "branch", "--list", "vibeforge/try-it").trim()).not.toBe("");
+    ctx.svc.close();
+    for (let tries = 0; tries < 150 && git(repo, "branch", "--list", "vibeforge/try-it").trim(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(git(repo, "branch", "--list", "vibeforge/try-it").trim()).toBe("");
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain("try-it");
+  });
+
+  it("keeps a copy that conflicts, keeps copies through a new conversation, and never touches a folder that isn't its own", async () => {
+    const { repo, git } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "clash", prompt: "Change a." }] }]);
+    ctx.svc.addWorkspace(repo);
+    const { copy } = await startInCopy(ctx, "clash");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nfrom the copy\n");
+    // The workspace moved on underneath, on the same line.
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nfrom the workspace\n");
+    git(repo, "commit", "-qam", "meanwhile");
+    const result = await ctx.svc.orchestratorApplyCopy(copy.id);
+    expect(result.conflicts).toEqual(["a.txt"]);
+    expect(fs.existsSync(copy.path)).toBe(true);
+    expect(ctx.svc.orchestratorView().copies?.map((item) => item.id)).toEqual(["clash"]);
+
+    // New: the conversation starts over, the copy still waits.
+    ctx.svc.orchestratorClear();
+    expect(ctx.svc.orchestratorView()).toMatchObject({ turns: [], copies: [expect.objectContaining({ id: "clash" })] });
+    ctx.svc.close();
+
+    // A list edited by hand to point somewhere else: Apply refuses, Discard only forgets it.
+    const elsewhere = tempDir();
+    fs.writeFileSync(path.join(elsewhere, "keep.txt"), "mine\n");
+    const file = path.join(ctx.dataRoot, "orchestrator", "copies.json");
+    const saved = JSON.parse(fs.readFileSync(file, "utf8")) as { copies: Array<Record<string, unknown>> };
+    saved.copies[0].path = elsewhere;
+    fs.writeFileSync(file, JSON.stringify(saved));
+    const again = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await expect(again.svc.orchestratorApplyCopy("clash")).rejects.toThrow("This copy is not in VibeForge's worktrees folder, so it was left alone.");
+    await expect(again.svc.orchestratorCopyDiff("clash")).rejects.toThrow();
+    expect((await again.svc.orchestratorDiscardCopy("clash")).copyLeft).toBe(true);
+    expect(fs.readFileSync(path.join(elsewhere, "keep.txt"), "utf8")).toBe("mine\n");
+    expect(again.svc.orchestratorView().copies).toEqual([]);
+    again.svc.close();
   });
 
   it("carries a plan out at once under Just go, and keeps one that needs a person", async () => {

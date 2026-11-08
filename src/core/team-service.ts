@@ -178,6 +178,18 @@ export class TeamService extends ServiceCore {
     this.orchestrator.removeStep(turnId, stepId);
   }
 
+  orchestratorCopyDiff(copyId: string): Promise<string> {
+    return this.orchestrator.copyDiff(copyId);
+  }
+
+  orchestratorApplyCopy(copyId: string): Promise<ApplyResult> {
+    return this.orchestrator.applyCopy(copyId);
+  }
+
+  orchestratorDiscardCopy(copyId: string): Promise<Deleted> {
+    return this.orchestrator.discardCopy(copyId);
+  }
+
   // ---------------------------------------------------------------- routines
 
   listRoutines(): RoutineView[] {

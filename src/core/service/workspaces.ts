@@ -1,5 +1,5 @@
 import path from "node:path";
-import { newBranchCheckout, openBranchCheckout, readBranches, type BranchList, type OpenedCheckout } from "../branches.js";
+import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
 import { isDirectory } from "../fsx.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
@@ -67,24 +67,20 @@ export class WorkspaceDesk {
   }
 
   /**
-   * New work on `branch` in its own folder beside this workspace (the Orchestrator's start step):
-   * the branch is made from this folder's commit when it doesn't exist. The new folder becomes a
-   * workspace, named for the repository and branch, and is returned.
+   * A folder as a workspace of its own, named `name`, without making it the one Code shows: the
+   * person stays where they are (a Maestro step's copy). A folder that is a workspace already
+   * keeps its record. Returns its id.
    */
-  async openNewBranch(id: string, branch: string): Promise<{ workspaceId: string; opened: OpenedCheckout }> {
-    const workspace = this.workspace(id);
-    const opened = await newBranchCheckout(workspace.path, branch);
-    const known = this.core.store.readWorkspaces().workspaces.find((item) => path.resolve(item.path) === path.resolve(opened.path));
-    if (known) return { workspaceId: known.id, opened };
-    // Added without becoming the one Code shows: the person stays where they are.
+  addQuietly(folder: string, name: string): string {
     const before = this.core.store.readWorkspaces();
-    const next = addWorkspaceRecord(before, opened.path);
-    const added = next.workspaces.find((item) => path.resolve(item.path) === path.resolve(opened.path));
+    const known = before.workspaces.find((item) => path.resolve(item.path) === path.resolve(folder));
+    if (known) return known.id;
+    const next = addWorkspaceRecord(before, folder);
+    const added = next.workspaces.find((item) => path.resolve(item.path) === path.resolve(folder));
     if (!added) throw new Error("Choose a folder that exists.");
-    const named = updateWorkspaceRecord({ ...next, lastWorkspaceId: before.lastWorkspaceId }, added.id, { name: `${opened.repoName} · ${opened.branch}` });
-    this.core.store.writeWorkspaces(named);
+    this.core.store.writeWorkspaces(updateWorkspaceRecord({ ...next, lastWorkspaceId: before.lastWorkspaceId }, added.id, { name }));
     this.core.emit("workspaces");
-    return { workspaceId: added.id, opened };
+    return added.id;
   }
 
   private workspace(id: string) {

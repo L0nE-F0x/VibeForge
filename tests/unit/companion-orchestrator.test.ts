@@ -292,7 +292,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     expect(view.turns.at(-1)?.plan).toBe("done");
     expect(done).toMatchObject({ state: "done", live: true });
     expect(done?.runId).toBeTruthy();
-    const copy = path.join(path.dirname(repo), "shop.worktrees", "blah");
+    const copy = path.join(ctx.dataRoot, "worktrees", "blah");
     expect(ctx.spawns[0].cwd).toBe(copy);
     expect(ctx.spawns[0].argv.at(-1)).toBe("Do A and B.");
     expect(view.running[0]).toMatchObject({ ptyId: done?.ptyId, name: "Argy", workspace: "shop · blah", orchestrated: true, stop: "end" });

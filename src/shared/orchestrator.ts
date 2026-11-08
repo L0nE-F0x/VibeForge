@@ -30,6 +30,38 @@ export interface OrchestratorStep {
   /** start: the terminal it opened, and the workspace that terminal is in (the copy's). */
   ptyId: string | null;
   openedWorkspaceId: string | null;
+  /** start: its own copy (a MaestroCopy's id), made when it ran in a git workspace on a branch. */
+  copyId?: string | null;
+  /** start: what became of that copy, once a person applied or discarded it. */
+  outcome?: "applied" | "discarded" | null;
+}
+
+/**
+ * A start step's own copy of its workspace, made the way a task's is: a git worktree in
+ * VibeForge's worktrees folder on a `vibeforge/` branch, opened as a workspace of its own. Like a
+ * task's, it waits for a person: its changes to review, then Apply into the workspace it came
+ * from, or Discard (with Undo), which takes the copy, its branch and its workspace away.
+ */
+export interface MaestroCopy {
+  /** Its folder's name under worktrees/, and its branch's after `vibeforge/`. */
+  id: string;
+  /** The plan step that made it. */
+  turnId: string;
+  stepId: string;
+  engineId: string;
+  prompt: string;
+  /** The branch name the plan asked for, for its label. */
+  name: string;
+  /** The workspace it was made from, which Apply brings the changes into. */
+  workspaceId: string;
+  /** Its own workspace in Code. */
+  openedWorkspaceId: string | null;
+  at: string;
+  /** The worktree, as src/core/worktrees.ts's WorkingCopy: its folder, branch, base commit and repository. */
+  path: string;
+  branch: string;
+  base: string;
+  repo: string;
 }
 
 export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
@@ -57,6 +89,8 @@ export interface OrchestratorView {
   /** Waiting for the planning CLI's answer. */
   thinking: boolean;
   turns: OrchestratorTurn[];
+  /** Copies waiting for a person to apply or discard them, oldest first. */
+  copies?: MaestroCopy[];
 }
 
 /** The engines that can plan: the ones with a headless turn, structured output and a way to turn tools off. */
