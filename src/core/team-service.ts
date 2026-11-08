@@ -35,7 +35,7 @@ export class TeamService extends ServiceCore {
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
   private readonly messages = new MessageDesk(this, this.tasks);
-  readonly orchestrator = new OrchestratorDesk(this, this.workspaces);
+  readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages);
 
   override close(): void {
     this.turns.close();

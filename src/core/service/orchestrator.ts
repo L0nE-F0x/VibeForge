@@ -24,6 +24,7 @@ import {
 } from "../orchestrator.js";
 import { isGitRepo } from "../vcs.js";
 import type { ServiceCore } from "./core.js";
+import type { MessageDesk } from "./messages.js";
 import type { WorkspaceDesk } from "./workspaces.js";
 
 /** One planning turn can think for a while (Antigravity's first took 80 s); past this it is given up on. */
@@ -134,6 +135,7 @@ export class OrchestratorDesk {
   constructor(
     private readonly core: ServiceCore,
     private readonly workspaces: WorkspaceDesk,
+    private readonly messages: MessageDesk,
   ) {
     this.conversation = this.load();
   }
@@ -409,7 +411,15 @@ export class OrchestratorDesk {
     }
     if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "tell") {
-      await this.core.options.host.send(step.target, step.prompt, true);
+      // Looked at again now: a pane whose CLI has quit since the plan was made is a bare shell,
+      // and the message would run there as a command.
+      const session = this.core.live.get(step.target);
+      const to = session && isCodingCli(session) ? this.messages.list().find((item) => item.ptyId === step.target) : undefined;
+      if (!to) throw new Error("That CLI isn't running any more.");
+      // The way every message to a CLI goes: in once it is idle and nobody is typing there, and
+      // not at all after Stop. It is checked for its CLI once more as it goes in.
+      const sent = await this.messages.tell({ fromPty: null, to: to.handle, text: step.prompt });
+      if (!sent.ok) throw new Error(sent.error);
       return;
     }
     await this.core.killPty(step.target);

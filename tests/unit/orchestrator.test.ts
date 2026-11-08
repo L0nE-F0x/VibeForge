@@ -254,8 +254,8 @@ function gitRepo(): string {
 }
 
 /** The harness with a "grok" row that plans (its bin resolves), and a planner that answers from a list. */
-function withPlanner(answers: Array<Record<string, unknown> | string>) {
-  const ctx = setup();
+function withPlanner(answers: Array<Record<string, unknown> | string>, opts: Parameters<typeof setup>[0] = {}) {
+  const ctx = setup(opts);
   const file = path.join(ctx.configRoot, "engines.json");
   const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
   engines.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] });
@@ -343,9 +343,12 @@ describe("the Orchestrator in the service", () => {
   });
 
   it("tells and stops running CLIs, replaces a waiting plan, and says when it can't read the answer", async () => {
-    const ctx = withPlanner([]);
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
     const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
     const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    // Past the moment a CLI that just started is left to draw its first screen.
+    at += 6000;
     const answers: Array<Record<string, unknown> | string> = [
       { say: "First idea.", steps: [{ kind: "stop", target: running.ptyId }] },
       { say: "Telling it, then closing it.", steps: [{ kind: "tell", target: running.ptyId, prompt: "Wrap up." }, { kind: "stop", target: running.ptyId }] },
@@ -361,7 +364,8 @@ describe("the Orchestrator in the service", () => {
     expect(turns[1].plan).toBe("replaced");
     expect(() => ctx.svc.orchestratorEditStep(turns[1].id, turns[1].steps?.[0].id ?? "", { prompt: "x" })).toThrow("That plan has already been carried out.");
     await ctx.svc.orchestratorRun(turns[3].id);
-    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "Wrap up." });
+    // A message like any other, labelled, through the queue.
+    expect(ctx.sent).toContainEqual({ ptyId: running.ptyId, text: "From a terminal outside VibeForge:\nWrap up." });
     expect(ctx.killed).toContain(running.ptyId);
     await until(() => ctx.ended.length === 1);
 
@@ -370,6 +374,52 @@ describe("the Orchestrator in the service", () => {
 
     ctx.svc.orchestratorClear();
     expect(ctx.svc.orchestratorView().turns).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("tells a CLI only once it is free, never after Stop, and never into a shell whose CLI has quit", async () => {
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const run = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(shell.ptyId, ["pasty"], ctx.place);
+    at += 6000;
+    const plans: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: plans.shift() }), stderr: "", timedOut: false });
+    const tell = async (target: string, prompt: string) => {
+      plans.push({ say: "Telling it.", steps: [{ kind: "tell", target, prompt }] });
+      await ctx.svc.orchestratorAsk("tell it");
+      const turn = ctx.svc.orchestratorView().turns.at(-1);
+      await ctx.svc.orchestratorRun(turn?.id ?? "");
+      return ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps?.[0];
+    };
+
+    // Busy: it waits in the queue, and goes in once the CLI has been quiet a moment.
+    ctx.svc.onPtyActivity(run.ptyId, true);
+    expect(await tell(run.ptyId, "Add tests.")).toMatchObject({ state: "done" });
+    expect(ctx.sent).toEqual([]);
+    ctx.svc.onPtyActivity(run.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent).toEqual([{ ptyId: run.ptyId, text: "From a terminal outside VibeForge:\nAdd tests." }]);
+
+    // Stop on that terminal holds Maestro's messages too, until a person types there.
+    ctx.svc.stopTalk(run.ptyId);
+    at += 4000;
+    expect(await tell(run.ptyId, "And docs.")).toMatchObject({ state: "failed", error: expect.stringContaining("A person stopped the conversation") });
+
+    // The shell's CLI quits while the message waits for it: nothing is typed at the bare prompt.
+    ctx.svc.onPtyActivity(shell.ptyId, true);
+    expect(await tell(shell.ptyId, "rm -rf build")).toMatchObject({ state: "done" });
+    ctx.svc.onPtyProgram(shell.ptyId, null, ctx.place);
+    ctx.svc.onPtyActivity(shell.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
+    // And one planned while it ran is checked again at Go.
+    expect(await tell(shell.ptyId, "ls")).toMatchObject({ state: "skipped" });
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
     ctx.svc.close();
   });
 
