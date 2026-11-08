@@ -7,6 +7,7 @@ import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { useAction, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { SaveState, useAutosave, useSaveShortcut } from "./Agents.js";
+import { shortcutKeys } from "../shortcuts.js";
 import { useT } from "../i18n/index.js";
 
 const TEMPLATE = `## When
@@ -142,7 +143,7 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
         {skill ? (
           <SaveState dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("skills.savedBody")}`} />
         ) : (
-          <Button variant="primary" icon={Save} busy={saving} disabled={!name.trim()} kbd="Ctrl+S" tip={t("skills.create")} onClick={() => void save()}>
+          <Button variant="primary" icon={Save} busy={saving} disabled={!name.trim()} kbd={shortcutKeys("form.save")} tip={t("skills.create")} onClick={() => void save()}>
             {t("skills.create")}
           </Button>
         )}

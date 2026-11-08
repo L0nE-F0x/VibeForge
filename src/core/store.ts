@@ -1,948 +1,218 @@
-import fs from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { parse, stringify } from "yaml";
-import { DEFAULT_MAX_MESSAGES } from "./agent-talk.js";
-import { defaultCompanion, normalizeCompanion } from "./companion.js";
-import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines } from "./engines.js";
-import { readJson, writeFileAtomic, writeJson } from "./fsx.js";
 import { ensureLayout } from "./layout.js";
-import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta } from "./runs.js";
-import { isSafeId, slugify } from "./slug.js";
-import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../shared/text.js";
-import { TASK_STATUSES } from "./tasks.js";
-import { isThemeId } from "./theme.js";
+import type { RUN_FILES } from "./runs.js";
+import { Chats } from "./store/chats.js";
+import { Config } from "./store/config.js";
+import { Library } from "./store/library.js";
+import { ReadCache } from "./store/read-cache.js";
+import { RunIndex, type RunQuery } from "./store/run-index.js";
 import type { WorkspaceFile } from "./workspaces.js";
-import type { WorkingCopy } from "./worktrees.js";
-import type {
-  Agent,
-  AgentTier,
-  ChatRecord,
-  EngineRow,
-  LayoutNode,
-  Routine,
-  RunMeta,
-  RunOrigin,
-  RunStatus,
-  Schedule,
-  Settings,
-  SoundSettings,
-  VoiceSettings,
-  Skill,
-  Task,
-  TaskStatus,
-  Workspace,
-} from "./types.js";
+import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task } from "./types.js";
 
-export const MEMORY_STARTER =
-  "<!-- Preferences, decisions, constraints, and lessons that should still matter next week. Dated bullets. No secrets. VibeForge adds this file to every run of this agent. -->\n";
-
-const SCHEMA_VERSION = 3;
-
-const RUN_COLUMNS = [
-  "id",
-  "origin",
-  "title",
-  "agentId",
-  "routineId",
-  "taskId",
-  "chatId",
-  "workspaceId",
-  "engine",
-  "argv",
-  "cwd",
-  "prompt",
-  "startedAt",
-  "endedAt",
-  "status",
-  "exitCode",
-  "signal",
-  "stopRequested",
-  "openedAt",
-  "notifiedAt",
-  "dir",
-  "error",
-  "changes",
-  "gitStart",
-  "continuedFrom",
-] as const;
-
-export interface RunQuery {
-  origin?: RunOrigin | RunOrigin[];
-  agentId?: string;
-  routineId?: string;
-  taskId?: string;
-  chatId?: string;
-  workspaceId?: string;
-  status?: RunStatus | RunStatus[];
-  unopened?: boolean;
-  since?: string;
-  search?: string;
-  limit?: number;
-}
-
-/** How much of a transcript is indexed: its start (the ask) and its end (how it went). */
-const INDEXED_CHARS = 100_000;
-
-function searchableText(text: string): string {
-  const clean = text.replace(/[\u0000-\u0008\u000b-\u001f]/g, " ");
-  return clean.length <= INDEXED_CHARS * 2 ? clean : `${clean.slice(0, INDEXED_CHARS)}\n…\n${clean.slice(-INDEXED_CHARS)}`;
-}
-
-/** Typed words as an FTS5 query: every word must appear, each matching the start of a word. */
-export function matchExpression(text: string): string | null {
-  const words = text.match(/[\p{L}\p{N}_]+/gu);
-  if (!words?.length) return null;
-  return words
-    .slice(0, 12)
-    .map((word) => `"${word}"*`)
-    .join(" ");
-}
-
-export function defaultSettings(): Settings {
-  return {
-    defaultEngine: "claude",
-    defaultShell: process.env.SHELL || "/bin/bash",
-    notify: true,
-    terminalFontSize: 13,
-    terminalFontFamily: "JetBrainsMono Nerd Font",
-    theme: "omarchy",
-    tourDone: false,
-    checkUpdates: true,
-    language: "system",
-    voice: { model: "", language: "auto", talkBack: true, speaker: "", agent: "" },
-    sounds: { on: true, volume: 0.6, voice: true, attention: true, finished: true, routines: false, inFront: false },
-    tray: true,
-    closeToTray: true,
-    usage: true,
-    planLimits: false,
-    quotaAlerts: false,
-    activity: "git",
-    rail: { order: [], hidden: [] },
-    keepRuns: { days: 0, maxMb: 0 },
-    companion: defaultCompanion(),
-    agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
-    orchestrator: { engine: "", mode: "plan", model: "" },
-  };
-}
-
-/** A whole number from 0 to `max`; anything else is `fallback`. */
-function count(value: unknown, max: number, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(Math.round(value), max) : fallback;
-}
-
-function str(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function strOrNull(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function names(value: unknown): string[] {
-  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string"))] : [];
-}
-
-function bool(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-/** Older settings said "summary", "full", or "off". Reading aloud is now on or off; on is the first paragraph. */
-function talkBackFlag(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (value === "off") return false;
-  if (value === "summary" || value === "full") return true;
-  return fallback;
-}
-
-function normalizeSoundSettings(value: unknown, defaults: SoundSettings): SoundSettings {
-  const raw = value && typeof value === "object" ? (value as Partial<SoundSettings>) : {};
-  const volume = typeof raw.volume === "number" && Number.isFinite(raw.volume) ? Math.min(1, Math.max(0, raw.volume)) : defaults.volume;
-  return {
-    on: bool(raw.on, defaults.on),
-    volume,
-    voice: bool(raw.voice, defaults.voice),
-    attention: bool(raw.attention, defaults.attention),
-    finished: bool(raw.finished, defaults.finished),
-    routines: bool(raw.routines, defaults.routines),
-    inFront: bool(raw.inFront, defaults.inFront),
-  };
-}
-
-function normalizeVoiceSettings(value: unknown, defaults: VoiceSettings): VoiceSettings {
-  const raw = value && typeof value === "object" ? (value as Partial<VoiceSettings> & { talkBack?: unknown }) : {};
-  return {
-    model: str(raw.model).trim(),
-    language: /^(auto|[a-z]{2,3})$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
-    talkBack: talkBackFlag(raw.talkBack, defaults.talkBack),
-    speaker: str(raw.speaker).trim(),
-    agent: str(raw.agent).trim(),
-  };
-}
-
-function strList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
-}
-
-function schedule(value: unknown): Schedule {
-  if (value && typeof value === "object") {
-    const record = value as { kind?: unknown; expr?: unknown; minutes?: unknown };
-    if (record.kind === "cron") return { kind: "cron", expr: str(record.expr).trim() };
-    if (record.kind === "every") return { kind: "every", minutes: Number(record.minutes) };
-  }
-  return { kind: "every", minutes: 0 };
-}
-
-function yamlText(value: unknown): string {
-  return stringify(value, { lineWidth: 0 });
-}
-
-function readYaml(file: string): unknown {
-  try {
-    return parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-/** A "good at" line: one line, short enough for a roster. */
-export function oneLine(text: string, max = 160): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-export function agentTier(value: unknown): AgentTier {
-  return value === "fast" || value === "everyday" || value === "strong" ? value : "";
-}
-
-function normalizeAgent(id: string, value: unknown): Agent | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return {
-    id,
-    name: str(record.name) || id,
-    engine: str(record.engine),
-    brief: str(record.brief),
-    memoryFile: "memory.md",
-    places: strList(record.places),
-    skills: strList(record.skills),
-    allowRoutines: bool(record.allowRoutines, true),
-    voice: str(record.voice).trim(),
-    goodAt: oneLine(str(record.goodAt)),
-    tier: agentTier(record.tier),
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
-export function parseSkill(id: string, text: string): Skill {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { id, name: id, description: "", body: text.trim() };
-  let front: { name?: unknown; description?: unknown } | null;
-  try {
-    front = parse(match[1]) as { name?: unknown; description?: unknown } | null;
-  } catch {
-    front = null;
-  }
-  return {
-    id,
-    name: str(front?.name, id) || id,
-    description: str(front?.description),
-    body: match[2].replace(/^\s*\n/, "").trimEnd(),
-  };
-}
-
-export function skillDocument(skill: Skill): string {
-  const front = yamlText({ name: skill.name, description: skill.description }).trimEnd();
-  return `---\n${front}\n---\n\n${skill.body.trim()}\n`;
-}
-
-function normalizeRoutine(id: string, value: unknown): Routine | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return {
-    id,
-    name: str(record.name) || id,
-    agentId: str(record.agentId),
-    enabled: bool(record.enabled, true),
-    schedule: schedule(record.schedule),
-    prompt: str(record.prompt),
-    notify: bool(record.notify, true),
-    lastFiredAt: strOrNull(record.lastFiredAt),
-    lastMissedAt: strOrNull(record.lastMissedAt),
-    shareCheckout: record.shareCheckout === true,
-  };
-}
-
-function normalizeTask(id: string, value: unknown): Task | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const status = str(record.status, "todo") as TaskStatus;
-  return {
-    id,
-    title: str(record.title) || id,
-    body: str(record.body),
-    status: TASK_STATUSES.includes(status) ? status : "todo",
-    agentId: strOrNull(record.agentId),
-    workspaceId: strOrNull(record.workspaceId),
-    runIds: strList(record.runIds),
-    isolated: record.isolated === true,
-    copy: workingCopy(record.copy),
-    shareCheckout: record.shareCheckout === true,
-    sourceRunId: strOrNull(record.sourceRunId),
-    askedBy: strOrNull(record.askedBy),
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
-function workingCopy(value: unknown): WorkingCopy | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const [copyPath, branch, base, repo] = [record.path, record.branch, record.base, record.repo].map((item) => str(item));
-  if (!path.isAbsolute(copyPath) || !path.isAbsolute(repo) || !/^vibeforge\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{7,64}$/.test(base)) return null;
-  return { path: copyPath, branch, base, repo };
-}
-
-function normalizeChat(value: unknown): ChatRecord | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const id = str(record.id);
-  if (!isSafeId(id)) return null;
-  const runIds = strList(record.runIds);
-  const legacy = strOrNull(record.runId);
-  if (legacy && !runIds.includes(legacy)) runIds.push(legacy);
-  return {
-    id,
-    title: str(record.title) || "Chat",
-    agentId: strOrNull(record.agentId),
-    engine: str(record.engine),
-    cwd: str(record.cwd),
-    runIds,
-    createdAt: str(record.createdAt),
-    updatedAt: str(record.updatedAt),
-  };
-}
-
-function normalizeWorkspace(value: unknown): Workspace | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const id = str(record.id);
-  const folder = str(record.path);
-  if (!isSafeId(id) || !folder) return null;
-  return { id, name: str(record.name) || path.basename(folder) || id, path: folder, dockUrl: str(record.dockUrl) };
-}
-
-function isLayoutNode(value: unknown, depth = 0): value is LayoutNode {
-  if (!value || typeof value !== "object" || depth > 12) return false;
-  const node = value as Record<string, unknown>;
-  if (node.kind === "pane") {
-    const launch = node.launch as Record<string, unknown> | undefined;
-    return typeof node.id === "string" && !!launch && (launch.type === "shell" || (launch.type === "engine" && typeof launch.engineId === "string"));
-  }
-  if (node.kind === "split") {
-    return (
-      (node.dir === "row" || node.dir === "col") &&
-      typeof node.ratio === "number" &&
-      isLayoutNode(node.a, depth + 1) &&
-      isLayoutNode(node.b, depth + 1)
-    );
-  }
-  return false;
-}
-
-function toRow(meta: RunMeta): Array<string | number | null> {
-  return RUN_COLUMNS.map((column) => {
-    const value = meta[column];
-    if (column === "argv") return JSON.stringify(value);
-    if (column === "stopRequested") return value ? 1 : 0;
-    if (value === undefined) return null;
-    return value as string | number | null;
-  });
-}
-
-/** SQLite's "database disk image is malformed" (11) and "file is not a database" (26). */
-function isBrokenIndex(error: unknown): boolean {
-  const { code, errcode } = (error ?? {}) as { code?: unknown; errcode?: unknown };
-  return code === "ERR_SQLITE_ERROR" && typeof errcode === "number" && [11, 26].includes(errcode & 0xff);
-}
-
-/** Moves a damaged index (and its journal) to `index.sqlite.broken`, as writeJson does with a JSON file. */
-function setIndexAside(file: string): void {
-  const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
-  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
-    if (fs.existsSync(`${file}${suffix}`)) fs.renameSync(`${file}${suffix}`, `${aside}${suffix}`);
-  }
-}
-
-// ---------------------------------------------------------------- read cache
+export { defaultSettings } from "./store/config.js";
+export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument } from "./store/library.js";
+export { matchExpression, type RunQuery } from "./store/run-index.js";
 
 /**
- * How long after a change a file is still parsed on every read. A second change within the same
- * tick of the file system's clock, at the same size, could keep the first one's stamp.
+ * Everything VibeForge keeps on disk, behind one API: the run index, the config folder's JSON
+ * files, the hand-edited library and the chats. Each lives in `./store/`; this class opens them
+ * and passes each call on.
  */
-const SETTLE_MS = 2000;
-
-/** What identifies a file's contents without reading them; null when there is no such file. */
-function fileStamp(file: string): { key: string; settled: boolean } | null {
-  try {
-    const stat = fs.statSync(file);
-    if (!stat.isFile()) return null;
-    return { key: `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, settled: Date.now() - stat.mtimeMs > SETTLE_MS };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Settings, engines and agents as last parsed, kept while their file is unchanged on disk. The
- * services read them hundreds of times a refresh, and a stat costs far less than parsing again.
- * These are files people edit by hand, so the stamp (inode, size, modify and change times) is
- * checked on every read, and the store's own writes drop the entry at once. Every read gets its
- * own copy, so a caller changing what it got can't change what the next one sees.
- */
-class ReadCache {
-  private readonly entries = new Map<string, { key: string; value: unknown }>();
-
-  read<T>(file: string, load: () => T): T {
-    const stamp = fileStamp(file);
-    const hit = this.entries.get(file);
-    if (stamp && hit?.key === stamp.key) return structuredClone(hit.value) as T;
-    const value = load();
-    if (stamp?.settled) this.entries.set(file, { key: stamp.key, value: structuredClone(value) });
-    else this.entries.delete(file);
-    return value;
-  }
-
-  forget(file: string): void {
-    this.entries.delete(file);
-  }
-}
-
 export class Store {
   readonly configRoot: string;
   readonly dataRoot: string;
-  private readonly db: DatabaseSync;
+  private readonly runs: RunIndex;
+  private readonly config: Config;
+  private readonly library: Library;
+  private readonly chats: Chats;
 
   constructor(configRoot: string, dataRoot: string) {
     this.configRoot = configRoot;
     this.dataRoot = dataRoot;
     ensureLayout(configRoot, dataRoot);
-    const index = path.join(dataRoot, "index.sqlite");
-    let db: DatabaseSync | null = null;
-    try {
-      db = this.db = new DatabaseSync(index);
-      this.migrate();
-    } catch (error) {
-      if (!isBrokenIndex(error)) throw error;
-      // The index only mirrors the run folders' meta.json, so a damaged one is set aside and built again from them.
-      db?.close();
-      setIndexAside(index);
-      this.db = new DatabaseSync(index);
-      this.migrate();
-    }
+    this.runs = new RunIndex(dataRoot);
+    const cache = new ReadCache();
+    this.config = new Config(configRoot, cache);
+    this.library = new Library(configRoot, cache);
+    this.chats = new Chats(dataRoot);
   }
 
   close(): void {
-    this.db.close();
+    this.runs.close();
   }
 
-  // ---------------------------------------------------------------- run index
+  // ---------------------------------------------------------------- runs (store/run-index.ts)
 
-  private migrate(): void {
-    const version = (this.db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-    if (version !== SCHEMA_VERSION) {
-      this.db.exec("DROP TABLE IF EXISTS runs");
-      this.db.exec(`CREATE TABLE runs (
-        id TEXT PRIMARY KEY, origin TEXT, title TEXT, agentId TEXT, routineId TEXT, taskId TEXT, chatId TEXT,
-        workspaceId TEXT, engine TEXT, argv TEXT, cwd TEXT, prompt TEXT, startedAt TEXT, endedAt TEXT, status TEXT,
-        exitCode INTEGER, signal INTEGER, stopRequested INTEGER, openedAt TEXT, notifiedAt TEXT, dir TEXT,
-        error TEXT, changes TEXT, gitStart TEXT, continuedFrom TEXT
-      )`);
-      this.db.exec("CREATE INDEX runs_started ON runs(startedAt DESC)");
-      this.db.exec("CREATE INDEX runs_status ON runs(status)");
-      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    }
-    // What a run said, for search. Filled as runs end, and for older runs by `indexMissingText`.
-    this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS run_text USING fts5(
-      id UNINDEXED, title, prompt, transcript, tokenize = 'unicode61 remove_diacritics 2'
-    )`);
-    this.reindex();
-  }
-
-  /** Pick up run folders the index does not know about (a crash, or a copied data dir). */
   reindex(): number {
-    const known = new Set((this.db.prepare("SELECT id FROM runs").all() as Array<{ id: string }>).map((row) => row.id));
-    let added = 0;
-    for (const dir of listRunDirs(this.dataRoot)) {
-      if (known.has(path.basename(dir))) continue;
-      const meta = readRunMeta(dir);
-      // A run's folder is named for its id; one that isn't (copied by hand) would be found in the wrong place.
-      if (!meta || meta.id !== path.basename(dir)) continue;
-      meta.dir = dir;
-      this.indexRun(meta);
-      added += 1;
-    }
-    return added;
+    return this.runs.reindex();
   }
 
-  private indexRun(meta: RunMeta): void {
-    this.db
-      .prepare(
-        `INSERT INTO runs (${RUN_COLUMNS.join(", ")}) VALUES (${RUN_COLUMNS.map(() => "?").join(", ")})
-         ON CONFLICT(id) DO UPDATE SET ${RUN_COLUMNS.filter((column) => column !== "id")
-           .map((column) => `${column} = excluded.${column}`)
-           .join(", ")}`,
-      )
-      .run(...toRow(meta));
-  }
-
-  /** The only way run state changes: meta.json and the index move together. */
   saveRun(meta: RunMeta): RunMeta {
-    const normalized = this.located(meta);
-    if (!normalized) throw new Error("Run is not valid");
-    writeRunMeta(normalized);
-    this.indexRun(normalized);
-    return normalized;
+    return this.runs.saveRun(meta);
   }
 
   getRun(id: string): RunMeta | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id);
-    return row ? this.located(row) : null;
-  }
-
-  /**
-   * A run as the index or its meta.json has it, its folder worked out from the data folder and its
-   * id. The stored path is never used: a data folder restored under another $HOME still finds its
-   * runs, and nothing outside the data folder is ever read or deleted as one.
-   */
-  private located(value: unknown): RunMeta | null {
-    const run = normalizeRun(value);
-    if (run) run.dir = runDir(this.dataRoot, run.id) ?? "";
-    return run;
+    return this.runs.getRun(id);
   }
 
   queryRuns(query: RunQuery = {}): RunMeta[] {
-    const where: string[] = [];
-    const params: Array<string | number> = [];
-    const oneOrMany = (column: string, value: string | string[] | undefined) => {
-      if (value === undefined) return;
-      const list = Array.isArray(value) ? value : [value];
-      if (list.length === 0) return;
-      where.push(`${column} IN (${list.map(() => "?").join(", ")})`);
-      params.push(...list);
-    };
-    oneOrMany("origin", query.origin);
-    oneOrMany("status", query.status);
-    for (const column of ["agentId", "routineId", "taskId", "chatId", "workspaceId"] as const) {
-      const value = query[column];
-      if (value) {
-        where.push(`${column} = ?`);
-        params.push(value);
-      }
-    }
-    if (query.unopened) where.push("openedAt IS NULL");
-    if (query.since) {
-      where.push("startedAt >= ?");
-      params.push(query.since);
-    }
-    if (query.search?.trim()) {
-      where.push("(title LIKE ? OR prompt LIKE ? OR cwd LIKE ?)");
-      const like = `%${query.search.trim()}%`;
-      params.push(like, like, like);
-    }
-    const limit = Math.max(1, Math.min(query.limit ?? 200, 2000));
-    const sql = `SELECT * FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY startedAt DESC LIMIT ${limit}`;
-    return (this.db.prepare(sql).all(...params) as unknown[])
-      .map((row) => this.located(row))
-      .filter((run): run is RunMeta => run !== null);
+    return this.runs.queryRuns(query);
   }
 
-  /** Make a finished run findable by its words. `transcript` is the text the terminal showed. */
   indexRunText(meta: RunMeta, transcript: string): void {
-    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(meta.id);
-    this.db.prepare("INSERT INTO run_text (id, title, prompt, transcript) VALUES (?, ?, ?, ?)").run(meta.id, meta.title, meta.prompt, searchableText(transcript));
+    this.runs.indexRunText(meta, transcript);
   }
 
-  /** Finished runs not in the search index yet, newest first: older runs, and runs from before search. */
   runsMissingText(limit: number): RunMeta[] {
-    return (
-      this.db
-        .prepare(`SELECT * FROM runs WHERE status != 'running' AND id NOT IN (SELECT id FROM run_text) ORDER BY startedAt DESC LIMIT ${Math.max(1, Math.floor(limit))}`)
-        .all() as unknown[]
-    )
-      .map((row) => this.located(row))
-      .filter((run): run is RunMeta => run !== null);
+    return this.runs.runsMissingText(limit);
   }
 
-  /**
-   * Runs whose title, prompt, transcript or folder hold every word typed (each as a word start),
-   * best match first, with a snippet of the text around the match. Matches are wrapped in
-   * SNIPPET_OPEN and SNIPPET_CLOSE.
-   */
   searchRuns(text: string, limit = 50): Array<{ run: RunMeta; snippet: string }> {
-    const match = matchExpression(text);
-    if (!match) return [];
-    const cap = Math.max(1, Math.min(Math.floor(limit), 500));
-    const rows = this.db
-      .prepare(
-        `SELECT runs.*, snippet(run_text, -1, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 14) AS snippet
-         FROM run_text JOIN runs ON runs.id = run_text.id
-         WHERE run_text MATCH ? ORDER BY rank LIMIT ${cap}`,
-      )
-      .all(match) as Array<Record<string, unknown>>;
-    const found = rows.flatMap((row) => {
-      const run = this.located(row);
-      return run ? [{ run, snippet: typeof row.snippet === "string" ? row.snippet : "" }] : [];
-    });
-    if (found.length >= cap) return found;
-    // A folder is a path, not words: those still match as typed.
-    const seen = new Set(found.map((item) => item.run.id));
-    const byFolder = this.queryRuns({ search: text, limit: cap - found.length }).filter((run) => !seen.has(run.id));
-    return [...found, ...byFolder.map((run) => ({ run, snippet: "" }))];
+    return this.runs.searchRuns(text, limit);
   }
 
-  /** Every run in the index, newest first, with no limit: for tidying up, not for showing. */
   allRuns(): RunMeta[] {
-    return (this.db.prepare("SELECT * FROM runs ORDER BY startedAt DESC").all() as unknown[])
-      .map((row) => this.located(row))
-      .filter((run): run is RunMeta => run !== null);
+    return this.runs.allRuns();
   }
 
-  /** Forget a run entirely: its index row and its folder, which is only ever `<data>/runs/<id>`. */
   deleteRun(run: RunMeta): void {
-    this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
-    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
-    const dir = runDir(this.dataRoot, run.id);
-    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    this.runs.deleteRun(run);
   }
 
   deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
-    const dir = runDir(this.dataRoot, run.id);
-    if (dir) fs.rmSync(path.join(dir, RUN_FILES[file]), { force: true });
+    this.runs.deleteRunFile(run, file);
   }
 
-  // ---------------------------------------------------------------- settings & engines
-
-  private readonly cache = new ReadCache();
+  // ---------------------------------------------------------------- settings, engines & layouts (store/config.ts)
 
   readSettings(): Settings {
-    return this.cache.read(path.join(this.configRoot, "settings.json"), () => this.loadSettings());
-  }
-
-  private loadSettings(): Settings {
-    const file = path.join(this.configRoot, "settings.json");
-    const defaults = defaultSettings();
-    const raw = readJson<Partial<Settings> | null>(file, null);
-    if (!raw) {
-      // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its
-      // author, and moved aside to settings.json.broken if the app saves settings before it is fixed.
-      if (!fs.existsSync(file)) writeJson(file, defaults, { mode: 0o600 });
-      return defaults;
-    }
-    return {
-      defaultEngine: str(raw.defaultEngine) || defaults.defaultEngine,
-      defaultShell: str(raw.defaultShell) || defaults.defaultShell,
-      notify: bool(raw.notify, defaults.notify),
-      terminalFontSize:
-        typeof raw.terminalFontSize === "number" && raw.terminalFontSize >= 8 && raw.terminalFontSize <= 32
-          ? raw.terminalFontSize
-          : defaults.terminalFontSize,
-      terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
-      // "builtin" was Apex Forge before any theme could be picked.
-      theme: raw.theme === "builtin" ? "apex-forge" : isThemeId(str(raw.theme)) ? str(raw.theme) : defaults.theme,
-      tourDone: bool(raw.tourDone, defaults.tourDone),
-      checkUpdates: bool(raw.checkUpdates, defaults.checkUpdates),
-      language: /^(system|[a-z]{2,3}(-[A-Za-z]{2,4})?)$/.test(str(raw.language)) ? str(raw.language) : defaults.language,
-      voice: normalizeVoiceSettings(raw.voice, defaults.voice),
-      sounds: normalizeSoundSettings(raw.sounds, defaults.sounds),
-      tray: bool(raw.tray, defaults.tray),
-      closeToTray: bool(raw.closeToTray, defaults.closeToTray),
-      usage: bool(raw.usage, defaults.usage),
-      planLimits: bool(raw.planLimits, defaults.planLimits),
-      quotaAlerts: bool(raw.quotaAlerts, defaults.quotaAlerts),
-      activity: raw.activity === "off" || raw.activity === "github" ? raw.activity : defaults.activity,
-      rail: {
-        order: names(raw.rail?.order),
-        hidden: names(raw.rail?.hidden),
-      },
-      keepRuns: {
-        days: count(raw.keepRuns?.days, 36500, defaults.keepRuns.days),
-        maxMb: count(raw.keepRuns?.maxMb, 1_000_000, defaults.keepRuns.maxMb),
-      },
-      companion: normalizeCompanion(raw.companion),
-      agentTalk: {
-        on: bool(raw.agentTalk?.on, defaults.agentTalk.on),
-        maxMessages: Math.max(1, count(raw.agentTalk?.maxMessages, 50, defaults.agentTalk.maxMessages)),
-        reviewRounds: Math.max(1, count(raw.agentTalk?.reviewRounds, 5, defaults.agentTalk.reviewRounds)),
-        lead: str(raw.agentTalk?.lead).trim(),
-        handOff: raw.agentTalk?.handOff === "go" ? "go" : "ask",
-        maxWorking: Math.max(1, count(raw.agentTalk?.maxWorking, 20, defaults.agentTalk.maxWorking)),
-        maxHandOffs: Math.max(1, count(raw.agentTalk?.maxHandOffs, 50, defaults.agentTalk.maxHandOffs)),
-        leadApplies: bool(raw.agentTalk?.leadApplies, defaults.agentTalk.leadApplies),
-      },
-      orchestrator: {
-        engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
-        mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
-        model: str(raw.orchestrator?.model).trim().slice(0, 120),
-      },
-    };
+    return this.config.readSettings();
   }
 
   writeSettings(settings: Settings): void {
-    writeJson(path.join(this.configRoot, "settings.json"), settings, { mode: 0o600 });
-    this.cache.forget(path.join(this.configRoot, "settings.json"));
+    this.config.writeSettings(settings);
   }
 
   readEngineRows(): EngineRow[] {
-    return this.cache.read(path.join(this.configRoot, "engines.json"), () => this.loadEngineRows());
-  }
-
-  private loadEngineRows(): EngineRow[] {
-    const file = path.join(this.configRoot, "engines.json");
-    if (!fs.existsSync(file)) {
-      const seeded = seedEngines();
-      writeJson(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION });
-      return seeded;
-    }
-    const raw = readJson<{ engines?: unknown; seedRevision?: unknown } | unknown[]>(file, { engines: [] });
-    const saved = normalizeEngineRows(raw);
-    const revision = raw && !Array.isArray(raw) && typeof raw.seedRevision === "number" ? raw.seedRevision : 1;
-    const merged = mergeEngineRows(saved, revision);
-    if (merged.changed) writeJson(file, { engines: merged.rows, seedRevision: merged.revision });
-    return merged.rows;
+    return this.config.readEngineRows();
   }
 
   writeEngineRows(rows: EngineRow[]): void {
-    const file = path.join(this.configRoot, "engines.json");
-    const raw = readJson<{ seedRevision?: unknown }>(file, {});
-    const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
-    writeJson(file, { engines: normalizeEngineRows(rows), seedRevision: revision });
-    this.cache.forget(file);
+    this.config.writeEngineRows(rows);
   }
 
-  // ---------------------------------------------------------------- workspaces & layouts
-
   readWorkspaces(): WorkspaceFile {
-    const raw = readJson<unknown>(path.join(this.configRoot, "workspaces.json"), null);
-    const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
-    const workspaces = Array.isArray(list)
-      ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
-      : [];
-    const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
-    return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+    return this.config.readWorkspaces();
   }
 
   writeWorkspaces(file: WorkspaceFile): void {
-    writeJson(path.join(this.configRoot, "workspaces.json"), file);
+    this.config.writeWorkspaces(file);
   }
 
   readLayout(workspaceId: string): LayoutNode | null {
-    if (!isSafeId(workspaceId)) return null;
-    const raw = readJson<unknown>(path.join(this.configRoot, "layouts", `${workspaceId}.json`), null);
-    return isLayoutNode(raw) ? raw : null;
+    return this.config.readLayout(workspaceId);
   }
 
   writeLayout(workspaceId: string, layout: LayoutNode | null): void {
-    if (!isSafeId(workspaceId)) return;
-    const file = path.join(this.configRoot, "layouts", `${workspaceId}.json`);
-    if (!layout) {
-      fs.rmSync(file, { force: true });
-      return;
-    }
-    if (!isLayoutNode(layout)) throw new Error("Layout is not valid");
-    writeJson(file, layout);
+    this.config.writeLayout(workspaceId, layout);
   }
 
-  // ---------------------------------------------------------------- agents
+  // ---------------------------------------------------------------- agents, skills, routines & tasks (store/library.ts)
 
   uniqueId(dir: string, base: string, extension: string): string {
-    const root = slugify(base);
-    const taken = (id: string) => fs.existsSync(path.join(dir, `${id}${extension}`));
-    if (!taken(root)) return root;
-    let count = 2;
-    while (taken(`${root}-${count}`)) count += 1;
-    return `${root}-${count}`;
+    return this.library.uniqueId(dir, base, extension);
   }
 
   listAgents(): Agent[] {
-    const root = path.join(this.configRoot, "agents");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getAgent(entry.name))
-      .filter((agent): agent is Agent => agent !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listAgents();
   }
 
   getAgent(id: string): Agent | null {
-    if (!isSafeId(id)) return null;
-    const file = path.join(this.configRoot, "agents", id, "agent.yaml");
-    return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
+    return this.library.getAgent(id);
   }
 
   writeAgent(agent: Agent): void {
-    const dir = path.join(this.configRoot, "agents", agent.id);
-    fs.mkdirSync(dir, { recursive: true });
-    const memoryPath = path.join(dir, "memory.md");
-    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
-    writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
-    this.cache.forget(path.join(dir, "agent.yaml"));
+    this.library.writeAgent(agent);
   }
 
   readMemory(agentId: string): string {
-    if (!isSafeId(agentId)) return "";
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "agents", agentId, "memory.md"), "utf8");
-    } catch {
-      return "";
-    }
+    return this.library.readMemory(agentId);
   }
 
   writeMemory(agentId: string, text: string): void {
-    if (!isSafeId(agentId)) throw new Error("Agent is missing");
-    writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
+    this.library.writeMemory(agentId, text);
   }
 
-  // ---------------------------------------------------------------- skills
-
   listSkills(): Skill[] {
-    const root = path.join(this.configRoot, "skills");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getSkill(entry.name))
-      .filter((skill): skill is Skill => skill !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listSkills();
   }
 
   getSkill(id: string): Skill | null {
-    const raw = this.readSkillRaw(id);
-    return raw === null ? null : parseSkill(id, raw);
+    return this.library.getSkill(id);
   }
 
   readSkillRaw(id: string): string | null {
-    if (!isSafeId(id)) return null;
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "skills", id, "SKILL.md"), "utf8");
-    } catch {
-      return null;
-    }
+    return this.library.readSkillRaw(id);
   }
 
   writeSkill(skill: Skill): void {
-    writeFileAtomic(path.join(this.configRoot, "skills", skill.id, "SKILL.md"), skillDocument(skill));
+    this.library.writeSkill(skill);
   }
 
-  /** Where a skill, routine or task lives on disk, for moving it aside (see Trash). Null for a bad id. */
   pathOf(kind: "skill" | "routine" | "task", id: string): string | null {
-    if (!isSafeId(id)) return null;
-    if (kind === "skill") return path.join(this.configRoot, "skills", id);
-    return path.join(this.configRoot, kind === "routine" ? "routines" : "tasks", `${id}.yaml`);
+    return this.library.pathOf(kind, id);
   }
 
   deleteSkill(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "skills", id), { recursive: true, force: true });
+    this.library.deleteSkill(id);
   }
 
-  // ---------------------------------------------------------------- routines
-
   listRoutines(): Routine[] {
-    return this.listYaml("routines", (id, value) => normalizeRoutine(id, value)).sort((a, b) => a.name.localeCompare(b.name));
+    return this.library.listRoutines();
   }
 
   getRoutine(id: string): Routine | null {
-    if (!isSafeId(id)) return null;
-    return normalizeRoutine(id, readYaml(path.join(this.configRoot, "routines", `${id}.yaml`)));
+    return this.library.getRoutine(id);
   }
 
   writeRoutine(routine: Routine): void {
-    writeFileAtomic(path.join(this.configRoot, "routines", `${routine.id}.yaml`), yamlText(routine));
+    this.library.writeRoutine(routine);
   }
 
   deleteRoutine(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "routines", `${id}.yaml`), { force: true });
+    this.library.deleteRoutine(id);
   }
 
-  // ---------------------------------------------------------------- tasks
-
   listTasks(): Task[] {
-    return this.listYaml("tasks", (id, value) => normalizeTask(id, value)).sort((a, b) =>
-      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
-    );
+    return this.library.listTasks();
   }
 
   getTask(id: string): Task | null {
-    if (!isSafeId(id)) return null;
-    return normalizeTask(id, readYaml(path.join(this.configRoot, "tasks", `${id}.yaml`)));
+    return this.library.getTask(id);
   }
 
   writeTask(task: Task): void {
-    writeFileAtomic(path.join(this.configRoot, "tasks", `${task.id}.yaml`), yamlText(task));
+    this.library.writeTask(task);
   }
 
   deleteTask(id: string): void {
-    if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "tasks", `${id}.yaml`), { force: true });
+    this.library.deleteTask(id);
   }
 
-  private listYaml<T>(folder: string, normalize: (id: string, value: unknown) => T | null): T[] {
-    let entries: string[] = [];
-    try {
-      entries = fs.readdirSync(path.join(this.configRoot, folder));
-    } catch {
-      return [];
-    }
-    const items: T[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".yaml")) continue;
-      const id = entry.slice(0, -5);
-      if (!isSafeId(id)) continue;
-      const item = normalize(id, readYaml(path.join(this.configRoot, folder, entry)));
-      if (item) items.push(item);
-    }
-    return items;
-  }
-
-  // ---------------------------------------------------------------- chats
-
-  private chatFile(): string {
-    return path.join(this.dataRoot, "chats.json");
-  }
+  // ---------------------------------------------------------------- chats (store/chats.ts)
 
   listChats(): ChatRecord[] {
-    const raw = readJson<unknown>(this.chatFile(), null);
-    const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
-    if (!Array.isArray(list)) return [];
-    return list
-      .map(normalizeChat)
-      .filter((chat): chat is ChatRecord => chat !== null)
-      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    return this.chats.listChats();
   }
 
   getChat(id: string): ChatRecord | null {
-    return this.listChats().find((chat) => chat.id === id) ?? null;
+    return this.chats.getChat(id);
   }
 
   writeChat(chat: ChatRecord): void {
-    const chats = this.listChats().filter((item) => item.id !== chat.id);
-    chats.push(chat);
-    writeJson(this.chatFile(), { chats });
+    this.chats.writeChat(chat);
   }
 
   deleteChat(id: string): void {
-    writeJson(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
+    this.chats.deleteChat(id);
   }
 }

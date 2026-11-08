@@ -1,23 +1,11 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.14.1, 2026-11-08, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.15.0, 2026-11-09, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Maestro, and a per-workspace strip in Code (the Running list in Maestro covers Stop all for now).
-
-## Later, from the 2026-11-08 audit
-
-Everything it rated as a bug is fixed (2.14.0). These are the larger ideas and clean-ups it left for later:
-
-- [ ] **Prebuilt releases:** release.yml attaches a built tarball, and the installer downloads, verifies and swaps it, so installing and updating need no compiler and take seconds.
-- [ ] **Per-device phone pairing:** the code traded once for a device token, listed in Settings with Revoke, a "A phone paired" toast, and server-sent events instead of the 2 s poll.
-- [ ] **"Which one do I use?"** in the tour, Help and README: Code, Chat, Tasks, Routines, Maestro and the rest, side by side.
-- [ ] **Skills in typed CLIs:** an opt-in sync to the CLIs' own skill folders (Claude Code reads the same SKILL.md).
-- [ ] **Splitting the largest files** (electron/main.ts, src/core/service/messages.ts, src/core/store.ts, src/ui/views/Code.tsx, companion/app.js) and one shortcut registry for the key handlers and Help.
-- [ ] **Type-checking the JavaScript** that isn't yet: electron/pty-host.cjs, electron/terminal-capture.cjs, companion/app.js, scripts/talk.mjs.
-- [ ] **A new Maestro screenshot** for the site: `site/assets/app-maestro.webp` still shows the old "Orchestrator" title.
 
 ## Only checked with stand-ins
 

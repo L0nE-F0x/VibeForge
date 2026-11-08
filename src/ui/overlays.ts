@@ -4,6 +4,8 @@
 // while anything is on the stack the views' own shortcuts wait, so a key can't open a pane
 // behind a dialog.
 
+import { isShortcut } from "./shortcuts.js";
+
 export interface Overlay {
   /** What Escape does while this one is on top. */
   close: () => void;
@@ -35,6 +37,18 @@ export function overlayOpen(): boolean {
   return stack.length > 0;
 }
 
+/**
+ * Whether something may take focus on its own (a terminal or a chat box as it appears): not from
+ * under a menu or dialog it isn't part of. Taken from the switcher, Esc and Enter would go to
+ * the terminal behind it instead.
+ */
+export function mayTakeFocus(element: Element | null): boolean {
+  const top = topOverlay();
+  if (!top) return true;
+  const node = top.node?.();
+  return Boolean(element && node?.contains(element));
+}
+
 type EscapeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "defaultPrevented" | "isComposing" | "preventDefault" | "stopPropagation"> & {
   target: EventTarget | { closest?: (selector: string) => unknown } | null;
 };
@@ -53,8 +67,8 @@ function inTerminal(target: EscapeEvent["target"]): boolean {
  */
 export function escapeTop(event: EscapeEvent): boolean {
   // Taken already: dictation drops its words on Escape (voice.tsx), the tour closes itself.
-  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return false;
-  if (inTerminal(event.target) && !event.shiftKey) return false;
+  if (event.defaultPrevented || event.isComposing) return false;
+  if (!isShortcut(inTerminal(event.target) ? "overlay.closeFromTerminal" : "overlay.close", event)) return false;
   const top = topOverlay();
   if (!top) return false;
   event.preventDefault();

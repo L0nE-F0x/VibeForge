@@ -237,3 +237,46 @@ describe("who the phone page answers", () => {
     }
   });
 });
+
+describe("the phone page's own files", () => {
+  const root = path.join(import.meta.dirname, "../../companion");
+
+  /** app.js and every module it reaches through its imports, as paths under companion/. */
+  function pageModules(): string[] {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      const text = fs.readFileSync(path.join(root, file), "utf8");
+      for (const [, from] of text.matchAll(/^import [^"]* from "(\.[^"]+)";$/gm)) walk(path.posix.join(path.posix.dirname(file), from));
+    };
+    walk("app.js");
+    return [...seen].sort();
+  }
+
+  it("serves app.js and each of its modules as a script under the page's CSP, and nothing else from js/", async () => {
+    const modules = pageModules();
+    // Every module in js/ is one the page loads: a file left out of the list below would break it.
+    expect(modules.filter((file) => file !== "app.js")).toEqual(fs.readdirSync(path.join(root, "js")).map((name) => `js/${name}`).sort());
+    const server = await startCompanionHttp({ port: 0, token: newCompanionToken(), root, icon: null, actions: actions() });
+    const host = `localhost:${server.port}`;
+    try {
+      for (const file of modules) {
+        const served = await ask(server.port, `/${file}`, host);
+        expect(served.status, file).toBe(200);
+        expect(served.headers["content-type"], file).toBe("text/javascript; charset=utf-8");
+        expect(served.headers["content-security-policy"], file).toContain("script-src 'self'");
+        expect(served.headers["cache-control"], file).toBe("no-store");
+        expect(served.body, file).toBe(fs.readFileSync(path.join(root, file), "utf8"));
+      }
+      for (const route of ["/js/", "/js/missing.js", "/js/../app.js.map", "/companion/app.js"]) expect((await ask(server.port, route, host)).status, route).toBe(404);
+      // The page asks for all of them at once, not one import after another.
+      const html = (await ask(server.port, "/", host)).body;
+      const preloaded = [...html.matchAll(/<link rel="modulepreload" href="\/([^"]+)" \/>/g)].map((found) => found[1]).sort();
+      expect(preloaded).toEqual(modules.filter((file) => file !== "app.js"));
+      expect(html).toContain('<script src="/app.js" type="module"></script>');
+    } finally {
+      await server.close();
+    }
+  });
+});

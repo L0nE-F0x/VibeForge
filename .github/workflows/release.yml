@@ -6,7 +6,10 @@ name: Release
 # Only a commit on main whose CI passed (test, typecheck, lint and smoke) is published. A tag with
 # a hyphen (v2.14.0-rc.1) is a pre-release, and a fix to an older line (2.12.3 after 2.13.0) is
 # published too; neither becomes "latest", which is what the installer and the in-app Update take.
-# Each release carries scripts/install.sh and a SHA256SUMS file for it.
+# Each release carries scripts/install.sh, the ready-made build the installer downloads
+# (vibeforge-<version>-linux-x64.tar.zst, from scripts/pack-release.mjs) and a SHA256SUMS for both.
+# The build is installed from its archive and smoke-tested from the installed copy before it is
+# published, as CI's smoke job does on every pull request.
 on:
   push:
     tags: ["v*.*.*"]
@@ -18,9 +21,10 @@ permissions:
 jobs:
   release:
     name: release
-    runs-on: ubuntu-latest
-    # Most of it is waiting for CI on the tagged commit.
-    timeout-minutes: 45
+    # The ready-made build's node-pty links against this runner's glibc; Arch's is always newer.
+    runs-on: ubuntu-24.04
+    # Most of it is waiting for CI on the tagged commit; then building and testing the archive.
+    timeout-minutes: 60
     steps:
       # All history and tags: whether the commit is on main, and which tag is the newest.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,7 +78,7 @@ jobs:
           done
           echo "::error::These checks on $COMMIT did not pass within 30 minutes:$waiting"
           exit 1
-      - name: The notes, the installer and its checksum
+      - name: The notes
         run: |
           if ! node scripts/release-notes.mjs "$GITHUB_REF_NAME" >notes.md; then
             case "$GITHUB_REF_NAME" in
@@ -83,10 +87,18 @@ jobs:
               *) exit 1 ;;
             esac
           fi
-          mkdir assets
-          cp scripts/install.sh assets/install.sh
-          (cd assets && sha256sum install.sh >SHA256SUMS)
-          cat assets/SHA256SUMS
+      # The build runs on the Node CI's smoke test uses; node-pty's addon (Node-API) then runs on any.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      # npm ci, vite build, then only what the app runs (Electron, node-pty built here, dist, …),
+      # with install.sh and SHA256SUMS beside it in assets/. Then the way a person gets it: the
+      # installer downloads the archive (laid out like a release), checks it against SHA256SUMS and
+      # unpacks it into a scratch home, and the installed copy's smoke test runs. CI's smoke job
+      # runs the same script on every pull request (scripts/build-release.sh).
+      - name: Pack the ready-made build, install it and smoke-test the installed copy
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh assets
       - name: Publish, unless it already is
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,5 +113,5 @@ jobs:
             "$newest") kind=(--latest) ;;
             *) kind=(--latest=false) ;;
           esac
-          gh release create "$GITHUB_REF_NAME" assets/install.sh assets/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" assets/install.sh assets/vibeforge-*.tar.zst assets/SHA256SUMS \
             --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag "${kind[@]}"

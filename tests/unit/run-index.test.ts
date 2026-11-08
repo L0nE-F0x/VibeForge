@@ -55,4 +55,37 @@ describe("the run index", () => {
     expect(() => new Store(configRoot, dataRoot)).toThrow();
     expect(fs.existsSync(path.join(dataRoot, "index.sqlite.broken"))).toBe(false);
   });
+
+  it("matches a %, _ or \\ typed in the search as itself, not as a wildcard", () => {
+    const store = storeWithRuns(["100% done", "1000 left", "my_file", "myXfile", "back\\slash", "backslash"]);
+    const titles = (search: string) => store.queryRuns({ search }).map((run) => run.title);
+    expect(titles("100%")).toEqual(["100% done"]);
+    expect(titles("my_file")).toEqual(["my_file"]);
+    expect(titles("back\\slash")).toEqual(["back\\slash"]);
+    store.close();
+  });
+
+  it("reads a limit that isn't a whole number, or is below zero, as the default", () => {
+    const store = storeWithRuns(["Notes one", "Notes two", "Notes three"]);
+    for (const limit of [Number.NaN, -3, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(store.queryRuns({ limit })).toHaveLength(3);
+      expect(store.searchRuns("notes", limit)).toHaveLength(3);
+    }
+    expect(store.queryRuns({ limit: 2 }).map((run) => run.title)).toEqual(["Notes three", "Notes two"]);
+    expect(store.queryRuns({ limit: 0 })).toHaveLength(1);
+    expect(store.searchRuns("notes", 1)).toHaveLength(1);
+    store.close();
+  });
 });
+
+/** A store with one finished run per title, a minute apart, the first title oldest. */
+function storeWithRuns(titles: string[]): Store {
+  const dataRoot = tempDir();
+  const store = new Store(tempDir(), dataRoot);
+  titles.forEach((title, n) => {
+    const startedAt = new Date(Date.UTC(2026, 10, 1, 9, n));
+    const { id, dir } = allocateRunDir(dataRoot, startedAt, title);
+    store.saveRun(normalizeRun({ id, dir, origin: "code", status: "exited", startedAt: startedAt.toISOString(), title }) as RunMeta);
+  });
+  return store;
+}

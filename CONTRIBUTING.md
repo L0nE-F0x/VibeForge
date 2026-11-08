@@ -80,6 +80,12 @@ User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under `Unreleas
 
 Pushing a `vX.Y.Z` tag publishes its GitHub Release (`.github/workflows/release.yml`): the notes are that version's CHANGELOG section, word for word, which is what the in-app Update shows. The tag has to match `package.json`. `npm run release-notes X.Y.Z` prints the same notes locally.
 
+The release also carries the ready-made build the installer downloads, `vibeforge-X.Y.Z-linux-x64.tar.zst`, so nobody compiles anything to install or update. `scripts/pack-release.mjs` makes it: it exports the commit, runs `npm ci` and the build in a scratch folder, and packs only what the app runs (whole folders, listed in the script; `tests/unit/pack-release.test.ts` keeps the list in step with the files the app opens). `scripts/build-release.sh` packs it, writes `install.sh` and a `SHA256SUMS` for both beside it, installs it with that `install.sh` into a scratch home the way a person would, and runs the smoke test from the installed copy. CI's smoke job runs that on every pull request, and `release.yml` runs it for the tag once the checks have passed, then attaches the three files. To try it on your machine (it packs the last commit, not uncommitted changes):
+
+```bash
+SMOKE_HEADLESS=1 scripts/build-release.sh release    # release/: the archive, install.sh, SHA256SUMS
+```
+
 ## Pull requests
 
 Open a pull request for anything beyond a typo.

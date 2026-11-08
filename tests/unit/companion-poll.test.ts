@@ -3,23 +3,24 @@ import path from "node:path";
 import vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8");
+/** The phone page's module that talks to the computer: requests and the poll. */
+const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/js/api.js"), "utf8");
 
-/** A top-level function of the phone page, as written there. */
+/** A top-level function of the phone page, as written there, without its `export`. */
 function pick(name: string): string {
-  const found = page.match(new RegExp(`^(async )?function ${name}\\([\\s\\S]*?^}$`, "m"))?.[0];
-  if (!found) throw new Error(`app.js has no function ${name}`);
-  return found;
+  const found = page.match(new RegExp(`^(export )?(async )?function ${name}\\([\\s\\S]*?^}$`, "m"))?.[0];
+  if (!found) throw new Error(`api.js has no function ${name}`);
+  return found.replace(/^export /, "");
 }
 
 /** A top-level `const` or `let` line of the phone page. */
 function line(kind: "const" | "let", name: string): string {
   const found = page.match(new RegExp(`^${kind} ${name} = .*$`, "m"))?.[0];
-  if (!found) throw new Error(`app.js has no ${kind} ${name}`);
+  if (!found) throw new Error(`api.js has no ${kind} ${name}`);
   return found;
 }
 
-type Answer = { ms: number; status?: number };
+type Answer = { ms: number; status?: number; body?: unknown };
 
 /** The page's own poll, run on its own against a link that answers as slowly as `answer` says. */
 function pagePoll(answer: (route: string) => Answer) {
@@ -37,7 +38,7 @@ function pagePoll(answer: (route: string) => Answer) {
       const status = reply.status ?? 200;
       const done = setTimeout(() => {
         open -= 1;
-        resolve({ ok: status < 400, status, json: async () => (route === "/api/desk" ? { workspaces: [] } : {}) });
+        resolve({ ok: status < 400, status, json: async () => reply.body ?? (route === "/api/desk" ? { workspaces: [] } : {}) });
       }, reply.ms);
       init.signal?.addEventListener("abort", () => {
         clearTimeout(done);
@@ -47,18 +48,18 @@ function pagePoll(answer: (route: string) => Answer) {
       });
     });
   const script = [
-    `let token = "vf_test"; let view = "desk"; let ticket = 0; let timer = 0;`,
-    `let desk = null; let session = null; let orch = null; let error = ""; let plans = null;`,
-    `let plansAt = Infinity; const PLANS_EVERY_MS = 60000; let sessionQuery = { ptyId: "", runId: "" }; let updates = 0;`,
+    // What the page's modules share (companion/js/state.js), and what api.js keeps to itself.
+    `const state = { token: "vf_test", view: "desk", ticket: 0, desk: null, session: null, orch: null, error: "", plans: null, sessionQuery: { ptyId: "", runId: "" } };`,
+    `let timer = 0; let plansAt = Infinity; const PLANS_EVERY_MS = 60000; let updates = 0;`,
     `const t = (key) => key;`,
-    `function forget() { token = ""; }`,
+    `function forget() { state.token = ""; }`,
     `function watch() {}`,
-    `function show() { ticket += 1; }`,
+    `function show() { state.ticket += 1; }`,
     `function update() { updates += 1; }`,
     ...["POLL_MS", "POLL_SLOWEST_MS", "POLL_TIMEOUT_MS"].map((name) => line("const", name)),
     ...["polling", "pollAgain", "pollFailures"].map((name) => line("let", name)),
     ...["call", "refresh", "poll", "schedule"].map(pick),
-    `globalThis.page = { refresh, state: () => ({ desk, error, pollFailures, updates }), setView(next) { view = next; show(); void refresh(); } };`,
+    `globalThis.page = { refresh, state: () => ({ desk: state.desk, error: state.error, pollFailures, updates }), setView(next) { state.view = next; show(); void refresh(); } };`,
   ].join("\n");
   const context = vm.createContext({
     window: { setTimeout: (run: () => void, ms: number) => setTimeout(run, ms), clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id) },
@@ -124,6 +125,22 @@ describe("the phone page's poll", () => {
     await vi.advanceTimersByTimeAsync(33_000);
     expect(link.page.state()).toMatchObject({ error: "", pollFailures: 0 });
     expect(link.fetches.slice(5).map((seen) => seen.at)).toEqual([135_000, 137_100]);
+    expect(link.most()).toBe(1);
+  });
+
+  it("keeps the desk when the session page's own read is refused, says why, and asks again without backing off", async () => {
+    let gone = true;
+    const link = pagePoll((route) => (route.startsWith("/api/session") && gone ? { ms: 100, status: 404, body: { error: "That session is gone." } } : { ms: 100 }));
+    link.page.setView("session");
+    await vi.advanceTimersByTimeAsync(300);
+    // The computer answered: the desk is fresh and the banner says what it said about the session.
+    expect(link.page.state()).toMatchObject({ desk: { workspaces: [] }, error: "That session is gone.", pollFailures: 0 });
+    await vi.advanceTimersByTimeAsync(4200);
+    // Two seconds after each poll, as when all is well, not the four, eight… of an offline computer.
+    expect(link.fetches.filter((seen) => seen.route === "/api/desk").map((seen) => seen.at)).toEqual([0, 2200, 4400]);
+    gone = false;
+    await vi.advanceTimersByTimeAsync(2400);
+    expect(link.page.state()).toMatchObject({ error: "", pollFailures: 0 });
     expect(link.most()).toBe(1);
   });
 });

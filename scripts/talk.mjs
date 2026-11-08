@@ -1,8 +1,12 @@
 #!/usr/bin/env node
+// @ts-check
 // `vibeforge tell`, `vibeforge who`, `vibeforge task` and `vibeforge apply`: coding CLIs in VibeForge's terminals
 // talking to each other through the running window's control socket. One JSON line goes in, one
 // comes back. The window knows which terminal asked from VIBEFORGE_PTY, which it sets in each one.
 import net from "node:net";
+
+// What goes over the socket is typed in src/core/control.ts, which the window's side uses too.
+/** @import { TalkAnswers, TalkRequest } from "../src/core/control.js" */
 
 const USAGE = `Talk to the other coding CLIs open in VibeForge.
 
@@ -31,6 +35,11 @@ Two CLIs may send each other a limited number of messages before a person has to
 press Enter on the next one (Settings → Agents together). Exit codes: 0 done,
 1 refused or failed, 2 usage, 3 still waiting for an answer.`;
 
+/**
+ * @param {string} message
+ * @param {number} [code]
+ * @returns {never}
+ */
 function fail(message, code = 1) {
   process.stderr.write(`vibeforge: ${message}\n`);
   process.exit(code);
@@ -42,8 +51,12 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Flags anywhere, the first word after the command as the target, the rest as the text. */
+/**
+ * Flags anywhere, the first word after the command as the target, the rest as the text.
+ * @param {string[]} args
+ */
 function parse(args) {
+  /** @type {{ wait: boolean, start: boolean, title: string | undefined, timeout: number | undefined }} */
   const flags = { wait: false, start: true, title: undefined, timeout: undefined };
   const words = [];
   for (let i = 0; i < args.length; i++) {
@@ -65,6 +78,12 @@ function parse(args) {
   return { flags, words };
 }
 
+/**
+ * One request to the window, and its answer.
+ * @template {TalkRequest} R
+ * @param {R} request
+ * @returns {Promise<TalkAnswers[R["op"]]>}
+ */
 function ask(request) {
   const socket = process.env.VIBEFORGE_SOCKET;
   if (!socket) fail("VibeForge's control socket is unknown; run this from a VibeForge terminal.");
@@ -99,13 +118,14 @@ const timeoutMs = flags.timeout ? Math.round(flags.timeout * 60_000) : undefined
 try {
   if (command === "who") {
     const answer = await ask({ op: "who", pty });
-    if (answer.error) fail(answer.error);
+    if ("error" in answer) fail(answer.error || "VibeForge refused that.");
     // Folders under your home read as ~/…, as a shell prompt shows them.
     const home = process.env.HOME;
-    const shown = (folder) => (home && (folder === home || folder.startsWith(`${home}/`)) ? `~${folder.slice(home.length)}` : folder);
+    const shown = (/** @type {string} */ folder) => (home && (folder === home || folder.startsWith(`${home}/`)) ? `~${folder.slice(home.length)}` : folder);
     const lines = answer.clis.map((cli) => `${cli.you ? "* " : "  "}${cli.handle.padEnd(14)} ${cli.label}${cli.working ? " (working)" : ""} in ${shown(cli.folder)}`);
     process.stdout.write(`${lines.length ? `CLIs (vibeforge tell <name>):\n${lines.join("\n")}` : "No coding CLIs are running in VibeForge."}\n`);
     if (answer.you) process.stdout.write(`You are ${answer.you}.\n`);
+    /** @type {Record<string, string>} */
     const TIERS = { fast: "cheap and fast", everyday: "everyday cost", strong: "strong and costly" };
     const agents = answer.agents.map((agent) =>
       [`  ${agent.handle.padEnd(14)} ${agent.engine ?? ""}`, agent.goodAt, TIERS[agent.tier]].filter(Boolean).join(" · "),
@@ -125,16 +145,15 @@ try {
   let text = message.join(" ");
   if (text === "-" || (!text && !process.stdin.isTTY)) text = await readStdin();
   if (!target || !text.trim()) fail(`${command} needs a name and a message\n\n${USAGE}`, 2);
-  const answer =
-    command === "tell"
-      ? await ask({ op: "tell", pty, to: target, text, wait: flags.wait, timeoutMs })
-      : await ask({ op: "task", pty, agent: target, text, title: flags.title, start: flags.start, wait: flags.wait, timeoutMs });
-  if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
   if (command === "task") {
+    const answer = await ask({ op: "task", pty, agent: target, text, title: flags.title, start: flags.start, wait: flags.wait, timeoutMs });
+    if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
     process.stdout.write(`${answer.started ? "Started" : "Made"} task "${answer.title}" (${answer.taskId}).${answer.note ? ` ${answer.note}` : ""}\n`);
     if (answer.reply) process.stdout.write(`\n${answer.reply}\n`);
     process.exit(flags.wait && answer.started && !answer.reply ? 3 : 0);
   }
+  const answer = await ask({ op: "tell", pty, to: target, text, wait: flags.wait, timeoutMs });
+  if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
   if (answer.reply) {
     process.stdout.write(`${answer.reply}\n`);
     if (answer.fromScreen) process.stdout.write(`\n(Read from ${answer.to}'s screen.)\n`);

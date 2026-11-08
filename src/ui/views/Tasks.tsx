@@ -14,6 +14,7 @@ import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
 import { changesFor } from "../changes-text.js";
 import { applyConflictNote } from "../apply-note.js";
+import { shortcutKeys } from "../shortcuts.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
   { status: "todo", label: "tasks.col.todo" },
@@ -456,7 +457,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
             {t("common.cancel")}
           </Button>
         )}
-        <Button variant={task ? undefined : "primary"} icon={Save} busy={saving} disabled={!dirty || !title.trim()} kbd="Ctrl+S" tip={task ? t("common.save") : t("tasks.create")} onClick={() => void save()}>
+        <Button variant={task ? undefined : "primary"} icon={Save} busy={saving} disabled={!dirty || !title.trim()} kbd={shortcutKeys("form.save")} tip={task ? t("common.save") : t("tasks.create")} onClick={() => void save()}>
           {task ? t("common.save") : t("tasks.create")}
         </Button>
       </div>

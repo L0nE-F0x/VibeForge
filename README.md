@@ -37,7 +37,9 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Add `--uninstall` to remove the launcher and Start at login (your data stays).
 
-The installer needs `git`, Node 20.19+ or 22.12+ (Omarchy ships mise: `mise use -g node@lts`) and `base-devel` + `python` to build the terminal engine. It clones into `~/.local/share/vibeforge-app`, checks out the newest [release](https://github.com/L0nE-F0x/VibeForge/releases), and adds `~/.local/bin/vibeforge` and a desktop entry. Set `VIBEFORGE_BRANCH=main` to follow the main branch instead. An update builds beside the installed copy and swaps it in only once the build has worked, so a dropped connection or a failed build leaves VibeForge as it was; the copy it replaced stays in `~/.local/share/vibeforge-app.previous`.
+The installer downloads the newest [release](https://github.com/L0nE-F0x/VibeForge/releases)'s ready-made build (about 100 MB), checks it against the release's `SHA256SUMS`, unpacks it into `~/.local/share/vibeforge-app`, and adds `~/.local/bin/vibeforge` and a desktop entry. Nothing is compiled: it needs `curl`, `tar`, `zstd` and `sha256sum`, which every Arch install has, and Node 20 or newer for the terminals (Omarchy ships mise: `mise use -g node@lts`). An update downloads the new release's build the same way, unpacks it beside the installed copy and swaps it in only once it is whole and its checksum matches, so a dropped connection or a bad download leaves VibeForge as it was; the copy it replaced stays in `~/.local/share/vibeforge-app.previous`.
+
+It builds from source instead (a clone, `npm ci` and a build, which need `git`, `base-devel`, `python` and Node 20.19+ or 22.12+) when the release has no ready-made build or none for your CPU (there is one for x86-64), when you set `VIBEFORGE_FROM_SOURCE=1`, or with `VIBEFORGE_BRANCH=main` to follow the main branch. It says which way it went. `VIBEFORGE_VERSION=vX.Y.Z` installs that release instead of the newest.
 
 **Updating.** VibeForge asks GitHub for the newest release number when it starts and every six hours (nothing else is sent; turn it off in Settings → Updates). When one is out, Help in the rail gets a dot: **Update** shows the release notes, runs the installer in a terminal you can watch, then restarts. Running the install command again does the same.
 
@@ -54,6 +56,23 @@ npm run build       # production build, when you want it now
 ```
 
 </details>
+
+## Which one do I use?
+
+What you want, and where to do it. The welcome tour shows the same list, and so does **Help → Which one do I use?** in the rail, where each place is a link.
+
+| You want | Use |
+| --- | --- |
+| A quick question, no project | **Chat** |
+| Work in a project while you watch: type `claude` or any CLI in a terminal | **Code**, where each CLI you type is kept as a run |
+| An agent's work in its own copy, brought back for review | **Tasks**: **Execute** starts it, **Apply** brings its changes in |
+| An agent's job on a schedule | **Routines** |
+| A teammate with a brief, memory and skills | **Agents** · **Skills** |
+| Say or type what to start where, and have it set up | **Maestro**, or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> from any view |
+| One CLI asking another, or handing an agent a task: `vibeforge tell`, `vibeforge task` | **Settings → Agents together**, which can also make one CLI [the lead](#agents-together) |
+| Look back at a session, then Continue it or Hand it off to an agent | **Runs** |
+| Start and steer CLIs from the couch, on your phone | **Settings → Phone** ([how](#phone)) |
+| Dictate to an agent from any app: hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | **Settings → Voice**, which adds the key to Hyprland |
 
 ## What's inside
 

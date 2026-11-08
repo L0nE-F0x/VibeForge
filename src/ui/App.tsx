@@ -9,6 +9,7 @@ import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
+import { WhichOneSheet } from "./components/WhichOne.js";
 import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
@@ -18,6 +19,8 @@ import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
 import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
+import { overlayOpen } from "./overlays.js";
+import { numberedKeys, runShortcut, shortcutKeys, type ShortcutAction, type ShortcutIdIn } from "./shortcuts.js";
 import { CodeView } from "./views/Code.js";
 import { HomeView } from "./views/Home.js";
 import { OPEN_ORCHESTRATOR_EVENT, OrchestratorBar, OrchestratorView } from "./views/Orchestrator.js";
@@ -67,44 +70,31 @@ function Shell() {
   railRef.current = rail;
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+    // The app's own keys (shortcuts.ts), tried in this order. They work over menus and dialogs too.
+    const actions = {
+      "app.views": (event) => {
         const item = railViews(railRef.current).visible[Number(event.key) - 1];
-        if (!item) return;
-        event.preventDefault();
+        if (!item) return false;
         open(item.view);
-      } else if (event.ctrlKey && !event.altKey && event.key === ",") {
-        event.preventDefault();
-        go({ view: "settings" });
-      } else if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) {
+      },
+      "app.settings": () => go({ view: "settings" }),
+      "app.workspaces": (event) => {
         const workspace = workspacesRef.current[Number(event.code.slice(5)) - 1];
-        if (!workspace) return;
-        event.preventDefault();
+        if (!workspace) return false;
         go({ view: "code", workspaceId: workspace.id });
-      } else if (event.altKey && event.key === "ArrowLeft") {
-        event.preventDefault();
-        back();
-      } else if (event.altKey && event.key === "ArrowRight") {
-        event.preventDefault();
-        forward();
-      } else if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setSwitcher((open) => !open);
-      } else if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === "o") {
-        event.preventDefault();
+      },
+      "app.back": () => back(),
+      "app.forward": () => forward(),
+      "app.switcher": () => setSwitcher((open) => !open),
+      "app.orchestrator": () => {
         setSwitcher(false);
         if (viewRef.current !== "orchestrator") setOrchestrator((open) => !open);
-      } else if (event.ctrlKey && event.shiftKey && event.code === "Slash") {
-        event.preventDefault();
-        window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT));
-      } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "b") {
-        event.preventDefault();
-        window.dispatchEvent(new Event(TOGGLE_PANEL_EVENT));
-      } else if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "i") {
-        event.preventDefault();
-        void call("app.toggleDevTools");
-      }
-    };
+      },
+      "app.shortcuts": () => void window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)),
+      "app.panel": () => void window.dispatchEvent(new Event(TOGGLE_PANEL_EVENT)),
+      "app.devtools": () => void call("app.toggleDevTools"),
+    } satisfies Record<ShortcutIdIn<"app">, ShortcutAction>;
+    const onKey = (event: KeyboardEvent) => runShortcut(event, actions, overlayOpen);
     // A mouse's side buttons: back and forward, wherever the pointer is (terminals included).
     const onMouse = (event: MouseEvent) => {
       if (event.button !== 3 && event.button !== 4) return;
@@ -232,6 +222,7 @@ function Guides() {
     <>
       {tour && <Tour onClose={closeTour} />}
       {shortcuts && !tour && <ShortcutsModal onClose={closeShortcuts} />}
+      {!tour && <WhichOneSheet />}
       {update && !tour && <UpdateSheet appPath={appPath} onClose={() => setUpdate(false)} />}
     </>
   );
@@ -307,7 +298,7 @@ function Rail() {
   return (
     <nav ref={navRef} className="rail" aria-label={t("app.views")}>
       <span className={`rail-marker${marker.glides ? " glides" : ""}`} style={marker.box ? { transform: `translate(${marker.box.left}px, ${marker.box.top}px)`, height: marker.box.height } : { opacity: 0 }} aria-hidden />
-      <button type="button" className="rail-logo" aria-label={t("switcher.title")} {...tipProps(t("switcher.title"), { kbd: "Ctrl+K", side: "right" })} onClick={() => window.dispatchEvent(new Event(OPEN_SWITCHER_EVENT))}>
+      <button type="button" className="rail-logo" aria-label={t("switcher.title")} {...tipProps(t("switcher.title"), { kbd: shortcutKeys("app.switcher"), side: "right" })} onClick={() => window.dispatchEvent(new Event(OPEN_SWITCHER_EVENT))}>
         <Logo size={22} />
       </button>
       {visible.map((item, index) => {
@@ -320,7 +311,7 @@ function Rail() {
             className={`rail-btn${marks.includes("waiting") ? " wants-you" : ""}`}
             aria-current={route.view === item.view ? "page" : undefined}
             aria-label={t(item.label)}
-            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? `Ctrl+${index + 1}` : undefined, side: "right" })}
+            {...tipProps(count > 0 ? `${t(item.tip)} · ${badgeTip(item.view, count)}` : t(item.tip), { kbd: index < 9 ? numberedKeys("app.views", index + 1) : undefined, side: "right" })}
             onClick={() => open(item.view)}
             onContextMenu={(event) => {
               event.preventDefault();
@@ -371,7 +362,7 @@ function Rail() {
           type="button"
           className="rail-btn"
           aria-current={route.view === "settings" ? "page" : undefined}
-          {...tipProps(t("rail.tip.settings"), { kbd: "Ctrl+,", side: "right" })}
+          {...tipProps(t("rail.tip.settings"), { kbd: shortcutKeys("app.settings"), side: "right" })}
           onClick={() => go({ view: "settings" })}
         >
           <SettingsIcon size={19} strokeWidth={1.9} />

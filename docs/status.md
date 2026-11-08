@@ -1,8 +1,8 @@
 # Status
 
-**2.14.1**, released 2026-11-08. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
+**2.15.0**, released 2026-11-09. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
 
-Every change runs `npm test` (468 tests at 2.14.0, including the real PTY host driven with `/bin/bash`) on Node 22, 24 and 26, the typecheck, lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`; the Release workflow publishes a tag only once those checks passed on its commit on `main`, and has published every tag from 1.3.0 to 2.14.1. Features are then driven in the built app over CDP with a scratch profile.
+Every change runs `npm test` (564 tests at 2.15.0, including the real PTY host driven with `/bin/bash`) on Node 22, 24 and 26, the typecheck (the TypeScript, and the terminal host, `vibeforge tell` and the phone page through JSDoc), lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`, and also packs the ready-made build, installs it into a scratch home and runs the smoke test from there; the Release workflow publishes a tag only once those checks passed on its commit on `main`, and has published every tag from 1.3.0 to 2.15.0. Features are then driven in the built app over CDP with a scratch profile.
 
 ## What has been checked
 

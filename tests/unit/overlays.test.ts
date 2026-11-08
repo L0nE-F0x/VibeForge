@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { escapeTop, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/overlays.js";
+import { escapeTop, mayTakeFocus, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/overlays.js";
 import { confirmSlot } from "../../src/ui/state.js";
 
 /** A keydown as the overlay stack sees it, recording what was done to it. */
@@ -101,6 +101,26 @@ describe("the overlay stack", () => {
     pop();
     expect(overlayOpen()).toBe(false);
     expect(topOverlay()).toBeUndefined();
+  });
+
+  it("lets a terminal or chat box take focus on its own only from inside the top overlay", () => {
+    const inSheet = {} as Element;
+    const behind = {} as Element;
+    const sheet = { contains: (element: Element | null) => element === inSheet } as unknown as HTMLElement;
+    expect(mayTakeFocus(behind)).toBe(true);
+    pops.push(pushOverlay({ close: () => undefined, node: () => sheet }));
+    // A task sheet's live terminal still takes focus; one behind the sheet waits.
+    expect(mayTakeFocus(inSheet)).toBe(true);
+    expect(mayTakeFocus(behind)).toBe(false);
+    // The switcher over the sheet: nothing under it takes focus from its search box.
+    const switcher = { contains: () => false } as unknown as HTMLElement;
+    pops.push(pushOverlay({ close: () => undefined, node: () => switcher }));
+    expect(mayTakeFocus(inSheet)).toBe(false);
+    // An overlay with no element of its own (a list panel floating over the work) holds focus too.
+    pops.pop()?.();
+    pops.push(pushOverlay({ close: () => undefined }));
+    expect(mayTakeFocus(inSheet)).toBe(false);
+    expect(mayTakeFocus(null)).toBe(false);
   });
 
   it("takes an overlay out from the middle when it closes first", () => {

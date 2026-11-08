@@ -102,10 +102,13 @@ jobs:
 
   # The built app, started under a virtual display: every view opens, the language switches,
   # Ctrl+K works and a real shell answers, with no errors from the page (scripts/smoke.mjs).
+  # Then the release's ready-made build, packed, installed and smoke-tested the way release.yml
+  # does it (scripts/build-release.sh), so a tag is never the first time it runs. ubuntu-24.04 as
+  # in release.yml: node-pty links against the runner's glibc.
   smoke:
     name: smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     env:
       # This job runs Electron, so it needs the binary the other jobs skip.
       ELECTRON_SKIP_BINARY_DOWNLOAD: ""
@@ -120,3 +123,5 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/smoke.mjs
+      - name: Pack the ready-made build, install it and smoke-test the installed copy
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh "$RUNNER_TEMP/release"

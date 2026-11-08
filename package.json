@@ -1,6 +1,6 @@
 {
   "name": "vibeforge",
-  "version": "2.14.1",
+  "version": "2.15.0",
   "private": true,
   "description": "VibeForge: an open-source desktop for Omarchy that runs Claude Code, Codex, Grok and the other coding CLIs you already use, side by side in real terminals, with agents, routines, tasks and Maestro.",
   "author": "Lone Fox (https://github.com/L0nE-F0x)",
@@ -34,7 +34,7 @@
     "build": "vite build",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.scripts.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.scripts.json && tsc -p tsconfig.js.json && tsc -p tsconfig.companion.json",
     "lint": "biome lint",
     "postinstall": "node scripts/ensure-electron.cjs",
     "smoke": "node scripts/smoke.mjs",

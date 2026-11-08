@@ -18,13 +18,15 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { useEngines } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useNav, useOverlay, type Route } from "../state.js";
 import { Button, Logo, cx } from "./ui.js";
+import { WhichOne, WhichOneIcon } from "./WhichOne.js";
+import { isShortcut, shortcutKeys } from "../shortcuts.js";
 
 // The welcome tour: a card that walks the rail and each view, with a spotlight on the part
 // being described. It opens by itself until it has been finished or skipped once, and Help
@@ -49,6 +51,8 @@ interface Step {
   title?: Key;
   body?: Key;
   keys?: Array<[string, Key]>;
+  /** Shown under the body, in a card this wide. */
+  extra?: { content: ComponentType; width: number };
 }
 
 const LIST_PANEL = ".view.split-list > .list-panel-slot > .list-panel";
@@ -63,9 +67,9 @@ const STEPS: Step[] = [
     side: "right",
     icon: Compass,
     keys: [
-      ["Ctrl+K", "shortcuts.switcher"],
-      ["Ctrl+1…9", "shortcuts.switchViews"],
-      ["Alt+←", "shortcuts.back"],
+      [shortcutKeys("app.switcher"), "shortcuts.switcher"],
+      [shortcutKeys("app.views"), "shortcuts.switchViews"],
+      [shortcutKeys("app.back"), "shortcuts.back"],
     ],
   },
   {
@@ -95,10 +99,10 @@ const STEPS: Step[] = [
     side: "left",
     icon: Move,
     keys: [
-      ["Ctrl+Shift+D", "shortcuts.splitRight"],
-      ["Ctrl+Shift+M", "shortcuts.maximize"],
-      ["Ctrl+C", "shortcuts.copy"],
-      ["Ctrl+V", "shortcuts.paste"],
+      [shortcutKeys("code.splitRight"), "shortcuts.splitRight"],
+      [shortcutKeys("code.maximize"), "shortcuts.maximize"],
+      [shortcutKeys("terminal.copy"), "shortcuts.copy"],
+      [shortcutKeys("terminal.paste"), "shortcuts.paste"],
     ],
   },
   {
@@ -145,7 +149,7 @@ const STEPS: Step[] = [
     target: [".orch-talk", ".stage"],
     side: "left",
     icon: Workflow,
-    keys: [["Ctrl+Shift+O", "shortcuts.orchestrator"]],
+    keys: [[shortcutKeys("app.orchestrator"), "shortcuts.orchestrator"]],
   },
   {
     id: "runs",
@@ -164,7 +168,16 @@ const STEPS: Step[] = [
     target: [`${LIST_PANEL} > .list-head`],
     side: "right",
     icon: PanelLeftClose,
-    keys: [["Ctrl+Shift+B", "shortcuts.panel"]],
+    keys: [[shortcutKeys("app.panel"), "shortcuts.panel"]],
+  },
+  {
+    id: "which",
+    title: "whichOne.title",
+    body: "tour.whichOne.body",
+    target: [".rail"],
+    side: "right",
+    icon: WhichOneIcon,
+    extra: { content: WhichOne, width: 600 },
   },
   {
     id: "help",
@@ -173,7 +186,7 @@ const STEPS: Step[] = [
     target: ['[data-tour="help"]'],
     side: "right",
     icon: LifeBuoy,
-    keys: [["Ctrl+Shift+/", "help.shortcuts"]],
+    keys: [[shortcutKeys("app.shortcuts"), "help.shortcuts"]],
   },
   { id: "done", icon: Rocket },
 ];
@@ -300,11 +313,11 @@ export function Tour({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     (document.activeElement as HTMLElement | null)?.blur?.();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowRight" || event.key === "Enter") {
+      if (isShortcut("tour.next", event)) {
         if (index === STEPS.length - 1) onClose();
         else move(1);
-      } else if (event.key === "ArrowLeft") move(-1);
-      else if (event.key === "Escape") onClose();
+      } else if (isShortcut("tour.back", event)) move(-1);
+      else if (isShortcut("overlay.close", event)) onClose();
       else return;
       event.preventDefault();
       event.stopPropagation();
@@ -315,6 +328,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
 
   const tourSteps = STEPS.length - 2;
   const stepNo = index;
+  const width = step.extra ? Math.min(step.extra.width, window.innerWidth - 32) : CARD_W;
 
   return createPortal(
     <div className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label={t("tour.label")}>
@@ -340,10 +354,10 @@ export function Tour({ onClose }: { onClose: () => void }) {
           className="tour-card"
           style={
             missing
-              ? { left: "50%", top: "50%", width: CARD_W, transform: "translate(-50%, -50%)" }
+              ? { left: "50%", top: "50%", width, transform: "translate(-50%, -50%)" }
               : cardHere
-                ? { left: cardHere.left, top: cardHere.top, width: CARD_W }
-                : { left: 0, top: 0, width: CARD_W, visibility: "hidden" }
+                ? { left: cardHere.left, top: cardHere.top, width }
+                : { left: 0, top: 0, width, visibility: "hidden" }
           }
         >
           <div className="tour-card-head">
@@ -357,6 +371,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
           </div>
           <h3>{step.title && t(step.title)}</h3>
           <p>{step.body && <Rich text={t(step.body)} />}</p>
+          {step.extra && <step.extra.content />}
           {step.keys && (
             <div className="tour-keys">
               {step.keys.map(([keys, text]) => (
@@ -377,7 +392,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
                 <span key={item.id} className={cx(dot + 1 === index && "on", dot + 1 < index && "done")} />
               ))}
             </div>
-            <Button size="sm" variant="ghost" icon={ArrowLeft} tip={t("common.back")} kbd="←" onClick={() => move(-1)} />
+            <Button size="sm" variant="ghost" icon={ArrowLeft} tip={t("common.back")} kbd={shortcutKeys("tour.back")} onClick={() => move(-1)} />
             <Button size="sm" variant="primary" onClick={() => move(1)}>
               {t("common.next")} <ArrowRight size={14} />
             </Button>

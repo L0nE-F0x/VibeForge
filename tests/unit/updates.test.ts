@@ -30,6 +30,8 @@ describe("updates", () => {
     const installer = "/home/me/.local/share/vibeforge-app";
     expect(installKind(installer, { installerHome: installer, marked: false, checkout: true })).toBe("installer");
     expect(installKind("/opt/elsewhere", { installerHome: installer, marked: true, checkout: true })).toBe("installer");
+    // A ready-made build has the mark and no .git, wherever it was unpacked.
+    expect(installKind("/opt/vibeforge", { installerHome: installer, marked: true, checkout: false })).toBe("installer");
     expect(installKind("/home/me/code/VibeForge", { installerHome: installer, marked: false, checkout: true })).toBe("checkout");
     expect(installKind("/usr/lib/vibeforge", { installerHome: installer, marked: false, checkout: false })).toBe("other");
   });
