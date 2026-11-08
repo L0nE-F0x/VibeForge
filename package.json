@@ -34,7 +34,7 @@
     "build": "vite build",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.scripts.json",
     "lint": "biome lint",
     "postinstall": "node scripts/ensure-electron.cjs",
     "smoke": "node scripts/smoke.mjs",
