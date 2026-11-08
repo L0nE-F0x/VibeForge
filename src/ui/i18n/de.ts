@@ -1027,6 +1027,7 @@ export const de: Catalog = {
   "run.transcriptNote": "Reiner Text des Terminals, geschrieben beim Ende des Laufs.",
   "run.transcriptLater": "Das Transkript wird beim Ende des Laufs geschrieben.",
   "run.noTranscript": "Für diesen Lauf wurde kein Transkript geschrieben.",
+  "run.noScreen": "Für diesen Lauf wurde nichts aufgezeichnet.",
   "run.openRunFolder": "Laufordner öffnen",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` senden · `Shift`+`Enter` neue Zeile",

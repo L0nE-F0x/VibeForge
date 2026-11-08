@@ -1028,6 +1028,7 @@ export const fr: Catalog = {
   "run.transcriptNote": "Texte brut du terminal, écrit à la fin de l'exécution.",
   "run.transcriptLater": "La transcription est écrite à la fin de l'exécution.",
   "run.noTranscript": "Aucune transcription n'a été écrite pour cette exécution.",
+  "run.noScreen": "Rien n'a été capturé pour cette exécution.",
   "run.openRunFolder": "Ouvrir le dossier de l'exécution",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Entrée` envoyer · `Maj`+`Entrée` nouvelle ligne",

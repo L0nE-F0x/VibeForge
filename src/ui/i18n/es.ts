@@ -1027,6 +1027,7 @@ export const es: Catalog = {
   "run.transcriptNote": "Texto plano del terminal, escrito al terminar la ejecución.",
   "run.transcriptLater": "La transcripción se escribe al terminar la ejecución.",
   "run.noTranscript": "No se escribió transcripción para esta ejecución.",
+  "run.noScreen": "No se capturó nada en esta ejecución.",
   "run.openRunFolder": "Abrir la carpeta de la ejecución",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` enviar · `Shift`+`Enter` nueva línea",

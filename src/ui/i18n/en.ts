@@ -1040,6 +1040,7 @@ export const en = {
   "run.transcriptNote": "Plain text of the terminal, written when the run ended.",
   "run.transcriptLater": "The transcript is written when the run ends.",
   "run.noTranscript": "No transcript was written for this run.",
+  "run.noScreen": "Nothing was captured for this run.",
   "run.openRunFolder": "Open run folder",
   // ---------------------------------------------------------------- sessions
   "session.keysShort": "`Enter` send · `Shift`+`Enter` new line",
