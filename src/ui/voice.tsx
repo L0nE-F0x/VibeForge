@@ -10,6 +10,7 @@ import { Rich } from "./i18n/Rich.js";
 import { useLayer, useNav, useToast } from "./state.js";
 import { micRelease } from "./mic.js";
 import { cue } from "./sounds.js";
+import { isShortcut, shortcutKeys } from "./shortcuts.js";
 
 // Hold Ctrl+Shift+Space, or hold the mic, and let go: the words land in the box or terminal that
 // has focus and wait there. A quick click on the mic keeps it listening instead, until the mic (or
@@ -18,7 +19,7 @@ import { cue } from "./sounds.js";
 // and leaves the words in that agent's chat. Pressing Enter on dictated words is what asks for
 // the answer to be read aloud. Holding the key again cuts that off.
 
-export const DICTATE_KEYS = "Ctrl+Shift+Space";
+export const DICTATE_KEYS = shortcutKeys("voice.dictate");
 /** How long to wait for a message to reach a terminal before giving up on hearing its answer. */
 const PTY_WAIT_MS = 8000;
 
@@ -547,9 +548,9 @@ export function VoiceLayer() {
       window.clearTimeout(releaseTimer);
       releaseTimer = 0;
     };
-    const isDictate = (event: KeyboardEvent) => event.code === "Space" && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey;
+    const isDictate = (event: KeyboardEvent) => isShortcut("voice.dictate", event);
     const down = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && ((session && !session.finishing) || (!session && talk))) {
+      if (isShortcut("voice.cancel", event) && ((session && !session.finishing) || (!session && talk))) {
         event.preventDefault();
         event.stopPropagation();
         holding = false;

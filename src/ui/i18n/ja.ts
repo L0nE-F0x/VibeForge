@@ -141,6 +141,7 @@ export const ja: Catalog = {
   "shortcuts.drop": "パスを挿入",
   "shortcuts.write": "チャットのターミナルで：長めのメッセージを書く",
   "shortcuts.save": "エージェント、スキル、タスク、ルーティンを保存",
+  "shortcuts.undo": "元に戻す（メッセージに表示されている間）",
   "shortcuts.devtools": "開発者ツール",
   "shortcuts.doubleClick": "ダブルクリック",
   "shortcuts.drag": "ドラッグ",

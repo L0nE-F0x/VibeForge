@@ -140,6 +140,7 @@ export const es: Catalog = {
   "shortcuts.drop": "Insertar su ruta",
   "shortcuts.write": "En el terminal de un chat: escribir un mensaje más largo",
   "shortcuts.save": "Guardar un agente, skill, tarea o rutina",
+  "shortcuts.undo": "Deshacer, mientras un mensaje lo ofrezca",
   "shortcuts.devtools": "Herramientas de desarrollo",
   "shortcuts.doubleClick": "Doble clic",
   "shortcuts.drag": "Arrastrar",

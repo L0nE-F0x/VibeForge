@@ -4,6 +4,8 @@
 // while anything is on the stack the views' own shortcuts wait, so a key can't open a pane
 // behind a dialog.
 
+import { isShortcut } from "./shortcuts.js";
+
 export interface Overlay {
   /** What Escape does while this one is on top. */
   close: () => void;
@@ -53,8 +55,8 @@ function inTerminal(target: EscapeEvent["target"]): boolean {
  */
 export function escapeTop(event: EscapeEvent): boolean {
   // Taken already: dictation drops its words on Escape (voice.tsx), the tour closes itself.
-  if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return false;
-  if (inTerminal(event.target) && !event.shiftKey) return false;
+  if (event.defaultPrevented || event.isComposing) return false;
+  if (!isShortcut(inTerminal(event.target) ? "overlay.closeFromTerminal" : "overlay.close", event)) return false;
   const top = topOverlay();
   if (!top) return false;
   event.preventDefault();

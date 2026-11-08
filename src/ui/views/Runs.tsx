@@ -7,6 +7,7 @@ import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
+import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 
@@ -65,11 +66,12 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   // J and K step through the list from anywhere in the view, except while typing or in a terminal.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || (event.key !== "j" && event.key !== "k")) return;
+      const by = isShortcut("runs.next", event) ? 1 : isShortcut("runs.prev", event) ? -1 : 0;
+      if (!by) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
       event.preventDefault();
-      stepRef.current(event.key === "j" ? 1 : -1);
+      stepRef.current(by);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

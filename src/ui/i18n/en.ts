@@ -145,6 +145,7 @@ export const en = {
   "shortcuts.drop": "Insert its path",
   "shortcuts.write": "In a chat's terminal: write a longer message",
   "shortcuts.save": "Save an agent, skill, task or routine",
+  "shortcuts.undo": "Undo, while a message offers it",
   "shortcuts.devtools": "Developer tools",
   "shortcuts.doubleClick": "Double-click",
   "shortcuts.drag": "Drag",

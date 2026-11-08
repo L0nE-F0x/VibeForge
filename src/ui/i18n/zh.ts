@@ -141,6 +141,7 @@ export const zh: Catalog = {
   "shortcuts.drop": "插入其路径",
   "shortcuts.write": "在聊天的终端中：撰写较长的消息",
   "shortcuts.save": "保存智能体、技能、任务或例行任务",
+  "shortcuts.undo": "撤销（提示中出现撤销时）",
   "shortcuts.devtools": "开发者工具",
   "shortcuts.doubleClick": "双击",
   "shortcuts.drag": "拖动",

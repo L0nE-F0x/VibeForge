@@ -24,6 +24,7 @@ import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
+import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 import { useVoiceStatus } from "../voice.js";
@@ -33,7 +34,7 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.key.toLowerCase() === "s") {
+      if (isShortcut("form.save", event)) {
         event.preventDefault();
         save();
       }

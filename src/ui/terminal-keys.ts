@@ -7,6 +7,8 @@
 //   how Claude Code pastes images.
 // - Ctrl+Shift+C / Ctrl+Shift+V and Ctrl+Insert / Shift+Insert always copy and paste.
 
+import { isShortcut, reachesWindow } from "./shortcuts.js";
+
 export type ClipboardKey = "copy" | "paste" | "paste-or-pass" | null;
 
 interface KeyLike {
@@ -25,20 +27,18 @@ export function clipboardKey(event: KeyLike, hasSelection: boolean): ClipboardKe
   if (event.ctrlKey && event.shiftKey && key === "v") return "paste";
   if (event.ctrlKey && !event.shiftKey && key === "insert") return "copy";
   if (event.shiftKey && !event.ctrlKey && key === "insert") return "paste";
-  if (event.ctrlKey && !event.shiftKey && key === "c") return hasSelection ? "copy" : null;
-  if (event.ctrlKey && !event.shiftKey && key === "v") return "paste-or-pass";
+  if (isShortcut("terminal.copy", event)) return hasSelection ? "copy" : null;
+  if (isShortcut("terminal.paste", event)) return "paste-or-pass";
   return null;
 }
 
-/** App shortcuts that must reach the window instead of the program in the terminal. */
+/**
+ * App shortcuts that must reach the window instead of the program in the terminal: the ones
+ * shortcuts.ts marks for it. Ctrl+Shift+K opens the switcher there; plain Ctrl+K stays the
+ * program's (kill to end of line), and so do Alt+← and Alt+→.
+ */
 export function appShortcut(event: KeyLike): boolean {
-  if (event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) return true;
-  if (event.ctrlKey && !event.altKey && event.key === ",") return true;
-  // Ctrl+Shift+K opens the switcher; plain Ctrl+K stays the program's (kill to end of line).
-  if (event.ctrlKey && event.shiftKey && !event.altKey && (/^[ibmdewko]$/i.test(event.key) || event.code === "Slash")) return true;
-  // Alt+1…9 jumps between workspaces.
-  if (event.altKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code ?? "")) return true;
-  return false;
+  return reachesWindow(event);
 }
 
 /** A link a terminal may open: http(s) only. Anything else a program prints (file:, javascript:) is ignored. */

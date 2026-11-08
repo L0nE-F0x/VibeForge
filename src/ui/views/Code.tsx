@@ -1,110 +1,46 @@
-import {
-  Columns2,
-  FolderOpen,
-  FolderPlus,
-  FolderTree,
-  GitBranch,
-  Globe,
-  GripVertical,
-  Maximize2,
-  Minimize2,
-  MoreHorizontal,
-  PanelRight,
-  Pencil,
-  Play,
-  RotateCcw,
-  Rows2,
-  SquareTerminal,
-  TerminalSquare,
-  Trash2,
-  X,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Engine, LayoutNode, LiveSession, PaneLaunch, TalkState, Workspace, WorkspaceFile } from "../../shared/api.js";
-import { isDockUrl } from "../../shared/dock-url.js";
+import { Columns2, FolderPlus, PanelRight, Play, Rows2, SquareTerminal, TerminalSquare } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { LiveSession, Workspace, WorkspaceFile } from "../../shared/api.js";
 import { shellQuote, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
-import { estimateTermSize, LiveTerminal, type TerminalHandle } from "../components/Terminal.js";
-import { SidePanel, StripItem, useNarrowStage } from "../components/SidePanel.js";
-import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
+import { setPtyInView, setWorkspaceInView, usePtyAttention } from "../attention.js";
+import type { TalkTarget } from "../components/TalkMenu.js";
 import { tipProps } from "../components/Tooltip.js";
-import { Button, Empty, Input, Menu, MenuButton, Popover, type MenuItem } from "../components/ui.js";
+import { shellNumber } from "../components/WorkspaceState.js";
+import { Button, Empty } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
-import { overlayOpen } from "../overlays.js";
+import { panesOf, type PaneNode } from "../pane-layout.js";
 import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
-import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../pane-layout.js";
-import { BranchDialog } from "./BranchDialog.js";
-import { TalkButton, TalkChip, type TalkTarget } from "../components/TalkMenu.js";
-import { DockPanel, FilesPanel, SplitView } from "./CodeParts.js";
+import { shortcutKeys } from "../shortcuts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
-import { setPtyInView, setWorkspaceInView, useAttention, usePtyAttention } from "../attention.js";
+import { BranchDialog } from "./BranchDialog.js";
+import { CodeSide, useCodeSide } from "./code/CodeSide.js";
+import { PaneView, type PaneActions } from "./code/PaneView.js";
+import { SplitView } from "./code/SplitView.js";
+import { useCodeShortcuts } from "./code/useCodeShortcuts.js";
+import { isCodingCli, useWorkspacePanes } from "./code/useWorkspacePanes.js";
+import { WorkspaceList } from "./code/WorkspaceList.js";
 
-interface Runtime {
-  ptyId: string | null;
-  runId: string | null;
-  state: "idle" | "starting" | "live" | "exited";
-  exitText: string | null;
-}
+// Code mode: the workspace list, each workspace's panes of terminals, and the files and browser
+// panel beside them. The pieces live in ./code/; this puts them together.
 
-const newPaneId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-
-const PANE_MIME = "application/x-vibeforge-pane";
-const WORKSPACE_MIME = "application/x-vibeforge-workspace";
-
-function zoneFor(event: React.DragEvent<HTMLElement>): DropZone {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = (event.clientX - rect.left) / rect.width;
-  const y = (event.clientY - rect.top) / rect.height;
-  const edges: Array<[DropZone, number]> = [
-    ["left", x],
-    ["right", 1 - x],
-    ["top", y],
-    ["bottom", 1 - y],
-  ];
-  const [zone, distance] = edges.sort((a, b) => a[1] - b[1])[0];
-  return distance < 0.28 ? zone : "center";
-}
-
-/** A coding CLI: a run VibeForge started, or one typed into a shell (src/core/checkout.ts says the same). */
-function isCodingCli(session: LiveSession): boolean {
-  return session.kind === "run" || Boolean(session.programEngineId);
-}
-
-/**
- * State whose latest value is in its ref the moment it is set, not a render later. Code that
- * places several panes in a row (two CLIs a plan starts together) reads each one's result.
- */
-function useSyncedState<T extends object>(initial: T): [T, { readonly current: T }, (update: (prev: T) => T) => void] {
-  const [state, setState] = useState(initial);
-  const ref = useRef(state);
-  const set = useCallback((update: (prev: T) => T) => {
-    ref.current = update(ref.current);
-    setState(ref.current);
-  }, []);
-  return [state, ref, set];
-}
-
-function readLocal<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
+/** One object that never changes, whose members always run the latest render's functions. */
+function useStableActions<T extends object>(actions: T): T {
+  const latest = useRef(actions);
+  latest.current = actions;
+  const stable = useRef<T | null>(null);
+  if (!stable.current) {
+    const forward = {} as Record<string, (...args: unknown[]) => unknown>;
+    for (const name of Object.keys(actions)) forward[name] = (...args) => (latest.current as Record<string, (...args: unknown[]) => unknown>)[name](...args);
+    stable.current = forward as T;
   }
-}
-
-function writeLocal(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* storage can be unavailable */
-  }
+  return stable.current;
 }
 
 export function CodeView({ active, route }: { active: boolean; route: Extract<Route, { view: "code" }> | null }) {
   const t = useT();
   const { go } = useNav();
-  const { push, fail } = useToast();
+  const { push } = useToast();
   const confirm = useConfirm();
   const file = useWorkspaces();
   const engines = useEngines().data ?? [];
@@ -116,30 +52,11 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const workspaces = useMemo(() => file.data?.workspaces ?? [], [file.data]);
 
   const [currentId, setCurrentId] = useState<string | null>(null);
-  // Per workspace: its pane tree, null once every pane has been closed, missing until loaded.
-  const [layouts, layoutsRef, setLayouts] = useSyncedState<Record<string, LayoutNode | null>>({});
-  const [runtime, runtimeRef, setRuntime] = useSyncedState<Record<string, Runtime>>({});
-  const [focus, focusRef, setFocus] = useSyncedState<Record<string, string>>({});
-  const [side, setSide] = useState(() => readLocal<{ open: boolean; tab: "files" | "browser"; width: number }>("vf.code.side", { open: true, tab: "files", width: 320 }));
-  // The address a click or the bar just asked for, shown before the workspace file catches up.
-  const [pendingDock, setPendingDock] = useState<{ id: string; url: string } | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [zoomed, setZoomed] = useState<Record<string, string | null>>({});
   const [dragPane, setDragPane] = useState<string | null>(null);
-  const [dragWorkspace, setDragWorkspace] = useState<{ id: string; over: number | null } | null>(null);
-  const [workspaceMenu, setWorkspaceMenu] = useState<{ workspace: Workspace; anchor: HTMLElement } | null>(null);
   const [branchFor, setBranchFor] = useState<Workspace | null>(null);
-  const terminals = useRef(new Map<string, TerminalHandle>());
-  const starting = useRef(new Set<string>());
-  const liveRef = useRef(live);
-  liveRef.current = live;
-  const fontSizeRef = useRef(13);
-  fontSizeRef.current = settings?.terminalFontSize ?? 13;
-  const attention = useAttention();
   const ptyAttention = usePtyAttention();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
-  const browserUrl = current ? (pendingDock?.id === current.id ? pendingDock.url : current.dockUrl) : "";
   // The view stays mounted so terminals survive mode switches, but nothing starts until it is opened.
   const [opened, setOpened] = useState(active);
   useEffect(() => {
@@ -159,23 +76,9 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (next !== currentId) setCurrentId(next);
   }, [route?.workspaceId, workspaces, file.data, currentId]);
 
-  useEffect(() => writeLocal("vf.code.side", side), [side]);
-  // On a narrow tile the side panel steps aside without forgetting it was open; the button brings it back.
-  const narrow = useNarrowStage();
-  const [narrowSide, setNarrowSide] = useState(false);
-  useEffect(() => {
-    if (!narrow) setNarrowSide(false);
-  }, [narrow]);
-  const narrowRef = useRef(narrow);
-  narrowRef.current = narrow;
-  const sideOpen = narrow ? narrowSide : side.open;
-  const setSideOpen = (open: boolean) => (narrow ? setNarrowSide(open) : setSide((prev) => ({ ...prev, open })));
-
-  useEffect(() => {
-    if (!pendingDock) return;
-    const saved = workspaces.find((item) => item.id === pendingDock.id)?.dockUrl ?? "";
-    if (saved === pendingDock.url) setPendingDock(null);
-  }, [workspaces, pendingDock]);
+  const side = useCodeSide(workspaces);
+  const panes = useWorkspacePanes({ opened, current, route, workspaces, live, engines, defaultEngine: settings?.defaultEngine, fontSize: settings?.terminalFontSize ?? 13 });
+  const { layouts, runtime, focus, zoomed, terminals } = panes;
 
   // The shell's session watch flags CLIs that go quiet out of sight; it needs to know what's shown.
   useEffect(() => setWorkspaceInView(active ? (current?.id ?? null) : null), [active, current?.id]);
@@ -185,249 +88,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   useEffect(() => setPtyInView("code", focusedPty), [focusedPty]);
   useEffect(() => () => setPtyInView("code", null), []);
 
-  const shortcuts = useRef<(event: KeyboardEvent) => void>(() => undefined);
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (event: KeyboardEvent) => shortcuts.current(event);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [active]);
-
-  // ---------------------------------------------------------------- panes
-
-  const patchRuntime = useCallback(
-    (paneId: string, patch: Partial<Runtime>) => {
-      setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
-    },
-    [setRuntime],
-  );
-
-  const updateLayout = useCallback(
-    (workspaceId: string, next: LayoutNode | null) => {
-      setLayouts((prev) => ({ ...prev, [workspaceId]: next }));
-      void call("layouts.save", workspaceId, next).catch(() => undefined);
-    },
-    [setLayouts],
-  );
-
-  /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
-  const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}): Promise<string | null> => {
-      if (starting.current.has(pane.id)) return null;
-      starting.current.add(pane.id);
-      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
-      // Measure after React has laid the new pane out. A window on a hidden workspace gets no
-      // frames, so don't wait on one forever.
-      await new Promise((resolve) => {
-        requestAnimationFrame(resolve);
-        setTimeout(resolve, 100);
-      });
-      const size = estimateTermSize(document.querySelector<HTMLElement>(`[data-pane="${pane.id}"]`), fontSizeRef.current, 34);
-      try {
-        let ptyId: string;
-        if (pane.launch.type === "shell") {
-          ({ ptyId } = await call("code.shell", { workspaceId: workspace.id, ...size }));
-          patchRuntime(pane.id, { ptyId, runId: null, state: "live" });
-        } else {
-          const result = await call("code.engine", {
-            workspaceId: workspace.id,
-            engineId: pane.launch.engineId,
-            continueSession: opts.continueSession,
-            ...size,
-          });
-          ptyId = result.ptyId;
-          patchRuntime(pane.id, { ptyId: result.ptyId, runId: result.runId, state: "live" });
-        }
-        setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-        return ptyId;
-      } catch (error) {
-        patchRuntime(pane.id, { state: "idle" });
-        fail(error, t("code.startFailed"));
-        return null;
-      } finally {
-        starting.current.delete(pane.id);
-      }
-    },
-    [fail, patchRuntime, setFocus],
-  );
-
-  // Load the current workspace's layout. Nothing saved stays empty, so New terminal
-  // is the way in. A layout left open from last time brings its shells back.
-  useEffect(() => {
-    if (!opened || !current || current.id in layoutsRef.current) return;
-    let cancelled = false;
-    void call("layouts.get", current.id)
-      .catch(() => null)
-      .then((saved) => {
-        if (cancelled || current.id in layoutsRef.current) return;
-        setLayouts((prev) => ({ ...prev, [current.id]: saved }));
-        if (!saved) return;
-        const panes = panesOf(saved);
-        const first = panes[0];
-        if (first) setFocus((prev) => ({ ...prev, [current.id]: prev[current.id] ?? first.id }));
-        for (const pane of panes) if (pane.launch.type === "shell") void startPane(current, pane);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [opened, current, startPane, setLayouts, setFocus]);
-
-  // Jumping here for a specific session: focus its pane, or give it one. The switch to the
-  // route's workspace lands a render later, so until then `current` is the one being left.
-  useEffect(() => {
-    if (!route?.ptyId || !current) return;
-    if (route.workspaceId && route.workspaceId !== current.id) return;
-    const layout = layouts[current.id];
-    if (layout === undefined) return;
-    const owner = (layout ? panesOf(layout) : []).find((pane) => runtime[pane.id]?.ptyId === route.ptyId);
-    if (owner) {
-      setFocus((prev) => ({ ...prev, [current.id]: owner.id }));
-      terminals.current.get(owner.id)?.focus();
-      return;
-    }
-    const session = live.find((item) => item.ptyId === route.ptyId);
-    if (!session) return;
-    adopt(current, session.ptyId, session.runId, session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: engineOfTitle(session.title) });
-    go({ view: "code", workspaceId: current.id });
-    // Adoption runs once per requested session.
-  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""]]);
-
-  function engineOfTitle(title: string): string {
-    return engines.find((engine) => title.startsWith(engine.label))?.id ?? settings?.defaultEngine ?? "";
-  }
-
-  /** Give a session that is already running a pane: a new one beside the focused pane. */
-  function adopt(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch) {
-    show(workspace, ptyId, runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id] }));
-  }
-
-  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }) {
-    if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
-    patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
-    setFocus((prev) => ({ ...prev, [workspace.id]: spot.paneId }));
-  }
-
-  // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
-  // not Code is on screen, so it is there when the person goes to look. Each one once.
-  const placed = useRef(new Set<string>());
-  useEffect(() => {
-    for (const session of live) {
-      if (!session.orchestrated || !session.workspaceId || placed.current.has(session.ptyId)) continue;
-      const workspace = workspaces.find((item) => item.id === session.workspaceId);
-      if (!workspace) continue;
-      placed.current.add(session.ptyId);
-      if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) continue;
-      const launch: PaneLaunch = { type: "engine", engineId: engineOfTitle(session.title) };
-      if (workspace.id in layoutsRef.current) {
-        place(workspace, session, launch);
-        continue;
-      }
-      // Not loaded yet: load its saved panes first (and start their shells, as opening it would).
-      void call("layouts.get", workspace.id)
-        .catch(() => null)
-        .then((saved) => {
-          if (!(workspace.id in layoutsRef.current)) {
-            setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
-            for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
-          }
-          place(workspace, session, launch);
-        });
-    }
-    // Only new sessions matter; the rest is read through refs.
-  }, [live, workspaces]);
-
-  /** Into a pane of the same CLI that has nothing running (left from last time), or a new one beside. */
-  function place(workspace: Workspace, session: LiveSession, launch: PaneLaunch) {
-    const idle = (paneId: string) => {
-      const state = runtimeRef.current[paneId]?.state ?? "idle";
-      return state === "idle" || state === "exited";
-    };
-    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }));
-  }
-
-  /** The first pane of a workspace whose panes were all closed. */
-  function openFirst(workspace: Workspace, launch: PaneLaunch) {
-    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
-    updateLayout(workspace.id, pane);
-    setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
-  }
-
-  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch) {
-    const layout = layoutsRef.current[workspace.id];
-    if (!layout) return;
-    const existing = panesOf(layout).find((pane) => pane.id === paneId);
-    if (!existing) return;
-    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
-    updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir, ratio: 0.5, a: existing, b: pane }));
-    setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
-  }
-
-  async function closePane(workspace: Workspace, pane: PaneNode) {
-    const state = runtime[pane.id];
-    if (state?.state === "live" && state.ptyId) {
-      const ok = await confirm({
-        title: t("code.close.title"),
-        body: state.runId || live.find((session) => session.ptyId === state.ptyId)?.runId ? t("code.close.bodyRun") : t("code.close.bodyShell"),
-        confirm: t("code.close.confirm"),
-      });
-      if (!ok) return;
-      void call("pty.kill", state.ptyId).catch(() => undefined);
-    }
-    const layout = layoutsRef.current[workspace.id];
-    if (!layout) return;
-    // Closing the last pane leaves the workspace empty; it does not start a new shell in its place.
-    const next = removePane(layout, pane.id);
-    updateLayout(workspace.id, next);
-    setRuntime((prev) => {
-      const copy = { ...prev };
-      delete copy[pane.id];
-      return copy;
-    });
-    terminals.current.delete(pane.id);
-    const remaining = next ? panesOf(next) : [];
-    setFocus((prev) => {
-      const copy = { ...prev };
-      if (remaining.length) copy[workspace.id] = remaining[remaining.length - 1].id;
-      else delete copy[workspace.id];
-      return copy;
-    });
-    setZoomed((prev) => (prev[workspace.id] === pane.id ? { ...prev, [workspace.id]: null } : prev));
-  }
-
-  function launchHere(workspace: Workspace, pane: PaneNode, launch: PaneLaunch, opts: { continueSession?: boolean } = {}) {
-    const layout = layoutsRef.current[workspace.id];
-    if (!layout) return;
-    const next: PaneNode = { ...pane, launch };
-    updateLayout(workspace.id, replacePane(layout, pane.id, next));
-    void startPane(workspace, next, opts);
-  }
-
-  /** A new shell beside the focused pane, or the first one in an empty workspace. */
-  function newTerminal(workspace: Workspace, dir: "row" | "col") {
-    const layout = layoutsRef.current[workspace.id];
-    if (layout === null) openFirst(workspace, { type: "shell" });
-    else if (layout) splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
-  }
-
-  shortcuts.current = (event: KeyboardEvent) => {
-    if (!event.ctrlKey || !event.shiftKey || event.altKey || !current) return;
-    const key = event.key.toLowerCase();
-    if (key !== "m" && key !== "d" && key !== "e" && key !== "w") return;
-    // A menu or dialog is open: the keys mustn't open or close panes behind it.
-    if (overlayOpen()) return;
-    event.preventDefault();
-    // Holding the keys repeats them; one press is one pane.
-    if (event.repeat) return;
-    const layout = layoutsRef.current[current.id];
-    const paneId = focusRef.current[current.id];
-    const pane = layout && paneId ? panesOf(layout).find((item) => item.id === paneId) : undefined;
-    if (key === "m" && paneId) setZoomed((prev) => ({ ...prev, [current.id]: prev[current.id] === paneId ? null : paneId }));
-    else if (key === "d") newTerminal(current, "row");
-    else if (key === "e") newTerminal(current, "col");
-    else if (key === "w" && pane) void closePane(current, pane);
-  };
+  useCodeShortcuts(active, current, panes);
 
   // ---------------------------------------------------------------- dictation
 
@@ -441,7 +102,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       label: `${title} · ${workspace.name}`,
       element: () => document.querySelector<HTMLElement>(`[data-pane="${CSS.escape(pane.id)}"]`),
       insert: (text) => terminals.current.get(pane.id)?.paste(text),
-      ptyId: () => livePty(pane.id),
+      ptyId: () => panes.livePty(pane.id),
       words: () => workspaceWords(workspace),
     };
   }
@@ -449,8 +110,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   /** The toolbar mic: dictation into the pane that has focus in the workspace on screen, then back to it for Enter. */
   const toolbarMic = useDictationTarget(() => {
     const layout = current ? layouts[current.id] : null;
-    const panes = layout ? panesOf(layout) : [];
-    const pane = (current && panes.find((item) => item.id === focus[current.id])) ?? panes[0];
+    const shown = layout ? panesOf(layout) : [];
+    const pane = (current && shown.find((item) => item.id === focus[current.id])) ?? shown[0];
     if (!current || !pane) return { label: "", element: () => null, insert: () => undefined };
     const into = paneTarget(current, pane);
     return {
@@ -461,11 +122,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       },
     };
   });
-
-  function livePty(paneId: string): string | null {
-    const state = runtimeRef.current[paneId];
-    return state?.state === "live" ? state.ptyId : null;
-  }
 
   /**
    * The other coding CLIs open anywhere, for Send to…: this workspace's terminals first. Any other
@@ -489,16 +145,6 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       .sort((a, b) => Number(a.where !== null) - Number(b.where !== null));
   }
 
-  /** Review with a new CLI here: `engineId` in a new pane beside `paneId`; its terminal once it runs. */
-  function startReviewer(workspace: Workspace, paneId: string, engineId: string): Promise<string | null> {
-    const layout = layoutsRef.current[workspace.id];
-    const existing = layout ? panesOf(layout).find((pane) => pane.id === paneId) : undefined;
-    if (!layout || !existing) return Promise.resolve(null);
-    const pane: PaneNode = { kind: "pane", id: newPaneId(), launch: { type: "engine", engineId } };
-    updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir: "row", ratio: 0.5, a: existing, b: pane }));
-    return startPane(workspace, pane);
-  }
-
   /** Bring the pane holding `ptyId` forward and into focus, when it is in Code. */
   function focusPty(ptyId: string) {
     for (const [workspaceId, node] of Object.entries(layouts)) {
@@ -506,7 +152,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       if (!pane) continue;
       const workspace = workspaces.find((item) => item.id === workspaceId);
       if (workspace) select(workspace);
-      setFocus((prev) => ({ ...prev, [workspaceId]: pane.id }));
+      panes.setFocus((prev) => ({ ...prev, [workspaceId]: pane.id }));
       setTimeout(() => terminals.current.get(pane.id)?.focus(), 0);
       return;
     }
@@ -522,6 +168,30 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     }
     handle.paste(`${shellQuote(target)} `);
   }
+
+  const paneActions = useStableActions<PaneActions>({
+    focus: (workspace, pane) => {
+      setDictationTarget(paneTarget(workspace, pane));
+      panes.focusPane(workspace.id, pane.id);
+    },
+    register: (paneId, handle) => {
+      if (handle) terminals.current.set(paneId, handle);
+      else terminals.current.delete(paneId);
+    },
+    exited: (paneId, text) => panes.patchRuntime(paneId, { state: "exited", exitText: text }),
+    start: (workspace, pane, launch, continueSession) => panes.launchHere(workspace, pane, launch, { continueSession }),
+    close: (workspace, pane) => void panes.closePane(workspace, pane),
+    review: (runId) => go({ view: "runs", runId }),
+    drag: setDragPane,
+    drop: (workspace, pane, sourceId, zone) => {
+      setDragPane(null);
+      panes.dropPane(workspace.id, sourceId, pane.id, zone);
+    },
+    zoom: (workspace, pane) => panes.toggleZoom(workspace.id, pane.id),
+    openLink: (workspace, url) => side.openInBrowser(workspace.id, url),
+    draft: (toPty) => focusPty(toPty),
+    newReviewer: (workspace, pane, engineId) => panes.startReviewer(workspace, pane.id, engineId),
+  });
 
   // ---------------------------------------------------------------- workspaces
 
@@ -546,47 +216,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (!ok) return;
     await call("workspaces.remove", workspace.id);
     await call("dock.release", workspace.id).catch(() => undefined);
-    setPendingDock((prev) => (prev?.id === workspace.id ? null : prev));
-    setLayouts((prev) => {
-      const copy = { ...prev };
-      delete copy[workspace.id];
-      return copy;
-    });
+    side.forgetDock(workspace.id);
+    panes.forget(workspace.id);
     if (currentId === workspace.id) setCurrentId(null);
   }, t("code.removeFailed"));
-
-  const [renameWorkspace] = useAction(async (workspace: Workspace, name: string) => {
-    if (name.trim() && name.trim() !== workspace.name) await call("workspaces.update", workspace.id, { name: name.trim() });
-    setRenaming(null);
-  }, t("code.renameFailed"));
-
-  const [setDockUrl] = useAction(async (workspaceId: string, url: string) => {
-    await call("workspaces.update", workspaceId, { dockUrl: url });
-  }, t("code.urlFailed"));
-
-  /** The address bar committed. The id is the workspace the bar was editing. */
-  function rememberDock(workspaceId: string, url: string) {
-    setPendingDock({ id: workspaceId, url });
-    // Stop a hidden page from writing its address back over a bar the person just cleared.
-    if (!url) void call("dock.show", { x: 0, y: 0, width: 0, height: 0 }, "", workspaceId).catch(() => undefined);
-    void setDockUrl(workspaceId, url);
-  }
-
-  /** A link in this workspace's terminal: open its own browser on that address. */
-  function openInBrowser(workspaceId: string, url: string) {
-    if (!isDockUrl(url)) {
-      void call("app.openExternal", url);
-      return;
-    }
-    setPendingDock({ id: workspaceId, url });
-    setSide((prev) => (prev.open && prev.tab === "browser" ? prev : { ...prev, open: true, tab: "browser" }));
-    if (narrowRef.current) setNarrowSide(true);
-    void setDockUrl(workspaceId, url);
-  }
-
-  const [moveWorkspace] = useAction(async (id: string, toIndex: number) => {
-    await call("workspaces.move", id, toIndex);
-  }, t("code.moveFailed"));
 
   function select(workspace: Workspace) {
     setCurrentId(workspace.id);
@@ -602,150 +235,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (workspace) select(workspace);
   }
 
-  // ---------------------------------------------------------------- side panel resize
-
-  const startSideResize = (event: React.PointerEvent) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = side.width;
-    const target = event.currentTarget as HTMLElement;
-    target.classList.add("dragging");
-    const move = (moveEvent: PointerEvent) => {
-      const width = Math.min(900, Math.max(220, startWidth - (moveEvent.clientX - startX)));
-      setSide((prev) => ({ ...prev, width }));
-    };
-    const up = () => {
-      target.classList.remove("dragging");
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-
   // ---------------------------------------------------------------- render
-
-  const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
-  const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
-    { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
-    { label: t("code.openBranch"), icon: GitBranch, onSelect: () => setBranchFor(workspace) },
-    { label: t("common.rename"), icon: Pencil, onSelect: () => setRenaming(workspace.id) },
-    "sep",
-    { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void removeWorkspace(workspace) },
-  ];
 
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <SidePanel
-          id="workspaces"
-          title={t("code.workspaces")}
-          defaultWidth={250}
-          actions={
-            <Button size="sm" icon={FolderPlus} onClick={() => void addWorkspace()} tip={t("code.addTip")}>
-              {t("code.add")}
-            </Button>
-          }
-          strip={
-            <>
-              <StripItem label={t("code.addStrip")} onClick={() => void addWorkspace()}>
-                <FolderPlus size={16} />
-              </StripItem>
-              {workspaces.map((workspace) => (
-                <StripItem
-                  key={workspace.id}
-                  label={`${workspace.name} — ${tildify(workspace.path, home)}`}
-                  selected={workspace.id === currentId}
-                  onClick={() => select(workspace)}
-                  badge={<WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} strip />}
-                >
-                  <span className="strip-initials">{workspace.name.slice(0, 2).toUpperCase()}</span>
-                </StripItem>
-              ))}
-            </>
-          }
-        >
-          <div className="list-scroll">
-            {workspaces.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("code.addEmpty")}</div>}
-            {workspaces.map((workspace, index) => {
-              const over = dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
-              return (
-                <div
-                  key={workspace.id}
-                  className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-current={workspace.id === currentId ? "true" : undefined}
-                  draggable={renaming !== workspace.id}
-                  onClick={() => select(workspace)}
-                  onDoubleClick={() => setRenaming(workspace.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") select(workspace);
-                    if (event.key === "F2") setRenaming(workspace.id);
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    setWorkspaceMenu({ workspace, anchor: event.currentTarget });
-                  }}
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData(WORKSPACE_MIME, workspace.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    setDragWorkspace({ id: workspace.id, over: null });
-                  }}
-                  onDragEnd={() => setDragWorkspace(null)}
-                  onDragOver={(event) => {
-                    if (!dragWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const at = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
-                    if (dragWorkspace.over !== at) setDragWorkspace({ ...dragWorkspace, over: at });
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    const drag = dragWorkspace;
-                    setDragWorkspace(null);
-                    if (!drag || drag.over === null) return;
-                    const from = workspaces.findIndex((item) => item.id === drag.id);
-                    const to = drag.over > from ? drag.over - 1 : drag.over;
-                    if (from >= 0 && to !== from) void moveWorkspace(drag.id, to);
-                  }}
-                >
-                  <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />
-                  <span className="vstack grow" style={{ gap: 0 }}>
-                    {renaming === workspace.id ? (
-                      <Input
-                        autoFocus
-                        defaultValue={workspace.name}
-                        onClick={(event) => event.stopPropagation()}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                        onFocus={(event) => event.target.select()}
-                        onBlur={(event) => void renameWorkspace(workspace, event.target.value)}
-                        onKeyDown={(event) => {
-                          event.stopPropagation();
-                          if (event.key === "Enter") void renameWorkspace(workspace, (event.target as HTMLInputElement).value);
-                          if (event.key === "Escape") setRenaming(null);
-                        }}
-                      />
-                    ) : (
-                      <span className="row-title truncate">{workspace.name}</span>
-                    )}
-                    <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
-                  </span>
-                  <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
-                  <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-                    <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {workspaceMenu && (
-            <Popover anchor={workspaceMenu.anchor} onClose={() => setWorkspaceMenu(null)} align="end">
-              <Menu items={workspaceItems(workspaceMenu.workspace)} onClose={() => setWorkspaceMenu(null)} />
-            </Popover>
-          )}
-        </SidePanel>
+        <WorkspaceList workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={(workspace) => void removeWorkspace(workspace)} onBranch={setBranchFor} />
 
         {!current ? (
           <Empty
@@ -772,10 +267,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
               </div>
               <MicButton size="sm" target={toolbarMic.target} hint={t("code.dictate")} disabled={!layouts[current.id]} />
               <span className="toolbar-sep" />
-              <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd="Ctrl+Shift+D" onClick={() => newTerminal(current, "row")} />
-              <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd="Ctrl+Shift+E" onClick={() => newTerminal(current, "col")} />
+              <Button size="sm" variant="ghost" icon={Columns2} tip={t("code.splitRight")} kbd={shortcutKeys("code.splitRight")} onClick={() => panes.newTerminal(current, "row")} />
+              <Button size="sm" variant="ghost" icon={Rows2} tip={t("code.splitDown")} kbd={shortcutKeys("code.splitDown")} onClick={() => panes.newTerminal(current, "col")} />
               <span className="toolbar-sep" />
-              <Button size="sm" variant="ghost" icon={PanelRight} pressed={sideOpen} tip={t("code.sideTip")} onClick={() => setSideOpen(!sideOpen)} />
+              <Button size="sm" variant="ghost" icon={PanelRight} pressed={side.open} tip={t("code.sideTip")} onClick={() => side.setOpen(!side.open)} />
             </div>
 
             <div className="code-work">
@@ -790,14 +285,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         title={t("code.noPanes.title")}
                         actions={
                           <>
-                            <Button variant="primary" icon={TerminalSquare} kbd="Ctrl+Shift+D" onClick={() => openFirst(workspace, { type: "shell" })}>
+                            <Button variant="primary" icon={TerminalSquare} kbd={shortcutKeys("code.splitRight")} onClick={() => panes.openFirst(workspace, { type: "shell" })}>
                               {t("code.newTerminal")}
                             </Button>
                             {/* The CLIs found on this machine, one click each instead of a shell and typing. */}
                             {engines
                               .filter((engine) => engine.available)
                               .map((engine) => (
-                                <Button key={engine.id} icon={Play} tip={t("code.startEngine", { engine: engine.label })} onClick={() => openFirst(workspace, { type: "engine", engineId: engine.id })}>
+                                <Button key={engine.id} icon={Play} tip={t("code.startEngine", { engine: engine.label })} onClick={() => panes.openFirst(workspace, { type: "engine", engineId: engine.id })}>
                                   {engine.label}
                                 </Button>
                               ))}
@@ -816,14 +311,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   <div key={workspace.id} className={`canvas${zoomedPane ? " has-zoom" : ""}`} style={visible ? undefined : { display: "none" }}>
                     <SplitView
                       node={layout}
-                      onRatio={(path, ratio, done) => {
-                        const node = layoutsRef.current[workspace.id];
-                        if (!node) return;
-                        const next = setRatioAt(node, path, ratio);
-                        // Saved once the divider is let go (or reset), not on every step of the drag.
-                        if (done) updateLayout(workspace.id, next);
-                        else setLayouts((prev) => ({ ...prev, [workspace.id]: next }));
-                      }}
+                      onRatio={(path, ratio, done) => panes.setRatio(workspace.id, path, ratio, done)}
                       renderPane={(pane) => {
                         const session = live.find((item) => item.ptyId === runtime[pane.id]?.ptyId);
                         // A launched CLI is its own run; a shell has one while a CLI typed into it is recorded.
@@ -831,6 +319,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                         return (
                           <PaneView
                             key={pane.id}
+                            workspace={workspace}
                             pane={pane}
                             runtime={runtime[pane.id]}
                             runId={runId}
@@ -841,36 +330,14 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                             talk={session?.talk ?? null}
                             talkTargets={session && isCodingCli(session) && talkOn ? talkTargets(session, workspace) : []}
                             reviewEngines={session && isCodingCli(session) && talkOn ? engines.filter((engine) => engine.available) : []}
-                            onDraft={(toPty) => focusPty(toPty)}
-                            onNewReviewer={(engineId) => startReviewer(workspace, pane.id, engineId)}
                             engines={engines}
                             active={active && visible}
                             focused={focus[workspace.id] === pane.id}
-                            onFocus={() => {
-                              setDictationTarget(paneTarget(workspace, pane));
-                              setFocus((prev) => (prev[workspace.id] === pane.id ? prev : { ...prev, [workspace.id]: pane.id }));
-                            }}
-                            register={(handle) => {
-                              if (handle) terminals.current.set(pane.id, handle);
-                              else terminals.current.delete(pane.id);
-                            }}
-                            onExit={(text) => patchRuntime(pane.id, { state: "exited", exitText: text })}
-                            onStart={(launch, continueSession) => launchHere(workspace, pane, launch, { continueSession })}
                             canZoom={paneCount > 1}
-                            onClose={() => void closePane(workspace, pane)}
-                            onReview={() => runId && go({ view: "runs", runId })}
                             canMove={paneCount > 1 && !zoomedPane}
                             dragging={dragPane}
-                            onDragPane={setDragPane}
-                            onDropPane={(sourceId, zone) => {
-                              setDragPane(null);
-                              const latest = layoutsRef.current[workspace.id];
-                              if (latest) updateLayout(workspace.id, movePane(latest, sourceId, pane.id, zone));
-                              setFocus((prev) => ({ ...prev, [workspace.id]: sourceId }));
-                            }}
                             zoomed={zoomedPane === pane.id}
-                            onZoom={() => setZoomed((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] === pane.id ? null : pane.id }))}
-                            onOpenLink={(url) => openInBrowser(workspace.id, url)}
+                            actions={paneActions}
                           />
                         );
                       }}
@@ -878,280 +345,12 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
                   </div>
                 );
               })}
-              {sideOpen && (
-                <aside className="side-panel" style={{ width: narrow ? Math.min(side.width, 280) : side.width }}>
-                  <div className="side-resize" onPointerDown={startSideResize} />
-                  <div className="side-tabs">
-                    <Button size="sm" variant="ghost" icon={FolderTree} pressed={side.tab === "files"} onClick={() => setSide((prev) => ({ ...prev, tab: "files" }))}>
-                      {t("code.files")}
-                    </Button>
-                    <Button size="sm" variant="ghost" icon={Globe} pressed={side.tab === "browser"} onClick={() => setSide((prev) => ({ ...prev, tab: "browser" }))}>
-                      {t("code.browser")}
-                    </Button>
-                    <span className="grow" />
-                    <Button size="sm" variant="ghost" icon={X} tip={t("code.hideSide")} onClick={() => setSideOpen(false)} />
-                  </div>
-                  {side.tab === "files" ? (
-                    <FilesPanel root={current.path} onInsert={insertPath} />
-                  ) : (
-                    <DockPanel
-                      key={current.id}
-                      workspaceId={current.id}
-                      url={browserUrl}
-                      onUrl={rememberDock}
-                      visible={active && sideOpen && side.tab === "browser"}
-                    />
-                  )}
-                </aside>
-              )}
+              {side.open && <CodeSide panel={side} workspace={current} active={active} onInsert={insertPath} />}
             </div>
-
           </div>
         )}
       </div>
       {branchFor && <BranchDialog workspace={branchFor} onClose={() => setBranchFor(null)} onOpened={openedBranch} />}
-    </div>
-  );
-}
-
-function PaneView({
-  pane,
-  runtime,
-  runId,
-  program,
-  needsYou,
-  alsoHere,
-  talk,
-  talkTargets,
-  reviewEngines,
-  onDraft,
-  onNewReviewer,
-  engines,
-  active,
-  focused,
-  onFocus,
-  register,
-  onExit,
-  onStart,
-  canZoom,
-  onClose,
-  onReview,
-  canMove,
-  dragging,
-  onDragPane,
-  onDropPane,
-  zoomed,
-  onZoom,
-  onOpenLink,
-  shellNumber,
-}: {
-  pane: PaneNode;
-  runtime: Runtime | undefined;
-  /** The run this pane is recording, if any. */
-  runId: string | null;
-  /** What a shell is running in its foreground, when it isn't at its prompt. */
-  program: string | null;
-  /** Its CLI went quiet out of sight and waits for you. */
-  needsYou: boolean;
-  /** The other coding CLIs working in the same folder. */
-  alsoHere: string[];
-  /** Messages with other CLIs, while there are any. */
-  talk: TalkState | null;
-  /** The other coding CLIs this one can send to; empty when it isn't one, or talking is off. */
-  talkTargets: TalkTarget[];
-  /** The CLIs that could be started beside this one to review it. */
-  reviewEngines: Engine[];
-  onDraft: (toPty: string) => void;
-  onNewReviewer: (engineId: string) => Promise<string | null>;
-  engines: Engine[];
-  active: boolean;
-  focused: boolean;
-  onFocus: () => void;
-  register: (handle: TerminalHandle | null) => void;
-  onExit: (text: string) => void;
-  onStart: (launch: PaneLaunch, continueSession?: boolean) => void;
-  canZoom: boolean;
-  onClose: () => void;
-  onReview: () => void;
-  canMove: boolean;
-  dragging: string | null;
-  onDragPane: (paneId: string | null) => void;
-  onDropPane: (sourceId: string, zone: DropZone) => void;
-  zoomed: boolean;
-  onZoom: () => void;
-  onOpenLink?: (url: string) => void;
-  /** Which shell this is in the workspace, when there is more than one. */
-  shellNumber?: number | null;
-}) {
-  const t = useT();
-  const state = runtime?.state ?? "idle";
-  const [zone, setZone] = useState<DropZone | null>(null);
-  const terminalRef = useRef<TerminalHandle | null>(null);
-  const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
-  const title = pane.launch.type === "shell" ? `${t("common.shell")}${shellNumber ? ` ${shellNumber}` : ""}` : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
-  // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
-  const shown = state === "live" && program ? program : title;
-
-  return (
-    <div className={`pane${focused ? " focused" : ""}${zoomed ? " is-zoomed" : ""}${dragging === pane.id ? " is-dragging" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
-      <div
-        className={`pane-head${canMove ? " can-move" : ""}${needsYou ? " needs-you" : ""}`}
-        draggable={canMove}
-        onDragStart={(event) => {
-          event.dataTransfer.setData(PANE_MIME, pane.id);
-          event.dataTransfer.effectAllowed = "move";
-          onDragPane(pane.id);
-        }}
-        onDragEnd={() => onDragPane(null)}
-        onDoubleClick={(event) => {
-          if ((event.target as HTMLElement).closest("button") || !(canZoom || zoomed)) return;
-          onZoom();
-        }}
-      >
-        {canMove && (
-          <span className="pane-grip" {...tipProps(t("pane.drag"))}>
-            <GripVertical size={13} />
-          </span>
-        )}
-        {state === "live" ? (
-          <span className="dot running" role="img" aria-label={t("pane.running")} {...tipProps(t("pane.running"))} />
-        ) : state === "exited" ? (
-          <span className="dot stopped" role="img" aria-label={t("pane.exited")} {...tipProps(t("pane.exited"))} />
-        ) : (
-          <span className="dot" role="img" aria-label={t("pane.idle")} {...tipProps(t("pane.idle"))} />
-        )}
-        <span className="pane-title truncate">{shown}</span>
-        {shown !== title && <span className="pane-sub truncate">{title}</span>}
-        {alsoHere.length > 0 && (
-          <span className="pane-sub truncate" {...tipProps(t("occupancy.paneTip"))}>
-            {t("occupancy.alsoHere", { names: alsoHere.join(", ") })}
-          </span>
-        )}
-        {runId && (
-          <button type="button" className="pane-run-link" onClick={onReview} {...tipProps(t("pane.openRun"))}>
-            {t("pane.run")}
-          </button>
-        )}
-        {zoomed && <span className="chip accent">{t("pane.maximized")}</span>}
-        {talk && runtime?.ptyId && <TalkChip ptyId={runtime.ptyId} talk={talk} />}
-        <span className="grow" />
-        <div className="pane-actions">
-          {state === "live" && runtime?.ptyId && (
-            <TalkButton
-              ptyId={runtime.ptyId}
-              targets={talkTargets}
-              engines={reviewEngines}
-              selection={() => terminalRef.current?.selection() ?? ""}
-              onDraft={onDraft}
-              onNewReviewer={onNewReviewer}
-            />
-          )}
-          {(canZoom || zoomed) && (
-            <Button size="sm" variant="ghost" icon={zoomed ? Minimize2 : Maximize2} tip={zoomed ? t("pane.restore") : t("pane.maximize")} kbd="Ctrl+Shift+M" onClick={onZoom} />
-          )}
-          <Button size="sm" variant="ghost" icon={X} tip={t("pane.close")} kbd="Ctrl+Shift+W" onClick={onClose} />
-        </div>
-      </div>
-      {dragging && dragging !== pane.id && (
-        <div
-          className="pane-drop"
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes(PANE_MIME)) return;
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "move";
-            const next = zoneFor(event);
-            setZone((prev) => (prev === next ? prev : next));
-          }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node)) setZone(null);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const source = event.dataTransfer.getData(PANE_MIME);
-            const where = zone ?? "center";
-            setZone(null);
-            if (source) onDropPane(source, where);
-          }}
-        >
-          {zone && (
-            <div className={`drop-zone zone-${zone}`}>
-              <span>{zone === "center" ? t("pane.swap") : t(`pane.dock.${zone}`)}</span>
-            </div>
-          )}
-        </div>
-      )}
-      {runtime?.ptyId && state !== "idle" ? (
-        <>
-          <LiveTerminal
-            key={runtime.ptyId}
-            ref={(handle) => {
-              terminalRef.current = handle;
-              register(handle);
-            }}
-            ptyId={runtime.ptyId}
-            active={active}
-            autoFocus={focused}
-            onFocus={onFocus}
-            onLink={onOpenLink}
-            onExit={(info) => onExit(info.signal ? t("pane.exitSignal", { signal: info.signal }) : t("pane.exitCode", { code: info.exitCode ?? "?" }))}
-          />
-          {state === "exited" && (
-            <div className="pane-exit">
-              <span className="grow truncate">
-                {title} {runtime.exitText}
-              </span>
-              {pane.launch.type === "engine" && engine?.continueArgs?.length ? (
-                <Button size="sm" icon={RotateCcw} onClick={() => onStart(pane.launch, true)}>
-                  {t("common.continue")}
-                </Button>
-              ) : null}
-              <Button size="sm" icon={Play} onClick={() => onStart(pane.launch)}>
-                {t("common.restart")}
-              </Button>
-              <Button size="sm" variant="ghost" icon={X} onClick={onClose}>
-                {t("common.close")}
-              </Button>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="pane-idle">
-          {state === "starting" ? (
-            <span className="hstack">
-              <span className="spinner" /> {t("pane.starting", { title })}
-            </span>
-          ) : pane.launch.type === "engine" ? (
-            <>
-              <span>
-                {t("pane.lastTime", { title })}
-                {engine && !engine.available ? ` ${t("pane.notOnPath")}` : ""}
-              </span>
-              <div className="launchers">
-                {engine?.continueArgs?.length ? (
-                  <Button variant="primary" icon={RotateCcw} disabled={!engine?.available} onClick={() => onStart(pane.launch, true)}>
-                    {t("pane.continueSession")}
-                  </Button>
-                ) : null}
-                <Button icon={Play} disabled={!engine?.available} onClick={() => onStart(pane.launch)}>
-                  {t("pane.startEngine", { title })}
-                </Button>
-                <Button icon={TerminalSquare} onClick={() => onStart({ type: "shell" })}>
-                  {t("pane.shellInstead")}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <span>{t("pane.nothing")}</span>
-              <div className="launchers">
-                <Button variant="primary" icon={TerminalSquare} onClick={() => onStart({ type: "shell" })}>
-                  {t("code.newTerminal")}
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }

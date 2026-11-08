@@ -4,6 +4,7 @@ import type { AttentionMark } from "./attention.js";
 import { call, errorText } from "./api.js";
 import { t as translate, useT } from "./i18n/index.js";
 import { covers, sameBox, type Box, type Layer } from "./floating.js";
+import { isShortcut } from "./shortcuts.js";
 
 // ------------------------------------------------------------------ routes
 
@@ -251,7 +252,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   latest.current = [...toasts].reverse().find((toast) => toast.action);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || event.key.toLowerCase() !== "z") return;
+      if (!isShortcut("toast.undo", event)) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true'], .xterm")) return;
       const toast = latest.current;
