@@ -254,7 +254,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       if (!isShortcut("toast.undo", event)) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true'], .xterm")) return;
+      if (target?.closest("input, textarea, select, [contenteditable='true'], .xterm:not(.replay .xterm)")) return;
       const toast = latest.current;
       if (!toast?.action) return;
       event.preventDefault();
