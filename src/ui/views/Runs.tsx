@@ -73,8 +73,8 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
       const by = isShortcut("runs.next", event) ? 1 : isShortcut("runs.prev", event) ? -1 : 0;
       if (!by) return;
       const target = event.target as HTMLElement | null;
-      // A finished run's replayed screen is read-only, so J and K still step from there.
-      if (target?.closest("input, textarea, select, [contenteditable], .xterm:not(.replay .xterm), .modal, .sheet")) return;
+      // A finished run's replayed screen is read-only (its xterm's own textarea included), so J and K still step from there.
+      if (!target?.closest(".term.replay") && target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
       event.preventDefault();
       // The live CLI the next run shows leaves J and K to the list (see markKeyboardNavigation).
       markKeyboardNavigation();
