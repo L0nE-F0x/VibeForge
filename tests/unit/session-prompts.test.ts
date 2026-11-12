@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readGrokPrompts, readMusePrompts } from "../../src/core/session-prompts.js";
 
 describe("Grok prompts for a typed run", () => {
@@ -30,6 +30,33 @@ describe("Grok prompts for a typed run", () => {
     fs.writeFileSync(path.join(other, "chat_history.jsonl"), `${line("user", "<user_query>Old</user_query>")}\n`);
     expect(readGrokPrompts(home, cwd, started)).toBe("Fix the layout\n\nSecond");
     expect(readGrokPrompts(home, cwd, "2026-09-27T18:00:00.000Z")).toBe("");
+  });
+
+  it("doesn't open sessions whose folder last changed before the run started, and remembers its match", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-grok-"));
+    const cwd = "/tmp/busy";
+    const root = path.join(home, "sessions", encodeURIComponent(cwd));
+    const started = "2026-11-10T10:00:00.000Z";
+    const session = (name: string, created: string, query: string) => {
+      const dir = path.join(root, name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "summary.json"), JSON.stringify({ created_at: created }));
+      fs.writeFileSync(path.join(dir, "chat_history.jsonl"), `${JSON.stringify({ type: "user", content: [{ type: "text", text: `<user_query>${query}</user_query>` }] })}\n`);
+      return dir;
+    };
+    const old = session("old", "2026-11-01T10:00:00.000Z", "Old");
+    const day = new Date("2026-11-01T10:00:05Z");
+    fs.utimesSync(old, day, day);
+    const mine = session("mine", "2026-11-10T10:00:01.000Z", "Mine");
+    const later = new Date("2026-11-10T10:05:00Z");
+    fs.utimesSync(mine, later, later);
+    const read = vi.spyOn(fs, "readFileSync");
+    const summaries = () => read.mock.calls.filter(([file]) => String(file).endsWith("summary.json")).map(([file]) => path.basename(path.dirname(String(file))));
+    expect(readGrokPrompts(home, cwd, started)).toBe("Mine");
+    expect(summaries()).toEqual(["mine"]);
+    expect(readGrokPrompts(home, cwd, started)).toBe("Mine");
+    expect(summaries()).toEqual(["mine"]);
+    read.mockRestore();
   });
 });
 

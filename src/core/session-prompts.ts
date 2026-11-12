@@ -49,10 +49,21 @@ function queriesFromChat(text: string): string[] {
   return found;
 }
 
-/** The Grok session that started with this run, if one was written within a few seconds. */
-function sessionDir(root: string, startedAt: string): string | null {
+/** Sessions already matched to a run's start, by folder and start: opening a run again reads no other folder. */
+const matched = new Map<string, string | null>();
+const MATCHED_MAX = 500;
+
+/**
+ * The Grok session that started with this run, if one was written within a few seconds. A
+ * session's folder is made when it starts and only changes later, so a folder last changed before
+ * the run started can't be its session: only the others have their summary.json read. Grok keeps
+ * hundreds of sessions for a busy folder.
+ */
+function sessionDir(root: string, startedAt: string, now = Date.now()): string | null {
   const start = Date.parse(startedAt);
   if (!Number.isFinite(start)) return null;
+  const key = `${root}\n${start}`;
+  if (matched.has(key)) return matched.get(key) ?? null;
   let names: string[];
   try {
     names = fs.readdirSync(root);
@@ -61,9 +72,15 @@ function sessionDir(root: string, startedAt: string): string | null {
   }
   let best: { dir: string; delta: number } | null = null;
   for (const name of names) {
+    const dir = path.join(root, name);
+    try {
+      if (fs.statSync(dir).mtimeMs < start - MATCH_MS) continue;
+    } catch {
+      continue;
+    }
     let summary: { created_at?: string };
     try {
-      summary = JSON.parse(fs.readFileSync(path.join(root, name, "summary.json"), "utf8")) as { created_at?: string };
+      summary = JSON.parse(fs.readFileSync(path.join(dir, "summary.json"), "utf8")) as { created_at?: string };
     } catch {
       continue;
     }
@@ -71,9 +88,15 @@ function sessionDir(root: string, startedAt: string): string | null {
     if (!Number.isFinite(created)) continue;
     const delta = Math.abs(created - start);
     if (delta > MATCH_MS) continue;
-    if (!best || delta < best.delta) best = { dir: path.join(root, name), delta };
+    if (!best || delta < best.delta) best = { dir, delta };
   }
-  return best?.dir ?? null;
+  const found = best?.dir ?? null;
+  // A match is for good; no match is only final once a session made later couldn't be its own.
+  if (found || now - start > 2 * MATCH_MS) {
+    if (matched.size >= MATCHED_MAX) matched.delete(matched.keys().next().value as string);
+    matched.set(key, found);
+  }
+  return found;
 }
 
 /**
