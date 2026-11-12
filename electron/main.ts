@@ -14,6 +14,7 @@ import { savedDockUrl } from "../src/shared/dock-url.js";
 import { syncCompanion } from "./companion.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
+import { secondStartArgs } from "./guards.js";
 import { Dock } from "./dock.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { answerTalk, registerIpc } from "./ipc.js";
@@ -133,6 +134,12 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   // `vibeforge --voice start` from a keybinding reaches the window here when the control socket can't.
   app.on("second-instance", (_event, argv) => {
+    // Started again while this copy is on its way out (a CLI taking its seconds to end): the new
+    // start lost the lock to this one, so come back once this one has gone.
+    if (ctx.quitting) {
+      if (!voiceArg(argv)) app.relaunch({ args: secondStartArgs(process.argv, argv) });
+      return;
+    }
     const action = voiceArg(argv);
     if (action) send("voice-command", { action });
     // A second autostart at login shouldn't pull the window up.
