@@ -365,7 +365,7 @@ export const fr: Catalog = {
   "settings.usage": "Afficher l'utilisation des tokens dans la barre",
   "settings.usageHint": "Additionne ce que Claude Code, Codex, Grok Build, Gemini CLI et Muse notent dans leurs propres journaux sur cette machine. Rien n'est envoyé nulle part.",
   "settings.planLimits": "Afficher les limites des forfaits",
-  "settings.planLimitsHint": "Affiche chaque forfait de code auquel cette machine est connectée, et laisse les autres de côté. Demande à Anthropic, xAI, Moonshot, OpenAI et Meta au plus toutes les 3 minutes, avec la connexion que cette CLI a déjà enregistrée, et ne la renouvelle ni ne la conserve. Codex et Muse s'affichent aussi depuis leurs propres journaux, même quand ceci est désactivé.",
+  "settings.planLimitsHint": "Affiche chaque forfait de code auquel cette machine est connectée, et laisse les autres de côté. Demande à Anthropic, xAI, Google, Moonshot, OpenAI et Meta au plus toutes les 3 minutes, avec la connexion que cette CLI a déjà enregistrée, et ne la renouvelle ni ne la conserve. Codex et Muse s'affichent aussi depuis leurs propres journaux, même quand ceci est désactivé.",
   "settings.activity": "Graphe des contributions sur l'accueil",
   "settings.activity.off": "Désactivé",
   "settings.activity.git": "Mes commits",

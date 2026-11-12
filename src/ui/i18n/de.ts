@@ -364,7 +364,7 @@ export const de: Catalog = {
   "settings.usage": "Token-Nutzung in der Leiste zeigen",
   "settings.usageHint": "Zählt zusammen, was Claude Code, Codex, Grok Build, Gemini CLI und Muse in ihren eigenen Logs auf diesem Rechner festhalten. Nichts wird irgendwohin gesendet.",
   "settings.planLimits": "Abo-Limits zeigen",
-  "settings.planLimitsHint": "Zeigt jedes Coding-Abo, bei dem dieser Rechner angemeldet ist, und lässt die anderen weg. Fragt Anthropic, xAI, Moonshot, OpenAI und Meta höchstens alle 3 Minuten mit der Anmeldung, die diese CLI schon gespeichert hat, und erneuert oder behält sie nie. Codex und Muse erscheinen auch aus ihren eigenen Logs, selbst wenn das hier aus ist.",
+  "settings.planLimitsHint": "Zeigt jedes Coding-Abo, bei dem dieser Rechner angemeldet ist, und lässt die anderen weg. Fragt Anthropic, xAI, Google, Moonshot, OpenAI und Meta höchstens alle 3 Minuten mit der Anmeldung, die diese CLI schon gespeichert hat, und erneuert oder behält sie nie. Codex und Muse erscheinen auch aus ihren eigenen Logs, selbst wenn das hier aus ist.",
   "settings.activity": "Beitragsgrafik auf der Startseite",
   "settings.activity.off": "Aus",
   "settings.activity.git": "Meine Commits",

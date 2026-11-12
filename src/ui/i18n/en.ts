@@ -374,7 +374,7 @@ export const en = {
   "settings.usage": "Show token usage in the rail",
   "settings.usageHint": "Adds up what Claude Code, Codex, Grok Build, Gemini CLI and Muse record in their own logs on this machine. Nothing is sent anywhere.",
   "settings.planLimits": "Show plan limits",
-  "settings.planLimitsHint": "Shows each coding plan this machine is signed in to, and leaves the others out. Asks Anthropic, xAI, Moonshot, OpenAI and Meta at most every 3 minutes, with the sign-in that CLI already saved, and never renews or keeps it. Codex and Muse also show from their own logs, even while this is off.",
+  "settings.planLimitsHint": "Shows each coding plan this machine is signed in to, and leaves the others out. Asks Anthropic, xAI, Google, Moonshot, OpenAI and Meta at most every 3 minutes, with the sign-in that CLI already saved, and never renews or keeps it. Codex and Muse also show from their own logs, even while this is off.",
   "settings.activity": "Contribution graph on Home",
   "settings.activity.off": "Off",
   "settings.activity.git": "My commits",
