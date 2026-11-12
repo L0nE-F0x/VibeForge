@@ -945,6 +945,7 @@ export const de: Catalog = {
   "core.copyMove": "Übernimm oder verwirf die Kopie der Aufgabe, bevor du sie in einen anderen Arbeitsbereich verschiebst.",
   "core.noCopy": "Diese Aufgabe hat keine eigene Kopie.",
   "core.copyUntrusted": "Die Kopie dieser Aufgabe liegt nicht in VibeForges Worktree-Ordner und wurde deshalb nicht angerührt.",
+  "core.copyNestedRepo": "Die Änderungen der Kopie ließen sich nicht lesen: {folder} in der Kopie ist ein eigenes Git-Repository, in dem noch nichts committet ist. Committe dort etwas oder entferne seinen .git-Ordner und versuche es erneut.",
   "core.copyOtherRepo": "Die Kopie dieser Aufgabe nennt ein anderes Repository und wurde deshalb nicht angerührt.",
   "core.stopBeforeApply": "Stoppe die Aufgabe, bevor du ihre Änderungen übernimmst.",
   "core.stopBeforeDiscard": "Stoppe die Aufgabe, bevor du ihre Kopie verwirfst.",

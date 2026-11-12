@@ -3,10 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { MESSAGE_INLINE_MAX } from "../agent-talk.js";
 import { writeFileAtomic } from "../fsx.js";
+import { slimPatch } from "../vcs.js";
 import type { ServiceCore } from "./core.js";
 
 /** Saved messages and patches stay this long: a CLI handed a path may read it a good while later. */
 const KEEP_FILES_MS = 3 * 24 * 60 * 60 * 1000;
+/** How often old saved files are looked for, besides whenever one is saved. */
+const TIDY_EVERY_MS = 60 * 60 * 1000;
+/** The folders saved files go in. */
+const FOLDERS = ["messages", "reviews"] as const;
 
 /** Messages, reviews and patches saved in the data folder, for a CLI to read by their path. */
 export class SavedFiles {
@@ -15,6 +20,28 @@ export class SavedFiles {
     /** The texts of messages still in line or still being answered: a file one names is kept. */
     private readonly inUse: () => string[],
   ) {}
+
+  /**
+   * A patch for a CLI to read, slimmed (see slimPatch): binary contents named, the whole capped.
+   * The changes themselves are still where they were made.
+   */
+  savePatch(patch: string): string {
+    return this.saveFile("reviews", "patch", slimPatch(patch));
+  }
+
+  /**
+   * Tidy every folder now and then from now on, not only when another file is saved: a folder
+   * nothing has been saved to in days kept its files for good. Returns the stop.
+   */
+  tidyNowAndHourly(): () => void {
+    const tidyAll = () => {
+      for (const folder of FOLDERS) this.tidy(path.join(this.core.options.dataRoot, folder));
+    };
+    tidyAll();
+    const timer = setInterval(tidyAll, TIDY_EVERY_MS);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  }
 
   /** A long text goes in a file: a CLI reads a path more reliably than a paste of many screens. */
   saveIfLong(folder: string, text: string): string | null {

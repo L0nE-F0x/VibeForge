@@ -30,6 +30,8 @@ async function clis(folder?: string) {
   const a = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
   const b = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
   const codex = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "codex" });
+  // What was there when they started is read as they start, before a real CLI could change anything.
+  await Promise.all([...ctx.svc.dirtyAtStart.values()]);
   at += 5000;
   return { ctx, a: a.ptyId, b: b.ptyId, codex: codex.ptyId };
 }

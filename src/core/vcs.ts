@@ -77,6 +77,17 @@ export async function gitHead(cwd: string, timeoutMs = 3000): Promise<string | n
   return result.code === 0 && /^[0-9a-f]{7,64}$/.test(sha) ? sha : null;
 }
 
+/**
+ * The work tree's top folder, or null outside one. Git names files from there in a patch and in
+ * `status --porcelain`, while `ls-files` names them from the folder it runs in, so everything that
+ * names files works from the top: a CLI started in `packages/web` still has one set of names.
+ */
+async function topLevel(cwd: string, timeoutMs: number): Promise<string | null> {
+  const result = await execGit(["rev-parse", "--show-toplevel"], cwd, timeoutMs);
+  const top = result.stdout.trim();
+  return result.code === 0 && top ? path.resolve(top) : null;
+}
+
 export async function isGitRepo(cwd: string, timeoutMs = 3000): Promise<boolean> {
   if (!cwd) return false;
   const result = await execGit(["rev-parse", "--is-inside-work-tree"], cwd, timeoutMs);
@@ -124,9 +135,10 @@ export async function diffSince(cwd: string, startHead: string | null, timeoutMs
   if (!cwd || !(await isGitRepo(cwd, Math.min(3000, Math.max(1, timeoutMs))))) return "";
   const started = Date.now();
   const budget = () => Math.max(1, timeoutMs - (Date.now() - started));
-  const tracked = await trackedDiff(cwd, startHead, budget);
+  const root = (await topLevel(cwd, budget())) ?? cwd;
+  const tracked = await trackedDiff(root, startHead, budget);
   if (tracked.includes("# saved diff truncated") || tracked.length >= MAX_PATCH) return capPatch(tracked);
-  const created = await newFileDiffs(cwd, budget, MAX_PATCH - tracked.length);
+  const created = await newFileDiffs(root, budget, MAX_PATCH - tracked.length);
   return capPatch(joinBlocks(tracked, created));
 }
 
@@ -254,14 +266,32 @@ function joinBlocks(left: string, right: string): string {
   return left.endsWith("\n") ? `${left}${right}` : `${left}\n${right}`;
 }
 
-function capPatch(text: string): string {
-  if (text.length <= MAX_PATCH) return text;
-  const cut = text.slice(0, MAX_PATCH);
+/**
+ * A patch to save for a CLI to read: binary contents (a `--binary` diff's "GIT binary patch"
+ * blocks) named rather than copied in, which a CLI can't read anyway, and the whole cut at the size
+ * a run's saved diff is. A copy with a few images in it made patches of many megabytes.
+ */
+export function slimPatch(patch: string, max = MAX_PATCH): string {
+  const blocks = patch.split(/^(?=diff --git )/m).map((block) => {
+    const at = block.indexOf("\nGIT binary patch\n");
+    if (at < 0) return block;
+    const names = /^diff --git a\/(.+?) b\/(.+)$/m.exec(block);
+    return `${block.slice(0, at + 1)}Binary files ${names ? `a/${names[1]} and b/${names[2]}` : "a and b"} differ\n`;
+  });
+  return capPatch(blocks.join(""), max);
+}
+
+function capPatch(text: string, max = MAX_PATCH): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
   return `${cut.endsWith("\n") ? cut : `${cut}\n`}# saved diff truncated\n`;
 }
 
-/** Files already changed in a work tree, each with a stamp of what it holds: what a CLI found when it started. */
-export type DirtyFiles = Map<string, string>;
+/**
+ * Files already changed in a work tree, each with a stamp of what it holds: what a CLI found when
+ * it started. Names are from the work tree's top folder, `root`.
+ */
+export type DirtyFiles = Map<string, string> & { root?: string };
 
 const DIRTY_MAX = 1000;
 const STAMP_HASH_MAX = 8 * 1024 * 1024;
@@ -273,7 +303,9 @@ const STAMP_HASH_MAX = 8 * 1024 * 1024;
  */
 export async function dirtyFiles(cwd: string, timeoutMs = 5000): Promise<DirtyFiles | null> {
   if (!cwd) return null;
-  const status = await execGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd, timeoutMs);
+  const started = Date.now();
+  const root = (await topLevel(cwd, timeoutMs)) ?? cwd;
+  const status = await execGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], root, Math.max(1, timeoutMs - (Date.now() - started)));
   if (status.code !== 0 || status.timedOut || status.truncated) return null;
   const fields = status.stdout.split("\0");
   const names: string[] = [];
@@ -285,9 +317,9 @@ export async function dirtyFiles(cwd: string, timeoutMs = 5000): Promise<DirtyFi
     if (/[RC]/.test(entry.slice(0, 2))) index += 1;
   }
   if (names.length > DIRTY_MAX) return null;
-  const files: DirtyFiles = new Map();
+  const files: DirtyFiles = Object.assign(new Map<string, string>(), { root });
   for (const name of names) {
-    const full = fileInWorkTree(cwd, name);
+    const full = fileInWorkTree(root, name);
     if (full) files.set(name, fileStamp(full));
   }
   return files;
@@ -313,12 +345,14 @@ function fileStamp(full: string): string {
  */
 export function leaveOutUntouched(patch: string, cwd: string, before: DirtyFiles | null | undefined): string {
   if (!before?.size || !patch) return patch;
+  // The names in both are from the top of the work tree, which is where the stamps were taken.
+  const root = before.root ?? cwd;
   return patch
     .split(/^(?=diff --git )/m)
     .map((block) => {
       const name = /^diff --git a\/.+? b\/(.+)$/m.exec(block)?.[1];
       if (!name || !block.startsWith("diff --git ") || !before.has(name)) return block;
-      const full = fileInWorkTree(cwd, name);
+      const full = fileInWorkTree(root, name);
       if (!full || fileStamp(full) !== before.get(name)) return block;
       return block
         .split("\n")

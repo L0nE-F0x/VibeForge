@@ -343,4 +343,14 @@ describe("plan limits", () => {
     // Flat or falling never fills.
     expect(fullAt(points.map((point) => ({ ...point, percent: 50 })), 50, NOW)).toBeNull();
   });
+
+  it("doesn't say a window fills after it resets, or read one window's climb as another's", () => {
+    const climb = [0, 1, 2, 3].map((step) => ({ t: new Date(NOW - (3 - step) * 3600_000).toISOString(), percent: 25 + step * 5, w: "5h" }));
+    // 40% now, 5% an hour: twelve hours to go, but the window resets in one.
+    expect(fullAt(climb, 40, NOW, { limiter: "5h", resetsAt: inHours(1) })).toBeNull();
+    expect(fullAt(climb, 40, NOW, { limiter: "5h", resetsAt: inHours(20) })).toBe(inHours(12));
+    // The week became the fullest a moment ago: the 5-hour window's points are no pace for it.
+    const switched = [...climb, { t: new Date(NOW).toISOString(), percent: 41, w: "week" }];
+    expect(fullAt(switched, 41, NOW, { limiter: "week", resetsAt: inHours(100) })).toBeNull();
+  });
 });

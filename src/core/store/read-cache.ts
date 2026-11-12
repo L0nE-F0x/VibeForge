@@ -18,7 +18,8 @@ function fileStamp(file: string): { key: string; settled: boolean } | null {
 }
 
 /**
- * Settings, engines and agents as last parsed, kept while their file is unchanged on disk. The
+ * Settings, engines, workspaces, agents, routines, tasks and chats as last parsed, kept while their
+ * file is unchanged on disk. The
  * services read them hundreds of times a refresh, and a stat costs far less than parsing again.
  * These are files people edit by hand, so the stamp (inode, size, modify and change times) is
  * checked on every read, and the store's own writes drop the entry at once. Every read gets its

@@ -69,11 +69,11 @@ export class TeamService extends ServiceCore {
     super.prepareShutdown();
   }
 
-  override close(): void {
+  override close(): Promise<void> {
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
-    super.close();
+    return super.close();
   }
 
   // ---------------------------------------------------------------- library
@@ -312,7 +312,7 @@ export class TeamService extends ServiceCore {
     return this.messages.tell(input);
   }
 
-  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
+  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TaskResult> {
     return this.messages.handTask(input);
   }
 

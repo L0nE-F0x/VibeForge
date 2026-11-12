@@ -219,17 +219,23 @@ export class Config {
   }
 
   readWorkspaces(): WorkspaceFile {
-    const raw = readJson<unknown>(path.join(this.configRoot, "workspaces.json"), null);
-    const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
-    const workspaces = Array.isArray(list)
-      ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
-      : [];
-    const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
-    return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+    const file = path.join(this.configRoot, "workspaces.json");
+    // Read for nearly everything (each task, run and terminal names its workspace): parsed once while it holds still.
+    return this.cache.read(file, () => {
+      const raw = readJson<unknown>(file, null);
+      const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
+      const workspaces = Array.isArray(list)
+        ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
+        : [];
+      const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
+      return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+    });
   }
 
   writeWorkspaces(file: WorkspaceFile): void {
-    writeJson(path.join(this.configRoot, "workspaces.json"), file);
+    const target = path.join(this.configRoot, "workspaces.json");
+    writeJson(target, file);
+    this.cache.forget(target);
   }
 
   readLayout(workspaceId: string): LayoutNode | null {

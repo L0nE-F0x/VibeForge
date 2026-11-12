@@ -228,6 +228,45 @@ describe("applying a task's copy", () => {
     const patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n-nothing like this\n+at all\n the end\n";
     await expect(applyToWorkspace(copy, patch)).rejects.toThrow(/^The changes don't apply to the workspace/);
   });
+
+  it("brings text in other encodings across byte for byte", async () => {
+    const latin1 = (text: string) => Buffer.from(text, "latin1");
+    const { repo, copy, owner } = await repoWithCopy({ "fr.properties": latin1("titre=Café\nfin=oui\n") });
+    // The agent edits a Latin-1 file and adds another; neither is valid UTF-8.
+    write(copy.path, "fr.properties", latin1("titre=Café crème\nfin=oui\n"));
+    write(copy.path, "de.properties", latin1("grüße=Grüße\n"));
+    expect(await apply(copy, owner)).toEqual({ files: ["de.properties", "fr.properties"], conflicts: [], kept: [] });
+    expect(fs.readFileSync(path.join(repo, "fr.properties"))).toEqual(latin1("titre=Café crème\nfin=oui\n"));
+    expect(fs.readFileSync(path.join(repo, "de.properties"))).toEqual(latin1("grüße=Grüße\n"));
+  });
+
+  it("keeps a git repository made inside the copy instead of dropping it", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("one", "ONE"));
+    // The agent clones something into its copy.
+    const vendored = path.join(copy.path, "vendor", "lib");
+    fs.mkdirSync(vendored, { recursive: true });
+    git(vendored, "init", "-q");
+    write(vendored, "lib.js", "export {};\n");
+    git(vendored, "add", "-A");
+    git(vendored, "commit", "-qm", "lib");
+    const result = await apply(copy, owner);
+    expect(result.conflicts).toEqual(["vendor/lib"]);
+    expect(result.kept).toEqual(["vendor/lib"]);
+    // The rest still comes in; the repository stays in the copy, where it can be fetched by hand.
+    expect(read(repo, "a.txt")).toBe(LINES.replace("one", "ONE"));
+    expect(fs.existsSync(path.join(repo, "vendor"))).toBe(false);
+    expect(fs.existsSync(path.join(vendored, "lib.js"))).toBe(true);
+  });
+
+  it("names a repository with nothing committed inside the copy, instead of git's error", async () => {
+    const { copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    const nested = path.join(copy.path, "scratch");
+    fs.mkdirSync(nested);
+    git(nested, "init", "-q");
+    write(nested, "notes.md", "draft\n");
+    await expect(copyPatch(copy, owner)).rejects.toThrow("scratch in the copy is a git repository of its own with nothing committed yet");
+  });
 });
 
 /** The worktrees git has registered in `repo`, as `git worktree list --porcelain` shows them. */

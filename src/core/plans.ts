@@ -29,6 +29,8 @@ export interface PlanWindow {
 export interface PlanPoint {
   t: string;
   percent: number;
+  /** The window that was fullest then ("5h", "week"); points from before 2.16 have none. */
+  w?: string | null;
 }
 
 /** Why the numbers shown aren't fresh. */
@@ -543,13 +545,18 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
 
 // ------------------------------------------------------------------ pace
 
-/** When `percent` reaches 100 at the pace of the recent points, or null if it won't within two days. */
-export function fullAt(history: readonly PlanPoint[], percent: number | null, now: number): string | null {
+/**
+ * When `percent` reaches 100 at the pace of the recent points, or null if it won't within two
+ * days, or not before the window resets (`resetsAt`). Only points from the same window
+ * (`limiter`) count: a 5-hour window's climb says nothing about the week's.
+ */
+export function fullAt(history: readonly PlanPoint[], percent: number | null, now: number, window: { limiter?: string | null; resetsAt?: string | null } = {}): string | null {
   if (percent === null || percent >= 100) return null;
   let points: Array<{ t: number; v: number }> = [];
   for (const point of history) {
     const t = Date.parse(point.t);
     if (Number.isNaN(t)) continue;
+    if (window.limiter && point.w && point.w !== window.limiter) continue;
     // A big drop is a window resetting; only the climb since then says anything.
     if (points.length && point.percent < points[points.length - 1].v - 15) points = [];
     points.push({ t, v: point.percent });
@@ -575,6 +582,8 @@ export function fullAt(history: readonly PlanPoint[], percent: number | null, no
   if (!(slope > 0)) return null;
   const left = (100 - percent) / slope;
   if (!Number.isFinite(left) || left <= 0 || left > 48 * 3600_000) return null;
+  const resets = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  if (Number.isFinite(resets) && now + left >= resets) return null;
   return new Date(now + left).toISOString();
 }
 
@@ -679,7 +688,7 @@ export class PlanWatcher {
         }
         const reading = next.reading ?? kept?.reading ?? null;
         this.kept.set(provider.id, { reading, readAt: next.reading ? new Date(now).toISOString() : (kept?.readAt ?? null), problem: next.problem, askedAt: now });
-        if (next.reading) dirty = this.remember(provider.id, next.reading.percent, now) || dirty;
+        if (next.reading) dirty = this.remember(provider.id, next.reading.percent, now, next.reading.limiter) || dirty;
       });
       await Promise.all(asks);
     }
@@ -697,7 +706,7 @@ export class PlanWatcher {
       if (kept?.reading && (logAt === null || (keptAt !== null && logAt <= keptAt))) continue;
       const when = logAt ?? now;
       this.kept.set(id, { reading, readAt: new Date(when).toISOString(), problem: null, askedAt: kept?.askedAt ?? 0 });
-      dirty = this.remember(id, reading.percent, when) || dirty;
+      dirty = this.remember(id, reading.percent, when, reading.limiter) || dirty;
       hidden.delete(id);
       include(id);
     }
@@ -726,14 +735,14 @@ export class PlanWatcher {
   }
 
   /** Adds a point to the day's line, unless it only repeats the last one. */
-  private remember(id: PlanId, percent: number, now: number): boolean {
+  private remember(id: PlanId, percent: number, now: number, limiter: string | null = null): boolean {
     const points = (this.history[id] ?? []).filter((point) => now - Date.parse(point.t) < HISTORY_MS);
     const last = points[points.length - 1];
-    if (last && last.percent === percent && now - Date.parse(last.t) < 10 * 60_000) {
+    if (last && last.percent === percent && (last.w ?? null) === limiter && now - Date.parse(last.t) < 10 * 60_000) {
       this.history[id] = points;
       return false;
     }
-    points.push({ t: new Date(now).toISOString(), percent });
+    points.push({ t: new Date(now).toISOString(), percent, ...(limiter ? { w: limiter } : {}) });
     this.history[id] = points;
     return true;
   }
@@ -767,7 +776,7 @@ export class PlanWatcher {
       readAt: kept.readAt,
       problem: kept.problem,
       history,
-      fullAt: kept.problem ? null : fullAt(history, percent, now),
+      fullAt: kept.problem ? null : fullAt(history, percent, now, { limiter, resetsAt }),
     };
   }
 

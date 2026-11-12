@@ -946,6 +946,7 @@ export const zh: Catalog = {
   "core.copyMove": "将任务移到其他工作区前，请先应用或丢弃它的副本。",
   "core.noCopy": "此任务没有单独副本。",
   "core.copyUntrusted": "此任务的副本不在 VibeForge 的 worktrees 文件夹中，因此没有动它。",
+  "core.copyNestedRepo": "无法读取副本的更改：副本中的 {folder} 是一个独立的 git 仓库，还没有任何提交。请在其中提交，或删除它的 .git 文件夹，然后重试。",
   "core.copyOtherRepo": "此任务的副本指向另一个仓库，因此没有动它。",
   "core.stopBeforeApply": "应用改动前请先停止任务。",
   "core.stopBeforeDiscard": "丢弃副本前请先停止任务。",
