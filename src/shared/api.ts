@@ -219,6 +219,11 @@ export interface CompanionStatus {
   /** http://127.0.0.1:port while the page is up. */
   url: string | null;
   error: string | null;
+  /**
+   * Requests since the page started that came through a tailnet name without Tailscale's sign-in
+   * header: Tailscale Funnel (the page open to the internet), or a tagged device.
+   */
+  unsigned?: number;
 }
 
 export interface PtySnapshot {
