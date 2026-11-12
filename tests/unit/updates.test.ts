@@ -4,7 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { describeError, LogFile, PageErrors } from "../../src/core/log.js";
-import { INSTALL_URL, installKind, isNewer, parseVersion, releaseFrom, updateCommand } from "../../src/core/updates.js";
+import crypto from "node:crypto";
+import { INSTALL_URL, installKind, isNewer, parseVersion, releaseFrom, updateCommand, type Release } from "../../src/core/updates.js";
 
 describe("updates", () => {
   it("compares versions numerically, with or without a leading v", () => {
@@ -20,10 +21,24 @@ describe("updates", () => {
   it("reads GitHub's latest-release answer", () => {
     expect(
       releaseFrom({ tag_name: "v0.3.0", name: "VibeForge 0.3.0", html_url: "https://github.com/x/releases/tag/v0.3.0", body: "Notes", published_at: "2026-09-25T20:00:00Z" }),
-    ).toEqual({ version: "0.3.0", name: "VibeForge 0.3.0", url: "https://github.com/x/releases/tag/v0.3.0", notes: "Notes", publishedAt: "2026-09-25T20:00:00Z" });
+    ).toEqual({ version: "0.3.0", tag: "v0.3.0", name: "VibeForge 0.3.0", url: "https://github.com/x/releases/tag/v0.3.0", notes: "Notes", publishedAt: "2026-09-25T20:00:00Z", installer: null });
     expect(releaseFrom({ tag_name: "v1.2.3", name: "" })?.name).toBe("VibeForge v1.2.3");
     expect(releaseFrom({ message: "Not Found" })).toBeNull();
     expect(releaseFrom(null)).toBeNull();
+  });
+
+  it("reads the release's install.sh and the checksum GitHub lists for it", () => {
+    const sha = "a".repeat(64);
+    const asset = (name: string, digest?: string) => ({ name, browser_download_url: "https://evil.example/install.sh", ...(digest ? { digest } : {}) });
+    const release = releaseFrom({ tag_name: "v2.16.0", assets: [asset("SHA256SUMS"), asset("install.sh", `sha256:${sha.toUpperCase()}`)] });
+    // Made from the tag, whatever download address the answer gives.
+    expect(release?.installer).toEqual({ url: "https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh", sha256: sha });
+    expect(releaseFrom({ tag_name: "v2.13.0", assets: [asset("install.sh")] })?.installer?.sha256).toBeNull();
+    expect(releaseFrom({ tag_name: "v2.13.0", assets: [asset("install.sh", "md5:abc")] })?.installer?.sha256).toBeNull();
+    expect(releaseFrom({ tag_name: "v1.0.0", assets: [] })?.installer).toBeNull();
+    expect(releaseFrom({ tag_name: "v1.0.0" })?.installer).toBeNull();
+    // A tag that couldn't sit safely in a command line gets no installer.
+    expect(releaseFrom({ tag_name: "v1.0.0;rm", assets: [asset("install.sh", `sha256:${sha}`)] })?.installer).toBeNull();
   });
 
   it("knows how this copy was installed", () => {
@@ -37,8 +52,11 @@ describe("updates", () => {
   });
 
   it("builds the update command for each kind, quoting paths", () => {
+    expect(INSTALL_URL).toBe("https://github.com/L0nE-F0x/VibeForge/releases/latest/download/install.sh");
     expect(updateCommand("installer", "/home/me/My Apps/vf")).toBe(`set -o pipefail; curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME='/home/me/My Apps/vf' bash`);
-    expect(updateCommand("checkout", "/home/me/VibeForge")).toBe("cd /home/me/VibeForge && git pull --ff-only && npm install --no-audit --no-fund && npm run build");
+    expect(updateCommand("installer", "/home/me/My Apps/vf", undefined, null)).toContain(INSTALL_URL);
+    // npm ci leaves package-lock.json alone, so the next git pull --ff-only still applies.
+    expect(updateCommand("checkout", "/home/me/VibeForge")).toBe("cd /home/me/VibeForge && git pull --ff-only && npm ci --no-audit --no-fund && npm run build");
     expect(updateCommand("other", "/usr/lib/vibeforge")).toBeNull();
     expect(updateCommand("other", "/usr/lib/vibeforge", "yay -Syu vibeforge")).toBe("yay -Syu vibeforge");
   });
@@ -66,6 +84,51 @@ describe("updates", () => {
     expect(run('main() {\n  echo "half"\n', 18).status).not.toBe(0);
     // The installer itself failing.
     expect(run("exit 1\n").status).toBe(1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("runs the release's own installer only when it matches the checksum GitHub lists", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-update-"));
+    const app = path.join(dir, "My App");
+    const script = 'echo "installing $VIBEFORGE_VERSION into $VIBEFORGE_HOME"\n';
+    const sha = crypto.createHash("sha256").update(script).digest("hex");
+    const at = (sha256: string | null): Release => ({
+      version: "2.16.0",
+      tag: "v2.16.0",
+      name: "VibeForge 2.16.0",
+      url: "",
+      notes: "",
+      publishedAt: null,
+      installer: { url: "https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh", sha256 },
+    });
+    // A stand-in curl: writes CURL_SAYS to its -o file, after noting the address it was asked for.
+    fs.mkdirSync(path.join(dir, "bin"));
+    fs.writeFileSync(
+      path.join(dir, "bin", "curl"),
+      '#!/bin/bash\nout=""\nwhile [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; https://*) echo "$1" >>"$CURL_LOG" ;; esac; shift; done\nprintf %s "$CURL_SAYS" >"$out"\nexit "$CURL_EXIT"\n',
+      { mode: 0o755 },
+    );
+    const run = (release: Release, says: string, exit = 0) =>
+      spawnSync("/bin/bash", ["-c", updateCommand("installer", app, undefined, release) as string], {
+        encoding: "utf8",
+        env: { PATH: `${path.join(dir, "bin")}:/usr/bin:/bin`, CURL_SAYS: says, CURL_EXIT: String(exit), CURL_LOG: path.join(dir, "asked") },
+      });
+
+    const good = run(at(sha), script);
+    expect(good.status, good.stderr).toBe(0);
+    expect(good.stdout).toBe(`installing v2.16.0 into ${app}\n`);
+    expect(fs.readFileSync(path.join(dir, "asked"), "utf8")).toBe("https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh\n");
+    // Changed on the way: not run.
+    const tampered = run(at(sha), 'echo "something else"\n');
+    expect(tampered.status).toBe(1);
+    expect(tampered.stdout).toBe("");
+    expect(tampered.stderr).toContain("does not match the checksum GitHub lists for v2.16.0");
+    // No network.
+    expect(run(at(sha), "", 6).status).not.toBe(0);
+    // A release from before GitHub listed checksums still installs its own tag.
+    expect(run(at(null), script).stdout).toBe(`installing v2.16.0 into ${app}\n`);
+    // The downloaded installer doesn't stay behind in /tmp.
+    expect(updateCommand("installer", app, undefined, at(sha))).toContain(`trap 'rm -f "$f"' EXIT`);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
