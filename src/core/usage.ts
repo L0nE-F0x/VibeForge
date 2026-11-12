@@ -85,6 +85,21 @@ interface Ledger {
    */
   scanned: Record<string, string>;
   days: Record<string, Record<string, Record<string, Tokens>>>;
+  /**
+   * The time zone the days were counted in. A token's day is its local date, so after a move to
+   * another zone the days still read from the logs are counted again from nothing; otherwise
+   * tokens that moved to the next day would count on both. Missing in ledgers before 2.16.
+   */
+  zone?: string;
+}
+
+/** The time zone this machine's local dates are in now. */
+function currentZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
 }
 
 interface FileState {
@@ -663,8 +678,9 @@ function lastDays(now: Date, count: number): string[] {
 function cleanLedger(value: unknown): Ledger {
   const ledger: Ledger = { scanned: {}, days: {} };
   if (!value || typeof value !== "object") return ledger;
-  const record = value as { scanned?: unknown; days?: unknown };
+  const record = value as { scanned?: unknown; days?: unknown; zone?: unknown };
   if (!record.days || typeof record.days !== "object") return ledger;
+  if (typeof record.zone === "string" && record.zone) ledger.zone = record.zone;
   if (typeof record.scanned === "string" && DAY.test(record.scanned)) {
     // 2.3.0 kept one day for every CLI it read then, each of which has an entry in `days`.
     for (const id of Object.keys(record.days)) ledger.scanned[id] = record.scanned;
@@ -838,6 +854,18 @@ export class UsageScanner {
     const ledger = this.loadLedger();
     const windowStart = startOf(lastDays(now, USAGE_DAYS)[0]);
     let changed = false;
+    const zone = currentZone();
+    // Another time zone since the last pass: what each file was read as is in the old one's days.
+    // Those files are read again, and the days they fill are counted from nothing, not "only grows".
+    const moved = Boolean(ledger.zone && zone && ledger.zone !== zone);
+    if (moved) {
+      for (const state of this.files.values()) this.forget(state.keys);
+      this.files.clear();
+    }
+    if (zone && ledger.zone !== zone) {
+      ledger.zone = zone;
+      changed = true;
+    }
     const live = new Set<string>();
     const found: Array<Omit<UsageSource, "periods">> = [];
 
@@ -871,6 +899,8 @@ export class UsageScanner {
       }
       ledger.days[source.id] ??= {};
       const kept = ledger.days[source.id];
+      // The week's days, whose logs are all still there, are counted again; older ones stay.
+      if (moved) for (const day of Object.keys(kept)) if (startOf(day) >= windowStart) delete kept[day];
       for (const [day, models] of days) {
         kept[day] ??= {};
         const into = kept[day];
