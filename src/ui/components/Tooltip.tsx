@@ -16,6 +16,17 @@ interface Tip {
 
 const SHOW_DELAY = 420;
 const WARM_WINDOW = 500;
+/** A tip at a point rather than on an element: where a terminal's link really goes. */
+const POINTER_TIP_EVENT = "vibeforge:pointer-tip";
+
+/** Show `text` above the point (x, y) until the pointer leaves, a key is pressed or something scrolls. */
+export function showPointerTip(text: string, x: number, y: number): void {
+  window.dispatchEvent(new CustomEvent(POINTER_TIP_EVENT, { detail: { text, x, y } }));
+}
+
+export function hidePointerTip(): void {
+  window.dispatchEvent(new CustomEvent(POINTER_TIP_EVENT, { detail: null }));
+}
 
 function tipTarget(node: EventTarget | null): HTMLElement | null {
   if (!(node instanceof Element)) return null;
@@ -85,6 +96,17 @@ export function TooltipLayer() {
       else timer.current = window.setTimeout(reveal, SHOW_DELAY);
     };
     const warm = () => Date.now() - lastHidden.current < WARM_WINDOW;
+    const onPointerTip = (event: Event) => {
+      const detail = (event as CustomEvent<{ text: string; x: number; y: number } | null>).detail;
+      if (!detail) {
+        hide();
+        return;
+      }
+      window.clearTimeout(timer.current);
+      if (current.current) describedBy(current.current, []);
+      current.current = null;
+      setTip({ text: detail.text, kbd: [], rect: new DOMRect(detail.x, detail.y - 8, 0, 16), side: "top" });
+    };
 
     const onOver = (event: PointerEvent) => {
       const element = tipTarget(event.target);
@@ -107,7 +129,9 @@ export function TooltipLayer() {
     window.addEventListener("blur", hide);
     window.addEventListener("focusin", onFocus);
     window.addEventListener("focusout", hide);
+    window.addEventListener(POINTER_TIP_EVENT, onPointerTip);
     return () => {
+      window.removeEventListener(POINTER_TIP_EVENT, onPointerTip);
       window.removeEventListener("pointerover", onOver);
       window.removeEventListener("pointerdown", hide, true);
       window.removeEventListener("keydown", hide, true);

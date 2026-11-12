@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { clockNow, subscribeClock } from "./clock.js";
 import { coreText } from "./core-text.js";
 import { QueryCache, type QueryOptions, type Topics } from "./query-cache.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
@@ -174,12 +175,9 @@ export function useDebounced<T>(value: T, ms: number): T {
 
 /** Re-render on an interval, for clocks and relative times. */
 export function useNow(intervalMs = 15_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
+  // One shared clock per interval (clock.ts), however many of these are on screen.
+  const subscribe = useCallback((listener: () => void) => subscribeClock(intervalMs, listener), [intervalMs]);
+  return useSyncExternalStore(subscribe, () => clockNow(intervalMs));
 }
 
 // ------------------------------------------------------------------ common queries
@@ -194,18 +192,41 @@ export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "wor
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
+// Polled: most of it is fixed while VibeForge runs, but whether the terminal host is up isn't.
 export const useAppInfo = () => useQuery("app-info", [], () => call("app.info"));
 export const useUpdate = () => useQuery("updates", ["updates"], () => call("updates.get"));
 export const useActivity = () => useQuery("activity", ["settings", "workspaces"], () => call("activity.get"));
 
+/**
+ * Reload a query every minute, with one timer for the key however many components read it. The
+ * cache's own 30-second refresh is off for these (poll: false), so each is read once a minute.
+ */
+const minuteReloads = new Map<string, { readers: number; reload: () => Promise<void>; timer: ReturnType<typeof setInterval> }>();
+
+function useEveryMinute(key: string, reload: () => Promise<void>): void {
+  useEffect(() => {
+    let shared = minuteReloads.get(key);
+    if (!shared) {
+      const made = { readers: 0, reload, timer: setInterval(() => void made.reload(), 60_000) };
+      minuteReloads.set(key, made);
+      shared = made;
+    }
+    shared.readers += 1;
+    shared.reload = reload;
+    const mine = shared;
+    return () => {
+      mine.readers -= 1;
+      if (mine.readers > 0) return;
+      clearInterval(mine.timer);
+      minuteReloads.delete(key);
+    };
+  }, [key, reload]);
+}
+
 /** Token usage from the CLIs' logs, read again every minute and whenever a run ends. */
 export function useUsage(): Query<UsageSummary | null> {
-  const query = useQuery("usage", ["settings", "runs"], () => call("usage.summary"));
-  const { reload } = query;
-  useEffect(() => {
-    const timer = setInterval(() => void reload(), 60_000);
-    return () => clearInterval(timer);
-  }, [reload]);
+  const query = useQuery("usage", ["settings", "runs"], () => call("usage.summary"), { poll: false });
+  useEveryMinute("usage", query.reload);
   return query;
 }
 /**
@@ -213,12 +234,9 @@ export function useUsage(): Query<UsageSummary | null> {
  * process asks the providers at most every few minutes; `refresh` asks them now.
  */
 export function usePlans(): Query<PlanSummary | null> & { refresh: () => Promise<void> } {
-  const query = useQuery("plans", ["settings", "runs"], () => call("plans.summary"));
+  const query = useQuery("plans", ["settings", "runs"], () => call("plans.summary"), { poll: false });
   const { reload } = query;
-  useEffect(() => {
-    const timer = setInterval(() => void reload(), 60_000);
-    return () => clearInterval(timer);
-  }, [reload]);
+  useEveryMinute("plans", reload);
   const refresh = useCallback(async () => {
     await call("plans.summary", true);
     await reload();

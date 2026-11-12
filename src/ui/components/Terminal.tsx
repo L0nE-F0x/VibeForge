@@ -8,6 +8,7 @@ import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
 import { appShortcut, clipboardKey, isWebLink } from "../terminal-keys.js";
 import { mayTakeFocus } from "../overlays.js";
+import { hidePointerTip, showPointerTip } from "./Tooltip.js";
 import { isShortcut } from "../shortcuts.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
@@ -17,6 +18,20 @@ import { WebglPool, type GlUser } from "../webgl-pool.js";
 export const PATH_MIME = "application/x-vibeforge-path";
 /** Under Chromium's limit of WebGL contexts per page; the other terminals draw with the DOM. */
 const webgl = new WebglPool(10);
+/**
+ * How long a terminal's size has to stay put before the program hears about it. Dragging a divider
+ * or the window fits the terminal every frame; a CLI told each of those sizes redraws each time.
+ */
+const RESIZE_SETTLE_MS = 100;
+
+/**
+ * OSC 8 links show text that can differ from where they go ("github.com/…" pointing elsewhere), so
+ * the real address shows in a tooltip while the pointer is on one, before anyone clicks it.
+ */
+const linkHover = {
+  hover: (event: MouseEvent, uri: string) => showPointerTip(uri, event.clientX, event.clientY),
+  leave: () => hidePointerTip(),
+};
 
 export interface TerminalHandle {
   focus(): void;
@@ -164,6 +179,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const optionsRef = useRef({ fontFamily, fontSize, palette });
   optionsRef.current = { fontFamily, fontSize, palette };
   const [ended, setEnded] = useState<string | null>(null);
+  /** Fit the terminal to its box and tell the program its size once it settles. */
+  const refitRef = useRef<() => void>(() => undefined);
 
   useImperativeHandle(ref, () => ({
     focus: () => termRef.current?.focus(),
@@ -187,7 +204,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       if (open) open(uri);
       else void call("app.openExternal", uri);
     };
-    const term = new XTerm({ ...baseOptions(family, size), theme: xtermTheme(initialPalette), linkHandler: { activate: (_event, uri) => openLink(uri) } });
+    const term = new XTerm({ ...baseOptions(family, size), theme: xtermTheme(initialPalette), linkHandler: { activate: (_event, uri) => openLink(uri), ...linkHover } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
@@ -203,6 +220,17 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     let lastCols = 0;
     let lastRows = 0;
     let frame = 0;
+    let settle = 0;
+    // The terminal follows its box every frame; the program hears the size once it stops changing.
+    const tellSize = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        if (disposed || (term.cols === lastCols && term.rows === lastRows)) return;
+        lastCols = term.cols;
+        lastRows = term.rows;
+        void call("pty.resize", ptyId, term.cols, term.rows).catch(() => undefined);
+      }, RESIZE_SETTLE_MS);
+    };
     const refit = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -212,13 +240,10 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
         } catch {
           return;
         }
-        if (term.cols !== lastCols || term.rows !== lastRows) {
-          lastCols = term.cols;
-          lastRows = term.rows;
-          void call("pty.resize", ptyId, term.cols, term.rows).catch(() => undefined);
-        }
+        tellSize();
       });
     };
+    refitRef.current = refit;
     const observer = new ResizeObserver(refit);
     observer.observe(host);
 
@@ -318,6 +343,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
+      refitRef.current = () => undefined;
       observer.disconnect();
       offData();
       offExit();
@@ -345,11 +372,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     const next = baseOptions(fontFamily, fontSize);
     term.options.fontFamily = next.fontFamily;
     term.options.fontSize = fontSize;
-    try {
-      fitRef.current?.fit();
-    } catch {
-      /* hidden */
-    }
+    // A new font size changes how many cells fit: the program hears the new size too.
+    refitRef.current();
   }, [fontFamily, fontSize]);
 
   // On screen it asks for a WebGL slot; hidden, it gives its slot up once one on screen needs it.
@@ -404,7 +428,7 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
     const openLink = (uri: string) => {
       if (isWebLink(uri)) void call("app.openExternal", uri);
     };
-    const term = new XTerm({ ...baseOptions(family, size), cursorBlink: false, disableStdin: true, theme: xtermTheme(palette), linkHandler: { activate: (_event, uri) => openLink(uri) } });
+    const term = new XTerm({ ...baseOptions(family, size), cursorBlink: false, disableStdin: true, theme: xtermTheme(palette), linkHandler: { activate: (_event, uri) => openLink(uri), ...linkHover } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
@@ -412,6 +436,18 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
     term.loadAddon(new WebLinksAddon((_event, uri) => openLink(uri)));
     term.open(host);
     termRef.current = term;
+    // Nothing here goes to a program, so the copy keys copy and every other key goes on to the
+    // window: J/K, Ctrl+K and the view keys work over a finished run's screen as anywhere else.
+    // Even read-only, xterm would otherwise swallow any key that types a byte.
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.shiftKey && /^(PageUp|PageDown|Home|End)$/.test(event.key)) return true;
+      if (event.type === "keydown" && clipboardKey(event, term.hasSelection()) === "copy") {
+        event.preventDefault();
+        const selection = term.getSelection();
+        if (selection) void call("app.copyText", selection).catch(() => undefined);
+      }
+      return false;
+    });
     const doFit = () => {
       if (disposed || host.offsetWidth < 20) return;
       try {
@@ -448,7 +484,7 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
   }, [family, size]);
 
   return (
-    <div className="term">
+    <div className="term replay">
       <div ref={hostRef} className="term-host" />
     </div>
   );

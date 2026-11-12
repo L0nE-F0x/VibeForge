@@ -1,5 +1,5 @@
 import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Hourglass, KanbanSquare, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
@@ -99,7 +99,8 @@ export function HomeView() {
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const since = useMemo(() => new Date(Date.now() - DAYS * 86_400_000).toISOString(), []);
-  const recent = useQuery("home-activity", ["runs"], () => call("runs.list", { since, limit: 2000 })).data ?? [];
+  // Only the last two weeks, for the bars; new runs reload it, so the 30-second refresh is off.
+  const recent = useQuery("home-activity", ["runs"], () => call("runs.list", { since, limit: 2000 }), { poll: false }).data ?? [];
   const [markAll, marking] = useAction(() => call("runs.markAllOpened"));
 
   const time = (iso: string) => fireTime(iso, t.language, now);
@@ -139,10 +140,15 @@ export function HomeView() {
   const contributions = useActivity().data;
   const graph = contributions && !contributions.error && contributions.days.length ? contributions : null;
   const number = (value: number) => value.toLocaleString(t.language);
-  const dayTip = (day: string, count: number) => {
-    const date = new Date(`${day}T12:00:00`).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-    return t.count(graph?.source === "github" ? "home.activity.githubDay" : "home.activity.gitDay", count, { count: number(count), date });
-  };
+  // The graph's 365 day labels are worked out once per graph and language, not on every clock tick.
+  const source = graph?.source;
+  const dayTip = useCallback(
+    (day: string, count: number) => {
+      const date = new Date(`${day}T12:00:00`).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+      return t.count(source === "github" ? "home.activity.githubDay" : "home.activity.gitDay", count, { count: count.toLocaleString(t.language), date });
+    },
+    [t, source],
+  );
 
   const status = [
     live.length ? t.count("home.status.live", live.length) : "",

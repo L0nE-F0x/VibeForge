@@ -187,8 +187,13 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
   const files = bundle.data?.files;
 
   useEffect(() => setTab("session"), [runId]);
+  // Opening a finished run marks it reviewed, once per visit: "Put it back in Needs review" from
+  // its menu then stays put instead of being marked again as the run reloads.
+  const marked = useRef<string | null>(null);
   useEffect(() => {
-    if (run && run.status !== "running" && !run.openedAt) void call("runs.markOpened", run.id, true).catch(() => undefined);
+    if (!run || run.status === "running" || marked.current === run.id) return;
+    marked.current = run.id;
+    if (!run.openedAt) void call("runs.markOpened", run.id, true).catch(() => undefined);
   }, [run]);
 
   const [cont, continuing] = useAction(async () => {
@@ -351,22 +356,29 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
       )}
       {tab === "details" && (
         <div className="page-body">
-          <pre className="pre">
-            {[
-              `id            ${run.id}`,
-              `origin        ${run.origin}`,
-              `engine        ${run.engine}`,
-              `command       ${run.argv.join(" ")}`,
-              `folder        ${run.cwd}`,
-              `started       ${new Date(run.startedAt).toLocaleString()}`,
-              `ended         ${run.endedAt ? new Date(run.endedAt).toLocaleString() : "—"}`,
-              `exit code     ${run.exitCode ?? "—"}${run.signal ? ` (signal ${run.signal})` : ""}`,
-              `git at start  ${run.gitStart ?? "—"}`,
-              `saved diff    ${files.patchSaved ? "diff.patch" : "—"}`,
-              `continues     ${run.continuedFrom ?? "—"}`,
-              `run folder    ${run.dir}`,
-            ].join("\n")}
-          </pre>
+          <dl className="run-details">
+            {(
+              [
+                ["run.detail.id", run.id],
+                ["run.detail.origin", t(ORIGIN_KEY[run.origin])],
+                ["run.detail.engine", engine?.label ?? run.engine],
+                ["run.detail.command", run.argv.join(" ")],
+                ["run.detail.folder", run.cwd],
+                ["run.detail.started", new Date(run.startedAt).toLocaleString(t.language)],
+                ["run.detail.ended", run.endedAt ? new Date(run.endedAt).toLocaleString(t.language) : "—"],
+                ["run.detail.exit", run.signal ? t("pane.exitSignal", { signal: run.signal }) : String(run.exitCode ?? "—")],
+                ["run.detail.gitStart", run.gitStart ?? "—"],
+                ["run.detail.savedDiff", files.patchSaved ? "diff.patch" : "—"],
+                ["run.detail.continues", run.continuedFrom ?? "—"],
+                ["run.detail.runFolder", run.dir],
+              ] as Array<[Key, string]>
+            ).map(([label, value]) => (
+              <div key={label}>
+                <dt>{t(label)}</dt>
+                <dd className="mono">{value}</dd>
+              </div>
+            ))}
+          </dl>
           <div className="hstack" style={{ marginTop: 10 }}>
             <Button size="sm" icon={FolderOpen} onClick={() => void call("app.openPath", run.dir)}>
               {t("run.openRunFolder")}

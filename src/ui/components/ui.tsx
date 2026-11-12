@@ -10,6 +10,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
   type SelectHTMLAttributes,
@@ -501,6 +502,8 @@ export interface MenuItem {
   keepOpen?: boolean;
 }
 
+const POPOVER_FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 /**
  * A small floating menu anchored to an element. It moves to stay inside the window when its
  * content grows or shrinks. `tall` lets it use the window's height instead of 60% of it.
@@ -546,6 +549,33 @@ export function Popover({
     observer.observe(node);
     return () => observer.disconnect();
   }, [place]);
+  // Opened from the keyboard (or a click, which focuses its button), focus moves into it: the first
+  // menu item, else the first control. Portaled to the end of the page, it would otherwise be
+  // reached only after Tab had walked the whole page. Once it is placed, since a hidden element
+  // can't take focus.
+  const entered = useRef(false);
+  const placed = pos !== null;
+  useEffect(() => {
+    const node = ref.current;
+    if (!placed || entered.current || !node) return;
+    entered.current = true;
+    const active = document.activeElement;
+    if (!active || !(active === anchor || anchor.contains(active))) return;
+    const first = node.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? node.querySelector<HTMLElement>(POPOVER_FOCUSABLE);
+    first?.focus({ preventScroll: true });
+  }, [placed, anchor]);
+  // Tab past its last control (or Shift+Tab past its first) closes it, and focus goes back to its button.
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key !== "Tab" || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return;
+    const node = ref.current;
+    if (!node) return;
+    const items = [...node.querySelectorAll<HTMLElement>(POPOVER_FOCUSABLE)].filter((item) => item.getClientRects().length > 0);
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    if (at < 0 || (event.shiftKey ? at === 0 : at === items.length - 1)) {
+      event.preventDefault();
+      onClose();
+    }
+  };
   useEffect(() => {
     const handler = (event: MouseEvent) => {
       if (ref.current?.contains(event.target as Node) || anchor.contains(event.target as Node)) return;
@@ -560,7 +590,7 @@ export function Popover({
     };
   }, [anchor, onClose]);
   return createPortal(
-    <div ref={ref} className={tall ? "popover tall" : "popover"} style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }}>
+    <div ref={ref} className={tall ? "popover tall" : "popover"} style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }} onKeyDown={onKeyDown}>
       {children}
     </div>,
     document.body,
@@ -568,8 +598,20 @@ export function Popover({
 }
 
 export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClose: () => void }) {
+  // ↑/↓ move between its items (round the ends), Home/End go to the first and last; the Popover
+  // puts focus on the first as it opens.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (!step && event.key !== "Home" && event.key !== "End") return;
+    const entries = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+    if (!entries.length) return;
+    event.preventDefault();
+    const at = entries.indexOf(document.activeElement as HTMLElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1 : at < 0 ? (step > 0 ? 0 : entries.length - 1) : (at + step + entries.length) % entries.length;
+    entries[next].focus();
+  };
   return (
-    <div role="menu">
+    <div role="menu" onKeyDown={onKeyDown}>
       {items.map((item, index) =>
         item === "sep" ? (
           <div key={`sep-${index}`} className="menu-sep" />

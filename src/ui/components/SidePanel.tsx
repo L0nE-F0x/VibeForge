@@ -1,7 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useT } from "../i18n/index.js";
-import { pushOverlay } from "../overlays.js";
+import { markKeyboardNavigation, pushOverlay } from "../overlays.js";
 import { isShortcut, shortcutKeys } from "../shortcuts.js";
 import { tipProps } from "./Tooltip.js";
 import { Button, cx } from "./ui.js";
@@ -241,6 +241,8 @@ export function SidePanel({
     const next = event.key === "Home" ? rows[0] : event.key === "End" ? rows[rows.length - 1] : rows[at + (event.key === "ArrowDown" ? 1 : -1)];
     event.preventDefault();
     if (!next || next === row) return;
+    // What this opens leaves focus here for a moment (see markKeyboardNavigation).
+    markKeyboardNavigation();
     next.focus();
     next.scrollIntoView({ block: "nearest" });
     next.click();

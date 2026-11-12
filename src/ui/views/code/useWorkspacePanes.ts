@@ -3,7 +3,7 @@ import type { Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../
 import { call } from "../../api.js";
 import { estimateTermSize, type TerminalHandle } from "../../components/Terminal.js";
 import { useT } from "../../i18n/index.js";
-import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, type DropZone, type PaneNode } from "../../pane-layout.js";
+import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode } from "../../pane-layout.js";
 import { useConfirm, useNav, useToast, type Route } from "../../state.js";
 
 // Code's panes: each workspace's pane tree, what runs in each pane, which one has focus, and the
@@ -68,6 +68,9 @@ export function useWorkspacePanes({
   const [runtime, runtimeRef, setRuntime] = useSyncedState<Record<string, Runtime>>({});
   const [focus, focusRef, setFocus] = useSyncedState<Record<string, string>>({});
   const [zoomed, setZoomed] = useState<Record<string, string | null>>({});
+  // A maximized pane hides the others, so focus moving to another pane (a new one split off, one
+  // a route or Maestro jumps to, one dragged) restores the layout instead of focusing a hidden pane.
+  useEffect(() => setZoomed((prev) => unzoomForFocus(prev, focus)), [focus]);
   const terminals = useRef(new Map<string, TerminalHandle>());
   const starting = useRef(new Set<string>());
   const fontSizeRef = useRef(13);
@@ -101,24 +104,31 @@ export function useWorkspacePanes({
         setTimeout(resolve, 100);
       });
       const size = estimateTermSize(document.querySelector<HTMLElement>(`[data-pane="${pane.id}"]`), fontSizeRef.current, 34);
+      // The pane can be closed while its terminal is still starting.
+      const stillThere = () => {
+        const layout = layoutsRef.current[workspace.id];
+        return Boolean(layout && panesOf(layout).some((item) => item.id === pane.id));
+      };
       try {
-        let ptyId: string;
-        if (pane.launch.type === "shell") {
-          ({ ptyId } = await call("code.shell", { workspaceId: workspace.id, ...size }));
-          patchRuntime(pane.id, { ptyId, runId: null, state: "live" });
-        } else {
-          const result = await call("code.engine", {
-            workspaceId: workspace.id,
-            engineId: pane.launch.engineId,
-            continueSession: opts.continueSession,
-            ...size,
-          });
-          ptyId = result.ptyId;
-          patchRuntime(pane.id, { ptyId: result.ptyId, runId: result.runId, state: "live" });
+        const started =
+          pane.launch.type === "shell"
+            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...size })), runId: null }
+            : await call("code.engine", {
+                workspaceId: workspace.id,
+                engineId: pane.launch.engineId,
+                continueSession: opts.continueSession,
+                ...size,
+              });
+        if (!stillThere()) {
+          // Closed while it started: what started goes too, instead of running on with no pane.
+          void call("pty.kill", started.ptyId).catch(() => undefined);
+          return null;
         }
+        patchRuntime(pane.id, { ptyId: started.ptyId, runId: started.runId, state: "live" });
         setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-        return ptyId;
+        return started.ptyId;
       } catch (error) {
+        if (!stillThere()) return null;
         patchRuntime(pane.id, { state: "idle" });
         fail(error, t("code.startFailed"));
         return null;
@@ -126,7 +136,7 @@ export function useWorkspacePanes({
         starting.current.delete(pane.id);
       }
     },
-    [fail, patchRuntime, setFocus],
+    [fail, patchRuntime, setFocus, layoutsRef],
   );
 
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
@@ -179,10 +189,13 @@ export function useWorkspacePanes({
     show(workspace, ptyId, runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id] }));
   }
 
-  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }) {
+  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }, opts: { focus?: boolean } = {}) {
     if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
     patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
-    setFocus((prev) => ({ ...prev, [workspace.id]: spot.paneId }));
+    // A pane placed on its own (a CLI Maestro started) doesn't take focus from the one being typed
+    // in; it is focused only in a workspace that has no focused pane yet.
+    const focus = opts.focus ?? true;
+    setFocus((prev) => (focus || !prev[workspace.id] ? { ...prev, [workspace.id]: spot.paneId } : prev));
   }
 
   // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
@@ -220,7 +233,7 @@ export function useWorkspacePanes({
       const state = runtimeRef.current[paneId]?.state ?? "idle";
       return state === "idle" || state === "exited";
     };
-    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }));
+    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }), { focus: false });
   }
 
   /** The first pane of a workspace whose panes were all closed. */

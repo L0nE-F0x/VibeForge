@@ -98,6 +98,7 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const { go } = useNav();
   const { push } = useToast();
   const deleted = useDeleted();
+  const skills = useSkills();
   const agents = useAgents().data ?? [];
   const [form, setForm] = useDraftState(skill ? `skill:${skill.id}` : "skill:new", {
     name: skill?.name ?? "",
@@ -122,7 +123,9 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
   const [remove, removing] = useAction(async () => {
     if (!skill) return;
     const result = await call("skills.delete", skill.id);
-    go({ view: "skills" });
+    // Straight to one that is left: the list hasn't reloaded yet, so "the first one" would be this one.
+    const next = (skills.data ?? []).find((item) => item.id !== skill.id);
+    go(next ? { view: "skills", skillId: next.id } : { view: "skills" });
     deleted(t("skills.deleted", { name: skill.name }), result);
   }, t("skills.deleteFailed"));
   const [install] = useAction(async (agentId: string, on: boolean) => {
