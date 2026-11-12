@@ -3722,6 +3722,19 @@ kbd.big {
   transform: translateY(26px);
 }
 
+/* main.js marks the page as soon as it runs. Until then, a page whose script never arrives (blocked,
+   offline, an error) shows everything after a few seconds instead of staying blank below the hero. */
+html:not(.reveal-ready) .reveal {
+  animation: reveal-anyway 0.6s ease 4s forwards;
+}
+
+@keyframes reveal-anyway {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .reveal.is-visible {
   opacity: 1;
   transform: none;
