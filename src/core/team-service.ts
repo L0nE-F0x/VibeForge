@@ -312,7 +312,7 @@ export class TeamService extends ServiceCore {
     return this.messages.tell(input);
   }
 
-  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
+  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TaskResult> {
     return this.messages.handTask(input);
   }
 

@@ -811,6 +811,53 @@ describe("a review loop and handing out tasks", () => {
     expect(ctx.svc.liveForView().find((item) => item.ptyId === outside)?.talk ?? null).toBeNull();
     ctx.svc.close();
   });
+
+  it("reports a waited-for task as a message when the asking CLI hangs up first", async () => {
+    let at = AT;
+    const repo = gitRepo();
+    const ctx = setup({ now: () => new Date(at) });
+    const pass = (ms: number) => (at += ms);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+    goAhead(ctx);
+    const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    pass(5000);
+    const gone = new AbortController();
+    const waited = ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Slow one", wait: true, timeoutMs: 600_000, gone: gone.signal });
+    for (let i = 0; i < 200 && !ctx.svc.listLive().some((item) => item.taskId); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const taskPty = ctx.svc.listLive().find((item) => item.taskId)!.ptyId;
+    // Its tool call timed out long before the task's answer.
+    pass(120_000);
+    gone.abort();
+    expect(await waited).toMatchObject({ ok: true, started: true, reply: null });
+    ctx.host.screen = async () => "Finished the slow one.\n> ";
+    ctx.svc.onPtyActivity(taskPty, true);
+    pass(2000);
+    ctx.svc.onPtyActivity(taskPty, false);
+    pass(SETTLE_MS + 100);
+    const reports = () => ctx.sent.filter((item) => item.ptyId === sender.ptyId && item.text.startsWith("[Task report"));
+    for (let i = 0; i < 100 && !reports().length; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      pass(1000);
+      await ctx.svc.pumpMessages();
+    }
+    expect(reports()[0]?.text).toContain("Its answer:\nFinished the slow one.");
+    ctx.svc.close();
+  });
+
+  it("counts tasks still starting against the working limit, when a lead hands out several at once", async () => {
+    const repo = gitRepo();
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    await ctx.svc.saveAgent({ name: "Helper", brief: "Help.", engine: "argy", places: [repo] });
+    goAhead(ctx, { maxWorking: 1, maxHandOffs: 10 });
+    const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    const results = await Promise.all(["One", "Two", "Three"].map((text) => ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text })));
+    expect(results.filter((result) => result.ok && result.started)).toHaveLength(1);
+    expect(results.filter((result) => result.ok && !result.started)).toHaveLength(2);
+    expect(ctx.svc.listLive().filter((item) => item.taskId)).toHaveLength(1);
+    ctx.svc.close();
+  });
 });
 
 describe("a lead and its team", () => {

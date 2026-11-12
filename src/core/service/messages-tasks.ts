@@ -36,6 +36,12 @@ export class HandedTasks {
   private readonly handedSince = new Map<string, number>();
   /** How many times each task has been watched again after a report that it waits for a person. */
   private readonly rewatched = new Map<string, number>();
+  /**
+   * Hand-offs from each terminal that are past their limit checks but haven't started yet: their
+   * copy is still being made. Counted with the ones working, so a lead that hands out several at
+   * once (Claude Code runs its tool calls side by side) can't get past "at most this many working".
+   */
+  private readonly starting = new Map<string, number>();
   /** `--wait` callers, by task, until its first answer; `end` when none will come: its CLI ended, or a person pressed Stop. */
   private readonly waitFor = new Map<string, (answered: Answered | null, end: "ended" | "stopped" | null) => void>();
 
@@ -85,7 +91,7 @@ export class HandedTasks {
   }
 
   /** `vibeforge task <agent> "…"`: a task for a VibeForge agent, in its own copy so it never works in the sender's folder. */
-  async handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
+  async handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TaskResult> {
     if (!this.settings().on) return { ok: false, error: "Agents talking to each other is turned off in VibeForge's Settings." };
     const agents = this.core.store.listAgents();
     const agent = findAgent(agents, input.agent);
@@ -135,15 +141,30 @@ export class HandedTasks {
     if (asker) this.handedSince.set(asker, handedNow);
     if (talk.handOff === "ask") return held("It waits for the person to press Start on your terminal's title bar (Ask first, in VibeForge's Settings → Agents together).");
     if (asker && handedNow > talk.maxHandOffs) return held(`You've handed out ${talk.maxHandOffs} tasks since the person last wrote to you, so this one waits for them to press Start.`);
-    if (asker && this.answers.reportingTo(asker) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
-    return this.startHanded(task.id, asker, input);
+    if (asker && this.answers.reportingTo(asker) + (this.starting.get(asker) ?? 0) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
+    if (!asker) return this.startHanded(task.id, asker, input);
+    // Counted from here, with no wait in between, until it is watched as working (or didn't start).
+    this.starting.set(asker, (this.starting.get(asker) ?? 0) + 1);
+    let counted = true;
+    const release = () => {
+      if (!counted) return;
+      counted = false;
+      const left = (this.starting.get(asker) ?? 1) - 1;
+      if (left > 0) this.starting.set(asker, left);
+      else this.starting.delete(asker);
+    };
+    try {
+      return await this.startHanded(task.id, asker, { ...input, started: release });
+    } finally {
+      release();
+    }
   }
 
   /**
    * Start a handed-out task and watch for its first answer. `--wait` gets it as the result;
    * otherwise, or once the wait is over, it goes to the CLI that handed it out as a report.
    */
-  private async startHanded(taskId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number } = {}): Promise<TaskResult> {
+  private async startHanded(taskId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number; gone?: AbortSignal; started?: () => void } = {}): Promise<TaskResult> {
     // Out of the held ones while it starts, so a second Start can't start it twice; back if it doesn't.
     const heldBy = this.proposed.get(taskId);
     this.proposed.delete(taskId);
@@ -165,6 +186,8 @@ export class HandedTasks {
     // Nobody to answer or report to: a terminal outside VibeForge gets the usual notification.
     if (!("ptyId" in launched) || (!opts.wait && !asker)) return { ok: true, taskId, title, started: true, note };
     this.watchReport(taskId, launched.ptyId, asker, opts);
+    // Watched now, so counted as working from here on.
+    opts.started?.();
     if (!opts.wait) return { ok: true, taskId, title, started: true, note: `${note}${reports}` };
     return new Promise<TaskResult>((resolve) => {
       this.waitFor.set(taskId, (answered, end) =>
@@ -188,12 +211,14 @@ export class HandedTasks {
   }
 
   /** Watches a started task's first answer (from `since`, its start by default); see startHanded. */
-  private watchReport(taskId: string, ptyId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number }, since?: number): void {
+  private watchReport(taskId: string, ptyId: string, asker: string | null, opts: { wait?: boolean; timeoutMs?: number; gone?: AbortSignal }, since?: number): void {
     const settle = (answered: Answered | null, end: "ended" | "stopped" | null) => {
       const waiting = this.waitFor.get(taskId);
       this.waitFor.delete(taskId);
       waiting?.(answered, end);
     };
+    // Nobody is listening for the result any more; its answer comes as a report instead.
+    if (opts.wait) opts.gone?.addEventListener("abort", () => settle(null, null), { once: true });
     this.answers.watchAnswer(
       ptyId,
       {
@@ -201,8 +226,9 @@ export class HandedTasks {
         deadline: this.nowMs() + (opts.wait ? Math.max(1000, opts.timeoutMs ?? DEFAULT_WAIT_MS) : 0),
         done: (answered) => settle(answered, null),
         dropped: (_why, stopped) => settle(null, stopped ? "stopped" : "ended"),
-        // Not waiting: the answer is a report from the start.
-        gone: opts.wait ? undefined : AbortSignal.abort(),
+        // Not waiting: the answer is a report from the start. Waiting: it becomes one if the
+        // asking CLI hangs up first (its tool call timed out), as a `tell --wait` answer does.
+        gone: opts.wait ? opts.gone : AbortSignal.abort(),
         // Only from its start: once reported as waiting for a person, it has to move before it's heard from again.
         stuckMs: since === undefined ? STUCK_MS : undefined,
         after: asker
