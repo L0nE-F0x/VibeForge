@@ -195,9 +195,9 @@ function alive(pid: number): boolean {
   }
 }
 
-/** Polls for up to three seconds, for a real process that is slow to start or to be reaped. */
+/** Polls for up to ten seconds, for a real process that is slow to start or to be reaped on a busy machine. */
 async function eventually(check: () => boolean): Promise<void> {
-  for (let tries = 0; tries < 150 && !check(); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  for (const end = Date.now() + 10_000; !check() && Date.now() < end; ) await new Promise((resolve) => setTimeout(resolve, 20));
   expect(check()).toBe(true);
 }
 

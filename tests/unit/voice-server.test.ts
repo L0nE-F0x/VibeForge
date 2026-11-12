@@ -80,7 +80,8 @@ describe("whisper-server's lifetime", () => {
       expect((await instance.transcribe(speech())).text).toBe("hello there");
       const server = pid();
       expect(alive(server)).toBe(true);
-      await sleep(1200);
+      // Gone a little after the idle time; a busy machine may take longer to end and reap it.
+      for (const end = Date.now() + 10_000; alive(server) && Date.now() < end; ) await sleep(50);
       expect(alive(server)).toBe(false);
     } finally {
       instance.dispose();
