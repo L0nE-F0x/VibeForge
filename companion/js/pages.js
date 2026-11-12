@@ -26,20 +26,48 @@ export function show() {
   if (state.view !== "maestro") micCancel();
   // The install offer only shows on the code and the landing page (app.css), never over a text box.
   document.body.dataset.view = state.token ? state.view : "pair";
-  setParts(/** @type {Parts} */ ({ banner: el("div", { class: "banner", hidden: true }) }));
+  setParts(/** @type {Parts} */ ({}));
+  parts.banner = banner();
   app.replaceChildren(parts.banner, page(), credit());
   update();
 }
 
 /** Brings the page on show up to date without touching what is being typed. */
 export function update() {
-  parts.banner.hidden = !state.error;
-  parts.banner.textContent = state.error;
+  // What an action ran into comes first: it is what the person just did.
+  const said = state.actionError || state.error;
+  parts.banner.hidden = !said;
+  if (parts.bannerText.textContent !== said) parts.bannerText.textContent = said;
+  parts.bannerClose.hidden = !state.actionError;
   if (state.view === "desk") updateDesk();
   else if (state.view === "launch") updateLaunch();
   else if (state.view === "session") updateSession();
   else if (state.view === "maestro") updateMaestro();
   else if (state.view === "pair" && parts.pair) parts.pair.disabled = state.busy;
+}
+
+/**
+ * What went wrong, read out as it appears. An action's error has a close button; the poll's own goes
+ * away by itself once the computer answers again.
+ */
+function banner() {
+  parts.bannerText = el("span", { class: "banner-text" });
+  parts.bannerClose = el(
+    "button",
+    {
+      class: "banner-close",
+      type: "button",
+      hidden: true,
+      "aria-label": t("common.close"),
+      title: t("common.close"),
+      onclick: () => {
+        state.actionError = "";
+        update();
+      },
+    },
+    "×",
+  );
+  return el("div", { class: "banner", role: "alert", "aria-live": "assertive", hidden: true }, parts.bannerText, parts.bannerClose);
 }
 
 /** @param {View} next */

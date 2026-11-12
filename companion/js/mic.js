@@ -33,6 +33,7 @@ const EMPTY_HEARD = { short: "phone.micShort", silent: "voice.empty.silent", not
  * @property {MediaStreamAudioSourceNode | null} source
  * @property {AudioWorkletNode | null} node
  * @property {number} timer
+ * @property {AbortController | null} upload While it is heard: the request, so Cancel can let go of it.
  */
 
 /** The recording, while there is one: starting (the phone asks for the mic), recording, or being heard. @type {Recording | null} */
@@ -47,7 +48,7 @@ export function micParts() {
   parts.micWord = el("strong", {});
   parts.micClock = el("span", { class: "mic-clock" });
   parts.micHint = el("span", { class: "small faint mic-hint" });
-  parts.micCancel = el("button", { class: "ghost small-btn mic-cancel", type: "button", onclick: () => micCancel() }, t("common.cancel"));
+  parts.micCancel = el("button", { class: "ghost small-btn mic-cancel", type: "button", onclick: () => micCancel(true) }, t("common.cancel"));
   parts.micNote = el("div", { class: "mic-note", hidden: true, role: "status", "aria-live": "polite" }, parts.micMeter, parts.micBusy, parts.micWord, parts.micClock, parts.micHint, parts.micCancel);
   parts.mic = micButton();
 }
@@ -132,7 +133,7 @@ function loudness(samples) {
 function micBegin() {
   if (mic) return;
   /** @type {Recording} */
-  const mine = { phase: "starting", latched: false, finish: false, chunks: [], length: 0, level: 0, ctx: null, stream: null, source: null, node: null, timer: 0 };
+  const mine = { phase: "starting", latched: false, finish: false, chunks: [], length: 0, level: 0, ctx: null, stream: null, source: null, node: null, timer: 0, upload: null };
   micSaid = { text: "", until: 0 };
   try {
     // Made inside the tap itself, or iOS keeps it silent.
@@ -198,12 +199,33 @@ function closeMic(current) {
   void current.ctx?.close().catch(() => undefined);
 }
 
-export function micCancel() {
+/**
+ * Puts the mic down. A recording is dropped; one already sent to be heard is let go of only when
+ * Cancel itself was tapped (`heard`): leaving the page lets its words still land in the box.
+ * @param {boolean} [heard]
+ */
+export function micCancel(heard = false) {
   const current = mic;
-  if (!current || current.phase === "hearing") return;
+  if (!current) return;
+  if (current.phase === "hearing") {
+    if (!heard) return;
+    current.upload?.abort();
+    mic = null;
+    paintMic();
+    return;
+  }
   mic = null;
   closeMic(current);
   paintMic();
+}
+
+/**
+ * How long hearing a recording may take: the upload on a slow link, then whisper on the computer.
+ * A minute at least, and more for a long recording (at 50 KB/s for the upload).
+ * @param {number} bytes
+ */
+export function hearTimeout(bytes) {
+  return Math.max(60_000, 30_000 + Math.ceil(bytes / 50));
 }
 
 /**
@@ -255,13 +277,21 @@ async function micFinish() {
   paintMic();
   try {
     const pcm = toPcm(mine.chunks, mine.length, /** @type {AudioContext} */ (mine.ctx).sampleRate);
+    const upload = new AbortController();
+    mine.upload = upload;
+    const limit = window.setTimeout(() => upload.abort(), hearTimeout(pcm.byteLength));
     let response;
     try {
-      response = await fetch("/api/orchestrator/hear", { method: "POST", headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/octet-stream" }, body: pcm });
+      response = await fetch("/api/orchestrator/hear", { method: "POST", headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/octet-stream" }, body: pcm, signal: upload.signal });
     } catch {
-      throw new Error(t("phone.offline"));
+      // Cancel let go of it: nothing to say.
+      if (mic !== mine) return;
+      throw new Error(upload.signal.aborted ? t("phone.timedOut") : t("phone.offline"));
+    } finally {
+      window.clearTimeout(limit);
     }
     const body = await response.json().catch(() => ({}));
+    if (mic !== mine) return;
     if (response.status === 401) {
       forget();
       return;
@@ -273,7 +303,7 @@ async function micFinish() {
       if (box) box.value = state.orchDraft;
     } else showMicNote(t(EMPTY_HEARD[body.empty] || "voice.empty.nothing"));
   } catch (err) {
-    state.error = err.message;
+    state.actionError = err.message;
     update();
   } finally {
     if (mic === mine) mic = null;
@@ -300,6 +330,12 @@ export function paintMic() {
   button.classList.toggle("live", phase === "recording" || phase === "starting");
   button.setAttribute("aria-pressed", String(phase === "recording"));
   button.disabled = phase === "hearing";
+  // What a tap does now, for a screen reader as for the eye.
+  const label = phase === "hearing" ? t("voice.transcribing") : phase === "idle" ? t("phone.mic") : t("phone.micStop");
+  if (button.getAttribute("aria-label") !== label) {
+    button.setAttribute("aria-label", label);
+    button.title = label;
+  }
   const note = parts.micNote;
   const listening = phase === "recording" || phase === "starting";
   const said = !mic && micSaid.text && Date.now() < micSaid.until;
@@ -308,7 +344,8 @@ export function paintMic() {
   parts.micMeter.hidden = !listening;
   parts.micBusy.hidden = phase !== "hearing";
   parts.micClock.hidden = !listening;
-  parts.micCancel.hidden = !listening;
+  // Cancel stays while it is heard: a link that stalls would otherwise leave the box waiting.
+  parts.micCancel.hidden = !listening && phase !== "hearing";
   if (listening && mic) {
     const lit = Math.round((mic.level || 0) * METER_CELLS);
     [...parts.micMeter.children].forEach((cell, index) => {

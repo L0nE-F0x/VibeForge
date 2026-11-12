@@ -407,12 +407,21 @@ describe("the phone page's words", () => {
     expect(de["orch.go"]).toBe("Los");
     expect(de["rail.orchestrator"]).toBe("Maestro");
     expect(de["voice.listening"]).toBe("Hört zu");
-    const shared = ["rail.orchestrator", "common.cancel", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+    const shared = ["rail.orchestrator", "common.cancel", "common.close", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
     expect(Object.keys(de).filter((key) => !/^(phone|plans|orch)\./.test(key)).sort()).toEqual([...shared].sort());
     expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
     for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {
       expect((await phoneWords(language))["phone.credit"]).toContain("{name}");
     }
+  });
+
+  it("keeps the English words the page falls back on the same as the app's", async () => {
+    const page = fs.readFileSync(path.join(import.meta.dirname, "../../companion/js/words.js"), "utf8");
+    const block = page.match(/^const FALLBACK = (\{[\s\S]*?^\});$/m)?.[1];
+    expect(block).toBeTruthy();
+    const fallback = JSON.parse((block ?? "").replace(/,\s*}$/, "}")) as Record<string, string>;
+    const en = await phoneWords("en");
+    for (const [key, text] of Object.entries(fallback)) expect(en[key], key).toBe(text);
   });
 
   it("explains the page before the desk, in every language", async () => {

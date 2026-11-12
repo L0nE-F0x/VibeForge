@@ -20,6 +20,8 @@ import { t, tCount } from "./words.js";
 export const pendingSteps = new Map();
 /** Step changes go one after another, and Go waits for them. @type {Promise<unknown>} */
 let stepQueue = Promise.resolve();
+/** Changes on their way to the computer, each until it has answered. Go waits for all of them, and stops if one was refused. @type {Set<Promise<unknown>>} */
+const stepSends = new Set();
 
 /** @type {Record<string, string>} */
 const ISSUE_KEYS = { workspace: "orch.issue.workspace", engine: "orch.issue.engine", engineMissing: "orch.issue.engineMissing", target: "orch.issue.target", prompt: "orch.issue.prompt" };
@@ -215,11 +217,13 @@ function editStep(turn, step, patch) {
     () => undefined,
     () => undefined,
   );
+  stepSends.add(sent);
   sent
     .catch((err) => {
-      state.error = err.message;
+      state.actionError = err.message;
     })
     .finally(() => {
+      stepSends.delete(sent);
       if (pendingSteps.get(step.id) === pending) pendingSteps.delete(step.id);
       void refresh();
     });
@@ -228,10 +232,14 @@ function editStep(turn, step, patch) {
 
 /**
  * Whatever is typed on the card and not sent yet: iOS doesn't always take the focus off a box when Go is tapped.
+ * Returns the changes it sent.
  * @param {PhoneTurn} turn
  * @param {HTMLElement} card
+ * @returns {Promise<unknown>[]}
  */
 function flushStepEdits(turn, card) {
+  /** @type {Promise<unknown>[]} */
+  const sent = [];
   for (const step of turn.steps || []) {
     const row = [.../** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll("[data-step]"))].find((node) => node.dataset.step === step.id);
     if (!row) continue;
@@ -242,8 +250,9 @@ function flushStepEdits(turn, card) {
       const next = key === "branch" ? field.value.trim() : field.value;
       if (next !== currentStep(step, key)) patch[key] = next;
     }
-    if (Object.keys(patch).length) editStep(turn, step, patch);
+    if (Object.keys(patch).length) sent.push(editStep(turn, step, patch));
   }
+  return sent;
 }
 
 /**
@@ -261,10 +270,14 @@ function leaveCard(turn, card) {
  * @param {HTMLElement} card
  */
 async function goPlan(turn, card) {
+  // Every change still on its way, this card's last ones included (the blur above sends them too, and
+  // stepSends counts each once). One the computer refused or never got stops Go: the CLI would start
+  // with what the card said before, and the banner says why.
   leaveCard(turn, card);
+  const waiting = [...stepSends];
   parts.stickTurns = true;
   await withBusy(async () => {
-    await stepQueue;
+    await Promise.all(waiting);
     await post("/api/orchestrator/go", { turnId: turn.id });
     return true;
   });
