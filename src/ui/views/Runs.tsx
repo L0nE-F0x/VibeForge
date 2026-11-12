@@ -7,6 +7,7 @@ import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
+import { markKeyboardNavigation } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
@@ -69,8 +70,11 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
       const by = isShortcut("runs.next", event) ? 1 : isShortcut("runs.prev", event) ? -1 : 0;
       if (!by) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
+      // A finished run's replayed screen is read-only, so J and K still step from there.
+      if (target?.closest("input, textarea, select, [contenteditable], .xterm:not(.replay .xterm), .modal, .sheet")) return;
       event.preventDefault();
+      // The live CLI the next run shows leaves J and K to the list (see markKeyboardNavigation).
+      markKeyboardNavigation();
       stepRef.current(by);
     };
     window.addEventListener("keydown", onKey);

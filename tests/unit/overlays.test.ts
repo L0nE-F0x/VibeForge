@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { escapeTop, mayTakeFocus, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/overlays.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { escapeTop, keyboardNavigating, markKeyboardNavigation, mayTakeFocus, overlayOpen, pushOverlay, topOverlay } from "../../src/ui/overlays.js";
 import { confirmSlot } from "../../src/ui/state.js";
 
 /** A keydown as the overlay stack sees it, recording what was done to it. */
@@ -121,6 +121,24 @@ describe("the overlay stack", () => {
     pops.push(pushOverlay({ close: () => undefined }));
     expect(mayTakeFocus(inSheet)).toBe(false);
     expect(mayTakeFocus(null)).toBe(false);
+  });
+
+  it("keeps a live terminal from taking focus right after a list was moved through by keyboard", () => {
+    const pane = {} as Element;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-12T10:00:00Z"));
+      expect(mayTakeFocus(pane)).toBe(true);
+      // ↓ in the chat list opens a live chat: its terminal must not take the next key.
+      markKeyboardNavigation();
+      expect(keyboardNavigating()).toBe(true);
+      expect(mayTakeFocus(pane)).toBe(false);
+      // A moment later a click on it may focus it as usual.
+      vi.advanceTimersByTime(700);
+      expect(mayTakeFocus(pane)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("takes an overlay out from the middle when it closes first", () => {
