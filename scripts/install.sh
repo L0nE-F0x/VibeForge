@@ -18,7 +18,9 @@
 # An update is unpacked (or built) beside the installed copy, in vibeforge-app.next, and swapped in
 # only once it is whole, so a dropped network, a bad download or a failed build leaves the installed
 # copy as it was. The copy it replaced stays in vibeforge-app.previous; to go back, quit VibeForge
-# and swap the two.
+# and swap the two. Run again while the newest release is already installed, it only puts the command
+# and launcher entry back (VIBEFORGE_FORCE=1 downloads it again). Two installers at once can't run:
+# the second one stops.
 #
 # VIBEFORGE_RELEASES is where releases are downloaded from, by default VIBEFORGE_REPO's releases on
 # GitHub: <releases>/latest redirects to <releases>/tag/<tag>, and a release's files are in
@@ -45,6 +47,12 @@ PREVIOUS=""
 STAGE=""
 FETCHED=""
 SWAPPED=0
+# Set once the installed copy has been moved aside to vibeforge-app.previous for the swap.
+MOVED_ASIDE=0
+# The latest release's tag, from latest_release_tag.
+LATEST_TAG=""
+# The version installed now, for the closing lines.
+VERSION_DONE=""
 # Set by fetch_archive when the release has no ready-made build for this CPU.
 NO_ARCHIVE=""
 
@@ -66,31 +74,62 @@ uninstall() {
   rm -f "$BIN_DIR/vibeforge" "$APPS_DIR/vibeforge.desktop" "$AUTOSTART"
   rm -f "$ICON_DIR/512x512/apps/vibeforge.png" "$ICON_DIR/256x256/apps/vibeforge.png" "$ICON_DIR/scalable/apps/vibeforge.svg"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
-  note "The app itself is still in $DEST. Delete it with: rm -rf \"$DEST\" \"$DEST.previous\""
-  note "Your data is untouched: ~/.config/vibeforge and ~/.local/share/vibeforge"
+  # Nothing running is stopped: a VibeForge that is open keeps its terminals until it is quit.
+  note "If VibeForge is open, quit it (its tray menu → Quit, or close the window)."
+  note "The app itself is still in $DEST. Delete it with: rm -rf \"$DEST\" \"$DEST.previous\" \"$DEST.lock\""
+  note "Your data is untouched: ~/.config/vibeforge and ~/.local/share/vibeforge (agents, routines, runs)."
+  note "Also left: ~/.config/VibeForge (the window's browser profile: the browser pane's sign-ins and cache)"
+  note "and ~/.cache/vibeforge. Delete them too to remove everything."
+  local hypr="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+  if grep -qs -e "VibeForge voice" "$hypr"/*.conf "$hypr"/*.lua 2>/dev/null; then
+    note "Settings → Voice added a hold-to-talk key to $hypr: remove the lines under \"VibeForge voice\"."
+  fi
   exit 0
 }
 
-# The tag of the latest release, from where <releases>/latest redirects: the same release the app's
-# Update checks for, so a stray tag that was never released can't win. Prints nothing if it can't ask.
+# The tag of the latest release in LATEST_TAG, from where <releases>/latest redirects: the same release
+# the app's Update checks for, so a stray tag that was never released can't win. Empty when there are
+# no releases to ask about, or none published yet. GitHub not answering, or answering with an error,
+# stops here: building from source instead would need GitHub too, and would hide why.
 latest_release_tag() {
+  LATEST_TAG=""
   [[ -n "$RELEASES" ]] || return 0
-  command -v curl >/dev/null 2>&1 || return 0
-  local url
-  url=$(curl -fsS -o /dev/null -w '%{redirect_url}' --max-time 15 "$RELEASES/latest" 2>/dev/null) || return 0
-  if [[ "$url" =~ /tag/([^/?#]+)$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; fi
+  command -v curl >/dev/null 2>&1 || die "curl is missing. Install it with: sudo pacman -S --needed curl"
+  local out status=0 code url
+  out=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
+  ((status == 0)) || die "Could not reach GitHub to find the latest release (curl error $status). Check the network, then run this again."
+  code="${out%% *}"
+  url="${out#* }"
+  case "$code" in
+    3??) if [[ "$url" =~ /tag/([^/?#]+)$ ]]; then LATEST_TAG="${BASH_REMATCH[1]}"; fi ;;
+    *) die "GitHub answered $code when asked for the latest release. Try again in a few minutes." ;;
+  esac
 }
 
 # On the way out: a half-built or half-downloaded copy is removed, and a failed update says the
 # installed one is as it was.
 finish() {
   local status=$?
+  # Stopped between moving the installed copy aside and moving the new one in: put it back.
+  if ((MOVED_ASIDE && !SWAPPED)) && [[ ! -e "$DEST" && -e "$PREVIOUS" ]]; then mv "$PREVIOUS" "$DEST" || true; fi
   if [[ -n "$STAGE" && -e "$STAGE" ]]; then rm -rf "$STAGE"; fi
   if [[ -n "$FETCHED" && -e "$FETCHED" ]]; then rm -rf "$FETCHED"; fi
   if ((status != 0 && !SWAPPED)) && [[ -f "$DEST/dist-electron/main.js" ]]; then
     note "The installed copy in $DEST is unchanged."
   fi
+  if ((status != 0 && SWAPPED)); then
+    printf '\033[31m✗ VibeForge %s is in %s, but adding the vibeforge command or the launcher entry failed. Run this again.\033[0m\n' "$VERSION_DONE" "$DEST" >&2
+  fi
   return "$status"
+}
+
+# The parts a working copy can't do without.
+REQUIRED_PARTS=(node_modules/electron/dist/electron node_modules/node-pty/build/Release/pty.node dist/index.html dist-electron/main.js scripts/vibeforge)
+
+# Whether every part is in the copy at $1.
+whole() {
+  local part
+  for part in "${REQUIRED_PARTS[@]}"; do [[ -e "$1/$part" ]] || return 1; done
 }
 
 # The release's ready-made build for this CPU, downloaded, checked against the release's SHA256SUMS
@@ -101,16 +140,17 @@ fetch_archive() {
   FETCHED="$DEST.download"
   rm -rf "$FETCHED"
   mkdir -p "$FETCHED"
-  curl -fsSL --retry 2 --connect-timeout 20 --max-time 60 -o "$FETCHED/SHA256SUMS" "$RELEASES/download/$tag/SHA256SUMS" || status=$?
-  case "$status" in
-    0) ;;
-    # Not found (an HTTP error, or a file:// path that isn't there): a release from before these builds.
-    22 | 37)
-      NO_ARCHIVE="the $tag release has no ready-made build"
-      return 0
-      ;;
-    *) die "Could not download $tag's checksums (curl error $status). Check the network, then run this again." ;;
-  esac
+  local code
+  code=$(curl -sSL --retry 2 --connect-timeout 20 --max-time 60 -o "$FETCHED/SHA256SUMS" -w '%{http_code}' "$RELEASES/download/$tag/SHA256SUMS") || status=$?
+  # Only "not found" means a release from before these builds: GitHub's 404, or a file:// path that
+  # isn't there. Any other answer (a rate limit, GitHub having a bad moment) stops, rather than
+  # quietly building from source for a minute or asking for build tools nobody needs.
+  if ((status == 37)) || { ((status == 0)) && [[ "$code" == 404 ]]; }; then
+    NO_ARCHIVE="the $tag release has no ready-made build"
+    return 0
+  fi
+  ((status == 0)) || die "Could not download $tag's checksums (curl error $status). Check the network, then run this again."
+  [[ "$code" == 2?? || "$code" == 000 ]] || die "GitHub answered $code for $tag's checksums. Try again in a few minutes."
   expected=$(awk -v f="$file" '$2 == f || $2 == "*" f { print $1; exit }' "$FETCHED/SHA256SUMS")
   if [[ -z "$expected" ]]; then
     NO_ARCHIVE="the $tag release has no ready-made build for linux-$arch"
@@ -131,16 +171,24 @@ fetch_archive() {
     die "The download does not match $tag's SHA256SUMS, so it was not installed. Run this again; if it keeps happening, open an issue on GitHub."
   note "It matches the release's SHA256SUMS."
 
-  # The copy from two updates ago goes first, so the disk holds two copies at most, not three.
-  rm -rf "$PREVIOUS"
+  # The copy from two updates ago stays until the new one is whole: it goes at the swap.
   mkdir -p "$STAGE"
   tar --zstd -xf "$FETCHED/$file" -C "$STAGE" --strip-components=1 --no-same-owner ||
     die "Could not unpack the download into $STAGE. Is the disk full?"
   rm -rf "$FETCHED"
   local part
-  for part in node_modules/electron/dist/electron node_modules/node-pty/build/Release/pty.node dist/index.html dist-electron/main.js scripts/vibeforge; do
+  for part in "${REQUIRED_PARTS[@]}"; do
     [[ -e "$STAGE/$part" ]] || die "The ready-made build has no $part, so it was not installed."
   done
+  # The terminal engine's addon was built on the release runner's Linux. One that this system can't
+  # load (an older glibc, musl) would install fine and then open no terminals: build it here instead.
+  local loaded
+  if ! loaded=$(node -e 'try { require(process.argv[1]) } catch (error) { console.log(String(error.message).split("\n")[0]); process.exit(1) }' "$STAGE/node_modules/node-pty" 2>&1); then
+    note "$loaded"
+    rm -rf "$STAGE"
+    NO_ARCHIVE="the ready-made terminal engine doesn't load on this system"
+    return 0
+  fi
   touch "$STAGE/$MARK"
 }
 
@@ -162,8 +210,7 @@ build_from_source() {
     die "Building VibeForge needs Node 20.19+ or 22.12+ (found $(node --version)). Try: mise use -g node@lts"
   command -v npm >/dev/null 2>&1 || die "npm is missing next to node."
 
-  # The copy from two updates ago goes first, so the disk holds two copies at most, not three.
-  rm -rf "$PREVIOUS"
+  # The copy from two updates ago stays until the new one is built: it goes at the swap.
   if [[ -d "$DEST/.git" ]]; then
     # A copy of its history (copy-on-write where the disk can), so the installed copy isn't touched.
     mkdir -p "$STAGE"
@@ -201,6 +248,37 @@ build_from_source() {
   cd "$HOME"
 }
 
+# The vibeforge command, the app-launcher entry and its icons, for the copy in $DEST. An icon that
+# can't be made is only a missing icon, never a failed install.
+add_launcher() {
+  step "Adding the vibeforge command and the launcher entry"
+  mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR/512x512/apps" "$ICON_DIR/256x256/apps" "$ICON_DIR/scalable/apps"
+  chmod +x "$DEST/scripts/vibeforge"
+  ln -sfn "$DEST/scripts/vibeforge" "$BIN_DIR/vibeforge"
+  cp "$DEST/resources/icon.png" "$ICON_DIR/512x512/apps/vibeforge.png" || note "Could not copy the app icon; the launcher entry shows a generic one."
+  cp "$DEST/resources/icon.svg" "$ICON_DIR/scalable/apps/vibeforge.svg" || true
+  if command -v rsvg-convert >/dev/null 2>&1; then
+    rsvg-convert -w 256 -h 256 "$DEST/resources/icon.svg" -o "$ICON_DIR/256x256/apps/vibeforge.png" 2>/dev/null || true
+  fi
+  cat >"$APPS_DIR/vibeforge.desktop" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=VibeForge
+GenericName=Agent desk
+Comment=Your coding CLIs, agents, routines and tasks in one window
+Exec=$BIN_DIR/vibeforge
+TryExec=$BIN_DIR/vibeforge
+Icon=$ICON_DIR/512x512/apps/vibeforge.png
+Terminal=false
+Categories=Development;
+Keywords=AI;Agent;Terminal;Code;Claude;Codex;Grok;Antigravity;
+StartupNotify=true
+StartupWMClass=vibeforge
+EOF
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+}
+
 main() {
   [[ "${1:-}" == "--uninstall" ]] && uninstall
 
@@ -215,6 +293,12 @@ main() {
   # A git checkout is what this installer made before releases carried a ready-made build.
   if [[ -e "$DEST" && ! -d "$DEST/.git" && ! -e "$DEST/$MARK" ]]; then
     die "$DEST exists but is not a VibeForge copy. Move it aside or set VIBEFORGE_HOME."
+  fi
+  # One installer at a time: a second one would clear the first one's download and half-made copy.
+  mkdir -p "$(dirname "$DEST")"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$DEST.lock"
+    flock -n 9 || die "Another VibeForge install or update is running. Let it finish, then run this again."
   fi
   if [[ -z "$RELEASES" && "$REPO" =~ github\.com[/:]([^/]+)/([^/]+)$ ]]; then
     RELEASES="https://github.com/${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}/releases"
@@ -244,18 +328,44 @@ main() {
   if [[ -n "$BRANCH" ]]; then
     why="VIBEFORGE_BRANCH=$BRANCH follows a branch, and only releases are ready-made"
   else
-    if [[ -n "$VERSION" ]]; then tag="v${VERSION#v}"; else tag=$(latest_release_tag); fi
+    if [[ -n "$VERSION" ]]; then
+      tag="v${VERSION#v}"
+    else
+      latest_release_tag
+      tag="$LATEST_TAG"
+    fi
     if [[ "${VIBEFORGE_FROM_SOURCE:-}" == 1 ]]; then
       why="VIBEFORGE_FROM_SOURCE=1"
     elif [[ -z "$arch" ]]; then
       why="there is no ready-made build for $(uname -m)"
+    elif [[ -z "$tag" && -z "$RELEASES" ]]; then
+      why="$REPO has no GitHub releases to download from"
     elif [[ -z "$tag" ]]; then
-      why="could not ask GitHub which release is the latest"
+      why="no release has been published yet"
     fi
+  fi
+
+  # The release asked for is the one installed already: nothing to download, only the command and
+  # the launcher entry put back (they may be what someone ran this again for).
+  if [[ -z "$BRANCH" && -n "$tag" && "${VIBEFORGE_FORCE:-}" != 1 && "${VIBEFORGE_FROM_SOURCE:-}" != 1 ]] &&
+    [[ -e "$DEST/$MARK" || -d "$DEST/.git" ]] && whole "$DEST" &&
+    [[ "v$(node -p 'require(process.argv[1]).version' "$DEST/package.json" 2>/dev/null)" == "$tag" ]]; then
+    VERSION_DONE="${tag#v}"
+    step "VibeForge $VERSION_DONE is installed already, in $DEST"
+    note "Nothing to download. VIBEFORGE_FORCE=1 installs it again."
+    SWAPPED=1
+    trap finish EXIT
+    add_launcher
+    say_done "already"
+    return 0
   fi
 
   STAGE="$DEST.next"
   trap finish EXIT
+  # Ctrl+C or a closed terminal still runs finish, which tidies up and puts a copy moved aside back.
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
   rm -rf "$STAGE"
   if [[ -e "$DEST" ]]; then step "Updating $DEST"; else step "Installing into $DEST"; fi
   if [[ -z "$why" ]]; then
@@ -280,48 +390,31 @@ main() {
   if [[ -e "$DEST" ]]; then
     rm -rf "$PREVIOUS"
     mv "$DEST" "$PREVIOUS"
+    MOVED_ASIDE=1
   fi
-  if ! mv "$STAGE" "$DEST"; then
-    if [[ -e "$PREVIOUS" && ! -e "$DEST" ]]; then mv "$PREVIOUS" "$DEST"; fi
-    die "Could not move the new copy into $DEST."
-  fi
+  # finish puts the copy moved aside back if this fails or is stopped.
+  mv "$STAGE" "$DEST" || die "Could not move the new copy into $DEST."
   SWAPPED=1
+  VERSION_DONE="$version"
 
-  step "Adding the vibeforge command and the launcher entry"
-  mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR/512x512/apps" "$ICON_DIR/256x256/apps" "$ICON_DIR/scalable/apps"
-  chmod +x "$DEST/scripts/vibeforge"
-  ln -sfn "$DEST/scripts/vibeforge" "$BIN_DIR/vibeforge"
-  cp "$DEST/resources/icon.png" "$ICON_DIR/512x512/apps/vibeforge.png"
-  cp "$DEST/resources/icon.svg" "$ICON_DIR/scalable/apps/vibeforge.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert -w 256 -h 256 "$DEST/resources/icon.svg" -o "$ICON_DIR/256x256/apps/vibeforge.png"
-  fi
-  cat >"$APPS_DIR/vibeforge.desktop" <<EOF
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=VibeForge
-GenericName=Agent desk
-Comment=Your coding CLIs, agents, routines and tasks in one window
-Exec=$BIN_DIR/vibeforge
-TryExec=$BIN_DIR/vibeforge
-Icon=$ICON_DIR/512x512/apps/vibeforge.png
-Terminal=false
-Categories=Development;
-Keywords=AI;Agent;Terminal;Code;Claude;Codex;Grok;Antigravity;
-StartupNotify=true
-StartupWMClass=vibeforge
-EOF
-  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+  add_launcher
+  if [[ -n "$why" ]]; then say_done "source"; else say_done "ready-made"; fi
+}
 
+# The closing lines: what is installed, how it got here, and where to start. $1 is "ready-made",
+# "source" or "already".
+say_done() {
   # The CLIs VibeForge knows (seedEngines in src/core/engines.ts).
   local found=() cli
   for cli in claude codex grok cursor-agent agy opencode copilot kimi muse crush pi hermes; do
     command -v "$cli" >/dev/null 2>&1 && found+=("$cli")
   done
 
-  printf '\n%s✓ VibeForge %s is installed.%s\n' "$ember" "$version" "$reset"
-  if [[ -n "$why" ]]; then note "Built from source on this computer."; else note "From the release's ready-made build."; fi
+  printf '\n%s✓ VibeForge %s is installed.%s\n' "$ember" "$VERSION_DONE" "$reset"
+  case "$1" in
+    source) note "Built from source on this computer." ;;
+    ready-made) note "From the release's ready-made build." ;;
+  esac
   note "Open it from the app launcher (Super + Space), or run: vibeforge"
   if ((${#found[@]})); then
     note "CLIs found on PATH: ${found[*]}"
