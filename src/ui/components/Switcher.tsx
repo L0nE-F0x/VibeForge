@@ -13,6 +13,7 @@ import { SHOW_SHORTCUTS_EVENT } from "./Help.js";
 import { SETTINGS_SECTIONS } from "../settings-sections.js";
 import { FOLLOW, useThemes } from "./ThemePicker.js";
 import { useOverlayStack } from "./ui.js";
+import { isShortcut } from "../shortcuts.js";
 
 // Ctrl+K: type part of a name and press Enter to land on any agent, chat, workspace, task,
 // routine, skill or view. Ctrl+Shift+K does the same from inside a terminal, where Ctrl+K
@@ -56,7 +57,8 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const [pickTheme] = useAction(async (theme: string) => call("settings.save", { theme }), t("settings.saveFailed"));
   const [query, setQuery] = useState("");
   const words = useDebounced(query.trim(), 140);
-  const runHits = useQuery(words.length >= RUN_SEARCH_MIN ? `switcher:runs:${words}` : null, ["runs"], () => call("runs.search", words, RUN_HITS)).data;
+  // One entry per text typed: not kept once the search moves on.
+  const runHits = useQuery(words.length >= RUN_SEARCH_MIN ? `switcher:runs:${words}` : null, ["runs"], () => call("runs.search", words, RUN_HITS), { keep: false }).data;
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -175,10 +177,10 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   };
 
   const onKey = (event: React.KeyboardEvent) => {
-    if (event.key === "ArrowDown" || (event.ctrlKey && event.key === "n")) {
+    if (event.key === "ArrowDown" || isShortcut("switcher.next", event)) {
       event.preventDefault();
       setActive((index) => (listed.length ? (index + 1) % listed.length : 0));
-    } else if (event.key === "ArrowUp" || (event.ctrlKey && event.key === "p")) {
+    } else if (event.key === "ArrowUp" || isShortcut("switcher.prev", event)) {
       event.preventDefault();
       setActive((index) => (listed.length ? (index - 1 + listed.length) % listed.length : 0));
     } else if (event.key === "Enter") {
