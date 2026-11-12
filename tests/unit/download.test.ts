@@ -6,7 +6,8 @@ import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
 // Electron's network stack isn't here; every test hands in its own fetch.
-vi.mock("electron", () => ({ net: {} }));
+const netFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
+vi.mock("electron", () => ({ net: { fetch: (url: string, init: RequestInit) => netFetch(url, init) } }));
 
 const { downloadFiles } = await import("../../electron/download.js");
 const { MODEL_CATALOG, modelUrl, PIPER_COMMIT, VOICE_CATALOG, voiceUrls, WHISPER_COMMIT } = await import("../../src/core/voice.js");
@@ -106,6 +107,13 @@ describe("downloading models and voices", () => {
     const work = downloadFiles([pinned("https://example.test/big.bin", target, 64 * 1024 * 1024, { sha256: "0".repeat(64) })], options({ signal: abort.signal, fetch: async () => response(64 * 1024 * 1024), progress: (received) => received > 256 * 1024 && abort.abort() }));
     await expect(within(work)).rejects.toThrow(/abort/i);
     expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it("sends no cookies: a sign-in in the browser dock stays out of a download", async () => {
+    const dir = tempDir();
+    netFetch.mockResolvedValue(response(1000));
+    await downloadFiles([pinned("https://example.test/a.bin", path.join(dir, "a.bin"), 1000)], options());
+    expect(netFetch.mock.calls[0][1].credentials).toBe("omit");
   });
 
   it("names the host and its answer when the server refuses", async () => {
