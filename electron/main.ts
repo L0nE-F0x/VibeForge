@@ -48,6 +48,16 @@ process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in th
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
+// No spellchecker: nothing types prose here, and Chromium's would fetch a dictionary from Google on
+// first start, a request nobody asked for. Each session is told as it is made, before any page.
+app.on("session-created", (made) => {
+  try {
+    made.setSpellCheckerEnabled(false);
+    made.setSpellCheckerLanguages([]);
+  } catch (error) {
+    log.warn(`Could not turn the spellchecker off: ${describeError(error)}`);
+  }
+});
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
 if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
 
