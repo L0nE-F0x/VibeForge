@@ -1,8 +1,9 @@
-import { Check, CircleAlert, ExternalLink, GitBranch, MessageSquare, Play, RotateCcw, Square, SquareTerminal, Workflow, X } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Check, CircleAlert, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, MessageSquare, Play, RotateCcw, Square, SquareTerminal, Trash2, Workflow, X, ExternalLink } from "lucide-react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Engine, LiveSession, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, Workspace } from "../../shared/api.js";
-import { canOrchestrate, orchestratorVoiceWords, stepIssue, type PlanContext } from "../../shared/orchestrator.js";
+import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
+import { effortLevels, launchKind, takesModel } from "../../shared/launch-options.js";
+import { canOrchestrate, KNOWN_MODELS, orchestratorVoiceWords, plannedId, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
 import { usePtyAttention } from "../attention.js";
 import { coreText } from "../core-text.js";
@@ -24,7 +25,7 @@ const DRAFT_KEY = "orchestrator";
 /** Put the bar away: "Open in Code" on the bar opens the terminal, so the bar mustn't stay over it. */
 const LeaveBar = createContext<(() => void) | null>(null);
 
-export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines"], () => call("orchestrator.get"));
+export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
 
 /** A coding CLI: a run VibeForge started, or one typed into a shell. */
 function isCodingCli(session: LiveSession): boolean {
@@ -36,13 +37,15 @@ function usePlanContext(): PlanContext {
   const workspaces = useWorkspaces().data?.workspaces;
   const engines = useEngines().data;
   const live = useLive().data;
+  const copies = useOrchestrator().data?.copies;
   return useMemo(
     () => ({
       workspaces: (workspaces ?? []).map((item) => ({ id: item.id, name: item.name, folder: item.path, git: true })),
-      engines: (engines ?? []).map((item) => ({ id: item.id, label: item.label, available: item.available })),
+      engines: (engines ?? []).map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
       running: (live ?? []).filter(isCodingCli).map((item) => ({ id: item.ptyId, engine: item.program || item.title, workspace: item.workspaceId ?? "", folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
+      copies: (copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: item.workspaceId })),
     }),
-    [workspaces, engines, live],
+    [workspaces, engines, live, copies],
   );
 }
 
@@ -52,6 +55,9 @@ const ISSUE_KEY: Record<StepIssue, Key> = {
   engineMissing: "orch.issue.engineMissing",
   target: "orch.issue.target",
   prompt: "orch.issue.prompt",
+  effort: "orch.issue.effort",
+  folder: "orch.issue.folder",
+  copy: "orch.issue.copy",
 };
 
 /** A live CLI as a person knows it: "Claude Code · VibeForge · fix-tray". */
@@ -263,6 +269,7 @@ function TurnView({ turn, engineLabel: current, compact }: { turn: OrchestratorT
       </div>
     );
   }
+  if (turn.note) return <NoteView note={turn.note} />;
   return (
     <div className="orch-turn from-vibeforge">
       <span className="orch-who">
@@ -295,10 +302,12 @@ const PLAN_KEY: Record<NonNullable<OrchestratorTurn["plan"]>, Key> = {
 
 function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean }) {
   const t = useT();
-  const context = usePlanContext();
+  const steps = turn.steps ?? [];
+  const here = usePlanContext();
+  // The plan's own new workspaces count as there for the steps after them.
+  const context = useMemo(() => withPlannedWorkspaces(here, steps), [here, steps]);
   const [run, running] = useAction(async () => call("orchestrator.run", turn.id), t("orch.failed"));
   const [cancel] = useAction(async () => call("orchestrator.cancel", turn.id), t("orch.failed"));
-  const steps = turn.steps ?? [];
   const waiting = turn.plan === "waiting";
   const blocked = waiting ? steps.filter((step) => stepIssue(step, context)).length : 0;
   const state = turn.plan ?? "done";
@@ -309,7 +318,7 @@ function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean
         <span className="faint">{t.count("orch.steps", steps.length)}</span>
       </div>
       {steps.map((step) => (
-        <StepRow key={step.id} turnId={turn.id} step={step} editable={waiting} compact={compact} issue={waiting ? stepIssue(step, context) : null} />
+        <StepRow key={step.id} turnId={turn.id} step={step} plan={steps} editable={waiting} compact={compact} issue={waiting ? stepIssue(step, context) : null} />
       ))}
       {waiting && (
         <div className="orch-plan-foot">
@@ -328,26 +337,102 @@ function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean
   );
 }
 
-function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; step: OrchestratorStep; editable: boolean; compact?: boolean; issue: StepIssue | null }) {
+function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: string; step: OrchestratorStep; plan: OrchestratorStep[]; editable: boolean; compact?: boolean; issue: StepIssue | null }) {
   const t = useT();
   const { go } = useNav();
   const leaveBar = useContext(LeaveBar);
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const live = useLive().data ?? [];
-  const [edit] = useAction(async (patch: Partial<OrchestratorStep>) => call("orchestrator.editStep", turnId, step.id, patch), t("orch.failed"));
+  const [edit] = useAction(async (patch: StepPatch) => call("orchestrator.editStep", turnId, step.id, patch), t("orch.failed"));
   const [remove] = useAction(async () => call("orchestrator.removeStep", turnId, step.id), t("orch.failed"));
-  const [prompt, setPrompt] = useState(step.prompt);
-  const [branch, setBranch] = useState(step.branch);
-  useEffect(() => setPrompt(step.prompt), [step.prompt]);
-  useEffect(() => setBranch(step.branch), [step.branch]);
+  const [undo] = useAction(async () => step.undo && call("undo.delete", step.undo), t("common.undoFailed"));
   const engine = engines.find((item) => item.id === step.engineId);
+  // The plan's own new workspaces, while their steps can still run, for a start step to pick.
+  const planned = plan.filter((item) => item.kind === "workspace" && item.state !== "failed" && item.state !== "skipped");
   const workspace = workspaces.find((item) => item.id === step.workspaceId);
+  const plannedWorkspace = planned.find((item) => plannedId(item.id) === step.workspaceId);
+  const workspaceName = workspace?.name ?? (plannedWorkspace ? t("orch.planned", { name: plannedWorkspace.name ?? "" }) : step.asked);
   const target = live.find((item) => item.ptyId === step.target);
-  const Icon = step.kind === "start" ? Play : step.kind === "tell" ? MessageSquare : Square;
+  const Icon = STEP_ICON[step.kind];
   const opened = step.ptyId ? live.find((item) => item.ptyId === step.ptyId) : undefined;
-  const copies = useOrchestrator().data?.copies ?? [];
+  const view = useOrchestrator().data;
+  const copies = view?.copies ?? [];
   const copy = step.kind === "start" && !editable ? copies.find((item) => item.id === step.copyId || item.stepId === step.id) : undefined;
+  const targetCopy = step.kind === "apply" || step.kind === "discard" ? copies.find((item) => item.id === step.target) : undefined;
+
+  let line: ReactNode;
+  if (step.kind === "workspace") {
+    line = editable ? (
+      <div className="orch-step-line">
+        <strong>{t("orch.makeWorkspace")}</strong>
+        <TextField value={step.name ?? ""} label={t("orch.workspaceName")} width={150} onDone={(name) => void edit({ name })} />
+        <TextField value={step.folder ?? ""} label={t("orch.folder")} tip={t("orch.folderTip")} mono width={260} onDone={(folder) => void edit({ folder })} />
+        <label className="orch-check" {...tipProps(t("orch.gitInitTip"))}>
+          <input type="checkbox" checked={Boolean(step.git)} onChange={(event) => void edit({ git: event.target.checked })} />
+          {t("orch.gitInit")}
+        </label>
+      </div>
+    ) : (
+      <div className="orch-step-line">
+        <strong>{t("orch.makeWorkspace")}</strong>
+        <span>{step.name}</span>
+        <span className="faint mono truncate">{step.folder}</span>
+        {step.git && <Chip>{t("orch.gitInit")}</Chip>}
+      </div>
+    );
+  } else if (step.kind === "start") {
+    line = editable ? (
+      <div className="orch-step-line">
+        <EnginePick engines={engines} value={step.engineId} onChange={(engineId) => void edit({ engineId })} />
+        <Select value={step.workspaceId} aria-label={t("orch.workspace")} onChange={(event) => void edit({ workspaceId: event.target.value })}>
+          {!workspace && !plannedWorkspace && <option value="">{t("orch.pickWorkspace")}</option>}
+          {planned.map((item) => (
+            <option key={item.id} value={plannedId(item.id)}>
+              {t("orch.planned", { name: item.name ?? "" })}
+            </option>
+          ))}
+          {workspaces.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </Select>
+        <BranchField value={step.branch} onDone={(branch) => void edit({ branch })} />
+        <ModelField engine={engine} value={step.model ?? ""} onDone={(model) => void edit({ model })} />
+        <EffortPick engine={engine} value={step.effort ?? ""} onChange={(effort) => void edit({ effort })} />
+      </div>
+    ) : (
+      <div className="orch-step-line">
+        <strong>{engine?.label ?? step.engineId}</strong>
+        <span className="faint">·</span>
+        <span>{workspaceName}</span>
+        {step.branch ? (
+          <span className="orch-branch-text mono">
+            <GitBranch size={12} /> {step.branch}
+          </span>
+        ) : (
+          <span className="faint">{t("orch.inPlace")}</span>
+        )}
+        {step.model && <Chip>{step.model}</Chip>}
+        {step.effort && <Chip>{t("orch.effortIs", { effort: step.effort })}</Chip>}
+      </div>
+    );
+  } else if (step.kind === "apply" || step.kind === "discard") {
+    line = (
+      <div className="orch-step-line">
+        <strong>{step.kind === "apply" ? t("orch.applyStep") : t("orch.discard")}</strong>
+        <span className="truncate">{targetCopy ? `${targetCopy.name} · ${workspaces.find((item) => item.id === targetCopy.workspaceId)?.name ?? ""}` : step.asked || t("orch.copyGone")}</span>
+      </div>
+    );
+  } else {
+    line = (
+      <div className="orch-step-line">
+        <strong>{step.kind === "tell" ? t("orch.tell") : step.kind === "show" ? t("orch.show") : t("orch.close")}</strong>
+        <span className="truncate">{sessionLabel(target, workspaces) || step.asked || t("orch.gone")}</span>
+      </div>
+    );
+  }
 
   return (
     <div className={`orch-step step-${step.state}${issue ? " has-issue" : ""}`}>
@@ -355,64 +440,31 @@ function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; s
         {step.state === "running" ? <Spinner /> : step.state === "done" ? <Check size={13} /> : step.state === "failed" ? <CircleAlert size={13} /> : <Icon size={13} />}
       </span>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
-        {step.kind === "start" ? (
-          editable ? (
-            <div className="orch-step-line">
-              <EnginePick engines={engines} value={step.engineId} onChange={(engineId) => void edit({ engineId })} />
-              <Select value={step.workspaceId} aria-label={t("orch.workspace")} onChange={(event) => void edit({ workspaceId: event.target.value })}>
-                {!workspace && <option value="">{t("orch.pickWorkspace")}</option>}
-                {workspaces.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </Select>
-              <label className="orch-branch" {...tipProps(t("orch.branchTip"))}>
-                <GitBranch size={12} />
-                <input
-                  className="mono"
-                  value={branch}
-                  aria-label={t("orch.branch")}
-                  placeholder={t("orch.noBranch")}
-                  onChange={(event) => setBranch(event.target.value)}
-                  onBlur={() => branch !== step.branch && void edit({ branch: branch.trim() })}
-                />
-              </label>
-            </div>
-          ) : (
-            <div className="orch-step-line">
-              <strong>{engine?.label ?? step.engineId}</strong>
-              <span className="faint">·</span>
-              <span>{workspace?.name ?? step.asked}</span>
-              {step.branch && (
-                <span className="orch-branch-text mono">
-                  <GitBranch size={12} /> {step.branch}
-                </span>
-              )}
-            </div>
-          )
-        ) : (
-          <div className="orch-step-line">
-            <strong>{step.kind === "tell" ? t("orch.tell") : t("orch.close")}</strong>
-            <span className="truncate">{sessionLabel(target, workspaces) || step.asked || t("orch.gone")}</span>
-          </div>
-        )}
-        {step.kind !== "stop" &&
+        {line}
+        {(step.kind === "start" || step.kind === "tell") &&
           (editable && !compact ? (
-            <PromptBox value={prompt} label={t("orch.prompt")} onChange={setPrompt} onDone={() => prompt !== step.prompt && void edit({ prompt })} />
+            <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
           ) : (
-            <span className={`orch-prompt-text${compact ? " clamp" : ""}`}>{step.prompt}</span>
+            step.prompt && <span className={`orch-prompt-text${compact ? " clamp" : ""}`}>{step.prompt}</span>
           ))}
+        {step.kind === "start" && editable && step.branch && step.dirty ? (
+          <span className="orch-warn">{t.count("orch.dirty", step.dirty, { workspace: workspace?.name ?? "" })}</span>
+        ) : null}
         {issue && <span className="orch-issue">{t(ISSUE_KEY[issue], { asked: step.asked || "?" })}</span>}
         {step.state === "failed" && step.error && <span className="orch-issue">{coreText(step.error)}</span>}
         {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
+        {step.result && <span className="orch-warn">{coreText(step.result)}</span>}
         {copy && <CopyActions copy={copy} onLeave={leaveBar} />}
         {!copy && step.outcome && (
           <span className="faint">{step.outcome === "applied" ? t("orch.outcome.applied", { workspace: workspace?.name ?? "" }) : t("orch.outcome.discarded")}</span>
         )}
       </div>
       {step.state === "done" && step.kind === "start" && step.ptyId && (
-        <Button size="sm" icon={SquareTerminal} disabled={!opened} onClick={() => {
+        <Button
+          size="sm"
+          icon={SquareTerminal}
+          disabled={!opened}
+          onClick={() => {
             leaveBar?.();
             go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined, ptyId: step.ptyId ?? undefined });
           }}
@@ -420,21 +472,188 @@ function StepRow({ turnId, step, editable, compact, issue }: { turnId: string; s
           {t("orch.open")}
         </Button>
       )}
+      {step.state === "done" && step.kind === "workspace" && step.openedWorkspaceId && (
+        <Button
+          size="sm"
+          icon={SquareTerminal}
+          onClick={() => {
+            leaveBar?.();
+            go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined });
+          }}
+        >
+          {t("orch.open")}
+        </Button>
+      )}
+      {step.state === "done" && step.kind === "discard" && step.undo && !copies.some((item) => item.id === step.target) && (
+        <Button size="sm" variant="ghost" icon={RotateCcw} onClick={() => void undo()}>
+          {t("common.undo")}
+        </Button>
+      )}
       {editable && <Button size="sm" variant="ghost" icon={X} tip={t("orch.removeStep")} onClick={() => void remove()} />}
     </div>
   );
 }
 
+const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = { start: Play, tell: MessageSquare, stop: Square, workspace: FolderPlus, apply: GitMerge, discard: Trash2, show: Eye };
+
+/** VibeForge's own word about a CLI Maestro started: its turn ended after real work, or it closed. */
+function NoteView({ note }: { note: MaestroNote }) {
+  const t = useT();
+  const { go } = useNav();
+  const leaveBar = useContext(LeaveBar);
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const running = live.some((item) => item.ptyId === note.ptyId);
+  const copy = note.copyId ? copies.find((item) => item.id === note.copyId) : undefined;
+  return (
+    <div className="orch-turn from-vibeforge orch-note">
+      <span className="orch-who">
+        <Logo size={16} />
+      </span>
+      <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
+        <span className="orch-said">
+          {t(note.kind === "finished" ? "orch.note.finished" : "orch.note.ended", { engine: note.engine, workspace: note.workspace })}
+          {note.changes && <span className="faint"> · {coreText(note.changes)}</span>}
+        </span>
+        <div className="orch-copy">
+          {running && (
+            <Button
+              size="sm"
+              icon={SquareTerminal}
+              onClick={() => {
+                leaveBar?.();
+                go({ view: "code", workspaceId: note.workspaceId ?? undefined, ptyId: note.ptyId });
+              }}
+            >
+              {t("orch.open")}
+            </Button>
+          )}
+          {copy && (
+            <Button
+              size="sm"
+              icon={FileDiff}
+              onClick={() => {
+                leaveBar?.();
+                go({ view: "orchestrator", copyId: copy.id });
+              }}
+            >
+              {t("orch.review")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A one-line field that tells the plan once it is left (or Enter), not on every key. */
+function TextField({ value, label, tip, mono, width, onDone }: { value: string; label: string; tip?: string; mono?: boolean; width?: number; onDone: (value: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  return (
+    <input
+      className={`orch-field${mono ? " mono" : ""}`}
+      style={width ? { width } : undefined}
+      value={text}
+      aria-label={label}
+      placeholder={label}
+      {...(tip ? tipProps(tip) : {})}
+      onChange={(event) => setText(event.target.value)}
+      onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+      onBlur={() => text.trim() !== value && onDone(text.trim())}
+    />
+  );
+}
+
+/** The new branch, in a copy of the workspace of its own; empty works in the workspace itself. */
+function BranchField({ value, onDone }: { value: string; onDone: (branch: string) => void }) {
+  const t = useT();
+  const [branch, setBranch] = useState(value);
+  useEffect(() => setBranch(value), [value]);
+  return (
+    <label className="orch-branch" {...tipProps(t("orch.branchTip"))}>
+      <GitBranch size={12} />
+      <input
+        className="mono"
+        value={branch}
+        aria-label={t("orch.branch")}
+        placeholder={t("orch.noBranch")}
+        onChange={(event) => setBranch(event.target.value)}
+        onBlur={() => branch !== value && onDone(branch.trim())}
+      />
+    </label>
+  );
+}
+
+/** The model a start step's CLI starts on: its own default, or a name it knows. */
+function ModelField({ engine, value, onDone }: { engine: Engine | undefined; value: string; onDone: (model: string) => void }) {
+  const t = useT();
+  const [model, setModel] = useState(value);
+  useEffect(() => setModel(value), [value]);
+  const usable = Boolean(engine && takesModel(engine));
+  // Claude Code's aliases are known without asking it; other CLIs take a name typed in.
+  const known = engine && launchKind(engine) === "claude" ? KNOWN_MODELS.claude : undefined;
+  const list = `orch-models-${engine?.id ?? "none"}`;
+  return (
+    <label className="orch-branch" {...tipProps(usable ? t("orch.stepModelTip") : t("orch.noModel"))}>
+      <input
+        className="mono"
+        style={{ width: 120 }}
+        value={model}
+        disabled={!usable}
+        list={known ? list : undefined}
+        aria-label={t("orch.model")}
+        placeholder={usable ? t("orch.modelDefault") : t("orch.noModel")}
+        onChange={(event) => setModel(event.target.value)}
+        onBlur={() => model.trim() !== value && onDone(model.trim())}
+      />
+      {known && (
+        <datalist id={list}>
+          {known.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      )}
+    </label>
+  );
+}
+
+/** The reasoning effort a start step's CLI starts with: only the levels that CLI takes. */
+function EffortPick({ engine, value, onChange }: { engine: Engine | undefined; value: string; onChange: (effort: string) => void }) {
+  const t = useT();
+  const levels = engine ? effortLevels(engine) : [];
+  if (!levels.length) {
+    return (
+      <Select value="" disabled aria-label={t("orch.effort")} {...tipProps(t("orch.noEffortTip"))}>
+        <option value="">{t("orch.noEffort")}</option>
+      </Select>
+    );
+  }
+  return (
+    <Select value={value} aria-label={t("orch.effort")} onChange={(event) => onChange(event.target.value)}>
+      <option value="">{t("orch.effortDefault")}</option>
+      {value && !levels.includes(value) && <option value={value}>{value}</option>}
+      {levels.map((level) => (
+        <option key={level} value={level}>
+          {t("orch.effortIs", { effort: level })}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 /** A step's words, as tall as they are (up to a point), so the whole instruction reads before Go. */
-function PromptBox({ value, label, onChange, onDone }: { value: string; label: string; onChange: (text: string) => void; onDone: () => void }) {
+function PromptBox({ value, label, placeholder, onDone }: { value: string; label: string; placeholder?: string; onDone: (text: string) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
     node.style.height = "0px";
     node.style.height = `${Math.min(240, Math.max(44, node.scrollHeight + 2))}px`;
-  }, [value]);
-  return <textarea ref={ref} className="orch-prompt" value={value} aria-label={label} onChange={(event) => onChange(event.target.value)} onBlur={onDone} />;
+  }, [text]);
+  return <textarea ref={ref} className="orch-prompt" value={text} aria-label={label} placeholder={placeholder} onChange={(event) => setText(event.target.value)} onBlur={() => onDone(text)} />;
 }
 
 function EnginePick({ engines, value, onChange }: { engines: Engine[]; value: string; onChange: (id: string) => void }) {

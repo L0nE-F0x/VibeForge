@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
-import { call, useEngines, useSettings } from "../api.js";
+import { call, useEngines, useQuery, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import type { OrchestratorSettings } from "../../shared/api.js";
@@ -14,6 +14,8 @@ export function OrchestratorCard() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const [save] = useAction(async (orchestrator: OrchestratorSettings) => call("settings.save", { orchestrator }), t("settings.saveFailed"));
+  // Maestro's own view says where a new workspace goes when this is left empty.
+  const view = useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get")).data;
   if (!settings) return null;
   const current = settings.orchestrator;
   const planners = engines.filter((engine) => canOrchestrate(engine));
@@ -46,8 +48,26 @@ export function OrchestratorCard() {
             onChange={(mode) => void save({ ...current, mode })}
           />
         </Field>
+        <Field label={t("orch.projectsFolder")} hint={t("orch.projectsFolderHint", { folder: view?.projectsFolder ?? "~/Projects" })}>
+          <FolderInput value={current.projectsFolder} placeholder={view?.projectsFolder ?? "~/Projects"} onChange={(projectsFolder) => void save({ ...current, projectsFolder })} />
+        </Field>
       </div>
     </div>
+  );
+}
+
+/** A folder typed in (~ allowed), saved once the field is left. */
+function FolderInput({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (folder: string) => void }) {
+  const [typed, setTyped] = useState(value);
+  return (
+    <Input
+      className="mono"
+      value={typed}
+      placeholder={placeholder}
+      onChange={(event) => setTyped(event.target.value)}
+      onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+      onBlur={() => typed.trim() !== value && onChange(typed.trim())}
+    />
   );
 }
 

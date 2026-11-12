@@ -327,3 +327,39 @@
   overflow: auto;
   margin-bottom: 6px;
 }
+
+/* A new workspace's name and folder, typed on the card before Go. */
+.orch-field {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--bg-deep) 70%, transparent);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  outline: 0;
+  min-width: 0;
+}
+
+.orch-field:focus-visible {
+  border-color: var(--focus-line);
+}
+
+.orch-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+/* Something to know before Go that doesn't stop the step: edits left behind, conflicts to sort out. */
+.orch-warn {
+  color: var(--yellow);
+  font-size: var(--fs-sm);
+}
+
+/* VibeForge's own word about a CLI it started: quieter than an answer. */
+.orch-note .orch-said {
+  color: var(--fg-2);
+}
