@@ -427,6 +427,8 @@ export const en = {
   "updates.doneUnknown": "The update finished. Restart VibeForge to start using it.",
   "updates.stopped": "The update stopped with exit code {code}. The terminal shows why.",
   "updates.restart": "Restart VibeForge",
+  "updates.finishTitle": "Restart to finish updating",
+  "updates.finishBody": "VibeForge was updated while it was open. This part comes from the new version, so restart VibeForge to use it.",
   "updates.restartTitle": "Restart VibeForge?",
   "updates.restartBody.one": "{count} terminal is still running. Restarting stops it; runs keep their transcripts.",
   "updates.restartBody.other": "{count} terminals are still running. Restarting stops them; runs keep their transcripts.",

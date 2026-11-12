@@ -416,6 +416,8 @@ export const es: Catalog = {
   "updates.doneUnknown": "La actualización ha terminado. Reinicia VibeForge para empezar a usarla.",
   "updates.stopped": "La actualización se detuvo con el código de salida {code}. El terminal muestra por qué.",
   "updates.restart": "Reiniciar VibeForge",
+  "updates.finishTitle": "Reinicia para terminar la actualización",
+  "updates.finishBody": "VibeForge se actualizó mientras estaba abierto. Esta parte es de la versión nueva, así que reinicia VibeForge para usarla.",
   "updates.restartTitle": "¿Reiniciar VibeForge?",
   "updates.restartBody.one": "Todavía hay {count} terminal en ejecución. Reiniciar lo detiene; las ejecuciones conservan sus transcripciones.",
   "updates.restartBody.other": "Todavía hay {count} terminales en ejecución. Reiniciar los detiene; las ejecuciones conservan sus transcripciones.",

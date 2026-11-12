@@ -417,6 +417,8 @@ export const fr: Catalog = {
   "updates.doneUnknown": "La mise à jour est terminée. Relancez VibeForge pour l'utiliser.",
   "updates.stopped": "La mise à jour s'est arrêtée avec le code de sortie {code}. Le terminal montre pourquoi.",
   "updates.restart": "Relancer VibeForge",
+  "updates.finishTitle": "Redémarrez pour terminer la mise à jour",
+  "updates.finishBody": "VibeForge a été mis à jour pendant qu'il était ouvert. Cette partie vient de la nouvelle version : redémarrez VibeForge pour l'utiliser.",
   "updates.restartTitle": "Relancer VibeForge ?",
   "updates.restartBody.one": "{count} terminal tourne encore. Relancer l'arrête ; les exécutions gardent leur transcription.",
   "updates.restartBody.other": "{count} terminaux tournent encore. Relancer les arrête ; les exécutions gardent leur transcription.",

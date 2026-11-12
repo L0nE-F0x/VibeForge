@@ -417,6 +417,8 @@ export const ja: Catalog = {
   "updates.doneUnknown": "アップデートが完了しました。VibeForge を再起動すると使えます。",
   "updates.stopped": "アップデートは終了コード {code} で止まりました。理由はターミナルに表示されています。",
   "updates.restart": "VibeForge を再起動",
+  "updates.finishTitle": "再起動してアップデートを完了",
+  "updates.finishBody": "VibeForge は開いたままアップデートされました。この部分は新しいバージョンのものなので、VibeForge を再起動すると使えます。",
   "updates.restartTitle": "VibeForge を再起動しますか？",
   "updates.restartBody.one": "{count} 個のターミナルがまだ稼働中です。再起動すると停止しますが、実行の記録は残ります。",
   "updates.restartBody.other": "{count} 個のターミナルがまだ稼働中です。再起動すると停止しますが、実行の記録は残ります。",

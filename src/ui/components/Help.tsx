@@ -7,6 +7,7 @@ import { useToast } from "../state.js";
 import { tipProps } from "./Tooltip.js";
 import { startTour } from "./Tour.js";
 import { showUpdate } from "./Update.js";
+import { useUpdated } from "../update-state.js";
 import { showWhichOne, WhichOneIcon } from "./WhichOne.js";
 import { Menu, Modal, Popover, type MenuItem } from "./ui.js";
 
@@ -112,8 +113,10 @@ export function HelpPopover({ anchor, onClose }: { anchor: HTMLElement; onClose:
   const copyDiagnostics = useCopyDiagnostics();
   const repo = info?.repo ?? REPO;
   const waiting = update?.available && update.latest ? update.latest.version : null;
+  // Already updated on disk this session: what's left is a restart, which the update dialog offers.
+  const updated = useUpdated();
   const items: Array<MenuItem | "sep"> = [
-    ...(waiting ? ([{ label: t("help.updateTo", { version: waiting }), icon: Download, accent: true, onSelect: showUpdate }, "sep"] as Array<MenuItem | "sep">) : []),
+    ...(waiting ? ([{ label: updated ? t("updates.finishTitle") : t("help.updateTo", { version: waiting }), icon: Download, accent: true, onSelect: showUpdate }, "sep"] as Array<MenuItem | "sep">) : []),
     { label: t("help.tour"), icon: Compass, onSelect: startTour },
     { label: t("whichOne.title"), icon: WhichOneIcon, onSelect: showWhichOne },
     { label: t("help.shortcuts"), icon: Keyboard, hint: shortcutKeys("app.shortcuts"), onSelect: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },

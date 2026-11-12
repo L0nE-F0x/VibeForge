@@ -417,6 +417,8 @@ export const zh: Catalog = {
   "updates.doneUnknown": "更新已完成。重新启动 VibeForge 即可使用。",
   "updates.stopped": "更新已停止，退出码 {code}。终端里显示了原因。",
   "updates.restart": "重新启动 VibeForge",
+  "updates.finishTitle": "重启以完成更新",
+  "updates.finishBody": "VibeForge 在打开时已更新。这部分来自新版本，请重启 VibeForge 后使用。",
   "updates.restartTitle": "重新启动 VibeForge？",
   "updates.restartBody.one": "还有 {count} 个终端在运行。重新启动会停止它们，运行记录会保留文字记录。",
   "updates.restartBody.other": "还有 {count} 个终端在运行。重新启动会停止它们，运行记录会保留文字记录。",

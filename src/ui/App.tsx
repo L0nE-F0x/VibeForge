@@ -10,7 +10,8 @@ import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
 import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
 import { WhichOneSheet } from "./components/WhichOne.js";
-import { SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
+import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
+import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
 import { VoiceLayer } from "./voice.js";
@@ -26,14 +27,24 @@ import { HomeView } from "./views/Home.js";
 import { OPEN_ORCHESTRATOR_EVENT, OrchestratorBar, OrchestratorView } from "./views/Orchestrator.js";
 
 // Home is the first screen and Code stays mounted to keep its terminals; the other views load
-// the first time they're opened.
-const AgentsView = lazy(() => import("./views/Agents.js").then((module) => ({ default: module.AgentsView })));
-const ChatView = lazy(() => import("./views/Chat.js").then((module) => ({ default: module.ChatView })));
-const TasksView = lazy(() => import("./views/Tasks.js").then((module) => ({ default: module.TasksView })));
-const RoutinesView = lazy(() => import("./views/Routines.js").then((module) => ({ default: module.RoutinesView })));
-const SkillsView = lazy(() => import("./views/Skills.js").then((module) => ({ default: module.SkillsView })));
-const RunsView = lazy(() => import("./views/Runs.js").then((module) => ({ default: module.RunsView })));
-const SettingsView = lazy(() => import("./views/Settings.js").then((module) => ({ default: module.SettingsView })));
+// the first time they're opened, or in the first quiet moment after start (preloadWhenIdle), so an
+// update that replaces the files on disk can't leave this window without them.
+const VIEW_FILES = {
+  agents: () => import("./views/Agents.js"),
+  chat: () => import("./views/Chat.js"),
+  tasks: () => import("./views/Tasks.js"),
+  routines: () => import("./views/Routines.js"),
+  skills: () => import("./views/Skills.js"),
+  runs: () => import("./views/Runs.js"),
+  settings: () => import("./views/Settings.js"),
+};
+const AgentsView = lazy(() => VIEW_FILES.agents().then((module) => ({ default: module.AgentsView })));
+const ChatView = lazy(() => VIEW_FILES.chat().then((module) => ({ default: module.ChatView })));
+const TasksView = lazy(() => VIEW_FILES.tasks().then((module) => ({ default: module.TasksView })));
+const RoutinesView = lazy(() => VIEW_FILES.routines().then((module) => ({ default: module.RoutinesView })));
+const SkillsView = lazy(() => VIEW_FILES.skills().then((module) => ({ default: module.SkillsView })));
+const RunsView = lazy(() => VIEW_FILES.runs().then((module) => ({ default: module.RunsView })));
+const SettingsView = lazy(() => VIEW_FILES.settings().then((module) => ({ default: module.SettingsView })));
 
 export function App() {
   return (
@@ -52,6 +63,7 @@ export function App() {
 
 function Shell() {
   const { route, go, open, back, forward } = useNav();
+  useEffect(() => preloadWhenIdle(Object.values(VIEW_FILES)), []);
   const [switcher, setSwitcher] = useState(false);
   const [orchestrator, setOrchestrator] = useState(false);
   const closeOrchestrator = useCallback(() => setOrchestrator(false), []);
@@ -492,10 +504,13 @@ class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 
   componentDidCatch(error: Error) {
+    if (isStaleChunk(error)) markUpdated();
     console.error(error);
   }
 
   render() {
+    // A view whose file an update replaced: Try again can't bring it back, a restart can.
+    if (this.state.error && isStaleChunk(this.state.error)) return <RestartToFinish />;
     if (this.state.error) {
       return (
         <Empty

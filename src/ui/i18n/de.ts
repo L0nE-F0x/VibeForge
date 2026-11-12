@@ -416,6 +416,8 @@ export const de: Catalog = {
   "updates.doneUnknown": "Das Update ist fertig. Starte VibeForge neu, um es zu verwenden.",
   "updates.stopped": "Das Update endete mit Exit-Code {code}. Das Terminal zeigt, warum.",
   "updates.restart": "VibeForge neu starten",
+  "updates.finishTitle": "Neu starten, um das Update abzuschließen",
+  "updates.finishBody": "VibeForge wurde aktualisiert, während es offen war. Dieser Teil stammt aus der neuen Version; starte VibeForge neu, um ihn zu nutzen.",
   "updates.restartTitle": "VibeForge neu starten?",
   "updates.restartBody.one": "{count} Terminal läuft noch. Ein Neustart stoppt es; Läufe behalten ihre Transkripte.",
   "updates.restartBody.other": "{count} Terminals laufen noch. Ein Neustart stoppt sie; Läufe behalten ihre Transkripte.",

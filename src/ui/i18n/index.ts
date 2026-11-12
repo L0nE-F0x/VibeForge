@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { en } from "./en.js";
+import { isStaleChunk, markUpdated } from "../update-state.js";
 
 // Translations with no dependencies. English (`en.ts`) is the source: its keys are the only
 // keys, and every other catalog must have all of them, so a missing translation fails the
@@ -44,10 +45,19 @@ export function loadLanguage(language: Language): Promise<void> {
   if (CATALOGS[language]) return Promise.resolve();
   let pending = loading.get(language);
   if (!pending) {
-    pending = LOADERS[language as Exclude<Language, "en">]().then((catalog) => {
-      CATALOGS[language] = catalog;
-      if (language === current) refresh();
-    });
+    pending = LOADERS[language as Exclude<Language, "en">]().then(
+      (catalog) => {
+        CATALOGS[language] = catalog;
+        if (language === current) refresh();
+      },
+      (error: unknown) => {
+        // Not kept, so asking again tries again. Gone because an update replaced the files on
+        // disk: the window says to restart (update-state.ts).
+        loading.delete(language);
+        if (isStaleChunk(error)) markUpdated();
+        throw error;
+      },
+    );
     loading.set(language, pending);
   }
   return pending;
@@ -128,11 +138,13 @@ export function applyLanguageSetting(setting: string): void {
   const next = resolveLanguage(setting, systemLanguages());
   if (typeof document !== "undefined") document.documentElement.lang = next;
   requested = next;
-  void loadLanguage(next).then(() => {
-    if (requested !== next || current === next) return;
-    current = next;
-    refresh();
-  });
+  void loadLanguage(next)
+    .then(() => {
+      if (requested !== next || current === next) return;
+      current = next;
+      refresh();
+    })
+    .catch(() => undefined);
 }
 
 function subscribe(listener: () => void): () => void {
