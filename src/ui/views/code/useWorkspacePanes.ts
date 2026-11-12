@@ -189,10 +189,13 @@ export function useWorkspacePanes({
     show(workspace, ptyId, runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id] }));
   }
 
-  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }) {
+  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }, opts: { focus?: boolean } = {}) {
     if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
     patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
-    setFocus((prev) => ({ ...prev, [workspace.id]: spot.paneId }));
+    // A pane placed on its own (a CLI Maestro started) doesn't take focus from the one being typed
+    // in; it is focused only in a workspace that has no focused pane yet.
+    const focus = opts.focus ?? true;
+    setFocus((prev) => (focus || !prev[workspace.id] ? { ...prev, [workspace.id]: spot.paneId } : prev));
   }
 
   // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
@@ -230,7 +233,7 @@ export function useWorkspacePanes({
       const state = runtimeRef.current[paneId]?.state ?? "idle";
       return state === "idle" || state === "exited";
     };
-    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }));
+    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }), { focus: false });
   }
 
   /** The first pane of a workspace whose panes were all closed. */
