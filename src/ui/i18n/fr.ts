@@ -946,6 +946,7 @@ export const fr: Catalog = {
   "core.copyMove": "Appliquez ou abandonnez la copie de la tâche avant de la déplacer vers un autre espace de travail.",
   "core.noCopy": "Cette tâche n'a pas de copie à part.",
   "core.copyUntrusted": "La copie de cette tâche n'est pas dans le dossier des worktrees de VibeForge, elle n'a donc pas été touchée.",
+  "core.copyNestedRepo": "Impossible de lire les modifications de la copie : {folder} dans la copie est un dépôt git à part, sans aucun commit pour l'instant. Faites un commit dedans, ou supprimez son dossier .git, puis réessayez.",
   "core.copyOtherRepo": "La copie de cette tâche désigne un autre dépôt, elle n'a donc pas été touchée.",
   "core.stopBeforeApply": "Arrêtez la tâche avant d'appliquer ses changements.",
   "core.stopBeforeDiscard": "Arrêtez la tâche avant d'abandonner sa copie.",

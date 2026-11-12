@@ -945,6 +945,7 @@ export const es: Catalog = {
   "core.copyMove": "Aplica o descarta la copia de la tarea antes de moverla a otro espacio de trabajo.",
   "core.noCopy": "Esta tarea no tiene copia aparte.",
   "core.copyUntrusted": "La copia de esta tarea no está en la carpeta de worktrees de VibeForge, así que no se tocó.",
+  "core.copyNestedRepo": "No se pudieron leer los cambios de la copia: {folder} dentro de la copia es un repositorio git propio sin ningún commit todavía. Haz un commit en él, o quita su carpeta .git, y vuelve a intentarlo.",
   "core.copyOtherRepo": "La copia de esta tarea indica otro repositorio, así que no se tocó.",
   "core.stopBeforeApply": "Detén la tarea antes de aplicar sus cambios.",
   "core.stopBeforeDiscard": "Detén la tarea antes de descartar su copia.",

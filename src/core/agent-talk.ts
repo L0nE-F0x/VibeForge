@@ -178,6 +178,8 @@ export function taskReportText(input: {
   applyWith?: string | null;
   /** It went quiet with nothing in the log VibeForge reads for it: `reply` is the end of its screen. */
   waiting?: boolean;
+  /** Why its changes couldn't be read, when they couldn't: not the same as changing nothing. */
+  changesError?: string | null;
 }): string {
   const files = input.files.length > 12 ? `${input.files.slice(0, 12).join(", ")} and ${input.files.length - 12} more` : input.files.join(", ");
   if (input.waiting) {
@@ -194,7 +196,9 @@ export function taskReportText(input: {
     `[Task report from ${input.agentLabel}, sent through VibeForge]`,
     input.ended ? `The task you handed out, "${input.title}", ended before ${input.agentLabel} answered.` : `${input.agentLabel} finished its turn on the task you handed it: "${input.title}".`,
     ...(said ? [said] : []),
-    input.patchPath
+    input.changesError
+      ? `Its changes couldn't be read (${input.changesError.replace(/^Could not read the copy's changes: /, "")}). They are still in its own copy${input.copyPath ? ` at ${input.copyPath}` : ""}; tell the person.`
+      : input.patchPath
       ? `Its changes are in ${input.patchPath}${files ? ` (${files})` : ""}, made in its own copy${input.copyPath ? ` at ${input.copyPath}` : ""}. ${input.applyWith ? `When they're right, apply them with: vibeforge apply ${input.applyWith}` : "A person applies them from the task in VibeForge."}`
       : "It changed no files.",
     ...(input.handle && !input.ended ? ["", `(To ask it more, run: vibeforge tell ${input.handle} "…")`] : []),

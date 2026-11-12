@@ -316,11 +316,36 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
   return withRepoLock(copy.repo, async () => {
     // Staging in the copy is the copy's own business; it makes new files part of the diff.
     const staged = await git(["add", "-A"], copy.path);
-    if (staged.code !== 0) throw failure("Could not read the copy's changes", staged);
+    if (staged.code !== 0) throw stagingFailure(staged);
+    // The staged tree is what Apply merges: the patch below is text, and text in some other
+    // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
+    const tree = await git(["write-tree"], copy.path);
+    if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
     const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path);
     if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
+    stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
     return diff.stdout;
   });
+}
+
+/**
+ * The tree each copy's last patch was read from, by the copy's folder. Apply takes the copy's
+ * side from it, byte for byte, when it is handed that same patch.
+ */
+const stagedTrees = new Map<string, { patch: string; tree: string }>();
+
+/**
+ * Why `git add -A` in a copy failed, in words. A git repository inside the copy that has no
+ * commit yet (`git init` with nothing committed) is the usual cause, and git's own words
+ * ("does not have a commit checked out") don't say what to do.
+ */
+function stagingFailure(run: GitRun): Error {
+  const nested = /'([^']+)' does not have a commit checked out/.exec(run.stderr)?.[1];
+  if (nested) {
+    const folder = nested.replace(/\/$/, "");
+    return new Error(`Could not read the copy's changes: ${folder} in the copy is a git repository of its own with nothing committed yet. Commit in it, or remove its .git folder, and try again.`);
+  }
+  return failure("Could not read the copy's changes", run);
 }
 
 /** The files a patch touches, from its `diff --git` headers. */
@@ -338,7 +363,15 @@ export function patchFiles(patch: string): string[] {
  * index is never touched, and nothing is committed. Throws when the changes can't go in at all.
  */
 export function applyToWorkspace(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
-  return withRepoLock(copy.repo, () => applyPatch(copy, patch));
+  return withRepoLock(copy.repo, async () => {
+    const key = path.resolve(copy.path);
+    const staged = stagedTrees.get(key);
+    try {
+      return await applyPatch(copy, patch, staged?.patch === patch ? staged.tree : null);
+    } finally {
+      if (stagedTrees.get(key) === staged) stagedTrees.delete(key);
+    }
+  });
 }
 
 const ZERO_OID = /^0+$/;
@@ -351,7 +384,7 @@ const MERGE_AUTHOR = {
   GIT_COMMITTER_EMAIL: "vibeforge@localhost",
 };
 
-async function applyPatch(copy: WorkingCopy, patch: string): Promise<ApplyResult> {
+async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null): Promise<ApplyResult> {
   if (!patch.trim()) return { files: [], conflicts: [], kept: [] };
   if (!isCommitId(copy.base)) throw new Error("The changes don't apply to the workspace");
   const files = patchFiles(patch);
@@ -363,11 +396,15 @@ async function applyPatch(copy: WorkingCopy, patch: string): Promise<ApplyResult
       if (run.code !== 0) throw failure("The changes don't apply to the workspace", run);
       return run.stdout;
     };
-    // The copy's side: the patch on top of its base, in an index of its own.
-    const theirsIndex = path.join(scratch, "theirs");
-    await step(["read-tree", copy.base], theirsIndex);
-    await step(["apply", "--cached", "--whitespace=nowarn", "-"], theirsIndex, patch);
-    const theirs = (await step(["write-tree"], theirsIndex)).trim();
+    // The copy's side: the tree its patch was read from (a worktree keeps its objects in the
+    // repository's own store), else the patch on top of its base, in an index of its own.
+    let theirs = stagedTree && isCommitId(stagedTree) && (await git(["cat-file", "-e", `${stagedTree}^{tree}`], repo)).code === 0 ? stagedTree : "";
+    if (!theirs) {
+      const theirsIndex = path.join(scratch, "theirs");
+      await step(["read-tree", copy.base], theirsIndex);
+      await step(["apply", "--cached", "--whitespace=nowarn", "-"], theirsIndex, patch);
+      theirs = (await step(["write-tree"], theirsIndex)).trim();
+    }
     const touched = (await step(["diff-tree", "-r", "-z", "--no-renames", "--name-only", copy.base, theirs])).split("\0").filter(Boolean);
     // The workspace's side: git's index copied, then brought up to what is on disk now.
     const oursIndex = path.join(scratch, "ours");
@@ -465,8 +502,12 @@ async function writeChanges(repo: string, changes: TreeChange[], stages: Map<str
   const ordered = [...changes.filter((change) => change.deleted), ...changes.filter((change) => !change.deleted)];
   for (const change of ordered) {
     if (stages.has(change.path) && !withMarkers(change, stages)) continue;
-    // A submodule's commit isn't a file to write.
-    if (change.mode === "160000") continue;
+    // A git repository inside the copy (a clone, a submodule) is a commit, not files to write:
+    // left in the copy and named, so the copy isn't removed with it still in there.
+    if (change.mode === "160000") {
+      failed.push(change.path);
+      continue;
+    }
     const target = placeIn(repo, change.path);
     if (!target || (change.added && lstat(target))) {
       failed.push(change.path);

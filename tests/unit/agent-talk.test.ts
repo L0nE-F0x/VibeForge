@@ -790,6 +790,20 @@ describe("a review loop and handing out tasks", () => {
     await nextReport(3);
     expect(reports()).toHaveLength(2);
 
+    // Changes that can't be read are reported as unread, not as no changes at all.
+    expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "helper", text: "Make a repo" })).toMatchObject({ ok: true, started: true });
+    const made = ctx.svc.listTasks().find((item) => item.title === "Make a repo")!;
+    const madePty = ctx.svc.listLive().find((item) => item.taskId === made.id)!.ptyId;
+    await ctx.svc.pumpMessages();
+    const nested = path.join(made.copy!.path, "scratch");
+    fs.mkdirSync(nested);
+    execFileSync("git", ["init", "-q"], { cwd: nested });
+    fs.writeFileSync(path.join(nested, "notes.md"), "draft\n");
+    await ctx.exit(madePty);
+    const unread = (await nextReport(3)).text;
+    expect(unread).toContain("Its changes couldn't be read (scratch in the copy is a git repository of its own with nothing committed yet.");
+    expect(unread).not.toContain("It changed no files.");
+
     // From a terminal outside VibeForge there's nobody to report to, so nothing is watched.
     const before = new Set(ctx.svc.listLive().map((item) => item.ptyId));
     expect(await ctx.svc.handTask({ fromPty: null, agent: "helper", text: "From outside" })).toMatchObject({ ok: true, started: true });

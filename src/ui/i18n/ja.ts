@@ -946,6 +946,7 @@ export const ja: Catalog = {
   "core.copyMove": "別のワークスペースへ移す前に、タスクのコピーを適用するか破棄してください。",
   "core.noCopy": "このタスクには別のコピーがありません。",
   "core.copyUntrusted": "このタスクのコピーは VibeForge の worktrees フォルダーの外にあるため、手を付けませんでした。",
+  "core.copyNestedRepo": "コピーの変更を読めませんでした: コピー内の {folder} はまだ何もコミットされていない独立した git リポジトリです。そこでコミットするか、その .git フォルダーを削除してから、もう一度お試しください。",
   "core.copyOtherRepo": "このタスクのコピーは別のリポジトリを指しているため、手を付けませんでした。",
   "core.stopBeforeApply": "変更を適用する前にタスクを停止してください。",
   "core.stopBeforeDiscard": "コピーを破棄する前にタスクを停止してください。",

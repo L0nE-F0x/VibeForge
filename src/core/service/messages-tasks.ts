@@ -310,7 +310,15 @@ export class HandedTasks {
     const waiting = Boolean(!ended && answered?.fromScreen && engine && replyLogFor(engine.id, engine.bin));
     const from = this.roster.list().find((item) => item.ptyId === taskPty) ?? null;
     const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
-    const patch = task.copy ? await copyPatch(task.copy, { dataRoot: this.core.options.dataRoot, taskId }).catch(() => "") : "";
+    let patch = "";
+    let changesError: string | null = null;
+    if (task.copy) {
+      try {
+        patch = await copyPatch(task.copy, { dataRoot: this.core.options.dataRoot, taskId });
+      } catch (error) {
+        changesError = error instanceof Error ? error.message : String(error);
+      }
+    }
     const reply = answered?.reply ? cleanText(answered.reply) : null;
     const text = taskReportText({
       agentLabel: from?.label ?? agent?.name ?? "The agent",
@@ -324,6 +332,7 @@ export class HandedTasks {
       copyPath: task.copy?.path ?? null,
       applyWith: this.settings().leadApplies && !ended ? task.id : null,
       waiting,
+      changesError,
     });
     // Counted like any message between the two: past the limit it waits in the prompt for a person
     // (checked as it goes in, see Delivery.deliver).
