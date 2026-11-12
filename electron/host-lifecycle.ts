@@ -33,7 +33,7 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
       }
     },
     send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
-    screen: async (ptyId) => (await supervisor.snapshot(ptyId)).plain,
+    screen: (ptyId) => supervisor.screen(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),

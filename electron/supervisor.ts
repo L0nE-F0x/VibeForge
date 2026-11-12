@@ -171,6 +171,12 @@ export class PtySupervisor {
     };
   }
 
+  /** The last lines of a terminal as plain text: what a person would read there now. */
+  async screen(ptyId: string): Promise<string> {
+    const result = await this.request({ op: "screen", ptyId });
+    return String(result.plain ?? "");
+  }
+
   /** Stop every session, let the host write their files, then end it. */
   async shutdown(timeoutMs = 7000): Promise<void> {
     const child = this.child;
