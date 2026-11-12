@@ -182,7 +182,8 @@ export class MaestroCopies {
           this.save();
           this.settled(copy, null);
         },
-        owned ? () => void removeCopy(copy, this.owner(copy.id), trusted).catch(() => undefined) : undefined,
+        // Returned, so a quit inside the Undo window waits for the branch to go too.
+        owned ? () => removeCopy(copy, this.owner(copy.id), trusted).catch(() => undefined) : undefined,
       );
       return owned ? deleted : { ...deleted, copyLeft: true };
     });
