@@ -59,7 +59,7 @@ function setUp() {
   } as never;
   const exited: string[] = [];
   const life = new HostLifecycle(ctx, {
-    voice: { status: () => ({ controlSocket: "/run/vf.sock" }) as never },
+    voice: { controlSocket: "/run/vf.sock" },
     talk: { exited: async (ptyId: string) => void exited.push(ptyId) },
   });
   life.wire();
@@ -125,7 +125,12 @@ describe("the terminal host's lifecycle", () => {
     ]);
     expect(lines()).toContain("INFO  Terminal p1 ended (the terminal host stopped)");
     expect(lines()).toContain("INFO  Terminal p2 ended (the terminal host stopped)");
-    expect(sent).toEqual([["host-crash", "The terminal host stopped (SIGKILL)."]]);
+    // The page hears each terminal end, so no pane goes on looking live, then the crash.
+    expect(sent).toEqual([
+      ["pty-exit", { ptyId: "p1", exitCode: null, signal: null }],
+      ["pty-exit", { ptyId: "p2", exitCode: null, signal: null }],
+      ["host-crash", "The terminal host stopped (SIGKILL)."],
+    ]);
     expect(lines()).toContain("ERROR The terminal host stopped (SIGKILL).");
     expect(lines().join("\n")).not.toContain("stopped: The terminal host stopped");
     expect(supervisor.starts).toHaveLength(0);
@@ -152,7 +157,7 @@ describe("the terminal host's lifecycle", () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(supervisor.starts).toHaveLength(0);
     // The page hears about the first crash only: the second came during the quit.
-    expect(sent).toEqual([["host-crash", "gone"]]);
+    expect(sent.filter(([event]) => event === "host-crash")).toEqual([["host-crash", "gone"]]);
   });
 
   it("stops bringing back a host that crashed more than three times in five minutes", async () => {

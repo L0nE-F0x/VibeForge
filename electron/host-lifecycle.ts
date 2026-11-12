@@ -95,7 +95,7 @@ export class HostLifecycle {
 
   constructor(
     private readonly ctx: MainContext,
-    private readonly parts: { voice: Pick<Voice, "status">; talk: Pick<Talk, "exited"> },
+    private readonly parts: { voice: Pick<Voice, "controlSocket">; talk: Pick<Talk, "exited"> },
   ) {}
 
   /** Why the terminal host is down, for a page that loads after it happened. */
@@ -105,7 +105,7 @@ export class HostLifecycle {
 
   async start(): Promise<void> {
     try {
-      await this.ctx.supervisor.start(this.ctx.appRoot, terminalEnv(this.ctx, this.parts.voice.status().controlSocket));
+      await this.ctx.supervisor.start(this.ctx.appRoot, terminalEnv(this.ctx, this.parts.voice.controlSocket));
       this.hostError = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -134,6 +134,8 @@ export class HostLifecycle {
       // Every terminal died with the host. Record them, then bring the host back.
       for (const session of ctx.service?.listLive() ?? []) {
         log.info(`Terminal ${session.ptyId} ended (the terminal host stopped)`);
+        // The page too, or an open pane goes on looking live while every key typed there is lost.
+        send("pty-exit", { ptyId: session.ptyId, exitCode: null, signal: null });
         this.ended(session.ptyId, null, null);
       }
       // Once quitting has begun the host stays down: a new one would start halfway through the quit.
