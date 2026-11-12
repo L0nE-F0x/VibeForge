@@ -11,6 +11,8 @@ import type { Voice } from "./voice.js";
 
 /** How long a quit waits for the phone page's server to close before going on without it. */
 const COMPANION_STOP_MS = 2000;
+/** How long a quit waits for deletes that just became final to tidy up after themselves in git. */
+const CLOSE_WAIT_MS = 3000;
 
 export class Quit {
   private shutdownDone = false;
@@ -64,7 +66,8 @@ export class Quit {
     await ctx.supervisor.shutdown(7000);
     await Promise.race([ctx.service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
     ctx.service.shutdown();
-    ctx.service.close();
+    // A task deleted moments ago still has its copy's branch to drop: give git a moment for it.
+    await Promise.race([ctx.service.close(), new Promise((resolve) => setTimeout(resolve, CLOSE_WAIT_MS))]);
     ctx.service = null;
   }
 

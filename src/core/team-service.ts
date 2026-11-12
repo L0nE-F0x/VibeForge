@@ -69,11 +69,11 @@ export class TeamService extends ServiceCore {
     super.prepareShutdown();
   }
 
-  override close(): void {
+  override close(): Promise<void> {
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
-    super.close();
+    return super.close();
   }
 
   // ---------------------------------------------------------------- library

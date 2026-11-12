@@ -913,8 +913,9 @@ describe("runs", () => {
     // Deleted, and the app closes before Undo has passed: the copy, its lock and its branch all go.
     const otherCopy = copyOf(other.id);
     await ctx.svc.deleteTask(other.id);
-    ctx.svc.close();
-    await until(() => git(repo, "branch", "--list", `vibeforge/${other.id}`).trim() === "");
+    // Closing resolves once git is done, so a quit can wait for it.
+    await ctx.svc.close();
+    expect(git(repo, "branch", "--list", `vibeforge/${other.id}`).trim()).toBe("");
     expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
   });
 

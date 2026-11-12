@@ -14,6 +14,9 @@ import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, Workspace } from "../types.js";
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
+/** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
+type Settle = () => void | Promise<unknown>;
+
 /**
  * The state every part of the service shares, and the lifecycle of a run: launching it, its exit,
  * and what is written when it ends. The desks in this folder hold the rest; `TeamService` puts
@@ -37,7 +40,7 @@ export class ServiceCore {
   /** Per live run: the files already changed when it started, so its own changes can be told apart. */
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
-  private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: () => void }>();
+  private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: Settle }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   readonly settled: Promise<void>;
@@ -61,13 +64,28 @@ export class ServiceCore {
     return this.options.now();
   }
 
-  close(): void {
+  /**
+   * Done: a delete still undoable is final now, and what it leaves outside its files (a task
+   * copy's worktree entry and branch) is tidied. Resolves once that tidying has finished, which a
+   * quit waits for a moment: git still had a few steps to go when the app went.
+   */
+  close(): Promise<void> {
     for (const entry of this.undoable.values()) clearTimeout(entry.timer);
     const settling = [...this.undoable.values()].flatMap((entry) => (entry.settle ? [entry.settle] : []));
     this.undoable.clear();
     this.trash.empty();
-    for (const settle of settling) settle();
+    const tidied = settling.map((settle) => {
+      try {
+        return Promise.resolve(settle()).then(
+          () => undefined,
+          () => undefined,
+        );
+      } catch {
+        return Promise.resolve();
+      }
+    });
     this.store.close();
+    return Promise.all(tidied).then(() => undefined);
   }
 
   // ---------------------------------------------------------------- undo
@@ -76,11 +94,11 @@ export class ServiceCore {
    * Keep a delete undoable for a while; after that its files go for good, and `settle` tidies
    * whatever lived outside them (a task copy's git branch). `restore` hears which paths went back.
    */
-  keepForUndo(bin: Bin, restore: (restored: string[]) => void, settle?: () => void): Deleted {
+  keepForUndo(bin: Bin, restore: (restored: string[]) => void, settle?: Settle): Deleted {
     const timer = setTimeout(() => {
       this.undoable.delete(bin.token);
       this.trash.drop(bin);
-      settle?.();
+      void Promise.resolve(settle?.()).catch(() => undefined);
     }, UNDO_MS);
     timer.unref?.();
     this.undoable.set(bin.token, { bin, restore, timer, settle });

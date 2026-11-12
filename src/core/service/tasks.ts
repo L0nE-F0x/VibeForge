@@ -126,10 +126,9 @@ export class TaskDesk {
         this.core.emit("tasks");
       },
       copy && owned
-        ? () => {
+        ? () =>
             // A new task given the same name since owns that folder and branch now.
-            if (!this.core.store.getTask(id)) void removeCopy(copy, this.owner(id), trusted).catch(() => undefined);
-          }
+            this.core.store.getTask(id) ? undefined : removeCopy(copy, this.owner(id), trusted).catch(() => undefined)
         : undefined,
     );
     return copy && !owned ? { ...deleted, copyLeft: true } : deleted;
