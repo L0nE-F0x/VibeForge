@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
 import { describe, expect, it } from "vitest";
+import { answers, listenControl } from "../../electron/control.js";
 import { controlSocketPath, fallbackSocketDir, prepareSocketDir } from "../../src/core/control.js";
 
 const uid = process.getuid?.() ?? 0;
@@ -81,5 +83,49 @@ describe("the control socket's path", () => {
     fs.chmodSync(runtime, 0o755);
     expect(prepareSocketDir(controlSocketPath(data, runtime, uid), uid)).toBe(true);
     expect(mode(runtime)).toBe(0o755);
+  });
+});
+
+describe("listening on the control socket", () => {
+  const ask = (socket: string, line: string) =>
+    new Promise<string>((resolve, reject) => {
+      const client = net.connect(socket, () => client.end(`${line}\n`));
+      let out = "";
+      client.setEncoding("utf8").on("data", (chunk: string) => (out += chunk));
+      client.on("end", () => resolve(out));
+      client.on("error", reject);
+    });
+  const log = () => {
+    const warned: string[] = [];
+    return { warned, log: { warn: (line: string) => warned.push(line), info: () => undefined, error: () => undefined } as never };
+  };
+  const until = async (check: () => boolean | Promise<boolean>) => {
+    for (let tries = 0; tries < 100 && !(await check()); tries += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  };
+
+  it("takes over a socket file a crashed run left, and leaves one another VibeForge is using", async () => {
+    const dir = tempDir();
+    const socket = path.join(dir, "vf.sock");
+    // Left by a crash: a socket file nothing listens on.
+    const crashed = net.createServer().listen(socket);
+    await new Promise((resolve) => crashed.once("listening", resolve));
+    await new Promise((resolve) => {
+      crashed.close(resolve);
+      fs.writeFileSync(socket, "");
+    });
+    const first = log();
+    const stopFirst = listenControl(socket, first.log, () => undefined, async () => ({ ok: true, from: "first" }));
+    await until(async () => (await answers(socket)) === true);
+    expect(await ask(socket, JSON.stringify({ op: "who", pty: null }))).toContain('"from":"first"');
+
+    // A second VibeForge on the same data folder: it neither steals nor deletes the socket.
+    const second = log();
+    const stopSecond = listenControl(socket, second.log, () => undefined, async () => ({ ok: true, from: "second" }));
+    await until(() => second.warned.length > 0);
+    expect(second.warned[0]).toContain("another VibeForge is listening");
+    stopSecond();
+    expect(await ask(socket, JSON.stringify({ op: "who", pty: null }))).toContain('"from":"first"');
+    stopFirst();
+    expect(fs.existsSync(socket)).toBe(false);
   });
 });

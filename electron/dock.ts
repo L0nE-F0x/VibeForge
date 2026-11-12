@@ -1,4 +1,4 @@
-import { WebContentsView, type BrowserWindow, type WebContents } from "electron";
+import { WebContentsView, type BrowserWindow, type WebContents, type WebContentsViewConstructorOptions } from "electron";
 import type { DockBounds, DockState } from "../src/shared/api.js";
 import { isDockUrl } from "../src/shared/dock-url.js";
 
@@ -26,6 +26,21 @@ interface Slot {
   quiet: boolean;
 }
 
+/**
+ * A slot's page, or null once it is gone. Electron 45 leaves `view.webContents` undefined after the
+ * page is destroyed (a page that closes itself, a crash that took it), not a destroyed object, so
+ * every use goes through here rather than calling `isDestroyed()` on what may not be there.
+ */
+function contentsOf(slot: Slot): WebContents | null {
+  const contents = slot.view.webContents as WebContents | undefined;
+  if (!contents) return null;
+  try {
+    return contents.isDestroyed() ? null : contents;
+  } catch {
+    return null;
+  }
+}
+
 function httpUrl(contents: WebContents): string {
   if (contents.isDestroyed()) return "";
   try {
@@ -42,22 +57,32 @@ export class Dock {
   private readonly saves = new Map<string, { url: string; timer: ReturnType<typeof setTimeout> }>();
   /** The workspace the panel is showing, even while its page is hidden behind a card or a menu. */
   private activeId: string | null = null;
+  /** The last show, so Try again can bring back a page that closed itself. */
+  private lastShow: { bounds: DockBounds; url: string; workspaceId: string } | null = null;
 
   constructor(
     private readonly window: () => BrowserWindow | null,
     private readonly emit: (state: DockState) => void,
     /** Stores the address for the workspace that owns the view. */
     private readonly onAddress: (workspaceId: string, url: string) => void,
+    /** Makes a page's view; tests hand in their own. */
+    private readonly makeView: (options: WebContentsViewConstructorOptions) => WebContentsView = (options) => new WebContentsView(options),
   ) {}
 
   private ensure(workspaceId: string): Slot | null {
     const existing = this.slots.get(workspaceId);
-    if (existing && !existing.dead) return existing;
+    if (existing && !existing.dead && contentsOf(existing)) return existing;
+    // A page gone without word (no "destroyed" seen): its view is no use, so start over.
+    if (existing) {
+      existing.dead = true;
+      this.slots.delete(workspaceId);
+      this.detach(existing);
+    }
     const win = this.window();
     if (!win || win.isDestroyed()) return null;
     // No partition: the view uses the default session, so the window's permission rule applies
     // and a sign-in in one workspace is there in the others.
-    const view = new WebContentsView({
+    const view = this.makeView({
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
     });
     view.setBackgroundColor("#00000000");
@@ -101,17 +126,39 @@ export class Dock {
       slot.error = "The page crashed. Reload to try again.";
       this.publish(workspaceId);
     });
+    // A page can close itself (window.close() after a sign-in). Its view is no use after that: drop
+    // it, so the next show makes a fresh one instead of every call failing until a restart.
+    contents.once("destroyed", () => this.lost(workspaceId, slot));
     win.contentView.addChildView(view);
     view.setVisible(false);
     this.slots.set(workspaceId, slot);
     return slot;
   }
 
+  /** A slot whose page went away on its own: forget it, take its view off the window, and say so. */
+  private lost(workspaceId: string, slot: Slot): void {
+    if (slot.dead) return;
+    slot.dead = true;
+    if (this.slots.get(workspaceId) === slot) this.slots.delete(workspaceId);
+    this.detach(slot);
+    this.emit({ workspaceId, url: slot.quiet ? "" : slot.current, title: "", loading: false, canGoBack: false, canGoForward: false, error: "The page closed. Reload to open it again." });
+  }
+
+  private detach(slot: Slot): void {
+    const win = this.window();
+    if (!win || win.isDestroyed()) return;
+    try {
+      win.contentView.removeChildView(slot.view);
+    } catch {
+      // The window is already tearing the view down.
+    }
+  }
+
   /** A load we started has committed on the main frame. Older loads are ignored. */
   private onCommit(slot: Slot, workspaceId: string): void {
     if (slot.dead || slot.quiet || slot.epoch === 0 || slot.loadingEpoch !== slot.epoch) return;
-    const contents = slot.view.webContents;
-    if (contents.isDestroyed()) return;
+    const contents = contentsOf(slot);
+    if (!contents) return;
     const page = httpUrl(contents);
     if (page) {
       slot.current = page;
@@ -124,8 +171,8 @@ export class Dock {
   private publish(workspaceId: string): void {
     const slot = this.slots.get(workspaceId);
     if (!slot || slot.dead) return;
-    const contents = slot.view.webContents;
-    if (contents.isDestroyed()) return;
+    const contents = contentsOf(slot);
+    if (!contents) return;
     const page = httpUrl(contents);
     let title = "";
     let loading = false;
@@ -163,7 +210,9 @@ export class Dock {
     this.remember(workspaceId, target);
     // The address the panel asked for is stored now. A redirect that follows replaces it.
     if (fromPanel) this.flush(workspaceId);
-    slot.view.webContents.loadURL(target).catch((error: unknown) => {
+    const contents = contentsOf(slot);
+    if (!contents) return;
+    contents.loadURL(target).catch((error: unknown) => {
       if (slot.dead || slot.epoch !== epoch) return;
       const message = error instanceof Error ? error.message : String(error);
       if (/ERR_ABORTED/.test(message)) return;
@@ -212,15 +261,16 @@ export class Dock {
     if (!workspaceId) return;
     if (this.activeId && this.activeId !== workspaceId) this.flush(this.activeId);
     this.activeId = workspaceId;
+    this.lastShow = { bounds, url, workspaceId };
     for (const [id, slot] of this.slots) {
-      if (id !== workspaceId && !slot.view.webContents.isDestroyed()) slot.view.setVisible(false);
+      if (id !== workspaceId && contentsOf(slot)) slot.view.setVisible(false);
     }
     const target = url.trim();
     const tooSmall = bounds.width < 8 || bounds.height < 8;
     if (!isDockUrl(target)) this.quiet(workspaceId);
     if (!isDockUrl(target) || tooSmall) {
       const slot = this.slots.get(workspaceId);
-      if (slot && !slot.view.webContents.isDestroyed()) slot.view.setVisible(false);
+      if (slot && contentsOf(slot)) slot.view.setVisible(false);
       if (slot) this.publish(workspaceId);
       return;
     }
@@ -242,7 +292,7 @@ export class Dock {
   hide(workspaceId?: string): void {
     if (this.activeId) this.flush(this.activeId);
     for (const slot of this.slots.values()) {
-      if (!slot.view.webContents.isDestroyed()) slot.view.setVisible(false);
+      if (contentsOf(slot)) slot.view.setVisible(false);
     }
     // No id means the panel is gone (Files, or Code isn't showing). An id keeps reload pointed here.
     this.activeId = workspaceId ?? null;
@@ -254,9 +304,10 @@ export class Dock {
    */
   async capture(): Promise<string | null> {
     const slot = this.activeId ? this.slots.get(this.activeId) : undefined;
-    if (!slot || slot.dead || !slot.view.getVisible() || slot.view.webContents.isDestroyed()) return null;
+    const contents = slot && !slot.dead ? contentsOf(slot) : null;
+    if (!slot || !contents || !slot.view.getVisible()) return null;
     try {
-      const image = await slot.view.webContents.capturePage();
+      const image = await contents.capturePage();
       return image.isEmpty() ? null : `data:image/jpeg;base64,${image.toJPEG(90).toString("base64")}`;
     } catch {
       return null;
@@ -266,8 +317,13 @@ export class Dock {
   command(command: "back" | "forward" | "reload" | "stop" | "devtools"): void {
     const slot = this.activeId ? this.slots.get(this.activeId) : undefined;
     const workspaceId = this.activeId;
-    if (!slot || !workspaceId || slot.dead || slot.view.webContents.isDestroyed()) return;
-    const contents = slot.view.webContents;
+    const contents = slot && !slot.dead ? contentsOf(slot) : null;
+    if (!slot || !workspaceId || !contents) {
+      // Its page closed itself: Try again shows it afresh where the panel last put it.
+      const last = this.lastShow;
+      if (command === "reload" && workspaceId && last?.workspaceId === workspaceId) this.show(last.bounds, last.url, workspaceId);
+      return;
+    }
     if (command === "back" && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack();
     else if (command === "forward" && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward();
     else if (command === "reload") {
@@ -295,16 +351,9 @@ export class Dock {
   }
 
   private destroy(slot: Slot): void {
-    const win = this.window();
-    if (win && !win.isDestroyed()) {
-      try {
-        win.contentView.removeChildView(slot.view);
-      } catch {
-        // The window is already tearing the view down.
-      }
-    }
-    const contents = slot.view.webContents;
-    if (contents.isDestroyed()) return;
+    this.detach(slot);
+    const contents = contentsOf(slot);
+    if (!contents) return;
     try {
       if (contents.isDevToolsOpened()) contents.closeDevTools();
       contents.close({ waitForBeforeUnload: false });
@@ -314,8 +363,16 @@ export class Dock {
   }
 
   dispose(): void {
-    for (const id of [...this.slots.keys()]) this.release(id);
+    for (const id of [...this.slots.keys()]) {
+      // One view that can't be closed mustn't keep the rest open.
+      try {
+        this.release(id);
+      } catch {
+        this.slots.delete(id);
+      }
+    }
     this.flush();
     this.activeId = null;
+    this.lastShow = null;
   }
 }

@@ -48,4 +48,28 @@ describe("the terminal host's client", () => {
     expect(await supervisor.snapshot("p1")).toEqual({ ansi: "", plain: "", seq: 0, cols: 0, rows: 0, alive: false });
     await expect(supervisor.write("p1", "x")).rejects.toThrow("No write here.");
   });
+
+  it("says why a host failed to start, from what it wrote to stderr", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-supervisor-"));
+    fs.mkdirSync(path.join(dir, "electron"));
+    fs.writeFileSync(path.join(dir, "electron", "pty-host.cjs"), `process.stderr.write("Error: Cannot find module 'node-pty'\\n"); process.exit(1);`);
+    vi.stubEnv("VIBEFORGE_NODE", process.execPath);
+    supervisor = new PtySupervisor();
+    const heard: string[] = [];
+    supervisor.onStderr.add((line) => heard.push(line));
+    await expect(supervisor.start(dir, { ...process.env })).rejects.toThrow(/exited during start \(code 1\)\.\nError: Cannot find module 'node-pty'/);
+    expect(heard).toEqual(["Error: Cannot find module 'node-pty'"]);
+    expect(supervisor.running).toBe(false);
+  });
+
+  it("fails at once, and isn't left running, when the host can't be started at all", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-supervisor-"));
+    vi.stubEnv("VIBEFORGE_NODE", path.join(dir, "no-such-node"));
+    supervisor = new PtySupervisor();
+    const started = Date.now();
+    await expect(supervisor.start(dir, { ...process.env })).rejects.toThrow(/could not start: .*ENOENT/);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(supervisor.running).toBe(false);
+    await expect(supervisor.snapshot("p1")).rejects.toThrow("not running");
+  });
 });

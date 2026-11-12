@@ -248,6 +248,15 @@ async function main() {
   if (typeof storage?.runs !== "number") fail("storage.summary returned nothing");
   const hits = await call("runs.search", "smoke");
   if (!Array.isArray(hits)) fail("runs.search did not return a list");
+
+  // Chromium's spellchecker fetches a dictionary from Google unless it is turned off; the update
+  // check is the only thing VibeForge may ask the internet for by itself (docs/principles.md).
+  if (!attach) {
+    step("nothing was downloaded for a spellchecker");
+    const dictionaries = path.join(scratch, "profile", "Dictionaries");
+    const fetched = fs.existsSync(dictionaries) ? fs.readdirSync(dictionaries).filter((name) => name.endsWith(".bdic")) : [];
+    if (fetched.length) fail(`the profile has spellcheck dictionaries: ${fetched.join(", ")}`);
+  }
 }
 
 let code = 0;

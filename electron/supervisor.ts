@@ -9,6 +9,9 @@ export type { PtyActivity, PtyData, PtyExit, PtyProgram, PtySnapshot } from "./p
 
 type Waiter = { resolve: (answer: PtyAnswers[PtyOp]) => void; reject: (error: Error) => void };
 
+/** How many of the host's last stderr lines are kept to say why it stopped. */
+const STDERR_LINES = 20;
+
 /**
  * Client for electron/pty-host.cjs. The host runs on the system Node, the one node-pty is
  * built for, and owns every terminal.
@@ -23,6 +26,10 @@ export class PtySupervisor {
   readonly onProgram = new Set<(event: PtyProgram) => void>();
   readonly onActivity = new Set<(event: PtyActivity) => void>();
   readonly onCrash = new Set<(message: string) => void>();
+  /** Each line the host writes to stderr: why node-pty failed to load, a full disk, an uncaught error. */
+  readonly onStderr = new Set<(line: string) => void>();
+  /** The host's last stderr lines, for the reason a start failed. */
+  private stderrTail: string[] = [];
 
   async start(appRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
     const node = process.env.VIBEFORGE_NODE || whichBin("node", env.PATH ?? "");
@@ -30,6 +37,24 @@ export class PtySupervisor {
     const script = path.join(appRoot, "electron", "pty-host.cjs");
     const child = spawn(node, [script], { cwd: appRoot, env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
+    this.stderrTail = [];
+    let partial = "";
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      process.stderr.write(`[pty-host] ${chunk}`);
+      const lines = `${partial}${chunk}`.split("\n");
+      partial = lines.pop() ?? "";
+      if (partial.length > 4000) partial = partial.slice(-4000);
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        this.stderrTail = [...this.stderrTail, line.slice(0, 1000)].slice(-STDERR_LINES);
+        for (const handler of this.onStderr) handler(line);
+      }
+    });
+    /** A start error with the host's last words, which say why (node-pty that didn't load, for one). */
+    const why = (message: string) => {
+      const said = [...this.stderrTail, partial.trim()].filter(Boolean).slice(-6).join("\n");
+      return new Error(said ? `${message}\n${said}` : message);
+    };
     // A host that dies before it is ready failed to start (the rejection below says so); only
     // one that stops later has crashed.
     let started = false;
@@ -49,10 +74,17 @@ export class PtySupervisor {
       });
       child.once("exit", (code) => {
         clearTimeout(timer);
-        reject(new Error(`The terminal host exited during start (code ${code}).`));
+        // stderr can still hold the reason when the exit is seen; give it a moment to arrive.
+        setTimeout(() => reject(why(`The terminal host exited during start (code ${code}).`)), 50);
+      });
+      // A host that couldn't be started at all (no such file, no permission) never exits: say so
+      // now instead of waiting out the ten seconds, and don't count it as running.
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        if (this.child === child) this.child = null;
+        reject(why(`The terminal host could not start: ${error.message}`));
       });
     });
-    child.stderr.on("data", (chunk: Buffer) => process.stderr.write(`[pty-host] ${chunk.toString()}`));
     child.on("exit", (code, signal) => {
       this.child = null;
       for (const [id, waiter] of this.waiting) {
@@ -169,6 +201,12 @@ export class PtySupervisor {
       rows: Number(result.rows ?? 0),
       alive: Boolean(result.alive),
     };
+  }
+
+  /** The last lines of a terminal as plain text: what a person would read there now. */
+  async screen(ptyId: string): Promise<string> {
+    const result = await this.request({ op: "screen", ptyId });
+    return String(result.plain ?? "");
   }
 
   /** Stop every session, let the host write their files, then end it. */

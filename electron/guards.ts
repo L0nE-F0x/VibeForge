@@ -48,6 +48,14 @@ export function relaunchArgs(argv: readonly string[]): string[] {
   return argv.slice(1).filter((arg) => arg !== HIDDEN_ARG);
 }
 
+/**
+ * The arguments to come back with when VibeForge was started again while quitting: this copy's
+ * own, opened as a window unless the new start came from login (--hidden).
+ */
+export function secondStartArgs(own: readonly string[], second: readonly string[]): string[] {
+  return [...relaunchArgs(own), ...(second.includes(HIDDEN_ARG) ? [HIDDEN_ARG] : [])];
+}
+
 /** Waits for `work` for at most `ms`: true when it settled in time, false when it didn't. Never rejects. */
 export function settleWithin(work: Promise<unknown>, ms: number, failed: (error: unknown) => void = () => undefined): Promise<boolean> {
   return new Promise((resolve) => {

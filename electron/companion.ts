@@ -268,7 +268,7 @@ async function sessionOf(service: TeamService, supervisor: PtySupervisor, query:
   let screen = "";
   if (live) {
     try {
-      screen = (await supervisor.snapshot(live.ptyId)).plain;
+      screen = await supervisor.screen(live.ptyId);
     } catch {
       screen = "";
     }

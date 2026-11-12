@@ -14,6 +14,8 @@ const COMPANION_STOP_MS = 2000;
 
 export class Quit {
   private shutdownDone = false;
+  /** The shutdown under way: a second quit (Quit again, a SIGTERM) waits for it rather than starting another. */
+  private shuttingDown: Promise<void> | null = null;
 
   constructor(
     private readonly ctx: MainContext,
@@ -95,7 +97,9 @@ export class Quit {
     app.on("will-quit", (event) => {
       if (this.shutdownDone) return;
       event.preventDefault();
-      void this.shutdown().finally(() => {
+      // Already on its way: the one under way quits when it is done.
+      if (this.shuttingDown) return;
+      this.shuttingDown = this.shutdown().finally(() => {
         this.shutdownDone = true;
         // On the next turn: with no terminal host to wait for, shutdown settles while Electron is
         // still inside this event, where a quit is ignored and the app would stay on, windowless.

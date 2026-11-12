@@ -6,6 +6,15 @@ import type { UpdateInfo } from "../src/shared/api.js";
 const FIRST_CHECK_MS = 20_000;
 const EVERY_MS = 6 * 60 * 60 * 1000;
 
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+
+/**
+ * Electron's fetch, on the session the browser dock shares, without that session's cookies: a
+ * GitHub sign-in in the dock must not ride along on the update check, which sends nothing but the
+ * version in its User-Agent.
+ */
+const withoutCookies: Fetch = (url, init) => net.fetch(url, { ...init, credentials: "omit" });
+
 /**
  * Asks GitHub which release is newest: shortly after start and every six hours while automatic
  * checks are on, or whenever someone asks. It only reads the public release list.
@@ -24,6 +33,8 @@ export class Updater {
       log: LogFile;
       enabled: () => boolean;
       changed: () => void;
+      /** Stand-in for tests. */
+      fetch?: Fetch;
     },
   ) {
     this.info = { current: opts.current, latest: null, available: false, checking: false, checkedAt: null, error: null, install: opts.install, command: opts.command };
@@ -60,7 +71,7 @@ export class Updater {
   private async fetchLatest(): Promise<UpdateInfo> {
     this.set({ checking: true });
     try {
-      const response = await net.fetch(this.opts.url, {
+      const response = await (this.opts.fetch ?? withoutCookies)(this.opts.url, {
         headers: { Accept: "application/vnd.github+json", "User-Agent": `VibeForge/${this.opts.current}` },
         signal: AbortSignal.timeout(15_000),
       });
