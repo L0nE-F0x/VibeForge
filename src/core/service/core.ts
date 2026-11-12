@@ -3,7 +3,7 @@ import path from "node:path";
 import { newCompanionToken, normalizeCompanion } from "../companion.js";
 import { instructionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
-import { diffSince, dirtyFiles, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
+import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile } from "../run-storage.js";
@@ -32,7 +32,7 @@ export class ServiceCore {
   readonly recordings = new Map<string, Promise<void>>();
   /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
   readonly hostWorking = new Map<string, boolean>();
-  /** The git snapshot when a shell run started: a tree that was already dirty isn't this run's doing. */
+  /** The git snapshot when a run started: a tree that was already dirty isn't this run's doing. */
   readonly gitAtStart = new Map<string, string>();
   /** Per live run: the files already changed when it started, so its own changes can be told apart. */
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
@@ -331,8 +331,11 @@ export class ServiceCore {
     let gitStart: string | null = null;
     try {
       gitStart = await this.options.host.gitHead(input.cwd);
+      // What the tree looked like: a run that only answers a question ends with "No changes",
+      // however many edits were already there, and doesn't go to Review for them.
+      if (gitStart) this.gitAtStart.set(id, await this.options.host.snapshotGit(input.cwd, gitStart));
     } catch {
-      gitStart = null;
+      /* not a repository, or git is slow: the run is recorded without */
     }
     this.dirtyAtStart.set(id, dirtyFiles(input.cwd).catch(() => null));
     const meta: RunMeta = {
@@ -442,18 +445,21 @@ export class ServiceCore {
     const run = this.store.getRun(runId);
     if (!run) return;
     const git = await this.writeSnapshot(run);
-    await this.writePatch(run);
+    const dirty = (await this.dirtyAtStart.get(runId)) ?? null;
+    const own = await this.writePatch(run, "", dirty);
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
     this.dirtyAtStart.delete(runId);
+    // Only edits that were there before it started, left as they were: none of this run's doing.
+    const untouched = Boolean(dirty?.size) && own !== null && !own.trim() && !git.includes("commits since the run started");
     const finished = this.store.saveRun({
       ...latest,
       status: latest.stopRequested ? "stopped" : outcome.status,
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       endedAt: this.now().toISOString(),
-      changes: before !== undefined && before === git ? "No changes" : summarizeSnapshot(git),
+      changes: (before !== undefined && before === git) || untouched ? "No changes" : summarizeSnapshot(git),
     });
     this.indexText(finished);
     if (finished.taskId) {
@@ -560,19 +566,22 @@ export class ServiceCore {
   /**
    * Freeze diff.patch. The first write wins, so a later pass cannot replace the tree from
    * the moment the run ended with whatever the folder looks like afterwards.
-   * `preface` marks a patch taken on the next open, when the exit itself never wrote one.
+   * `preface` marks a patch taken on the next open, when the exit itself never wrote one. Files
+   * that were already changed when the run started (`before`) and still hold exactly that are
+   * left out: they're someone else's edits. Returns the patch written, or null when none was.
    */
-  private async writePatch(run: RunMeta, preface = ""): Promise<void> {
-    if (!run.dir || !isDirectory(run.dir)) return;
-    if (hasRunFile(run.dir, RUN_FILES.patch)) return;
+  private async writePatch(run: RunMeta, preface = "", before: DirtyFiles | null = null): Promise<string | null> {
+    if (!run.dir || !isDirectory(run.dir)) return null;
+    if (hasRunFile(run.dir, RUN_FILES.patch)) return null;
     let patch = "";
     try {
-      patch = await diffSince(run.cwd, run.gitStart);
+      patch = leaveOutUntouched(await diffSince(run.cwd, run.gitStart), run.cwd, before);
     } catch {
-      return;
+      return null;
     }
     const body = preface + patch;
     this.writeRunFile(run, RUN_FILES.patch, body.length === 0 || body.endsWith("\n") ? body : `${body}\n`);
+    return patch;
   }
 
   private writeRunFile(run: RunMeta, name: string, text: string): void {

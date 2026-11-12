@@ -46,7 +46,11 @@ describe("chats", () => {
     const ctx = setup();
     const agent = await agentIn(ctx);
     const chat = ctx.svc.createChat({ agentId: agent.id });
+    // A clean tree when it starts, and an edit by the time it ends.
+    const edited = ctx.host.snapshotGit;
+    ctx.host.snapshotGit = async () => "git status --short\n\n\ngit diff --stat\n";
     const first = await ctx.svc.sendChat(chat.id, "Write the notes\nfor today");
+    ctx.host.snapshotGit = edited;
     expect(first.started).toBe(true);
     expect(ctx.spawns).toHaveLength(1);
     const [bin, flag, prompt] = ctx.spawns[0].argv;
@@ -510,7 +514,11 @@ describe("tasks", () => {
     expect(task.status).toBe("todo");
     expect(task.blocker).toBeNull();
 
+    // A clean tree when it starts, and an edit by the time it ends.
+    const edited = ctx.host.snapshotGit;
+    ctx.host.snapshotGit = async () => "git status --short\n\n\ngit diff --stat\n";
     const launched = started(await ctx.svc.executeTask(task.id));
+    ctx.host.snapshotGit = edited;
     expect(ctx.spawns[0].argv[2]).toContain("# This run\nTask: Dim lamp\n\nWarm it");
     expect(ctx.svc.listTasks()[0]).toMatchObject({ status: "running" });
     await expect(ctx.svc.executeTask(task.id)).rejects.toThrow(/already running/);
@@ -935,6 +943,42 @@ describe("runs", () => {
     ctx.svc.close();
   });
 
+  it("doesn't count edits that were already there when a run started as its changes", async () => {
+    const repo = tempDir();
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" });
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    fs.writeFileSync(path.join(repo, "b.txt"), "bee\n");
+    git("add", "-A");
+    git("commit", "-qm", "init");
+    // The person's own edit, not committed yet.
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\nmine\n");
+    const ctx = setup();
+    ctx.host.gitHead = (cwd) => gitHead(cwd);
+    ctx.host.snapshotGit = (cwd, start) => snapshotGit(cwd, 5000, start);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const run = async (edit?: () => void) => {
+      const launched = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+      await ctx.svc.dirtyAtStart.get(launched.runId);
+      edit?.();
+      await ctx.exit(launched.ptyId);
+      const done = ctx.svc.getRun(launched.runId);
+      return { changes: done.run.changes, patch: fs.readFileSync(path.join(done.run.dir, "diff.patch"), "utf8") };
+    };
+    // A run that only answers a question: no changes of its own, nothing to review.
+    const asked = await run();
+    expect(asked.changes).toBe("No changes");
+    expect(asked.patch).not.toContain("a.txt");
+    expect(ctx.svc.inbox().map((item) => item.changes)).not.toContain("No changes");
+    // One that edits another file: only its own edit is in its patch.
+    const edited = await run(() => fs.writeFileSync(path.join(repo, "b.txt"), "bee\ncli\n"));
+    expect(edited.changes).not.toBe("No changes");
+    expect(edited.patch).toContain("+cli");
+    expect(edited.patch).not.toContain("+mine");
+    ctx.svc.close();
+  });
+
   it("freezes the patch when a run ends, and keeps it after the folder changes", async () => {
     const repo = tempDir();
     const git = (...args: string[]) =>
@@ -951,6 +995,8 @@ describe("runs", () => {
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     const task = ctx.svc.saveTask({ title: "Edit", body: "Change a", agentId: agent.id, workspaceId: workspace.id });
     const launched = started(await ctx.svc.executeTask(task.id));
+    // What was there when it started is read as it starts, before a real CLI could change anything.
+    await ctx.svc.dirtyAtStart.get(launched.runId);
     fs.writeFileSync(path.join(repo, "a.txt"), "one\nsession-line-two\n");
     fs.writeFileSync(path.join(repo, "new.txt"), "brand-new-file\n");
 
