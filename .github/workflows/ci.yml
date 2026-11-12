@@ -21,7 +21,7 @@ env:
 
 jobs:
   # The terminal host and the build run on each person's own Node, so the tests run on every line
-  # they may have: 22, 24, and 26 (the current LTS) with the coverage floors (vitest.config.ts),
+  # they may have: 22, 24, and 26 (the current LTS) with the coverage floors (vitest.config.mts),
   # which were measured there. Node 20.19, which the installer still accepts, is past its end of
   # life, and vitest 5 doesn't run on it.
   test-node:
