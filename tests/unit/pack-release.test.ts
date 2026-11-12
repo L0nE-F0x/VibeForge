@@ -58,8 +58,11 @@ describe("the ready-made build's file list", () => {
 
   it("ships what the installer checks for after unpacking", () => {
     const install = read("scripts/install.sh");
-    const parts = /for part in ([^;]+); do/.exec(install)?.[1].trim().split(/\s+/) ?? [];
+    const parts = /^REQUIRED_PARTS=\(([^)]+)\)/m.exec(install)?.[1].trim().split(/\s+/) ?? [];
     expect(parts.length).toBeGreaterThan(0);
+    // It also loads node-pty from the unpacked copy to see that its addon works on this system.
+    expect(install).toContain('"$STAGE/node_modules/node-pty"');
+    parts.push("node_modules/node-pty/package.json", "node_modules/node-pty/lib/index.js");
     for (const part of parts) {
       const pkg = /^node_modules\/((?:@[^/]+\/)?[^/]+)\/(.+)$/.exec(part);
       if (pkg) expect(PACKAGES[pkg[1]]?.some((item) => pkg[2] === item || pkg[2].startsWith(`${item}/`)), part).toBe(true);
