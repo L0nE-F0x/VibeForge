@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { clockNow, subscribeClock } from "./clock.js";
 import { coreText } from "./core-text.js";
 import { QueryCache, type QueryOptions, type Topics } from "./query-cache.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
@@ -174,12 +175,9 @@ export function useDebounced<T>(value: T, ms: number): T {
 
 /** Re-render on an interval, for clocks and relative times. */
 export function useNow(intervalMs = 15_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
+  // One shared clock per interval (clock.ts), however many of these are on screen.
+  const subscribe = useCallback((listener: () => void) => subscribeClock(intervalMs, listener), [intervalMs]);
+  return useSyncExternalStore(subscribe, () => clockNow(intervalMs));
 }
 
 // ------------------------------------------------------------------ common queries

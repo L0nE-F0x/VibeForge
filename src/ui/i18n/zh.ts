@@ -661,6 +661,8 @@ export const zh: Catalog = {
   // ---------------------------------------------------------------- search
   "switcher.run": "运行",
   "runs.searchPlaceholder": "搜索运行的内容、标题和文件夹",
+  "runs.cutSearch": "显示最新的 {count} 条 · 更早的请搜索",
+  "runs.cutElsewhere": "显示最新的 {count} 条 · 更早的在运行记录中",
   "runs.noMatch": "没有运行包含这些内容。",
   // ---------------------------------------------------------------- task copies
   "tasks.isolated": "在单独的副本中工作",

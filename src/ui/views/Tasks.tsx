@@ -153,6 +153,9 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   );
 }
 
+/** How many of a task's runs its sheet lists; the rest are in Runs. */
+const TASK_RUNS = 50;
+
 function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClose: () => void; onCreated: (task: TaskView) => void }) {
   const t = useT();
   const { go } = useNav();
@@ -167,7 +170,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     cols: Math.floor((Math.min(1100, window.innerWidth - 120) - 14) / (fontSize * 0.6)),
     rows: Math.floor((window.innerHeight * 0.46 - 14) / Math.ceil(fontSize * 1.32 * 1.18)),
   });
-  const runs = useQuery(task ? `runs:task:${task.id}` : null, ["runs"], () => call("runs.list", { taskId: task!.id, limit: 50 }));
+  const runs = useQuery(task ? `runs:task:${task.id}` : null, ["runs"], () => call("runs.list", { taskId: task!.id, limit: TASK_RUNS }));
   // A new task starts with an agent and a workspace it is allowed in, so it can run as it stands.
   const firstAgent = agents[0];
   const [form, setForm, discard] = useDraftState(task ? `task:${task.id}` : "task:new", {
@@ -441,6 +444,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
               {runs.data!.map((run) => (
                 <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id, filter: "all" })} />
               ))}
+              {runs.data!.length >= TASK_RUNS && <div className="list-cut faint">{t("runs.cutElsewhere", { count: TASK_RUNS })}</div>}
             </div>
           </>
         )}

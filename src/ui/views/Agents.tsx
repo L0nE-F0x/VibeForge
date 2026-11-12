@@ -310,13 +310,16 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
 
 // ------------------------------------------------------------------ detail
 
+/** How many of an agent's runs its Runs tab lists; the rest are in Runs. */
+const AGENT_RUNS = 100;
+
 function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chatId?: string }) {
   const t = useT();
   const { go } = useNav();
   const engines = useEngines().data ?? [];
   const engine = engines.find((item) => item.id === agent.engine);
   const chats = useChats(agent.id).data ?? [];
-  const runs = useQuery(`runs:agent:${agent.id}`, ["runs"], () => call("runs.list", { agentId: agent.id, limit: 100 }));
+  const runs = useQuery(`runs:agent:${agent.id}`, ["runs"], () => call("runs.list", { agentId: agent.id, limit: AGENT_RUNS }));
   const setTab = (next: AgentTab) => go({ view: "agents", agentId: agent.id, tab: next, chatId: next === "chats" ? chatId : undefined });
 
   return (
@@ -362,6 +365,7 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
           <div className="vstack page-narrow" style={{ gap: 6 }}>
             {runs.data?.length === 0 && <Notice>{t("runs.none")}</Notice>}
             {runs.data?.map((run) => <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id, filter: "all" })} />)}
+            {(runs.data?.length ?? 0) >= AGENT_RUNS && <div className="list-cut faint">{t("runs.cutElsewhere", { count: AGENT_RUNS })}</div>}
           </div>
         </div>
       )}

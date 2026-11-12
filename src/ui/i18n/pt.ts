@@ -660,6 +660,8 @@ export const pt: Catalog = {
   // ---------------------------------------------------------------- search
   "switcher.run": "Execução",
   "runs.searchPlaceholder": "Busque o que as execuções disseram, seus títulos e pastas",
+  "runs.cutSearch": "A mostrar as {count} mais recentes · pesquise as mais antigas",
+  "runs.cutElsewhere": "A mostrar as {count} mais recentes · as anteriores estão em Histórico",
   "runs.noMatch": "Nenhuma execução diz isso.",
   // ---------------------------------------------------------------- task copies
   "tasks.isolated": "Trabalhar numa cópia separada",

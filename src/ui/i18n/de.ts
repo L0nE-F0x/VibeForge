@@ -660,6 +660,8 @@ export const de: Catalog = {
   // ---------------------------------------------------------------- search
   "switcher.run": "Lauf",
   "runs.searchPlaceholder": "Durchsuche, was Läufe sagten, ihre Titel und Ordner",
+  "runs.cutSearch": "Die neuesten {count} · ältere über die Suche",
+  "runs.cutElsewhere": "Die neuesten {count} · ältere stehen unter Läufe",
   "runs.noMatch": "Kein Lauf sagt das.",
   // ---------------------------------------------------------------- task copies
   "tasks.isolated": "In einer eigenen Kopie arbeiten",

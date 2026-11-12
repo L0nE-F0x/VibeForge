@@ -661,6 +661,8 @@ export const ja: Catalog = {
   // ---------------------------------------------------------------- search
   "switcher.run": "実行",
   "runs.searchPlaceholder": "実行の内容、タイトル、フォルダーを検索",
+  "runs.cutSearch": "新しい {count} 件を表示中 · 古いものは検索してください",
+  "runs.cutElsewhere": "新しい {count} 件を表示中 · 古いものは実行履歴にあります",
   "runs.noMatch": "該当する実行はありません。",
   // ---------------------------------------------------------------- task copies
   "tasks.isolated": "別のコピーで作業する",

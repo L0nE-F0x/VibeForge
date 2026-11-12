@@ -389,3 +389,10 @@
   word-break: break-word;
   user-select: text;
 }
+
+/* The end of a list that stops at a limit: says so, and where the rest are. */
+.list-cut {
+  padding: 10px 10px 4px;
+  font-size: var(--fs-xs);
+  text-align: center;
+}

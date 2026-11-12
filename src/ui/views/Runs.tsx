@@ -12,6 +12,9 @@ import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
 
+/** How many runs All lists; older ones are found by searching. */
+const ALL_RUNS = 300;
+
 export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> }) {
   const t = useT();
   const { go, replace } = useNav();
@@ -19,7 +22,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const [search, setSearch] = useState("");
   const inbox = useInbox();
   const typed = useDebounced(search.trim(), 160);
-  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: 300 }));
+  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: ALL_RUNS }));
   // One entry per text typed: not kept once the search moves on.
   const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false });
   const searching = filter === "all" && typed !== "";
@@ -136,6 +139,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
               </Fragment>
             );
           })}
+          {filter === "all" && !searching && runs.length >= ALL_RUNS && <div className="list-cut faint">{t("runs.cutSearch", { count: ALL_RUNS })}</div>}
         </div>
       </SidePanel>
       {selected ? (

@@ -673,6 +673,8 @@ export const en = {
   // ---------------------------------------------------------------- search
   "switcher.run": "Run",
   "runs.searchPlaceholder": "Search what runs said, their titles and folders",
+  "runs.cutSearch": "Showing the newest {count} · search for older ones",
+  "runs.cutElsewhere": "Showing the newest {count} · older ones are in Runs",
   "runs.noMatch": "No run says that.",
   // ---------------------------------------------------------------- task copies
   "tasks.isolated": "Work in a separate copy",
