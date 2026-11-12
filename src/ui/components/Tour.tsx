@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import { useEngines } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
+import { pushOverlay } from "../overlays.js";
 import { useNav, useOverlay, type Route } from "../state.js";
 import { Button, Logo, cx } from "./ui.js";
 import { WhichOne, WhichOneIcon } from "./WhichOne.js";
@@ -259,6 +260,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
   const [hole, setHole] = useState<ForStep<Rect> | null>(null);
   const [cardPos, setCardPos] = useState<ForStep<{ left: number; top: number }> | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const step = STEPS[index];
   const centered = step.id === "welcome" || step.id === "done";
   useOverlay(true);
@@ -310,9 +312,17 @@ export function Tour({ onClose }: { onClose: () => void }) {
     return () => window.clearTimeout(timer);
   }, [index, centered, step.target]);
 
+  // On the overlay stack like any dialog: Code's keys wait behind it (Ctrl+Shift+D on its Code
+  // step would split a pane under the card), terminals don't take focus from it, and Tab stays in it.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => pushOverlay({ close: () => closeRef.current(), node: () => rootRef.current, trap: true }), []);
+
   useEffect(() => {
     (document.activeElement as HTMLElement | null)?.blur?.();
     const onKey = (event: KeyboardEvent) => {
+      // Enter on a focused button (Skip tour, Skip for now) is that button's, not Next.
+      if (event.key === "Enter" && (event.target as HTMLElement | null)?.closest?.("button")) return;
       if (isShortcut("tour.next", event)) {
         if (index === STEPS.length - 1) onClose();
         else move(1);
@@ -331,7 +341,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
   const width = step.extra ? Math.min(step.extra.width, window.innerWidth - 32) : CARD_W;
 
   return createPortal(
-    <div className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label={t("tour.label")}>
+    <div ref={rootRef} className={cx("tour", centered && "is-centered")} role="dialog" aria-modal aria-label={t("tour.label")}>
       <div
         className={cx("tour-hole", (centered || missing || !hole) && "is-empty")}
         style={hole && !centered && !missing ? { top: hole.top, left: hole.left, width: hole.width, height: hole.height } : undefined}
