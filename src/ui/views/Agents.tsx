@@ -19,7 +19,8 @@ import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSkills } from "../api.js";
-import { useDraftState } from "../drafts.js";
+import { autosaveDue, oneLine } from "../autosave.js";
+import { forgetDraft, useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
@@ -46,15 +47,20 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
 
 /**
  * A page editor saves on its own a moment after typing stops, and on the way out; Ctrl+S saves at
- * once. `value` is what is being edited, so each change restarts the wait.
+ * once. `value` is what is being edited, so each change restarts the wait. Each value is tried
+ * once (see autosaveDue), so one that doesn't stick isn't saved again every second.
  */
 export function useAutosave(value: unknown, dirty: boolean, ready: boolean, save: () => void, delay = 800): void {
   const latest = useRef({ save, dirty, ready });
   latest.current = { save, dirty, ready };
   const key = JSON.stringify(value);
+  const attempted = useRef<string | null>(null);
   useEffect(() => {
-    if (!dirty || !ready) return;
-    const timer = setTimeout(() => latest.current.save(), delay);
+    if (!autosaveDue(key, attempted.current, dirty, ready)) return;
+    const timer = setTimeout(() => {
+      attempted.current = key;
+      latest.current.save();
+    }, delay);
     return () => clearTimeout(timer);
   }, [key, dirty, ready, delay]);
   useEffect(
@@ -219,17 +225,22 @@ function FolderList({ places, onRemove, home }: { places: string[]; onRemove?: (
   );
 }
 
+const NEW_AGENT_DRAFT = "agent:new";
+
 function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (agent: Agent) => void }) {
   const t = useT();
   const engines = useEngines().data ?? [];
   const settings = useQuery("settings", ["settings"], () => call("settings.get")).data;
   const home = useAppInfo().data?.home ?? "";
   const available = engines.filter((engine) => engine.available);
-  const [name, setName] = useState("");
-  const [brief, setBrief] = useState("");
-  const [engine, setEngine] = useState("");
-  const [places, setPlaces] = useState<string[]>([]);
-  const [allowRoutines, setAllowRoutines] = useState(true);
+  // Kept as a draft, as a new task, skill or routine is: Esc or a click outside doesn't lose a long brief.
+  const [form, setForm] = useDraftState(NEW_AGENT_DRAFT, { name: "", brief: "", engine: "", places: [] as string[], allowRoutines: true });
+  const { name, brief, engine, places, allowRoutines } = form;
+  const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
+  const setBrief = (next: string) => setForm((prev) => ({ ...prev, brief: next }));
+  const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
+  const setPlaces = (update: (prev: string[]) => string[]) => setForm((prev) => ({ ...prev, places: update(prev.places) }));
+  const setAllowRoutines = (next: boolean) => setForm((prev) => ({ ...prev, allowRoutines: next }));
 
   useEffect(() => {
     if (engine || !available.length) return;
@@ -243,6 +254,7 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
   });
   const [save, saving] = useAction(async () => {
     const agent = await call("agents.save", { name, brief, engine, places, allowRoutines });
+    forgetDraft(NEW_AGENT_DRAFT);
     onCreated(agent);
   }, t("agents.createFailed"));
 
@@ -558,6 +570,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const { push } = useToast();
   const confirm = useConfirm();
   const deleted = useDeleted();
+  const others = (useAgents().data ?? []).filter((item) => item.id !== agent.id);
   const running = (useLive().data ?? []).some((session) => session.agentId === agent.id && session.runId);
   const engines = useEngines().data ?? [];
   const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
@@ -570,7 +583,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const setTier = (next: AgentTier) => setForm((prev) => ({ ...prev, tier: next }));
   const voices = useVoiceStatus().data?.voices ?? [];
   const dirty =
-    name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice || (goodAt ?? "").trim() !== agent.goodAt || (tier ?? "") !== agent.tier;
+    name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice || oneLine(goodAt ?? "") !== agent.goodAt || (tier ?? "") !== agent.tier;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
@@ -585,7 +598,8 @@ function SettingsTab({ agent }: { agent: Agent }) {
       if (!ok) return;
     }
     const result = await call("agents.delete", agent.id);
-    go({ view: "agents" });
+    // Straight to one that is left: the list hasn't reloaded yet, so "the first one" would be this one.
+    go(others[0] ? { view: "agents", agentId: others[0].id, tab: "chats" } : { view: "agents" });
     deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));
   useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
