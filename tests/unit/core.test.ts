@@ -14,7 +14,7 @@ import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/task
 import { BUILTIN_PALETTE, companionColor, contrast, listThemes, paletteFromFiles, parseFlatToml, readableMuted, readTheme, resolvePalette, toHex } from "../../src/core/theme.js";
 import { BUNDLED_THEMES } from "../../src/core/themes-bundled.js";
 import type { RunMeta } from "../../src/core/types.js";
-import { diffSince, gitHead, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
+import { diffSince, dirtyFiles, gitHead, leaveOutUntouched, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
 import { dayHeading, dayKey, fireTime, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
 
@@ -434,6 +434,32 @@ describe("git snapshot", () => {
     const fallback = await diffSince(dir, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
     expect(fallback).toContain("+more");
     expect(fallback).toContain("+deep");
+  });
+
+  it("names files from the top of the repository when the CLI works in a subfolder", async () => {
+    const dir = tempDir();
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, stdio: "pipe" });
+    git("init", "-q");
+    fs.mkdirSync(path.join(dir, "packages", "web"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "root.txt"), "one\n");
+    fs.writeFileSync(path.join(dir, "packages", "web", "app.ts"), "a\n");
+    git("add", "-A");
+    git("commit", "-qm", "init");
+    const sub = path.join(dir, "packages", "web");
+    // Already changed when the CLI started in packages/web: one it then edits, one it leaves.
+    fs.writeFileSync(path.join(dir, "root.txt"), "one\nmine\n");
+    fs.writeFileSync(path.join(sub, "app.ts"), "a\nmine\n");
+    const start = await gitHead(sub);
+    const before = await dirtyFiles(sub);
+    expect([...(before?.keys() ?? [])].sort()).toEqual(["packages/web/app.ts", "root.txt"]);
+    fs.writeFileSync(path.join(sub, "app.ts"), "a\nmine\ncli\n");
+    fs.writeFileSync(path.join(sub, "new.ts"), "fresh\n");
+    const own = leaveOutUntouched(await diffSince(sub, start), sub, before);
+    expect(own).toContain("diff --git a/packages/web/app.ts b/packages/web/app.ts");
+    expect(own).toContain("+cli");
+    expect(own).toContain("diff --git a/packages/web/new.ts b/packages/web/new.ts");
+    expect(own).not.toContain("root.txt");
   });
 });
 
