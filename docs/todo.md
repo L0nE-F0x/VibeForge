@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.15.0, 2026-11-09, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.16.0, 2026-11-12, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -18,6 +18,13 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 - Settings → Storage's first upkeep on a large real run folder.
 - A task in its own copy on a repository Claude Code hasn't trusted yet.
 - **Codex as Maestro's planner.** Built to Codex's JSON lines and tested against its real "not signed in" answer. Codex isn't signed in on this machine, so a real plan from it waits for someone who uses Codex.
+
+## Left from the 2026-11-12 audit
+
+- [ ] **Maestro: a "waiting for you" note.** The core can't tell a CLI waiting for a person from one that's quiet; only the window works that out. Moving that into the core would let Maestro say so too.
+- [ ] **Maestro: start a named agent** as a plan step. It needs a service call for "this agent's chat, in this workspace" that doesn't exist yet.
+- [ ] **Neighbouring panes keep their place.** A split or a close remounts the terminal beside it (its scrollback comes back, its scroll position and selection don't). Needs a keyed pane tree in SplitView.
+- [ ] **File names that aren't UTF-8** still go through UTF-8 text when Apply lists what changed. Rare; their content is now carried byte for byte.
 
 ## Parked
 

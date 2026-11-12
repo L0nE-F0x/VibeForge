@@ -6,6 +6,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-11-12
+
+**2.16.0: Maestro makes workspaces, starts each CLI on the model and effort you ask for, and tells you when one is done; Apply keeps every byte; and a long list of fixes from a full audit.**
+
+### Added
+
+- **Maestro makes workspaces.** Say "make a workspace called Star Ledger as a git repo and start Claude there" and the plan has a **New workspace** step: its name, its folder (in Settings → Maestro's new **New workspaces go in**, or the folder most of your workspaces sit in, else `~/Projects`) and whether to run `git init`. Go makes the folder and adds it to Code; a folder that's already there is only added, never written into or emptied. Later steps in the same plan can work in it.
+- **Model and effort for each CLI Maestro starts.** "Start Claude on opus at high effort" starts it with `--model opus --effort high`. Each start step on the plan card has a model and an effort, with only the levels that CLI takes: Claude Code, Grok Build, Codex, Antigravity CLI, Copilot, Muse and Pi have efforts; Kimi and Cursor Agent take a model only.
+- **Maestro opens a CLI where you are.** "Open Claude in VibeForge" starts it in the workspace itself, with no branch, copy or first instruction. A branch left empty on the card means the same.
+- **Maestro hears back.** When a CLI it started finishes a stretch of work, its conversation says so, with what changed, **Open in Code** and **Review**; when one closes by itself it says that too. Asking "how's it going?" gets an answer that knows what each CLI was asked, which branch it's on and which copies wait for review.
+- **Apply, Discard and Show in a plan.** "Apply the fix-tray copy", "throw away the parser copy" and "show me Grok" are steps now. Apply, Discard and Stop always wait for Go, even under **Just go**.
+- **The plan card warns** when a workspace has edits you haven't committed, since a copy starts from the last commit and leaves them behind.
+- **On the phone:** **Forget this phone** in its settings; the pairing code is hidden as you type it, with Show; Settings → Phone warns when the page was reached through a tailnet name without Tailscale's sign-in header (that's what `tailscale funnel` looks like); and the page reloads itself once this computer runs a new version.
+- **Keyboard:** menus open on their first item and move with ↑/↓/Home/End; the Files tree moves with the arrow keys; Ctrl+N/Ctrl+P in Go to anything and F2 to rename a workspace are on the shortcuts sheet.
+
+### Changed
+
+- **Maestro answers sooner.** Claude Code and Grok Build plan at low effort, and Claude Code plans without loading your MCP servers.
+- **Maestro matches names better.** "GitHub Copilot" and "Copilot CLI" find Copilot; a two-letter name such as Pi no longer matches inside longer words.
+- **The in-app Update runs the installer of the release it found,** checked against the SHA-256 GitHub lists for it, instead of the website's `/install`. A git checkout updates with `npm ci`.
+- **Releases are built and published in two steps:** the build runs with a read-only token, and the publish step, which runs none of the project's code, attaches a build provenance attestation.
+- **The installer** downloads nothing when you already have the newest version (`VIBEFORGE_FORCE=1` reinstalls), runs one at a time, keeps your previous copy until the new one is unpacked, puts the old copy back if it's stopped midway, checks the ready-made terminal module loads on your system (and builds from source if not), and reads only a 404 as "this release has no ready-made build". Uninstalling names every folder VibeForge used.
+- **Lighter on the phone's data:** the page asks again only for what changed, compressed, and plan limits no longer hold up the rest.
+- **The website** shows everything without JavaScript, and serves HSTS.
+
+### Fixed
+
+- **Apply keeps every byte.** A text file in an older encoding (Latin-1, Windows-1252, Shift-JIS) came through Apply with its special characters replaced, and its copy was then removed. A repository a CLI cloned inside its copy was silently left out; now the copy stays and Apply says so, and a nested repository with no commits gets a plain message naming the folder.
+- **The browser dock no longer stops working** once a page in it closes itself, and closing the window no longer throws.
+- **Arrowing through a list no longer hands the keyboard to a live terminal,** where your next keys (Enter included) went to the CLI.
+- **VibeForge no longer waits on a slow or prompting shell profile to open its window.**
+- **No more spell-check download from Google** on first start; the update check and voice downloads carry no cookies from the browser dock; and the Plan limits hint names Google, which it asks for Antigravity.
+- **After an update, before you restart,** every view still opens, and VibeForge offers Restart rather than Update now.
+- **Agent talk:** `vibeforge task --wait` reports back as a message when the asking CLI's command gave up first; several hand-offs at once respect the working limit; Review with… and Send changes from a subfolder include files that were already edited.
+- **Runs count only their own changes,** not edits that were already in the folder when they started.
+- **Double starts:** pressing Continue twice, or two messages to a new chat at once, start one session.
+- **Routines on an interval** no longer fire twice the night daylight saving ends.
+- **Plan limits** no longer predict "full" after the window resets; token days stay right after a change of time zone.
+- **Terminals:** opening a pane while its CLI prints no longer shows output twice; a pane closed while starting no longer leaves its CLI running; new panes no longer open hidden behind a maximized one; a finished run's screen copies with Ctrl+C and lets app shortcuts through; terminals that die with the terminal host show as ended; the terminal host ends its terminals properly when the terminal VibeForge was started from closes.
+- **Smaller fixes:** "Put it back in Needs review" stays put; an agent's Good at with two spaces no longer saves in a loop; the New agent dialog keeps what you typed; removing a CLI in Settings has Undo and New code asks first; deleting the first agent or skill opens another; double-clicking a file opens it without pasting its path twice; Ctrl+Shift+Enter closes the Write box and Ctrl+Enter sends; the tour keeps the keyboard to itself; a dictation started by click survives the window losing focus; terminal links show where they really go; long lists say where they stop; the run Details tab speaks your language.
+- **On the phone:** an error stays on screen until you close it; with VibeForge closed, a correct pairing code says the computer can't be reached instead of "didn't match"; nothing waits forever on a stalled link; Go no longer starts a plan whose last edit didn't reach the computer; text from the phone is cleaned of control characters before it reaches a terminal.
+- **Under the hood:** saved review patches are capped and tidied after three days; a quit waits for a deleted task's or discarded copy's branch to go; a busy phone port is tried again; the terminal host's errors reach the log; the reply watcher no longer loses long turns.
+
 ## [2.15.0] - 2026-11-09
 
 **2.15.0: installing and updating take seconds, with nothing to compile, and a one-screen guide to which part of VibeForge fits what you want to do.**
