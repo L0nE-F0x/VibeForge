@@ -266,9 +266,24 @@ function joinBlocks(left: string, right: string): string {
   return left.endsWith("\n") ? `${left}${right}` : `${left}\n${right}`;
 }
 
-function capPatch(text: string): string {
-  if (text.length <= MAX_PATCH) return text;
-  const cut = text.slice(0, MAX_PATCH);
+/**
+ * A patch to save for a CLI to read: binary contents (a `--binary` diff's "GIT binary patch"
+ * blocks) named rather than copied in, which a CLI can't read anyway, and the whole cut at the size
+ * a run's saved diff is. A copy with a few images in it made patches of many megabytes.
+ */
+export function slimPatch(patch: string, max = MAX_PATCH): string {
+  const blocks = patch.split(/^(?=diff --git )/m).map((block) => {
+    const at = block.indexOf("\nGIT binary patch\n");
+    if (at < 0) return block;
+    const names = /^diff --git a\/(.+?) b\/(.+)$/m.exec(block);
+    return `${block.slice(0, at + 1)}Binary files ${names ? `a/${names[1]} and b/${names[2]}` : "a and b"} differ\n`;
+  });
+  return capPatch(blocks.join(""), max);
+}
+
+function capPatch(text: string, max = MAX_PATCH): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
   return `${cut.endsWith("\n") ? cut : `${cut}\n`}# saved diff truncated\n`;
 }
 

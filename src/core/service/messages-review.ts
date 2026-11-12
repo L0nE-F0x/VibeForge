@@ -127,7 +127,7 @@ export class Reviews {
       this.core.emit("live");
       return;
     }
-    const file = this.files.saveFile("reviews", "patch", patch);
+    const file = this.files.savePatch(patch);
     review.phase = "reviewer";
     this.core.emit("live");
     this.delivery.queue({

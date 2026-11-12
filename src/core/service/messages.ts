@@ -45,6 +45,7 @@ export class MessageDesk {
   private readonly reviews: Reviews;
   private readonly handed: HandedTasks;
   private timer: NodeJS.Timeout | null = null;
+  private readonly stopTidying: () => void;
   private running: Promise<void> | null = null;
   private again = false;
 
@@ -56,6 +57,7 @@ export class MessageDesk {
     this.answers = new Answers(core, this.roster, () => this.ensureTimer(), (from, to, reply) => this.forward(from, to, reply));
     this.delivery = new Delivery(core, this.answers);
     this.files = new SavedFiles(core, () => [...this.delivery.texts(), ...this.answers.texts()]);
+    this.stopTidying = this.files.tidyNowAndHourly();
     const pump = () => void this.pump();
     this.reviews = new Reviews(core, this.roster, this.delivery, this.files, pump);
     this.handed = new HandedTasks(core, tasks, this.roster, this.delivery, this.answers, this.files, pump);
@@ -64,6 +66,7 @@ export class MessageDesk {
   close(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.stopTidying();
     this.answers.close();
   }
 
@@ -171,7 +174,7 @@ export class MessageDesk {
     else {
       const patch = await changesOf(this.core, from.ptyId);
       if (patch.trim()) {
-        const file = this.files.saveFile("reviews", "patch", patch);
+        const file = this.files.savePatch(patch);
         const files = patchFiles(patch);
         text = `My changes are in ${file}${files.length ? ` (${files.slice(0, 12).join(", ")}${files.length > 12 ? "…" : ""})` : ""}.`;
       }

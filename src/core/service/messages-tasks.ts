@@ -353,7 +353,7 @@ export class HandedTasks {
       ended,
       reply,
       savedAt: reply ? this.files.saveIfLong("messages", reply) : null,
-      patchPath: patch.trim() ? this.files.saveFile("reviews", "patch", patch) : null,
+      patchPath: patch.trim() ? this.files.savePatch(patch) : null,
       files: patchFiles(patch),
       copyPath: task.copy?.path ?? null,
       applyWith: this.settings().leadApplies && !ended ? task.id : null,
