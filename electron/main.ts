@@ -104,7 +104,8 @@ const stats = new Stats(ctx, notify, app.getVersion());
 const updater = new Updater({
   current: app.getVersion(),
   install,
-  command: updateCommand(install, ctx.appRoot, process.env.VIBEFORGE_UPDATE_COMMAND),
+  // Built again from each release read, so Update runs that release's own installer, checked against GitHub's digest.
+  command: (latest) => updateCommand(install, ctx.appRoot, process.env.VIBEFORGE_UPDATE_COMMAND, latest),
   url: process.env.VIBEFORGE_UPDATE_URL || RELEASES_URL,
   log,
   enabled: () => ctx.service?.getSettings().checkUpdates ?? false,

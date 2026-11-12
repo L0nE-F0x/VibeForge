@@ -14,12 +14,12 @@ afterEach(() => {
   netFetch.mockReset();
 });
 
-function updater(opts: { enabled?: boolean; fetch?: (url: string, init: RequestInit) => Promise<Response>; current?: string } = {}) {
+function updater(opts: { enabled?: boolean; fetch?: (url: string, init: RequestInit) => Promise<Response>; current?: string; command?: (latest: { tag: string } | null) => string | null } = {}) {
   const log = new LogFile(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-updater-")), "log.txt"));
   return new Updater({
     current: opts.current ?? "2.15.0",
     install: "installer",
-    command: "true",
+    command: opts.command ?? (() => "true"),
     url: "https://api.github.com/repos/x/y/releases/latest",
     log,
     enabled: () => opts.enabled ?? true,
@@ -61,6 +61,20 @@ describe("the update check", () => {
     expect(none).toMatchObject({ latest: null, available: false, error: null });
     const refused = await updater({ fetch: async () => new Response("", { status: 403, statusText: "Forbidden" }) }).check();
     expect(refused.error).toBe("GitHub answered 403 Forbidden");
+  });
+
+  it("builds the update command again from each release it reads", async () => {
+    const seen: Array<string | null> = [];
+    const check = updater({
+      fetch: async () => release("v2.16.0"),
+      command: (latest) => {
+        seen.push(latest?.tag ?? null);
+        return latest ? `install ${latest.tag}` : "install latest";
+      },
+    });
+    expect(check.get().command).toBe("install latest");
+    expect((await check.check()).command).toBe("install v2.16.0");
+    expect(seen).toEqual([null, "v2.16.0"]);
   });
 
   it("says when GitHub didn't answer in time", async () => {
