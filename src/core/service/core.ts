@@ -15,7 +15,7 @@ import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Setting
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
-type Settle = () => void | Promise<unknown>;
+type Settle = () => unknown;
 
 /**
  * The state every part of the service shares, and the lifecycle of a run: launching it, its exit,
