@@ -12,7 +12,25 @@ import type { ServiceCore } from "./core.js";
 
 /** Chats, plain or with an agent: each message pastes into a live session or picks the last one up again. */
 export class ChatDesk {
+  /**
+   * Chats whose CLI is being started. Another send or Continue meanwhile waits for it, then goes
+   * to that session, instead of starting (or resuming) a second one.
+   */
+  private readonly starting = new Map<string, Promise<unknown>>();
+
   constructor(private readonly core: ServiceCore) {}
+
+  /** Start a chat's CLI, one start at a time per chat. */
+  private startOnce<T>(id: string, start: () => Promise<T>): Promise<T> {
+    const run = start();
+    const held = run.catch(() => undefined);
+    this.starting.set(id, held);
+    void held.then(() => {
+      if (this.starting.get(id) === held) this.starting.delete(id);
+    });
+    return run;
+  }
+
 
   listChats(filter: { agentId?: string | null } = {}): ChatView[] {
     return this.core.store
@@ -127,6 +145,9 @@ export class ChatDesk {
   async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
     if (!text.trim()) throw new Error("Type something to send.");
     await this.core.settled;
+    // Checked with no wait between here and the start below, so two sends can't both start one.
+    const going = this.starting.get(id);
+    if (going) return going.then(() => this.sendChat(id, text, size));
     let chat = this.core.store.getChat(id);
     if (!chat) throw new Error("That chat no longer exists.");
     if (chat.title === DEFAULT_CHAT_TITLE) {
@@ -141,11 +162,12 @@ export class ChatDesk {
       this.core.emit("chats");
       return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
     }
+    const current = chat;
     if (!lastId) {
-      const launched = await this.startChatRun(chat, { prompt: text, continueSession: false, size });
+      const launched = await this.startOnce(id, () => this.startChatRun(current, { prompt: text, continueSession: false, size }));
       return { ...launched, chatId: chat.id, started: true, note: null };
     }
-    const launched = await this.startChatRun(chat, { prompt: text, continueSession: true, size });
+    const launched = await this.startOnce(id, () => this.startChatRun(current, { prompt: text, continueSession: true, size }));
     return { ...launched, chatId: chat.id, started: true, note: "The last session had ended, so VibeForge picked it up again." };
   }
 
@@ -153,12 +175,14 @@ export class ChatDesk {
   async continueChat(id: string, size: TermSize = {}): Promise<SendResult> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
+    const going = this.starting.get(id);
+    if (going) return going.then(() => this.continueChat(id, size));
     const chat = this.core.store.getChat(id);
     if (!chat) throw new Error("That chat no longer exists.");
     const lastId = chat.runIds[chat.runIds.length - 1];
     const livePty = lastId ? this.core.ptyByRun.get(lastId) : undefined;
     if (lastId && livePty) return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
-    const launched = await this.startChatRun(chat, { prompt: null, continueSession: Boolean(lastId), size });
+    const launched = await this.startOnce(id, () => this.startChatRun(chat, { prompt: null, continueSession: Boolean(lastId), size }));
     return { ...launched, chatId: chat.id, started: true, note: null };
   }
 

@@ -85,6 +85,17 @@ describe("chats", () => {
     ctx.svc.close();
   });
 
+  it("starts one session when two messages go to a new chat at once, and the second goes into it", async () => {
+    const ctx = setup();
+    const chat = ctx.svc.createChat({ engine: "argy" });
+    const [first, second] = await Promise.all([ctx.svc.sendChat(chat.id, "one"), ctx.svc.sendChat(chat.id, "two")]);
+    expect(ctx.spawns).toHaveLength(1);
+    expect(first.started).toBe(true);
+    expect(second).toMatchObject({ started: false, ptyId: first.ptyId });
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: first.ptyId, text: "two" });
+    ctx.svc.close();
+  });
+
   it("reopens the exact session the CLI printed on exit", async () => {
     const ctx = setup();
     const chat = ctx.svc.createChat({ engine: "argy" });
@@ -514,6 +525,20 @@ describe("tasks", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(ctx.svc.getRun(again.runId).run.status).toBe("stopped");
     expect(ctx.svc.listTasks()[0].status).toBe("review");
+    ctx.svc.close();
+  });
+
+  it("starts one CLI when Continue is pressed twice at once", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const workspaces = ctx.svc.addWorkspace(ctx.place);
+    const task = ctx.svc.saveTask({ title: "Twice", agentId: agent.id, workspaceId: workspaces.workspaces[0].id });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const before = ctx.spawns.length;
+    const both = await Promise.allSettled([ctx.svc.continueTask(task.id), ctx.svc.continueTask(task.id)]);
+    expect(both.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(both.find((result) => result.status === "rejected")).toMatchObject({ reason: expect.objectContaining({ message: "This task is already running." }) });
+    expect(ctx.spawns.length - before).toBe(1);
     ctx.svc.close();
   });
 

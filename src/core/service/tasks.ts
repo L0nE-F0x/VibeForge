@@ -16,6 +16,13 @@ import type { FolderTurns } from "./turns.js";
 
 /** Tasks: a title and a body an agent executes in a workspace, then waits for review. */
 export class TaskDesk {
+  /**
+   * Tasks whose CLI is being started: a copy made, a run allocated, not yet in the task's runs. A
+   * second Execute or Continue then (a double click, the board and a lead's Start together) would
+   * start a second CLI in the same copy.
+   */
+  private readonly launching = new Set<string>();
+
   constructor(
     private readonly core: ServiceCore,
     private readonly turns: FolderTurns,
@@ -181,13 +188,23 @@ export class TaskDesk {
   private ready(id: string): Task {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
-    if (task.status === "running" && this.taskLive(task)) throw new Error("This task is already running.");
+    if ((task.status === "running" && this.taskLive(task)) || this.launching.has(id)) throw new Error("This task is already running.");
     const blocker = this.taskBlocker(task);
     if (blocker) throw new Error(BLOCKER_TEXT[blocker]);
     return task;
   }
 
   private async launchTask(task: Task, size: TermSize, continueSession: boolean, followUp: string | null = null): Promise<Launched> {
+    // Taken in the same tick as ready()'s check, before anything here waits.
+    this.launching.add(task.id);
+    try {
+      return await this.launchOnce(task, size, continueSession, followUp);
+    } finally {
+      this.launching.delete(task.id);
+    }
+  }
+
+  private async launchOnce(task: Task, size: TermSize, continueSession: boolean, followUp: string | null): Promise<Launched> {
     const id = task.id;
     const agent = this.core.store.getAgent(task.agentId!)!;
     const workspace = this.core.workspaceById(task.workspaceId)!;
