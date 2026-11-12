@@ -90,8 +90,17 @@ class Host {
 
   close(): Promise<void> {
     return new Promise((resolve) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) return resolve();
       this.child.once("exit", () => resolve());
       this.child.stdin.end();
+    });
+  }
+
+  /** Sends the host a signal; how it ended. */
+  signal(name: NodeJS.Signals): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    return new Promise((resolve) => {
+      this.child.once("exit", (code, signal) => resolve({ code, signal }));
+      this.child.kill(name);
     });
   }
 }
@@ -339,6 +348,17 @@ describe("pty host", () => {
     expect(host.exitOf(pty)).toBeUndefined();
     await host.request({ op: "kill", ptyId: pty });
     expect((await host.request({ op: "screen", ptyId: "nope" })).alive).toBe(false);
+  });
+
+  it("ends its terminals properly on SIGHUP, as when the terminal VibeForge started from closes", async () => {
+    const host = await startHost();
+    const dir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH, runDir: dir })).ptyId);
+    await host.request({ op: "write", ptyId: pty, data: "echo HUP-$((40+2))\r" });
+    await host.until(async () => (await host.screen(pty)).includes("HUP-42"));
+    expect(await host.signal("SIGHUP")).toEqual({ code: 0, signal: null });
+    expect(host.exitOf(pty)).toBeDefined();
+    expect(fs.readFileSync(path.join(dir, "transcript.txt"), "utf8")).toContain("HUP-42");
   });
 
   it("reports a program's own exit code and rejects unknown requests", async () => {
