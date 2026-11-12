@@ -38,6 +38,8 @@ export interface DeskHost {
   finished?(run: { runId: string; origin: RunOrigin; outcome: "ok" | "failed" | "stopped" }): void;
   snapshotGit(cwd: string, startHead: string | null): Promise<string>;
   gitHead(cwd: string): Promise<string | null>;
+  /** Bring the window up on a place in it (a terminal in Code), as a notification's click does. */
+  show?(route: { view: "code"; workspaceId?: string; ptyId?: string }): void;
 }
 
 export interface DeskOptions {

@@ -22,7 +22,20 @@ export const pendingSteps = new Map();
 let stepQueue = Promise.resolve();
 
 /** @type {Record<string, string>} */
-const ISSUE_KEYS = { workspace: "orch.issue.workspace", engine: "orch.issue.engine", engineMissing: "orch.issue.engineMissing", target: "orch.issue.target", prompt: "orch.issue.prompt" };
+const ISSUE_KEYS = {
+  workspace: "orch.issue.workspace",
+  engine: "orch.issue.engine",
+  engineMissing: "orch.issue.engineMissing",
+  target: "orch.issue.target",
+  prompt: "orch.issue.prompt",
+  effort: "orch.issue.effort",
+  folder: "orch.issue.folder",
+  copy: "orch.issue.copy",
+};
+/** The word for each kind of step that isn't a start (which shows its CLI and workspace instead). @type {Record<string, string>} */
+const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard" };
+/** A plan's own new workspace, as later steps in it name it until it is made. */
+const PLANNED_PREFIX = "new:";
 /** @type {Record<string, string>} */
 const PLAN_TONE = { waiting: "waiting", running: "working", done: "done", cancelled: "done", replaced: "done" };
 
@@ -68,27 +81,44 @@ function stepNode(turn, step, editable) {
       ? el("span", { class: "px working", "aria-hidden": "true" })
       : glyph(step.state === "done" ? "done" : step.state === "failed" ? "failed" : step.kind);
   const main = el("div", { class: "orch-step-main" });
-  if (step.kind === "start") {
+  if (step.kind === "workspace") {
+    main.append(
+      editable
+        ? el("div", { class: "orch-step-line" }, el("strong", {}, t("orch.makeWorkspace")), textField(turn, step, "name", value("name") || "", t("orch.workspaceName")))
+        : el("div", { class: "orch-step-line" }, el("strong", {}, t("orch.makeWorkspace")), el("span", {}, step.name || ""), step.git ? el("span", { class: "chip done" }, t("orch.gitInit")) : null),
+      editable ? textField(turn, step, "folder", value("folder") || "", t("orch.folder")) : el("span", { class: "small faint orch-folder" }, step.folder || ""),
+    );
+  } else if (step.kind === "start") {
     if (editable) {
       main.append(el("div", { class: "orch-step-line" }, enginePick(turn, step, value("engineId")), workspacePick(turn, step, value("workspaceId"))), branchField(turn, step, value("branch")));
     } else {
-      const workspace = orch.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
       main.append(
         el(
           "div",
           { class: "orch-step-line" },
           el("strong", {}, engineLabel(step.engineId)),
           el("span", { class: "faint" }, "·"),
-          el("span", {}, workspace),
-          step.branch ? el("span", { class: "orch-branch-text" }, glyph("branch"), step.branch) : null,
+          el("span", {}, workspaceName(turn, step)),
+          step.branch ? el("span", { class: "orch-branch-text" }, glyph("branch"), step.branch) : el("span", { class: "faint" }, t("orch.inPlace")),
         ),
       );
     }
+    // Model and effort are set on the computer's card; here they show.
+    const options = [step.model, step.effort ? t("orch.effortIs", { effort: step.effort }) : ""].filter(Boolean);
+    if (options.length) main.append(el("span", { class: "small faint" }, options.join(" · ")));
+    if (editable && step.branch && step.dirty) main.append(el("span", { class: "orch-warn" }, tCount("orch.dirty", step.dirty, { workspace: workspaceName(turn, step) })));
+  } else if (step.kind === "apply" || step.kind === "discard") {
+    const copy = orch.copies?.find((item) => item.id === step.target);
+    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
   } else {
     const target = orch.running.find((item) => item.ptyId === step.target);
-    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, step.kind === "tell" ? t("orch.tell") : t("orch.close")), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
+    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind] || "orch.close")), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
   }
-  if (step.kind !== "stop") main.append(editable ? promptField(turn, step, value("prompt")) : el("span", { class: "orch-prompt-text" }, step.prompt));
+  if (step.kind === "start" || step.kind === "tell") {
+    if (editable) main.append(promptField(turn, step, value("prompt")));
+    else if (step.prompt) main.append(el("span", { class: "orch-prompt-text" }, step.prompt));
+  }
+  if (step.result) main.append(el("span", { class: "orch-warn" }, step.result));
   if (step.issue) main.append(el("span", { class: "orch-issue" }, t(ISSUE_KEYS[step.issue] || "orch.fixFirst", { asked: step.asked || "?" })));
   if (step.state === "failed" && step.error) main.append(el("span", { class: "orch-error" }, step.error));
   if (step.state === "skipped") main.append(el("span", { class: "small faint" }, t("orch.skipped")));
@@ -137,15 +167,50 @@ function enginePick(turn, step, value) {
  */
 function workspacePick(turn, step, value) {
   const workspaces = /** @type {PhoneOrchestrator} */ (state.orch).workspaces;
+  // The plan's own new workspaces, while their steps can still run.
+  const planned = (turn.steps || []).filter((item) => item.kind === "workspace" && item.state !== "failed" && item.state !== "skipped");
+  const known = workspaces.some((item) => item.id === value) || planned.some((item) => PLANNED_PREFIX + item.id === value);
   const select = el(
     "select",
     { "aria-label": t("orch.workspace"), "data-field": "workspaceId" },
-    workspaces.some((item) => item.id === value) ? null : el("option", { value: "" }, t("orch.pickWorkspace")),
+    known ? null : el("option", { value: "" }, t("orch.pickWorkspace")),
+    planned.map((item) => el("option", { value: PLANNED_PREFIX + item.id }, t("orch.planned", { name: item.name || "" }))),
     workspaces.map((item) => el("option", { value: item.id }, item.name)),
   );
   select.value = value;
   select.addEventListener("change", () => editStep(turn, step, { workspaceId: select.value }));
   return select;
+}
+
+/**
+ * Where a start step works: a workspace on the computer, or one its plan makes first.
+ * @param {PhoneTurn} turn
+ * @param {PhoneStep} step
+ */
+function workspaceName(turn, step) {
+  const orch = /** @type {PhoneOrchestrator} */ (state.orch);
+  const known = orch.workspaces.find((item) => item.id === step.workspaceId)?.name;
+  if (known) return known;
+  const planned = (turn.steps || []).find((item) => PLANNED_PREFIX + item.id === step.workspaceId);
+  return planned ? t("orch.planned", { name: planned.name || "" }) : step.asked;
+}
+
+/**
+ * A new workspace's name or folder, sent once the box is left.
+ * @param {PhoneTurn} turn
+ * @param {PhoneStep} step
+ * @param {"name" | "folder"} key
+ * @param {string} value
+ * @param {string} label
+ */
+function textField(turn, step, key, value, label) {
+  const input = el("input", { class: "orch-branch-input", "data-field": key, autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: label, "aria-label": label });
+  input.value = value;
+  input.addEventListener("blur", () => {
+    const next = input.value.trim();
+    if (next !== currentStep(step, key)) editStep(turn, step, { [key]: next });
+  });
+  return el("label", { class: "orch-branch" }, input);
 }
 
 /**

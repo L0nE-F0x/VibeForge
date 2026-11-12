@@ -34,7 +34,7 @@ export function defaultSettings(): Settings {
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
-    orchestrator: { engine: "", mode: "plan", model: "" },
+    orchestrator: { engine: "", mode: "plan", model: "", projectsFolder: "" },
   };
 }
 
@@ -179,6 +179,7 @@ export class Config {
         engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
         mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
         model: str(raw.orchestrator?.model).trim().slice(0, 120),
+        projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
       },
     };
   }

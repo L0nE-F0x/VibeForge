@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion } from "../companion.js";
-import { instructionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
+import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -308,6 +308,9 @@ export class ServiceCore {
     continuedFrom?: string | null;
     /** The Orchestrator started it (Code gives it a pane). */
     orchestrated?: boolean;
+    /** The model and reasoning effort to start the CLI with, where it takes them (launchOptionArgs). */
+    model?: string;
+    effort?: string;
     cols?: number;
     rows?: number;
   }): Promise<Launched> {
@@ -326,6 +329,7 @@ export class ServiceCore {
             record: instructionArgs(input.engine.row, "{VibeForge note}", { allowVibeforge: input.allowVibeforge }),
           }
         : null,
+      options: launchOptionArgs(input.engine.row, { model: input.model, effort: input.effort }),
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
     let gitStart: string | null = null;

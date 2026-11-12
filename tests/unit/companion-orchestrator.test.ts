@@ -31,6 +31,31 @@ function step(patch: Partial<NonNullable<OrchestratorTurn["steps"]>[number]>) {
 }
 
 describe("the Orchestrator on the phone", () => {
+  it("checks a plan's new workspace, effort and copy steps as the desktop's card does", () => {
+    const copy = { id: "fix-tray", turnId: "t0", stepId: "s0", engineId: "claude", prompt: "", name: "fix-tray", workspaceId: "shop", openedWorkspaceId: "shop-cart", at: "", path: "/x", branch: "vibeforge/fix-tray", base: "abc", repo: "/work/shop" };
+    const turns: OrchestratorTurn[] = [
+      {
+        id: "t1",
+        at: "",
+        from: "vibeforge",
+        text: "Making it.",
+        plan: "waiting",
+        steps: [
+          step({ id: "w1", kind: "workspace", engineId: "", workspaceId: "", branch: "", prompt: "", name: "Star Ledger", folder: "~/Projects/Star Ledger" }),
+          step({ id: "s2", workspaceId: "new:w1", branch: "", effort: "high" }),
+          step({ id: "s3", effort: "ultra" }),
+          step({ id: "s4", kind: "apply", target: "fix-tray" }),
+          step({ id: "s5", kind: "discard", target: "gone" }),
+        ],
+      },
+      { id: "t2", at: "", from: "vibeforge", text: "", note: { kind: "finished", ptyId: "pty-2", runId: null, engine: "Claude Code", workspace: "shop", workspaceId: "shop", copyId: null, changes: "1 file changed" } },
+    ];
+    const phone = buildPhoneOrchestrator({ view: { engineId: "grok", engineReady: true, mode: "plan", thinking: false, turns, copies: [copy] }, engines, workspaces, live: [], hear: false });
+    expect(phone.turns[0].steps?.map((item) => item.issue)).toEqual([null, null, "effort", null, "copy"]);
+    expect(phone.copies).toEqual([{ id: "fix-tray", name: "fix-tray", branch: "vibeforge/fix-tray" }]);
+    expect(phone.turns[1].note).toMatchObject({ kind: "finished", engine: "Claude Code" });
+  });
+
   it("shows the desktop's conversation with each waiting step checked, the end of it only, and the CLIs running", () => {
     const turns: OrchestratorTurn[] = [
       ...Array.from({ length: PHONE_TURNS }, (_, index): OrchestratorTurn => ({ id: `old${index}`, at: "", from: "you", text: `old ${index}` })),
@@ -297,7 +322,7 @@ describe("the phone working the desktop's Orchestrator", () => {
     const rows = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
     rows.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] }, { id: "claude", label: "Claude Code", bin: "pasty", args: [] });
     fs.writeFileSync(file, JSON.stringify(rows));
-    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7", projectsFolder: "" } });
     const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
     const answers: Array<(run: BrainRun) => void> = [];
     ctx.svc.orchestrator.runner = () => new Promise((resolve) => answers.push(resolve));
@@ -334,9 +359,9 @@ describe("the phone working the desktop's Orchestrator", () => {
 
     // The view's header: another planner starts on its own default model; one that can't plan is refused.
     phone.settings({ mode: "go" });
-    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "grok", mode: "go", model: "grok-4.7" });
+    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "grok", mode: "go", model: "grok-4.7", projectsFolder: "" });
     phone.settings({ engine: "claude" });
-    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "claude", mode: "go", model: "" });
+    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "claude", mode: "go", model: "", projectsFolder: "" });
     expect(() => phone.settings({ engine: "argy" })).toThrow();
     expect(ctx.svc.getSettings().orchestrator.engine).toBe("claude");
 

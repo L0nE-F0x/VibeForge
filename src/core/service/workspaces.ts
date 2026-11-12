@@ -178,7 +178,8 @@ export class WorkspaceDesk {
     return { instructions: leadNote({ team, ...talk }), allowVibeforge: true };
   }
 
-  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean } & TermSize): Promise<Launched> {
+  /** `model` and `effort` start the CLI with them where it takes them (launchOptionArgs); empty keeps its own. */
+  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean; model?: string; effort?: string } & TermSize): Promise<Launched> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
@@ -203,6 +204,8 @@ export class WorkspaceDesk {
       continuedFrom: previous?.id ?? null,
       ...this.paneInstructions(engine.row.id, workspace.path),
       orchestrated: opts.orchestrated,
+      model: opts.model,
+      effort: opts.effort,
       cols: opts.cols,
       rows: opts.rows,
     });

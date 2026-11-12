@@ -174,6 +174,8 @@ export interface OrchestratorSettings {
   mode: "plan" | "go";
   /** A model for that CLI to plan with; empty keeps its own default. */
   model: string;
+  /** Where a workspace Maestro makes gets its folder; empty: where most workspaces are, else ~/Projects. */
+  projectsFolder: string;
 }
 
 /** How far CLIs may go on their own when they talk to each other. */

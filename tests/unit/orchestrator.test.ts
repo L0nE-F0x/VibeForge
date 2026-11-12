@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannerFor, readBrainOutput, resolvePlan, signedOut, stepIssue, type PlanContext } from "../../src/core/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
 import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
@@ -64,7 +64,7 @@ describe("the Orchestrator's plans", () => {
     expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
     expect(asked).toContain("plan");
     expect(asked).not.toContain("--conversation");
-    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target"]);
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace"]);
     expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
     expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
     expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);
@@ -129,7 +129,10 @@ describe("the Orchestrator's plans", () => {
       stopReason: "end_turn",
       structuredOutput: { say: "Starting Claude Code in Dune.", steps: [{ kind: "start", engine: "claude", workspace: "Dune" }] },
     });
-    expect(readBrainOutput(fromGrok).plan).toEqual({ say: "Starting Claude Code in Dune.", steps: [{ kind: "start", engine: "claude", workspace: "Dune", branch: undefined, prompt: undefined, target: undefined }] });
+    expect(readBrainOutput(fromGrok).plan).toEqual({
+      say: "Starting Claude Code in Dune.",
+      steps: [{ kind: "start", engine: "claude", workspace: "Dune", branch: undefined, prompt: undefined, target: undefined, folder: undefined, git: false, model: undefined, effort: undefined, inPlace: false }],
+    });
     const fromClaude = JSON.stringify({ type: "result", result: "ok", structured_output: { say: "Which workspace?", steps: [] } });
     expect(readBrainOutput(fromClaude).plan).toEqual({ say: "Which workspace?", steps: [] });
     expect(readBrainOutput('Here you go: {"say":"Hi.","steps":[]} done').plan?.say).toBe("Hi.");
@@ -180,7 +183,9 @@ describe("the Orchestrator's plans", () => {
     ]);
     expect(steps.map((step) => stepIssue(step, context))).toEqual([null, null, "engine", "engineMissing", null, null]);
     expect(steps[2].asked).toBe("gemini · Dune");
-    expect(stepIssue({ ...steps[0], prompt: " " }, context)).toBe("prompt");
+    // A CLI can be opened with nothing to do yet; a message can't be empty.
+    expect(stepIssue({ ...steps[0], prompt: " " }, context)).toBeNull();
+    expect(stepIssue({ ...steps[4], prompt: " " }, context)).toBe("prompt");
     expect(stepIssue({ ...steps[4], target: "pty-9" }, context)).toBe("target");
   });
 });
@@ -265,7 +270,7 @@ function withPlanner(answers: Array<Record<string, unknown> | string>, opts: Par
   const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
   engines.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] });
   fs.writeFileSync(file, JSON.stringify(engines));
-  ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "" } });
+  ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "", projectsFolder: "" } });
   const calls: Array<{ argv: string[]; cwd: string }> = [];
   ctx.svc.orchestrator.runner = async (argv, cwd): Promise<BrainRun> => {
     calls.push({ argv, cwd });
@@ -467,7 +472,7 @@ describe("the Orchestrator in the service", () => {
       { say: "Which CLI?", steps: [{ kind: "start", engine: "nobody", workspace: "shop", prompt: "Second." }] },
     ]);
     ctx.svc.addWorkspace(repo);
-    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
     await ctx.svc.orchestratorAsk("start argy on one");
     await until(() => ctx.svc.orchestratorView().turns[1]?.plan === "done");
     expect(ctx.spawns).toHaveLength(1);
@@ -579,7 +584,7 @@ describe("the Orchestrator in the service", () => {
     const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
     engines.engines.push({ id: "codex", label: "Codex", bin: "argy", args: [] }, { id: "claude", label: "Claude Code", bin: "pasty", args: [] });
     fs.writeFileSync(file, JSON.stringify(engines));
-    ctx.svc.saveSettings({ orchestrator: { engine: "codex", mode: "plan", model: "gpt-x" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "codex", mode: "plan", model: "gpt-x", projectsFolder: "" } });
     const calls: string[][] = [];
     const lines = (thread: string, say: string) => [`{"type":"thread.started","thread_id":"${thread}"}`, JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ say, steps: [] }) } })].join("\n");
     const answers = [
@@ -610,7 +615,7 @@ describe("the Orchestrator in the service", () => {
 
   it("says so when the planning CLI isn't one that can plan or isn't installed", async () => {
     const ctx = setup();
-    ctx.svc.saveSettings({ orchestrator: { engine: "argy", mode: "plan", model: "" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "argy", mode: "plan", model: "", projectsFolder: "" } });
     expect(ctx.svc.orchestratorView().engineReady).toBe(false);
     await ctx.svc.orchestratorAsk("hi");
     expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ from: "vibeforge", problem: "noEngine" });
@@ -631,7 +636,7 @@ describe("the Orchestrator in the service", () => {
       return { code: 0, stdout: JSON.stringify({ structured_output: { say: "Hello.", steps: [] } }), stderr: "", timedOut: false };
     };
     // A model left over for a planner that isn't here isn't handed to this one.
-    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7" } });
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7", projectsFolder: "" } });
     await ctx.svc.orchestratorAsk("hi");
     expect(calls[0][0]).toBe("/usr/bin/pasty");
     expect(calls[0]).toContain("--print");
@@ -647,5 +652,351 @@ describe("the Orchestrator in the service", () => {
     const again = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
     expect(again.svc.orchestratorView().turns.map((turn) => turn.text)).toEqual(["hi", "Hello."]);
     again.svc.close();
+  });
+});
+
+describe("Maestro's plans, 2.16", () => {
+  const founder: PlanContext = {
+    workspaces: ["VibeForge", "Kardashev Project", "WoW Addons", "MegaJamTest", "Bunker Busters", "Filthy Net Deck", "SingularityCity", "Stones-to-Stars", "call-papa", "Multiverse Radio", "Holo Card 3D", "UrbanScan", "Cephandrius", "Barber", "apexforge-site", "The Little Naga", "OmaAmp", "Temple Lodge - Accounting", "Black Ink"].map((name) => ({
+      id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      name,
+      folder: `~/Projects/${name}`,
+      git: true,
+    })),
+    engines: [
+      ["claude", "Claude Code"],
+      ["codex", "Codex"],
+      ["grok", "Grok Build"],
+      ["cursor-agent", "Cursor Agent"],
+      ["agy", "Antigravity CLI"],
+      ["opencode", "OpenCode"],
+      ["copilot", "Copilot"],
+      ["kimi", "Kimi"],
+      ["muse", "Muse"],
+      ["crush", "Crush"],
+      ["pi", "Pi"],
+      ["hermes", "Hermes"],
+    ].map(([id, label]) => ({ id, label, available: true, bin: id })),
+    running: [],
+    copies: [{ id: "fix-tray", name: "fix-tray", branch: "vibeforge/fix-tray", workspace: "VibeForge" }],
+    projectsFolder: "~/Projects",
+  };
+  const engineOf = (asked: string) => matchName(asked, founder.engines, (item) => [item.id, item.label], true)?.id ?? null;
+  const workspaceOf = (asked: string) => matchName(asked, founder.workspaces, (item) => [item.name], true)?.name ?? null;
+
+  it("finds the founder's CLIs and workspaces the way they're said, and Pi only whole", () => {
+    expect(engineOf("GitHub Copilot")).toBe("copilot");
+    expect(engineOf("Copilot CLI")).toBe("copilot");
+    expect(engineOf("Claude")).toBe("claude");
+    expect(engineOf("Antigravity")).toBe("agy");
+    expect(engineOf("Open Code")).toBe("opencode");
+    expect(engineOf("Cursor")).toBe("cursor-agent");
+    expect(engineOf("the Pi agent")).toBe("pi");
+    expect(engineOf("Kimi Code")).toBe("kimi");
+    expect(engineOf("Gemini")).toBeNull();
+    expect(engineOf("pi")).toBe("pi");
+    for (const [asked, name] of [
+      ["vibe forge", "VibeForge"],
+      ["Kardashev", "Kardashev Project"],
+      ["little naga", "The Little Naga"],
+      ["Temple Lodge", "Temple Lodge - Accounting"],
+      ["Wow add-ons", "WoW Addons"],
+      ["mega jam test", "MegaJamTest"],
+      ["stones to stars", "Stones-to-Stars"],
+      ["Call Papa", "call-papa"],
+      ["urban scan", "UrbanScan"],
+      ["Black ink project", "Black Ink"],
+    ]) {
+      expect(workspaceOf(asked)).toBe(name);
+    }
+  });
+
+  it("plans a new workspace, puts it where new ones go, and lets the steps after it work there in place", () => {
+    const steps = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "workspace", workspace: "Star Ledger", git: true },
+          { kind: "start", engine: "claude", workspace: "star ledger", prompt: "Set up a Vite app.", effort: "High", model: "opus" },
+          { kind: "workspace", workspace: "Notes Two", folder: "~/Documents/notes-two" },
+        ],
+      },
+      founder,
+    );
+    expect(steps[0]).toMatchObject({ kind: "workspace", name: "Star Ledger", folder: "~/Projects/Star Ledger", git: true });
+    // A fresh folder has nothing committed to copy: it works there.
+    expect(steps[1]).toMatchObject({ kind: "start", engineId: "claude", workspaceId: plannedId(steps[0].id), branch: "", effort: "high", model: "opus" });
+    expect(steps[2]).toMatchObject({ folder: "~/Documents/notes-two", git: false });
+    const checked = withPlannedWorkspaces(founder, steps);
+    expect(steps.map((step) => stepIssue(step, checked))).toEqual([null, null, null]);
+    // Once its workspace step is left out, the start has nowhere to go.
+    expect(stepIssue(steps[1], withPlannedWorkspaces(founder, steps.slice(1)))).toBe("workspace");
+    expect(stepIssue({ ...steps[0], name: "../x" }, founder)).toBe("folder");
+    expect(stepIssue({ ...steps[0], folder: "relative/path" }, founder)).toBe("folder");
+    expect(stepIssue({ ...steps[1], effort: "ultra" }, checked)).toBe("effort");
+  });
+
+  it("opens a CLI in the workspace itself when asked, or when there's nothing for it to do yet", () => {
+    const steps = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "start", engine: "claude", workspace: "VibeForge" },
+          { kind: "start", engine: "grok", workspace: "VibeForge", prompt: "Fix the tray.", inPlace: true },
+          { kind: "start", engine: "codex", workspace: "VibeForge", prompt: "Fix the tray." },
+        ],
+      },
+      founder,
+    );
+    expect(steps.map((step) => step.branch)).toEqual(["", "", "fix-the-tray"]);
+    expect(stepIssue(steps[0], founder)).toBeNull();
+  });
+
+  it("names copies for apply and discard, and running CLIs for show", () => {
+    const context = { ...founder, running: [{ id: "pty-7", engine: "Claude Code", workspace: "VibeForge", folder: "~/Projects/VibeForge", working: false, orchestrated: true }] };
+    const steps = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "apply", target: "fix tray" },
+          { kind: "discard", target: "nothing like it" },
+          { kind: "show", target: "Claude Code in VibeForge" },
+        ],
+      },
+      context,
+    );
+    expect(steps.map((step) => [step.kind, step.target])).toEqual([
+      ["apply", "fix-tray"],
+      ["discard", ""],
+      ["show", "pty-7"],
+    ]);
+    expect(steps.map((step) => stepIssue(step, context))).toEqual([null, "copy", null]);
+  });
+
+  it("tells the planner what each CLI takes, what is waiting for review, and where new workspaces go", () => {
+    const rules = orchestratorRules({ ...founder, running: [{ id: "pty-7", engine: "Claude Code", workspace: "VibeForge", folder: "~/x", working: true, orchestrated: true, asked: "Fix the tray.", branch: "vibeforge/fix-tray" }] });
+    expect(rules).toContain("- claude: Claude Code (effort: low, medium, high, xhigh, max)");
+    expect(rules).toContain("- crush: Crush\n");
+    expect(rules).toContain("- fix-tray: fix-tray (branch vibeforge/fix-tray), from VibeForge");
+    expect(rules).toContain("in its own copy on vibeforge/fix-tray; asked: Fix the tray.");
+    expect(rules).toContain("~/Projects/<name>");
+    expect(rules).toContain("- workspace: make a new workspace.");
+  });
+
+  it("plans faster: low effort, and no MCP servers for Claude Code", () => {
+    expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false })).toEqual(expect.arrayContaining(["--effort", "low", "--strict-mcp-config"]));
+    const grokArgs = brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false }) ?? [];
+    expect(grokArgs.slice(grokArgs.indexOf("--reasoning-effort"), grokArgs.indexOf("--reasoning-effort") + 2)).toEqual(["--reasoning-effort", "low"]);
+  });
+
+  it("knows when the session a planner was asked to resume is gone", () => {
+    expect(sessionGone("No conversation found with session ID: 1234")).toBe(true);
+    expect(sessionGone("Error: session abc not found")).toBe(true);
+    expect(sessionGone("thread not found")).toBe(true);
+    expect(sessionGone("unexpected status 401 Unauthorized")).toBe(false);
+    expect(sessionGone("Session ID 1234 is already in use.")).toBe(false);
+  });
+});
+
+describe("Maestro in the service, 2.16", () => {
+  it("makes a workspace's folder (a git repository when asked), adds it, and starts the CLI there", async () => {
+    const projects = tempDir();
+    const ctx = withPlanner([
+      {
+        say: "Making Star Ledger and starting Claude there.",
+        steps: [
+          { kind: "workspace", workspace: "Star Ledger", git: true },
+          { kind: "start", engine: "claude", workspace: "Star Ledger", prompt: "Set it up.", effort: "high", model: "opus" },
+        ],
+      },
+    ]);
+    const file = path.join(ctx.configRoot, "engines.json");
+    const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+    engines.engines.push({ id: "claude", label: "Claude Code", bin: "argy", args: [], promptArgs: ["{prompt}"] });
+    fs.writeFileSync(file, JSON.stringify(engines));
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "", projectsFolder: projects } });
+    expect(ctx.svc.orchestratorView().projectsFolder).toBe(projects);
+
+    await ctx.svc.orchestratorAsk("make a workspace called Star Ledger and start Claude in it on high effort with opus");
+    const plan = ctx.svc.orchestratorView().turns.at(-1);
+    expect(plan?.steps?.[0]).toMatchObject({ kind: "workspace", name: "Star Ledger", folder: path.join(projects, "Star Ledger") });
+    expect(fs.existsSync(path.join(projects, "Star Ledger"))).toBe(false);
+    await ctx.svc.orchestratorRun(plan?.id ?? "");
+    const done = ctx.svc.orchestratorView().turns.find((turn) => turn.id === plan?.id);
+    expect(done?.steps?.map((step) => step.state)).toEqual(["done", "done"]);
+    const folder = path.join(projects, "Star Ledger");
+    expect(fs.existsSync(path.join(folder, ".git"))).toBe(true);
+    const made = ctx.svc.listWorkspaces().workspaces.find((item) => item.path === folder);
+    expect(made?.name).toBe("Star Ledger");
+    expect(done?.steps?.[1]).toMatchObject({ workspaceId: made?.id, branch: "" });
+    expect(ctx.spawns[0].cwd).toBe(folder);
+    // The CLI starts on the model and effort asked for, before its prompt.
+    expect(ctx.spawns[0].argv.slice(0, 5)).toEqual(["/usr/bin/argy", "--model", "opus", "--effort", "high"]);
+    expect(ctx.spawns[0].argv.at(-1)).toBe("Set it up.");
+    ctx.svc.close();
+  });
+
+  it("only adds a folder that is already there: nothing in it is written, and no repository is made", async () => {
+    const projects = tempDir();
+    const existing = path.join(projects, "Old Stuff");
+    fs.mkdirSync(existing);
+    fs.writeFileSync(path.join(existing, "keep.txt"), "mine\n");
+    const ctx = withPlanner([{ say: "Adding it.", steps: [{ kind: "workspace", workspace: "Old Stuff", git: true }] }]);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: projects } });
+    await ctx.svc.orchestratorAsk("add old stuff");
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(fs.readdirSync(existing)).toEqual(["keep.txt"]);
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.name)).toContain("Old Stuff");
+    ctx.svc.close();
+  });
+
+  it("puts new workspaces where most of them are when Settings don't say", () => {
+    const parent = tempDir();
+    const ctx = withPlanner([]);
+    for (const name of ["a", "b"]) {
+      fs.mkdirSync(path.join(parent, name));
+      ctx.svc.addWorkspace(path.join(parent, name));
+    }
+    ctx.svc.addWorkspace(ctx.place);
+    expect(ctx.svc.orchestratorView().projectsFolder).toBe(parent);
+    ctx.svc.close();
+  });
+
+  it("never stops, applies or throws away work under Just go without Go", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Stopping it.", steps: [{ kind: "stop", target: running.ptyId }] } }), stderr: "", timedOut: false });
+    await ctx.svc.orchestratorAsk("stop it");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    expect(ctx.killed).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("applies, discards and shows through a plan once Go is pressed", async () => {
+    const { repo, git } = repoWithFile();
+    const plan = (branch: string) => ({ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch, prompt: "Change a." }] });
+    const ctx = withPlanner([plan("one"), plan("two")]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const shown: unknown[] = [];
+    ctx.host.show = (route) => shown.push(route);
+    const one = await startInCopy(ctx, "one");
+    fs.writeFileSync(path.join(one.copy.path, "a.txt"), "one\nTWO\n");
+    git(one.copy.path, "commit", "-qam", "two");
+    const two = await startInCopy(ctx, "two");
+    const answers = [
+      { say: "Showing it.", steps: [{ kind: "show", target: two.step.ptyId }] },
+      { say: "Applying one, dropping two.", steps: [{ kind: "apply", target: "one" }, { kind: "discard", target: "two" }] },
+    ];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: answers.shift() }), stderr: "", timedOut: false });
+    const ask = async (text: string) => {
+      await ctx.svc.orchestratorAsk(text);
+      const turn = ctx.svc.orchestratorView().turns.at(-1);
+      await ctx.svc.orchestratorRun(turn?.id ?? "");
+      return ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id);
+    };
+    await ask("show me two");
+    expect(shown).toEqual([{ view: "code", workspaceId: two.step.openedWorkspaceId, ptyId: two.step.ptyId }]);
+    const done = await ask("apply one and throw away two");
+    expect(done?.steps?.map((step) => step.state)).toEqual(["done", "done"]);
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
+    expect(ctx.svc.orchestratorView().copies).toEqual([]);
+    // Discard can be undone, from the step's own Undo.
+    expect(done?.steps?.[1].undo).toBeTruthy();
+    expect(workspace.id).toBeTruthy();
+    ctx.svc.close();
+  });
+
+  it("says when uncommitted edits won't be in a new copy", async () => {
+    const { repo } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "x", prompt: "Go." }] }]);
+    ctx.svc.addWorkspace(repo);
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n");
+    fs.writeFileSync(path.join(repo, "new.txt"), "new\n");
+    await ctx.svc.orchestratorAsk("go");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.steps?.[0].dirty).toBe(2);
+    ctx.svc.close();
+  });
+
+  it("never names a session twice after a first turn that didn't go through, and starts again when one is gone", async () => {
+    const ctx = withPlanner([]);
+    const calls: string[][] = [];
+    const answers = [
+      { code: 1, stdout: "", stderr: "boom", timedOut: false },
+      { code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Hello.", steps: [] } }), stderr: "", timedOut: false },
+      { code: 1, stdout: "", stderr: "Error: No conversation found with session ID: abc", timedOut: false },
+      { code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Back again.", steps: [] } }), stderr: "", timedOut: false },
+    ];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      calls.push(argv);
+      return answers.shift() ?? { code: 1, stdout: "", stderr: "", timedOut: false };
+    };
+    await ctx.svc.orchestratorAsk("hi");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ problem: "failed" });
+    await ctx.svc.orchestratorAsk("hi again");
+    // The failed turn's session is never named again.
+    expect(calls[1].at(-2)).toBe("-s");
+    expect(calls[1].at(-1)).not.toBe(calls[0].at(-1));
+    // Resumed, but gone: a new session, told what was said.
+    await ctx.svc.orchestratorAsk("and now?");
+    expect(calls[2].slice(-2)).toEqual(["-r", calls[1].at(-1)]);
+    expect(calls[3].at(-2)).toBe("-s");
+    expect(calls[3].at(-1)).not.toBe(calls[1].at(-1));
+    const text = calls[3][calls[3].indexOf("-p") + 1];
+    expect(text).toContain("The person: hi again");
+    expect(text).toContain("You: Hello.");
+    expect(text).toContain("The person now says:\nand now?");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("Back again.");
+    ctx.svc.close();
+  });
+
+  it("hears back from a CLI it started: a turn that ends after real work, and a CLI that closes", async () => {
+    let at = Date.now();
+    const repo = gitRepo();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", inPlace: true, prompt: "Work." }] }], { now: () => new Date(at) });
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("start argy in shop");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    const ptyId = ctx.svc.orchestratorView().turns.at(-1)?.steps?.[0].ptyId ?? "";
+    const notes = () => ctx.svc.orchestratorView().turns.filter((turn) => turn.note);
+
+    // A short blip isn't a turn worth a word.
+    ctx.svc.onPtyActivity(ptyId, true);
+    at += 5000;
+    ctx.svc.onPtyActivity(ptyId, false);
+    expect(notes()).toEqual([]);
+    // Real work, then quiet.
+    ctx.svc.onPtyActivity(ptyId, true);
+    at += 30_000;
+    ctx.svc.onPtyActivity(ptyId, false);
+    await until(() => notes().length === 1);
+    expect(notes()[0].note).toMatchObject({ kind: "finished", ptyId, engine: "Argy", workspace: "shop", changes: expect.stringContaining("1 file changed") });
+    // Working again within the minute: still one word.
+    ctx.svc.onPtyActivity(ptyId, true);
+    at += 25_000;
+    ctx.svc.onPtyActivity(ptyId, false);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(notes()).toHaveLength(1);
+    // It closes by itself.
+    await ctx.exit(ptyId);
+    expect(notes().at(-1)?.note).toMatchObject({ kind: "ended", ptyId });
+    ctx.svc.close();
+  });
+
+  it("says nothing when a person stops a CLI it started", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", inPlace: true, prompt: "Work." }] }]);
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("start argy in shop");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    const ptyId = ctx.svc.orchestratorView().turns.at(-1)?.steps?.[0].ptyId ?? "";
+    await ctx.svc.killPty(ptyId);
+    await until(() => !ctx.svc.listLive().some((session) => session.ptyId === ptyId));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ctx.svc.orchestratorView().turns.filter((turn) => turn.note)).toEqual([]);
+    ctx.svc.close();
   });
 });

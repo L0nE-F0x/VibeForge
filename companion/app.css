@@ -1046,6 +1046,14 @@ html.keyboard .credit { display: none; }
 
 .orch-issue { color: var(--amber); font-size: 11.5px; }
 
+/* Worth knowing before Go, without stopping the step: edits left behind, conflicts to sort out. */
+.orch-warn { color: var(--amber); font-size: 11.5px; }
+
+.orch-folder { overflow-wrap: anywhere; }
+
+/* VibeForge's own word about a CLI it started: quieter than an answer. */
+.orch-note .orch-said { color: var(--muted); }
+
 .orch-error { color: color-mix(in srgb, var(--bad) 75%, var(--fg)); font-size: 11.5px; overflow-wrap: anywhere; }
 
 .orch-step-actions { display: flex; }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { bearerToken, tokenMatches, type DeskPayload } from "./companion.js";
 import type { PhoneOrchestrator } from "./companion-orchestrator.js";
 import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
-import type { OrchestratorStep } from "./orchestrator.js";
+import type { StepPatch } from "./orchestrator.js";
 import type { PlanSummary } from "./plans.js";
 import { BYTES_PER_SECOND, MAX_SECONDS } from "./voice.js";
 import type { en } from "../ui/i18n/en.js";
@@ -60,7 +60,7 @@ export interface CompanionActions {
   hear(pcm: Buffer): Promise<{ text: string; empty: "short" | "silent" | "nothing" | null }>;
 }
 
-export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>;
+export type { StepPatch };
 
 /** What the desktop's Orchestrator view does, for the phone. */
 export interface OrchestratorActions {
@@ -173,9 +173,10 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 function stepPatch(value: unknown): StepPatch {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const patch: StepPatch = {};
-  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["prompt", COMPANION_PROMPT_MAX]] as const) {
+  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["prompt", COMPANION_PROMPT_MAX], ["model", 120], ["effort", 20], ["name", 120], ["folder", 500]] as const) {
     if (typeof raw[key] === "string") patch[key] = (raw[key] as string).slice(0, max);
   }
+  if (typeof raw.git === "boolean") patch.git = raw.git;
   return patch;
 }
 

@@ -177,9 +177,31 @@ function paintTurns() {
   return changed;
 }
 
+/**
+ * VibeForge's own word about a CLI Maestro started: its turn ended after real work, or it closed.
+ * @param {NonNullable<PhoneTurn["note"]>} note
+ */
+function noteNode(note) {
+  const orch = /** @type {PhoneOrchestrator} */ (state.orch);
+  const running = orch.running.find((item) => item.ptyId === note.ptyId);
+  const said = el(
+    "span",
+    { class: "orch-said" },
+    t(note.kind === "finished" ? "orch.note.finished" : "orch.note.ended", { engine: note.engine, workspace: note.workspace }),
+    note.changes ? el("span", { class: "faint" }, ` · ${note.changes}`) : null,
+  );
+  const open = running
+    ? el("button", { class: "ghost small-btn", type: "button", "data-act": "open", disabled: state.busy, onclick: () => openSession({ ptyId: running.ptyId, runId: running.runId || "" }) }, t("phone.orchOpen"))
+    : note.runId
+      ? el("button", { class: "ghost small-btn", type: "button", "data-act": "open", disabled: state.busy, onclick: () => openSession({ ptyId: "", runId: /** @type {string} */ (note.runId) }) }, t("phone.orchOpen"))
+      : null;
+  return el("div", { class: "orch-turn from-vibeforge orch-note" }, whoMark(), el("div", { class: "orch-body" }, said, open ? el("div", { class: "orch-step-actions" }, open) : null));
+}
+
 /** @param {PhoneTurn} turn */
 function turnNode(turn) {
   if (turn.from === "you") return el("div", { class: "orch-turn from-you" }, el("span", { class: "orch-said" }, turn.text));
+  if (turn.note) return noteNode(turn.note);
   const orch = /** @type {PhoneOrchestrator} */ (state.orch);
   const label = engineLabel(turn.by || orch.engineId);
   const said = turn.problem
