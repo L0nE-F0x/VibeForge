@@ -70,6 +70,27 @@ describe("reply watchers", () => {
     expect((reads.get(log) ?? []).reduce((sum, read) => sum + read.length, 0)).toBe(fs.statSync(log).size);
   });
 
+  it("still finds the answer when a turn writes more than the window after its prompt", async () => {
+    const home = tempHome();
+    const cwd = "/work/long";
+    const log = path.join(claudeProjectDir(home, cwd), "s1.jsonl");
+    const since = Date.now() - 1000;
+    write(log, jsonl([claudePrompt(since + 10, "Refactor the parser", cwd)]));
+    const controller = new AbortController();
+    const reply = watchReply({ kind: "claude", home, cwd, since, words: "refactor the parser", signal: controller.signal });
+    await wait(300);
+    // Tool results, 6 MB of them, between the prompt and the answer.
+    const result = (n: number) => ({ type: "user", timestamp: iso(since + 20 + n), message: { role: "user", content: [{ type: "tool_result", content: "y".repeat(200_000) }] } });
+    for (let chunk = 0; chunk < 3; chunk += 1) {
+      fs.appendFileSync(log, jsonl(Array.from({ length: 10 }, (_, n) => result(chunk * 10 + n))));
+      await wait(800);
+    }
+    fs.appendFileSync(log, jsonl([claudeAnswer(since + 100, "Done: the parser is split in two.")]));
+    const timer = setTimeout(() => controller.abort(), 5000);
+    expect(await reply).toBe("Done: the parser is split in two.");
+    clearTimeout(timer);
+  }, 15_000);
+
   it("reads Grok Build's history and events once, then only what they gain", async () => {
     const home = tempHome();
     const cwd = "/work/grok";

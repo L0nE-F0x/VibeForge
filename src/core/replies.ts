@@ -17,6 +17,19 @@ export interface Turn {
 
 const NO_TURN: Turn = { prompted: false, matched: false, reply: null };
 
+/** One parsed line of a CLI's session log. */
+export type LogRow = Record<string, unknown>;
+
+/** A log as text, or as rows a caller already parsed (a watcher keeps them as the log grows). */
+type LogInput = string | readonly LogRow[];
+
+const rowsOf = (log: LogInput): readonly LogRow[] => (typeof log === "string" ? parseLines(log) : log);
+
+/** A log's lines as rows; a line that isn't a JSON object (one still being written) is left out. */
+export function logRows(text: string): LogRow[] {
+  return parseLines(text);
+}
+
 function parseLines(text: string): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
   for (const line of text.split("\n")) {
@@ -85,8 +98,8 @@ function textBlocks(row: Record<string, unknown>): string[] {
  * It has ended when an assistant row stops with "end_turn"; the reply is that message's text
  * (its blocks are written one row each), else the last text of the turn.
  */
-export function claudeTurn(log: string, since: number, words = ""): Turn {
-  const rows = parseLines(log);
+export function claudeTurn(log: LogInput, since: number, words = ""): Turn {
+  const rows = rowsOf(log);
   let start = -1;
   let matched = false;
   for (let i = 0; i < rows.length; i++) {
@@ -142,8 +155,8 @@ export function codexLogCwd(head: string): string | null {
  * The same for a Codex rollout log: the prompt is an event_msg "user_message", the turn ends with
  * "task_complete", and its last_agent_message (else the last "agent_message") is the reply.
  */
-export function codexTurn(log: string, since: number, words = ""): Turn {
-  const rows = parseLines(log);
+export function codexTurn(log: LogInput, since: number, words = ""): Turn {
+  const rows = rowsOf(log);
   let start = -1;
   let matched = false;
   const payload = (row: Record<string, unknown>) => (row.type === "event_msg" ? (row.payload as Record<string, unknown> | undefined) : undefined);
@@ -193,12 +206,12 @@ function plainText(content: unknown): string {
  * it; the reply is the last assistant text after the prompt (the one mentioning `words`, else the
  * last typed one). Rows Grok adds itself carry a `synthetic_reason` and are not prompts.
  */
-export function grokTurn(history: string, events: string, since: number, words = ""): Turn {
-  const turns = parseLines(events);
+export function grokTurn(history: LogInput, events: LogInput, since: number, words = ""): Turn {
+  const turns = rowsOf(events);
   const started = turns.findIndex((row) => row.type === "turn_started" && Date.parse(String(row.ts ?? "")) >= since);
   if (started < 0) return NO_TURN;
   const ended = turns.slice(started + 1).some((row) => row.type === "turn_ended");
-  const rows = parseLines(history);
+  const rows = rowsOf(history);
   const prompts = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.type === "user" && !row.synthetic_reason && plainText(row.content).trim());
   const hit = words ? [...prompts].reverse().find(({ row }) => mentions(plainText(row.content), words)) : undefined;
   const prompt = hit ?? prompts[prompts.length - 1];
@@ -225,8 +238,8 @@ export function kimiStateCwd(state: string): string | null {
  * A Kimi Code `wire.jsonl`: a "turn.prompt" (time in milliseconds) opens a turn, and its
  * "turn.ended" closes it; the reply is the last assistant text appended in between.
  */
-export function kimiTurn(log: string, since: number, words = ""): Turn {
-  const rows = parseLines(log);
+export function kimiTurn(log: LogInput, since: number, words = ""): Turn {
+  const rows = rowsOf(log);
   let start = -1;
   let matched = false;
   for (let i = 0; i < rows.length; i++) {
@@ -273,8 +286,8 @@ export function replyLogFor(engineId: string, bin: string): ReplyLog | null {
 // ------------------------------------------------------------------ the latest answer
 
 /** When each prompt in a log was sent (for Grok Build, when each turn started), oldest first. */
-function promptTimes(kind: ReplyLog, log: string): number[] {
-  const rows = parseLines(log);
+function promptTimes(kind: ReplyLog, log: LogInput): number[] {
+  const rows = rowsOf(log);
   const times =
     kind === "claude"
       ? rows.filter((row) => claudePromptText(row) !== null).map(time)
@@ -287,7 +300,7 @@ function promptTimes(kind: ReplyLog, log: string): number[] {
 }
 
 /** The answer of the last turn that has finished in one CLI's log (`events` is Grok Build's second file). */
-export function lastReplyIn(kind: ReplyLog, log: string, events = ""): string | null {
+export function lastReplyIn(kind: ReplyLog, log: LogInput, events: LogInput = ""): string | null {
   const starts = promptTimes(kind, kind === "grok" ? events : log);
   // The newest turn may still be going; then the one before it is the latest answer.
   for (const since of starts.slice(-2).reverse()) {
@@ -295,6 +308,18 @@ export function lastReplyIn(kind: ReplyLog, log: string, events = ""): string | 
     if (turn.reply?.trim()) return turn.reply.trim();
   }
   return null;
+}
+
+/**
+ * A row a turn begins with: a prompt (Claude Code, Codex, Kimi Code), Grok Build's turn start or a
+ * message the person wrote in its history. A watcher keeps these when it lets older rows of a long
+ * turn go, so the turn can still be found however much the CLI wrote after its prompt.
+ */
+export function startsTurn(kind: ReplyLog, row: LogRow): boolean {
+  if (kind === "claude") return claudePromptText(row) !== null;
+  if (kind === "codex") return row.type === "event_msg" && (row.payload as { type?: unknown } | undefined)?.type === "user_message";
+  if (kind === "kimi") return row.type === "turn.prompt";
+  return row.type === "turn_started" || (row.type === "user" && !row.synthetic_reason);
 }
 
 // ------------------------------------------------------------------ what gets said
