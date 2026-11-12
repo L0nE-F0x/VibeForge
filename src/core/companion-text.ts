@@ -57,7 +57,7 @@ export function fill(text: string, vars?: Record<string, string>): string {
 const PHONE_PREFIXES = ["phone.", "plans.", "orch."] as const;
 
 /** The window's words the page shares, one by one: the Orchestrator's name in the rail, and what dictation says on the desktop too. */
-const PHONE_KEYS: readonly Key[] = ["rail.orchestrator", "common.cancel", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+const PHONE_KEYS: readonly Key[] = ["rail.orchestrator", "common.cancel", "common.close", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
 
 /** Every word the page shows, in one language, English where a catalog has none. */
 export async function phoneWords(language: PhoneLanguage): Promise<Record<string, string>> {

@@ -122,6 +122,8 @@ export interface DeskPayload {
   /** The coding CLIs installed here, for starting one without an agent. */
   engines: Array<{ id: string; label: string }>;
   workspaces: DeskWorkspace[];
+  /** The app's version, which the server adds: a page from another version loads itself again. */
+  version?: string;
 }
 
 export interface DeskRun {

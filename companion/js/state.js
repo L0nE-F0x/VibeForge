@@ -35,7 +35,8 @@ const token = localStorage.getItem(TOKEN_KEY) || "";
  * @property {DeskPayload | null} desk
  * @property {SessionPayload | null} session
  * @property {SessionQuery} sessionQuery
- * @property {string} error
+ * @property {string} error What the last poll ran into: the computer offline, or a session that has gone. The next poll replaces it.
+ * @property {string} actionError What an action someone tapped ran into. It stays until the next action, or until it is tapped away.
  * @property {boolean} busy
  * @property {number} ticket
  * @property {PlanSummary | null} plans
@@ -52,6 +53,7 @@ export const state = {
   session: null,
   sessionQuery: { ptyId: "", runId: "" },
   error: "",
+  actionError: "",
   busy: false,
   ticket: 0,
   plans: null,
@@ -64,6 +66,8 @@ export const state = {
  * Each page fills in its own: the rest belong to other pages and are not there.
  * @typedef {object} Parts
  * @property {HTMLDivElement} banner
+ * @property {HTMLSpanElement} bannerText
+ * @property {HTMLButtonElement} bannerClose
  * @property {HTMLButtonElement} pair
  * @property {HTMLParagraphElement} buzzNote
  * @property {HTMLButtonElement} buzz

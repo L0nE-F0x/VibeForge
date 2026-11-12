@@ -180,6 +180,36 @@ describe("the phone page's Orchestrator routes", () => {
     }
   });
 
+  it("answers Go once the plan is running, not once every CLI in it has started, and still says when the plan is gone", async () => {
+    let finish: () => void = () => undefined;
+    const running = new Set<string>();
+    const orchestrator = desk({
+      // As the desk's own run: the plan is marked running (or refused) before the first wait.
+      run: async (turnId) => {
+        if (turnId === "gone") throw new Error("That plan is gone.");
+        running.add(turnId);
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        throw new Error("a step's failure is the card's to show");
+      },
+    });
+    const { http, post } = await server(orchestrator);
+    try {
+      const go = await post("/api/orchestrator/go", { turnId: "t1" });
+      expect(go.status).toBe(200);
+      expect(running.has("t1")).toBe(true);
+      const gone = await post("/api/orchestrator/go", { turnId: "gone" });
+      expect(gone.status).toBe(400);
+      expect((await gone.json()).error).toBe("That plan is gone.");
+      // The rest of the plan going wrong later is no unhandled rejection.
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      await http.close();
+    }
+  });
+
   it("says why the desk refused, in the phone's language", async () => {
     const orchestrator = desk({
       ask: () => {

@@ -672,11 +672,30 @@ html.keyboard textarea { min-height: 44px; max-height: 7em; }
 
 .banner {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   background: color-mix(in srgb, var(--bad) 10%, var(--bg));
   color: color-mix(in srgb, var(--bad) 70%, var(--fg));
   border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent);
   padding: 10px 12px 10px 14px;
   margin-bottom: 12px;
+}
+
+.banner-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* An action's error stays until it is tapped away: a 44 px square at the end, the glyph small inside it. */
+.banner-close {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: -10px -12px -10px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .banner::before {
@@ -840,6 +859,34 @@ html.keyboard .credit { display: none; }
 .top-action { flex: none; min-height: 36px; padding: 6px 12px; font-size: 12px; }
 
 .small-btn { min-height: 34px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+
+/*
+ * The small controls keep the size they are drawn at, but a finger gets at least 44 px to aim at:
+ * an invisible area centred on each reaches past its edges (Stop and Interrupt in Running, the mic's
+ * Cancel, Show and Hide, a step's ×, New).
+ */
+.small-btn, .plans-toggle, .runs-toggle, .orch-step-x, .top-action { position: relative; }
+
+.small-btn::after, .plans-toggle::after, .runs-toggle::after, .orch-step-x::after, .top-action::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* The pairing code, hidden as typed, with Show beside it. */
+.code-field { display: flex; gap: 8px; }
+
+.code-field input { flex: 1; min-width: 0; }
+
+.code-field .reveal { flex: none; min-height: 44px; padding: 0 12px; font-size: 12px; }
+
+.home-forget { display: flex; flex-direction: column; gap: 10px; }
+
+.home-forget p { margin: 0; }
 
 .glyph { display: block; flex: none; fill: currentColor; }
 

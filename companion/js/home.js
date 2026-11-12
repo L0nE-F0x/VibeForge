@@ -2,7 +2,7 @@
 // Before the desk: pairing with the code from the computer, and the landing page a paired phone
 // opens on, with how it works and the phone's own settings.
 
-import { checkCode } from "./api.js";
+import { checkCode, forget } from "./api.js";
 import { wordmark } from "./art.js";
 import { forgetSeen } from "./buzz.js";
 import { el, sheet } from "./dom.js";
@@ -11,8 +11,11 @@ import { BUZZ_KEY, buzzShownOn, PLANS_KEY, parts, plansOpen, state, TEXT_KEY, TO
 import { t } from "./words.js";
 
 export function pairPage() {
+  // Kept out of sight and out of the browser's autofill: the code is a key to this computer.
   const input = el("input", {
     id: "code",
+    type: "password",
+    autocomplete: "off",
     autocapitalize: "off",
     autocorrect: "off",
     spellcheck: "false",
@@ -21,14 +24,34 @@ export function pairPage() {
       if (event.key === "Enter") void pair(input.value);
     },
   });
+  const reveal = el("button", {
+    class: "ghost reveal",
+    type: "button",
+    "aria-pressed": "false",
+    onclick: () => {
+      const shown = input.type === "password";
+      input.type = shown ? "text" : "password";
+      paintReveal(reveal, shown);
+    },
+  });
+  paintReveal(reveal, false);
   parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, t("phone.continue"));
   return el(
     "section",
     {},
     el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
     el("p", { class: "muted lede" }, t("phone.pairLead")),
-    el("div", { class: "card stack" }, el("label", {}, t("phone.code"), input), parts.pair),
+    el("div", { class: "card stack" }, el("label", {}, t("phone.code"), el("span", { class: "code-field" }, input, reveal)), parts.pair),
   );
+}
+
+/**
+ * @param {HTMLButtonElement} button
+ * @param {boolean} shown
+ */
+function paintReveal(button, shown) {
+  button.textContent = shown ? t("phone.codeHide") : t("phone.codeShow");
+  button.setAttribute("aria-pressed", String(shown));
 }
 
 /** @param {string} code */
@@ -143,6 +166,23 @@ export function homePage() {
         document.documentElement.classList.toggle("large", on);
         paintSwitch(button, on);
       }),
+    ),
+    // Only this phone: the others keep the code. A new code on the computer signs every phone out.
+    el(
+      "div",
+      { class: "card home-forget" },
+      el("p", { class: "small muted" }, t("phone.forgetHint")),
+      el(
+        "button",
+        {
+          class: "ghost danger",
+          type: "button",
+          onclick: () => {
+            if (window.confirm(t("phone.forgetConfirm"))) forget();
+          },
+        },
+        t("phone.forget"),
+      ),
     ),
   );
   return el(

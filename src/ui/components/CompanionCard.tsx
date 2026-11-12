@@ -62,6 +62,7 @@ export function CompanionCard() {
         </div>
       </Field>
       {current.enabled && status?.error ? <Notice tone="bad">{t("companion.down", { error: status.error })}</Notice> : null}
+      {current.enabled && status?.unsigned ? <Notice tone="warn">{t("companion.unsigned")}</Notice> : null}
       {current.enabled && current.token ? (
         <Field label={t("companion.code")} hint={t("companion.codeHint")}>
           <div className="hstack">
