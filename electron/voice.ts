@@ -218,6 +218,11 @@ export class Voice {
     return pickVoice(voices, this.opts.settings().speaker, this.opts.language());
   }
 
+  /** Where `vibeforge` reaches this app: fixed at start, so reading it scans nothing. */
+  get controlSocket(): string {
+    return this.opts.controlSocket;
+  }
+
   status(): VoiceStatus {
     const settings = this.opts.settings();
     const whisper = this.whisper();

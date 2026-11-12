@@ -174,7 +174,7 @@ if (!app.requestSingleInstanceLock()) {
       ctx.service?.emit(...topics);
       if (topics.includes("settings")) refreshPalette();
     });
-    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), (request, gone) => answerTalk(ctx, request, gone));
+    const stopControl = listenControl(voice.controlSocket, log, (action) => send("voice-command", { action }), (request, gone) => answerTalk(ctx, request, gone));
     ctx.win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
     tray.refreshHost();
