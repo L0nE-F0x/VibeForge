@@ -8,10 +8,12 @@ on:
 permissions:
   contents: read
 
-# A pull request's newer push cancels its older run. A commit on main always runs to the end:
-# release.yml publishes a tag only once these checks passed on its commit.
+# A pull request's newer push cancels its older run. Each commit on main gets a group of its own
+# and always runs to the end: release.yml publishes a tag only once these checks passed on its
+# commit. (One group for all of main would still drop a queued run when a third merge lands, and a
+# tag on that commit would wait for checks that never come.)
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Actions are pinned to a commit; Dependabot (.github/dependabot.yml) moves the pins.
