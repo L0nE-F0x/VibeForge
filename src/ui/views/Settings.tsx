@@ -179,7 +179,16 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
   const [saveEngines] = useAction(async (next: EngineRow[]) => {
     await call("engines.save", next);
     setEditing(null);
+    return true;
   }, t("settings.enginesFailed"));
+  // Undo puts the row back where it was, with its arguments: as every other delete can be undone.
+  const removeEngine = (id: string) => {
+    const before = rows.map(toRow);
+    const gone = rows.find((item) => item.id === id);
+    void saveEngines(before.filter((item) => item.id !== id)).then((saved) =>
+      saved && push("info", t("common.deletedNamed", { name: gone?.label ?? id }), undefined, { label: t("common.undo"), run: () => void saveEngines(before) }),
+    );
+  };
 
   // A link to a section (Ctrl+K, the rail's menu, voice) lands on it once, then the page is yours.
   const ready = Boolean(current);
@@ -407,7 +416,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
                   </Chip>
                   {engine.continueArgs?.length ? <Chip title={joinArgs(engine.continueArgs)}>{t("settings.continueChip")}</Chip> : null}
                   <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setEditing(engine.id)} title={t("common.edit")} />
-                  <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void saveEngines(rows.filter((item) => item.id !== engine.id).map(toRow))} title={t("common.remove")} />
+                  <Button size="sm" variant="ghost" icon={Trash2} onClick={() => removeEngine(engine.id)} title={t("common.remove")} />
                 </div>
               ),
             )}

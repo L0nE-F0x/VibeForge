@@ -1106,6 +1106,8 @@ export const fr: Catalog = {
   "companion.copy": "Copier",
   "companion.copied": "Copié",
   "companion.newCode": "Nouveau code",
+  "companion.newCodeTitle": "Créer un nouveau code d'appairage ?",
+  "companion.newCodeBody": "Chaque téléphone appairé avec le code actuel est déconnecté immédiatement et devra être appairé à nouveau avec le nouveau.",
   "companion.reach": "Sur le téléphone",
   "companion.tailscale": "Lancez ceci une fois sur cet ordinateur, puis ouvrez l'adresse https affichée sur un téléphone connecté au même tailnet. La page propose de s'installer. Serve la garde dans votre tailnet ; funnel la mettrait sur internet, donc ne l'utilisez pas.",
   "companion.saveFailed": "Impossible d'enregistrer la page du téléphone",

@@ -1118,6 +1118,8 @@ export const en = {
   "companion.copy": "Copy",
   "companion.copied": "Copied",
   "companion.newCode": "New code",
+  "companion.newCodeTitle": "Make a new pairing code?",
+  "companion.newCodeBody": "Every phone paired with the current code is signed out at once and has to be paired again with the new one.",
   "companion.reach": "On your phone",
   "companion.tailscale": "Run this once on this computer, then open the https address it prints on a phone signed in to the same tailnet. The page offers to install itself. Serve keeps it inside your tailnet; funnel would put it on the internet, so don't use that.",
   "companion.saveFailed": "Could not save the phone page",

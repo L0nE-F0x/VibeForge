@@ -1105,6 +1105,8 @@ export const es: Catalog = {
   "companion.copy": "Copiar",
   "companion.copied": "Copiado",
   "companion.newCode": "Código nuevo",
+  "companion.newCodeTitle": "¿Crear un código de emparejamiento nuevo?",
+  "companion.newCodeBody": "Todos los teléfonos emparejados con el código actual se desconectan al momento y tendrán que emparejarse de nuevo con el nuevo.",
   "companion.reach": "En el teléfono",
   "companion.tailscale": "Ejecuta esto una vez en este equipo y abre la dirección https que imprime en un teléfono con sesión en la misma tailnet. La página ofrece instalarse. Serve la mantiene dentro de tu tailnet; funnel la pondría en internet, así que no lo uses.",
   "companion.saveFailed": "No se pudo guardar la página del teléfono",

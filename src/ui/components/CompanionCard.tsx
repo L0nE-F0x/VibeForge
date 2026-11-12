@@ -5,13 +5,14 @@ import type { CompanionStatus, Settings } from "../../shared/api.js";
 type CompanionSettings = Settings["companion"];
 import { call, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
-import { useAction, useToast } from "../state.js";
+import { useAction, useConfirm, useToast } from "../state.js";
 import { Button, Field, Notice, Toggle } from "./ui.js";
 
 /** Settings → Phone: the page this computer serves, its pairing code, and the one Tailscale command. */
 export function CompanionCard() {
   const t = useT();
   const { push } = useToast();
+  const confirm = useConfirm();
   const settings = useSettings().data;
   const [status, setStatus] = useState<CompanionStatus | null>(null);
   const [shown, setShown] = useState(false);
@@ -70,7 +71,14 @@ export function CompanionCard() {
             <Button size="sm" icon={Copy} onClick={() => copy(current.token)}>
               {t("companion.copy")}
             </Button>
-            <Button size="sm" icon={RefreshCw} onClick={() => patch({ token: "" })}>
+            <Button
+              size="sm"
+              icon={RefreshCw}
+              onClick={() =>
+                // A new code signs every paired phone out at once, and that can't be undone.
+                void confirm({ title: t("companion.newCodeTitle"), body: t("companion.newCodeBody"), confirm: t("companion.newCode"), danger: true }).then((ok) => ok && patch({ token: "" }))
+              }
+            >
               {t("companion.newCode")}
             </Button>
           </div>

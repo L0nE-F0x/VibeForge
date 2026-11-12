@@ -1105,6 +1105,8 @@ export const de: Catalog = {
   "companion.copy": "Kopieren",
   "companion.copied": "Kopiert",
   "companion.newCode": "Neuer Code",
+  "companion.newCodeTitle": "Einen neuen Kopplungscode erstellen?",
+  "companion.newCodeBody": "Jedes Telefon mit dem aktuellen Code wird sofort abgemeldet und muss mit dem neuen Code neu gekoppelt werden.",
   "companion.reach": "Auf dem Telefon",
   "companion.tailscale": "Führe das einmal auf diesem Rechner aus und öffne die ausgegebene HTTPS-Adresse auf einem Telefon im selben Tailnet. Die Seite bietet an, sich zu installieren. Serve hält sie in deinem Tailnet; funnel würde sie ins Internet stellen, also nimm das nicht.",
   "companion.saveFailed": "Die Telefonseite ließ sich nicht speichern",

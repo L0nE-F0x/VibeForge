@@ -1106,6 +1106,8 @@ export const zh: Catalog = {
   "companion.copy": "复制",
   "companion.copied": "已复制",
   "companion.newCode": "新配对码",
+  "companion.newCodeTitle": "生成新的配对码？",
+  "companion.newCodeBody": "所有用当前配对码配对的手机会立即退出，需要用新配对码重新配对。",
   "companion.reach": "在手机上",
   "companion.tailscale": "在这台电脑上运行一次这条命令，然后在登录同一 tailnet 的手机上打开它打印的 https 地址。页面会提示安装。serve 让页面留在你的 tailnet 内；funnel 会把它放到互联网上，所以别用。",
   "companion.saveFailed": "无法保存手机页面",

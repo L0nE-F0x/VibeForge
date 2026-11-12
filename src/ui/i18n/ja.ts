@@ -1106,6 +1106,8 @@ export const ja: Catalog = {
   "companion.copy": "コピー",
   "companion.copied": "コピーしました",
   "companion.newCode": "新しいコード",
+  "companion.newCodeTitle": "新しいペアリングコードを作成しますか？",
+  "companion.newCodeBody": "現在のコードでペアリングしたすべてのスマホはすぐにサインアウトされ、新しいコードで再びペアリングする必要があります。",
   "companion.reach": "電話では",
   "companion.tailscale": "このコンピュータで一度これを実行し、表示された https のアドレスを同じ tailnet にサインインした電話で開きます。ページがインストールを勧めます。serve なら tailnet の中にとどまります。funnel はインターネットに公開するので使わないでください。",
   "companion.saveFailed": "電話のページを保存できませんでした",

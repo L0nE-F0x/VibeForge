@@ -1105,6 +1105,8 @@ export const pt: Catalog = {
   "companion.copy": "Copiar",
   "companion.copied": "Copiado",
   "companion.newCode": "Novo código",
+  "companion.newCodeTitle": "Criar um novo código de emparelhamento?",
+  "companion.newCodeBody": "Todos os telemóveis emparelhados com o código atual saem de imediato e terão de ser emparelhados de novo com o novo código.",
   "companion.reach": "No telefone",
   "companion.tailscale": "Rode isto uma vez neste computador e abra o endereço https que ele mostrar num telefone conectado à mesma tailnet. A página se oferece para ser instalada. O serve a mantém dentro da sua tailnet; o funnel a colocaria na internet, então não use.",
   "companion.saveFailed": "Não foi possível salvar a página do telefone",
