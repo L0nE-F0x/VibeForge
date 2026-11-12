@@ -6,9 +6,9 @@ import { childEnv, loadShellPath, mergePath, parseShellPath } from "../../electr
 
 const M = "__VIBEFORGE_PATH__";
 
-function fakeShell(body: string): string {
+function fakeShell(body: string, interpreter = "/bin/sh"): string {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-shell-")), "fakesh");
-  fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  fs.writeFileSync(file, `#!${interpreter}\n${body}\n`, { mode: 0o755 });
   return file;
 }
 
@@ -29,6 +29,20 @@ describe("login-shell PATH", () => {
     const shell = fakeShell(`eval "$2"`);
     expect(await loadShellPath(4000, shell)).toBe(parseShellPath(`${M}${process.env.PATH}${M}`));
     expect(await loadShellPath(200, fakeShell("sleep 5"))).toBeNull();
+  });
+
+  it("holds its cap against a shell that ignores SIGTERM or waits on stdin", async () => {
+    // An interactive bash ignores SIGTERM; a profile can `read` from a terminal that isn't there.
+    const stubborn = fakeShell(`trap '' TERM\nsleep 9`, "/bin/bash");
+    let started = Date.now();
+    expect(await loadShellPath(300, stubborn)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(2500);
+    const reader = fakeShell(`read -r line\neval "$2"`, "/bin/bash");
+    started = Date.now();
+    // stdin is closed, so the read ends at once and the PATH still comes back.
+    expect(await loadShellPath(4000, reader)).toBe(parseShellPath(`${M}${process.env.PATH}${M}`));
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(await loadShellPath(300, "/no/such/shell")).toBeNull();
   });
 });
 
