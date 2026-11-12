@@ -365,7 +365,7 @@ export const ja: Catalog = {
   "settings.usage": "レールにトークン使用量を表示",
   "settings.usageHint": "Claude Code、Codex、Grok Build、Gemini CLI、Muse がこのマシンに残す自身のログを集計します。どこにも送信しません。",
   "settings.planLimits": "プランの上限を表示",
-  "settings.planLimitsHint": "このマシンでログインしているコーディングプランだけを表示します。各 CLI が保存したログインで、Anthropic、xAI、Moonshot、OpenAI、Meta に最大 3 分ごとに問い合わせ、そのログインを更新・保存することはありません。Codex と Muse は、これがオフでも自身のログから表示されます。",
+  "settings.planLimitsHint": "このマシンでログインしているコーディングプランだけを表示します。各 CLI が保存したログインで、Anthropic、xAI、Google、Moonshot、OpenAI、Meta に最大 3 分ごとに問い合わせ、そのログインを更新・保存することはありません。Codex と Muse は、これがオフでも自身のログから表示されます。",
   "settings.activity": "ホームのコントリビューショングラフ",
   "settings.activity.off": "オフ",
   "settings.activity.git": "自分のコミット",

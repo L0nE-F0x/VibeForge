@@ -364,7 +364,7 @@ export const es: Catalog = {
   "settings.usage": "Mostrar el uso de tokens en la barra",
   "settings.usageHint": "Suma lo que Claude Code, Codex, Grok Build, Gemini CLI y Muse anotan en sus propios registros en este equipo. No se envía nada a ningún sitio.",
   "settings.planLimits": "Mostrar los límites del plan",
-  "settings.planLimitsHint": "Muestra cada plan de código con sesión en este equipo y omite los demás. Pregunta a Anthropic, xAI, Moonshot, OpenAI y Meta como mucho cada 3 minutos, con la sesión que esa CLI ya guardó, y nunca la renueva ni la guarda. Codex y Muse también aparecen desde sus propios registros, aunque esto esté apagado.",
+  "settings.planLimitsHint": "Muestra cada plan de código con sesión en este equipo y omite los demás. Pregunta a Anthropic, xAI, Google, Moonshot, OpenAI y Meta como mucho cada 3 minutos, con la sesión que esa CLI ya guardó, y nunca la renueva ni la guarda. Codex y Muse también aparecen desde sus propios registros, aunque esto esté apagado.",
   "settings.activity": "Gráfico de contribuciones en Inicio",
   "settings.activity.off": "No",
   "settings.activity.git": "Mis commits",

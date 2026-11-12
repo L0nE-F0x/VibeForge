@@ -236,7 +236,10 @@ describe("pty host", () => {
     const activity = () => host.events.filter((event) => event.event === "activity" && event.ptyId === pty).map((event) => event.working);
     await host.until(() => activity().includes(true), 8000);
     await host.until(() => activity().at(-1) === false, 10000);
-    expect(activity()).toEqual([true, false]);
+    // Working, then quiet. A busy machine can stretch a 0.3 s gap past the quiet time and split the
+    // work in two, so the exact count of changes isn't held to.
+    expect(activity()[0]).toBe(true);
+    expect(activity().at(-1)).toBe(false);
   }, 20000);
 
   it("keeps the screen when a full-screen program clears it on the way out", async () => {

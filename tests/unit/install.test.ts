@@ -146,6 +146,23 @@ describe("the installer", () => {
     expect(fs.existsSync(path.join(home, ".local", "bin", "vibeforge"))).toBe(false);
     expect(fs.existsSync(path.join(home, ".local", "share", "applications", "vibeforge.desktop"))).toBe(false);
     expect(fs.existsSync(app())).toBe(true);
+    // What it leaves, and says so: the browser profile, the cache, and nothing about keys it didn't add.
+    expect(result.out).toContain("~/.config/VibeForge");
+    expect(result.out).toContain("~/.cache/vibeforge");
+    expect(result.out).toContain("quit it");
+    expect(result.out).not.toContain("hold-to-talk");
+  });
+
+  it("points at the voice key lines on --uninstall when Settings → Voice added them", () => {
+    const hypr = path.join(home, ".config", "hypr");
+    fs.mkdirSync(hypr, { recursive: true });
+    fs.writeFileSync(path.join(hypr, "bindings.conf"), "# VibeForge voice: hold to talk to one agent, from anywhere\nbind = SUPER ALT, V, exec, vibeforge --voice start\n");
+    const result = install(["--uninstall"]);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("hold-to-talk key");
+    // Only pointed at: the person's own config is never edited.
+    expect(fs.readFileSync(path.join(hypr, "bindings.conf"), "utf8")).toContain("VibeForge voice");
+    fs.rmSync(hypr, { recursive: true });
   });
 
   it("runs nothing when the download is cut off part-way", () => {
@@ -167,12 +184,21 @@ describe("the installer", () => {
 
 // ------------------------------------------------------------------ ready-made builds
 
-/** A stand-in for GitHub's releases: /latest redirects to the tag in `latest`, files are served as they are. */
+/**
+ * A stand-in for GitHub's releases: /latest redirects to the tag in `latest`, files are served as they
+ * are, and a path with a "<path>.status" file beside it answers with that HTTP status instead.
+ */
 const SERVER = `
 const fs = require("fs"), http = require("http"), path = require("path");
 const root = process.argv[1];
 http.createServer((req, res) => {
   const url = new URL(req.url, "http://localhost");
+  let forced = "";
+  try { forced = fs.readFileSync(path.join(root, path.normalize(url.pathname) + ".status"), "utf8").trim(); } catch {}
+  if (forced) {
+    res.writeHead(Number(forced));
+    return res.end("forced");
+  }
   if (url.pathname === "/releases/latest") {
     let tag = "";
     try { tag = fs.readFileSync(path.join(root, "latest"), "utf8").trim(); } catch {}
@@ -199,8 +225,10 @@ const sha256 = (file: string) => crypto.createHash("sha256").update(fs.readFileS
 /**
  * Publishes a release on the stand-in server and makes it the latest. `sums` breaks it: a wrong
  * checksum, a SHA256SUMS without the archive (a release from before ready-made builds), or none.
+ * `broken` breaks the archive itself: a terminal engine this system can't load, no icon, or an
+ * archive that doesn't unpack (its checksum still matches).
  */
-function publish(version: string, sums: "good" | "bad" | "no-archive" | "none" = "good") {
+function publish(version: string, sums: "good" | "bad" | "no-archive" | "none" = "good", broken?: "pty" | "icon" | "unpack") {
   const tag = `v${version}`;
   const files = path.join(srv, "releases", "download", tag);
   const name = `vibeforge-${version}-linux-${arch}`;
@@ -214,13 +242,17 @@ function publish(version: string, sums: "good" | "bad" | "no-archive" | "none" =
   write("dist-electron/main.js", version);
   write("node_modules/electron/dist/electron", "#!/bin/sh\n", 0o755);
   write("node_modules/node-pty/build/Release/pty.node", "");
+  // The installer loads node-pty to see that its addon works here; this one stands in for it.
+  write("node_modules/node-pty/package.json", JSON.stringify({ name: "node-pty", main: "index.js" }));
+  write("node_modules/node-pty/index.js", broken === "pty" ? 'throw new Error("GLIBC_2.39 not found");\n' : "module.exports = {};\n");
   write("scripts/vibeforge", "#!/bin/sh\n", 0o755);
-  write("resources/icon.png", "");
+  if (broken !== "icon") write("resources/icon.png", "");
   write("resources/icon.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>");
   write(".vibeforge-installer", "");
   fs.mkdirSync(files, { recursive: true });
   const archive = path.join(files, `${name}.tar.zst`);
-  execFileSync("tar", ["--zstd", "-cf", archive, "-C", path.dirname(tree), name]);
+  if (broken === "unpack") fs.writeFileSync(archive, "this is not a zstd archive");
+  else execFileSync("tar", ["--zstd", "-cf", archive, "-C", path.dirname(tree), name]);
   fs.writeFileSync(path.join(files, "install.sh"), script);
   const lines = [`${sha256(path.join(files, "install.sh"))}  install.sh`];
   if (sums === "good") lines.push(`${sha256(archive)}  ${name}.tar.zst`);
@@ -351,9 +383,161 @@ describe("the installer with ready-made builds", () => {
     const cpu = path.join(dir, "riscv");
     fs.mkdirSync(cpu, { recursive: true });
     fs.writeFileSync(path.join(cpu, "uname"), '#!/bin/sh\n[ "$1" = -m ] && echo riscv64 && exit 0\nexec /usr/bin/uname "$@"\n', { mode: 0o755 });
-    result = installReleased(home2, { path: `${cpu}:${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin` });
+    // 2.6.0 is installed already: VIBEFORGE_FORCE=1 has it made again, which this CPU can only do from source.
+    result = installReleased(home2, { path: `${cpu}:${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`, env: { VIBEFORGE_FORCE: "1" } });
     expect(result.status, result.out).toBe(0);
     expect(result.out).toContain("Building from source: there is no ready-made build for riscv64");
     expect(built(app(home2))).toBe("2.6.0");
+  });
+
+  /** A fresh home with the ready-made `version` installed in it. */
+  function homeWith(name: string, version: string): string {
+    const fresh = path.join(dir, name);
+    fs.mkdirSync(fresh);
+    publish(version);
+    const result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    return fresh;
+  }
+
+  const forced = (file: string, status: number | null) => {
+    const marker = path.join(srv, `${file}.status`);
+    if (status === null) fs.rmSync(marker, { force: true });
+    else fs.writeFileSync(marker, String(status));
+  };
+
+  it("stops on a GitHub error instead of building from source, and only 404 means no ready-made build", () => {
+    const fresh = homeWith("home-http", "3.0.0");
+    publish("3.0.1");
+    forced("releases/download/v3.0.1/SHA256SUMS", 503);
+    let result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("GitHub answered 503 for v3.0.1's checksums");
+    expect(result.out).not.toContain("Building from source");
+    expect(result.out).not.toContain("the installer ran");
+    expect(built(app(fresh))).toBe("3.0.0");
+    forced("releases/download/v3.0.1/SHA256SUMS", null);
+
+    forced("releases/latest", 429);
+    result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("GitHub answered 429 when asked for the latest release");
+    expect(result.out).not.toContain("Building from source");
+    forced("releases/latest", null);
+
+    // The same release with its checksums answered 404 is one from before ready-made builds.
+    release("3.0.1");
+    forced("releases/download/v3.0.1/SHA256SUMS", 404);
+    result = installReleased(fresh);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Building from source: the v3.0.1 release has no ready-made build");
+    forced("releases/download/v3.0.1/SHA256SUMS", null);
+    expect(leftovers(fresh)).toEqual([]);
+  });
+
+  it("downloads nothing when the latest release is installed already, unless VIBEFORGE_FORCE=1", () => {
+    const fresh = homeWith("home-current", "3.1.0");
+    publish("3.1.1");
+    expect(installReleased(fresh, { path: noBuildPath() }).status).toBe(0);
+    fs.rmSync(path.join(fresh, ".local", "bin", "vibeforge"));
+    // The archive is gone from the server: a download would fail, so a pass means none was tried.
+    fs.rmSync(path.join(srv, "releases", "download", "v3.1.1", `vibeforge-3.1.1-linux-${arch}.tar.zst`));
+    let result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("VibeForge 3.1.1 is installed already");
+    expect(result.out).not.toContain("Downloading");
+    expect(built(app(fresh))).toBe("3.1.1");
+    // The way back is still the copy before this one, not a second copy of this one.
+    expect(built(`${app(fresh)}.previous`)).toBe("3.1.0");
+    // What someone may have run it again for: the command comes back.
+    expect(fs.readlinkSync(path.join(fresh, ".local", "bin", "vibeforge"))).toBe(path.join(app(fresh), "scripts", "vibeforge"));
+    publish("3.1.1");
+    result = installReleased(fresh, { path: noBuildPath(), env: { VIBEFORGE_FORCE: "1" } });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Downloading VibeForge 3.1.1");
+    expect(built(`${app(fresh)}.previous`)).toBe("3.1.1");
+  });
+
+  it("keeps the copy to go back to when an update fails before the swap", () => {
+    const fresh = homeWith("home-keep", "3.2.0");
+    publish("3.2.1");
+    expect(installReleased(fresh, { path: noBuildPath() }).status).toBe(0);
+    expect(built(`${app(fresh)}.previous`)).toBe("3.2.0");
+    publish("3.2.2", "good", "unpack");
+    const result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("Could not unpack");
+    expect(built(app(fresh))).toBe("3.2.1");
+    expect(built(`${app(fresh)}.previous`)).toBe("3.2.0");
+    expect(leftovers(fresh)).toEqual([]);
+  });
+
+  it("puts the installed copy back when moving the new one in fails", () => {
+    const fresh = homeWith("home-swap", "3.3.0");
+    publish("3.3.1");
+    // An mv that moves the installed copy aside but can't move the new copy in.
+    const stub = path.join(dir, "mv-fails");
+    fs.mkdirSync(stub, { recursive: true });
+    fs.writeFileSync(path.join(stub, "mv"), '#!/bin/sh\ncase "$1" in *.next) echo "mv: no room" >&2; exit 1 ;; esac\nexec /usr/bin/mv "$@"\n', { mode: 0o755 });
+    const result = installReleased(fresh, { path: `${stub}:${noBuildPath()}` });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("Could not move the new copy");
+    expect(built(app(fresh))).toBe("3.3.0");
+    expect(leftovers(fresh)).toEqual([]);
+  });
+
+  it("builds the terminal engine from source when the ready-made one doesn't load here", () => {
+    const fresh = homeWith("home-pty", "3.4.0");
+    release("3.4.1");
+    publish("3.4.1", "good", "pty");
+    const result = installReleased(fresh);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("GLIBC_2.39 not found");
+    expect(result.out).toContain("Building from source: the ready-made terminal engine doesn't load on this system");
+    expect(built(app(fresh))).toBe("3.4.1");
+    expect(leftovers(fresh)).toEqual([]);
+  });
+
+  it("installs without an icon it can't copy, and says when the command can't be added", () => {
+    const fresh = path.join(dir, "home-icon");
+    fs.mkdirSync(fresh);
+    publish("3.5.0", "good", "icon");
+    let result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain("Could not copy the app icon");
+    expect(built(app(fresh))).toBe("3.5.0");
+    // ~/.local/bin is a file, so the command can't go in: the new copy is in, and it says what failed.
+    publish("3.5.1");
+    fs.rmSync(path.join(fresh, ".local", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(fresh, ".local", "bin"), "");
+    result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status).not.toBe(0);
+    expect(built(app(fresh))).toBe("3.5.1");
+    expect(result.out).toContain("VibeForge 3.5.1 is in");
+    expect(result.out).toContain("Run this again.");
+  });
+
+  it("lets one installer run at a time", async () => {
+    const fresh = homeWith("home-lock", "3.6.0");
+    publish("3.6.1");
+    // The lock is held by the sleep itself, so killing it lets go.
+    const holder = spawn("bash", ["-c", 'exec 9>"$0"; flock 9; exec sleep 30', `${app(fresh)}.lock`], { stdio: "ignore" });
+    try {
+      // flock has the lock once its sleep is running.
+      for (let tries = 0; tries < 100; tries++) {
+        if (spawnSync("flock", ["-n", `${app(fresh)}.lock`, "true"]).status !== 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const result = installReleased(fresh, { path: noBuildPath() });
+      expect(result.status).not.toBe(0);
+      expect(result.out).toContain("Another VibeForge install or update is running");
+      expect(built(app(fresh))).toBe("3.6.0");
+    } finally {
+      holder.kill();
+      await new Promise((resolve) => (holder.exitCode !== null || holder.signalCode !== null ? resolve(null) : holder.once("exit", resolve)));
+    }
+    const result = installReleased(fresh, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    expect(built(app(fresh))).toBe("3.6.1");
   });
 });

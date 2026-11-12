@@ -902,18 +902,30 @@ async function setupStars() {
 
 // ------------------------------------------------------------------ go
 
-setupThemes();
-setupInstall();
-setupCircuit();
-setupReveal();
-setupDesk();
-setupFlips();
-setupUpdateArt();
-setupVoiceArt();
-setupGlow();
-setupTour();
-setupFinal();
-setupInstallWindow();
-setupWaybar();
-setupPausing();
+// The page's sections fade in as they scroll into view (setupReveal), so that runs first, and one
+// part that throws doesn't keep the rest from running: otherwise everything below the hero would stay
+// invisible. styles.css shows them anyway if this script never runs at all.
+document.documentElement.classList.add("reveal-ready");
+for (const setup of [
+  setupReveal,
+  setupThemes,
+  setupInstall,
+  setupCircuit,
+  setupDesk,
+  setupFlips,
+  setupUpdateArt,
+  setupVoiceArt,
+  setupGlow,
+  setupTour,
+  setupFinal,
+  setupInstallWindow,
+  setupWaybar,
+  setupPausing,
+]) {
+  try {
+    setup();
+  } catch (error) {
+    console.error(error);
+  }
+}
 void setupStars();

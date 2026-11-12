@@ -35,13 +35,13 @@ On Omarchy (or any Arch + Hyprland setup):
 curl -fsSL https://vibe-forge.net/install | bash
 ```
 
-Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Add `--uninstall` to remove the launcher and Start at login (your data stays).
+Then open **VibeForge** from the app launcher (<kbd>Super</kbd> + <kbd>Space</kbd>) or run `vibeforge`. Add `--uninstall` to remove the command, the launcher entry and Start at login; it lists what stays (your data, the app's folder, its browser profile) so you can delete those too.
 
-The installer downloads the newest [release](https://github.com/L0nE-F0x/VibeForge/releases)'s ready-made build (about 100 MB), checks it against the release's `SHA256SUMS`, unpacks it into `~/.local/share/vibeforge-app`, and adds `~/.local/bin/vibeforge` and a desktop entry. Nothing is compiled: it needs `curl`, `tar`, `zstd` and `sha256sum`, which every Arch install has, and Node 20 or newer for the terminals (Omarchy ships mise: `mise use -g node@lts`). An update downloads the new release's build the same way, unpacks it beside the installed copy and swaps it in only once it is whole and its checksum matches, so a dropped connection or a bad download leaves VibeForge as it was; the copy it replaced stays in `~/.local/share/vibeforge-app.previous`.
+The installer downloads the newest [release](https://github.com/L0nE-F0x/VibeForge/releases)'s ready-made build (about 100 MB), checks it against the release's `SHA256SUMS`, unpacks it into `~/.local/share/vibeforge-app`, and adds `~/.local/bin/vibeforge` and a desktop entry. Nothing is compiled: it needs `curl`, `tar`, `zstd` and `sha256sum`, which every Arch install has, and Node 20 or newer for the terminals (Omarchy ships mise: `mise use -g node@lts`). An update downloads the new release's build the same way, unpacks it beside the installed copy and swaps it in only once it is whole and its checksum matches, so a dropped connection or a bad download leaves VibeForge as it was; the copy it replaced stays in `~/.local/share/vibeforge-app.previous`. If GitHub answers with an error, it stops and says so. Run it again with the newest release already installed and it downloads nothing (`VIBEFORGE_FORCE=1` installs it again).
 
-It builds from source instead (a clone, `npm ci` and a build, which need `git`, `base-devel`, `python` and Node 20.19+ or 22.12+) when the release has no ready-made build or none for your CPU (there is one for x86-64), when you set `VIBEFORGE_FROM_SOURCE=1`, or with `VIBEFORGE_BRANCH=main` to follow the main branch. It says which way it went. `VIBEFORGE_VERSION=vX.Y.Z` installs that release instead of the newest.
+It builds from source instead (a clone, `npm ci` and a build, which need `git`, `base-devel`, `python` and Node 20.19+ or 22.12+) when the release has no ready-made build or none for your CPU (there is one for x86-64), when the ready-made terminal engine won't load on your system (an older glibc), when you set `VIBEFORGE_FROM_SOURCE=1`, or with `VIBEFORGE_BRANCH=main` to follow the main branch. It says which way it went. `VIBEFORGE_VERSION=vX.Y.Z` installs that release instead of the newest.
 
-**Updating.** VibeForge asks GitHub for the newest release number when it starts and every six hours (nothing else is sent; turn it off in Settings → Updates). When one is out, Help in the rail gets a dot: **Update** shows the release notes, runs the installer in a terminal you can watch, then restarts. Running the install command again does the same.
+**Updating.** VibeForge asks GitHub for the newest release number when it starts and every six hours (nothing else is sent; turn it off in Settings → Updates). When one is out, Help in the rail gets a dot: **Update** shows the release notes, downloads that release's `install.sh` from GitHub, checks it against the SHA-256 GitHub lists for it, runs it in a terminal you can watch, then restarts. Running the install command again does the same. Each release's files carry a signed build provenance attestation from the GitHub Actions run that built them: `gh attestation verify <file> --repo L0nE-F0x/VibeForge` checks one.
 
 <details>
 <summary>Build it yourself</summary>
@@ -204,6 +204,8 @@ then open the https address it prints on your phone, signed in to the same tailn
   trash/                        deleted agents, chats, tasks, skills, routines and discarded copies, kept 30 s for Undo
   scratch/<chat>/               Chat mode working folders
   models/  voices/              whisper models and Piper voices downloaded in Settings → Voice
+~/.config/VibeForge/            the window's browser profile: the browser pane's sign-ins and cookies, caches
+~/.cache/vibeforge/             the launcher's build log (a git checkout that builds itself)
 ```
 
 Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.

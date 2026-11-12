@@ -365,7 +365,7 @@ export const zh: Catalog = {
   "settings.usage": "在侧栏显示 token 用量",
   "settings.usageHint": "汇总 Claude Code、Codex、Grok Build、Gemini CLI 和 Muse 在本机自己日志中的记录。不会发送到任何地方。",
   "settings.planLimits": "显示套餐额度",
-  "settings.planLimitsHint": "只显示本机已登录的编程套餐。最多每 3 分钟，用该 CLI 已保存的登录向 Anthropic、xAI、Moonshot、OpenAI 和 Meta 查询一次，从不续期或保存这些登录。即使这里关闭，Codex 和 Muse 也会从它们自己的日志显示。",
+  "settings.planLimitsHint": "只显示本机已登录的编程套餐。最多每 3 分钟，用该 CLI 已保存的登录向 Anthropic、xAI、Google、Moonshot、OpenAI 和 Meta 查询一次，从不续期或保存这些登录。即使这里关闭，Codex 和 Muse 也会从它们自己的日志显示。",
   "settings.activity": "首页的贡献图",
   "settings.activity.off": "关闭",
   "settings.activity.git": "我的提交",
