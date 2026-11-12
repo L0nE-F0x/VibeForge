@@ -14,6 +14,7 @@ import { savedDockUrl } from "../src/shared/dock-url.js";
 import { syncCompanion } from "./companion.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
+import { secondStartArgs } from "./guards.js";
 import { Dock } from "./dock.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { answerTalk, registerIpc } from "./ipc.js";
@@ -47,6 +48,16 @@ process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in th
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
+// No spellchecker: nothing types prose here, and Chromium's would fetch a dictionary from Google on
+// first start, a request nobody asked for. Each session is told as it is made, before any page.
+app.on("session-created", (made) => {
+  try {
+    made.setSpellCheckerEnabled(false);
+    made.setSpellCheckerLanguages([]);
+  } catch (error) {
+    log.warn(`Could not turn the spellchecker off: ${describeError(error)}`);
+  }
+});
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
 if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
 
@@ -93,7 +104,8 @@ const stats = new Stats(ctx, notify, app.getVersion());
 const updater = new Updater({
   current: app.getVersion(),
   install,
-  command: updateCommand(install, ctx.appRoot, process.env.VIBEFORGE_UPDATE_COMMAND),
+  // Built again from each release read, so Update runs that release's own installer, checked against GitHub's digest.
+  command: (latest) => updateCommand(install, ctx.appRoot, process.env.VIBEFORGE_UPDATE_COMMAND, latest),
   url: process.env.VIBEFORGE_UPDATE_URL || RELEASES_URL,
   log,
   enabled: () => ctx.service?.getSettings().checkUpdates ?? false,
@@ -133,6 +145,12 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   // `vibeforge --voice start` from a keybinding reaches the window here when the control socket can't.
   app.on("second-instance", (_event, argv) => {
+    // Started again while this copy is on its way out (a CLI taking its seconds to end): the new
+    // start lost the lock to this one, so come back once this one has gone.
+    if (ctx.quitting) {
+      if (!voiceArg(argv)) app.relaunch({ args: secondStartArgs(process.argv, argv) });
+      return;
+    }
     const action = voiceArg(argv);
     if (action) send("voice-command", { action });
     // A second autostart at login shouldn't pull the window up.
@@ -174,7 +192,7 @@ if (!app.requestSingleInstanceLock()) {
       ctx.service?.emit(...topics);
       if (topics.includes("settings")) refreshPalette();
     });
-    const stopControl = listenControl(voice.status().controlSocket, log, (action) => send("voice-command", { action }), (request, gone) => answerTalk(ctx, request, gone));
+    const stopControl = listenControl(voice.controlSocket, log, (action) => send("voice-command", { action }), (request, gone) => answerTalk(ctx, request, gone));
     ctx.win?.on("focus", refreshPalette);
     // Checked again whenever the window comes forward, so it's current before a close.
     tray.refreshHost();

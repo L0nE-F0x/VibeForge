@@ -21,12 +21,6 @@ export function listenControl(
     log.warn(`Control socket: ${path.dirname(socketPath)} belongs to someone else, so VibeForge doesn't listen there`);
     return () => undefined;
   }
-  // A socket left by a crashed run would make listen fail; nothing else could be using this path.
-  try {
-    fs.rmSync(socketPath, { force: true });
-  } catch {
-    /* not there */
-  }
   const server = net.createServer((socket) => {
     let buffer = "";
     let answering = false;
@@ -66,15 +60,35 @@ export function listenControl(
     socket.on("error", () => undefined);
   });
   server.on("error", (error) => log.warn(`Control socket: ${describeError(error)}`));
-  server.listen(socketPath, () => {
-    // Only this user may drive the microphone or talk to the terminals. The runtime folder is private already; this is belt and braces.
-    try {
-      fs.chmodSync(socketPath, 0o600);
-    } catch {
-      /* best effort */
+  let stopped = false;
+  let listening = false;
+  // A socket file left by a crashed run would make listen fail, so it is cleared first, but only
+  // once nothing answers on it: a VibeForge started with another profile and the same data folder
+  // would otherwise lose its socket to this one.
+  void answers(socketPath).then((taken) => {
+    if (stopped) return;
+    if (taken) {
+      log.warn(`Control socket: another VibeForge is listening at ${socketPath} (the same data folder), so this one doesn't`);
+      return;
     }
+    try {
+      fs.rmSync(socketPath, { force: true });
+    } catch {
+      /* not there */
+    }
+    listening = true;
+    server.listen(socketPath, () => {
+      // Only this user may drive the microphone or talk to the terminals. The runtime folder is private already; this is belt and braces.
+      try {
+        fs.chmodSync(socketPath, 0o600);
+      } catch {
+        /* best effort */
+      }
+    });
   });
   return () => {
+    stopped = true;
+    if (!listening) return;
     server.close();
     try {
       fs.rmSync(socketPath, { force: true });
@@ -82,4 +96,23 @@ export function listenControl(
       /* already gone */
     }
   };
+}
+
+/** Whether something is listening on a socket path now; false for a file nothing answers on. */
+export function answers(socketPath: string, timeoutMs = 500): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(socketPath)) {
+      resolve(false);
+      return;
+    }
+    const socket = net.connect(socketPath);
+    const done = (alive: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(alive);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
 }

@@ -1,5 +1,5 @@
 import { isCodingSession } from "./companion.js";
-import { canOrchestrate, orchestratorVoiceWords, stepIssue, type OrchestratorStep, type OrchestratorTurn, type OrchestratorView, type PlanContext, type StepIssue } from "./orchestrator.js";
+import { canOrchestrate, orchestratorVoiceWords, stepIssue, withPlannedWorkspaces, type OrchestratorStep, type OrchestratorTurn, type OrchestratorView, type PlanContext, type StepIssue } from "./orchestrator.js";
 import type { LiveSession } from "./types.js";
 
 // The Orchestrator as the phone page sees it: the desktop's own conversation and plans
@@ -50,6 +50,8 @@ export interface PhoneOrchestrator {
   engines: Array<{ id: string; label: string; available: boolean }>;
   workspaces: Array<{ id: string; name: string }>;
   running: PhoneRunning[];
+  /** Copies waiting for review, for a plan's apply and discard steps to name. */
+  copies?: Array<{ id: string; name: string; branch: string }>;
   /** The computer can turn the phone's speech into words (whisper.cpp and a model, from Settings → Voice). */
   hear: boolean;
 }
@@ -73,16 +75,19 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
   // What the desktop's plan card checks a step against (usePlanContext in src/ui/views/Orchestrator.tsx).
   const context: PlanContext = {
     workspaces: input.workspaces.map((item) => ({ id: item.id, name: item.name, folder: item.path, git: true })),
-    engines: input.engines.map((item) => ({ id: item.id, label: item.label, available: item.available })),
+    engines: input.engines.map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
     running: coding.map((item) => ({ id: item.ptyId, engine: cliName(item), workspace: item.workspaceId ?? "", folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
+    copies: (input.view.copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
   };
   const turns = input.view.turns.slice(-PHONE_TURNS).map((turn): PhoneTurn => {
     if (!turn.steps) return turn as PhoneTurn;
+    // A plan's own new workspaces count as there for its later steps, as on the desktop's card.
+    const checked = withPlannedWorkspaces(context, turn.steps);
     return {
       ...turn,
       steps: turn.steps.map((step) => {
         const opened = step.ptyId ? coding.find((item) => item.ptyId === step.ptyId) : undefined;
-        return { ...step, issue: turn.plan === "waiting" ? stepIssue(step, context) : null, live: Boolean(opened), runId: opened?.runId ?? null };
+        return { ...step, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? null };
       }),
     };
   });
@@ -113,6 +118,7 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
     engines: input.engines.map((item) => ({ id: item.id, label: item.label, available: item.available })),
     workspaces: input.workspaces.map((item) => ({ id: item.id, name: item.name })),
     running,
+    copies: (input.view.copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch })),
     hear: input.hear,
   };
 }

@@ -33,7 +33,7 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
       }
     },
     send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
-    screen: async (ptyId) => (await supervisor.snapshot(ptyId)).plain,
+    screen: (ptyId) => supervisor.screen(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),
@@ -44,6 +44,14 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
     finished: (run) => send("run-finished", run),
     snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
     gitHead: (cwd) => gitHead(cwd),
+    // Maestro's show step: the page goes there as it does for a clicked notification.
+    show: (route) => {
+      send("open-route", { route });
+      if (ctx.win && !ctx.win.isDestroyed()) {
+        if (!ctx.win.isVisible()) ctx.win.show();
+        ctx.win.focus();
+      }
+    },
   };
 }
 
@@ -76,6 +84,9 @@ export function terminalEnv(ctx: MainContext, controlSocket: string): NodeJS.Pro
   return env;
 }
 
+/** Lines of the host's stderr logged in a minute. */
+const STDERR_PER_MINUTE = 20;
+
 /** When the host last crashed, so one that keeps crashing isn't brought back forever. */
 export class CrashCount {
   private crashes: number[] = [];
@@ -95,7 +106,7 @@ export class HostLifecycle {
 
   constructor(
     private readonly ctx: MainContext,
-    private readonly parts: { voice: Pick<Voice, "status">; talk: Pick<Talk, "exited"> },
+    private readonly parts: { voice: Pick<Voice, "controlSocket">; talk: Pick<Talk, "exited"> },
   ) {}
 
   /** Why the terminal host is down, for a page that loads after it happened. */
@@ -105,7 +116,7 @@ export class HostLifecycle {
 
   async start(): Promise<void> {
     try {
-      await this.ctx.supervisor.start(this.ctx.appRoot, terminalEnv(this.ctx, this.parts.voice.status().controlSocket));
+      await this.ctx.supervisor.start(this.ctx.appRoot, terminalEnv(this.ctx, this.parts.voice.controlSocket));
       this.hostError = null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -120,6 +131,20 @@ export class HostLifecycle {
   wire(): void {
     const { ctx } = this;
     const { supervisor, log, send } = ctx;
+    // What the host says on stderr goes in the log, so a crash has its reason there; a host that
+    // says a lot is cut down to a few lines a minute.
+    let said = 0;
+    let since = 0;
+    supervisor.onStderr.add((line) => {
+      const now = Date.now();
+      if (now - since > 60_000) {
+        since = now;
+        said = 0;
+      }
+      said += 1;
+      if (said <= STDERR_PER_MINUTE) log.warn(`Terminal host: ${line}`);
+      else if (said === STDERR_PER_MINUTE + 1) log.warn("Terminal host: more on stderr this minute, not logged");
+    });
     supervisor.onData.add((event) => send("pty-data", event));
     supervisor.onExit.add((event) => {
       log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
@@ -134,6 +159,8 @@ export class HostLifecycle {
       // Every terminal died with the host. Record them, then bring the host back.
       for (const session of ctx.service?.listLive() ?? []) {
         log.info(`Terminal ${session.ptyId} ended (the terminal host stopped)`);
+        // The page too, or an open pane goes on looking live while every key typed there is lost.
+        send("pty-exit", { ptyId: session.ptyId, exitCode: null, signal: null });
         this.ended(session.ptyId, null, null);
       }
       // Once quitting has begun the host stays down: a new one would start halfway through the quit.

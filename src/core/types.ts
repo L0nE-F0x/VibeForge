@@ -147,8 +147,9 @@ export interface Settings {
   /** Add up token usage from the logs the CLIs keep on this machine. Read locally, never sent. */
   usage: boolean;
   /**
-   * Ask Anthropic, xAI and Moonshot how much of the Claude, Grok and Kimi plans is used, with the
-   * sign-in each CLI saved. Contacts those services, so it starts off.
+   * Ask the providers how much of each coding plan is used (Claude, Grok, Antigravity, Kimi, Codex
+   * and Muse: Anthropic, xAI, Google, Moonshot, OpenAI and Meta), with the sign-in each CLI saved.
+   * Contacts those services, so it starts off.
    */
   planLimits: boolean;
   /** A notification when a plan window passes 80, 95 and 100 percent. Off, since Omarchy's widget may already say so. */
@@ -174,6 +175,8 @@ export interface OrchestratorSettings {
   mode: "plan" | "go";
   /** A model for that CLI to plan with; empty keeps its own default. */
   model: string;
+  /** Where a workspace Maestro makes gets its folder; empty: where most workspaces are, else ~/Projects. */
+  projectsFolder: string;
 }
 
 /** How far CLIs may go on their own when they talk to each other. */

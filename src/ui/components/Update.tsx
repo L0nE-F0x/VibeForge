@@ -6,8 +6,9 @@ import { useT, type Translator } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { notesBlocks } from "../notes.js";
 import { useConfirm, useToast } from "../state.js";
+import { markUpdated, useUpdated } from "../update-state.js";
 import { LiveTerminal } from "./Terminal.js";
-import { Button, Modal, Notice } from "./ui.js";
+import { Button, Empty, Modal, Notice } from "./ui.js";
 
 // Updating: the dialog shows what's new and runs the update command in a real terminal, so
 // nothing happens out of sight, then offers a restart.
@@ -65,15 +66,56 @@ export function installText(info: UpdateInfo, appPath: string, t: Translator): s
   return t("updates.installOther", { path: appPath });
 }
 
+/** Restart VibeForge, asking first while other terminals run (they'd stop). `own` is the update's terminal. */
+function useRestart(own: string | null = null): () => Promise<void> {
+  const t = useT();
+  const live = useLive().data ?? [];
+  const confirm = useConfirm();
+  return async () => {
+    const others = live.filter((session) => session.ptyId !== own).length;
+    if (others > 0) {
+      const ok = await confirm({ title: t("updates.restartTitle"), body: t.count("updates.restartBody", others), confirm: t("updates.restart") });
+      if (!ok) return;
+    }
+    await call("app.restart");
+  };
+}
+
+/**
+ * In place of a view that can't load because an update replaced VibeForge's files under this
+ * window: the new version is on disk, and a restart starts it.
+ */
+export function RestartToFinish() {
+  const t = useT();
+  const restart = useRestart();
+  return (
+    <Empty
+      icon={RotateCcw}
+      title={t("updates.finishTitle")}
+      actions={
+        <Button variant="primary" icon={RotateCcw} onClick={() => void restart()}>
+          {t("updates.restart")}
+        </Button>
+      }
+    >
+      {t("updates.finishBody")}
+    </Empty>
+  );
+}
+
 export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: () => void }) {
   const t = useT();
   const info = useUpdate().data;
-  const live = useLive().data ?? [];
-  const confirm = useConfirm();
   const { fail } = useToast();
   const [ptyId, setPtyId] = useState<string | null>(null);
   const [exit, setExit] = useState<{ code: number | null; signal: number | null } | null>(null);
   const running = Boolean(ptyId) && !exit;
+  // Updated earlier in this session (the dialog was closed without restarting): Restart, not Update now again.
+  const updated = useUpdated();
+  const restart = useRestart(ptyId);
+  useEffect(() => {
+    if (exit?.code === 0) markUpdated();
+  }, [exit]);
 
   // Opening this is asking: check now if nothing is known yet.
   useEffect(() => {
@@ -82,7 +124,7 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
 
   if (!info) return null;
   const latest = info.latest;
-  const succeeded = exit?.code === 0;
+  const succeeded = exit?.code === 0 || (updated && !running && !exit);
 
   const start = async () => {
     setExit(null);
@@ -93,15 +135,6 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
     } catch (error) {
       fail(error);
     }
-  };
-
-  const restart = async () => {
-    const others = live.filter((session) => session.ptyId !== ptyId).length;
-    if (others > 0) {
-      const ok = await confirm({ title: t("updates.restartTitle"), body: t.count("updates.restartBody", others), confirm: t("updates.restart") });
-      if (!ok) return;
-    }
-    await call("app.restart");
   };
 
   const footer = running ? null : succeeded ? (
@@ -141,7 +174,12 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
           {latest.notes.trim() ? <Notes text={latest.notes} /> : <div className="update-notes">{t("updates.noNotes")}</div>}
         </>
       )}
-      {info.available && info.command && !ptyId && (
+      {!ptyId && updated && (
+        <Notice tone="accent" icon={CheckCircle2}>
+          {latest ? t("updates.done", { version: latest.version }) : t("updates.doneUnknown")}
+        </Notice>
+      )}
+      {info.available && info.command && !ptyId && !updated && (
         <div className="vstack" style={{ gap: 6 }}>
           <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
             {t("updates.willRun")}

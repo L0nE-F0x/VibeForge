@@ -18,6 +18,9 @@
 [[headers]]
   for = "/*"
   [headers.values]
+    # A year of HTTPS-only for this host (Netlify serves it over HTTPS already). Not preloaded:
+    # leaving the browsers' preload list again takes months.
+    Strict-Transport-Security = "max-age=31536000"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "DENY"
     Referrer-Policy = "strict-origin-when-cross-origin"

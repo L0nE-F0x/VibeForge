@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutNode } from "../../src/shared/api.js";
-import { movePane, panesOf, placeSession, removePane, setRatioAt } from "../../src/ui/pane-layout.js";
+import { movePane, panesOf, placeSession, removePane, setRatioAt, unzoomForFocus } from "../../src/ui/pane-layout.js";
 
 const pane = (id: string): LayoutNode => ({ kind: "pane", id, launch: { type: "shell" } });
 const split = (dir: "row" | "col", a: LayoutNode, b: LayoutNode, ratio = 0.5): LayoutNode => ({ kind: "split", dir, ratio, a, b });
@@ -85,5 +85,14 @@ describe("placing a CLI started outside Code", () => {
     expect(placeSession(layout, claude, { newId: "n", focus: "b" }).layout).toEqual(split("row", pane("a"), split("row", pane("b"), engine("n", "claude"))));
     expect(placeSession(layout, claude, { newId: "n", focus: "gone" }).layout).toEqual(split("row", split("row", pane("a"), engine("n", "claude")), pane("b")));
     expect(placeSession(null, claude, { newId: "n" })).toEqual({ layout: engine("n", "claude"), paneId: "n" });
+  });
+
+  it("restores a maximized workspace when focus moves to a pane hidden behind it", () => {
+    const zoomed = { code: "a", other: "x" };
+    // Focus still on the maximized pane: nothing changes, the same object comes back.
+    expect(unzoomForFocus(zoomed, { code: "a", other: "x" })).toBe(zoomed);
+    // Ctrl+Shift+D split a new pane off, or a jump focused another: that workspace is restored.
+    expect(unzoomForFocus(zoomed, { code: "b", other: "x" })).toEqual({ code: null, other: "x" });
+    expect(unzoomForFocus({ code: null }, { code: "b" })).toEqual({ code: null });
   });
 });

@@ -3,11 +3,23 @@
 // here, so the window can check a step the same way the main process does.
 
 import type { EngineRow } from "../core/types.js";
+import { effortLevels } from "./launch-options.js";
 
-export type OrchestratorStepKind = "start" | "tell" | "stop";
+/**
+ * start, tell, stop: a CLI. workspace: a new workspace (its folder made if it isn't there).
+ * apply, discard: a copy waiting for review. show: a running CLI, opened in Code.
+ */
+export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show";
+
+/** The steps that change or end someone's work: they wait for Go even when plans start at once. */
+export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
 
 /** Why a step can't run as it stands; the plan card asks the person to fix it. */
-export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt";
+export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt" | "effort" | "folder" | "copy";
+
+/** A workspace a plan makes, until its step has run: later steps name it by this id. */
+export const PLANNED_PREFIX = "new:";
+export const plannedId = (stepId: string) => `${PLANNED_PREFIX}${stepId}`;
 
 export interface OrchestratorStep {
   id: string;
@@ -34,6 +46,19 @@ export interface OrchestratorStep {
   copyId?: string | null;
   /** start: what became of that copy, once a person applied or discarded it. */
   outcome?: "applied" | "discarded" | null;
+  /** start: the model and reasoning effort it starts with; empty keeps the CLI's own. */
+  model?: string;
+  effort?: string;
+  /** start, on a branch: files changed in the workspace and not committed, which the copy won't have. */
+  dirty?: number;
+  /** workspace: its name, the folder it is (made if missing), and whether to `git init` a folder it makes. */
+  name?: string;
+  folder?: string;
+  git?: boolean;
+  /** apply: how it went, when there's more to say than done (conflicts to sort out). */
+  result?: string | null;
+  /** discard: the token that undoes it, while it can be undone. */
+  undo?: string | null;
 }
 
 /**
@@ -64,13 +89,33 @@ export interface MaestroCopy {
   repo: string;
 }
 
+/** The fields a plan card can change on a step before Go. */
+export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target" | "model" | "effort" | "name" | "folder" | "git">>;
+
 export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
+
+/** A word from VibeForge itself about a CLI Maestro started: its turn ended after real work, or it closed. */
+export interface MaestroNote {
+  kind: "finished" | "ended";
+  ptyId: string;
+  runId: string | null;
+  /** "Claude Code", and where: "VibeForge · fix-tray". */
+  engine: string;
+  workspace: string;
+  workspaceId: string | null;
+  /** Its copy, if it works in one, for Review. */
+  copyId: string | null;
+  /** "2 commits · 3 files changed", when git could say. */
+  changes: string | null;
+}
 
 export interface OrchestratorTurn {
   id: string;
   at: string;
   from: "you" | "vibeforge";
   text: string;
+  /** VibeForge's own word about a CLI, not the planner's answer. */
+  note?: MaestroNote;
   /** A plan: steps, and where it is. "replaced" is a plan the next answer took over. */
   steps?: OrchestratorStep[];
   plan?: "waiting" | "running" | "done" | "cancelled" | "replaced";
@@ -91,6 +136,8 @@ export interface OrchestratorView {
   turns: OrchestratorTurn[];
   /** Copies waiting for a person to apply or discard them, oldest first. */
   copies?: MaestroCopy[];
+  /** Where a new workspace's folder goes unless a step says otherwise (Settings, or where most are). */
+  projectsFolder?: string;
 }
 
 /** The engines that can plan: the ones with a headless turn, structured output and a way to turn tools off. */
@@ -140,19 +187,60 @@ export function orchestratorVoiceWords(workspaces: readonly string[]): string[] 
 
 export interface PlanContext {
   workspaces: Array<{ id: string; name: string; folder: string; git: boolean }>;
-  engines: Array<{ id: string; label: string; available: boolean }>;
-  running: Array<{ id: string; engine: string; workspace: string; folder: string; working: boolean; orchestrated: boolean }>;
+  /** `bin` tells which model and effort options a CLI takes; without it, none are checked. */
+  engines: Array<{ id: string; label: string; available: boolean; bin?: string }>;
+  running: Array<{
+    id: string;
+    engine: string;
+    workspace: string;
+    folder: string;
+    working: boolean;
+    orchestrated: boolean;
+    /** What it was first asked to do, cut short. */
+    asked?: string;
+    /** Its copy's branch, when it works in one. */
+    branch?: string;
+  }>;
+  /** Copies waiting for review (Apply or Discard). */
+  copies?: Array<{ id: string; name: string; branch: string; workspace: string }>;
+  /** Where a new workspace goes when the person doesn't say. */
+  projectsFolder?: string;
+}
+
+/**
+ * The context a plan's steps are checked against: what is here, plus the workspaces the plan's own
+ * workspace steps will make while those steps can still run, under their placeholder ids.
+ */
+export function withPlannedWorkspaces(context: PlanContext, steps: readonly OrchestratorStep[]): PlanContext {
+  const planned = steps.filter((step) => step.kind === "workspace" && (step.state === "planned" || step.state === "running"));
+  if (!planned.length) return context;
+  return { ...context, workspaces: [...context.workspaces, ...planned.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", folder: step.folder ?? "", git: false }))] };
+}
+
+/** A workspace's name as a folder's: something, and nothing that would put it somewhere else. */
+export function folderNameOk(name: string): boolean {
+  const clean = name.trim();
+  return clean.length > 0 && clean.length <= 120 && !/[\\/\0]/.test(clean) && clean !== "." && clean !== "..";
 }
 
 /** What stands in a step's way, given what's here now. */
 export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIssue | null {
+  if (step.kind === "workspace") {
+    const folder = (step.folder ?? "").trim();
+    if (!folderNameOk(step.name ?? "") || !(folder.startsWith("/") || folder.startsWith("~/")) || folder.split("/").includes("..")) return "folder";
+    return null;
+  }
   if (step.kind === "start") {
     if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
     const engine = context.engines.find((item) => item.id === step.engineId);
     if (!engine) return "engine";
     if (!engine.available) return "engineMissing";
-    if (!step.prompt.trim()) return "prompt";
+    const effort = step.effort?.trim();
+    if (effort && engine.bin !== undefined && !effortLevels({ id: engine.id, bin: engine.bin }).includes(effort)) return "effort";
     return null;
+  }
+  if (step.kind === "apply" || step.kind === "discard") {
+    return (context.copies ?? []).some((item) => item.id === step.target) ? null : "copy";
   }
   if (!context.running.some((item) => item.id === step.target)) return "target";
   if (step.kind === "tell" && !step.prompt.trim()) return "prompt";

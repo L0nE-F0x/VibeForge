@@ -28,12 +28,18 @@ export interface CompanionWire {
   hear: (pcm: Buffer, prompt: string) => Promise<Dictation>;
   /** Whether that can work here: whisper.cpp and a model. */
   canHear: () => boolean;
+  /** This app's version: a phone page from another one loads itself again. */
+  version?: string;
 }
 
 let server: CompanionHttp | null = null;
 let boundToken = "";
 let status: CompanionStatus = { listening: false, url: null, error: null };
 let job: Promise<void> = Promise.resolve();
+/** Tries the port again while the page is on but couldn't listen (something else had the port). */
+let retry: NodeJS.Timeout | null = null;
+/** How long before trying again. Slow: the port is rarely freed in a hurry, and each try is logged. */
+export const LISTEN_RETRY_MS = 30_000;
 
 function enqueue(task: () => Promise<void>): Promise<void> {
   const run = job.then(task, task);
@@ -45,7 +51,7 @@ function enqueue(task: () => Promise<void>): Promise<void> {
 }
 
 export function companionStatus(): CompanionStatus {
-  return status;
+  return { ...status, unsigned: server?.unsigned() ?? 0 };
 }
 
 /** Brings the page in line with Settings. The promise is for tests; the app doesn't wait on it. */
@@ -53,7 +59,13 @@ export function syncCompanion(wire: CompanionWire): Promise<void> {
   return enqueue(() => apply(wire));
 }
 
+function stopRetrying(): void {
+  if (retry) clearTimeout(retry);
+  retry = null;
+}
+
 export function stopCompanion(): Promise<void> {
+  stopRetrying();
   return enqueue(async () => {
     await closeServer();
     boundToken = "";
@@ -75,6 +87,7 @@ async function closeServer(): Promise<void> {
 }
 
 async function apply(wire: CompanionWire): Promise<void> {
+  stopRetrying();
   const settings = wire.service.getSettings().companion;
   const url = `http://127.0.0.1:${settings.port}`;
   if (settings.enabled && !settings.token) {
@@ -98,6 +111,7 @@ async function apply(wire: CompanionWire): Promise<void> {
       icon: wire.icon,
       actions: actionsFor(wire),
       language: () => wire.service.getSettings().language,
+      version: wire.version,
     });
     boundToken = settings.token;
     status = { listening: true, url, error: null };
@@ -106,6 +120,13 @@ async function apply(wire: CompanionWire): Promise<void> {
     boundToken = "";
     status = { listening: false, url: null, error: describeError(error).split("\n")[0] };
     wire.log(`Phone page could not listen on ${url}: ${status.error}`);
+    // The port may come free (another app quits, the last VibeForge finishes going): try again
+    // while the page stays on. Any change to Settings tries at once anyway.
+    retry = setTimeout(() => {
+      retry = null;
+      void syncCompanion(wire);
+    }, LISTEN_RETRY_MS);
+    retry.unref();
   }
 }
 
@@ -247,7 +268,7 @@ async function sessionOf(service: TeamService, supervisor: PtySupervisor, query:
   let screen = "";
   if (live) {
     try {
-      screen = (await supervisor.snapshot(live.ptyId)).plain;
+      screen = await supervisor.screen(live.ptyId);
     } catch {
       screen = "";
     }

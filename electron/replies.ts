@@ -1,11 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
-import { claudeLogCwd, claudeProjectDir, claudeTurn, codexDayDir, codexLogCwd, codexTurn, grokSessionsDir, grokTurn, kimiStateCwd, kimiTurn, lastReplyIn, type ReplyLog, type Turn } from "../src/core/replies.js";
+import {
+  claudeLogCwd,
+  claudeProjectDir,
+  claudeTurn,
+  codexDayDir,
+  codexLogCwd,
+  codexTurn,
+  grokSessionsDir,
+  grokTurn,
+  kimiStateCwd,
+  kimiTurn,
+  lastReplyIn,
+  logRows,
+  startsTurn,
+  type LogRow,
+  type ReplyLog,
+  type Turn,
+} from "../src/core/replies.js";
 
 // These run in Electron's main process, which relays every terminal byte, for as long as an
 // answer is awaited: up to half an hour, several at once. So logs are read with fs.promises, each
 // from where the last poll stopped; a log that hasn't grown keeps the turn made of it; and a
-// folder is listed again only once it has changed.
+// folder is listed again only once it has changed. Each line is parsed once, as it arrives, and
+// the rows a turn starts with are kept however much a long turn writes after them.
 
 const POLL_MS = 700;
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -84,40 +102,71 @@ async function readStart(file: string, length: number): Promise<string | null> {
   }
 }
 
-/** A log read as it grows: its whole lines (the last KEEP_BYTES of them), then what follows the last one. */
+/**
+ * A log read as it grows: its whole lines as rows (the last KEEP_BYTES of them, and every row a turn
+ * starts with that the caller asked to keep), then what follows the last one.
+ */
 interface Tail {
   /** The size at the last read; -1 until a read succeeds. */
   size: number;
   /** Where the next read starts: the end of the last whole line. */
   offset: number;
-  lines: string;
+  rows: LogRow[];
+  /** Each row's length, beside it; 0 for a row kept past the window. */
+  sizes: number[];
+  /** The rows' length, those kept past the window left out. */
+  bytes: number;
   rest: string;
-  /** What was made of the text at the last read, kept while the log doesn't grow. */
+  /** What was made of the rows at the last read, kept while the log doesn't grow. */
   turn: Turn | null;
 }
 
-const newTail = (): Tail => ({ size: -1, offset: 0, lines: "", rest: "", turn: null });
+const newTail = (): Tail => ({ size: -1, offset: 0, rows: [], sizes: [], bytes: 0, rest: "", turn: null });
 
-const textOf = (tail: Tail): string => tail.lines + tail.rest;
+/** The rows read so far, with the line still being written if it already reads as one. */
+const rowsIn = (tail: Tail): LogRow[] => (tail.rest.trim() ? [...tail.rows, ...logRows(tail.rest)] : tail.rows);
+
+/** Let the oldest rows go past KEEP_BYTES, except those `keep` holds on to (a turn's prompt). */
+function trim(tail: Tail, keep: (row: LogRow) => boolean): void {
+  if (tail.bytes <= KEEP_BYTES) return;
+  const held: LogRow[] = [];
+  let at = 0;
+  for (; at < tail.rows.length && tail.bytes > KEEP_BYTES; at += 1) {
+    const size = tail.sizes[at];
+    if (size === 0 || keep(tail.rows[at])) held.push(tail.rows[at]);
+    tail.bytes -= size;
+  }
+  tail.rows = [...held, ...tail.rows.slice(at)];
+  tail.sizes = [...held.map(() => 0), ...tail.sizes.slice(at)];
+}
 
 /**
  * Reads what a log gained since the last call; true when there was any. A first read starts
- * `back` bytes before the end, and so does one of a log cut shorter than before.
+ * `back` bytes before the end, and so does one of a log cut shorter than before. `keep` names rows
+ * to hold on to when older ones are let go.
  */
-async function follow(file: string, tail: Tail, back: number): Promise<boolean> {
+async function follow(file: string, tail: Tail, back: number, keep: (row: LogRow) => boolean = () => false): Promise<boolean> {
   let handle: fs.promises.FileHandle | null = null;
   try {
     handle = await fs.promises.open(file, "r");
     const size = (await handle.stat()).size;
     if (size === tail.size) return false;
-    if (tail.size < 0 || size < tail.offset) Object.assign(tail, { offset: Math.max(0, size - back), lines: "", rest: "" });
+    if (tail.size < 0 || size < tail.offset) Object.assign(tail, { offset: Math.max(0, size - back), rows: [], sizes: [], bytes: 0, rest: "" });
     tail.size = size;
     const buffer = Buffer.alloc(size - tail.offset);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, tail.offset);
     const bytes = buffer.subarray(0, bytesRead);
     // Split as bytes at the last newline, so a character a write in progress cut in two is read whole next time.
     const end = bytes.lastIndexOf(10) + 1;
-    tail.lines = (tail.lines + bytes.subarray(0, end).toString("utf8")).slice(-KEEP_BYTES);
+    for (const line of bytes.subarray(0, end).toString("utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const [row] = logRows(line);
+      if (!row) continue;
+      tail.rows.push(row);
+      tail.sizes.push(line.length + 1);
+      tail.bytes += line.length + 1;
+    }
+    trim(tail, keep);
     tail.rest = bytes.subarray(end).toString("utf8");
     tail.offset += end;
     return true;
@@ -197,7 +246,7 @@ export async function lastReply(opts: { kind: ReplyLog; home: string; cwd: strin
     const [history, events] = [newTail(), newTail()];
     await follow(path.join(newest.session, "chat_history.jsonl"), history, KEEP_BYTES);
     await follow(path.join(newest.session, "events.jsonl"), events, KEEP_BYTES);
-    return lastReplyIn("grok", textOf(history), textOf(events));
+    return lastReplyIn("grok", rowsIn(history), rowsIn(events));
   }
   const files = await logFiles(opts, new Map());
   const times = await Promise.all(files.map(mtime));
@@ -205,7 +254,7 @@ export async function lastReply(opts: { kind: ReplyLog; home: string; cwd: strin
   if (!newest) return null;
   const tail = newTail();
   await follow(newest.file, tail, KEEP_BYTES);
-  return lastReplyIn(opts.kind, textOf(tail));
+  return lastReplyIn(opts.kind, rowsIn(tail));
 }
 
 /**
@@ -221,8 +270,11 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
   };
   const cwdOk = new Map<string, boolean>();
   const started = Date.now();
-  const parse = (text: string): Turn =>
-    opts.kind === "claude" ? claudeTurn(text, opts.since, opts.words) : opts.kind === "kimi" ? kimiTurn(text, opts.since, opts.words) : codexTurn(text, opts.since, opts.words);
+  const parse = (rows: LogRow[]): Turn =>
+    opts.kind === "claude" ? claudeTurn(rows, opts.since, opts.words) : opts.kind === "kimi" ? kimiTurn(rows, opts.since, opts.words) : codexTurn(rows, opts.since, opts.words);
+  // A turn's own prompt stays however long the turn runs: past KEEP_BYTES of tool output after it,
+  // the turn could no longer be found and the wait ran to its half hour.
+  const keep = (row: LogRow) => startsTurn(opts.kind, row);
 
   const turnsNow = async (): Promise<Turn[]> => {
     const turns: Turn[] = [];
@@ -231,15 +283,15 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
       for (const { session } of await grokSessions(opts.home, opts.cwd, opts.since)) {
         const history = tailOf(path.join(session, "chat_history.jsonl"));
         const events = tailOf(path.join(session, "events.jsonl"));
-        const grew = [await follow(path.join(session, "chat_history.jsonl"), history, KEEP_BYTES), await follow(path.join(session, "events.jsonl"), events, KEEP_BYTES)];
-        if (grew.includes(true) || !events.turn) events.turn = grokTurn(textOf(history), textOf(events), opts.since, opts.words);
+        const grew = [await follow(path.join(session, "chat_history.jsonl"), history, KEEP_BYTES, keep), await follow(path.join(session, "events.jsonl"), events, KEEP_BYTES, keep)];
+        if (grew.includes(true) || !events.turn) events.turn = grokTurn(rowsIn(history), rowsIn(events), opts.since, opts.words);
         turns.push(events.turn);
       }
       return turns;
     }
     for (const file of await logFiles(opts, cwdOk)) {
       const tail = tailOf(file);
-      if (await follow(file, tail, LOOKBACK_BYTES)) tail.turn = parse(textOf(tail));
+      if (await follow(file, tail, LOOKBACK_BYTES, keep)) tail.turn = parse(rowsIn(tail));
       if (tail.turn) turns.push(tail.turn);
     }
     return turns;

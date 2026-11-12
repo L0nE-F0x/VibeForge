@@ -39,12 +39,24 @@ describe("watching the config folder", () => {
     fs.mkdirSync(path.join(dir, "routines"));
     const seen: Topic[][] = [];
     stop = watchConfig(dir, (topics) => seen.push(topics));
-    // fs.watch can take a moment to start reporting.
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const until = async (check: () => boolean, ms: number) => {
+      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(20);
+    };
+    // fs.watch can take a moment to start reporting: an edit it hands on shows it has, however
+    // long a busy machine takes.
+    for (let tries = 0; tries < 10 && !seen.length; tries += 1) {
+      fs.writeFileSync(path.join(dir, "workspaces.json"), "{}");
+      await until(() => seen.length > 0, 1000);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    seen.length = 0;
     fs.writeFileSync(path.join(dir, "settings.json"), "{}");
     fs.writeFileSync(path.join(dir, "routines", "r.yaml"), "x: 1\n");
     fs.writeFileSync(path.join(dir, "settings.json.tmp"), "{}");
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await until(() => seen.length > 0, 10_000);
+    // Twice the pause it waits for, so a second hand-on would have come by now.
+    await sleep(500);
     expect(seen).toHaveLength(1);
     expect([...seen[0]].sort()).toEqual(["routines", "settings"]);
   });

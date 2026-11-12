@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { tipProps } from "./Tooltip.js";
 import { mark, scatter, shade, wordmark, type Art } from "../../shared/pixel.js";
 
@@ -110,7 +110,8 @@ export function contributionLevels(counts: readonly number[]): (count: number) =
  * A year of days as pixels, a column per week from Sunday: the contribution graph, drawn in the
  * theme's shades. The busiest days take the brightest one.
  */
-export function ContributionGraph({ days, cell = 12, size = 9, tip, className }: {
+/** Memoised: Home re-renders every few seconds for its clock, and 365 cells with a label each needn't. */
+export const ContributionGraph = memo(function ContributionGraph({ days, cell = 12, size = 9, tip, className }: {
   days: ReadonlyArray<{ day: string; count: number }>;
   cell?: number;
   size?: number;
@@ -138,4 +139,4 @@ export function ContributionGraph({ days, cell = 12, size = 9, tip, className }:
       })}
     </svg>
   );
-}
+});

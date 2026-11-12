@@ -42,6 +42,8 @@ const HANDLERS: Record<ShortcutScope, string[]> = {
   toast: ["src/ui/state.tsx"],
   list: ["src/ui/components/SidePanel.tsx"],
   tour: ["src/ui/components/Tour.tsx"],
+  switcher: ["src/ui/components/Switcher.tsx"],
+  workspaceList: ["src/ui/views/code/WorkspaceList.tsx"],
 };
 
 /** Every UI source file but the registry and the translations, whose sentences name keys in each language's words. */
@@ -140,6 +142,9 @@ describe("the shortcut registry", () => {
       [press("ArrowDown"), ["list.move"]],
       [press("End"), ["list.move"]],
       [press("ArrowDown", { shift: true }), []],
+      [press("n", { ctrl: true }), ["switcher.next"]],
+      [press("p", { ctrl: true }), ["switcher.prev"]],
+      [press("F2", {}, "F2"), ["workspace.rename"]],
     ];
     for (const [event, ids] of cases) expect(shortcutsFor(event), JSON.stringify(event)).toEqual(ids);
   });

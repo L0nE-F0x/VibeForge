@@ -28,7 +28,9 @@ export interface DownloadOptions {
  * pinned to. `progress` gets the bytes so far and the total.
  */
 export async function downloadFiles(files: Download[], opts: DownloadOptions): Promise<number> {
-  const get = opts.fetch ?? ((url, init) => net.fetch(url, init));
+  // Without the session's cookies: the browser dock shares it, and a sign-in there is no business of
+  // a model download's.
+  const get = opts.fetch ?? ((url, init) => net.fetch(url, { ...init, credentials: "omit" }));
   const open = opts.open ?? ((file) => fs.createWriteStream(file));
   const total = files.reduce((sum, file) => sum + file.bytes, 0);
   let received = 0;

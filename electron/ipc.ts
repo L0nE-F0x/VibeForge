@@ -295,5 +295,5 @@ export async function answerTalk(ctx: MainContext, request: TalkRequest, gone: A
   if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(request.pty) };
   if (request.op === "tell") return ctx.service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
   if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: request.pty, task: request.task });
-  return ctx.service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs });
+  return ctx.service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs, gone });
 }

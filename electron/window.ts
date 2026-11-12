@@ -113,9 +113,14 @@ export class MainWindow {
     });
     const pageErrors = new PageErrors((line) => log.warn(`Page error: ${line}`));
     win.on("closed", () => {
-      pageErrors.flush();
-      dock.dispose();
+      // First, so nothing goes on talking to a window that is gone if what follows throws.
       ctx.win = null;
+      pageErrors.flush();
+      try {
+        dock.dispose();
+      } catch (error) {
+        log.warn(`Could not close the browser dock's pages: ${error instanceof Error ? error.message : String(error)}`);
+      }
     });
     win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
     win.webContents.on("console-message", (event) => {

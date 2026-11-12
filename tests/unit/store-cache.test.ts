@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Store } from "../../src/core/store.js";
+import { createTask } from "../../src/core/tasks.js";
 import type { Agent } from "../../src/core/types.js";
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-cache-"));
@@ -121,5 +122,40 @@ describe("store read cache", () => {
     store.getAgent("ada");
     store.getAgent("ada");
     expect(reads(files.agent)).toBe(2);
+  });
+
+  it("parses tasks, routines, workspaces and chats once while they hold still, and sees its own writes at once", () => {
+    const config = tempDir();
+    const data = tempDir();
+    const store = new Store(config, data);
+    const task = createTask({ title: "Tidy", body: "", agentId: null, workspaceId: null, now: new Date("2026-11-08T10:00:00Z") });
+    store.writeTask(task);
+    store.writeWorkspaces({ workspaces: [{ id: "shop", name: "Shop", path: "/tmp/shop", dockUrl: "" }], lastWorkspaceId: "shop" });
+    store.writeChat({ id: "c1", title: "Hi", agentId: null, engine: "claude", cwd: "/tmp", runIds: [], createdAt: "", updatedAt: "" });
+    const files = {
+      task: path.join(config, "tasks", `${task.id}.yaml`),
+      workspaces: path.join(config, "workspaces.json"),
+      chats: path.join(data, "chats.json"),
+    };
+    for (const file of Object.values(files)) settle(file);
+    const read = vi.spyOn(fs, "readFileSync");
+    const reads = (file: string) => read.mock.calls.filter(([name]) => name === file).length;
+    for (let round = 0; round < 5; round += 1) {
+      expect(store.listTasks().map((item) => item.title)).toEqual(["Tidy"]);
+      expect(store.getTask(task.id)?.title).toBe("Tidy");
+      expect(store.readWorkspaces().workspaces[0].name).toBe("Shop");
+      expect(store.getChat("c1")?.title).toBe("Hi");
+    }
+    expect([reads(files.task), reads(files.workspaces), reads(files.chats)]).toEqual([1, 1, 1]);
+    store.writeTask({ ...task, title: "Tidy up" });
+    store.writeWorkspaces({ workspaces: [{ id: "shop", name: "Store", path: "/tmp/shop", dockUrl: "" }], lastWorkspaceId: "shop" });
+    store.writeChat({ id: "c1", title: "Hello", agentId: null, engine: "claude", cwd: "/tmp", runIds: [], createdAt: "", updatedAt: "" });
+    expect(store.getTask(task.id)?.title).toBe("Tidy up");
+    expect(store.readWorkspaces().workspaces[0].name).toBe("Store");
+    expect(store.getChat("c1")?.title).toBe("Hello");
+    store.deleteTask(task.id);
+    expect(store.getTask(task.id)).toBeNull();
+    expect(store.listTasks()).toEqual([]);
+    store.close();
   });
 });

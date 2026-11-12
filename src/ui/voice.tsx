@@ -586,10 +586,12 @@ export function VoiceLayer() {
         finish();
       }, 80);
     };
-    // Alt-tab while the key is down must not leave the microphone open.
+    // Alt-tab while the key is down must not leave the microphone open. A recording started by
+    // clicking the mic (latched) isn't held by a key, so it keeps going while the pointer visits the
+    // browser dock or another window; its Stop ends it.
     const blur = () => {
       clearRelease();
-      if (!session || session.finishing || session.place === "agent") return;
+      if (!session || session.finishing || session.place === "agent" || session.latched) return;
       holding = false;
       finish();
     };

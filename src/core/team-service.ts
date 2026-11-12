@@ -9,7 +9,7 @@ import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
-import type { OrchestratorStep, OrchestratorView } from "./orchestrator.js";
+import type { OrchestratorView, StepPatch } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
@@ -69,11 +69,11 @@ export class TeamService extends ServiceCore {
     super.prepareShutdown();
   }
 
-  override close(): void {
+  override close(): Promise<void> {
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
-    super.close();
+    return super.close();
   }
 
   // ---------------------------------------------------------------- library
@@ -202,7 +202,7 @@ export class TeamService extends ServiceCore {
     this.orchestrator.cancel(turnId);
   }
 
-  orchestratorEditStep(turnId: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>): void {
+  orchestratorEditStep(turnId: string, stepId: string, patch: StepPatch): void {
     this.orchestrator.editStep(turnId, stepId, patch);
   }
 
@@ -312,7 +312,7 @@ export class TeamService extends ServiceCore {
     return this.messages.tell(input);
   }
 
-  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number }): Promise<TaskResult> {
+  handTask(input: { fromPty: string | null; agent: string; text: string; title?: string; start?: boolean; wait?: boolean; timeoutMs?: number; gone?: AbortSignal }): Promise<TaskResult> {
     return this.messages.handTask(input);
   }
 
@@ -476,6 +476,14 @@ export class TeamService extends ServiceCore {
 
   onPtyActivity(ptyId: string, working: boolean): void {
     this.shellRuns.onPtyActivity(ptyId, working);
+    this.orchestrator.onActivity(ptyId, working);
     if (!working) void this.messages.pump();
+  }
+
+  override async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
+    const session = this.live.get(ptyId);
+    await super.onPtyExit(ptyId, exitCode, signal);
+    // After the run is written, so what it changed is known.
+    this.orchestrator.onExit(session);
   }
 }

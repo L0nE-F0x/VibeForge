@@ -72,3 +72,17 @@ export function setRatioAt(node: LayoutNode, path: string, ratio: number): Layou
   const [head, ...rest] = path;
   return head === "a" ? { ...node, a: setRatioAt(node.a, rest.join(""), ratio) } : { ...node, b: setRatioAt(node.b, rest.join(""), ratio) };
 }
+
+/**
+ * A maximized pane hides the others, so a workspace whose focus moved to another pane (one split
+ * off, one a route or Maestro jumped to, one dragged) is restored. The same object back when
+ * nothing changes.
+ */
+export function unzoomForFocus(zoomed: Record<string, string | null>, focus: Record<string, string>): Record<string, string | null> {
+  let next = zoomed;
+  for (const [workspaceId, zoomedId] of Object.entries(zoomed)) {
+    const focused = focus[workspaceId];
+    if (zoomedId && focused && focused !== zoomedId) next = { ...next, [workspaceId]: null };
+  }
+  return next;
+}

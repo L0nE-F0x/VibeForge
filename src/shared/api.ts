@@ -50,9 +50,9 @@ import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
-import type { MaestroCopy, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue } from "../core/orchestrator.js";
+import type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch } from "../core/orchestrator.js";
 
-export type { MaestroCopy, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue };
+export type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch };
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
 export type { ApplyResult, WorkingCopy, BranchList };
@@ -219,6 +219,11 @@ export interface CompanionStatus {
   /** http://127.0.0.1:port while the page is up. */
   url: string | null;
   error: string | null;
+  /**
+   * Requests since the page started that came through a tailnet name without Tailscale's sign-in
+   * header: Tailscale Funnel (the page open to the internet), or a tagged device.
+   */
+  unsigned?: number;
 }
 
 export interface PtySnapshot {
@@ -398,7 +403,7 @@ export interface DeskMethods {
   /** Go: carry out a waiting plan. */
   "orchestrator.run": (turnId: string) => void;
   "orchestrator.cancel": (turnId: string) => void;
-  "orchestrator.editStep": (turnId: string, stepId: string, patch: Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>) => void;
+  "orchestrator.editStep": (turnId: string, stepId: string, patch: StepPatch) => void;
   "orchestrator.removeStep": (turnId: string, stepId: string) => void;
   /** A step's copy: its changes, Apply into the workspace it came from, or Discard (undone with undo.delete). */
   "orchestrator.copyDiff": (copyId: string) => string;

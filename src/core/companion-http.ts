@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import zlib from "node:zlib";
+import { cleanText } from "./agent-talk.js";
 import { bearerToken, tokenMatches, type DeskPayload } from "./companion.js";
 import type { PhoneOrchestrator } from "./companion-orchestrator.js";
 import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
-import type { OrchestratorStep } from "./orchestrator.js";
+import type { StepPatch } from "./orchestrator.js";
 import type { PlanSummary } from "./plans.js";
 import { BYTES_PER_SECOND, MAX_SECONDS } from "./voice.js";
 import type { en } from "../ui/i18n/en.js";
@@ -60,7 +63,7 @@ export interface CompanionActions {
   hear(pcm: Buffer): Promise<{ text: string; empty: "short" | "silent" | "nothing" | null }>;
 }
 
-export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target">>;
+export type { StepPatch };
 
 /** What the desktop's Orchestrator view does, for the phone. */
 export interface OrchestratorActions {
@@ -70,7 +73,10 @@ export interface OrchestratorActions {
   stopThinking(): void;
   /** New: an empty conversation and a new session for the planner. Running CLIs keep running. */
   clear(): void;
-  /** Go. */
+  /**
+   * Go. Marks the plan running before its first await (a plan that is gone throws then), and
+   * carries it out after that; the phone is answered once it is running and follows it by polling.
+   */
   run(turnId: string): Promise<void>;
   cancel(turnId: string): void;
   editStep(turnId: string, stepId: string, patch: StepPatch): void;
@@ -129,15 +135,31 @@ export interface CompanionHttpOptions {
   actions: CompanionActions;
   /** The language setting ("system" or a code). The phone's own languages fill in for "system". */
   language?: () => string;
+  /** This app's version, on the desk: a page from another version loads itself again. */
+  version?: string;
 }
 
 export interface CompanionHttp {
   port: number;
   close(): Promise<void>;
+  /**
+   * Requests that came through a tailnet name without the sign-in header Tailscale Serve adds for a
+   * person on the tailnet: a tagged device, or Tailscale Funnel, which puts the page on the internet.
+   */
+  unsigned(): number;
 }
 
 function text(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+/**
+ * Words a person sent from the phone to be typed into a terminal: no control characters, escape
+ * sequences or paste markers, as with what one CLI tells another (cleanText), so nothing can end the
+ * paste early and press keys of its own.
+ */
+function said(value: unknown, max: number): string {
+  return typeof value === "string" ? cleanText(value).slice(0, max) : "";
 }
 
 /** A body of at most `max` bytes, refused before reading when it says it is longer. Only the first `keep` are kept. */
@@ -173,22 +195,72 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 function stepPatch(value: unknown): StepPatch {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const patch: StepPatch = {};
-  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["prompt", COMPANION_PROMPT_MAX]] as const) {
+  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["model", 120], ["effort", 20], ["name", 120], ["folder", 500]] as const) {
     if (typeof raw[key] === "string") patch[key] = (raw[key] as string).slice(0, max);
   }
+  // A step's words are typed into the CLI it starts or tells: cleaned as everything else from the phone is.
+  if (typeof raw.prompt === "string") patch.prompt = said(raw.prompt, COMPANION_PROMPT_MAX);
+  if (typeof raw.git === "boolean") patch.git = raw.git;
   return patch;
 }
 
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+/** Smaller than this, gzip saves less than its own header costs. */
+const GZIP_FROM = 1024;
+
+/**
+ * A JSON reply. Given the request, a read answers 304 when the phone already has this exact answer
+ * (it polls every two seconds, mostly for nothing new), and is gzipped when the phone takes that.
+ * Nothing is cached by the browser either way (no-store): the page keeps the last answer itself.
+ */
+function sendJson(res: http.ServerResponse, status: number, body: unknown, req?: http.IncomingMessage): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, {
+  const headers: http.OutgoingHttpHeaders = {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(payload),
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
+  };
+  if (!req) {
+    res.writeHead(status, { ...headers, "Content-Length": Buffer.byteLength(payload) });
+    res.end(payload);
+    return;
+  }
+  headers.Vary = "Accept-Encoding";
+  if (status === 200 && req.method === "GET") {
+    // Weak: the same answer, gzipped or not.
+    const etag = `W/"${createHash("sha1").update(payload).digest("base64url")}"`;
+    headers.ETag = etag;
+    if (matchesEtag(req.headers["if-none-match"], etag)) {
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
+  }
+  const raw = Buffer.from(payload);
+  if (raw.length >= GZIP_FROM && acceptsGzip(req.headers["accept-encoding"])) {
+    const packed = zlib.gzipSync(raw);
+    res.writeHead(status, { ...headers, "Content-Encoding": "gzip", "Content-Length": packed.length });
+    res.end(packed);
+    return;
+  }
+  res.writeHead(status, { ...headers, "Content-Length": raw.length });
+  res.end(raw);
+}
+
+function matchesEtag(header: string | undefined, etag: string): boolean {
+  if (!header) return false;
+  const bare = (tag: string) => tag.trim().replace(/^W\//, "");
+  return header.split(",").some((tag) => tag.trim() === "*" || bare(tag) === bare(etag));
+}
+
+/** gzip in Accept-Encoding, unless it is there with q=0. */
+function acceptsGzip(header: string | undefined): boolean {
+  return (header ?? "").split(",").some((part) => {
+    const [name, ...params] = part.trim().toLowerCase().split(";");
+    if (name.trim() !== "gzip" && name.trim() !== "*") return false;
+    const q = params.map((param) => param.trim()).find((param) => param.startsWith("q="));
+    return !q || Number(q.slice(2)) > 0;
   });
-  res.end(payload);
 }
 
 function pagePath(root: string, name: string): string | null {
@@ -203,6 +275,13 @@ interface Served {
   stopping(): boolean;
   /** Set once the pairing code matched. Until then a failure says nothing about this computer. */
   paired: boolean;
+  /** Counts a request that came through a tailnet name without Tailscale's sign-in header. */
+  unsigned(): void;
+}
+
+/** A tailnet name: `<machine>.<tailnet>.ts.net`, the one Tailscale Serve and Funnel pass on. */
+function tailnetHost(host: string | undefined): boolean {
+  return /\.ts\.net\.?(:\d{1,5})?$/.test((host ?? "").trim().toLowerCase());
 }
 
 /**
@@ -224,6 +303,9 @@ function stillServing(served: Served): void {
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
   if (!hostAllowed(req.headers.host)) throw new CompanionHttpError("phone.error.host", 403);
+  // Tailscale Serve names the person on the tailnet who asked; Funnel, which answers anyone on the
+  // internet, doesn't. Not refused (a tagged device has no person either), but Settings → Phone says so.
+  if (tailnetHost(req.headers.host) && !req.headers["tailscale-user-login"]) served.unsigned();
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
   if (method === "GET" && url.pathname === "/icon.png") {
@@ -261,7 +343,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   // The page's words, before pairing too: the pairing page needs them.
   if (method === "GET" && url.pathname === "/api/text") {
     const language = languageOf(req, opts);
-    sendJson(res, 200, { language, words: await phoneWords(language) });
+    sendJson(res, 200, { language, words: await phoneWords(language) }, req);
     return;
   }
   if (method === "POST" && url.pathname === "/api/pair") {
@@ -276,15 +358,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   served.paired = true;
   if (method === "GET" && url.pathname === "/api/desk") {
-    sendJson(res, 200, opts.actions.desk());
+    sendJson(res, 200, { ...opts.actions.desk(), version: opts.version ?? "" }, req);
     return;
   }
   if (method === "GET" && url.pathname === "/api/plans") {
-    sendJson(res, 200, { plans: await opts.actions.plans() });
+    sendJson(res, 200, { plans: await opts.actions.plans() }, req);
     return;
   }
   if (method === "GET" && url.pathname === "/api/session") {
-    sendJson(res, 200, await opts.actions.session({ ptyId: url.searchParams.get("ptyId") || "", runId: url.searchParams.get("runId") || "" }));
+    sendJson(res, 200, await opts.actions.session({ ptyId: url.searchParams.get("ptyId") || "", runId: url.searchParams.get("runId") || "" }), req);
     return;
   }
   if (method === "GET" && url.pathname === "/api/orchestrator") {
@@ -294,7 +376,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     for (const turn of view.turns) {
       for (const step of turn.steps ?? []) if (step.error) step.error = await phoneCoreText(language, step.error);
     }
-    sendJson(res, 200, view);
+    sendJson(res, 200, view, req);
     return;
   }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
@@ -328,7 +410,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (url.pathname === "/api/send") {
     const ptyId = text(body.ptyId, 80);
     const runId = text(body.runId, 200);
-    const prompt = text(body.text, COMPANION_PROMPT_MAX);
+    const prompt = said(body.text, COMPANION_PROMPT_MAX);
     if (!prompt) throw new CompanionHttpError("phone.error.empty", 400);
     if (!ptyId && !runId) throw new CompanionHttpError("phone.error.gone", 400);
     const result = await opts.actions.send({ ptyId, runId, text: prompt, force: body.force === true });
@@ -348,7 +430,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     const agentId = text(body.agentId, 80);
     const engineId = text(body.engineId, 80);
     if (!workspaceId || (!agentId && !engineId)) throw new CompanionHttpError("phone.error.choose", 400);
-    sendJson(res, 200, await opts.actions.launch({ workspaceId, agentId, engineId, prompt: text(body.prompt, COMPANION_PROMPT_MAX) }));
+    sendJson(res, 200, await opts.actions.launch({ workspaceId, agentId, engineId, prompt: said(body.prompt, COMPANION_PROMPT_MAX) }));
     return;
   }
   throw new CompanionHttpError("phone.error.notFound", 404);
@@ -371,12 +453,12 @@ async function orchestratorPost(
     return stepId;
   };
   if (action === "ask") {
-    const words = text(body.text, COMPANION_PROMPT_MAX);
+    const words = said(body.text, COMPANION_PROMPT_MAX);
     if (!words) throw new CompanionHttpError("phone.error.empty", 400);
     desk.ask(words);
   } else if (action === "stop") desk.stopThinking();
   else if (action === "new") desk.clear();
-  else if (action === "go") await desk.run(needTurn());
+  else if (action === "go") await started(desk.run(needTurn()));
   else if (action === "cancel") desk.cancel(needTurn());
   else if (action === "step") desk.editStep(needTurn(), needStep(), stepPatch(body.patch));
   else if (action === "remove") desk.removeStep(needTurn(), needStep());
@@ -386,6 +468,21 @@ async function orchestratorPost(
     if (!engine && !mode) throw new CompanionHttpError("phone.error.invalid", 400);
     desk.settings({ ...(engine ? { engine } : {}), ...(mode ? { mode } : {}) });
   } else throw new CompanionHttpError("phone.error.notFound", 404);
+}
+
+/**
+ * Go is answered once the plan is running, not once every CLI in it has started (copies of big
+ * repositories, slow CLIs): the phone would hold its buttons all that while, and a stalled link would
+ * leave them held. `run` marks the plan running, or throws that it is gone, before it first waits, so
+ * by the time this looks a refusal has already happened. What comes after shows on the card as the
+ * page polls; a failure there is the step's own, never this request's.
+ */
+async function started(run: Promise<void>): Promise<void> {
+  // Later failures are the card's to show, never an unhandled rejection here.
+  run.catch(() => undefined);
+  // setImmediate runs once every promise already settling has: a refusal thrown before run's first
+  // wait wins the race, however many promise steps sit between here and it.
+  await Promise.race([run, new Promise<void>((done) => setImmediate(done))]);
 }
 
 function languageOf(req: http.IncomingMessage, opts: CompanionHttpOptions): PhoneLanguage {
@@ -404,12 +501,19 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
   // Off, a new code and Quit all stop this server. A phone that was connected gets nothing more from it:
   // its connection would otherwise keep this handler, and the old code, for as long as it polls.
   let stopping = false;
+  let unsigned = 0;
   const server = http.createServer((req, res) => {
     if (stopping) {
       res.destroy();
       return;
     }
-    const served: Served = { stopping: () => stopping, paired: false };
+    const served: Served = {
+      stopping: () => stopping,
+      paired: false,
+      unsigned: () => {
+        unsigned += 1;
+      },
+    };
     handle(req, res, opts, served).catch(async (error: unknown) => {
       if (res.headersSent || stopping || error instanceof Stopping) {
         res.destroy();
@@ -435,6 +539,7 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
       const port = address && typeof address === "object" ? address.port : opts.port;
       resolve({
         port,
+        unsigned: () => unsigned,
         close: () =>
           new Promise((done) => {
             stopping = true;

@@ -7,9 +7,13 @@ import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
 import { useNav, type Route, type RunFilter } from "../state.js";
+import { markKeyboardNavigation } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
+
+/** How many runs All lists; older ones are found by searching. */
+const ALL_RUNS = 300;
 
 export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> }) {
   const t = useT();
@@ -18,7 +22,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const [search, setSearch] = useState("");
   const inbox = useInbox();
   const typed = useDebounced(search.trim(), 160);
-  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: 300 }));
+  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: ALL_RUNS }));
   // One entry per text typed: not kept once the search moves on.
   const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false });
   const searching = filter === "all" && typed !== "";
@@ -69,8 +73,11 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
       const by = isShortcut("runs.next", event) ? 1 : isShortcut("runs.prev", event) ? -1 : 0;
       if (!by) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
+      // A finished run's replayed screen is read-only (its xterm's own textarea included), so J and K still step from there.
+      if (!target?.closest(".term.replay") && target?.closest("input, textarea, select, [contenteditable], .xterm, .modal, .sheet")) return;
       event.preventDefault();
+      // The live CLI the next run shows leaves J and K to the list (see markKeyboardNavigation).
+      markKeyboardNavigation();
       stepRef.current(by);
     };
     window.addEventListener("keydown", onKey);
@@ -132,6 +139,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
               </Fragment>
             );
           })}
+          {filter === "all" && !searching && runs.length >= ALL_RUNS && <div className="list-cut faint">{t("runs.cutSearch", { count: ALL_RUNS })}</div>}
         </div>
       </SidePanel>
       {selected ? (

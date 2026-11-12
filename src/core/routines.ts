@@ -78,15 +78,44 @@ export function isScheduleValid(schedule: Schedule | null | undefined): boolean 
   return false;
 }
 
-/** Interval slots line up with local midnight, so "every 60 minutes" fires on the hour. */
-function localOffsetMs(at: number): number {
-  return -new Date(at).getTimezoneOffset() * 60_000;
+/**
+ * Interval slots are wall-clock times that line up with local midnight, so "every 60 minutes"
+ * fires on the hour and "every day" at midnight, across a change to or from summer time too. A
+ * slot is counted in minutes of the local calendar (days since 1970 times 1440, plus the time of
+ * day) and turned back into an instant with the offset in force at that slot, not now: with
+ * today's offset, the night summer time ended put yesterday's midnight an hour later, after it had
+ * already fired, and it fired again.
+ */
+const DAY_MINUTES = 1440;
+
+/** Minutes since 1970-01-01 00:00 on the local calendar and clock. */
+function wallMinutes(at: number): number {
+  const date = new Date(at);
+  const day = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
+  return day * DAY_MINUTES + date.getHours() * 60 + date.getMinutes();
+}
+
+/** The instant a local calendar minute starts (the later one when the clock skips it). */
+function fromWall(wall: number): number {
+  const day = Math.floor(wall / DAY_MINUTES);
+  const minute = wall - day * DAY_MINUTES;
+  const date = new Date(day * 86_400_000);
+  return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), Math.floor(minute / 60), minute % 60).getTime();
 }
 
 function intervalSlot(at: number, minutes: number): number {
-  const interval = minutes * 60_000;
-  const offset = localOffsetMs(at);
-  return Math.floor((at + offset) / interval) * interval - offset;
+  let wall = Math.floor(wallMinutes(at) / minutes) * minutes;
+  // The hour the clock repeats in autumn can put the slot just after `at`: take the one before.
+  while (fromWall(wall) > at) wall -= minutes;
+  return fromWall(wall);
+}
+
+/** The slot after `slot`, on the same wall-clock grid. */
+function nextSlot(slot: number, minutes: number): number {
+  let wall = (Math.floor(wallMinutes(slot) / minutes) + 1) * minutes;
+  // A slot inside the hour the clock skips in spring lands on the same instant as the next one.
+  while (fromWall(wall) <= slot) wall += minutes;
+  return fromWall(wall);
 }
 
 export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
@@ -109,13 +138,12 @@ export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
 export function nextFireTimes(schedule: Schedule, from: Date, count = 3): Date[] {
   if (count <= 0 || !isScheduleValid(schedule)) return [];
   if (schedule.kind === "every") {
-    const interval = schedule.minutes * 60_000;
     let cursor = intervalSlot(from.getTime(), schedule.minutes);
-    if (cursor <= from.getTime()) cursor += interval;
+    if (cursor <= from.getTime()) cursor = nextSlot(cursor, schedule.minutes);
     const fires: Date[] = [];
     for (let index = 0; index < count; index += 1) {
       fires.push(new Date(cursor));
-      cursor += interval;
+      cursor = nextSlot(cursor, schedule.minutes);
     }
     return fires;
   }

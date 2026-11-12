@@ -10,21 +10,34 @@ name: Release
 # (vibeforge-<version>-linux-x64.tar.zst, from scripts/pack-release.mjs) and a SHA256SUMS for both.
 # The build is installed from its archive and smoke-tested from the installed copy before it is
 # published, as CI's smoke job does on every pull request.
+#
+# Two jobs, so the token that can write releases never runs the build. "build" runs npm ci, Vite
+# and Electron with a read-only token and no shared npm cache, and hands its files over as an
+# artifact. "publish" only downloads them, records where they came from (a signed build provenance
+# attestation for each file in SHA256SUMS: `gh attestation verify <file> --repo L0nE-F0x/VibeForge`)
+# and creates the release.
 on:
   push:
     tags: ["v*.*.*"]
 
-permissions:
-  contents: write
-  checks: read
+# Nothing by default: each job asks for what it needs.
+permissions: {}
+
+# One run per tag: a re-run waits for the one in progress instead of publishing beside it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: release
+  build:
+    name: build
     # The ready-made build's node-pty links against this runner's glibc; Arch's is always newer.
     runs-on: ubuntu-24.04
     # Most of it is waiting for CI on the tagged commit; then building and testing the archive.
     timeout-minutes: 60
+    permissions:
+      contents: read
+      checks: read
     steps:
       # All history and tags: whether the commit is on main, and which tag is the newest.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,10 +101,10 @@ jobs:
             esac
           fi
       # The build runs on the Node CI's smoke test uses; node-pty's addon (Node-API) then runs on any.
+      # No npm cache: what is published is built only from the registry and the lockfile.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
       # npm ci, vite build, then only what the app runs (Electron, node-pty built here, dist, …),
       # with install.sh and SHA256SUMS beside it in assets/. Then the way a person gets it: the
       # installer downloads the archive (laid out like a release), checks it against SHA256SUMS and
@@ -99,19 +112,62 @@ jobs:
       # runs the same script on every pull request (scripts/build-release.sh).
       - name: Pack the ready-made build, install it and smoke-test the installed copy
         run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            assets/install.sh
+            assets/vibeforge-*.tar.zst
+            assets/SHA256SUMS
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+      - name: The files are the ones SHA256SUMS lists
+        working-directory: assets
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: assets/SHA256SUMS
+      # Latest only when no published release is newer. Published releases, not tags: a stray tag
+      # that never became a release (its checks failed, and the tag ruleset keeps it) can't keep
+      # every later release from becoming the one the installer and the in-app Update take.
       - name: Publish, unless it already is
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          state="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null || echo none)"
+          if [ "$state" = published ]; then
             echo "$GITHUB_REF_NAME is already published; leaving it as it is."
             exit 0
           fi
-          newest="$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -v -e - | head -n 1)"
+          newest="$({ gh release list --exclude-drafts --exclude-pre-releases --limit 200 --json tagName --jq '.[].tagName'; echo "$GITHUB_REF_NAME"; } | grep -v -e - | sort -V | tail -n 1)"
           case "$GITHUB_REF_NAME" in
             *-*) kind=(--prerelease --latest=false) ;;
             "$newest") kind=(--latest) ;;
             *) kind=(--latest=false) ;;
           esac
-          gh release create "$GITHUB_REF_NAME" assets/install.sh assets/vibeforge-*.tar.zst assets/SHA256SUMS \
+          files=(assets/install.sh assets/vibeforge-*.tar.zst assets/SHA256SUMS)
+          if [ "$state" = draft ]; then
+            # A run that stopped part-way leaves a draft behind: finish it rather than call it done.
+            echo "$GITHUB_REF_NAME was left as a draft; uploading its files again and publishing it."
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --draft=false "${kind[@]}"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag "${kind[@]}"

@@ -364,3 +364,35 @@
     display: none;
   }
 }
+
+/* A run's Details tab: label and value side by side, the values selectable for copying. */
+.run-details {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.run-details > div {
+  display: contents;
+}
+.run-details dt {
+  color: var(--fg-3);
+}
+.run-details dd {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+/* The end of a list that stops at a limit: says so, and where the rest are. */
+.list-cut {
+  padding: 10px 10px 4px;
+  font-size: var(--fs-xs);
+  text-align: center;
+}

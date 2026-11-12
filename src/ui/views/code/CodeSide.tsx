@@ -42,7 +42,11 @@ export function useCodeSide(workspaces: Workspace[]) {
   // The address a click or the bar just asked for, shown before the workspace file catches up.
   const [pendingDock, setPendingDock] = useState<{ id: string; url: string } | null>(null);
 
-  useEffect(() => writeLocal("vf.code.side", side), [side]);
+  // Saved once a drag of its edge ends, not on every step of it.
+  const resizing = useRef(false);
+  useEffect(() => {
+    if (!resizing.current) writeLocal("vf.code.side", side);
+  }, [side]);
   // On a narrow tile the side panel steps aside without forgetting it was open; the button brings it back.
   const narrow = useNarrowStage();
   const [narrowSide, setNarrowSide] = useState(false);
@@ -87,6 +91,8 @@ export function useCodeSide(workspaces: Workspace[]) {
   return {
     side,
     setSide,
+    /** True while its edge is being dragged: the width is saved once the drag ends. */
+    resizing,
     narrow,
     open,
     setOpen,
@@ -110,6 +116,7 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
     const startWidth = side.width;
     const target = event.currentTarget as HTMLElement;
     target.classList.add("dragging");
+    panel.resizing.current = true;
     const move = (moveEvent: PointerEvent) => {
       const width = Math.min(900, Math.max(220, startWidth - (moveEvent.clientX - startX)));
       setSide((prev) => ({ ...prev, width }));
@@ -118,6 +125,9 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
       target.classList.remove("dragging");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      // Now the width is kept.
+      panel.resizing.current = false;
+      setSide((prev) => ({ ...prev }));
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);

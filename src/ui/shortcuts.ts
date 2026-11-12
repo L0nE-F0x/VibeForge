@@ -38,7 +38,11 @@ export type ShortcutScope =
   /** A list panel with a row focused (components/SidePanel.tsx). */
   | "list"
   /** The welcome tour, while it is up (components/Tour.tsx). */
-  | "tour";
+  | "tour"
+  /** Go to anything, while it is open (components/Switcher.tsx). */
+  | "switcher"
+  /** Code's workspace list, with a workspace focused (views/code/WorkspaceList.tsx). */
+  | "workspaceList";
 
 export interface Shortcut {
   /** How the handlers and the tests name it. */
@@ -88,6 +92,9 @@ const LIST = [
   { id: "app.forward", keys: "Alt+→", label: "shortcuts.forward", group: "shortcuts.anywhere", scope: "app", paused: "never", chord: { alt: true, key: "ArrowRight" } },
   { id: "app.sideButtons", gesture: "shortcuts.sideButtons", label: "shortcuts.backForward", group: "shortcuts.anywhere", scope: "app", paused: "never" },
   { id: "list.move", keys: "↑/↓", label: "shortcuts.listMove", group: "shortcuts.anywhere", scope: "list", paused: "never", chord: { ctrl: false, shift: false, alt: false, meta: false, key: /^(ArrowUp|ArrowDown|Home|End)$/ } },
+  // Inside Go to anything, as well as ↑/↓: the keys a terminal or Emacs user reaches for.
+  { id: "switcher.next", keys: "Ctrl+N", label: "shortcuts.switcherNext", group: "shortcuts.anywhere", scope: "switcher", paused: "never", chord: { ctrl: true, shift: false, alt: false, key: "n" } },
+  { id: "switcher.prev", keys: "Ctrl+P", label: "shortcuts.switcherPrev", group: "shortcuts.anywhere", scope: "switcher", paused: "never", chord: { ctrl: true, shift: false, alt: false, key: "p" } },
   { id: "app.panel", keys: "Ctrl+Shift+B", label: "shortcuts.panel", group: "shortcuts.anywhere", scope: "app", paused: "never", chord: { ctrl: true, shift: true, key: "b" }, terminal: "window", inTerminal: { alt: false } },
   { id: "app.shortcuts", keys: "Ctrl+Shift+/", label: "shortcuts.list", group: "shortcuts.anywhere", scope: "app", paused: "never", chord: { ctrl: true, shift: true, code: "Slash" }, terminal: "window", inTerminal: { alt: false } },
   { id: "overlay.close", keys: "Esc", label: "shortcuts.closeDialog", group: "shortcuts.anywhere", scope: "overlay", paused: "never", chord: { key: "Escape" } },
@@ -103,6 +110,7 @@ const LIST = [
   { id: "code.movePane", gesture: "shortcuts.drag", label: "shortcuts.movePane", group: "shortcuts.code", scope: "code", paused: "never" },
   { id: "code.moveWorkspace", gesture: "shortcuts.drag", label: "shortcuts.moveWorkspace", group: "shortcuts.code", scope: "code", paused: "never" },
   { id: "code.renameWorkspace", gesture: "shortcuts.doubleClick", label: "shortcuts.renameWorkspace", group: "shortcuts.code", scope: "code", paused: "never" },
+  { id: "workspace.rename", keys: "F2", label: "shortcuts.renameFocusedWorkspace", group: "shortcuts.code", scope: "workspaceList", paused: "never", chord: { ctrl: false, alt: false, shift: false, key: "F2" } },
 
   // ---------------------------------------------------------------- terminals
   { id: "terminal.copy", keys: "Ctrl+C", label: "shortcuts.copy", group: "shortcuts.terminals", scope: "terminal", paused: "never", chord: { ctrl: true, shift: false, alt: false, meta: false, key: "c" }, terminal: "own" },

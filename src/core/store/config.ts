@@ -34,7 +34,7 @@ export function defaultSettings(): Settings {
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
-    orchestrator: { engine: "", mode: "plan", model: "" },
+    orchestrator: { engine: "", mode: "plan", model: "", projectsFolder: "" },
   };
 }
 
@@ -179,6 +179,7 @@ export class Config {
         engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
         mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
         model: str(raw.orchestrator?.model).trim().slice(0, 120),
+        projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
       },
     };
   }
@@ -218,17 +219,23 @@ export class Config {
   }
 
   readWorkspaces(): WorkspaceFile {
-    const raw = readJson<unknown>(path.join(this.configRoot, "workspaces.json"), null);
-    const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
-    const workspaces = Array.isArray(list)
-      ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
-      : [];
-    const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
-    return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+    const file = path.join(this.configRoot, "workspaces.json");
+    // Read for nearly everything (each task, run and terminal names its workspace): parsed once while it holds still.
+    return this.cache.read(file, () => {
+      const raw = readJson<unknown>(file, null);
+      const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
+      const workspaces = Array.isArray(list)
+        ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
+        : [];
+      const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
+      return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+    });
   }
 
   writeWorkspaces(file: WorkspaceFile): void {
-    writeJson(path.join(this.configRoot, "workspaces.json"), file);
+    const target = path.join(this.configRoot, "workspaces.json");
+    writeJson(target, file);
+    this.cache.forget(target);
   }
 
   readLayout(workspaceId: string): LayoutNode | null {

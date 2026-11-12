@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Engine, EngineRow } from "./types.js";
 
+export { cleanModel, effortLevels, launchKind, launchOptionArgs, takesModel, type LaunchKind } from "../shared/launch-options.js";
+
 /**
  * Seed rows for the CLIs VibeForge knows how to hand a prompt to. A missing
  * engines.json is filled with these. A file that already exists keeps the
@@ -297,12 +299,15 @@ export function planLaunch(
     promptFile?: string | null;
     /** From {@link instructionArgs}: what the CLI gets, and the shorter stand-in the run record keeps. */
     instructions?: { argv: string[]; record: string[] } | null;
+    /** From launchOptionArgs: its model and effort, kept in the record as they are. */
+    options?: string[] | null;
   },
 ): LaunchPlan {
   // Options before the resume words, which can be a subcommand (`codex resume --last`).
   const resume = opts.resumeArgs?.length ? opts.resumeArgs : opts.continueSession && row.continueArgs?.length ? row.continueArgs : [];
-  const argv = [binPath, ...row.args, ...(opts.instructions?.argv ?? []), ...resume];
-  const record = [binPath, ...row.args, ...(opts.instructions?.record ?? []), ...resume];
+  const options = opts.options ?? [];
+  const argv = [binPath, ...row.args, ...options, ...(opts.instructions?.argv ?? []), ...resume];
+  const record = [binPath, ...row.args, ...options, ...(opts.instructions?.record ?? []), ...resume];
   const prompt = opts.prompt?.trim() ? opts.prompt : null;
   if (!prompt) return { argv, recordArgv: record, pasteInput: null };
   if (!row.promptArgs?.length) return { argv, recordArgv: record, pasteInput: prompt };

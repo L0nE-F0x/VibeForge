@@ -254,7 +254,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       if (!isShortcut("toast.undo", event)) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true'], .xterm")) return;
+      // A finished run's replayed screen (its xterm's own textarea included) takes no typing, so Ctrl+Z still undoes there.
+      if (!target?.closest(".term.replay") && target?.closest("input, textarea, select, [contenteditable='true'], .xterm")) return;
       const toast = latest.current;
       if (!toast?.action) return;
       event.preventDefault();

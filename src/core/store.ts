@@ -33,7 +33,7 @@ export class Store {
     const cache = new ReadCache();
     this.config = new Config(configRoot, cache);
     this.library = new Library(configRoot, cache);
-    this.chats = new Chats(dataRoot);
+    this.chats = new Chats(dataRoot, cache);
   }
 
   close(): void {

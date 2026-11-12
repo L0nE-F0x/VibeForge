@@ -85,6 +85,7 @@ const PAUSED_LOOK_MS = 50;
  *   working: boolean,
  *   unsent: number,
  *   paused: boolean,
+ *   holds?: number,
  *   pauseTimer: NodeJS.Timeout | undefined,
  *   gone: boolean,
  *   exitWaiters?: Array<() => void>,
@@ -294,13 +295,24 @@ function writeInput(session, data) {
 }
 
 /**
+ * Text that can only be read as text once pasted: line breaks become "\n", and every other control
+ * byte goes, ESC and DEL included. With ESC gone no paste marker can survive, however it is nested
+ * (`\x1b[20\x1b[201~1~` would collapse into a live end-of-paste with a one-pass strip), so
+ * nothing after it can arrive as keystrokes: no Ctrl+C, no Enter that sends a draft.
+ * @param {unknown} text
+ */
+function pasteSafe(text) {
+  return String(text).replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+}
+
+/**
  * Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first).
  * @param {Session} session
  * @param {string} text
  */
 function sendText(session, text, enter = true) {
   if (session.exited) return;
-  const clean = String(text).replace(/\r\n/g, "\n").replace(/\x1b\[20[01]~/g, "");
+  const clean = pasteSafe(text);
   if (session.mirror.modes.bracketedPasteMode) {
     writeInput(session, `\x1b[200~${clean}\x1b[201~`);
     if (enter) setTimeout(() => writeInput(session, "\r"), ENTER_AFTER_PASTE_MS);
@@ -404,6 +416,34 @@ function release(session) {
   session.pauseTimer = undefined;
   if (!session.paused) return;
   session.paused = false;
+  // A snapshot holding the output resumes it when it is done.
+  if (session.holds) return;
+  try {
+    session.term.resume();
+  } catch {
+    /* the pty closed underneath us */
+  }
+}
+
+/**
+ * Stop reading a terminal's output for a moment, so nothing new reaches its mirror while a
+ * snapshot is taken. Holds nest; flow control's own pause is left as it is.
+ * @param {Session} session
+ */
+function hold(session) {
+  session.holds = (session.holds || 0) + 1;
+  if (session.holds > 1 || session.paused) return;
+  try {
+    session.term.pause();
+  } catch {
+    /* the pty closed underneath us */
+  }
+}
+
+/** @param {Session} session */
+function unhold(session) {
+  session.holds = Math.max(0, (session.holds || 0) - 1);
+  if (session.holds > 0 || session.paused || session.exited) return;
   try {
     session.term.resume();
   } catch {
@@ -610,20 +650,40 @@ async function handle(msg) {
         reply(msg, { ok: true, ansi: "", seq: 0, cols: 0, rows: 0, alive: false });
         return;
       }
+      // The screen and the number it is sent with must agree: output that reached the mirror
+      // after `seq` was read would be in the screen and then replayed on top of it by the pane. So
+      // the output is held while the mirror catches up and the screen is read in the same turn.
+      hold(session);
       flush(session);
       const seq = session.seq;
+      captureSynced(session)
+        .then(
+          () => {
+            reply(msg, {
+              ok: true,
+              ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
+              plain: recentText(session, 160),
+              seq,
+              cols: session.cols,
+              rows: session.rows,
+              alive: true,
+            });
+          },
+          (error) => reply(msg, { ok: false, error: messageOf(error) }),
+        )
+        .finally(() => unhold(session));
+      return;
+    }
+    case "screen": {
+      // The last lines as text, for the phone and for reading a CLI's answer: no colours and no
+      // scrollback, so none of the cost of serializing the whole buffer.
+      const session = sessions.get(msg.ptyId);
+      if (!session || session.exited) {
+        reply(msg, { ok: true, plain: "", alive: false });
+        return;
+      }
       captureSynced(session).then(
-        () => {
-          reply(msg, {
-            ok: true,
-            ansi: session.serializer.serialize({ scrollback: SCROLLBACK_LINES }),
-            plain: recentText(session, 160),
-            seq,
-            cols: session.cols,
-            rows: session.rows,
-            alive: true,
-          });
-        },
+        () => reply(msg, { ok: true, plain: recentText(session, 160), alive: true }),
         (error) => reply(msg, { ok: false, error: messageOf(error) }),
       );
       return;
@@ -814,6 +874,9 @@ function exitAfterShutdown() {
 
 process.stdin.on("end", exitAfterShutdown);
 process.on("SIGTERM", exitAfterShutdown);
+// The terminal VibeForge was started from closing: end the sessions properly (their run files
+// written) rather than dying mid-write.
+process.on("SIGHUP", exitAfterShutdown);
 process.on("SIGINT", () => {
   /* Ctrl-C in the parent's terminal must not kill every session; the parent decides. */
 });

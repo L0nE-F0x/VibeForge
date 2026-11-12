@@ -37,12 +37,31 @@ export function overlayOpen(): boolean {
   return stack.length > 0;
 }
 
+/** How long after a list key a session it opened leaves focus in the list. */
+const KEYBOARD_NAV_MS = 600;
+let navigatingUntil = 0;
+
+/**
+ * A list was just moved through by keyboard (↑/↓ in a side list, J/K in Runs). For a moment a
+ * terminal or box that move opened doesn't take focus, so the next key keeps moving through the
+ * list instead of landing in a running CLI, where Enter could answer its question.
+ */
+export function markKeyboardNavigation(now = Date.now()): void {
+  navigatingUntil = now + KEYBOARD_NAV_MS;
+}
+
+/** Whether a list was moved through by keyboard a moment ago. */
+export function keyboardNavigating(now = Date.now()): boolean {
+  return now < navigatingUntil;
+}
+
 /**
  * Whether something may take focus on its own (a terminal or a chat box as it appears): not from
- * under a menu or dialog it isn't part of. Taken from the switcher, Esc and Enter would go to
- * the terminal behind it instead.
+ * under a menu or dialog it isn't part of, and not while someone is moving through a list by
+ * keyboard. Taken from the switcher, Esc and Enter would go to the terminal behind it instead.
  */
 export function mayTakeFocus(element: Element | null): boolean {
+  if (keyboardNavigating()) return false;
   const top = topOverlay();
   if (!top) return true;
   const node = top.node?.();
@@ -56,7 +75,8 @@ type EscapeEvent = Pick<KeyboardEvent, "key" | "shiftKey" | "defaultPrevented" |
 /** Whether a key was typed into a terminal: its program gets it, not the window. */
 function inTerminal(target: EscapeEvent["target"]): boolean {
   const closest = (target as { closest?: (selector: string) => unknown } | null)?.closest;
-  return typeof closest === "function" && Boolean(closest.call(target, ".xterm"));
+  // A finished run's replayed screen has no program behind it: plain Escape closes there.
+  return typeof closest === "function" && Boolean(closest.call(target, ".xterm")) && !closest.call(target, ".replay");
 }
 
 /**

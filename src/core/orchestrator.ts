@@ -9,9 +9,12 @@
 import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
-import { brainKind, type OrchestratorStep, type PlanContext } from "../shared/orchestrator.js";
+import { cleanModel, effortLevels } from "../shared/launch-options.js";
+import { brainKind, plannedId, type OrchestratorStep, type PlanContext } from "../shared/orchestrator.js";
 
 export * from "../shared/orchestrator.js";
+
+const STEP_FIELDS = ["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace"] as const;
 
 export const PLAN_SCHEMA = {
   type: "object",
@@ -24,12 +27,17 @@ export const PLAN_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          kind: { type: "string", enum: ["start", "tell", "stop"] },
+          kind: { type: "string", enum: ["start", "tell", "stop", "workspace", "apply", "discard", "show"] },
           engine: { type: "string" },
           workspace: { type: "string" },
           branch: { type: "string" },
           prompt: { type: "string" },
           target: { type: "string" },
+          folder: { type: "string" },
+          git: { type: "boolean" },
+          model: { type: "string" },
+          effort: { type: "string" },
+          inPlace: { type: "boolean" },
         },
         required: ["kind"],
       },
@@ -40,13 +48,13 @@ export const PLAN_SCHEMA = {
 
 /**
  * The same plan, the way OpenAI's structured output wants it: every field required. Codex and
- * Antigravity get this one; an empty string stands for a field that doesn't apply.
+ * Antigravity get this one; an empty string (or false) stands for a field that doesn't apply.
  */
 export const STRICT_PLAN_SCHEMA = {
   ...PLAN_SCHEMA,
   properties: {
     ...PLAN_SCHEMA.properties,
-    steps: { ...PLAN_SCHEMA.properties.steps, items: { ...PLAN_SCHEMA.properties.steps.items, required: ["kind", "engine", "workspace", "branch", "prompt", "target"] } },
+    steps: { ...PLAN_SCHEMA.properties.steps, items: { ...PLAN_SCHEMA.properties.steps.items, required: [...STEP_FIELDS] } },
   },
 } as const;
 
@@ -64,9 +72,11 @@ export interface BrainOptions {
 
 /**
  * One planning turn's command line, tools off or read-only, output held to the plan's schema.
- * - Grok Build 1.0.77: `-p` one turn, `--rules`, `--json-schema`, `-s <uuid>` names a session that `-r` resumes.
+ * - Grok Build 1.0.77: `-p` one turn, `--rules`, `--json-schema`, `-s <uuid>` names a session that `-r`
+ *   resumes, low `--reasoning-effort`.
  * - Claude Code 2.1: `--print`, `--append-system-prompt`, `--session-id`/`--resume`, and `--tools ""`
- *   with only options after it, as it takes every word up to the next one.
+ *   with only options after it, as it takes every word up to the next one. Low effort, and
+ *   `--strict-mcp-config` with no MCP config, so none of the person's MCP servers start for a plan.
  * - Codex 0.16x: `exec --json`, `--output-schema <file>`, a read-only sandbox, the rules as developer
  *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort.
  * - Antigravity CLI: `-p` with the rules in the message (it has no option for them), `--json-schema`,
@@ -91,6 +101,9 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       "--no-subagents",
       "--no-plan",
       "--disable-web-search",
+      // Planning is light work: a low effort answers sooner.
+      "--reasoning-effort",
+      "low",
       ...(model ? ["-m", model] : []),
       opts.resume ? "-r" : "-s",
       opts.sessionId,
@@ -108,6 +121,10 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       JSON.stringify(PLAN_SCHEMA),
       "--append-system-prompt",
       opts.rules,
+      // Planning is light work, and needs none of the person's MCP servers (each one is started first).
+      "--effort",
+      "low",
+      "--strict-mcp-config",
       ...(model ? ["--model", model] : []),
       opts.resume ? "--resume" : "--session-id",
       opts.sessionId,
@@ -160,30 +177,56 @@ export function signedOut(text: string): boolean {
   return /\b401\b|unauthori[sz]ed|not logged in|please run \/login|log ?in again|sign ?in (again|first|required)|invalid api key/i.test(text);
 }
 
+/**
+ * Whether a planner's error means the session it was asked to resume isn't there any more (its
+ * files were tidied away, or it was never saved), so a new one has to start.
+ */
+export function sessionGone(text: string): boolean {
+  return /no conversation found|(session|conversation|thread) (id )?(\S+ )?(was )?not found|could not find (the )?(session|conversation|thread)|unknown (session|conversation|thread)|no (such )?(session|conversation|thread)( found| with)/i.test(text);
+}
+
 /** What the planning CLI is told each turn: its job, the steps it may give, and what is here right now. */
 export function orchestratorRules(context: PlanContext): string {
   const workspaces = context.workspaces.length
     ? context.workspaces.map((item) => `- ${item.name} (${item.folder}${item.git ? "" : ", not a git repository"})`).join("\n")
-    : "- none yet (the person adds them in Code)";
+    : "- none yet";
   const engines = context.engines.filter((item) => item.available);
-  const engineList = engines.length ? engines.map((item) => `- ${item.id}: ${item.label}`).join("\n") : "- none found on PATH";
+  const engineList = engines.length
+    ? engines
+        .map((item) => {
+          const efforts = item.bin !== undefined ? effortLevels({ id: item.id, bin: item.bin }) : [];
+          return `- ${item.id}: ${item.label}${efforts.length ? ` (effort: ${efforts.join(", ")})` : ""}`;
+        })
+        .join("\n")
+    : "- none found on PATH";
   const running = context.running.length
-    ? context.running.map((item) => `- ${item.id}: ${item.engine} in ${item.workspace} (${item.folder}), ${item.working ? "working" : "waiting for input"}${item.orchestrated ? ", you started it" : ""}`).join("\n")
+    ? context.running
+        .map(
+          (item) =>
+            `- ${item.id}: ${item.engine} in ${item.workspace} (${item.folder}), ${item.working ? "working" : "waiting for input"}${item.orchestrated ? ", you started it" : ""}${item.branch ? `, in its own copy on ${item.branch}` : ""}${item.asked ? `; asked: ${item.asked}` : ""}`,
+        )
+        .join("\n")
     : "- none";
+  const copies = context.copies?.length ? context.copies.map((item) => `- ${item.id}: ${item.name} (branch ${item.branch}), from ${item.workspace}`).join("\n") : "- none";
+  const projects = context.projectsFolder || "~/Projects";
   return [
     "You are Maestro, the orchestrator inside VibeForge, a desktop app where a person runs several coding CLIs at once.",
     "The person talks to you, often by voice, so expect dictation slips: misheard names, missing punctuation. Match names generously.",
     "You never write code, read files or use tools yourself. You turn what the person asks into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
     "",
     "Steps:",
-    "- start: open a coding CLI in a workspace, on a new branch in its own copy of that workspace (a git worktree), with its first instruction. Fields: engine (an id below), workspace (a name below), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements).",
+    "- start: open a coding CLI in a workspace. Fields: engine (an id below), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
+    `- workspace: make a new workspace. Fields: workspace (its name, in the person's words), folder (only if they said where; otherwise leave it empty and it goes in ${projects}/<name>), git (true when they want it to be a git repository). An existing folder is only added, never changed.`,
     "- tell: send a message to a CLI that is already running. Fields: target (its id below), prompt (the message).",
     "- stop: close a running CLI. Fields: target.",
+    "- show: open a running CLI in Code for the person to look at. Fields: target.",
+    "- apply: bring a copy's changes into the workspace it came from. discard: throw a copy away. Fields: target (a copy's id below).",
     "",
     "Rules:",
     "- One start step per CLI the person asks for. Several are fine: they run at the same time.",
-    "- Use only the workspaces, engines and ids listed below. Never pick an engine the person didn't ask for; if they didn't say which, ask.",
-    "- If a name isn't there or the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, what you can do), answer in `say` with no steps.",
+    "- Use only the workspaces, engines, ids and copies listed below, or a workspace this plan makes. Never pick an engine the person didn't ask for; if they didn't say which, ask.",
+    "- When they ask for a workspace that isn't listed, make it with a workspace step first if they asked for a new one; if a name isn't there and they didn't ask for a new one, ask.",
+    "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do), answer in `say` with no steps.",
     "- If they change a plan you just gave, give the whole corrected plan again.",
     "- `say` is one or two short plain sentences: what you will do, or your question. No markdown.",
     "",
@@ -195,12 +238,29 @@ export function orchestratorRules(context: PlanContext): string {
     "",
     "Running now:",
     running,
+    "",
+    "Copies waiting for review:",
+    copies,
   ].join("\n");
+}
+
+export interface RawStep {
+  kind: string;
+  engine?: string;
+  workspace?: string;
+  branch?: string;
+  prompt?: string;
+  target?: string;
+  folder?: string;
+  git?: boolean;
+  model?: string;
+  effort?: string;
+  inPlace?: boolean;
 }
 
 export interface RawPlan {
   say: string;
-  steps: Array<{ kind: string; engine?: string; workspace?: string; branch?: string; prompt?: string; target?: string }>;
+  steps: RawStep[];
 }
 
 /** What one planning turn printed: the plan, its words, the session it reported, and any error. */
@@ -285,7 +345,22 @@ function asPlan(value: unknown): RawPlan | null {
       if (!item || typeof item !== "object") return [];
       const step = item as Record<string, unknown>;
       const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
-      return [{ kind: field("kind") ?? "", engine: field("engine"), workspace: field("workspace"), branch: field("branch"), prompt: field("prompt"), target: field("target") }];
+      const flag = (key: string) => step[key] === true;
+      return [
+        {
+          kind: field("kind") ?? "",
+          engine: field("engine"),
+          workspace: field("workspace"),
+          branch: field("branch"),
+          prompt: field("prompt"),
+          target: field("target"),
+          folder: field("folder"),
+          git: flag("git"),
+          model: field("model"),
+          effort: field("effort"),
+          inPlace: flag("inPlace"),
+        },
+      ];
     }),
   };
 }
@@ -293,12 +368,31 @@ function asPlan(value: unknown): RawPlan | null {
 /** Lowercase letters and digits only, so "vibe forge", "VibeForge" and "vibe-forge" are one name. */
 const squash = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
-/** The item a spoken name means: its id, its exact name, the same letters, or the one name that starts with or holds it. */
-export function matchName<T>(asked: string | undefined, items: readonly T[], names: (item: T) => string[]): T | null {
+/** The words in a name, squashed: "GitHub Copilot" is ["github", "copilot"]. */
+const words = (value: string) => value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+/**
+ * The item a spoken name means: its id, its exact name, the same letters, the one name that starts
+ * with or holds it, or (with `byWord`, for CLIs and workspaces, not ids) the one that shares a whole
+ * word with it ("GitHub Copilot" is Copilot). A name of one or two letters ("pi") only counts whole,
+ * so it can't turn up inside another word.
+ */
+export function matchName<T>(asked: string | undefined, items: readonly T[], names: (item: T) => string[], byWord = false): T | null {
   const wanted = squash(asked ?? "");
   if (!wanted) return null;
-  for (const test of [(name: string) => name === wanted, (name: string) => name.startsWith(wanted), (name: string) => name.includes(wanted) || wanted.includes(name)]) {
-    const found = items.filter((item) => names(item).some((name) => name && test(squash(name))));
+  const spoken = words(asked ?? "");
+  const holds = (name: string) => (name.length >= 3 && wanted.includes(name)) || (wanted.length >= 3 && name.includes(wanted));
+  // Every word of its name was said ("the Pi agent" is Pi), then any longer word of it ("GitHub Copilot").
+  const said = (raw: string) => words(raw).every((word) => spoken.includes(word));
+  const shares = (raw: string) => words(raw).some((word) => word.length >= 3 && spoken.includes(word));
+  const tests: Array<(name: string, raw: string) => boolean> = [
+    (name) => name === wanted,
+    (name) => name.startsWith(wanted),
+    (name) => holds(name),
+    ...(byWord ? [(_name: string, raw: string) => said(raw), (_name: string, raw: string) => shares(raw)] : []),
+  ];
+  for (const test of tests) {
+    const found = items.filter((item) => names(item).some((raw) => raw && test(squash(raw), raw)));
     if (found.length === 1) return found[0];
     // Two that fit as well as each other: the person picks on the card.
     if (found.length > 1) return null;
@@ -338,23 +432,56 @@ export function branchFromPrompt(prompt: string): string {
 let stepCounter = 0;
 const newStepId = () => `s${Date.now().toString(36)}${(stepCounter++).toString(36)}`;
 
+/** The folder a new workspace gets: the one the plan named, else `<projects folder>/<name>`. */
+export function plannedFolder(name: string, folder: string | undefined, projects: string): string {
+  const named = (folder ?? "").trim().replace(/\/+$/, "");
+  if (named) return named;
+  return `${(projects || "~/Projects").replace(/\/+$/, "")}/${name.trim()}`;
+}
+
 /** Turn a raw plan into steps with ids VibeForge knows, each flagged with what's missing. */
 export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorStep[] {
   const steps: OrchestratorStep[] = [];
+  // The workspaces this plan makes, under placeholder ids, for its later steps to name.
+  const planned: PlanContext["workspaces"] = [];
+  const kinds = ["start", "tell", "stop", "workspace", "apply", "discard", "show"] as const;
   for (const item of raw.steps) {
-    const kind = item.kind === "start" || item.kind === "tell" || item.kind === "stop" ? item.kind : null;
+    const kind = kinds.find((value) => value === item.kind) ?? null;
     if (!kind) continue;
     const base: OrchestratorStep = { id: newStepId(), kind, engineId: "", workspaceId: "", branch: "", prompt: item.prompt ?? "", target: "", asked: "", state: "planned", error: null, ptyId: null, openedWorkspaceId: null };
-    if (kind === "start") {
-      const workspace = matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)]);
-      const engine = matchName(item.engine, context.engines, (entry) => [entry.id, entry.label]);
-      const branch = workspace && !workspace.git ? "" : cleanBranch(item.branch ?? "") || branchFromPrompt(item.prompt ?? "");
-      steps.push({ ...base, workspaceId: workspace?.id ?? "", engineId: engine?.id ?? "", branch, asked: [item.engine, item.workspace].filter(Boolean).join(" · ") });
+    if (kind === "workspace") {
+      const name = (item.workspace ?? "").trim();
+      const step: OrchestratorStep = { ...base, prompt: "", name, folder: plannedFolder(name, item.folder, context.projectsFolder ?? ""), git: Boolean(item.git), asked: name };
+      planned.push({ id: plannedId(step.id), name, folder: step.folder ?? "", git: false });
+      steps.push(step);
+    } else if (kind === "start") {
+      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+      const workspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const engine = matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
+      const prompt = item.prompt ?? "";
+      const named = cleanBranch(item.branch ?? "");
+      // No copy: a folder that isn't a repository (or is new, with nothing committed), one the person
+      // asked to work in directly, or a CLI only opened with no work and no branch to put it on.
+      const inPlace = !workspace?.git || item.inPlace === true || (!named && !prompt.trim());
+      const branch = inPlace ? "" : named || branchFromPrompt(prompt);
+      const effort = (item.effort ?? "").trim().toLowerCase();
+      steps.push({
+        ...base,
+        workspaceId: workspace?.id ?? "",
+        engineId: engine?.id ?? "",
+        branch,
+        model: cleanModel(item.model),
+        effort,
+        asked: [item.engine, item.workspace].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "apply" || kind === "discard") {
+      const copies = context.copies ?? [];
+      const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
+      steps.push({ ...base, prompt: "", target: copy?.id ?? "", asked: item.target ?? "" });
     } else {
       const target = context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]);
-      steps.push({ ...base, target: target?.id ?? "", asked: item.target ?? "" });
+      steps.push({ ...base, prompt: kind === "tell" ? base.prompt : "", target: target?.id ?? "", asked: item.target ?? "" });
     }
   }
   return steps;
 }
-

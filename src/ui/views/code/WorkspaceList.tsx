@@ -9,6 +9,7 @@ import { Button, Input, Menu, MenuButton, Popover, type MenuItem } from "../../c
 import { workspaceMark, WorkspaceState } from "../../components/WorkspaceState.js";
 import { useT } from "../../i18n/index.js";
 import { useAction } from "../../state.js";
+import { isShortcut } from "../../shortcuts.js";
 
 const WORKSPACE_MIME = "application/x-vibeforge-workspace";
 
@@ -100,7 +101,7 @@ export function WorkspaceList({
               onDoubleClick={() => setRenaming(workspace.id)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") onSelect(workspace);
-                if (event.key === "F2") setRenaming(workspace.id);
+                if (isShortcut("workspace.rename", event)) setRenaming(workspace.id);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();

@@ -44,5 +44,6 @@ export function companionWire(ctx: MainContext, stats: Pick<Stats, "planSummary"
     plans: () => stats.planSummary(false),
     hear: (pcm: Buffer, prompt: string) => voice.transcribe(pcm, prompt),
     canHear: () => voice.canTranscribe(),
+    version: app.getVersion(),
   };
 }

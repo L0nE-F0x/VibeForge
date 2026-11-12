@@ -254,16 +254,21 @@ export class Library {
 
   getRoutine(id: string): Routine | null {
     if (!isSafeId(id)) return null;
-    return normalizeRoutine(id, readYaml(path.join(this.configRoot, "routines", `${id}.yaml`)));
+    const file = path.join(this.configRoot, "routines", `${id}.yaml`);
+    return this.cache.read(file, () => normalizeRoutine(id, readYaml(file)));
   }
 
   writeRoutine(routine: Routine): void {
-    writeFileAtomic(path.join(this.configRoot, "routines", `${routine.id}.yaml`), yamlText(routine));
+    const file = path.join(this.configRoot, "routines", `${routine.id}.yaml`);
+    writeFileAtomic(file, yamlText(routine));
+    this.cache.forget(file);
   }
 
   deleteRoutine(id: string): void {
     if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "routines", `${id}.yaml`), { force: true });
+    const file = path.join(this.configRoot, "routines", `${id}.yaml`);
+    fs.rmSync(file, { force: true });
+    this.cache.forget(file);
   }
 
   // ---------------------------------------------------------------- tasks
@@ -276,16 +281,21 @@ export class Library {
 
   getTask(id: string): Task | null {
     if (!isSafeId(id)) return null;
-    return normalizeTask(id, readYaml(path.join(this.configRoot, "tasks", `${id}.yaml`)));
+    const file = path.join(this.configRoot, "tasks", `${id}.yaml`);
+    return this.cache.read(file, () => normalizeTask(id, readYaml(file)));
   }
 
   writeTask(task: Task): void {
-    writeFileAtomic(path.join(this.configRoot, "tasks", `${task.id}.yaml`), yamlText(task));
+    const file = path.join(this.configRoot, "tasks", `${task.id}.yaml`);
+    writeFileAtomic(file, yamlText(task));
+    this.cache.forget(file);
   }
 
   deleteTask(id: string): void {
     if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "tasks", `${id}.yaml`), { force: true });
+    const file = path.join(this.configRoot, "tasks", `${id}.yaml`);
+    fs.rmSync(file, { force: true });
+    this.cache.forget(file);
   }
 
   private listYaml<T>(folder: string, normalize: (id: string, value: unknown) => T | null): T[] {
@@ -300,7 +310,9 @@ export class Library {
       if (!entry.endsWith(".yaml")) continue;
       const id = entry.slice(0, -5);
       if (!isSafeId(id)) continue;
-      const item = normalize(id, readYaml(path.join(this.configRoot, folder, entry)));
+      const file = path.join(this.configRoot, folder, entry);
+      // Parsed once while the file holds still: the task board asks for every task on each refresh.
+      const item = this.cache.read(file, () => normalize(id, readYaml(file)));
       if (item) items.push(item);
     }
     return items;

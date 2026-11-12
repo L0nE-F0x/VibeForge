@@ -1,10 +1,19 @@
 import { net } from "electron";
 import { describeError, type LogFile } from "../src/core/log.js";
-import { isNewer, releaseFrom, type InstallKind } from "../src/core/updates.js";
+import { isNewer, releaseFrom, type InstallKind, type Release } from "../src/core/updates.js";
 import type { UpdateInfo } from "../src/shared/api.js";
 
 const FIRST_CHECK_MS = 20_000;
 const EVERY_MS = 6 * 60 * 60 * 1000;
+
+type Fetch = (url: string, init: RequestInit) => Promise<Response>;
+
+/**
+ * Electron's fetch, on the session the browser dock shares, without that session's cookies: a
+ * GitHub sign-in in the dock must not ride along on the update check, which sends nothing but the
+ * version in its User-Agent.
+ */
+const withoutCookies: Fetch = (url, init) => net.fetch(url, { ...init, credentials: "omit" });
 
 /**
  * Asks GitHub which release is newest: shortly after start and every six hours while automatic
@@ -19,14 +28,17 @@ export class Updater {
     private readonly opts: {
       current: string;
       install: InstallKind;
-      command: string | null;
+      /** The shell command Update runs, for the release just read (null before any has been). */
+      command: (latest: Release | null) => string | null;
       url: string;
       log: LogFile;
       enabled: () => boolean;
       changed: () => void;
+      /** Stand-in for tests. */
+      fetch?: Fetch;
     },
   ) {
-    this.info = { current: opts.current, latest: null, available: false, checking: false, checkedAt: null, error: null, install: opts.install, command: opts.command };
+    this.info = { current: opts.current, latest: null, available: false, checking: false, checkedAt: null, error: null, install: opts.install, command: opts.command(null) };
   }
 
   get(): UpdateInfo {
@@ -60,7 +72,7 @@ export class Updater {
   private async fetchLatest(): Promise<UpdateInfo> {
     this.set({ checking: true });
     try {
-      const response = await net.fetch(this.opts.url, {
+      const response = await (this.opts.fetch ?? withoutCookies)(this.opts.url, {
         headers: { Accept: "application/vnd.github+json", "User-Agent": `VibeForge/${this.opts.current}` },
         signal: AbortSignal.timeout(15_000),
       });
@@ -68,7 +80,7 @@ export class Updater {
       if (!response.ok && response.status !== 404) throw new Error(`GitHub answered ${response.status} ${response.statusText}`.trim());
       const latest = response.ok ? releaseFrom(await response.json()) : null;
       const available = latest ? isNewer(latest.version, this.opts.current) : false;
-      this.set({ latest, available, checking: false, checkedAt: new Date().toISOString(), error: null });
+      this.set({ latest, available, checking: false, checkedAt: new Date().toISOString(), error: null, command: this.opts.command(latest) });
       this.opts.log.info(`Update check: ${latest ? `newest release ${latest.version}` : "no releases published"}, this is ${this.opts.current}${available ? " (update available)" : ""}`);
     } catch (error) {
       const message = error instanceof Error && error.name === "TimeoutError" ? "GitHub did not answer in time." : describeError(error).split("\n")[0];

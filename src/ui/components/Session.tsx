@@ -16,6 +16,7 @@ import { coreText } from "../core-text.js";
 import { expectAnswer, expectOnEnter, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
 import { changesFor } from "../changes-text.js";
 import { mayTakeFocus } from "../overlays.js";
+import { isShortcut } from "../shortcuts.js";
 
 // ------------------------------------------------------------------ composer
 
@@ -180,11 +181,15 @@ export function Composer({
             if (!next.trim()) dictated.current = "";
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.nativeEvent.isComposing) return;
+            // Ctrl+Shift+Enter, which opened the box from the terminal, closes it too.
+            if (isShortcut("terminal.write", event)) {
               event.preventDefault();
-              if (!event.ctrlKey) void submit();
-              // Ctrl+Shift+Enter, which opened the box from the terminal, closes it too.
-              else if (onEscape) onEscape();
+              onEscape?.();
+            } else if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+              // Enter sends, and so does Ctrl+Enter, as in most chat boxes.
+              event.preventDefault();
+              void submit();
             } else if (event.key === "Escape" && onEscape) {
               event.preventDefault();
               event.stopPropagation();
@@ -213,7 +218,8 @@ export function Composer({
 /** The final screen of a finished run, loaded from its run folder. */
 function RunReplay({ runId }: { runId: string }) {
   const t = useT();
-  const bundle = useQuery(`run:${runId}`, ["runs"], () => call("runs.get", runId));
+  // Its files are large and don't change once it has ended: not polled, and not kept once it is closed (as in RunDetail).
+  const bundle = useQuery(`run:${runId}`, ["runs"], () => call("runs.get", runId), { keep: false, poll: false });
   const files = bundle.data?.files;
   if (!bundle.loaded) return <div className="term" />;
   return <ReplayTerminal ansi={files?.screen || files?.scrollback || ""} emptyText={t("session.noTranscript")} />;

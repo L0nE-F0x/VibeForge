@@ -46,4 +46,29 @@ describe("saved message files", () => {
     expect(fs.readdirSync(dir).sort()).toEqual([path.basename(kept), path.basename(last), "dangling.md", "fresh.md"].sort());
     expect(fs.existsSync(first)).toBe(false);
   });
+
+  it("tidies every folder when it starts and hourly, not only when another file is saved", () => {
+    const { saved, now, pass } = files();
+    const old = saved.savePatch("diff --git a/a.txt b/a.txt\n+one\n");
+    const message = saved.saveFile("messages", "md", "old message");
+    pass(4 * DAY);
+    const stop = saved.tidyNowAndHourly();
+    stop();
+    expect(fs.existsSync(old)).toBe(false);
+    expect(fs.existsSync(message)).toBe(false);
+    expect(now().getTime()).toBeGreaterThan(0);
+  });
+
+  it("names binary contents in a saved patch instead of copying them in, and caps its size", () => {
+    const { saved } = files();
+    const binary = ["diff --git a/logo.png b/logo.png", "new file mode 100644", "index 0000000..1111111", "GIT binary patch", "literal 4", "LcmZQzWMT#Y01f~L", "", "literal 0", "HcmV?d00001", ""].join("\n");
+    const text = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n one\n+two\n";
+    const body = fs.readFileSync(saved.savePatch(`${text}${binary}`), "utf8");
+    expect(body).toContain("+two");
+    expect(body).toContain("diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files a/logo.png and b/logo.png differ\n");
+    expect(body).not.toContain("GIT binary patch");
+    const big = fs.readFileSync(saved.savePatch(`diff --git a/big.txt b/big.txt\n${"+x\n".repeat(2_000_000)}`), "utf8");
+    expect(big.length).toBeLessThan(2_100_000);
+    expect(big.trimEnd().endsWith("# saved diff truncated")).toBe(true);
+  });
 });

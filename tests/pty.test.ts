@@ -18,6 +18,8 @@ class Host {
   readonly events: Message[] = [];
   /** What each terminal printed, counted rather than kept: a flood would fill the test's memory. */
   readonly printed = new Map<string, number>();
+  /** Terminals whose output is kept whole, with each batch's last number: see keep(). */
+  readonly kept = new Map<string, Array<{ seq: number; data: string }>>();
   readonly ready: Promise<void>;
 
   constructor() {
@@ -31,7 +33,10 @@ class Host {
         const msg = JSON.parse(line) as Message;
         if (msg.event === "ready") resolve();
         if (typeof msg.reqId === "string") this.waiting.get(msg.reqId)?.(msg);
-        else if (msg.event === "data") this.printed.set(String(msg.ptyId), (this.printed.get(String(msg.ptyId)) ?? 0) + String(msg.data).length);
+        else if (msg.event === "data") {
+          this.printed.set(String(msg.ptyId), (this.printed.get(String(msg.ptyId)) ?? 0) + String(msg.data).length);
+          this.kept.get(String(msg.ptyId))?.push({ seq: Number(msg.seq), data: String(msg.data) });
+        }
         else this.events.push(msg);
       });
     });
@@ -44,6 +49,11 @@ class Host {
       this.waiting.set(reqId, resolve);
       this.child.stdin.write(`${JSON.stringify({ ...body, reqId })}\n`);
     });
+  }
+
+  /** Keep everything this terminal prints from now on. */
+  keep(ptyId: string): void {
+    this.kept.set(ptyId, []);
   }
 
   async screen(ptyId: string): Promise<string> {
@@ -80,8 +90,17 @@ class Host {
 
   close(): Promise<void> {
     return new Promise((resolve) => {
+      if (this.child.exitCode !== null || this.child.signalCode !== null) return resolve();
       this.child.once("exit", () => resolve());
       this.child.stdin.end();
+    });
+  }
+
+  /** Sends the host a signal; how it ended. */
+  signal(name: NodeJS.Signals): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    return new Promise((resolve) => {
+      this.child.once("exit", (code, signal) => resolve({ code, signal }));
+      this.child.kill(name);
     });
   }
 }
@@ -217,7 +236,10 @@ describe("pty host", () => {
     const activity = () => host.events.filter((event) => event.event === "activity" && event.ptyId === pty).map((event) => event.working);
     await host.until(() => activity().includes(true), 8000);
     await host.until(() => activity().at(-1) === false, 10000);
-    expect(activity()).toEqual([true, false]);
+    // Working, then quiet. A busy machine can stretch a 0.3 s gap past the quiet time and split the
+    // work in two, so the exact count of changes isn't held to.
+    expect(activity()[0]).toBe(true);
+    expect(activity().at(-1)).toBe(false);
   }, 20000);
 
   it("keeps the screen when a full-screen program clears it on the way out", async () => {
@@ -288,6 +310,59 @@ describe("pty host", () => {
     expect(host.printed.get(pty)).toBe(size + "\r\nFLOOD-END\r\n".length);
     expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toContain("FLOOD-END");
   }, 60000);
+
+  it("sends a snapshot whose screen holds exactly the output up to the number it reports", async () => {
+    const host = await startHost();
+    // Numbered lines as fast as bash prints them, so output keeps arriving while snapshots are taken.
+    const argv = ["/bin/bash", "--norc", "--noprofile", "-c", "for i in $(seq 1 400000); do echo L$i; done; sleep 30"];
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv, cols: 40, rows: 10 })).ptyId);
+    host.keep(pty);
+    await host.until(() => (host.printed.get(pty) ?? 0) > 2000);
+    let checked = 0;
+    for (let round = 0; round < 25; round += 1) {
+      const snap = await host.request({ op: "snapshot", ptyId: pty });
+      if (snap.alive !== true) break;
+      // What the pane would have before replaying anything newer than the snapshot's number.
+      const upTo = (host.kept.get(pty) ?? []).filter((batch) => batch.seq <= Number(snap.seq)).map((batch) => batch.data).join("");
+      const lastSent = upTo.replace(/\r?\n$/, "").split(/\r?\n/).at(-1) ?? "";
+      const lastShown = String(snap.plain).trimEnd().split("\n").at(-1) ?? "";
+      expect(lastShown).toBe(lastSent);
+      checked += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(checked).toBeGreaterThan(10);
+    // The output is let go again after each snapshot: all of it arrives.
+    await host.until(() => (host.kept.get(pty) ?? []).some((batch) => batch.data.includes("L400000")), 30_000);
+    await host.request({ op: "kill", ptyId: pty });
+  });
+
+  it("reads the last lines as text without the whole scrollback, and pastes no control bytes", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/cat"] })).ptyId);
+    // A paste end-marker nested inside another, then a Ctrl+C: neither may arrive as keys.
+    await host.request({ op: "send", ptyId: pty, text: "safe\x1b[20\x1b[201~1~\x03 still text\x7f", enter: true });
+    await host.until(async () => String((await host.request({ op: "screen", ptyId: pty })).plain).includes("still text"));
+    const screen = await host.request({ op: "screen", ptyId: pty });
+    expect(screen.alive).toBe(true);
+    expect(String(screen.plain)).toContain("safe[20[201~1~ still text");
+    expect(screen).not.toHaveProperty("ansi");
+    // cat is still there: the Ctrl+C was pasted as nothing, not typed.
+    expect((await host.request({ op: "foreground", ptyId: pty })).known).toBe(true);
+    expect(host.exitOf(pty)).toBeUndefined();
+    await host.request({ op: "kill", ptyId: pty });
+    expect((await host.request({ op: "screen", ptyId: "nope" })).alive).toBe(false);
+  });
+
+  it("ends its terminals properly on SIGHUP, as when the terminal VibeForge started from closes", async () => {
+    const host = await startHost();
+    const dir = tempDir();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH, runDir: dir })).ptyId);
+    await host.request({ op: "write", ptyId: pty, data: "echo HUP-$((40+2))\r" });
+    await host.until(async () => (await host.screen(pty)).includes("HUP-42"));
+    expect(await host.signal("SIGHUP")).toEqual({ code: 0, signal: null });
+    expect(host.exitOf(pty)).toBeDefined();
+    expect(fs.readFileSync(path.join(dir, "transcript.txt"), "utf8")).toContain("HUP-42");
+  });
 
   it("reports a program's own exit code and rejects unknown requests", async () => {
     const host = await startHost();

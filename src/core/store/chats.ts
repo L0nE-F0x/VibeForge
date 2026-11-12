@@ -1,5 +1,6 @@
 import path from "node:path";
 import { readJson, writeJson } from "../fsx.js";
+import type { ReadCache } from "./read-cache.js";
 import { isSafeId } from "../slug.js";
 import type { ChatRecord } from "../types.js";
 import { str, strList, strOrNull } from "./fields.js";
@@ -28,7 +29,10 @@ function normalizeChat(value: unknown): ChatRecord | null {
 export class Chats {
   private readonly dataRoot: string;
 
-  constructor(dataRoot: string) {
+  constructor(
+    dataRoot: string,
+    private readonly cache?: ReadCache,
+  ) {
     this.dataRoot = dataRoot;
   }
 
@@ -37,13 +41,16 @@ export class Chats {
   }
 
   listChats(): ChatRecord[] {
-    const raw = readJson<unknown>(this.chatFile(), null);
-    const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
-    if (!Array.isArray(list)) return [];
-    return list
-      .map(normalizeChat)
-      .filter((chat): chat is ChatRecord => chat !== null)
-      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    const load = () => {
+      const raw = readJson<unknown>(this.chatFile(), null);
+      const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
+      if (!Array.isArray(list)) return [];
+      return list
+        .map(normalizeChat)
+        .filter((chat): chat is ChatRecord => chat !== null)
+        .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    };
+    return this.cache ? this.cache.read(this.chatFile(), load) : load();
   }
 
   getChat(id: string): ChatRecord | null {
@@ -54,9 +61,11 @@ export class Chats {
     const chats = this.listChats().filter((item) => item.id !== chat.id);
     chats.push(chat);
     writeJson(this.chatFile(), { chats });
+    this.cache?.forget(this.chatFile());
   }
 
   deleteChat(id: string): void {
     writeJson(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
+    this.cache?.forget(this.chatFile());
   }
 }

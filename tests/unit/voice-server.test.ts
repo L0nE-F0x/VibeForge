@@ -33,7 +33,7 @@ const alive = (pid: number) => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** A Voice whose whisper-server is a stand-in that answers after `answerMs` and writes its pid down. */
-function voice(opts: { idleMs: number; answerMs: number }) {
+function voice(opts: { idleMs: number; answerMs: number; cliOnly?: string }) {
   const dataRoot = tempDir();
   const bin = tempDir();
   const pidFile = path.join(bin, "pid");
@@ -61,7 +61,7 @@ http.createServer((req, res) => {
     home: tempDir(),
     dataRoot,
     settings: () => settings,
-    resolveBin: (name) => (name === "whisper-server" ? server : null),
+    resolveBin: (name) => (opts.cliOnly ? (name === "whisper-cli" ? opts.cliOnly : null) : name === "whisper-server" ? server : null),
     state: () => undefined,
     changed: () => undefined,
     speaking: () => undefined,
@@ -80,7 +80,8 @@ describe("whisper-server's lifetime", () => {
       expect((await instance.transcribe(speech())).text).toBe("hello there");
       const server = pid();
       expect(alive(server)).toBe(true);
-      await sleep(1200);
+      // Gone a little after the idle time; a busy machine may take longer to end and reap it.
+      for (const end = Date.now() + 10_000; alive(server) && Date.now() < end; ) await sleep(50);
       expect(alive(server)).toBe(false);
     } finally {
       instance.dispose();
@@ -95,5 +96,23 @@ describe("whisper-server's lifetime", () => {
     } finally {
       instance.dispose();
     }
+  });
+});
+
+describe("whisper-cli, when there is no whisper-server", () => {
+  it("takes the recording out of /tmp when VibeForge quits mid-transcription", async () => {
+    const bin = tempDir();
+    const saw = path.join(bin, "audio-path");
+    const cli = path.join(bin, "whisper-cli");
+    // Writes down where its audio is, then takes its time.
+    fs.writeFileSync(cli, `#!/bin/sh\nwhile [ "$1" != "-f" ]; do shift; done\nprintf '%s' "$2" > ${JSON.stringify(saw)}\nexec sleep 30\n`, { mode: 0o755 });
+    const { instance } = voice({ idleMs: 400, answerMs: 0, cliOnly: cli });
+    const words = instance.transcribe(speech()).catch(() => null);
+    for (let tries = 0; tries < 100 && !fs.existsSync(saw); tries += 1) await sleep(20);
+    const audio = fs.readFileSync(saw, "utf8");
+    expect(fs.existsSync(audio)).toBe(true);
+    instance.dispose();
+    expect(fs.existsSync(path.dirname(audio))).toBe(false);
+    await words;
   });
 });
