@@ -13,6 +13,8 @@ export type PtyAsk =
   /** Start recording a shell into a run folder, or (null) stop and write its files. */
   | { op: "record"; ptyId: string; runDir: string | null }
   | { op: "snapshot"; ptyId: string }
+  /** The last lines as plain text, without serializing the scrollback. */
+  | { op: "screen"; ptyId: string }
   | { op: "list" }
   | { op: "foreground"; ptyId: string }
   | { op: "shutdown" };
@@ -50,6 +52,7 @@ export interface PtyAnswers {
   record: Done;
   /** A terminal that has ended answers with an empty screen, `alive: false` and no `plain`. */
   snapshot: Omit<PtySnapshot, "plain"> & { plain?: string };
+  screen: { plain: string; alive: boolean };
   list: { ptys: Array<{ ptyId: string; pid: number; cwd: string; argv: string[] }> };
   /** `known: false` means the read failed, not that the shell is back. */
   foreground: PtyForeground & { known: boolean };
