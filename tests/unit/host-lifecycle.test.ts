@@ -23,6 +23,7 @@ function fakeSupervisor() {
     onProgram: new Set<(event: unknown) => void>(),
     onActivity: new Set<(event: unknown) => void>(),
     onCrash: new Set<(message: string) => void>(),
+    onStderr: new Set<(line: string) => void>(),
     starts: [] as NodeJS.ProcessEnv[],
     fail: null as string | null,
     async start(_root: string, env: NodeJS.ProcessEnv) {
@@ -174,6 +175,17 @@ describe("the terminal host's lifecycle", () => {
     expect(life.error).toBe("gone It stopped 4 times in five minutes, so it stays off: restart VibeForge.");
     expect(sent.at(-1)).toEqual(["host-crash", life.error]);
     expect(lines()).toContain("ERROR The terminal host keeps stopping; it stays off until VibeForge restarts");
+  });
+});
+
+describe("what the terminal host says on stderr", () => {
+  it("goes in the log, a few lines a minute at most", () => {
+    const { supervisor, lines } = setUp();
+    for (let line = 0; line < 30; line += 1) for (const handler of supervisor.onStderr) handler(`scrollback: ENOSPC ${line}`);
+    const logged = lines().filter((line) => line.includes("Terminal host:"));
+    expect(logged[0]).toBe("WARN  Terminal host: scrollback: ENOSPC 0");
+    expect(logged).toHaveLength(21);
+    expect(logged.at(-1)).toContain("more on stderr this minute");
   });
 });
 

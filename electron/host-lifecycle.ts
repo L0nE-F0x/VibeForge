@@ -76,6 +76,9 @@ export function terminalEnv(ctx: MainContext, controlSocket: string): NodeJS.Pro
   return env;
 }
 
+/** Lines of the host's stderr logged in a minute. */
+const STDERR_PER_MINUTE = 20;
+
 /** When the host last crashed, so one that keeps crashing isn't brought back forever. */
 export class CrashCount {
   private crashes: number[] = [];
@@ -120,6 +123,20 @@ export class HostLifecycle {
   wire(): void {
     const { ctx } = this;
     const { supervisor, log, send } = ctx;
+    // What the host says on stderr goes in the log, so a crash has its reason there; a host that
+    // says a lot is cut down to a few lines a minute.
+    let said = 0;
+    let since = 0;
+    supervisor.onStderr.add((line) => {
+      const now = Date.now();
+      if (now - since > 60_000) {
+        since = now;
+        said = 0;
+      }
+      said += 1;
+      if (said <= STDERR_PER_MINUTE) log.warn(`Terminal host: ${line}`);
+      else if (said === STDERR_PER_MINUTE + 1) log.warn("Terminal host: more on stderr this minute, not logged");
+    });
     supervisor.onData.add((event) => send("pty-data", event));
     supervisor.onExit.add((event) => {
       log.info(`Terminal ${event.ptyId} ended (${event.signal ? `signal ${event.signal}` : `exit code ${event.exitCode ?? "?"}`})`);
