@@ -92,6 +92,8 @@ export class Voice {
   private transcribing = false;
   private server: Server | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
+  /** whisper-cli runs under way, with the folder holding each one's audio, for a quit to clear. */
+  private readonly cliRuns = new Map<ChildProcess, string>();
   /** Requests whisper-server is answering now; it isn't stopped under them. */
   private serverUses = 0;
   private download: { kind: DownloadKind; id: string; received: number; total: number; abort: AbortController } | null = null;
@@ -493,6 +495,7 @@ export class Voice {
       fs.writeFileSync(file, wavFile(pcm), { mode: 0o600 });
       return await new Promise<string>((resolve, reject) => {
         const child = spawn(bin, cliArgs({ model, file, language, prompt, threads: whisperThreads(os.cpus().length) }), { stdio: ["ignore", "pipe", "pipe"] });
+        this.cliRuns.set(child, dir);
         let stdout = "";
         let stderr = "";
         const timer = setTimeout(() => child.kill("SIGKILL"), TRANSCRIBE_TIMEOUT_MS);
@@ -501,6 +504,7 @@ export class Voice {
         child.on("error", reject);
         child.on("close", (code, signal) => {
           clearTimeout(timer);
+          this.cliRuns.delete(child);
           if (code === 0) resolve(stdout);
           else reject(new Error(`whisper-cli ${signal ? `was stopped (${signal})` : `exited with code ${code}`}: ${stderr.trim().split("\n").pop() ?? ""}`));
         });
@@ -576,5 +580,11 @@ export class Voice {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.stopServer();
     this.speaker.dispose();
+    // A quit mid-transcription: the recording is someone's voice, so it doesn't stay in /tmp.
+    for (const [child, dir] of this.cliRuns) {
+      child.kill("SIGKILL");
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    this.cliRuns.clear();
   }
 }
