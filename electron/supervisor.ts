@@ -35,7 +35,9 @@ export class PtySupervisor {
     const node = process.env.VIBEFORGE_NODE || whichBin("node", env.PATH ?? "");
     if (!node) throw new Error("VibeForge needs Node on PATH to run terminals (node was not found).");
     const script = path.join(appRoot, "electron", "pty-host.cjs");
+    this.stopping = false;
     const child = spawn(node, [script], { cwd: appRoot, env, stdio: ["pipe", "pipe", "pipe"] });
+    child.stdin.on("error", () => undefined);
     this.child = child;
     this.stderrTail = [];
     let partial = "";
@@ -61,6 +63,7 @@ export class PtySupervisor {
     const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     const ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (this.child === child) this.child = null;
         reject(new Error("The terminal host did not start within 10 seconds."));
         child.kill("SIGKILL");
       }, 10_000);
@@ -86,6 +89,7 @@ export class PtySupervisor {
       });
     });
     child.on("exit", (code, signal) => {
+      if (this.child !== child) return;
       this.child = null;
       for (const [id, waiter] of this.waiting) {
         waiter.reject(new Error("The terminal host stopped."));

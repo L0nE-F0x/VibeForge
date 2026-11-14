@@ -961,12 +961,12 @@ export class UsageScanner {
         const into = state;
         await readLines(file, into, stat.size, (line) => lines(into, line));
       }
+      state.size = stat.size;
+      state.mtimeMs = stat.mtimeMs;
+      this.files.set(file, state);
     } catch {
       /* unreadable now; counted as it was */
     }
-    state.size = stat.size;
-    state.mtimeMs = stat.mtimeMs;
-    this.files.set(file, state);
     return state;
   }
 }

@@ -31,12 +31,14 @@ async function buzz(body, data) {
 /** @param {DeskPayload} payload */
 export function watch(payload) {
   const next = new Map();
+  const nextPtys = new Set();
   for (const workspace of payload.workspaces) {
     for (const item of workspace.sessions) {
       const key = item.runId || item.ptyId;
       if (!key) continue;
       next.set(key, item);
-      const previous = known.get(key);
+      if (item.ptyId) nextPtys.add(item.ptyId);
+      const previous = known.get(key) || (item.ptyId ? known.get(item.ptyId) : undefined);
       if (!primed || !previous || previous.state === item.state) continue;
       if (item.state === "waiting" && previous.state === "working") void buzz(t("phone.buzzWaiting", { name: item.title }), { key, ptyId: item.ptyId || "", runId: item.runId || "" });
       if (item.state === "done") void buzz(`${t("phone.buzzFinished", { name: item.title })}${item.changes ? ` · ${item.changes}` : ""}`, { key, ptyId: "", runId: item.runId || "" });
@@ -44,7 +46,7 @@ export function watch(payload) {
   }
   if (primed) {
     for (const [key, previous] of known) {
-      if (next.has(key) || previous.state === "done") continue;
+      if (next.has(key) || (previous.ptyId && nextPtys.has(previous.ptyId)) || previous.state === "done") continue;
       void buzz(t("phone.buzzFinished", { name: previous.title }), { key, ptyId: "", runId: previous.runId || "" });
     }
   }

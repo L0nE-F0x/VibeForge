@@ -77,6 +77,7 @@ const PAUSED_LOOK_MS = 50;
  *   killTimers: NodeJS.Timeout[],
  *   paste: Paste | null,
  *   rec: Sink | null,
+ *   recSeq?: number,
  *   dirty: boolean,
  *   screen: { rows: string[], base: number } | null,
  *   reflowed?: boolean,
@@ -192,8 +193,11 @@ function trimScrollback(sink) {
   const keep = Math.min(size, MAX_SCROLLBACK_BYTES);
   const buffer = Buffer.alloc(keep);
   const fd = fs.openSync(file, "r");
-  fs.readSync(fd, buffer, 0, keep, size - keep);
-  fs.closeSync(fd);
+  try {
+    fs.readSync(fd, buffer, 0, keep, size - keep);
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.writeFileSync(file, buffer);
   sink.scrollFd = fs.openSync(file, "a");
   sink.scrollBytes = keep;
@@ -243,11 +247,20 @@ function closeSink(sink, done) {
  * @returns {Promise<void>}
  */
 function startRecording(session, runDir) {
+  const seq = (session.recSeq || 0) + 1;
+  session.recSeq = seq;
   return stopRecording(session)
-    .then(() => captureSynced(session))
+    .then(() => {
+      session.recSeq = seq;
+      return captureSynced(session);
+    })
     .then(
       () =>
         new Promise((resolve) => {
+          if (session.exited || sessions.get(session.id) !== session || session.recSeq !== seq) {
+            resolve();
+            return;
+          }
           const mirror = new Terminal({ cols: session.cols, rows: session.rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
           const serializer = new SerializeAddon();
           mirror.loadAddon(serializer);
@@ -259,6 +272,15 @@ function startRecording(session, runDir) {
           rec.onDrain = () => relieve(session);
           // Seed with the screen as it is now, then publish the recording so later output lands in it.
           mirror.write(session.serializer.serialize({ scrollback: 0 }), () => {
+            if (session.exited || sessions.get(session.id) !== session || session.recSeq !== seq) {
+              try {
+                rec.mirror.dispose();
+              } catch {
+                /* disposed */
+              }
+              resolve();
+              return;
+            }
             openScrollback(rec);
             session.rec = rec;
             resolve();
@@ -272,6 +294,7 @@ function startRecording(session, runDir) {
  * @returns {Promise<void>}
  */
 function stopRecording(session) {
+  session.recSeq = (session.recSeq || 0) + 1;
   const rec = session.rec;
   if (!rec) return Promise.resolve();
   session.rec = null;

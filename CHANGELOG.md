@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-11-14
+
+VibeForge's orchestrator becomes **Viby** — an anthropomorphic, voice-aware companion with situational awareness across workspaces, agents, tasks and routines, plus fixes from a full codebase audit.
+
+### Added
+
+- **Viby: VibeForge's anthropomorphic orchestrator.** Maestro is now **Viby** (recognizing "Viby", "Vibey", "Vibe" and "Maestro" by voice). Switching between planning CLIs (Grok Build, Claude Code, Codex, Antigravity CLI) keeps the conversation going by carrying a recap of recent turns into the new planner.
+- **Two-beat `lookup` step.** Ask Viby to find a past session, branch or project folder on disk and it emits a `lookup` step; VibeForge immediately searches run history, workspace git branches and project folders on disk (`~/Projects`, `~/Documents`, `~/Desktop` and the projects folder up to depth 3) and hands the findings back in the same turn so Viby can plan the real `workspace` and `start` steps right away.
+- **Full situational awareness, Agents, Tasks and Routines in Viby.** Viby knows each workspace's recent runs, your saved **Agents**, **Tasks**, **Routines** and default CLI. A `start` step can launch a named Agent (with its brief, memory and skills) or use your default CLI when none is named; `task` steps run or create and execute board tasks; `routine` steps run a routine now or enable/disable it.
+
+### Fixed
+
+- **2026-11-14 full codebase audit:** fixed planner empty-promise stalls and Grok resumed-session stale workspace lists; atomic temp-file writes in `writeText`; symlink-cycle protection in skill copy; ReDoS and path traversal guards across `replies.ts`, `usage.ts` and `vcs.ts`; `execFile` buffer and timeout limits; PTY host write backpressure and terminal capture flush ordering; WebGL context leak on unmount; and Phone Companion SSE overlap, mic stream cleanup and focus restoration.
+
 ## [2.16.0] - 2026-11-12
 
 **2.16.0: Maestro makes workspaces, starts each CLI on the model and effort you ask for, and tells you when one is done; Apply keeps every byte; and a long list of fixes from a full audit.**

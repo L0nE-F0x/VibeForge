@@ -103,11 +103,19 @@ function micButton() {
  * @param {boolean} cancelled
  */
 function micRelease(held, cancelled) {
+  if (cancelled) {
+    micCancel();
+    return;
+  }
   const current = mic;
   if (!current || current.phase === "hearing") return;
-  if (held.started && (current.phase === "starting" || (!cancelled && Date.now() - held.at < MIC_TAP_MS))) {
+  if (held.started && Date.now() - held.at < MIC_TAP_MS) {
     current.latched = true;
     paintMic();
+    return;
+  }
+  if (current.phase === "starting") {
+    micCancel();
     return;
   }
   void micFinish();
@@ -165,6 +173,10 @@ function micBegin() {
       // Connected through to the speakers so it keeps running; it writes nothing, so nothing plays.
       mine.node.connect(ctx.destination);
       if (ctx.state === "suspended") await ctx.resume();
+      if (mic !== mine) {
+        closeMic(mine);
+        return;
+      }
       mine.phase = "recording";
       mine.timer = window.setInterval(() => {
         if (mic !== mine) return;
@@ -273,6 +285,10 @@ async function micFinish() {
     return;
   }
   mine.phase = "hearing";
+  if (mine.node) {
+    mine.node.port.postMessage({ flush: true });
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+  }
   closeMic(mine);
   paintMic();
   try {

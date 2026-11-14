@@ -151,7 +151,10 @@ export class HostLifecycle {
       send("pty-exit", event);
       this.ended(event.ptyId, event.exitCode, event.signal);
     });
-    supervisor.onProgram.add((event) => ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd));
+    supervisor.onProgram.add((event) => {
+      ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd);
+      if (!event.argv) this.parts.talk.exited(event.ptyId);
+    });
     supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
     supervisor.onCrash.add((message) => {
       // The supervisor's message already says so: "The terminal host stopped (SIGKILL)."

@@ -191,4 +191,46 @@ describe("routines", () => {
     expect(ctx.svc.previewSchedule({ kind: "cron", expr: "not cron" }).valid).toBe(false);
     ctx.svc.close();
   });
+
+  it("handles delayed routine failures after waiting for a folder", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now, appStartedAt: new Date(time.now().getTime() - INTERVAL) });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+
+    const manual = ctx.svc.saveRoutine({ name: "Manual", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "m" });
+    const scheduled = ctx.svc.saveRoutine({ name: "Scheduled", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "s" });
+    const slotAt = new Date(Math.floor(time.now().getTime() / INTERVAL) * INTERVAL).toISOString();
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(scheduled.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * INTERVAL).toISOString() });
+
+    await ctx.svc.runRoutineNow(manual.id);
+    await ctx.svc.tick(time.now());
+    expect(ctx.svc.listRoutines().every((r) => r.waiting !== null)).toBe(true);
+
+    // Make the agent's CLI disappear from PATH while both queued routines are waiting.
+    const origResolveBin = ctx.host.resolveBin;
+    ctx.host.resolveBin = () => null;
+    await ctx.exit(busy.ptyId);
+    await ctx.svc.checkWaiting();
+
+    expect(ctx.svc.store.getRoutine(scheduled.id)!.lastFiredAt).toBe(slotAt);
+    expect(ctx.notes.some((n) => n.title === "Manual")).toBe(true);
+    expect(ctx.svc.store.queryRuns({ routineId: scheduled.id })).toHaveLength(1);
+
+    // Also test a scheduled wait whose spawn fails after creating the run record.
+    ctx.host.resolveBin = origResolveBin;
+    const busy2 = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy2.ptyId, true);
+    time.pass(INTERVAL);
+    await ctx.svc.tick(time.now());
+    ctx.host.spawn = async () => {
+      throw new Error("spawn failed");
+    };
+    await ctx.exit(busy2.ptyId);
+    await ctx.svc.checkWaiting();
+    expect(ctx.svc.store.getRoutine(scheduled.id)!.lastFiredAt).toBe(new Date(Math.floor(time.now().getTime() / INTERVAL) * INTERVAL).toISOString());
+    ctx.svc.close();
+  });
 });

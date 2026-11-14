@@ -61,6 +61,10 @@ function parse(args) {
   const words = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (words.length >= 2) {
+      words.push(arg);
+      continue;
+    }
     if (arg === "--") {
       words.push(...args.slice(i + 1));
       break;
@@ -91,6 +95,11 @@ function ask(request) {
     const client = net.connect(socket);
     let text = "";
     client.setEncoding("utf8");
+    const limit = ("timeoutMs" in request && request.timeoutMs ? request.timeoutMs : 9 * 60_000) + 30_000;
+    client.setTimeout(limit, () => {
+      reject(new Error("Timed out waiting for VibeForge."));
+      client.destroy();
+    });
     client.on("connect", () => client.write(`${JSON.stringify(request)}\n`));
     client.on("data", (chunk) => {
       text += chunk;

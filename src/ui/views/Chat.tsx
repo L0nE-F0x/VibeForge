@@ -1,5 +1,5 @@
 import { FolderOpen, MessageSquarePlus, MessagesSquare, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { dayHeading, dayKey, tildify } from "../../shared/text.js";
 import { useChatAttention } from "../attention.js";
 import type { ChatView as Chat } from "../../shared/api.js";
@@ -30,6 +30,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const [engine, setEngine] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
+  const skipBlurRef = useRef(false);
   const chat = chats.find((item) => item.id === route.chatId) ?? null;
   useDropMissing(chatList.loaded, Boolean(route.chatId) && !chat, { view: "chat" });
   const chatAttention = useChatAttention();
@@ -143,15 +144,39 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
                   value={title}
                   style={{ maxWidth: 420 }}
                   onChange={(event) => setTitle(event.target.value)}
-                  onBlur={() => void rename()}
+                  onBlur={() => {
+                    if (skipBlurRef.current) {
+                      skipBlurRef.current = false;
+                      return;
+                    }
+                    void rename();
+                  }}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter") void rename();
-                    if (event.key === "Escape") setRenaming(false);
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      skipBlurRef.current = true;
+                      setTitle(chat.title);
+                      setRenaming(false);
+                    }
                   }}
                 />
               ) : chat ? (
                 <h1 className="truncate">
-                  <button type="button" className="head-title" {...tipProps(t("common.rename"))} onClick={() => setRenaming(true)}>
+                  <button
+                    type="button"
+                    className="head-title"
+                    {...tipProps(t("common.rename"))}
+                    onClick={() => {
+                      skipBlurRef.current = false;
+                      setTitle(chat.title);
+                      setRenaming(true);
+                    }}
+                  >
                     {chat.title}
                   </button>
                 </h1>

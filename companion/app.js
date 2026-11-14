@@ -65,7 +65,7 @@ followKeyboard();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data?.type !== "open") return;
+    if (event.data?.type !== "open" || !state.token) return;
     openSession({ ptyId: event.data.ptyId || "", runId: event.data.runId || "" });
   });
   void navigator.serviceWorker.register("/sw.js");

@@ -414,6 +414,17 @@ describe("taking turns in a folder", () => {
     expect(await ctx.svc.executeTask(third.id)).toMatchObject({ queued: true });
     ctx.svc.cancelTaskWait(third.id);
     expect(ctx.svc.listTasks().find((task) => task.id === third.id)!.waiting).toBeNull();
+
+    // Enabling shareCheckout or isolated on a queued task cancels the wait and starts (or notifies if unready).
+    const fourth = ctx.svc.saveTask({ title: "Four", agentId: agent.id, workspaceId: workspace.id });
+    expect(await ctx.svc.executeTask(fourth.id)).toMatchObject({ queued: true });
+    ctx.svc.saveTask({ id: fourth.id, title: "Four", agentId: agent.id, workspaceId: workspace.id, shareCheckout: true });
+    await until(() => ctx.spawns.length === 4);
+
+    const fifth = ctx.svc.saveTask({ title: "Five", agentId: agent.id, workspaceId: workspace.id });
+    expect(await ctx.svc.executeTask(fifth.id)).toMatchObject({ queued: true });
+    ctx.svc.saveTask({ id: fifth.id, title: "Five", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await until(() => ctx.notes.some((n) => n.title === "Five"));
     ctx.svc.close();
   });
 

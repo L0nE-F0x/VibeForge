@@ -18,6 +18,7 @@ interface Review {
   phase: "author" | "reviewer" | "fixing";
   /** When the phase began; the author has to work and go quiet after it before the next round. */
   since: number;
+  lastPatch?: string;
 }
 
 /**
@@ -119,7 +120,7 @@ export class Reviews {
     const authorLabel = list.find((item) => item.ptyId === review.authorPty)?.label ?? "The other CLI";
     const reviewerLabel = list.find((item) => item.ptyId === review.reviewerPty)?.label ?? "The reviewer";
     if (!this.reviews.has(key)) return;
-    if (!patch.trim()) {
+    if (!patch.trim() || patch === review.lastPatch) {
       // Nothing yet: asked before the author has changed anything, so wait for its next turn. A
       // turn that ends with nothing changed ends the review.
       if (review.since === 0) review.since = now;
@@ -128,6 +129,7 @@ export class Reviews {
       return;
     }
     const file = this.files.savePatch(patch);
+    review.lastPatch = patch;
     review.phase = "reviewer";
     this.core.emit("live");
     this.delivery.queue({

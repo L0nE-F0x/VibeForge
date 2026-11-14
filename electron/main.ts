@@ -148,7 +148,7 @@ if (!app.requestSingleInstanceLock()) {
     // Started again while this copy is on its way out (a CLI taking its seconds to end): the new
     // start lost the lock to this one, so come back once this one has gone.
     if (ctx.quitting) {
-      if (!voiceArg(argv)) app.relaunch({ args: secondStartArgs(process.argv, argv) });
+      if (!voiceArg(argv)) app.relaunch({ execPath: process.execPath, args: secondStartArgs(process.argv, argv) });
       return;
     }
     const action = voiceArg(argv);

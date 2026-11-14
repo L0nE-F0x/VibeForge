@@ -185,10 +185,12 @@ export class HandedTasks {
     const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
     // Nobody to answer or report to: a terminal outside VibeForge gets the usual notification.
     if (!("ptyId" in launched) || (!opts.wait && !asker)) return { ok: true, taskId, title, started: true, note };
-    this.watchReport(taskId, launched.ptyId, asker, opts);
-    // Watched now, so counted as working from here on.
-    opts.started?.();
-    if (!opts.wait) return { ok: true, taskId, title, started: true, note: `${note}${reports}` };
+    if (!opts.wait) {
+      this.watchReport(taskId, launched.ptyId, asker, opts);
+      // Watched now, so counted as working from here on.
+      opts.started?.();
+      return { ok: true, taskId, title, started: true, note: `${note}${reports}` };
+    }
     return new Promise<TaskResult>((resolve) => {
       this.waitFor.set(taskId, (answered, end) =>
         resolve(
@@ -207,6 +209,14 @@ export class HandedTasks {
               : { ok: true, taskId, title, started: true, reply: answered?.reply ?? null, note: answered ? note : `${name} is still working on it. ${note}${reports}` },
         ),
       );
+      this.watchReport(taskId, launched.ptyId, asker, opts);
+      // Watched now, so counted as working from here on.
+      opts.started?.();
+      if (opts.gone?.aborted) {
+        const waiting = this.waitFor.get(taskId);
+        this.waitFor.delete(taskId);
+        waiting?.(null, null);
+      }
     });
   }
 
@@ -217,8 +227,6 @@ export class HandedTasks {
       this.waitFor.delete(taskId);
       waiting?.(answered, end);
     };
-    // Nobody is listening for the result any more; its answer comes as a report instead.
-    if (opts.wait) opts.gone?.addEventListener("abort", () => settle(null, null), { once: true });
     this.answers.watchAnswer(
       ptyId,
       {

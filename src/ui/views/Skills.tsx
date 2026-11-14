@@ -120,8 +120,12 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
       go({ view: "skills", skillId: saved.id });
     }
   }, t("skills.saveFailed"));
+  // An existing skill saves itself as you edit; a new one is made by Create.
+  const cancelAutosave = useAutosave(form, Boolean(skill) && dirty, Boolean(name.trim()) && !saving, () => void save());
+  useSaveShortcut(() => void save(), !skill && Boolean(name.trim()) && !saving);
   const [remove, removing] = useAction(async () => {
     if (!skill) return;
+    cancelAutosave();
     const result = await call("skills.delete", skill.id);
     // Straight to one that is left: the list hasn't reloaded yet, so "the first one" would be this one.
     const next = (skills.data ?? []).find((item) => item.id !== skill.id);
@@ -133,9 +137,6 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
     const current = agents.filter((agent) => agent.skills.includes(skill.id)).map((agent) => agent.id);
     await call("skills.setAgents", skill.id, on ? [...current, agentId] : current.filter((id) => id !== agentId));
   }, t("skills.agentFailed"));
-  // An existing skill saves itself as you edit; a new one is made by Create.
-  useAutosave(form, Boolean(skill) && dirty, Boolean(name.trim()) && !saving, () => void save());
-  useSaveShortcut(() => void save(), !skill && Boolean(name.trim()) && !saving);
 
   return (
     <div className="main">

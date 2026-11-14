@@ -736,7 +736,7 @@ const CAPTIONS = [
   ["Home", "Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs."],
   ["Code", "Shells and coding CLIs tiled side by side, with your workspaces on the left, a file tree, and a built-in browser."],
   ["Tasks", "Queue up tasks on a board. Hit Execute to run an agent in its own git worktree, then review and apply its diff."],
-  ["Maestro", "Say or type what to start. Your CLI builds a plan and opens each agent on its own branch in a git worktree."],
+  ["Viby", "Say or type what to start. Your CLI builds a plan and opens each agent on its own branch in a git worktree."],
 ];
 
 function setupTour() {

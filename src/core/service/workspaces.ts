@@ -179,13 +179,14 @@ export class WorkspaceDesk {
   }
 
   /** `model` and `effort` start the CLI with them where it takes them (launchOptionArgs); empty keeps its own. */
-  async startEngine(opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean; model?: string; effort?: string } & TermSize): Promise<Launched> {
+  async startEngine(opts: { workspaceId: string; engineId: string; agentId?: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean; model?: string; effort?: string } & TermSize): Promise<Launched> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
     if (!workspace) throw new Error("Open a workspace first.");
     if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
-    const engine = this.core.requireEngine(opts.engineId);
+    const agent = opts.agentId ? this.core.store.getAgent(opts.agentId) : null;
+    const engine = this.core.requireEngine(agent ? agent.engine : opts.engineId);
     const prompt = opts.prompt?.trim() ?? "";
     const previous = opts.continueSession
       ? (this.core.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
@@ -193,16 +194,17 @@ export class WorkspaceDesk {
     const resume = opts.continueSession ? this.core.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
     return this.core.launch({
       origin: "code",
-      title: `${engine.row.label} · ${workspace.name}`,
+      title: `${agent ? agent.name : engine.row.label} · ${workspace.name}`,
       engine,
       cwd: workspace.path,
       prompt,
-      promptText: prompt || null,
+      promptText: agent ? this.core.preambleFor(agent, prompt) : prompt || null,
       continueSession: Boolean(opts.continueSession && (resume.resumeArgs || engine.row.continueArgs?.length)),
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,
+      agentId: agent?.id ?? null,
       continuedFrom: previous?.id ?? null,
-      ...this.paneInstructions(engine.row.id, workspace.path),
+      ...(agent ? { instructions: null, allowVibeforge: Boolean(this.core.store.readSettings().agentTalk.on) } : this.paneInstructions(engine.row.id, workspace.path)),
       orchestrated: opts.orchestrated,
       model: opts.model,
       effort: opts.effort,

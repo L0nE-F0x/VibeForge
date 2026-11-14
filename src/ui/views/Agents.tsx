@@ -50,26 +50,39 @@ export function useSaveShortcut(save: () => void, enabled: boolean): void {
  * once. `value` is what is being edited, so each change restarts the wait. Each value is tried
  * once (see autosaveDue), so one that doesn't stick isn't saved again every second.
  */
-export function useAutosave(value: unknown, dirty: boolean, ready: boolean, save: () => void, delay = 800): void {
+export function useAutosave(value: unknown, dirty: boolean, ready: boolean, save: () => void, delay = 800): () => void {
   const latest = useRef({ save, dirty, ready });
-  latest.current = { save, dirty, ready };
+  const cancelled = useRef(false);
+  latest.current = { save, dirty: dirty && !cancelled.current, ready };
   const key = JSON.stringify(value);
   const attempted = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!autosaveDue(key, attempted.current, dirty, ready)) return;
-    const timer = setTimeout(() => {
+    if (cancelled.current || !autosaveDue(key, attempted.current, dirty, ready)) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      if (cancelled.current) return;
       attempted.current = key;
       latest.current.save();
     }, delay);
-    return () => clearTimeout(timer);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+    };
   }, [key, dirty, ready, delay]);
   useEffect(
     () => () => {
-      if (latest.current.dirty && latest.current.ready) latest.current.save();
+      if (!cancelled.current && latest.current.dirty && latest.current.ready) latest.current.save();
     },
     [],
   );
-  useSaveShortcut(() => latest.current.save(), dirty && ready);
+  useSaveShortcut(() => latest.current.save(), dirty && ready && !cancelled.current);
+  return () => {
+    cancelled.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    latest.current.dirty = false;
+  };
 }
 
 /** Where an autosaving editor is: saving, waiting to save, or saved (with what that means). */
@@ -595,18 +608,19 @@ function SettingsTab({ agent }: { agent: Agent }) {
     // A new engine is worth a word; the rest just saves.
     if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
+  const cancelAutosave = useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
   const [remove, removing] = useAction(async () => {
     // Deleting is undone from the toast. Only a running session asks first: stopping it can't be undone.
     if (running) {
       const ok = await confirm({ title: t("common.deleteNamed", { name: agent.name }), body: t("agents.deleteRunningBody"), confirm: t("common.stopAndDelete"), danger: true });
       if (!ok) return;
     }
+    cancelAutosave();
     const result = await call("agents.delete", agent.id);
     // Straight to one that is left: the list hasn't reloaded yet, so "the first one" would be this one.
     go(others[0] ? { view: "agents", agentId: others[0].id, tab: "chats" } : { view: "agents" });
     deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));
-  useAutosave(form, dirty, !saving && Boolean(name.trim()), () => void save());
 
   return (
     <div className="page-body">

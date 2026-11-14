@@ -1,11 +1,11 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.16.0, 2026-11-12, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.17.0, 2026-11-14, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
-- [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Maestro, and a per-workspace strip in Code (the Running list in Maestro covers Stop all for now).
+- [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 
 ## Only checked with stand-ins
 
@@ -17,12 +17,11 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 - The 2.8.1 Start at login fix across a real login. A real login found the missing icon; the fix was checked against a stand-in tray host.
 - Settings → Storage's first upkeep on a large real run folder.
 - A task in its own copy on a repository Claude Code hasn't trusted yet.
-- **Codex as Maestro's planner.** Built to Codex's JSON lines and tested against its real "not signed in" answer. Codex isn't signed in on this machine, so a real plan from it waits for someone who uses Codex.
+- **Codex as Viby's planner.** Built to Codex's JSON lines and tested against its real "not signed in" answer. Codex isn't signed in on this machine, so a real plan from it waits for someone who uses Codex.
 
-## Left from the 2026-11-12 audit
+## Left from recent audits
 
-- [ ] **Maestro: a "waiting for you" note.** The core can't tell a CLI waiting for a person from one that's quiet; only the window works that out. Moving that into the core would let Maestro say so too.
-- [ ] **Maestro: start a named agent** as a plan step. It needs a service call for "this agent's chat, in this workspace" that doesn't exist yet.
+- [ ] **Viby: a "waiting for you" note.** The core can't tell a CLI waiting for a person from one that's quiet; only the window works that out. Moving that into the core would let Viby say so too.
 - [ ] **Neighbouring panes keep their place.** A split or a close remounts the terminal beside it (its scrollback comes back, its scroll position and selection don't). Needs a keyed pane tree in SplitView.
 - [ ] **File names that aren't UTF-8** still go through UTF-8 text when Apply lists what changed. Rare; their content is now carried byte for byte.
 

@@ -6,10 +6,11 @@ import type { EngineRow } from "../core/types.js";
 import { effortLevels } from "./launch-options.js";
 
 /**
- * start, tell, stop: a CLI. workspace: a new workspace (its folder made if it isn't there).
+ * start, tell, stop: a CLI (or an agent). workspace: a new workspace (its folder made if it isn't there).
  * apply, discard: a copy waiting for review. show: a running CLI, opened in Code.
+ * lookup: search runs, git branches and project folders on disk. task: run or create a task. routine: run or toggle a routine.
  */
-export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show";
+export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show" | "lookup" | "task" | "routine";
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
 export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
@@ -26,7 +27,9 @@ export interface OrchestratorStep {
   kind: OrchestratorStepKind;
   /** start: the CLI to open. */
   engineId: string;
-  /** start: the workspace it works on. */
+  /** start, task: a saved VibeForge agent when one was named. */
+  agentId?: string;
+  /** start, task: the workspace it works on. */
   workspaceId: string;
   /** start: the new branch, in its own copy of the workspace. Empty when the folder isn't a git repository. */
   branch: string;
@@ -41,6 +44,7 @@ export interface OrchestratorStep {
   error: string | null;
   /** start: the terminal it opened, and the workspace that terminal is in (the copy's). */
   ptyId: string | null;
+  runId?: string | null;
   openedWorkspaceId: string | null;
   /** start: its own copy (a MaestroCopy's id), made when it ran in a git workspace on a branch. */
   copyId?: string | null;
@@ -182,13 +186,24 @@ export const KNOWN_MODELS: Partial<Record<BrainKind, string[]>> = {
  * every request has.
  */
 export function orchestratorVoiceWords(workspaces: readonly string[]): string[] {
-  return [...workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]), "branch", "workspace"];
+  return ["Viby", "Vibey", ...workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]), "branch", "workspace"];
 }
 
 export interface PlanContext {
-  workspaces: Array<{ id: string; name: string; folder: string; git: boolean }>;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    folder: string;
+    git: boolean;
+    /** Current git branch, when known. */
+    branch?: string;
+    /** Recent runs in this workspace, newest first. */
+    recentRuns?: Array<{ id: string; engine: string; branch?: string; prompt?: string; at: string }>;
+  }>;
   /** `bin` tells which model and effort options a CLI takes; without it, none are checked. */
   engines: Array<{ id: string; label: string; available: boolean; bin?: string }>;
+  /** Default CLI id when the person asks to start work without naming a specific CLI. */
+  defaultEngine?: string;
   running: Array<{
     id: string;
     engine: string;
@@ -203,6 +218,12 @@ export interface PlanContext {
   }>;
   /** Copies waiting for review (Apply or Discard). */
   copies?: Array<{ id: string; name: string; branch: string; workspace: string }>;
+  /** Saved VibeForge agents (teammates with their own brief, memory, skills and engine). */
+  agents?: Array<{ id: string; name: string; engine: string; goodAt?: string; places?: string[] }>;
+  /** Tasks on the board. */
+  tasks?: Array<{ id: string; title: string; status: string; workspace?: string; agent?: string }>;
+  /** Scheduled routines. */
+  routines?: Array<{ id: string; name: string; schedule: string; enabled: boolean; agent?: string }>;
   /** Where a new workspace goes when the person doesn't say. */
   projectsFolder?: string;
 }
@@ -227,7 +248,8 @@ export function folderNameOk(name: string): boolean {
 export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIssue | null {
   if (step.kind === "workspace") {
     const folder = (step.folder ?? "").trim();
-    if (!folderNameOk(step.name ?? "") || !(folder.startsWith("/") || folder.startsWith("~/")) || folder.split("/").includes("..")) return "folder";
+    const stripped = folder.replace(/\/+$/, "");
+    if (!folderNameOk(step.name ?? "") || !(folder.startsWith("/") || folder.startsWith("~/")) || !stripped || stripped === "~" || folder.split("/").includes("..")) return "folder";
     return null;
   }
   if (step.kind === "start") {
@@ -235,12 +257,24 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     const engine = context.engines.find((item) => item.id === step.engineId);
     if (!engine) return "engine";
     if (!engine.available) return "engineMissing";
-    const effort = step.effort?.trim();
+    const effort = step.effort?.trim().toLowerCase();
     if (effort && engine.bin !== undefined && !effortLevels({ id: engine.id, bin: engine.bin }).includes(effort)) return "effort";
     return null;
   }
   if (step.kind === "apply" || step.kind === "discard") {
     return (context.copies ?? []).some((item) => item.id === step.target) ? null : "copy";
+  }
+  if (step.kind === "lookup") {
+    return step.prompt.trim() ? null : "prompt";
+  }
+  if (step.kind === "routine") {
+    return !step.target || (context.routines && !context.routines.some((item) => item.id === step.target)) ? "target" : null;
+  }
+  if (step.kind === "task") {
+    if (step.target) return context.tasks && !context.tasks.some((item) => item.id === step.target) ? "target" : null;
+    if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+    if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
+    return step.prompt.trim() ? null : "prompt";
   }
   if (!context.running.some((item) => item.id === step.target)) return "target";
   if (step.kind === "tell" && !step.prompt.trim()) return "prompt";

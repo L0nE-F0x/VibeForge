@@ -38,7 +38,7 @@ export async function repairBlankCapture(dir: string, files: RunFiles): Promise<
   const capture = captureModule();
   if (!capture) return files;
   if (capture.plainText(files.transcript) || capture.plainText(files.screen)) return files;
-  const scrollback = readRunText(dir, RUN_FILES.scrollback);
+  const scrollback = files.scrollback || readRunText(dir, RUN_FILES.scrollback);
   if (scrollback.length < 32) return files;
   const restored = await capture.restoreScrollback(scrollback);
   if (!restored || !capture.plainText(restored.transcript)) return files;

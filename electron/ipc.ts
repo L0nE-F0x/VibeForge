@@ -91,7 +91,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "app.restart": () => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
       log.info("Restarting");
-      app.relaunch({ args: relaunchArgs(process.argv) });
+      app.relaunch({ execPath: process.execPath, args: relaunchArgs(process.argv) });
       ctx.quitting = true;
       app.quit();
     },
@@ -116,7 +116,11 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       return tray.autostart;
     },
     "app.attention": (state) => tray.attention(state),
-    "app.logTail": (lines) => log.tail(Math.min(Math.max(1, Math.floor(lines)), 2000)),
+    "app.logTail": (lines) => {
+      const safeLines = Number.isFinite(lines) ? Math.floor(lines) : 200;
+      const count = Math.max(10, Math.min(2000, safeLines));
+      return log.tail(count);
+    },
 
     "updates.get": () => updater.get(),
     "updates.check": () => updater.check(),

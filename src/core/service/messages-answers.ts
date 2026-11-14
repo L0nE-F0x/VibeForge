@@ -114,7 +114,15 @@ export class Answers {
     const waiter: Waiter = { ...spec, since, abort: new AbortController(), logKind, reading: false, gaveUp: Boolean(spec.gone?.aborted), forwardTo };
     // A sender that hangs up early has stopped waiting, as if its deadline had passed. Let go of
     // once the waiter is done (takeWaiter aborts its own signal), or the sender's keeps it.
-    spec.gone?.addEventListener("abort", () => (waiter.gaveUp = true), { once: true, signal: waiter.abort.signal });
+    spec.gone?.addEventListener(
+      "abort",
+      () => {
+        if (waiter.gaveUp) return;
+        waiter.gaveUp = true;
+        waiter.done(null);
+      },
+      { once: true, signal: waiter.abort.signal },
+    );
     this.waiting.set(target, [...(this.waiting.get(target) ?? []), waiter]);
     // Checked every second from now: a CLI that never moves would otherwise never be looked at again.
     this.wake();

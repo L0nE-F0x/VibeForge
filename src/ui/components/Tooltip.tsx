@@ -37,7 +37,8 @@ function tipTarget(node: EventTarget | null): HTMLElement | null {
 
 function describe(element: HTMLElement): Tip {
   const kbd = (element.dataset.tipKbd ?? "")
-    .split(/\s*\+\s*/)
+    .trim()
+    .split(/\s*\+\s*(?!$)/)
     .map((key) => key.trim())
     .filter(Boolean);
   const side = (element.dataset.tipSide as Side | undefined) ?? "bottom";
