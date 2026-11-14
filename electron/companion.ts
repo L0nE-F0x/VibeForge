@@ -196,7 +196,7 @@ export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" 
     },
     ask: (text) => {
       // The answer takes a while (one turn of the planning CLI). It arrives as a turn the page polls for.
-      if (service.orchestratorView().thinking) throw new Error("Maestro is still answering. Wait for it, or stop it.");
+      if (service.orchestratorView().thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
       void service.orchestratorAsk(text).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
     },
     stopThinking: () => service.orchestratorStopThinking(),

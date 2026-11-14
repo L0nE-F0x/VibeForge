@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useQuery, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
@@ -28,7 +28,7 @@ export function OrchestratorCard() {
           <Select value={engineId} onChange={(event) => void save({ ...current, engine: event.target.value, model: "" })}>
             {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
             {planners.map((engine) => (
-              <option key={engine.id} value={engine.id}>
+              <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== engineId}>
                 {engine.label}
                 {engine.available ? "" : ` ${t("common.notOnPath")}`}
               </option>
@@ -59,6 +59,7 @@ export function OrchestratorCard() {
 /** A folder typed in (~ allowed), saved once the field is left. */
 function FolderInput({ value, placeholder, onChange }: { value: string; placeholder: string; onChange: (folder: string) => void }) {
   const [typed, setTyped] = useState(value);
+  useEffect(() => setTyped(value), [value]);
   return (
     <Input
       className="mono"
@@ -81,6 +82,8 @@ function ModelPick({ engineId, value, onChange }: { engineId: string; value: str
   const [loading, setLoading] = useState(false);
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState(value);
+  const skipBlurRef = useRef(false);
+  useEffect(() => setTyped(value), [value]);
   const load = () => {
     if (models || loading) return;
     setLoading(true);
@@ -100,11 +103,18 @@ function ModelPick({ engineId, value, onChange }: { engineId: string; value: str
         onChange={(event) => setTyped(event.target.value)}
         onBlur={() => {
           setTyping(false);
+          if (skipBlurRef.current) {
+            skipBlurRef.current = false;
+            return;
+          }
           if (typed.trim() !== value) onChange(typed.trim());
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") (event.target as HTMLInputElement).blur();
           if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            skipBlurRef.current = true;
             setTyped(value);
             setTyping(false);
           }
@@ -119,6 +129,7 @@ function ModelPick({ engineId, value, onChange }: { engineId: string; value: str
       onPointerDown={load}
       onChange={(event) => {
         if (event.target.value === OTHER) {
+          skipBlurRef.current = false;
           setTyped(value);
           setTyping(true);
         } else onChange(event.target.value);

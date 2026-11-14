@@ -4,7 +4,7 @@ What VibeForge does and won't do. A change that breaks one of these needs a reas
 
 ## It runs the CLIs you already sign in to
 
-VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Maestro plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything.
+VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Viby plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything.
 
 Plan limits, when you turn them on, read the sign-in a CLI saved on this machine to ask its provider for your usage. VibeForge never renews, rewrites or keeps that sign-in, and saves only the percentages.
 
@@ -30,9 +30,9 @@ Anything that goes over the network stays off until you turn it on:
 ## A person decides each step
 
 - Writing or assigning a task starts nothing. **Execute** does.
-- Maestro shows a plan as a card that waits for **Go**. **Just go** is a setting you choose.
+- Viby shows a plan as a card that waits for **Go**. **Just go** is a setting you choose.
 - Dictated words land in the box or terminal and wait for you to press Enter.
-- Work done in a task's or Maestro's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
+- Work done in a task's or Viby's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
 - A task one CLI hands another waits for you under **Ask first**, the default. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
 
 ## Undo instead of "are you sure?"
@@ -41,7 +41,7 @@ Deleting an agent, chat, task, skill or routine, or discarding a copy, happens a
 
 ## One engine per agent
 
-An agent has one engine. VibeForge doesn't route work between models, pick a cheaper one, or fall back to another when a CLI fails or hits its limit. Maestro never starts a CLI you didn't name, and a lead CLI that hands out tasks decides that itself. Forks that want routing are welcome.
+An agent has one engine. VibeForge doesn't route work between models, pick a cheaper one, or fall back to another when a CLI fails or hits its limit. Viby never starts a CLI you didn't configure (using the CLI or saved Agent you named, or your default CLI setting when none is named), and a lead CLI that hands out tasks decides that itself. Forks that want routing are welcome.
 
 ## Voice stays on this machine
 

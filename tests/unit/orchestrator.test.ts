@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, emptyPromise, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
 import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, tempDir, until } from "./fixtures/service-harness.js";
@@ -187,6 +187,48 @@ describe("the Orchestrator's plans", () => {
     expect(stepIssue({ ...steps[0], prompt: " " }, context)).toBeNull();
     expect(stepIssue({ ...steps[4], prompt: " " }, context)).toBe("prompt");
     expect(stepIssue({ ...steps[4], target: "pty-9" }, context)).toBe("target");
+  });
+
+  it("resolves task, lookup, agent-place, defaultEngine and malformed JSON cases", () => {
+    const rich: PlanContext = {
+      ...context,
+      defaultEngine: "claude",
+      agents: [{ id: "agent-1", name: "Atlas", engine: "claude", goodAt: "tests", places: [context.workspaces[0].folder] }],
+      tasks: [{ id: "task-1", title: "Existing Task", status: "todo", workspace: context.workspaces[0].name }],
+      routines: [{ id: "routine-1", name: "Nightly", agent: "Atlas", enabled: true, schedule: "0 2 * * *" }],
+    };
+    const steps = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "start", engine: "Atlas", prompt: "Work in Atlas place." },
+          { kind: "start", workspace: "vibeforge", prompt: "Use default CLI." },
+          { kind: "task", target: "Existing Task" },
+          { kind: "task", engine: "Atlas", workspace: "vibeforge", branch: "Fix OAuth", prompt: "Fix login." },
+          { kind: "task", engine: "Atlas", workspace: "vibeforge", prompt: "Refactor routes" },
+          { kind: "lookup", prompt: " " },
+          { kind: "routine", target: "nonexistent" },
+        ],
+      },
+      rich,
+    );
+    expect(steps[0]).toMatchObject({ kind: "start", workspaceId: context.workspaces[0].id, engineId: "claude", agentId: "agent-1" });
+    expect(steps[1]).toMatchObject({ kind: "start", workspaceId: "vibeforge", engineId: "claude" });
+    expect(steps[2]).toMatchObject({ kind: "task", target: "task-1", asked: "Existing Task" });
+    expect(steps[3]).toMatchObject({ kind: "task", workspaceId: "vibeforge", agentId: "agent-1", name: "Fix OAuth", prompt: "Fix login." });
+    expect(steps[4]).toMatchObject({ kind: "task", name: "refactor routes" });
+
+    expect(stepIssue(steps[2], rich)).toBeNull();
+    expect(stepIssue({ ...steps[2], target: "missing-task" }, rich)).toBe("target");
+    expect(stepIssue(steps[3], rich)).toBeNull();
+    expect(stepIssue({ ...steps[3], workspaceId: "missing" }, rich)).toBe("workspace");
+    expect(stepIssue({ ...steps[3], agentId: "" }, rich)).toBe("engine");
+    expect(stepIssue({ ...steps[3], prompt: " " }, rich)).toBe("prompt");
+    expect(stepIssue(steps[5], rich)).toBe("prompt");
+    expect(stepIssue(steps[6], rich)).toBe("target");
+
+    expect(orchestratorRules(rich)).toContain("Existing Task");
+    expect(readBrainOutput("Sorry {not: valid json}").plan).toBeNull();
   });
 });
 
@@ -997,6 +1039,128 @@ describe("Maestro in the service, 2.16", () => {
     await until(() => !ctx.svc.listLive().some((session) => session.ptyId === ptyId));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(ctx.svc.orchestratorView().turns.filter((turn) => turn.note)).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("retries on a fresh session when a planner promises to search or start something with no steps", async () => {
+    expect(emptyPromise("I'm checking VibeForge and your projects for the Antigravity Android widget session so I can open the right workspace.")).toBe(true);
+    expect(emptyPromise("Sorry for the wait. I'm searching that session id on disk right now.")).toBe(true);
+    expect(emptyPromise("Which coding CLI should I start in VibeForge?")).toBe(false);
+    expect(emptyPromise("I don't see an Android widget workspace here. Which workspace is it in?")).toBe(false);
+
+    const repo = gitRepo();
+    const ctx = withPlanner([
+      { say: "Sorry for the wait. I'm searching that session id on disk right now.", steps: [] },
+      { say: "Starting Argy in shop to find that session.", steps: [{ kind: "start", engine: "argy", workspace: "shop", inPlace: true, prompt: "Find the Android widget session." }] },
+    ]);
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("find the Android widget session in shop with argy");
+    expect(ctx.calls).toHaveLength(2);
+    expect(ctx.calls[1].argv.at(-2)).toBe("-s");
+    expect(ctx.calls[1].argv.at(-1)).not.toBe(ctx.calls[0].argv.at(-1));
+    const retryPrompt = ctx.calls[1].argv[ctx.calls[1].argv.indexOf("-p") + 1];
+    expect(retryPrompt).toContain("with steps: []");
+    const lastTurn = ctx.svc.orchestratorView().turns.at(-1);
+    expect(lastTurn?.text).toBe("Starting Argy in shop to find that session.");
+    expect(lastTurn?.steps?.[0]).toMatchObject({ kind: "start", engineId: "argy" });
+    ctx.svc.close();
+  });
+
+  it("runs a lookup step immediately in the same turn and hands findings back so Viby plans the real steps", async () => {
+    const projects = tempDir();
+    const widgetDir = path.join(projects, "android-widget-app");
+    fs.mkdirSync(widgetDir, { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: widgetDir });
+
+    const ctx = withPlanner([
+      {
+        say: "Let me look for that Android widget project.",
+        steps: [{ kind: "lookup", prompt: "android-widget" }],
+      },
+      {
+        say: "Found android-widget-app on disk. Adding it as a workspace and starting Argy there.",
+        steps: [
+          { kind: "workspace", workspace: "android-widget-app", folder: widgetDir, git: true },
+          { kind: "start", engine: "argy", workspace: "android-widget-app", inPlace: true, prompt: "Continue the widget layout." },
+        ],
+      },
+    ]);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "", projectsFolder: projects } });
+
+    await ctx.svc.orchestratorAsk("Hey Viby, find my android-widget project and start argy in it");
+    expect(ctx.calls).toHaveLength(2);
+    const secondPrompt = ctx.calls[1].argv[ctx.calls[1].argv.indexOf("-p") + 1];
+    expect(secondPrompt).toContain("[Lookup results from VibeForge]");
+    expect(secondPrompt).toContain("android-widget-app");
+    const lastTurn = ctx.svc.orchestratorView().turns.at(-1);
+    expect(lastTurn?.text).toContain("Found android-widget-app on disk.");
+    expect(lastTurn?.steps?.map((s) => s.kind)).toEqual(["workspace", "start"]);
+    ctx.svc.close();
+  });
+
+  it("knows Viby's identity, default engine, agents, tasks and routines, and preserves context across planner switches", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([
+      { say: "I am Viby, ready to help.", steps: [] },
+      { say: "Starting Atlas and running the routine.", steps: [{ kind: "start", engine: "Atlas", workspace: "shop", inPlace: true, prompt: "Check the store." }, { kind: "routine", target: "Nightly Check", prompt: "disable" }] },
+    ]);
+    const file = path.join(ctx.configRoot, "engines.json");
+    const engines = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+    engines.engines.push({ id: "claude", label: "Claude Code", bin: "pasty", args: [] });
+    fs.writeFileSync(file, JSON.stringify(engines));
+
+    ctx.svc.addWorkspace(repo);
+    const agent = ctx.svc.saveAgent({ name: "Atlas", engine: "argy", goodAt: "backend architecture", brief: "Always check types.", places: [repo] });
+    const routine = ctx.svc.saveRoutine({ name: "Nightly Check", schedule: { kind: "cron", expr: "0 2 * * *" }, prompt: "Run checks.", agentId: agent.id, enabled: true });
+
+    await ctx.svc.orchestratorAsk("Hey Viby, who are you?");
+    const firstRules = ctx.calls[0].argv[ctx.calls[0].argv.indexOf("--rules") + 1];
+    expect(firstRules).toContain("You are Viby (also called Vibey, Vibe, or Maestro");
+    expect(firstRules).toContain("Atlas (CLI: argy; backend architecture");
+    expect(firstRules).toContain("Nightly Check");
+
+    // Switch planner from Grok to Claude Code: Viby carries the conversation recap into the new planner.
+    ctx.svc.saveSettings({ orchestrator: { engine: "claude", mode: "plan", model: "", projectsFolder: "" } });
+    await ctx.svc.orchestratorAsk("Start Atlas in shop and pause Nightly Check");
+    expect(ctx.calls[1].argv.at(-1)).toContain("The person: Hey Viby, who are you?");
+    expect(ctx.calls[1].argv.at(-1)).toContain("You: I am Viby, ready to help.");
+
+    const plan = ctx.svc.orchestratorView().turns.at(-1);
+    expect(plan?.steps?.[0]).toMatchObject({ kind: "start", engineId: "argy", agentId: agent.id });
+    expect(plan?.steps?.[1]).toMatchObject({ kind: "routine", target: routine.id });
+
+    await ctx.svc.orchestratorRun(plan?.id ?? "");
+    expect(ctx.spawns[0].argv.at(-1)).toContain("Always check types.");
+    expect(ctx.spawns[0].argv.at(-1)).toContain("Check the store.");
+    expect(ctx.svc.listRoutines().find((r) => r.id === routine.id)?.enabled).toBe(false);
+    ctx.svc.close();
+  });
+
+  it("runs existing tasks and creates new tasks from task steps", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([
+      {
+        say: "Running existing task and adding a new one.",
+        steps: [
+          { kind: "task", target: "Existing Fix" },
+          { kind: "task", engine: "Atlas", workspace: path.basename(repo), branch: "Audit docs", prompt: "Review README links." },
+        ],
+      },
+    ]);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "", projectsFolder: "" } });
+    const ws = ctx.svc.addWorkspace(repo).workspaces[0];
+    const agent = ctx.svc.saveAgent({ name: "Atlas", engine: "argy", brief: "Be brief.", places: [repo] });
+    const existing = ctx.svc.saveTask({ title: "Existing Fix", body: "Fix existing bug.", agentId: agent.id, workspaceId: ws.id });
+
+    await ctx.svc.orchestratorAsk("Run Existing Fix and create a task to audit docs");
+    const lastTurn = ctx.svc.orchestratorView().turns.at(-1);
+    const rules = ctx.calls[0].argv[ctx.calls[0].argv.indexOf("--rules") + 1];
+    expect(rules).toContain("Existing Fix");
+
+    await ctx.svc.orchestratorRun(lastTurn?.id ?? "");
+    const tasks = ctx.svc.listTasks();
+    expect(tasks.some((t) => t.id === existing.id && t.status === "running")).toBe(true);
+    expect(tasks.some((t) => t.title === "Audit docs")).toBe(true);
     ctx.svc.close();
   });
 });

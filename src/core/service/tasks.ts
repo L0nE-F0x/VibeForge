@@ -94,6 +94,12 @@ export class TaskDesk {
       : createTask({ title, body: input.body, agentId: input.agentId || null, workspaceId: input.workspaceId || null, isolated: input.isolated === true, shareCheckout: input.shareCheckout === true, now });
     if (existing?.copy && existing.workspaceId !== task.workspaceId) throw new Error("Apply or discard the task's copy before moving it to another workspace.");
     this.core.store.writeTask(task);
+    if (this.turns.waiting("task", task.id) && (task.isolated || task.shareCheckout)) {
+      this.turns.cancel("task", task.id);
+      void this.executeTask(task.id).catch((error) =>
+        this.core.options.host.notify({ title: task.title, body: error instanceof Error ? error.message : String(error), taskId: task.id }),
+      );
+    }
     this.core.emit("tasks");
     return this.taskView(task);
   }

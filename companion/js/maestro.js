@@ -110,8 +110,8 @@ export function updateMaestro() {
   parts.thinkingText.textContent = t("orch.thinking", { engine: label });
   parts.thinkingStop.disabled = state.busy;
   for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (parts.turnList.querySelectorAll("button[data-act]"))) button.disabled = state.busy || button.dataset.off === "1";
-  const key = JSON.stringify([changed, orch.turns.length, orch.thinking, orch.engineReady]);
-  if (key !== parts.orchTurnsKey) {
+  const key = JSON.stringify([orch.turns.length, orch.thinking, orch.engineReady]);
+  if (changed || key !== parts.orchTurnsKey) {
     parts.orchTurnsKey = key;
     if (parts.stickTurns && !editingIn(parts.turns)) parts.turns.scrollTop = parts.turns.scrollHeight;
   }
@@ -139,7 +139,7 @@ function paintPlanner() {
 function paintTurns() {
   const orch = /** @type {PhoneOrchestrator} */ (state.orch);
   // A plan card names CLIs, workspaces and running terminals, so it is redrawn when those change.
-  const context = JSON.stringify([orch.engines, orch.workspaces, orch.running.map((item) => [item.ptyId, item.label]), [...pendingSteps]]);
+  const context = JSON.stringify([orch.engines, orch.workspaces, orch.copies, orch.running.map((item) => [item.ptyId, item.label]), [...pendingSteps]]);
   const seen = new Set();
   /** @type {HTMLElement | null} */
   let previous = null;

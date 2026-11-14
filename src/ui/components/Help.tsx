@@ -188,7 +188,7 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
                   ) : row.gesture ? (
                     <span className="faint">{t(row.gesture)}</span>
                   ) : (
-                    row.keys?.split("+").map((key) => <kbd key={key}>{key}</kbd>)
+                    row.keys?.split(/\+(?!$)/).map((key) => <kbd key={key}>{key}</kbd>)
                   )}
                 </span>
               </div>

@@ -6,7 +6,7 @@ import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from 
 import { LiveTerminal } from "../components/Terminal.js";
 import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { Rich } from "../i18n/Rich.js";
-import { useAction, useConfirm, useDeleted, useNav, useToast, type Route } from "../state.js";
+import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { writerNames } from "../components/Occupancy.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
@@ -38,6 +38,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   // "new" (from Ctrl+K) opens a blank task, like the New task button.
   const open = route.taskId && route.taskId !== "new" ? list.find((task) => task.id === route.taskId) ?? null : null;
   const drafting = creating || route.taskId === "new";
+  useDropMissing(tasks.loaded, Boolean(route.taskId) && !drafting && !open, { view: "tasks" });
 
   const onDrop = (status: TaskStatus) => async (event: DragEvent) => {
     setDropTarget(null);
@@ -225,6 +226,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   }, t("tasks.saveFailed"));
   const [execute, executing] = useAction(async (now: boolean = false, inCopy: boolean = false) => {
     if (!task) return;
+    if (inCopy) setForm((prev) => ({ ...prev, isolated: true }));
     if (dirty || inCopy) await call("tasks.save", { id: task.id, ...fields(), ...(inCopy ? { isolated: true } : {}) });
     const result = await call("tasks.execute", task.id, termSize(), now);
     if ("queued" in result) push("info", t("turns.queued", { names: result.behind.join(", ") }), t("turns.queuedBody"));

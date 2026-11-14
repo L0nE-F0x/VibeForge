@@ -7,7 +7,7 @@ import { isPathInside } from "../places.js";
 import { isSafeId } from "../slug.js";
 import type { Workspace } from "../types.js";
 import { removeWorkspaceRecord } from "../workspaces.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, ownedCopyPath, removeCopy, repoRoot, type ApplyResult, type CopyOwner } from "../worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
@@ -162,6 +162,7 @@ export class MaestroCopies {
       await this.endIn(copy);
       const owned = ownedCopyPath(this.owner(copy.id), copy.path);
       const trusted = owned ? await this.trusted(copy) : false;
+      if (owned) await lockCopy(copy, this.owner(copy.id)).catch(() => false);
       const bin = this.core.trash.stash(owned?.real ? [owned.real] : []);
       const workspaces = this.core.store.readWorkspaces();
       const index = workspaces.workspaces.findIndex((item) => item.id === copy.openedWorkspaceId);
@@ -177,13 +178,14 @@ export class MaestroCopies {
       const deleted = this.core.keepForUndo(
         bin,
         () => {
+          if (owned) void unlockCopy(copy, this.owner(copy.id)).catch(() => undefined);
           if (workspace) this.restoreWorkspace(workspace, index, layout);
           this.copies.push(copy);
           this.save();
           this.settled(copy, null);
         },
         // Returned, so a quit inside the Undo window waits for the branch to go too.
-        owned ? () => removeCopy(copy, this.owner(copy.id), trusted).catch(() => undefined) : undefined,
+        owned ? () => (this.copies.some((item) => item.id === copy.id) ? Promise.resolve() : removeCopy(copy, this.owner(copy.id), trusted).catch(() => undefined)) : undefined,
       );
       return owned ? deleted : { ...deleted, copyLeft: true };
     });

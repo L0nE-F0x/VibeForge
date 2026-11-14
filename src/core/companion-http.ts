@@ -374,7 +374,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     // Why a step failed is the main process's own sentence, as the window translates it.
     const language = languageOf(req, opts);
     for (const turn of view.turns) {
-      for (const step of turn.steps ?? []) if (step.error) step.error = await phoneCoreText(language, step.error);
+      for (const step of turn.steps ?? []) {
+        if (step.error) step.error = await phoneCoreText(language, step.error);
+        if (step.result) step.result = await phoneCoreText(language, step.result);
+      }
     }
     sendJson(res, 200, view, req);
     return;

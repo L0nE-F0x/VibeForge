@@ -35,7 +35,7 @@ const ISSUE_KEYS = {
   copy: "orch.issue.copy",
 };
 /** The word for each kind of step that isn't a start (which shows its CLI and workspace instead). @type {Record<string, string>} */
-const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard" };
+const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard", lookup: "orch.show", task: "orch.go", routine: "orch.go" };
 /** A plan's own new workspace, as later steps in it name it until it is made. */
 const PLANNED_PREFIX = "new:";
 /** @type {Record<string, string>} */
@@ -208,6 +208,12 @@ function workspaceName(turn, step) {
 function textField(turn, step, key, value, label) {
   const input = el("input", { class: "orch-branch-input", "data-field": key, autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: label, "aria-label": label });
   input.value = value;
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+  });
   input.addEventListener("blur", () => {
     const next = input.value.trim();
     if (next !== currentStep(step, key)) editStep(turn, step, { [key]: next });
@@ -224,6 +230,12 @@ function textField(turn, step, key, value, label) {
 function branchField(turn, step, value) {
   const input = el("input", { class: "orch-branch-input", "data-field": "branch", autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: t("orch.noBranch"), "aria-label": t("orch.branch") });
   input.value = value;
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    }
+  });
   input.addEventListener("blur", () => {
     const next = input.value.trim();
     if (next !== currentStep(step, "branch")) editStep(turn, step, { branch: next });
@@ -265,7 +277,12 @@ export function sizePrompts(node) {
  */
 function currentStep(step, key) {
   const pending = pendingSteps.get(step.id);
-  return pending && key in pending ? pending[key] : /** @type {Record<string, any>} */ (step)[key];
+  if (pending && key in pending) return pending[key];
+  for (const turn of state.orch?.turns || []) {
+    const found = turn.steps?.find((item) => item.id === step.id);
+    if (found) return /** @type {Record<string, any>} */ (found)[key];
+  }
+  return /** @type {Record<string, any>} */ (step)[key];
 }
 
 /**
@@ -312,7 +329,7 @@ function flushStepEdits(turn, card) {
     const patch = {};
     for (const field of /** @type {NodeListOf<Field>} */ (row.querySelectorAll("[data-field]"))) {
       const key = /** @type {string} */ (field.dataset.field);
-      const next = key === "branch" ? field.value.trim() : field.value;
+      const next = key === "branch" || key === "name" || key === "folder" ? field.value.trim() : field.value;
       if (next !== currentStep(step, key)) patch[key] = next;
     }
     if (Object.keys(patch).length) sent.push(editStep(turn, step, patch));

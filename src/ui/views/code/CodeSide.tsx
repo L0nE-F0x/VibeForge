@@ -125,12 +125,14 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
       target.classList.remove("dragging");
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
       // Now the width is kept.
       panel.resizing.current = false;
       setSide((prev) => ({ ...prev }));
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
 
   return (

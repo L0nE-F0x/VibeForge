@@ -130,6 +130,7 @@ function trailingPartial(text) {
   const esc = text.lastIndexOf("\x1b");
   if (esc < 0 || text.length - esc > 32) return "";
   const tail = text.slice(esc);
+  if (tail === "\x1b") return tail;
   if (/^\x1b\[[0-9;?]*$/.test(tail)) return tail;
   if (/^\x1b\][^\x07]*$/.test(tail)) return tail;
   return "";
@@ -204,9 +205,11 @@ function flushHold(sink) {
  */
 function captureSynced(sink) {
   const pending = sink.chain || Promise.resolve();
-  return pending.then(() => flushHold(sink), () => flushHold(sink)).then(
-    () => new Promise((resolve) => sink.mirror.write("", resolve)),
+  const next = pending.then(() => flushHold(sink), () => flushHold(sink)).then(
+    () => /** @type {Promise<void>} */ (new Promise((resolve) => sink.mirror.write("", () => resolve(undefined)))),
   );
+  sink.chain = next;
+  return next;
 }
 
 /**

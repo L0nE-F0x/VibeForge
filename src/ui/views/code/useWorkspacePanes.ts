@@ -60,7 +60,7 @@ export function useWorkspacePanes({
   fontSize: number;
 }) {
   const t = useT();
-  const { go } = useNav();
+  const { replace } = useNav();
   const { fail } = useToast();
   const confirm = useConfirm();
   // Per workspace: its pane tree, null once every pane has been closed, missing until loaded.
@@ -171,14 +171,15 @@ export function useWorkspacePanes({
     if (owner) {
       setFocus((prev) => ({ ...prev, [current.id]: owner.id }));
       terminals.current.get(owner.id)?.focus();
+      replace({ view: "code", workspaceId: current.id });
       return;
     }
     const session = live.find((item) => item.ptyId === route.ptyId);
     if (!session) return;
-    adopt(current, session.ptyId, session.runId, session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: engineOfTitle(session.title) });
-    go({ view: "code", workspaceId: current.id });
+    adopt(current, session.ptyId, session.runId, session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) });
+    replace({ view: "code", workspaceId: current.id });
     // Adoption runs once per requested session.
-  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""]]);
+  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""], replace]);
 
   function engineOfTitle(title: string): string {
     return engines.find((engine) => title.startsWith(engine.label))?.id ?? defaultEngine ?? "";
@@ -208,7 +209,7 @@ export function useWorkspacePanes({
       if (!workspace) continue;
       placed.current.add(session.ptyId);
       if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) continue;
-      const launch: PaneLaunch = { type: "engine", engineId: engineOfTitle(session.title) };
+      const launch: PaneLaunch = { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) };
       if (workspace.id in layoutsRef.current) {
         place(workspace, session, launch);
         continue;
@@ -219,7 +220,9 @@ export function useWorkspacePanes({
         .then((saved) => {
           if (!(workspace.id in layoutsRef.current)) {
             setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
-            for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
+            if (opened) {
+              for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
+            }
           }
           place(workspace, session, launch);
         });

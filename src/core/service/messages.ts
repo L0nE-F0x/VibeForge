@@ -121,7 +121,24 @@ export class MessageDesk {
       `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
 
     return new Promise<TellResult>((resolve) => {
+      const done = new AbortController();
+      const finish = (result: TellResult) => {
+        done.abort();
+        resolve(result);
+      };
+      const stillWorking = (): TellResult => ({
+        ok: true,
+        to: to.handle,
+        delivered: "sent",
+        reply: null,
+        timedOut: true,
+        note: from ? `${to.label} is still working. Its answer will be sent to you as a message when it's done.` : `${to.label} is still working.`,
+      });
       const waitMs = Math.max(1000, input.timeoutMs ?? DEFAULT_WAIT_MS);
+      if (input.wait && !atLimit) {
+        if (input.gone?.aborted) finish(stillWorking());
+        else input.gone?.addEventListener("abort", () => finish(stillWorking()), { once: true, signal: done.signal });
+      }
       this.delivery.queue({
         fromPty: from?.ptyId ?? null,
         toPty: to.ptyId,
@@ -135,28 +152,22 @@ export class MessageDesk {
                 deadline: this.nowMs() + waitMs,
                 done: (answered) =>
                   answered
-                    ? resolve({ ok: true, to: to.handle, delivered: "sent", reply: answered.reply, fromScreen: answered.fromScreen || undefined })
-                    : resolve({
-                        ok: true,
-                        to: to.handle,
-                        delivered: "sent",
-                        reply: null,
-                        timedOut: true,
-                        note: from ? `${to.label} is still working. Its answer will be sent to you as a message when it's done.` : `${to.label} is still working.`,
-                      }),
-                dropped: (why) => resolve({ ok: false, error: why }),
+                    ? finish({ ok: true, to: to.handle, delivered: "sent", reply: answered.reply, fromScreen: answered.fromScreen || undefined })
+                    : finish(stillWorking()),
+                dropped: (why) => finish({ ok: false, error: why }),
                 gone: input.gone,
               }
             : null,
         // With --wait, an answer settles it, unless it went in as a draft (the limit came while it waited).
         delivered: (draft) => {
-          if (draft || !input.wait) resolve({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? note() : undefined });
+          done.abort();
+          if (draft || !input.wait) finish({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? note() : undefined });
         },
-        dropped: (why) => resolve({ ok: false, error: why }),
+        dropped: (why) => finish({ ok: false, error: why }),
       });
       // Busy for now: say so at once rather than holding the sender until there's room.
       if (!input.wait && !atLimit && !this.delivery.idle(to.ptyId)) {
-        resolve({ ok: true, to: to.handle, delivered: "queued", note: `${to.label} is busy; your message goes in as soon as it's free.` });
+        finish({ ok: true, to: to.handle, delivered: "queued", note: `${to.label} is busy; your message goes in as soon as it's free.` });
       }
       this.core.emit("live");
       void this.pump();

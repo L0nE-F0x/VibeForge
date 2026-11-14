@@ -7,9 +7,13 @@ import { isCodingCli } from "../checkout.js";
 import { isDirectory, readJson, writeJson } from "../fsx.js";
 import {
   brainArgs,
+  branchFromPrompt,
+  cleanBranch,
+  emptyPromise,
   folderNameOk,
   NEEDS_GO,
   PLANNED_PREFIX,
+  plannedFolder,
   plannedId,
   sessionGone,
   withPlannedWorkspaces,
@@ -37,7 +41,9 @@ import type { ServiceCore } from "./core.js";
 import type { MessageDesk } from "./messages.js";
 import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
 import type { LiveSession } from "../types.js";
-import { cleanModel } from "../../shared/launch-options.js";
+import { cleanModel, effortLevels, takesModel } from "../../shared/launch-options.js";
+import type { RoutineDesk } from "./routines.js";
+import type { TaskDesk } from "./tasks.js";
 import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
 
@@ -63,6 +69,8 @@ interface Conversation {
   engineId: string;
   /** The session exists (its first turn went through), so the next turn resumes it. */
   begun: boolean;
+  /** Non-copy workspaces present when the session began, so adding one refreshes a planner that caches rules on turn 1. */
+  workspacesKey?: string;
   turns: OrchestratorTurn[];
 }
 
@@ -161,6 +169,7 @@ const turnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).sl
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
+  private runEpoch = 0;
   /** Models each planner listed, kept for this run of VibeForge. */
   private readonly models = new Map<string, string[]>();
   private readonly copies: MaestroCopies;
@@ -170,6 +179,8 @@ export class OrchestratorDesk {
     private readonly core: ServiceCore,
     private readonly workspaces: WorkspaceDesk,
     private readonly messages: MessageDesk,
+    private readonly tasks?: TaskDesk,
+    private readonly routines?: RoutineDesk,
   ) {
     this.conversation = this.load();
     this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
@@ -243,11 +254,26 @@ export class OrchestratorDesk {
     return tildify(best && best[1] >= 2 ? best[0] : path.join(os.homedir(), "Projects"));
   }
 
-  /** What the planning CLI is told is here: workspaces, CLIs, the ones running, and copies waiting for review. */
+  /** What the planning CLI is told is here: workspaces, CLIs, agents, tasks, routines, running sessions, and copies waiting for review. */
   async context(): Promise<PlanContext> {
     const rows = this.core.store.readEngineRows();
     const workspaces = await Promise.all(
-      this.core.store.readWorkspaces().workspaces.map(async (item) => ({ id: item.id, name: item.name, folder: tildify(item.path), git: await isGitRepo(item.path).catch(() => false) })),
+      this.core.store.readWorkspaces().workspaces.map(async (item) => {
+        const git = await isGitRepo(item.path).catch(() => false);
+        const recent = this.core.store.queryRuns({ workspaceId: item.id, limit: 3 }).map((run) => ({
+          id: run.id,
+          engine: run.engine,
+          ...(run.prompt ? { prompt: oneLine(run.prompt, 80) } : {}),
+          at: run.startedAt,
+        }));
+        return {
+          id: item.id,
+          name: item.name,
+          folder: tildify(item.path),
+          git,
+          ...(recent.length ? { recentRuns: recent } : {}),
+        };
+      }),
     );
     const names = new Map(workspaces.map((item) => [item.id, item.name]));
     const copies = this.copies.list();
@@ -269,11 +295,43 @@ export class OrchestratorDesk {
           ...(copy ? { branch: copy.branch } : {}),
         };
       });
+    const rawAgents = this.core.store.listAgents();
+    const agentNames = new Map(rawAgents.map((item) => [item.id, item.name]));
+    const agents = rawAgents.map((item) => ({
+      id: item.id,
+      name: item.name,
+      engine: item.engine,
+      ...(item.goodAt ? { goodAt: item.goodAt } : {}),
+      ...(item.places.length ? { places: item.places.map(tildify) } : {}),
+    }));
+    const tasks = this.core.store
+      .listTasks()
+      .slice(0, 20)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        ...(item.workspaceId && names.get(item.workspaceId) ? { workspace: names.get(item.workspaceId) } : {}),
+        ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
+      }));
+    const routines = (this.routines ? this.routines.listRoutines() : []).map((item) => ({
+      id: item.id,
+      name: item.name,
+      schedule: item.description,
+      enabled: item.enabled,
+      ...(item.agentName ? { agent: item.agentName } : {}),
+    }));
+    const defaultPick = this.core.store.readSettings().defaultEngine;
+    const defaultEngine = defaultPick && this.core.resolveEngine(defaultPick) ? defaultPick : undefined;
     return {
       workspaces,
       engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
+      ...(defaultEngine ? { defaultEngine } : {}),
       running,
       copies: copies.map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
+      ...(agents.length ? { agents } : {}),
+      ...(tasks.length ? { tasks } : {}),
+      ...(routines.length ? { routines } : {}),
       projectsFolder: this.projectsFolder(),
     };
   }
@@ -282,7 +340,7 @@ export class OrchestratorDesk {
   async ask(text: string): Promise<void> {
     const words = text.trim();
     if (!words) return;
-    if (this.thinking) throw new Error("Maestro is still answering. Wait for it, or stop it.");
+    if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
     const now = this.core.now().toISOString();
     this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
     const controller = new AbortController();
@@ -312,20 +370,33 @@ export class OrchestratorDesk {
       this.answer({ text: "", problem: "noEngine" });
       return;
     }
-    if (this.conversation.engineId !== engineId) {
-      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false };
-    }
     const context = await this.context();
+    const copies = this.copies.list();
+    const currentWorkspacesKey = context.workspaces
+      .filter((w) => !copies.some((c) => c.openedWorkspaceId === w.id))
+      .map((w) => `${w.id}:${w.name}`)
+      .join("|");
+    const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
+    const workspacesChanged = Boolean(
+      this.conversation.begun &&
+        this.conversation.workspacesKey !== undefined &&
+        this.conversation.workspacesKey !== currentWorkspacesKey &&
+        brainKind(engine.row) === "grok",
+    );
+    if (this.conversation.engineId !== engineId || workspacesChanged) {
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false, workspacesKey: currentWorkspacesKey };
+    }
     const work = path.join(this.dir, "work");
     fs.mkdirSync(work, { recursive: true });
     // Codex reads the schema from a file.
     const schemaFile = path.join(work, "plan-schema.json");
     fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
-    const turn = async (text: string) => {
-      const args = brainArgs(engine.row, { text, rules: orchestratorRules(context), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, schemaFile });
+    const turn = async (text: string, ctx: PlanContext = context) => {
+      const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, schemaFile });
       return args ? this.runner([engine.binPath, ...args], work, signal) : null;
     };
-    let run = await turn(words);
+    const initialText = (switchedEngine || workspacesChanged) && !this.conversation.begun ? this.recap(words) : words;
+    let run = await turn(initialText);
     if (!run) {
       this.answer({ text: "", problem: "noEngine" });
       return;
@@ -341,7 +412,24 @@ export class OrchestratorDesk {
         output = readBrainOutput(run.stdout);
       }
     }
-    const { plan, text, sessionId, error } = output;
+    // A planner that says it is searching, checking, or starting something right now while returning
+    // steps: [] (e.g. a resumed session with stale rules or acting as if a tool turn follows):
+    // start a fresh session with the current workspace and running lists and ask once for real steps.
+    if (!signal.aborted && !run.timedOut && output.plan && !output.plan.steps.length && emptyPromise(output.plan.say)) {
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false };
+      const retried = await turn(
+        [
+          this.recap(words),
+          "",
+          `(Your draft answer said "${oneLine(output.plan.say, 200)}" with steps: []. Nothing runs after your answer unless you include steps, and you cannot search or check files yourself. Either return the steps to carry out now using the workspaces and CLIs listed in the rules, or emit a lookup step to search disk and run history, or tell the person plainly what you cannot see and ask.)`,
+        ].join("\n"),
+      );
+      if (retried) {
+        run = retried;
+        output = readBrainOutput(retried.stdout);
+      }
+    }
+    let { plan, text, sessionId, error } = output;
     const completed = !signal.aborted && !run.timedOut && Boolean(plan || (run.code === 0 && !error));
     // A first turn that didn't go through may still have left its session behind (Claude Code
     // saves it at the start), and naming it again would be refused as already in use: next time
@@ -360,11 +448,35 @@ export class OrchestratorDesk {
     // Codex and Antigravity name their own session; the next turn resumes that one.
     if (sessionId) this.conversation.sessionId = sessionId;
     this.conversation.begun = true;
+    this.conversation.workspacesKey = currentWorkspacesKey;
     if (!plan) {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
     }
-    const steps = resolvePlan(plan, context);
+    let steps = resolvePlan(plan, context);
+    // A plan whose steps are only lookups: VibeForge searches runs, branches and project folders at once
+    // and hands the findings back so Viby can give the real steps in the same turn.
+    if (!signal.aborted && steps.length > 0 && steps.every((step) => step.kind === "lookup" && !stepIssue(step, context))) {
+      const results = await Promise.all(steps.map((step) => this.lookup(step.prompt)));
+      if (signal.aborted) return;
+      const details = results.map((res, idx) => `Lookup "${steps[idx].prompt}":\n${res.details}`).join("\n\n");
+      const followUp = await turn(
+        [
+          "[Lookup results from VibeForge]",
+          details,
+          "",
+          `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps (such as workspace and start) to carry it out now, or answer in say with steps: [] if nothing should be started.`,
+        ].join("\n"),
+      );
+      if (followUp && !signal.aborted && !followUp.timedOut) {
+        const nextOut = readBrainOutput(followUp.stdout);
+        if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
+        if (nextOut.plan) {
+          plan = nextOut.plan;
+          steps = resolvePlan(plan, context);
+        }
+      }
+    }
     if (!steps.length) {
       this.answer({ text: plan.say });
       return;
@@ -439,6 +551,7 @@ export class OrchestratorDesk {
   clear(): void {
     this.thinking?.abort();
     this.thinking = null;
+    this.runEpoch += 1;
     this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
     this.save();
   }
@@ -456,19 +569,45 @@ export class OrchestratorDesk {
     const steps = turn.steps ?? [];
     const at = steps.findIndex((step) => step.id === stepId);
     if (at < 0) throw new Error("That plan is gone.");
+    const current = steps[at];
     const clean: Partial<OrchestratorStep> = {};
     for (const key of ["engineId", "workspaceId", "branch", "prompt", "target", "model", "effort", "name", "folder"] as const) {
       if (typeof patch[key] === "string") clean[key] = patch[key];
     }
+    if (typeof clean.branch === "string") clean.branch = cleanBranch(clean.branch);
     if (typeof clean.model === "string") clean.model = cleanModel(clean.model);
     if (typeof clean.effort === "string") clean.effort = clean.effort.trim().toLowerCase();
     if (typeof patch.git === "boolean") clean.git = patch.git;
-    steps[at] = { ...steps[at], ...clean };
+    if (current.kind === "workspace" && typeof clean.name === "string" && !("folder" in clean)) {
+      const oldDefault = plannedFolder(current.name ?? "", "", this.projectsFolder());
+      if (!current.folder || current.folder === oldDefault) {
+        clean.folder = plannedFolder(clean.name, "", this.projectsFolder());
+      }
+    }
+    if (current.kind === "start") {
+      if (typeof clean.engineId === "string" && clean.engineId !== current.engineId) {
+        const nextEngine = this.core.resolveEngine(clean.engineId);
+        const nextEffort = clean.effort ?? current.effort ?? "";
+        if (nextEffort && (!nextEngine || !effortLevels(nextEngine.row).includes(nextEffort))) clean.effort = "";
+        const nextModel = clean.model ?? current.model ?? "";
+        if (nextModel && nextEngine && !takesModel(nextEngine.row)) clean.model = "";
+      }
+      if (typeof clean.workspaceId === "string" && !current.workspaceId && !current.branch && !("branch" in clean)) {
+        const nextPrompt = (clean.prompt ?? current.prompt).trim();
+        const ws = this.core.workspaceById(clean.workspaceId);
+        if (nextPrompt && ws && fs.existsSync(path.join(ws.path, ".git"))) {
+          clean.branch = branchFromPrompt(nextPrompt);
+        }
+      }
+    }
+    steps[at] = { ...current, ...clean };
     this.save();
     // Another workspace or branch: whether its uncommitted edits stay behind is asked again.
     if ("workspaceId" in clean || "branch" in clean) {
       const step = steps[at];
-      void this.markDirty([step]).then(() => this.save());
+      void this.markDirty([step]).then(() => {
+        if (turn.plan === "waiting" && this.conversation.turns.includes(turn)) this.save();
+      });
     }
   }
 
@@ -517,10 +656,13 @@ export class OrchestratorDesk {
   async run(turnIdValue: string): Promise<void> {
     const turn = this.plan(turnIdValue);
     if (turn.plan !== "waiting") return;
+    const epoch = this.runEpoch;
     turn.plan = "running";
     this.save();
     for (const step of turn.steps ?? []) {
+      if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       const context = withPlannedWorkspaces(await this.context(), turn.steps ?? []);
+      if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       if (stepIssue(step, context)) {
         step.state = "skipped";
         this.save();
@@ -535,8 +677,10 @@ export class OrchestratorDesk {
         step.state = "failed";
         step.error = error instanceof Error ? error.message : String(error);
       }
+      if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       this.save();
     }
+    if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
     turn.plan = "done";
     this.save();
   }
@@ -555,16 +699,63 @@ export class OrchestratorDesk {
       if (!workspace) throw new Error("That workspace is gone.");
       let workspaceId = workspace.id;
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
-        // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
-        const copy = await this.copies.make({ turnId: turn.id, stepId: step.id, engineId: step.engineId, prompt: step.prompt, branch: step.branch, workspace });
-        step.copyId = copy.id;
-        step.branch = copy.branch;
-        workspaceId = copy.openedWorkspaceId;
-        this.save();
+        const hasCommit = (await gitIn(["rev-parse", "--verify", "HEAD"], workspace.path)).code === 0;
+        if (hasCommit) {
+          // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
+          const copy = await this.copies.make({ turnId: turn.id, stepId: step.id, engineId: step.engineId, prompt: step.prompt, branch: step.branch, workspace });
+          step.copyId = copy.id;
+          step.branch = copy.branch;
+          workspaceId = copy.openedWorkspaceId;
+          this.save();
+        } else {
+          step.branch = "";
+        }
       }
       step.openedWorkspaceId = workspaceId;
-      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
+      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
       step.ptyId = launched.ptyId;
+      step.runId = launched.runId;
+      return;
+    }
+    if (step.kind === "lookup") {
+      const found = await this.lookup(step.prompt);
+      step.result = found.summary;
+      return;
+    }
+    if (step.kind === "routine") {
+      if (!this.routines) throw new Error("That routine no longer exists.");
+      const action = step.prompt.trim().toLowerCase();
+      if (action === "enable" || action === "disable") {
+        this.routines.setRoutineEnabled(step.target, action === "enable");
+        return;
+      }
+      const launched = await this.routines.runRoutineNow(step.target, START_SIZE, true);
+      if ("ptyId" in launched) {
+        step.ptyId = launched.ptyId;
+        step.runId = launched.runId;
+      }
+      return;
+    }
+    if (step.kind === "task") {
+      if (!this.tasks) throw new Error("That task no longer exists.");
+      let taskId = step.target;
+      if (!taskId) {
+        if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+        const saved = this.tasks.saveTask({
+          title: step.name || branchFromPrompt(step.prompt),
+          body: step.prompt,
+          agentId: step.agentId || null,
+          workspaceId: step.workspaceId || null,
+          isolated: true,
+        });
+        taskId = saved.id;
+        step.target = taskId;
+      }
+      const launched = await this.tasks.executeTask(taskId, START_SIZE, true);
+      if ("ptyId" in launched) {
+        step.ptyId = launched.ptyId;
+        step.runId = launched.runId;
+      }
       return;
     }
     if (step.kind === "apply") {
@@ -620,7 +811,122 @@ export class OrchestratorDesk {
     const known = this.core.store.readWorkspaces().workspaces.find((item) => path.resolve(item.path) === folder);
     if (known) return known.id;
     const id = this.workspaces.addQuietly(folder, name);
+    const copies = this.copies.list();
+    this.conversation.workspacesKey = this.core.store
+      .readWorkspaces()
+      .workspaces.filter((w) => !copies.some((c) => c.openedWorkspaceId === w.id))
+      .map((w) => `${w.id}:${w.name}`)
+      .join("|");
     return id;
+  }
+
+  /**
+   * Search VibeForge's run history, workspace git branches, and project folders on disk for a
+   * session id, branch, or project folder.
+   */
+  async lookup(query: string): Promise<{ summary: string; details: string }> {
+    const raw = query.trim();
+    const tokens = raw
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}._-]+/u)
+      .filter((tok) => tok.length >= 2);
+    const matches = (haystack: string) => {
+      const lower = haystack.toLowerCase();
+      if (lower.includes(raw.toLowerCase())) return true;
+      return tokens.length > 0 && tokens.every((tok) => lower.includes(tok));
+    };
+    const anyToken = (haystack: string) => {
+      const lower = haystack.toLowerCase();
+      return tokens.some((tok) => tok.length >= 3 && lower.includes(tok));
+    };
+    const lines: string[] = [];
+    const workspaces = this.core.store.readWorkspaces().workspaces;
+    const wsById = new Map(workspaces.map((w) => [w.id, w]));
+
+    // 1. VibeForge runs index + runs directory on disk
+    const allRuns = this.core.store.queryRuns({ limit: 200 });
+    const runHits = allRuns.filter((run) => {
+      const ws = run.workspaceId ? wsById.get(run.workspaceId) : undefined;
+      const blob = [run.id, run.title, run.engine, run.cwd, ws?.name ?? "", run.prompt ?? "", run.changes ?? ""].join(" ");
+      return matches(blob);
+    });
+    const fallbackRuns = runHits.length
+      ? runHits
+      : allRuns.filter((run) => {
+          const ws = run.workspaceId ? wsById.get(run.workspaceId) : undefined;
+          const blob = [run.id, run.title, run.engine, run.cwd, ws?.name ?? "", run.prompt ?? ""].join(" ");
+          return anyToken(blob);
+        });
+    for (const run of fallbackRuns.slice(0, 6)) {
+      const ws = run.workspaceId ? wsById.get(run.workspaceId) : undefined;
+      lines.push(
+        `- Run ${run.id}: ${run.engine} in ${tildify(run.cwd)}${ws ? ` (workspace "${ws.name}")` : ""}${run.prompt ? ` — prompt: "${oneLine(run.prompt, 120)}"` : ""}`,
+      );
+    }
+
+    // 2. Registered workspaces and their local git branches
+    for (const ws of workspaces) {
+      if (!isDirectory(ws.path)) continue;
+      const branchOut = await gitIn(["branch", "--format=%(refname:short)"], ws.path);
+      const branches = branchOut.code === 0 ? branchOut.stdout.split("\n").map((b) => b.trim()).filter(Boolean) : [];
+      const hitBranches = branches.filter((b) => matches(b) || anyToken(b));
+      if (matches(`${ws.name} ${ws.path}`) || hitBranches.length > 0) {
+        lines.push(`- Workspace "${ws.name}" (${tildify(ws.path)})${hitBranches.length ? `: matching branches [${hitBranches.slice(0, 8).join(", ")}]` : ""}`);
+      }
+    }
+
+    // 3. Project folders on disk (up to depth 3 under projectsFolder, ~/Projects, ~/Documents, ~/Desktop)
+    const home = os.homedir();
+    const roots = new Set<string>([
+      path.resolve(expandHome(this.projectsFolder())),
+      path.join(home, "Projects"),
+      path.join(home, "Documents"),
+      path.join(home, "Desktop"),
+    ]);
+    const folderHits: string[] = [];
+    const seenDirs = new Set<string>();
+    const walk = (dir: string, depth: number) => {
+      if (depth > 3 || folderHits.length >= 8) return;
+      let resolved: string;
+      try {
+        resolved = fs.realpathSync(dir);
+      } catch {
+        return;
+      }
+      if (seenDirs.has(resolved)) return;
+      seenDirs.add(resolved);
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "build" || entry.name === "target") continue;
+        const full = path.join(dir, entry.name);
+        if (matches(entry.name) || matches(tildify(full)) || anyToken(entry.name)) {
+          const git = fs.existsSync(path.join(full, ".git"));
+          folderHits.push(`- Folder on disk: ${tildify(full)}${git ? " (git repository)" : ""}`);
+          if (folderHits.length >= 8) return;
+        }
+        if (depth < 3) walk(full, depth + 1);
+      }
+    };
+    for (const root of roots) {
+      if (isDirectory(root)) walk(root, 1);
+    }
+    lines.push(...folderHits);
+
+    if (!lines.length) {
+      return {
+        summary: `No runs, branches or folders matched "${oneLine(raw, 60)}".`,
+        details: `No runs, git branches, or folders under ${this.projectsFolder()}, ~/Projects, ~/Documents, or ~/Desktop matched "${raw}".`,
+      };
+    }
+    return {
+      summary: oneLine(lines[0].replace(/^- /, ""), 120),
+      details: lines.join("\n"),
+    };
   }
 
   // ---------------------------------------------------------------- hearing back

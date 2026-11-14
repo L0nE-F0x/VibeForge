@@ -185,7 +185,7 @@ function plansCard(summary) {
       else {
         const parts = [];
         if (provider.resetsAt && Date.parse(provider.resetsAt) > now) parts.push(t("plans.resetsIn", { time: span(Date.parse(provider.resetsAt) - now) }));
-        if (provider.fullAt) parts.push(t("plans.fullIn", { time: span(Date.parse(provider.fullAt) - now) }));
+        if (provider.fullAt && Date.parse(provider.fullAt) > now) parts.push(t("plans.fullIn", { time: span(Date.parse(provider.fullAt) - now) }));
         sub = parts.join(" · ");
       }
       // One window that is the headline number already says everything.

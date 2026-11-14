@@ -76,7 +76,7 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
   const context: PlanContext = {
     workspaces: input.workspaces.map((item) => ({ id: item.id, name: item.name, folder: item.path, git: true })),
     engines: input.engines.map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
-    running: coding.map((item) => ({ id: item.ptyId, engine: cliName(item), workspace: item.workspaceId ?? "", folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
+    running: coding.map((item) => ({ id: item.ptyId, engine: cliName(item), workspace: (item.workspaceId && names.get(item.workspaceId)) || item.title, folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
     copies: (input.view.copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
   };
   const turns = input.view.turns.slice(-PHONE_TURNS).map((turn): PhoneTurn => {
@@ -87,7 +87,7 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
       ...turn,
       steps: turn.steps.map((step) => {
         const opened = step.ptyId ? coding.find((item) => item.ptyId === step.ptyId) : undefined;
-        return { ...step, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? null };
+        return { ...step, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? step.runId ?? null };
       }),
     };
   });

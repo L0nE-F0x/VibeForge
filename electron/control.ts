@@ -47,7 +47,11 @@ export function listenControl(
     };
     socket.on("data", (chunk: string) => {
       buffer += chunk;
-      if (buffer.length > (buffer.trimStart().startsWith("{") ? TALK_REQUEST_MAX + 4096 : VOICE_LINE_MAX)) socket.destroy();
+      if (buffer.length > (buffer.trimStart().startsWith("{") ? TALK_REQUEST_MAX + 4096 : VOICE_LINE_MAX)) {
+        buffer = "";
+        socket.destroy();
+        return;
+      }
       for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);

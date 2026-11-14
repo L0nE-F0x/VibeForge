@@ -39,11 +39,14 @@ export function update() {
   parts.banner.hidden = !said;
   if (parts.bannerText.textContent !== said) parts.bannerText.textContent = said;
   parts.bannerClose.hidden = !state.actionError;
+  if (!state.token || state.view === "pair") {
+    if (parts.pair) parts.pair.disabled = state.busy;
+    return;
+  }
   if (state.view === "desk") updateDesk();
   else if (state.view === "launch") updateLaunch();
   else if (state.view === "session") updateSession();
   else if (state.view === "maestro") updateMaestro();
-  else if (state.view === "pair" && parts.pair) parts.pair.disabled = state.busy;
 }
 
 /**
@@ -72,9 +75,9 @@ function banner() {
 
 /** @param {View} next */
 export function setView(next) {
-  state.view = next;
+  state.view = state.token ? next : "pair";
   show();
-  void refresh();
+  if (state.token) void refresh();
 }
 
 function page() {

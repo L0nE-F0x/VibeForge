@@ -8,6 +8,13 @@ class VibeForgeMic extends AudioWorkletProcessor {
     super();
     this.batch = new Float32Array(BATCH);
     this.filled = 0;
+    this.port.onmessage = (event) => {
+      if (event.data && event.data.flush && this.filled > 0) {
+        this.port.postMessage(this.batch.subarray(0, this.filled));
+        this.batch = new Float32Array(BATCH);
+        this.filled = 0;
+      }
+    };
   }
 
   process(inputs) {

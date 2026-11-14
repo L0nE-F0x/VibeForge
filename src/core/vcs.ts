@@ -109,7 +109,12 @@ export async function snapshotGit(cwd: string, timeoutMs = 5000, startHead: stri
   }
   if (status.code !== 0) return `git status --short\n${status.stderr.trim() || "git status failed"}\n`;
   const sections = [`git status --short\n${status.stdout.trimEnd()}`];
-  const diff = await execGit(["diff", "--stat"], cwd, budget());
+  let diff = await execGit(["diff", "--stat"], cwd, budget());
+  if (!diff.timedOut && !diff.stdout.trim() && startHead) {
+    const sinceStart = await execGit(["diff", "--stat", startHead], cwd, budget());
+    if (sinceStart.timedOut) return `${sections.join("\n\n")}\n\ngit timed out\n`;
+    if (sinceStart.code === 0) diff = sinceStart;
+  }
   if (diff.timedOut) return `${sections.join("\n\n")}\n\ngit timed out\n`;
   sections.push(`git diff --stat\n${diff.stdout.trimEnd()}`);
   if (startHead) {
@@ -314,7 +319,10 @@ export async function dirtyFiles(cwd: string, timeoutMs = 5000): Promise<DirtyFi
     if (entry.length < 4) continue;
     names.push(entry.slice(3));
     // A rename or copy is followed by the name it had before.
-    if (/[RC]/.test(entry.slice(0, 2))) index += 1;
+    if (/[RC]/.test(entry.slice(0, 2))) {
+      index += 1;
+      if (fields[index]) names.push(fields[index]);
+    }
   }
   if (names.length > DIRTY_MAX) return null;
   const files: DirtyFiles = Object.assign(new Map<string, string>(), { root });

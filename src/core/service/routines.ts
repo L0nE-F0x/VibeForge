@@ -192,6 +192,11 @@ export class RoutineDesk {
       this.tell(routine, message);
       return;
     }
+    const current = this.core.store.getRoutine(routine.id);
+    if (current?.lastFiredAt !== scheduledAt) {
+      this.core.store.writeRoutine({ ...(current ?? routine), lastFiredAt: scheduledAt });
+      this.core.emit("routines");
+    }
     const latest = this.core.store.queryRuns({ routineId: routine.id, limit: 1 })[0];
     if (!latest || latest.startedAt < scheduledAt) this.recordFailedStart(routine, agent, message);
     // A spawn that failed has its run already.

@@ -56,7 +56,9 @@ export class WebglPool {
   /** It was used (focused): first in line for a slot. */
   touch(user: GlUser): void {
     const seat = this.seats.get(user);
-    if (seat) seat.used = ++this.clock;
+    if (!seat) return;
+    seat.used = ++this.clock;
+    if (seat.shown && !seat.on && !seat.resting) this.schedule();
   }
 
   /** Its WebGL context was lost and the renderer let go: the slot goes to someone else. */

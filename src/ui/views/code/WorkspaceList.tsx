@@ -1,5 +1,5 @@
 import { FolderOpen, FolderPlus, GitBranch, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Workspace } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
 import { call, useAppInfo, useLive } from "../../api.js";
@@ -35,6 +35,11 @@ export function WorkspaceList({
   const attention = useAttention();
   const home = useAppInfo().data?.home ?? "";
   const [renaming, setRenaming] = useState<string | null>(null);
+  const skipBlurRef = useRef(false);
+  const startRename = (id: string) => {
+    skipBlurRef.current = false;
+    setRenaming(id);
+  };
   const [dragWorkspace, setDragWorkspace] = useState<{ id: string; over: number | null } | null>(null);
   const [workspaceMenu, setWorkspaceMenu] = useState<{ workspace: Workspace; anchor: HTMLElement } | null>(null);
 
@@ -51,7 +56,7 @@ export function WorkspaceList({
   const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
-    { label: t("common.rename"), icon: Pencil, onSelect: () => setRenaming(workspace.id) },
+    { label: t("common.rename"), icon: Pencil, onSelect: () => startRename(workspace.id) },
     "sep",
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => onRemove(workspace) },
   ];
@@ -98,10 +103,10 @@ export function WorkspaceList({
               aria-current={workspace.id === currentId ? "true" : undefined}
               draggable={renaming !== workspace.id}
               onClick={() => onSelect(workspace)}
-              onDoubleClick={() => setRenaming(workspace.id)}
+              onDoubleClick={() => startRename(workspace.id)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") onSelect(workspace);
-                if (isShortcut("workspace.rename", event)) setRenaming(workspace.id);
+                if (isShortcut("workspace.rename", event)) startRename(workspace.id);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -139,12 +144,28 @@ export function WorkspaceList({
                     defaultValue={workspace.name}
                     onClick={(event) => event.stopPropagation()}
                     onDoubleClick={(event) => event.stopPropagation()}
-                    onFocus={(event) => event.target.select()}
-                    onBlur={(event) => void renameWorkspace(workspace, event.target.value)}
+                    onFocus={(event) => {
+                      skipBlurRef.current = false;
+                      event.target.select();
+                    }}
+                    onBlur={(event) => {
+                      if (skipBlurRef.current) {
+                        skipBlurRef.current = false;
+                        return;
+                      }
+                      void renameWorkspace(workspace, event.target.value);
+                    }}
                     onKeyDown={(event) => {
                       event.stopPropagation();
-                      if (event.key === "Enter") void renameWorkspace(workspace, (event.target as HTMLInputElement).value);
-                      if (event.key === "Escape") setRenaming(null);
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        skipBlurRef.current = true;
+                        setRenaming(null);
+                      }
                     }}
                   />
                 ) : (

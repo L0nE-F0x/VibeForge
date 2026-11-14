@@ -51,6 +51,7 @@ export function launchPage() {
     engines.length ? el("optgroup", { label: t("phone.clis") }, engines.map((engine) => el("option", { value: `engine:${engine.id}` }, engine.label))) : null,
   );
   const prompt = el("textarea", { id: "prompt", placeholder: t("phone.firstPromptHint") });
+  parts.prompt = prompt;
   parts.start = el("button", { class: "btn", type: "button", onclick: () => void startAgent(select.value, prompt) }, t("phone.start"));
   return el(
     "section",

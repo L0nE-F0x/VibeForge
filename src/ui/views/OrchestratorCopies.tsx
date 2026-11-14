@@ -75,6 +75,7 @@ export function CopySheet({ copyId, copies }: { copyId: string; copies: MaestroC
   const [load, loading] = useAction(async () => setDiff(await call("orchestrator.copyDiff", copyId)), t("orch.diffFailed"));
   const present = Boolean(copy);
   useEffect(() => {
+    setDiff(null);
     if (present) void load();
   }, [copyId, present, load]);
   // Applied, discarded, or gone since: back to the conversation.

@@ -10,6 +10,7 @@ import type { WorkspaceFile } from "../workspaces.js";
 import type { EngineRow, LayoutNode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { ReadCache } from "./read-cache.js";
+import { cleanModel } from "../../shared/launch-options.js";
 
 export function defaultSettings(): Settings {
   return {
@@ -178,7 +179,7 @@ export class Config {
       orchestrator: {
         engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
         mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
-        model: str(raw.orchestrator?.model).trim().slice(0, 120),
+        model: cleanModel(str(raw.orchestrator?.model)),
         projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
       },
     };

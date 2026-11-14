@@ -27,7 +27,7 @@ export const PLAN_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          kind: { type: "string", enum: ["start", "tell", "stop", "workspace", "apply", "discard", "show"] },
+          kind: { type: "string", enum: ["start", "tell", "stop", "workspace", "apply", "discard", "show", "lookup", "task", "routine"] },
           engine: { type: "string" },
           workspace: { type: "string" },
           branch: { type: "string" },
@@ -84,7 +84,7 @@ export interface BrainOptions {
  */
 export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   const kind = brainKind(row);
-  const model = opts.model?.trim() ?? "";
+  const model = cleanModel(opts.model);
   if (kind === "grok") {
     return [
       ...row.args,
@@ -188,14 +188,21 @@ export function sessionGone(text: string): boolean {
 /** What the planning CLI is told each turn: its job, the steps it may give, and what is here right now. */
 export function orchestratorRules(context: PlanContext): string {
   const workspaces = context.workspaces.length
-    ? context.workspaces.map((item) => `- ${item.name} (${item.folder}${item.git ? "" : ", not a git repository"})`).join("\n")
+    ? context.workspaces
+        .map((item) => {
+          const head = `- ${item.name} (${item.folder}${item.git ? "" : ", not a git repository"})${item.branch ? ` [branch: ${item.branch}]` : ""}`;
+          if (!item.recentRuns?.length) return head;
+          const runs = item.recentRuns.map((run) => `  · run ${run.id}: ${run.engine}${run.branch ? ` on ${run.branch}` : ""}${run.prompt ? ` — "${run.prompt}"` : ""}`).join("\n");
+          return `${head}\n${runs}`;
+        })
+        .join("\n")
     : "- none yet";
   const engines = context.engines.filter((item) => item.available);
   const engineList = engines.length
     ? engines
         .map((item) => {
           const efforts = item.bin !== undefined ? effortLevels({ id: item.id, bin: item.bin }) : [];
-          return `- ${item.id}: ${item.label}${efforts.length ? ` (effort: ${efforts.join(", ")})` : ""}`;
+          return `- ${item.id}: ${item.label}${efforts.length ? ` (effort: ${efforts.join(", ")})` : ""}${context.defaultEngine === item.id ? " [default]" : ""}`;
         })
         .join("\n")
     : "- none found on PATH";
@@ -208,39 +215,58 @@ export function orchestratorRules(context: PlanContext): string {
         .join("\n")
     : "- none";
   const copies = context.copies?.length ? context.copies.map((item) => `- ${item.id}: ${item.name} (branch ${item.branch}), from ${item.workspace}`).join("\n") : "- none";
+  const agents = context.agents?.length
+    ? context.agents.map((item) => `- ${item.id}: ${item.name} (CLI: ${item.engine}${item.goodAt ? `; ${item.goodAt}` : ""}${item.places?.length ? `; folders: ${item.places.join(", ")}` : ""})`).join("\n")
+    : "";
+  const tasks = context.tasks?.length
+    ? context.tasks.map((item) => `- ${item.id}: ${item.title} [${item.status}]${item.workspace ? ` in ${item.workspace}` : ""}${item.agent ? ` (${item.agent})` : ""}`).join("\n")
+    : "";
+  const routines = context.routines?.length
+    ? context.routines.map((item) => `- ${item.id}: ${item.name} (${item.schedule}, ${item.enabled ? "enabled" : "paused"}${item.agent ? `, agent: ${item.agent}` : ""})`).join("\n")
+    : "";
   const projects = context.projectsFolder || "~/Projects";
+  const defaultRule = context.defaultEngine
+    ? `Never pick an engine the person didn't ask for unless they asked to start work without naming a CLI, in which case use their default CLI (${context.defaultEngine}).`
+    : "Never pick an engine the person didn't ask for; if they didn't say which, ask.";
   return [
-    "You are Maestro, the orchestrator inside VibeForge, a desktop app where a person runs several coding CLIs at once.",
-    "The person talks to you, often by voice, so expect dictation slips: misheard names, missing punctuation. Match names generously.",
+    "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those), the person's personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, agents, tasks and routines at once.",
+    "Whatever planning CLI runs you under the hood, you are always Viby. The person talks to you, often by voice, so expect dictation slips: misheard names, missing punctuation. Match names generously.",
     "You never write code, read files or use tools yourself. You turn what the person asks into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
     "",
     "Steps:",
-    "- start: open a coding CLI in a workspace. Fields: engine (an id below), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
+    "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id or agent name below; leave empty only to use the default CLI when one is marked [default]), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
     `- workspace: make a new workspace. Fields: workspace (its name, in the person's words), folder (only if they said where; otherwise leave it empty and it goes in ${projects}/<name>), git (true when they want it to be a git repository). An existing folder is only added, never changed.`,
+    "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (the session id, branch, folder name, or keywords to search for). VibeForge runs the lookup at once and hands you the findings.",
     "- tell: send a message to a CLI that is already running. Fields: target (its id below), prompt (the message).",
     "- stop: close a running CLI. Fields: target.",
     "- show: open a running CLI in Code for the person to look at. Fields: target.",
     "- apply: bring a copy's changes into the workspace it came from. discard: throw a copy away. Fields: target (a copy's id below).",
+    "- task: run an existing task on the board, or create and start a new task for an agent. Fields: target (existing task id/title, or the agent's id/name for a new task), workspace (workspace name, for a new task), branch (short title for a new task), prompt (instructions for a new task).",
+    "- routine: run a scheduled routine now, or turn it on/off. Fields: target (a routine's id or name below), prompt (\"enable\", \"disable\", or empty to run now).",
     "",
     "Rules:",
     "- One start step per CLI the person asks for. Several are fine: they run at the same time.",
-    "- Use only the workspaces, engines, ids and copies listed below, or a workspace this plan makes. Never pick an engine the person didn't ask for; if they didn't say which, ask.",
-    "- When they ask for a workspace that isn't listed, make it with a workspace step first if they asked for a new one; if a name isn't there and they didn't ask for a new one, ask.",
+    `- Use only the workspaces, engines, agents, tasks, routines, ids and copies listed below, or a workspace this plan makes. ${defaultRule}`,
+    "- When they ask for a workspace, session or branch that isn't listed below, use a `lookup` step first to search disk, branches and run history if they are asking you to find an existing one; make it with a `workspace` step if they asked for a new one or gave its folder.",
     "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do), answer in `say` with no steps.",
     "- If they change a plan you just gave, give the whole corrected plan again.",
-    "- `say` is one or two short plain sentences: what you will do, or your question. No markdown.",
+    "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, or starting something when `steps` is empty — emit a `lookup` or `start` step instead.",
+    "- `say` is one or two short plain sentences in the person's language: what you will do, or your question. No markdown.",
     "",
     "Workspaces:",
     workspaces,
     "",
     "Coding CLIs on this machine:",
     engineList,
+    ...(agents ? ["", "Agents (teammates):", agents] : []),
     "",
     "Running now:",
     running,
     "",
     "Copies waiting for review:",
     copies,
+    ...(tasks ? ["", "Tasks on the board:", tasks] : []),
+    ...(routines ? ["", "Scheduled routines:", routines] : []),
   ].join("\n");
 }
 
@@ -444,7 +470,7 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
   const steps: OrchestratorStep[] = [];
   // The workspaces this plan makes, under placeholder ids, for its later steps to name.
   const planned: PlanContext["workspaces"] = [];
-  const kinds = ["start", "tell", "stop", "workspace", "apply", "discard", "show"] as const;
+  const kinds = ["start", "tell", "stop", "workspace", "apply", "discard", "show", "lookup", "task", "routine"] as const;
   for (const item of raw.steps) {
     const kind = kinds.find((value) => value === item.kind) ?? null;
     if (!kind) continue;
@@ -456,8 +482,15 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push(step);
     } else if (kind === "start") {
       const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const workspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
-      const engine = matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
+      const namedEngine = matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
+      const agent = !namedEngine ? matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true) : null;
+      const fallbackEngine = !item.engine?.trim() && !agent && context.defaultEngine ? (context.engines.find((entry) => entry.id === context.defaultEngine) ?? null) : null;
+      const engineId = namedEngine?.id ?? (agent ? agent.engine : (fallbackEngine?.id ?? ""));
+      const matchedWorkspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const agentWorkspace = !matchedWorkspace && !item.workspace?.trim() && agent?.places?.length
+        ? context.workspaces.find((entry) => agent.places?.some((place) => entry.folder === place || path.basename(entry.folder) === path.basename(place)))
+        : undefined;
+      const workspace = matchedWorkspace ?? agentWorkspace ?? null;
       const prompt = item.prompt ?? "";
       const named = cleanBranch(item.branch ?? "");
       // No copy: a folder that isn't a repository (or is new, with nothing committed), one the person
@@ -468,20 +501,61 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push({
         ...base,
         workspaceId: workspace?.id ?? "",
-        engineId: engine?.id ?? "",
+        engineId,
+        ...(agent ? { agentId: agent.id } : {}),
         branch,
         model: cleanModel(item.model),
         effort,
-        asked: [item.engine, item.workspace].filter(Boolean).join(" · "),
+        asked: [agent?.name || item.engine, item.workspace || workspace?.name].filter(Boolean).join(" · "),
       });
+    } else if (kind === "lookup") {
+      const query = (item.prompt || item.target || item.workspace || item.folder || "").trim();
+      steps.push({ ...base, prompt: query, asked: query });
+    } else if (kind === "routine") {
+      const routines = context.routines ?? [];
+      const routine = routines.find((entry) => entry.id === item.target) ?? matchName(item.target || item.workspace || item.prompt, routines, (entry) => [entry.id, entry.name], true);
+      const asked = routine ? routine.name : (item.target || item.workspace || "");
+      steps.push({ ...base, prompt: (item.prompt ?? "").trim(), target: routine?.id ?? "", asked });
+    } else if (kind === "task") {
+      const tasks = context.tasks ?? [];
+      const existing = item.target ? (tasks.find((entry) => entry.id === item.target) ?? matchName(item.target, tasks, (entry) => [entry.id, entry.title], true)) : null;
+      if (existing && !item.workspace && !item.prompt) {
+        steps.push({ ...base, prompt: "", target: existing.id, asked: existing.title });
+      } else {
+        const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+        const workspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+        const agent = matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true);
+        const title = (item.branch || "").trim() || branchFromPrompt(item.prompt ?? "").replace(/-/g, " ");
+        steps.push({
+          ...base,
+          workspaceId: workspace?.id ?? "",
+          agentId: agent?.id ?? "",
+          engineId: agent?.engine ?? "",
+          name: title,
+          prompt: item.prompt ?? "",
+          asked: [agent?.name || item.engine || item.target, workspace?.name || item.workspace].filter(Boolean).join(" · "),
+        });
+      }
     } else if (kind === "apply" || kind === "discard") {
       const copies = context.copies ?? [];
       const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
-      steps.push({ ...base, prompt: "", target: copy?.id ?? "", asked: item.target ?? "" });
+      const asked = copy ? `${copy.name} · ${copy.workspace}` : (item.target ?? "");
+      steps.push({ ...base, prompt: "", target: copy?.id ?? "", asked });
     } else {
       const target = context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]);
-      steps.push({ ...base, prompt: kind === "tell" ? base.prompt : "", target: target?.id ?? "", asked: item.target ?? "" });
+      const asked = target ? `${target.engine} · ${target.workspace}` : (item.target ?? "");
+      steps.push({ ...base, prompt: kind === "tell" ? base.prompt : "", target: target?.id ?? "", asked });
     }
   }
   return steps;
+}
+
+/**
+ * Whether an answer with no steps still promises to be searching, checking, or starting something
+ * right now (a planner acting as if another tool turn will follow its JSON output).
+ */
+export function emptyPromise(say: string): boolean {
+  const text = say.trim();
+  if (!text || text.includes("?")) return false;
+  return /\b(i['’]?m|i am|still)\s+(still\s+)?(searching|checking|looking|locating|finding|verifying|opening|starting|working\b|on it\b)|\b(i['’]?ll|i will)\s+(look up|search|check|locate|find|open|start|make)\b|\b(searching|checking|looking up|locating)\s+(the|that|your|for|vibe|on disk)\b/i.test(text);
 }

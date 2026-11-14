@@ -1,8 +1,8 @@
-import { Check, CircleAlert, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, MessageSquare, Play, RotateCcw, Square, SquareTerminal, Trash2, Workflow, X, ExternalLink } from "lucide-react";
+import { Check, CircleAlert, Clock, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Workflow, X, ExternalLink } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
-import { effortLevels, launchKind, takesModel } from "../../shared/launch-options.js";
+import { effortLevels, launchKind, takesModel, cleanModel } from "../../shared/launch-options.js";
 import { canOrchestrate, KNOWN_MODELS, orchestratorVoiceWords, plannedId, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
 import { usePtyAttention } from "../attention.js";
@@ -33,20 +33,22 @@ function isCodingCli(session: LiveSession): boolean {
 }
 
 /** What a step is checked against, from what the window already knows. */
-function usePlanContext(): PlanContext {
+function usePlanContext(): { context: PlanContext; ready: boolean } {
   const workspaces = useWorkspaces().data?.workspaces;
   const engines = useEngines().data;
   const live = useLive().data;
   const copies = useOrchestrator().data?.copies;
-  return useMemo(
-    () => ({
+  const ready = workspaces !== undefined && engines !== undefined && live !== undefined;
+  const context = useMemo(() => {
+    const names = new Map((workspaces ?? []).map((item) => [item.id, item.name]));
+    return {
       workspaces: (workspaces ?? []).map((item) => ({ id: item.id, name: item.name, folder: item.path, git: true })),
       engines: (engines ?? []).map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
-      running: (live ?? []).filter(isCodingCli).map((item) => ({ id: item.ptyId, engine: item.program || item.title, workspace: item.workspaceId ?? "", folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
-      copies: (copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: item.workspaceId })),
-    }),
-    [workspaces, engines, live, copies],
-  );
+      running: (live ?? []).filter(isCodingCli).map((item) => ({ id: item.ptyId, engine: item.program || item.title, workspace: (item.workspaceId && names.get(item.workspaceId)) || item.title, folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
+      copies: (copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: (item.workspaceId && names.get(item.workspaceId)) || item.workspaceId })),
+    };
+  }, [workspaces, engines, live, copies]);
+  return { context, ready };
 }
 
 const ISSUE_KEY: Record<StepIssue, Key> = {
@@ -94,7 +96,7 @@ export function OrchestratorView() {
           <Select value={engineId} aria-label={t("orch.planner")} style={{ width: 150 }} onChange={(event) => void saveEngine(event.target.value)} {...tipProps(t("orch.plannerTip"))}>
             {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
             {planners.map((engine) => (
-              <option key={engine.id} value={engine.id}>
+              <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== engineId}>
                 {engine.label}
                 {engine.available ? "" : ` ${t("common.notOnPath")}`}
               </option>
@@ -303,13 +305,13 @@ const PLAN_KEY: Record<NonNullable<OrchestratorTurn["plan"]>, Key> = {
 function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean }) {
   const t = useT();
   const steps = turn.steps ?? [];
-  const here = usePlanContext();
+  const { context: here, ready } = usePlanContext();
   // The plan's own new workspaces count as there for the steps after them.
   const context = useMemo(() => withPlannedWorkspaces(here, steps), [here, steps]);
   const [run, running] = useAction(async () => call("orchestrator.run", turn.id), t("orch.failed"));
   const [cancel] = useAction(async () => call("orchestrator.cancel", turn.id), t("orch.failed"));
   const waiting = turn.plan === "waiting";
-  const blocked = waiting ? steps.filter((step) => stepIssue(step, context)).length : 0;
+  const blocked = waiting && ready ? steps.filter((step) => stepIssue(step, context)).length : 0;
   const state = turn.plan ?? "done";
   return (
     <div className={`orch-plan state-${state}`}>
@@ -318,7 +320,7 @@ function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean
         <span className="faint">{t.count("orch.steps", steps.length)}</span>
       </div>
       {steps.map((step) => (
-        <StepRow key={step.id} turnId={turn.id} step={step} plan={steps} editable={waiting} compact={compact} issue={waiting ? stepIssue(step, context) : null} />
+        <StepRow key={step.id} turnId={turn.id} step={step} plan={steps} editable={waiting} compact={compact} issue={waiting && ready ? stepIssue(step, context) : null} />
       ))}
       {waiting && (
         <div className="orch-plan-foot">
@@ -328,7 +330,7 @@ function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean
           <Button size="sm" variant="ghost" onClick={() => void cancel()}>
             {t("common.cancel")}
           </Button>
-          <Button size="sm" variant="primary" icon={Play} busy={running} disabled={blocked === steps.length} onClick={() => void run()}>
+          <Button size="sm" variant="primary" icon={Play} busy={running} disabled={!ready || blocked === steps.length} onClick={() => void run()}>
             {t("orch.go")}
           </Button>
         </div>
@@ -425,6 +427,13 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         <span className="truncate">{targetCopy ? `${targetCopy.name} · ${workspaces.find((item) => item.id === targetCopy.workspaceId)?.name ?? ""}` : step.asked || t("orch.copyGone")}</span>
       </div>
     );
+  } else if (step.kind === "lookup" || step.kind === "task" || step.kind === "routine") {
+    line = (
+      <div className="orch-step-line">
+        <strong>{step.kind === "lookup" ? t("orch.show") : step.kind === "task" ? t("tasks.new") : t("routines.new")}</strong>
+        <span className="truncate">{step.asked || step.name || step.target || step.prompt}</span>
+      </div>
+    );
   } else {
     line = (
       <div className="orch-step-line">
@@ -442,7 +451,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {line}
         {(step.kind === "start" || step.kind === "tell") &&
-          (editable && !compact ? (
+          (editable ? (
             <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
           ) : (
             step.prompt && <span className={`orch-prompt-text${compact ? " clamp" : ""}`}>{step.prompt}</span>
@@ -494,7 +503,18 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
   );
 }
 
-const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = { start: Play, tell: MessageSquare, stop: Square, workspace: FolderPlus, apply: GitMerge, discard: Trash2, show: Eye };
+const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = {
+  start: Play,
+  tell: MessageSquare,
+  stop: Square,
+  workspace: FolderPlus,
+  apply: GitMerge,
+  discard: Trash2,
+  show: Eye,
+  lookup: Search,
+  task: ListTodo,
+  routine: Clock,
+};
 
 /** VibeForge's own word about a CLI Maestro started: its turn ended after real work, or it closed. */
 function NoteView({ note }: { note: MaestroNote }) {
@@ -546,10 +566,16 @@ function NoteView({ note }: { note: MaestroNote }) {
   );
 }
 
-/** A one-line field that tells the plan once it is left (or Enter), not on every key. */
+/** A one-line field that tells the plan once it is left (or Enter), or shortly after typing stops. */
 function TextField({ value, label, tip, mono, width, onDone }: { value: string; label: string; tip?: string; mono?: boolean; width?: number; onDone: (value: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
+  useEffect(() => {
+    const trimmed = text.trim();
+    if (trimmed === value) return;
+    const timer = setTimeout(() => onDone(trimmed), 250);
+    return () => clearTimeout(timer);
+  }, [text, value, onDone]);
   return (
     <input
       className={`orch-field${mono ? " mono" : ""}`}
@@ -579,7 +605,8 @@ function BranchField({ value, onDone }: { value: string; onDone: (branch: string
         aria-label={t("orch.branch")}
         placeholder={t("orch.noBranch")}
         onChange={(event) => setBranch(event.target.value)}
-        onBlur={() => branch !== value && onDone(branch.trim())}
+        onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+        onBlur={() => branch.trim() !== value && onDone(branch.trim())}
       />
     </label>
   );
@@ -605,7 +632,12 @@ function ModelField({ engine, value, onDone }: { engine: Engine | undefined; val
         aria-label={t("orch.model")}
         placeholder={usable ? t("orch.modelDefault") : t("orch.noModel")}
         onChange={(event) => setModel(event.target.value)}
-        onBlur={() => model.trim() !== value && onDone(model.trim())}
+        onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+        onBlur={() => {
+          const cleaned = cleanModel(model);
+          setModel(cleaned);
+          if (cleaned !== value) onDone(cleaned);
+        }}
       />
       {known && (
         <datalist id={list}>
@@ -622,7 +654,7 @@ function ModelField({ engine, value, onDone }: { engine: Engine | undefined; val
 function EffortPick({ engine, value, onChange }: { engine: Engine | undefined; value: string; onChange: (effort: string) => void }) {
   const t = useT();
   const levels = engine ? effortLevels(engine) : [];
-  if (!levels.length) {
+  if (!levels.length && !value) {
     return (
       <Select value="" disabled aria-label={t("orch.effort")} {...tipProps(t("orch.noEffortTip"))}>
         <option value="">{t("orch.noEffort")}</option>
@@ -647,6 +679,11 @@ function PromptBox({ value, label, placeholder, onDone }: { value: string; label
   const ref = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
+  useEffect(() => {
+    if (text === value) return;
+    const timer = setTimeout(() => onDone(text), 250);
+    return () => clearTimeout(timer);
+  }, [text, value, onDone]);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;

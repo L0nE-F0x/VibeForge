@@ -200,6 +200,12 @@ function plainText(content: unknown): string {
     .join("\n");
 }
 
+function isGrokPrompt(row: LogRow): boolean {
+  if (row.type !== "user" || Boolean(row.synthetic_reason)) return false;
+  const text = plainText(row.content).trim();
+  return Boolean(text) && !/^\s*<(user_info|system-reminder)\b/.test(text);
+}
+
 /**
  * A Grok Build session: `chat_history.jsonl` holds the messages without times, `events.jsonl` the
  * turns with them. The turn that started at or after `since` has ended once a "turn_ended" follows
@@ -208,17 +214,25 @@ function plainText(content: unknown): string {
  */
 export function grokTurn(history: LogInput, events: LogInput, since: number, words = ""): Turn {
   const turns = rowsOf(events);
-  const started = turns.findIndex((row) => row.type === "turn_started" && Date.parse(String(row.ts ?? "")) >= since);
-  if (started < 0) return NO_TURN;
-  const ended = turns.slice(started + 1).some((row) => row.type === "turn_ended");
+  const starts = turns.map((row, index) => ({ row, index })).filter(({ row }) => row.type === "turn_started");
+  const first = starts.findIndex(({ row }) => Date.parse(String(row.ts ?? "")) >= since);
+  if (first < 0) return NO_TURN;
   const rows = rowsOf(history);
-  const prompts = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.type === "user" && !row.synthetic_reason && plainText(row.content).trim());
+  const prompts = rows.map((row, index) => ({ row, index })).filter(({ row }) => isGrokPrompt(row));
+  const offset = Math.max(0, prompts.length - starts.length);
   const hit = words ? [...prompts].reverse().find(({ row }) => mentions(plainText(row.content), words)) : undefined;
-  const prompt = hit ?? prompts[prompts.length - 1];
+  const prompt = hit ?? prompts[offset + first];
   const matched = Boolean(hit);
+  const promptPos = hit ? prompts.indexOf(hit) : offset + first;
+  const startIndex = starts[Math.min(starts.length - 1, Math.max(first, promptPos - offset))].index;
+  const nextStart = turns.findIndex((row, index) => index > startIndex && row.type === "turn_started");
+  const ended = turns.slice(startIndex + 1, nextStart < 0 ? undefined : nextStart).some((row) => row.type === "turn_ended");
   if (!prompt || !ended) return { prompted: true, matched, reply: null };
   let reply = "";
-  for (const row of rows.slice(prompt.index + 1)) if (row.type === "assistant" && plainText(row.content).trim()) reply = plainText(row.content);
+  for (const row of rows.slice(prompt.index + 1)) {
+    if (isGrokPrompt(row)) break;
+    if (row.type === "assistant" && plainText(row.content).trim()) reply = plainText(row.content);
+  }
   return { prompted: true, matched, reply: reply.trim() };
 }
 
