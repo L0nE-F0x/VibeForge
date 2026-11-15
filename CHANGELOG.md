@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.17.1] - 2026-11-15
+
+**2.17.1: Viby's new task, routine and agent steps do what the board and Chat do; `vibeforge tell` flags, the phone's mic and the plan card work as before 2.17.0. From a review of 2.17.0.**
+
+### Fixed
+
+- **Viby runs a task the way Execute does.** A task that had run before was picked up in its last session with no instructions typed in; it now starts again with them. A task or routine in the workspace itself waits its turn while another CLI is busy there, as it does from the board, and its step says what it's waiting for. A new task in a folder that isn't a git repository (or has no commit yet) runs in the folder itself instead of failing.
+- **A saved agent stays in its allowed folders** when Viby starts it, as it does from Chat and Tasks, and one started in its own copy is told to work in that copy, not in the folder it was copied from.
+- **An agent whose name holds a CLI's** ("Grok Reviewer") starts as that agent, not as the bare CLI.
+- **Routine steps** understand "pause", "off", "turn on" and the like. A word Viby can't place is asked about on the card; it no longer runs the routine instead.
+- **`vibeforge tell` and `vibeforge task` take `--wait`, `--title` and `--timeout` after the message again,** as in 2.16. In 2.17.0 they became part of the message, and the answer wasn't waited for.
+- **The phone's mic keeps what you said when a press is interrupted,** and keeps listening when the phone first asks for the mic, as before 2.17.0, which threw the recording away.
+- **On a task waiting its turn, In a copy** starts it once, at the terminal's size, without an "already running" error.
+- **The plan card:** typing a new workspace's name or folder no longer drops a space or a key when you pause. Lookup, task and routine steps say what they will do (Look up, Run task, New task, Run routine, Turn on or off routine), on the computer and the phone, and a task or routine that isn't there is named as one.
+- **Lookups** match a folder by its own name, so the folders inside one match no longer push the others out of its eight results, and read the disk without holding up the window.
+- **Viby asks its planner again** only when the answer promised to do something without a step for it, not when it was waiting on you ("once you tell me which branch").
+- A terminal whose recording started and stopped in quick succession could go on recording after its run had ended.
+
 ## [2.17.0] - 2026-11-14
 
 VibeForge's orchestrator becomes **Viby** — an anthropomorphic, voice-aware companion with situational awareness across workspaces, agents, tasks and routines, plus fixes from a full codebase audit.

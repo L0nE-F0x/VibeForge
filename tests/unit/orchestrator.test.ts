@@ -2,10 +2,10 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, emptyPromise, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, emptyPromise, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, routineAction, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
 import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
-import { setup, tempDir, until } from "./fixtures/service-harness.js";
+import { setup, started, tempDir, until } from "./fixtures/service-harness.js";
 
 const grok: EngineRow = { id: "grok", label: "Grok Build", bin: "grok", args: [] };
 const claude: EngineRow = { id: "claude", label: "Claude Code", bin: "claude", args: [] };
@@ -1162,5 +1162,162 @@ describe("Maestro in the service, 2.16", () => {
     expect(tasks.some((t) => t.id === existing.id && t.status === "running")).toBe(true);
     expect(tasks.some((t) => t.title === "Audit docs")).toBe(true);
     ctx.svc.close();
+  });
+});
+
+describe("Viby's agent, task and routine steps do what the board and Chat do", () => {
+  it("takes an agent named exactly for that agent, even when its name holds a CLI's", () => {
+    const here: PlanContext = { ...context, agents: [{ id: "grok-reviewer", name: "Grok Reviewer", engine: "claude" }] };
+    const [byName, byId, cli] = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "start", engine: "Grok Reviewer", workspace: "VibeForge", prompt: "review the diff" },
+          { kind: "start", engine: "grok-reviewer", workspace: "VibeForge", prompt: "review it" },
+          { kind: "start", engine: "grok", workspace: "VibeForge", prompt: "review it" },
+        ],
+      },
+      here,
+    );
+    expect(byName).toMatchObject({ agentId: "grok-reviewer", engineId: "claude" });
+    expect(byId).toMatchObject({ agentId: "grok-reviewer", engineId: "claude" });
+    // A CLI's own id is that CLI.
+    expect(cli.engineId).toBe("grok");
+    expect(cli.agentId).toBeUndefined();
+  });
+
+  it("reads a routine step's on, off or run now, and asks about anything else", () => {
+    expect(["", "run", "Run now", "start"].map(routineAction)).toEqual(["", "", "", ""]);
+    expect(["enable", "on", "Turn it on", "resume"].map(routineAction)).toEqual(["enable", "enable", "enable", "enable"]);
+    expect(["disable", "off", "pause", "Stop."].map(routineAction)).toEqual(["disable", "disable", "disable", "disable"]);
+    const here: PlanContext = { ...context, routines: [{ id: "nightly", name: "Nightly", schedule: "every day", enabled: true }, { id: "disable-old", name: "Disable old branches", schedule: "weekly", enabled: true }] };
+    const [paused, unclear] = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "routine", target: "Nightly", prompt: "pause" },
+          { kind: "routine", target: "Nightly", prompt: "twice" },
+        ],
+      },
+      here,
+    );
+    expect(paused).toMatchObject({ target: "nightly", prompt: "disable" });
+    expect(stepIssue(paused, here)).toBeNull();
+    expect(stepIssue(unclear, here)).toBe("prompt");
+    // The action is never taken for the routine's name.
+    expect(resolvePlan({ say: "", steps: [{ kind: "routine", prompt: "disable" }] }, here)[0].target).toBe("");
+  });
+
+  it("doesn't take an answer that waits on the person for an empty promise", () => {
+    expect(emptyPromise("I'll start Claude in Dune once you tell me which branch.")).toBe(false);
+    expect(emptyPromise("I'll make the workspace as soon as you say where it goes.")).toBe(false);
+    expect(emptyPromise("Let me know which routine, and I'll start it.")).toBe(false);
+    expect(emptyPromise("I'm searching that session id on disk right now.")).toBe(true);
+  });
+
+  it("runs an existing task again as Execute does: fresh, with its instructions, never a Continue", async () => {
+    const ctx = withPlanner([{ say: "Running Fix login.", steps: [{ kind: "task", target: "Fix login" }] }]);
+    const ws = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const agent = ctx.svc.saveAgent({ name: "Notes", engine: "argy", brief: "b", places: [ctx.place] });
+    const task = ctx.svc.saveTask({ title: "Fix login", body: "Fix the login bug.", agentId: agent.id, workspaceId: ws.id });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    await ctx.svc.orchestratorAsk("run fix login again");
+    const turn = ctx.svc.orchestratorView().turns.at(-1);
+    await ctx.svc.orchestratorRun(turn?.id ?? "");
+    expect(ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps?.[0]).toMatchObject({ state: "done" });
+    const spawn = ctx.spawns.at(-1);
+    expect(spawn?.argv).not.toContain("--continue");
+    expect(spawn?.argv.join("\n")).toContain("Fix the login bug.");
+    ctx.svc.close();
+  });
+
+  it("lets a task and a routine in the workspace itself wait their turn while another CLI is busy there", async () => {
+    const ctx = withPlanner([
+      {
+        say: "Running both.",
+        steps: [
+          { kind: "task", target: "Fix login" },
+          { kind: "routine", target: "Nightly" },
+        ],
+      },
+    ]);
+    const ws = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const agent = ctx.svc.saveAgent({ name: "Notes", engine: "argy", brief: "b", places: [ctx.place], allowRoutines: true });
+    ctx.svc.saveTask({ title: "Fix login", body: "Fix it.", agentId: agent.id, workspaceId: ws.id, isolated: false });
+    ctx.svc.saveRoutine({ name: "Nightly", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "tidy" });
+    const busy = await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+    const before = ctx.spawns.length;
+    await ctx.svc.orchestratorAsk("run fix login and the nightly routine");
+    const turn = ctx.svc.orchestratorView().turns.at(-1);
+    await ctx.svc.orchestratorRun(turn?.id ?? "");
+    expect(ctx.spawns.length).toBe(before);
+    const steps = ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps ?? [];
+    expect(steps.map((step) => step.result)).toEqual([expect.stringContaining("Waiting for Argy in that folder"), expect.stringContaining("Waiting for Argy in that folder")]);
+    expect(ctx.svc.listTasks()[0].waiting).not.toBeNull();
+    ctx.svc.close();
+  });
+
+  it("makes a new task in a folder that isn't a git repository, in the folder itself", async () => {
+    const ctx = withPlanner([{ say: "Making it.", steps: [{ kind: "task", engine: "Notes", workspace: "", branch: "Tidy notes", prompt: "Tidy the notes." }] }]);
+    const ws = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    ctx.svc.saveAgent({ name: "Notes", engine: "argy", brief: "b", places: [ctx.place] });
+    await ctx.svc.orchestratorAsk("make a task for notes to tidy the notes");
+    const turn = ctx.svc.orchestratorView().turns.at(-1);
+    const step = turn?.steps?.[0];
+    if (step) ctx.svc.orchestratorEditStep(turn?.id ?? "", step.id, { workspaceId: ws.id });
+    await ctx.svc.orchestratorRun(turn?.id ?? "");
+    expect(ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps?.[0]).toMatchObject({ state: "done" });
+    expect(ctx.svc.listTasks()[0]).toMatchObject({ title: "Tidy notes", isolated: false, status: "running" });
+    ctx.svc.close();
+  });
+
+  it("starts an agent only in its allowed folders, and in a copy tells it to work there", async () => {
+    const repo = gitRepo();
+    const elsewhere = tempDir();
+    const ctx = withPlanner([
+      { say: "Starting Notes.", steps: [{ kind: "start", engine: "Notes", workspace: path.basename(elsewhere), prompt: "tidy up" }] },
+      { say: "Starting Notes.", steps: [{ kind: "start", engine: "Notes", workspace: "shop", branch: "tidy", prompt: "tidy up" }] },
+    ]);
+    ctx.svc.addWorkspace(elsewhere);
+    ctx.svc.addWorkspace(repo);
+    ctx.svc.saveAgent({ name: "Notes", engine: "argy", brief: "b", places: [repo] });
+    const before = ctx.spawns.length;
+    await ctx.svc.orchestratorAsk("start notes in the other folder");
+    const outside = ctx.svc.orchestratorView().turns.at(-1);
+    await ctx.svc.orchestratorRun(outside?.id ?? "");
+    expect(ctx.spawns.length).toBe(before);
+    expect(ctx.svc.orchestratorView().turns.find((item) => item.id === outside?.id)?.steps?.[0]).toMatchObject({ state: "failed", error: `Notes is not allowed in ${path.basename(elsewhere)}.` });
+
+    await ctx.svc.orchestratorAsk("start notes in shop on tidy");
+    const inside = ctx.svc.orchestratorView().turns.at(-1);
+    await ctx.svc.orchestratorRun(inside?.id ?? "");
+    expect(ctx.svc.orchestratorView().turns.find((item) => item.id === inside?.id)?.steps?.[0]).toMatchObject({ state: "done", copyId: expect.any(String) });
+    const spawn = ctx.spawns.at(-1);
+    expect(spawn?.cwd).not.toBe(repo);
+    const preamble = spawn?.argv.join("\n") ?? "";
+    expect(preamble).toContain(`- ${spawn?.cwd}`);
+    expect(preamble).toContain(`This run works in its own git worktree of ${repo}`);
+    ctx.svc.close();
+  });
+
+  it("looks a folder up by its own name, so the folders inside one match don't crowd the others out", async () => {
+    const home = tempDir();
+    const projects = path.join(home, "Projects");
+    for (const sub of ["src", "docs", "tests", "scripts", "assets", "public", "config", "lib", "app"]) fs.mkdirSync(path.join(projects, "aardvark", sub), { recursive: true });
+    fs.mkdirSync(path.join(projects, "zoo", "aardvark-notes"), { recursive: true });
+    fs.mkdirSync(path.join(projects, "zoo", "vark-ideas"), { recursive: true });
+    const saved = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const ctx = withPlanner([]);
+      const found = await ctx.svc.orchestrator.lookup("aardvark");
+      expect(found.details.split("\n").sort()).toEqual(["- Folder on disk: ~/Projects/aardvark", "- Folder on disk: ~/Projects/zoo/aardvark-notes"]);
+      // A path is matched whole only when the query is one.
+      expect((await ctx.svc.orchestrator.lookup("aardvark/docs")).details).toContain("~/Projects/aardvark/docs");
+      ctx.svc.close();
+    } finally {
+      process.env.HOME = saved;
+    }
   });
 });

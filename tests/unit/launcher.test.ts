@@ -115,6 +115,14 @@ describe("the vibeforge launcher", () => {
     }
   });
 
+  it("takes --wait, --title and --timeout after the message too: flags go anywhere", async () => {
+    requests.length = 0;
+    await launch(["tell", "codex", "Is this regex safe?", "--wait"]);
+    await launch(["task", "Helper", "fix the tests", "--title", "Tests", "--timeout", "2"]);
+    expect(requests[0]).toMatchObject({ op: "tell", to: "codex", text: "Is this regex safe?", wait: true });
+    expect(requests[1]).toMatchObject({ op: "task", agent: "Helper", text: "fix the tests", title: "Tests", timeoutMs: 120_000 });
+  });
+
   it("still falls through to the window for anything else", async () => {
     const result = await launch(["--hidden"]);
     expect(result.stderr).toContain("VibeForge: Electron is missing");

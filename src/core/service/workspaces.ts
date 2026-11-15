@@ -179,7 +179,20 @@ export class WorkspaceDesk {
   }
 
   /** `model` and `effort` start the CLI with them where it takes them (launchOptionArgs); empty keeps its own. */
-  async startEngine(opts: { workspaceId: string; engineId: string; agentId?: string; prompt?: string; continueSession?: boolean; orchestrated?: boolean; model?: string; effort?: string } & TermSize): Promise<Launched> {
+  async startEngine(
+    opts: {
+      workspaceId: string;
+      engineId: string;
+      agentId?: string;
+      /** An agent started in a copy: the copy's folder, and the workspace it is a copy of, for its brief. */
+      copyOf?: { path: string; of: string } | null;
+      prompt?: string;
+      continueSession?: boolean;
+      orchestrated?: boolean;
+      model?: string;
+      effort?: string;
+    } & TermSize,
+  ): Promise<Launched> {
     // Runs left over from a crash are still being recorded; starting now could race them.
     await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
@@ -198,7 +211,7 @@ export class WorkspaceDesk {
       engine,
       cwd: workspace.path,
       prompt,
-      promptText: agent ? this.core.preambleFor(agent, prompt) : prompt || null,
+      promptText: agent ? this.core.preambleFor(agent, prompt, null, opts.copyOf ?? null) : prompt || null,
       continueSession: Boolean(opts.continueSession && (resume.resumeArgs || engine.row.continueArgs?.length)),
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,

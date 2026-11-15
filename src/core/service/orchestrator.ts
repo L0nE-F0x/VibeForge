@@ -35,6 +35,7 @@ import {
   type OrchestratorView,
   type PlanContext,
 } from "../orchestrator.js";
+import { cwdAllowed } from "../places.js";
 import { isGitRepo, summarizeSnapshot } from "../vcs.js";
 import type { ApplyResult } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
@@ -61,6 +62,9 @@ const NOTE_AFTER_WORK_MS = 20_000;
 const NOTE_EVERY_MS = 60_000;
 /** Turns the planner is reminded of when its session is gone and a new one starts. */
 const RECAP_TURNS = 6;
+/** Folders on disk a lookup names at most, and how long it may look for them. */
+const LOOKUP_FOLDERS = 8;
+const LOOKUP_WALK_MS = 3000;
 
 interface Conversation {
   /** The planning CLI's own session, resumed each turn so it remembers what was said. */
@@ -697,22 +701,29 @@ export class OrchestratorDesk {
       if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
       const workspace = this.core.workspaceById(step.workspaceId);
       if (!workspace) throw new Error("That workspace is gone.");
+      // A saved agent works only in its allowed folders, as it does when started from Chat or a task.
+      const agent = step.agentId ? this.core.store.getAgent(step.agentId) : null;
+      if (step.agentId && !agent) throw new Error("That agent no longer exists.");
+      if (agent && !cwdAllowed(workspace.path, agent.places)) throw new Error(`${agent.name} is not allowed in ${workspace.name}.`);
       let workspaceId = workspace.id;
+      let copyOf: { path: string; of: string } | null = null;
       if (step.branch.trim() && (await isGitRepo(workspace.path).catch(() => false))) {
-        const hasCommit = (await gitIn(["rev-parse", "--verify", "HEAD"], workspace.path)).code === 0;
-        if (hasCommit) {
+        if (await hasCommit(workspace.path)) {
           // A copy of its own, as a task gets, so the work comes back for review: Apply or Discard.
           const copy = await this.copies.make({ turnId: turn.id, stepId: step.id, engineId: step.engineId, prompt: step.prompt, branch: step.branch, workspace });
           step.copyId = copy.id;
           step.branch = copy.branch;
           workspaceId = copy.openedWorkspaceId;
+          // An agent's brief names its allowed folders: it's told to work in the copy instead.
+          const opened = this.core.workspaceById(workspaceId);
+          if (opened) copyOf = { path: opened.path, of: workspace.path };
           this.save();
         } else {
           step.branch = "";
         }
       }
       step.openedWorkspaceId = workspaceId;
-      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
+      const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
       step.ptyId = launched.ptyId;
       step.runId = launched.runId;
       return;
@@ -729,11 +740,12 @@ export class OrchestratorDesk {
         this.routines.setRoutineEnabled(step.target, action === "enable");
         return;
       }
-      const launched = await this.routines.runRoutineNow(step.target, START_SIZE, true);
+      // As Run now on the board: with another CLI busy in its folder, it waits its turn there.
+      const launched = await this.routines.runRoutineNow(step.target, START_SIZE);
       if ("ptyId" in launched) {
         step.ptyId = launched.ptyId;
         step.runId = launched.runId;
-      }
+      } else step.result = waitsTurn(launched.behind);
       return;
     }
     if (step.kind === "task") {
@@ -741,21 +753,26 @@ export class OrchestratorDesk {
       let taskId = step.target;
       if (!taskId) {
         if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+        const workspace = this.core.workspaceById(step.workspaceId);
+        // In its own copy where the board would make one: a git workspace with a commit to copy.
+        const isolated = Boolean(workspace) && (await isGitRepo(workspace?.path ?? "").catch(() => false)) && (await hasCommit(workspace?.path ?? ""));
         const saved = this.tasks.saveTask({
           title: step.name || branchFromPrompt(step.prompt),
           body: step.prompt,
           agentId: step.agentId || null,
           workspaceId: step.workspaceId || null,
-          isolated: true,
+          isolated,
         });
         taskId = saved.id;
         step.target = taskId;
       }
-      const launched = await this.tasks.executeTask(taskId, START_SIZE, true);
+      // As Execute on the board: a fresh start with its instructions (never a Continue of its last
+      // session), and in the workspace itself it waits its turn while another CLI is busy there.
+      const launched = await this.tasks.executeTask(taskId, START_SIZE);
       if ("ptyId" in launched) {
         step.ptyId = launched.ptyId;
         step.runId = launched.runId;
-      }
+      } else step.result = waitsTurn(launched.behind);
       return;
     }
     if (step.kind === "apply") {
@@ -883,13 +900,19 @@ export class OrchestratorDesk {
       path.join(home, "Documents"),
       path.join(home, "Desktop"),
     ]);
-    const folderHits: string[] = [];
+    // A folder counts by its own name: the whole query first, then one word of it. A path counts
+    // only for a query that is one ("ApexForge/VibeForge"); otherwise every folder inside a match
+    // would match too and crowd the rest out. Read without blocking, and for a few seconds at most.
+    const byPath = raw.includes("/");
+    const strong: string[] = [];
+    const weak: string[] = [];
     const seenDirs = new Set<string>();
-    const walk = (dir: string, depth: number) => {
-      if (depth > 3 || folderHits.length >= 8) return;
+    const deadline = Date.now() + LOOKUP_WALK_MS;
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 3 || strong.length >= LOOKUP_FOLDERS || Date.now() > deadline) return;
       let resolved: string;
       try {
-        resolved = fs.realpathSync(dir);
+        resolved = await fs.promises.realpath(dir);
       } catch {
         return;
       }
@@ -897,25 +920,24 @@ export class OrchestratorDesk {
       seenDirs.add(resolved);
       let entries: fs.Dirent[];
       try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "build" || entry.name === "target") continue;
         const full = path.join(dir, entry.name);
-        if (matches(entry.name) || matches(tildify(full)) || anyToken(entry.name)) {
-          const git = fs.existsSync(path.join(full, ".git"));
-          folderHits.push(`- Folder on disk: ${tildify(full)}${git ? " (git repository)" : ""}`);
-          if (folderHits.length >= 8) return;
-        }
-        if (depth < 3) walk(full, depth + 1);
+        const line = () => `- Folder on disk: ${tildify(full)}${fs.existsSync(path.join(full, ".git")) ? " (git repository)" : ""}`;
+        if (matches(entry.name) || (byPath && matches(tildify(full)))) strong.push(line());
+        else if (weak.length < LOOKUP_FOLDERS && anyToken(entry.name)) weak.push(line());
+        if (strong.length >= LOOKUP_FOLDERS) return;
+        if (depth < 3) await walk(full, depth + 1);
       }
     };
     for (const root of roots) {
-      if (isDirectory(root)) walk(root, 1);
+      if (isDirectory(root)) await walk(root, 1);
     }
-    lines.push(...folderHits);
+    lines.push(...[...strong, ...weak].slice(0, LOOKUP_FOLDERS));
 
     if (!lines.length) {
       return {
@@ -1020,6 +1042,16 @@ function gitIn(args: string[], cwd: string): Promise<{ code: number; stdout: str
       resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
     });
   });
+}
+
+/** A repository with at least one commit, which a copy can be made from. */
+async function hasCommit(folder: string): Promise<boolean> {
+  return (await gitIn(["rev-parse", "--verify", "-q", "HEAD"], folder)).code === 0;
+}
+
+/** A task or routine step that is waiting for its folder (core.orchWaitsTurn). */
+function waitsTurn(behind: readonly string[]): string {
+  return `Waiting for ${behind.join(", ") || "another CLI"} in that folder; it starts on its own once it's quiet.`;
 }
 
 /** Files changed and not committed in a repository (new ones included); 0 when git can't say. */

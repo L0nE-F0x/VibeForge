@@ -103,19 +103,13 @@ function micButton() {
  * @param {boolean} cancelled
  */
 function micRelease(held, cancelled) {
-  if (cancelled) {
-    micCancel();
-    return;
-  }
   const current = mic;
   if (!current || current.phase === "hearing") return;
-  if (held.started && Date.now() - held.at < MIC_TAP_MS) {
+  // Still starting: the phone's question about the mic took the press, so keep listening once it's
+  // allowed. Like the desktop's mic, an interrupted hold keeps what was said: it finishes.
+  if (held.started && (current.phase === "starting" || (!cancelled && Date.now() - held.at < MIC_TAP_MS))) {
     current.latched = true;
     paintMic();
-    return;
-  }
-  if (current.phase === "starting") {
-    micCancel();
     return;
   }
   void micFinish();

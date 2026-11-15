@@ -482,8 +482,13 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push(step);
     } else if (kind === "start") {
       const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const namedEngine = matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
-      const agent = !namedEngine ? matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true) : null;
+      // An agent named exactly comes first, so "Grok Reviewer" isn't taken for Grok Build; a CLI's
+      // own id still means that CLI.
+      const said = squash(item.engine ?? "");
+      const exactAgent =
+        said && !context.engines.some((entry) => squash(entry.id) === said) ? (context.agents ?? []).find((entry) => squash(entry.id) === said || squash(entry.name) === said) : undefined;
+      const namedEngine = exactAgent ? null : matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
+      const agent = exactAgent ?? (!namedEngine ? matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true) : null);
       const fallbackEngine = !item.engine?.trim() && !agent && context.defaultEngine ? (context.engines.find((entry) => entry.id === context.defaultEngine) ?? null) : null;
       const engineId = namedEngine?.id ?? (agent ? agent.engine : (fallbackEngine?.id ?? ""));
       const matchedWorkspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
@@ -513,9 +518,9 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push({ ...base, prompt: query, asked: query });
     } else if (kind === "routine") {
       const routines = context.routines ?? [];
-      const routine = routines.find((entry) => entry.id === item.target) ?? matchName(item.target || item.workspace || item.prompt, routines, (entry) => [entry.id, entry.name], true);
+      const routine = routines.find((entry) => entry.id === item.target) ?? matchName(item.target || item.workspace, routines, (entry) => [entry.id, entry.name], true);
       const asked = routine ? routine.name : (item.target || item.workspace || "");
-      steps.push({ ...base, prompt: (item.prompt ?? "").trim(), target: routine?.id ?? "", asked });
+      steps.push({ ...base, prompt: routineAction(item.prompt), target: routine?.id ?? "", asked });
     } else if (kind === "task") {
       const tasks = context.tasks ?? [];
       const existing = item.target ? (tasks.find((entry) => entry.id === item.target) ?? matchName(item.target, tasks, (entry) => [entry.id, entry.title], true)) : null;
@@ -551,11 +556,25 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
 }
 
 /**
+ * A routine step's action in the words the step keeps: "enable", "disable", or "" to run it now.
+ * Anything else is kept as said, and the plan card asks for it to be fixed (stepIssue).
+ */
+export function routineAction(said: string | undefined): string {
+  const text = (said ?? "").trim().toLowerCase().replace(/[.!]+$/, "");
+  if (!text || /^(run|run it|run now|run it now|now|start|start it|go)$/.test(text)) return "";
+  if (/^(enable|enabled|on|turn on|turn it on|switch on|resume|unpause)$/.test(text)) return "enable";
+  if (/^(disable|disabled|off|turn off|turn it off|switch off|pause|stop)$/.test(text)) return "disable";
+  return text;
+}
+
+/**
  * Whether an answer with no steps still promises to be searching, checking, or starting something
  * right now (a planner acting as if another tool turn will follow its JSON output).
  */
 export function emptyPromise(say: string): boolean {
   const text = say.trim();
   if (!text || text.includes("?")) return false;
+  // Waiting on the person ("I'll start it once you tell me which branch") is an answer, not a promise.
+  if (/\b(once|when|after|as soon as|if)\s+(you|you've|you're|you'd)\b|\blet me know\b|\btell me\b|\bconfirm\b/i.test(text)) return false;
   return /\b(i['’]?m|i am|still)\s+(still\s+)?(searching|checking|looking|locating|finding|verifying|opening|starting|working\b|on it\b)|\b(i['’]?ll|i will)\s+(look up|search|check|locate|find|open|start|make)\b|\b(searching|checking|looking up|locating)\s+(the|that|your|for|vibe|on disk)\b/i.test(text);
 }

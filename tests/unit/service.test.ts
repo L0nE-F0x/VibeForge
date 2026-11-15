@@ -415,16 +415,41 @@ describe("taking turns in a folder", () => {
     ctx.svc.cancelTaskWait(third.id);
     expect(ctx.svc.listTasks().find((task) => task.id === third.id)!.waiting).toBeNull();
 
-    // Enabling shareCheckout or isolated on a queued task cancels the wait and starts (or notifies if unready).
+    // Saving a waiting task starts nothing by itself: the sheet's In a copy and Anyway save it and
+    // then execute it now, and that starts it once.
     const fourth = ctx.svc.saveTask({ title: "Four", agentId: agent.id, workspaceId: workspace.id });
     expect(await ctx.svc.executeTask(fourth.id)).toMatchObject({ queued: true });
+    const before = ctx.spawns.length;
     ctx.svc.saveTask({ id: fourth.id, title: "Four", agentId: agent.id, workspaceId: workspace.id, shareCheckout: true });
-    await until(() => ctx.spawns.length === 4);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ctx.spawns.length).toBe(before);
+    expect(await ctx.svc.executeTask(fourth.id, { cols: 90, rows: 20 }, true)).toMatchObject({ runId: expect.any(String) });
+    expect(ctx.spawns.length).toBe(before + 1);
+    expect(ctx.spawns.at(-1)).toMatchObject({ cols: 90, rows: 20 });
+    expect(ctx.svc.listTasks().find((task) => task.id === fourth.id)!.waiting).toBeNull();
+    ctx.svc.close();
+  });
 
-    const fifth = ctx.svc.saveTask({ title: "Five", agentId: agent.id, workspaceId: workspace.id });
-    expect(await ctx.svc.executeTask(fifth.id)).toMatchObject({ queued: true });
-    ctx.svc.saveTask({ id: fifth.id, title: "Five", agentId: agent.id, workspaceId: workspace.id, isolated: true });
-    await until(() => ctx.notes.some((n) => n.title === "Five"));
+  it("starts a waiting task in a copy once, from its sheet's In a copy", async () => {
+    const ctx = setup();
+    const repo = path.join(tempDir(), "shop");
+    fs.mkdirSync(repo);
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" });
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "start");
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const agent = ctx.svc.saveAgent({ name: "Notes", engine: "argy", brief: "b", places: [repo] });
+    const task = ctx.svc.saveTask({ title: "Fix login", body: "Fix it.", agentId: agent.id, workspaceId: workspace.id, isolated: false });
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+    expect(await ctx.svc.executeTask(task.id)).toMatchObject({ queued: true });
+    const before = ctx.spawns.length;
+    // What the button does: save with its own copy on, then Execute now.
+    ctx.svc.saveTask({ id: task.id, title: task.title, isolated: true });
+    expect(await ctx.svc.executeTask(task.id, { cols: 100, rows: 30 }, true)).toMatchObject({ runId: expect.any(String) });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ctx.spawns.slice(before)).toEqual([expect.objectContaining({ cols: 100, rows: 30 })]);
+    expect(ctx.spawns.at(-1)?.cwd).not.toBe(repo);
     ctx.svc.close();
   });
 
