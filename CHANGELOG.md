@@ -12,10 +12,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ### Changed
 
+- **Viby sends less with each message.** Each workspace's recent runs no longer go with every planning turn (on a desk of 18 workspaces that was about 700 tokens a message, with the start of each past prompt); a lookup searches past runs when you ask about one. A lookup reads folder names only in your projects folder and `~/Projects`, no longer in `~/Documents` or `~/Desktop`.
 - **Electron 45.2.3** (from 45.2.1), with Chromium's latest security fixes and a Wayland crash fix.
 
 ### Fixed
 
+- **One VibeForge icon, in your theme's colours,** in notifications, the tray and the app launcher, as in the window. A launcher entry made before 0.4.0 still had the old logo, which notifications showed beside the new one, and a voice message and Settings' **Send a test** came without an icon.
 - **Viby runs a task the way Execute does.** A task that had run before was picked up in its last session with no instructions typed in; it now starts again with them. A task or routine in the workspace itself waits its turn while another CLI is busy there, as it does from the board, and its step says what it's waiting for. A new task in a folder that isn't a git repository (or has no commit yet) runs in the folder itself instead of failing.
 - **A saved agent stays in its allowed folders** when Viby starts it, as it does from Chat and Tasks, and one started in its own copy is told to work in that copy, not in the folder it was copied from.
 - **An agent whose name holds a CLI's** ("Grok Reviewer") starts as that agent, not as the bare CLI.

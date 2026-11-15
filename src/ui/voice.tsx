@@ -293,7 +293,8 @@ export function VoiceLayer() {
   const inform = useCallback(
     (kind: "info" | "success" | "error", title: string, body?: string) => {
       if (focused()) push(kind, title, body);
-      else if ("Notification" in window) new Notification(title, { body, silent: true });
+      // Through the main process, so it has the icon every other notification has.
+      else void call("app.notify", { title, body: body ?? "", always: true, silent: true });
     },
     [push],
   );

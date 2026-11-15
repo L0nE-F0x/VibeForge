@@ -187,16 +187,7 @@ export function sessionGone(text: string): boolean {
 
 /** What the planning CLI is told each turn: its job, the steps it may give, and what is here right now. */
 export function orchestratorRules(context: PlanContext): string {
-  const workspaces = context.workspaces.length
-    ? context.workspaces
-        .map((item) => {
-          const head = `- ${item.name} (${item.folder}${item.git ? "" : ", not a git repository"})${item.branch ? ` [branch: ${item.branch}]` : ""}`;
-          if (!item.recentRuns?.length) return head;
-          const runs = item.recentRuns.map((run) => `  · run ${run.id}: ${run.engine}${run.branch ? ` on ${run.branch}` : ""}${run.prompt ? ` — "${run.prompt}"` : ""}`).join("\n");
-          return `${head}\n${runs}`;
-        })
-        .join("\n")
-    : "- none yet";
+  const workspaces = context.workspaces.length ? context.workspaces.map((item) => `- ${item.name} (${item.folder}${item.git ? "" : ", not a git repository"})`).join("\n") : "- none yet";
   const engines = context.engines.filter((item) => item.available);
   const engineList = engines.length
     ? engines

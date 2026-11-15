@@ -1301,12 +1301,27 @@ describe("Viby's agent, task and routine steps do what the board and Chat do", (
     ctx.svc.close();
   });
 
+  it("doesn't send each workspace's past runs with every turn: a lookup searches them when asked", async () => {
+    const ctx = withPlanner([{ say: "Nothing to start.", steps: [] }]);
+    const ws = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    await ctx.exit((await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "argy", prompt: "Refactor the secret billing module" })).ptyId);
+    await ctx.svc.orchestratorAsk("what's running?");
+    const rules = ctx.calls[0].argv[ctx.calls[0].argv.indexOf("--rules") + 1];
+    expect(rules).toContain(`- ${ws.name} (`);
+    expect(rules).not.toContain("secret billing");
+    expect((await ctx.svc.orchestrator.lookup("billing")).details).toContain("Refactor the secret billing module");
+    ctx.svc.close();
+  });
+
   it("looks a folder up by its own name, so the folders inside one match don't crowd the others out", async () => {
     const home = tempDir();
     const projects = path.join(home, "Projects");
     for (const sub of ["src", "docs", "tests", "scripts", "assets", "public", "config", "lib", "app"]) fs.mkdirSync(path.join(projects, "aardvark", sub), { recursive: true });
     fs.mkdirSync(path.join(projects, "zoo", "aardvark-notes"), { recursive: true });
     fs.mkdirSync(path.join(projects, "zoo", "vark-ideas"), { recursive: true });
+    // Only where projects are kept: other folders' names would go to the planner's provider.
+    fs.mkdirSync(path.join(home, "Documents", "aardvark-taxes"), { recursive: true });
+    fs.mkdirSync(path.join(home, "Desktop", "aardvark-photos"), { recursive: true });
     const saved = process.env.HOME;
     process.env.HOME = home;
     try {

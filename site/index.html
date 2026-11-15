@@ -337,7 +337,8 @@
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
               <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere to open Viby, VibeForge's orchestrator, and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
-              <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It only starts CLIs you ask for.</p>
+              <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It starts only the CLIs and agents you name, or your default CLI when you don't say which.</p>
+              <p>It runs your saved agents, tasks and routines too (<i>“have Atlas review the README”</i>, <i>“run the fix-login task”</i>, <i>“pause the nightly routine”</i>), and can look up a past session, branch or project folder before it plans.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">
@@ -622,16 +623,16 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=2.12.1" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
+              <img src="assets/app-home.webp?v=2.17.1" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=2.12.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of Maestro's code from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=2.17.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of Viby's code from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp?v=2.12.1" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace, the finished ones with their diff." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=2.17.1" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace, the finished ones with their diff." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-maestro.webp?v=2.14.1" width="1890" height="1138" alt="Viby (shown in 2.14 as Maestro): asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan, each step with Open in Code, Review changes, Apply and Discard for its own copy, and beside it the two copies wait under To review above the CLIs running." loading="lazy" />
+              <img src="assets/app-viby.webp?v=2.17.1" width="1890" height="1138" alt="Viby: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan, each step with Open in Code, Review changes, Apply and Discard for its own copy, and beside it the two copies wait under To review above the CLIs running." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs.</p>

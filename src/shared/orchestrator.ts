@@ -190,16 +190,7 @@ export function orchestratorVoiceWords(workspaces: readonly string[]): string[] 
 }
 
 export interface PlanContext {
-  workspaces: Array<{
-    id: string;
-    name: string;
-    folder: string;
-    git: boolean;
-    /** Current git branch, when known. */
-    branch?: string;
-    /** Recent runs in this workspace, newest first. */
-    recentRuns?: Array<{ id: string; engine: string; branch?: string; prompt?: string; at: string }>;
-  }>;
+  workspaces: Array<{ id: string; name: string; folder: string; git: boolean }>;
   /** `bin` tells which model and effort options a CLI takes; without it, none are checked. */
   engines: Array<{ id: string; label: string; available: boolean; bin?: string }>;
   /** Default CLI id when the person asks to start work without naming a specific CLI. */

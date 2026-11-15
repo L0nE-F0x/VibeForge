@@ -4,7 +4,7 @@ What VibeForge does and won't do. A change that breaks one of these needs a reas
 
 ## It runs the CLIs you already sign in to
 
-VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Viby plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything.
+VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Viby plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything. It is told what Viby shows you: your workspaces, CLIs, agents, tasks, routines, and what's running or waiting for review. Past runs and folder names go to it only when you ask it to find something, and folder names only from where projects are kept (your projects folder and `~/Projects`).
 
 Plan limits, when you turn them on, read the sign-in a CLI saved on this machine to ask its provider for your usage. VibeForge never renews, rewrites or keeps that sign-in, and saves only the percentages.
 

@@ -262,22 +262,8 @@ export class OrchestratorDesk {
   async context(): Promise<PlanContext> {
     const rows = this.core.store.readEngineRows();
     const workspaces = await Promise.all(
-      this.core.store.readWorkspaces().workspaces.map(async (item) => {
-        const git = await isGitRepo(item.path).catch(() => false);
-        const recent = this.core.store.queryRuns({ workspaceId: item.id, limit: 3 }).map((run) => ({
-          id: run.id,
-          engine: run.engine,
-          ...(run.prompt ? { prompt: oneLine(run.prompt, 80) } : {}),
-          at: run.startedAt,
-        }));
-        return {
-          id: item.id,
-          name: item.name,
-          folder: tildify(item.path),
-          git,
-          ...(recent.length ? { recentRuns: recent } : {}),
-        };
-      }),
+      // No past runs here: they'd go with every turn. A lookup step searches them when asked.
+      this.core.store.readWorkspaces().workspaces.map(async (item) => ({ id: item.id, name: item.name, folder: tildify(item.path), git: await isGitRepo(item.path).catch(() => false) })),
     );
     const names = new Map(workspaces.map((item) => [item.id, item.name]));
     const copies = this.copies.list();
@@ -892,14 +878,9 @@ export class OrchestratorDesk {
       }
     }
 
-    // 3. Project folders on disk (up to depth 3 under projectsFolder, ~/Projects, ~/Documents, ~/Desktop)
-    const home = os.homedir();
-    const roots = new Set<string>([
-      path.resolve(expandHome(this.projectsFolder())),
-      path.join(home, "Projects"),
-      path.join(home, "Documents"),
-      path.join(home, "Desktop"),
-    ]);
+    // 3. Project folders on disk, three levels down: only where projects are kept (the new-workspace
+    // folder and ~/Projects), so no other folder's names are sent to the planner's provider.
+    const roots = new Set<string>([path.resolve(expandHome(this.projectsFolder())), path.join(os.homedir(), "Projects")]);
     // A folder counts by its own name: the whole query first, then one word of it. A path counts
     // only for a query that is one ("ApexForge/VibeForge"); otherwise every folder inside a match
     // would match too and crowd the rest out. Read without blocking, and for a few seconds at most.
@@ -942,7 +923,7 @@ export class OrchestratorDesk {
     if (!lines.length) {
       return {
         summary: `No runs, branches or folders matched "${oneLine(raw, 60)}".`,
-        details: `No runs, git branches, or folders under ${this.projectsFolder()}, ~/Projects, ~/Documents, or ~/Desktop matched "${raw}".`,
+        details: `No runs, git branches, or folders under ${[...new Set([this.projectsFolder(), "~/Projects"])].join(" or ")} matched "${raw}".`,
       };
     }
     return {
