@@ -7,6 +7,8 @@ import type { MainContext } from "./main-context.js";
 export interface Note extends NoteTarget {
   title: string;
   body: string;
+  /** No sound from the desktop, whatever Settings say. */
+  silent?: boolean;
 }
 
 export type Notify = (note: Note) => void;
@@ -21,8 +23,9 @@ export function desktopNotifier(ctx: MainContext): Notify {
   return (note) => {
     if (Notification.isSupported()) {
       // VibeForge plays its own sounds, so the desktop's would be a second one for the same moment.
-      const silent = Boolean(ctx.service?.getSettings().sounds.on);
-      const notification = new Notification({ title: note.title, body: note.body, icon: ctx.iconPath, silent });
+      const silent = note.silent === true || Boolean(ctx.service?.getSettings().sounds.on);
+      // The icon in the theme's colours, the one the tray and the launcher show too.
+      const notification = new Notification({ title: note.title, body: note.body, icon: ctx.brandIcon ?? ctx.iconPath, silent });
       notifications.add(notification);
       notification.on("click", () => {
         ctx.focusWindow();

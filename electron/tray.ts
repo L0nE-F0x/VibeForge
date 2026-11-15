@@ -74,6 +74,8 @@ export class TrayIcon {
   private tray: Tray | null = null;
   private images: { plain: NativeImage; marked: NativeImage } | null = null;
   private state: TrayState | null = null;
+  /** The icon in the theme's colours; without it, the one at iconPath. */
+  private base: NativeImage | null = null;
 
   constructor(
     private iconPath: string,
@@ -85,7 +87,7 @@ export class TrayIcon {
   /** Made on first use: image work waits for the app to be ready. */
   private icons(): { plain: NativeImage; marked: NativeImage } {
     if (!this.images) {
-      const plain = nativeImage.createFromPath(this.iconPath).resize({ width: SIZE, height: SIZE, quality: "best" });
+      const plain = (this.base ?? nativeImage.createFromPath(this.iconPath)).resize({ width: SIZE, height: SIZE, quality: "best" });
       this.images = { plain, marked: plain.isEmpty() ? plain : withMark(plain, this.colors.mark, this.colors.outline) };
     }
     return this.images;
@@ -113,9 +115,10 @@ export class TrayIcon {
     this.show(state);
   }
 
-  recolor(mark: string, outline: string): void {
-    if (mark === this.colors.mark && outline === this.colors.outline) return;
+  recolor(mark: string, outline: string, base: NativeImage | null = this.base): void {
+    if (mark === this.colors.mark && outline === this.colors.outline && base === this.base) return;
     this.colors = { mark, outline };
+    this.base = base && !base.isEmpty() ? base : null;
     this.images = null;
     if (this.tray && this.state) this.tray.setImage(this.state.waiting ? this.icons().marked : this.icons().plain);
   }

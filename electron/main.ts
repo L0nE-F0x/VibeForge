@@ -1,13 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, Menu } from "electron";
+import { app, Menu, nativeImage } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
 import { describeError, LogFile } from "../src/core/log.js";
 import { MainText } from "../src/core/main-text.js";
 import { TeamService } from "../src/core/team-service.js";
+import { iconColors, iconPng, refreshLauncherIcons } from "../src/core/brand-icon.js";
 import { resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
@@ -121,7 +122,34 @@ function refreshPalette(): void {
   ctx.palette = resolvePalette(ctx.service.getSettings().theme);
   send("palette", ctx.palette);
   if (ctx.win && !ctx.win.isDestroyed()) ctx.win.setBackgroundColor(ctx.palette.background);
-  tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
+  drawBrandIcon();
+  tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
+}
+
+/** The colours the icon was last drawn in: a focus or a Settings change that keeps them costs nothing. */
+let brandDrawnIn = "";
+
+/**
+ * VibeForge's icon in the theme's colours, for notifications and the tray, and the launcher entry's
+ * icons redrawn to match, so the desktop shows one logo that changes with the theme.
+ */
+function drawBrandIcon(): void {
+  const colors = iconColors(ctx.palette);
+  const key = JSON.stringify(colors);
+  if (key === brandDrawnIn) return;
+  brandDrawnIn = key;
+  try {
+    const image = nativeImage.createFromBuffer(iconPng(colors, 256));
+    ctx.brandIcon = image.isEmpty() ? null : image;
+  } catch (error) {
+    ctx.brandIcon = null;
+    log.warn(`The icon could not be drawn in the theme's colours: ${describeError(error)}`);
+  }
+  try {
+    if (refreshLauncherIcons(colors).length) log.info(`The launcher's icon now shows ${ctx.palette.name}'s colours`);
+  } catch (error) {
+    log.warn(`The launcher's icon could not be redrawn: ${describeError(error)}`);
+  }
 }
 
 const quit = new Quit(ctx, { talk, voice });
@@ -178,7 +206,8 @@ if (!app.requestSingleInstanceLock()) {
     syncCompanion(companionWire(ctx, stats, voice));
     mainWindow.guardPermissions();
     registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, dock, notify, refreshPalette });
-    tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground);
+    drawBrandIcon();
+    tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
     // login) gets the icon again instead of leaving VibeForge running with nothing to open it from.
     const stopTrayWatch = tray.watchHost();

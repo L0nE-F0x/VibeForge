@@ -281,7 +281,8 @@ export interface DeskMethods {
   "activity.get": (fresh?: boolean) => Activity | null;
   /** A desktop notification (when Settings allow them) that opens the chat or workspace when clicked. */
   /** `route` is where a click on it goes, handed back as it was in "open-route". */
-  "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null; route?: unknown }) => void;
+  /** `always`: shown even with notifications off in Settings (a test, or the answer to a key just pressed); `silent`: no desktop sound. */
+  "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null; route?: unknown; always?: boolean; silent?: boolean }) => void;
   /** Omarchy's Do Not Disturb is on. */
   "app.doNotDisturb": () => boolean;
   /** "Start at login, in the tray": whether the autostart entry is there, and setting it. */

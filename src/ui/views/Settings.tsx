@@ -316,7 +316,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
             <span className="grow">
               <Toggle checked={current.notify} onChange={(notify) => void patch({ notify })} label={t("settings.notify")} />
             </span>
-            <Button size="sm" onClick={() => new Notification("VibeForge", { body: t("settings.testNotifyBody") })}>
+            <Button size="sm" onClick={() => void call("app.notify", { title: "VibeForge", body: t("settings.testNotifyBody"), always: true })}>
               {t("settings.testNotify")}
             </Button>
           </div>

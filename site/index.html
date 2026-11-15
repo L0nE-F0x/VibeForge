@@ -337,7 +337,8 @@
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
               <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere to open Viby, VibeForge's orchestrator, and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
-              <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It only starts CLIs you ask for.</p>
+              <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It starts only the CLIs and agents you name, or your default CLI when you don't say which.</p>
+              <p>It runs your saved agents, tasks and routines too (<i>“have Atlas review the README”</i>, <i>“run the fix-login task”</i>, <i>“pause the nightly routine”</i>), and can look up a past session, branch or project folder before it plans.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">

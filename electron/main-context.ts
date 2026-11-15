@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, NativeImage } from "electron";
 import type { Roots } from "../src/core/layout.js";
 import type { LogFile } from "../src/core/log.js";
 import type { MainText } from "../src/core/main-text.js";
@@ -36,6 +36,8 @@ export class MainContext {
   readonly appRoot: string;
   readonly install: InstallKind;
   readonly iconPath: string;
+  /** The icon in the theme's colours (src/core/brand-icon.ts), once drawn; until then iconPath. */
+  brandIcon: NativeImage | null = null;
   /** The one page that runs with the preload's bridge. */
   readonly page: AppPage;
   /** The window, from createWindow until it closes. */

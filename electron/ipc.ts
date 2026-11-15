@@ -106,7 +106,9 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "plans.summary": (fresh) => stats.planSummary(Boolean(fresh)),
     "activity.get": (fresh) => stats.activityFor(s().getSettings().activity, Boolean(fresh)),
     "app.notify": (note) => {
-      if (ctx.service?.getSettings().notify) notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route });
+      if (note.always === true || ctx.service?.getSettings().notify) {
+        notify({ title: note.title, body: note.body, workspaceId: note.workspaceId, chatId: note.chatId, agentId: note.agentId, route: note.route, ...(note.silent === true ? { silent: true } : {}) });
+      }
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
     "app.autostart": () => tray.autostart,

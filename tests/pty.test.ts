@@ -324,7 +324,9 @@ describe("pty host", () => {
       if (snap.alive !== true) break;
       // What the pane would have before replaying anything newer than the snapshot's number.
       const upTo = (host.kept.get(pty) ?? []).filter((batch) => batch.seq <= Number(snap.seq)).map((batch) => batch.data).join("");
-      const lastSent = upTo.replace(/\r?\n$/, "").split(/\r?\n/).at(-1) ?? "";
+      // A pause in reading (flow control, or the snapshot's own hold) can split a line's "\r\n"
+      // between two chunks; the screen never shows the "\r" left at the end of the first.
+      const lastSent = upTo.replace(/\r?\n$/, "").split(/\r?\n/).at(-1)?.replace(/\r$/, "") ?? "";
       const lastShown = String(snap.plain).trimEnd().split("\n").at(-1) ?? "";
       expect(lastShown).toBe(lastSent);
       checked += 1;
