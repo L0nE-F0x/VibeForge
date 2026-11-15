@@ -62,6 +62,22 @@ const ISSUE_KEY: Record<StepIssue, Key> = {
   copy: "orch.issue.copy",
 };
 
+/** What stands in a task's or routine's way says so in its own words; the rest as ISSUE_KEY has it. */
+function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
+  if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
+  if (step.kind === "task" && issue === "target") return "orch.issue.task";
+  if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  return ISSUE_KEY[issue];
+}
+
+/** What a lookup, task or routine step will do: a new task has a title (`name`), a routine step says on or off in `prompt`. */
+function otherStepKey(step: OrchestratorStep): Key {
+  if (step.kind === "lookup") return "orch.lookup";
+  if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
+  const action = step.prompt.trim().toLowerCase();
+  return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
+}
+
 /** A live CLI as a person knows it: "Claude Code · VibeForge · fix-tray". */
 function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[]): string {
   if (!session) return "";
@@ -430,8 +446,8 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
   } else if (step.kind === "lookup" || step.kind === "task" || step.kind === "routine") {
     line = (
       <div className="orch-step-line">
-        <strong>{step.kind === "lookup" ? t("orch.show") : step.kind === "task" ? t("tasks.new") : t("routines.new")}</strong>
-        <span className="truncate">{step.asked || step.name || step.target || step.prompt}</span>
+        <strong>{t(otherStepKey(step))}</strong>
+        <span className="truncate">{step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt}</span>
       </div>
     );
   } else {
@@ -450,7 +466,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
       </span>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {line}
-        {(step.kind === "start" || step.kind === "tell") &&
+        {(step.kind === "start" || step.kind === "tell" || (step.kind === "task" && Boolean(step.name))) &&
           (editable ? (
             <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
           ) : (
@@ -459,7 +475,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         {step.kind === "start" && editable && step.branch && step.dirty ? (
           <span className="orch-warn">{t.count("orch.dirty", step.dirty, { workspace: workspace?.name ?? "" })}</span>
         ) : null}
-        {issue && <span className="orch-issue">{t(ISSUE_KEY[issue], { asked: step.asked || "?" })}</span>}
+        {issue && <span className="orch-issue">{t(issueKey(step, issue), { asked: step.asked || "?" })}</span>}
         {step.state === "failed" && step.error && <span className="orch-issue">{coreText(step.error)}</span>}
         {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
         {step.result && <span className="orch-warn">{coreText(step.result)}</span>}
@@ -569,7 +585,12 @@ function NoteView({ note }: { note: MaestroNote }) {
 /** A one-line field that tells the plan once it is left (or Enter), or shortly after typing stops. */
 function TextField({ value, label, tip, mono, width, onDone }: { value: string; label: string; tip?: string; mono?: boolean; width?: number; onDone: (value: string) => void }) {
   const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
+  // While it has the keyboard, what was just saved coming back doesn't replace what has been typed
+  // since: a space before a pause, or a key pressed while it saved.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(value);
+  }, [value]);
   useEffect(() => {
     const trimmed = text.trim();
     if (trimmed === value) return;
@@ -586,7 +607,15 @@ function TextField({ value, label, tip, mono, width, onDone }: { value: string; 
       {...(tip ? tipProps(tip) : {})}
       onChange={(event) => setText(event.target.value)}
       onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
-      onBlur={() => text.trim() !== value && onDone(text.trim())}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+        const trimmed = text.trim();
+        setText(trimmed);
+        if (trimmed !== value) onDone(trimmed);
+      }}
     />
   );
 }
@@ -678,7 +707,11 @@ function EffortPick({ engine, value, onChange }: { engine: Engine | undefined; v
 function PromptBox({ value, label, placeholder, onDone }: { value: string; label: string; placeholder?: string; onDone: (text: string) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
+  // As TextField: what was just saved doesn't replace what is still being typed.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(value);
+  }, [value]);
   useEffect(() => {
     if (text === value) return;
     const timer = setTimeout(() => onDone(text), 250);
@@ -690,7 +723,23 @@ function PromptBox({ value, label, placeholder, onDone }: { value: string; label
     node.style.height = "0px";
     node.style.height = `${Math.min(240, Math.max(44, node.scrollHeight + 2))}px`;
   }, [text]);
-  return <textarea ref={ref} className="orch-prompt" value={text} aria-label={label} placeholder={placeholder} onChange={(event) => setText(event.target.value)} onBlur={() => onDone(text)} />;
+  return (
+    <textarea
+      ref={ref}
+      className="orch-prompt"
+      value={text}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={(event) => setText(event.target.value)}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+        onDone(text);
+      }}
+    />
+  );
 }
 
 function EnginePick({ engines, value, onChange }: { engines: Engine[]; value: string; onChange: (id: string) => void }) {

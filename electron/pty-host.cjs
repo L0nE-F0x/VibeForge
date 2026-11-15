@@ -247,13 +247,12 @@ function closeSink(sink, done) {
  * @returns {Promise<void>}
  */
 function startRecording(session, runDir) {
-  const seq = (session.recSeq || 0) + 1;
-  session.recSeq = seq;
-  return stopRecording(session)
-    .then(() => {
-      session.recSeq = seq;
-      return captureSynced(session);
-    })
+  // stopRecording counts every start and stop: one that comes after this, even while the last
+  // recording is still being written, leaves this one unpublished.
+  const stopped = stopRecording(session);
+  const seq = session.recSeq;
+  return stopped
+    .then(() => captureSynced(session))
     .then(
       () =>
         new Promise((resolve) => {

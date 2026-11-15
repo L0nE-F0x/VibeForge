@@ -61,10 +61,6 @@ function parse(args) {
   const words = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (words.length >= 2) {
-      words.push(arg);
-      continue;
-    }
     if (arg === "--") {
       words.push(...args.slice(i + 1));
       break;

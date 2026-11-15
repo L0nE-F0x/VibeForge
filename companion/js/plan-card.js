@@ -35,7 +35,31 @@ const ISSUE_KEYS = {
   copy: "orch.issue.copy",
 };
 /** The word for each kind of step that isn't a start (which shows its CLI and workspace instead). @type {Record<string, string>} */
-const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard", lookup: "orch.show", task: "orch.go", routine: "orch.go" };
+const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard" };
+
+/**
+ * What a lookup, task or routine step will do, as on the computer's card: a new task has a title
+ * (`name`), and a routine step says on or off in `prompt`.
+ * @param {PhoneStep} step
+ */
+function otherStepKey(step) {
+  if (step.kind === "lookup") return "orch.lookup";
+  if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
+  const action = step.prompt.trim().toLowerCase();
+  return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
+}
+
+/**
+ * What stands in a task's or routine's way, in its own words.
+ * @param {PhoneStep} step
+ * @param {string} issue
+ */
+function issueKey(step, issue) {
+  if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
+  if (step.kind === "task" && issue === "target") return "orch.issue.task";
+  if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  return ISSUE_KEYS[issue] || "orch.fixFirst";
+}
 /** A plan's own new workspace, as later steps in it name it until it is made. */
 const PLANNED_PREFIX = "new:";
 /** @type {Record<string, string>} */
@@ -112,16 +136,19 @@ function stepNode(turn, step, editable) {
   } else if (step.kind === "apply" || step.kind === "discard") {
     const copy = orch.copies?.find((item) => item.id === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
+  } else if (step.kind === "lookup" || step.kind === "task" || step.kind === "routine") {
+    const what = step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt;
+    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(otherStepKey(step))), el("span", { class: "orch-target" }, what)));
   } else {
     const target = orch.running.find((item) => item.ptyId === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind] || "orch.close")), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
   }
-  if (step.kind === "start" || step.kind === "tell") {
+  if (step.kind === "start" || step.kind === "tell" || (step.kind === "task" && step.name)) {
     if (editable) main.append(promptField(turn, step, value("prompt")));
     else if (step.prompt) main.append(el("span", { class: "orch-prompt-text" }, step.prompt));
   }
   if (step.result) main.append(el("span", { class: "orch-warn" }, step.result));
-  if (step.issue) main.append(el("span", { class: "orch-issue" }, t(ISSUE_KEYS[step.issue] || "orch.fixFirst", { asked: step.asked || "?" })));
+  if (step.issue) main.append(el("span", { class: "orch-issue" }, t(issueKey(step, step.issue), { asked: step.asked || "?" })));
   if (step.state === "failed" && step.error) main.append(el("span", { class: "orch-error" }, step.error));
   if (step.state === "skipped") main.append(el("span", { class: "small faint" }, t("orch.skipped")));
   if (step.state === "done" && step.kind === "start" && step.ptyId) {

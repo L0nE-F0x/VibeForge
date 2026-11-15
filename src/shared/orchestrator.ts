@@ -268,7 +268,9 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     return step.prompt.trim() ? null : "prompt";
   }
   if (step.kind === "routine") {
-    return !step.target || (context.routines && !context.routines.some((item) => item.id === step.target)) ? "target" : null;
+    if (!step.target || (context.routines && !context.routines.some((item) => item.id === step.target))) return "target";
+    // Run it now (""), or turn it on or off: anything else would be guessed at.
+    return step.prompt === "" || step.prompt === "enable" || step.prompt === "disable" ? null : "prompt";
   }
   if (step.kind === "task") {
     if (step.target) return context.tasks && !context.tasks.some((item) => item.id === step.target) ? "target" : null;
