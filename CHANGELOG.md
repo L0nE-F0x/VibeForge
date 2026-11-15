@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 **2.17.1: Viby's new task, routine and agent steps do what the board and Chat do; `vibeforge tell` flags, the phone's mic and the plan card work as before 2.17.0. From a review of 2.17.0.**
 
+### Changed
+
+- **Electron 45.2.3** (from 45.2.1), with Chromium's latest security fixes and a Wayland crash fix.
+
 ### Fixed
 
 - **Viby runs a task the way Execute does.** A task that had run before was picked up in its last session with no instructions typed in; it now starts again with them. A task or routine in the workspace itself waits its turn while another CLI is busy there, as it does from the board, and its step says what it's waiting for. A new task in a folder that isn't a git repository (or has no commit yet) runs in the folder itself instead of failing.
