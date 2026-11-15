@@ -5,6 +5,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.17.1, 2026-11-15, is the lates
 ## Next up
 
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
+- [ ] **A dictation key you choose, a mouse button included** (founder, 2026-11-15): Settings → Voice records a key or a mouse button (one of the side buttons, for talking from the couch with a hand on the mouse) that works like Ctrl+Shift+Space: hold to talk, or a quick press to latch, as the on-screen mic does. In the window the page sees it; a side button picked there stops being Back or Forward (`src/ui/App.tsx`). With another window in front only Hyprland can see a mouse button, so Settings offers the bind (`mouse:275`/`mouse:276` running `vibeforge --voice start` on press and `stop` on release, the way Super+Alt+V reaches the app).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 
 ## Only checked with stand-ins
