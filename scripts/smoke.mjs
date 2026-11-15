@@ -223,6 +223,15 @@ async function main() {
   await key("Escape", "Escape");
   await until(`!document.querySelector(".switcher")`, "the switcher to close");
 
+  // xterm's WebGL renderer sets fonts like " normal 13px …"; Electron 45.2.3's Chromium ignores a
+  // font with a leading space, and terminals drew in 10px sans-serif (src/ui/canvas-font.ts).
+  step("canvases keep the terminal's font");
+  const fonts = await page(`[document.createElement("canvas").getContext("2d"), new OffscreenCanvas(8, 8).getContext("2d")].map((context) => {
+    context.font = ' normal 13px "JetBrainsMono Nerd Font", monospace';
+    return context.font;
+  })`);
+  for (const font of fonts) if (!/^13px /.test(font)) fail(`a canvas font with a leading space became "${font}"`);
+
   step("a workspace and a real shell");
   const added = await call("workspaces.add", workspace);
   const shell = await call("code.shell", { cwd: workspace, cols: 100, rows: 30 });

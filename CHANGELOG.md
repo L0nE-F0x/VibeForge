@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.17.2] - 2026-11-16
+
+**2.17.2: terminals draw in your terminal font again.**
+
+### Fixed
+
+- **Terminals draw in your terminal font again.** Since 2.17.1, terminals drawn on the graphics card showed tiny letters in a proportional font, spread out across their cells, and were hard to read. Electron 45.2.3's Chromium ignores a canvas font that starts with a space, which is how the terminal's renderer names its font for upright text, so it fell back to 10px sans-serif. VibeForge now hands the font over without the space, and the smoke test checks it on every build.
+
 ## [2.17.1] - 2026-11-15
 
 **2.17.1: Viby's new task, routine and agent steps do what the board and Chat do; `vibeforge tell` flags, the phone's mic and the plan card work as before 2.17.0. From a review of 2.17.0.**

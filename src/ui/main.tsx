@@ -5,9 +5,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
 import { markWindowFocus } from "./api.js";
+import { installCanvasFontTrim } from "./canvas-font.js";
 import "./styles/app.css";
 import { initTheme } from "./theme.js";
 
+installCanvasFontTrim();
 markWindowFocus();
 void initTheme().finally(() => {
   createRoot(document.getElementById("root")!).render(
