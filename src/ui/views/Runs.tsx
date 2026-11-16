@@ -55,12 +55,23 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const loaded = filter === "review" ? inbox.loaded : searching ? found.loaded : all.loaded;
 
   // Not reading them one by one: every run waiting is marked reviewed and the list clears.
+  const here = useRef({ filter, selected, mounted: true });
+  here.current = { filter, selected, mounted: true };
+  useEffect(
+    () => () => {
+      here.current.mounted = false;
+    },
+    [],
+  );
   const [markAll, marking] = useAction(async () => {
     const ids = [...(inbox.data ?? []).map((run) => run.id), ...reviewed.current];
+    const from = selected;
     await call("runs.markAllOpened");
     for (const id of ids) dropped.current.add(id);
     reviewed.current.clear();
-    replace({ view: "runs", filter: "review" });
+    // Only if you're still where you clicked: not after going elsewhere while it worked.
+    const now = here.current;
+    if (now.mounted && now.filter === "review" && now.selected === from) replace({ view: "runs", filter: "review" });
   }, t("runs.markAllFailed"));
 
   // Coming to review: the first run waiting is already open.

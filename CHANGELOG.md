@@ -17,6 +17,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **A Send button after dictating.** Once dictated words are in a terminal, a small **Send** shows in its lower right corner: a click presses Enter there, the same as pressing it yourself, so talk-back still works. By default it comes after the mic or the mouse button and not after the keys; Settings → Voice can show it after any dictation, or never. Enter, Ctrl+C or Esc in the terminal, a new dictation or × put it away. Message boxes keep their own Send.
 - **Mark all reviewed** at the top of Runs → Review clears the list without opening each run, as Home's button does.
 
+### Fixed
+
+- **Talk-back after dictating into a terminal** is no longer dropped by a click elsewhere, a mouse move or an arrow key before you press Enter. Claude Code has the terminal report focus and the mouse as input, and any of those reports used to count as giving up on the dictated words; now only Ctrl+C, Ctrl+U or Esc does.
+
 ## [2.17.2] - 2026-11-16
 
 **2.17.2: terminals draw in your terminal font again.**

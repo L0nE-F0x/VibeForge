@@ -5,6 +5,7 @@ import { DEFAULT_DICTATE_KEYS, dictateKeysLabel, dictateKeysProblem, sameDictate
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { dictateClashes, shortcutLabel } from "../shortcuts.js";
+import { clipboardKey } from "../terminal-keys.js";
 import { setKeyCapture } from "../voice.js";
 import { Button, Field, Notice, Select } from "./ui.js";
 
@@ -48,7 +49,9 @@ function KeysPicker({ keys, onPick }: { keys: DictateKeys; onPick: (keys: Dictat
         setProblem(t(why === "escape" ? "voice.keysEscape" : "voice.keysNeedModifier"));
         return;
       }
-      const clash = dictateClashes(event)[0];
+      // The terminal's own copy and paste keys (Ctrl+Shift+C/V, Ctrl/Shift+Insert) as well as the shortcuts.
+      const clipboard = clipboardKey(event, true);
+      const clash = dictateClashes(event)[0] ?? (clipboard === "copy" ? "terminal.copy" : clipboard ? "terminal.paste" : undefined);
       if (clash) {
         setProblem(t("voice.keysTaken", { keys: dictateKeysLabel(next), what: t(shortcutLabel(clash)) }));
         return;

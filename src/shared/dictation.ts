@@ -79,7 +79,8 @@ export function sameDictateKeys(a: DictateKeys, b: DictateKeys): boolean {
 }
 
 const KEY_NAMES: Record<string, string> = {
-  Backquote: "`",
+  // Not "`": keycaps in the window's text are written between backticks.
+  Backquote: "Backtick",
   Minus: "-",
   Equal: "=",
   BracketLeft: "[",

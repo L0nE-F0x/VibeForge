@@ -30,6 +30,7 @@ import {
   sameDictateKeys,
   vocabularyPrompt,
 } from "../../src/shared/dictation.js";
+import { typedIn } from "../../src/shared/terminal-input.js";
 
 /** s16le mono PCM: `seconds` of a sine at `amplitude` (0–1), or silence at 0. */
 function tone(seconds: number, amplitude: number): Buffer {
@@ -195,12 +196,22 @@ describe("voice: settings", () => {
   });
 });
 
+describe("what was typed into a terminal", () => {
+  it("leaves out what the terminal reports by itself, so focus and the mouse don't send or drop dictated words", () => {
+    // Focus out (pressing Send), any-motion and X10 mouse reports, an arrow key, bracketed paste.
+    for (const report of ["\x1b[O", "\x1b[I", "\x1b[<35;12;4M", "\x1b[M #!", "\x1b[D", "\x1bOA"]) expect(typedIn(report)).toBe("");
+    expect(typedIn("\x1b[200~fix the build\x1b[201~")).toBe("fix the build");
+    expect(typedIn("\r")).toBe("\r");
+    expect(typedIn("\x1b[O\x03")).toBe("\x03");
+  });
+});
+
 describe("dictate keys", () => {
   it("names keys the way the shortcut sheet writes them", () => {
     expect(dictateKeysLabel(DEFAULT_DICTATE_KEYS)).toBe("Ctrl+Shift+Space");
     expect(dictateKeysLabel({ code: "KeyD", ctrl: false, shift: false, alt: true, meta: true })).toBe("Alt+Super+D");
     expect(dictateKeysLabel({ code: "Digit5", ctrl: true, shift: false, alt: false, meta: false })).toBe("Ctrl+5");
-    expect(dictateKeysLabel({ code: "Backquote", ctrl: true, shift: false, alt: false, meta: false })).toBe("Ctrl+`");
+    expect(dictateKeysLabel({ code: "Backquote", ctrl: true, shift: false, alt: false, meta: false })).toBe("Ctrl+Backtick");
     expect(dictateKeysLabel({ code: "F9", ctrl: false, shift: false, alt: false, meta: false })).toBe("F9");
   });
 

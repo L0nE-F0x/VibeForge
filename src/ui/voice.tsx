@@ -1,6 +1,7 @@
 import { ArrowUp, Mic, Square, Volume2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DEFAULT_DICTATE_KEYS, DICTATE_BUTTONS, dictateKeysLabel, vocabularyPrompt } from "../shared/dictation.js";
+import { typedIn } from "../shared/terminal-input.js";
 import type { TalkEvent, VoiceState } from "../shared/api.js";
 import { call, on, useAgents, useEngines, useQuery, useRoutines, useSettings } from "./api.js";
 import { Button } from "./components/ui.js";
@@ -149,15 +150,20 @@ function armTerminal(target: DictationTarget, words: string): void {
 
 /** What a terminal just sent to its program. Enter after dictated words asks to hear the answer. */
 export function notePtyInput(ptyId: string, data: string): void {
-  // Sent, cleared or given up on by hand: the Send button has nothing left to send.
-  if (waiting && waiting.ptyId === ptyId && /[\r\n\x03\x15\x1b]/.test(data)) setWaiting(null);
-  if (!pendingEnter.has(ptyId)) return;
+  // Only what was typed counts: a terminal also reports focus (Claude Code asks for it, and
+  // pressing Send moves focus), the mouse and arrow keys as escape sequences.
+  const typed = typedIn(data);
   // Ctrl+U clears the line, Ctrl+C and Esc give up on it.
-  if (data.includes("\x15") || data.includes("\x03") || data.includes("\x1b")) {
+  const gaveUp = data === "\x1b" || /[\x03\x15]/.test(typed);
+  const sent = /[\r\n]/.test(typed);
+  // Sent, cleared or given up on by hand: the Send button has nothing left to send.
+  if (waiting && waiting.ptyId === ptyId && (gaveUp || sent)) setWaiting(null);
+  if (!pendingEnter.has(ptyId)) return;
+  if (gaveUp) {
     pendingEnter.delete(ptyId);
     return;
   }
-  if (!/[\r\n]/.test(data)) return;
+  if (!sent) return;
   const words = pendingEnter.get(ptyId) ?? "";
   pendingEnter.delete(ptyId);
   if (words.trim()) controller?.expectPty(ptyId, words);
@@ -641,6 +647,17 @@ export function VoiceLayer() {
         }
         return;
       }
+      // While the key is held, its repeats are the hold's, whichever modifiers are still down: Ctrl
+      // let go first must not send Ctrl+C (or whatever is left) to the terminal over and over.
+      if ((holding || releaseTimer) && event.code === (refs.current.settings?.voice.keys.code ?? DEFAULT_DICTATE_KEYS.code)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (releaseTimer) {
+          clearRelease();
+          holding = true;
+        }
+        return;
+      }
       if (!isDictate(event)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -833,6 +850,8 @@ function ListeningBar({
   );
 }
 
+const keepFocus = (event: React.MouseEvent) => event.preventDefault();
+
 /**
  * Send, for words waiting in a terminal: low on the terminal's right, where the line being written
  * usually leaves room. Enter in the terminal does the same.
@@ -871,10 +890,11 @@ function SendBar() {
       <span className="listening-text">
         <strong>{t("voice.sendReady")}</strong>
       </span>
-      <Button variant="primary" icon={ArrowUp} onClick={sendWaiting} tip={t("voice.sendTip")}>
+      {/* A press here leaves focus in the terminal, so it doesn't report a blur or lose its cursor. */}
+      <Button variant="primary" icon={ArrowUp} onMouseDown={keepFocus} onClick={sendWaiting} tip={t("voice.sendTip")}>
         {t("common.send")}
       </Button>
-      <Button size="sm" variant="ghost" icon={X} onClick={() => setWaiting(null)} tip={t("voice.sendDismiss")} />
+      <Button size="sm" variant="ghost" icon={X} onMouseDown={keepFocus} onClick={() => setWaiting(null)} tip={t("voice.sendDismiss")} />
     </div>
   );
 }
