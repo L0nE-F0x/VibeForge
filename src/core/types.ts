@@ -1,3 +1,4 @@
+import type { DictateButton, DictateKeys, SendButton } from "../shared/dictation.js";
 import type { WorkingCopy } from "./worktrees.js";
 
 export type Schedule =
@@ -235,6 +236,12 @@ export interface VoiceSettings {
   speaker: string;
   /** Who Super+Alt+V talks to. Empty: the agent you last dictated to. */
   agent: string;
+  /** The keys held to dictate in the window (Ctrl+Shift+Space unless changed). */
+  keys: DictateKeys;
+  /** A mouse button that dictates in the window, like the mic. A side button taken here stops going back or forward. */
+  mouseButton: DictateButton;
+  /** A Send button over a terminal once dictated words are in it, for sending without Enter. */
+  sendButton: SendButton;
 }
 
 export interface Workspace {

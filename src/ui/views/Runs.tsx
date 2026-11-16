@@ -1,12 +1,12 @@
-import { History, Search } from "lucide-react";
+import { CheckCheck, History, Search } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { dayHeading, dayKey } from "../../shared/text.js";
 import { call, useDebounced, useInbox, useQuery } from "../api.js";
 import { RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Empty, Input, Segmented, Skeleton } from "../components/ui.js";
-import { useNav, type Route, type RunFilter } from "../state.js";
+import { Button, Empty, Input, Segmented, Skeleton } from "../components/ui.js";
+import { useAction, useNav, type Route, type RunFilter } from "../state.js";
 import { markKeyboardNavigation } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
@@ -36,11 +36,15 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   // Opening a run marks it reviewed. The ones reviewed during this visit stay in the list, in
   // their places, so K can go back to them; the list starts fresh next time.
   const reviewed = useRef(new Set<string>());
-  if (filter !== "review") reviewed.current.clear();
-  else if (selected) reviewed.current.add(selected);
+  // Marked all at once: gone from the list straight away, before the inbox catches up.
+  const dropped = useRef(new Set<string>());
+  if (filter !== "review") {
+    reviewed.current.clear();
+    dropped.current.clear();
+  } else if (selected && !dropped.current.has(selected)) reviewed.current.add(selected);
   if (filter === "review") {
     const pool = new Map([...(all.data ?? []), ...(inbox.data ?? [])].map((run) => [run.id, run]));
-    const ids = new Set([...(inbox.data ?? []).map((run) => run.id), ...reviewed.current]);
+    const ids = new Set([...(inbox.data ?? []).map((run) => run.id), ...reviewed.current].filter((id) => !dropped.current.has(id)));
     runs = [...ids]
       .map((id) => pool.get(id))
       .filter((run): run is RunView => Boolean(run))
@@ -49,6 +53,15 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   else runs = searching ? (found.data ?? []) : (all.data ?? []);
   const snippets = new Map(searching ? (found.data ?? []).map((hit) => [hit.id, hit.snippet]) : []);
   const loaded = filter === "review" ? inbox.loaded : searching ? found.loaded : all.loaded;
+
+  // Not reading them one by one: every run waiting is marked reviewed and the list clears.
+  const [markAll, marking] = useAction(async () => {
+    const ids = [...(inbox.data ?? []).map((run) => run.id), ...reviewed.current];
+    await call("runs.markAllOpened");
+    for (const id of ids) dropped.current.add(id);
+    reviewed.current.clear();
+    replace({ view: "runs", filter: "review" });
+  }, t("runs.markAllFailed"));
 
   // Coming to review: the first run waiting is already open.
   const first = filter === "review" && loaded && !selected ? runs[0]?.id : undefined;
@@ -119,6 +132,13 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
               <Search size={13} className="faint" style={{ position: "absolute", left: 9 }} />
               <Input placeholder={t("runs.searchPlaceholder")} aria-label={t("runs.searchPlaceholder")} value={search} onChange={(event) => setSearch(event.target.value)} style={{ paddingLeft: 28 }} />
             </div>
+          </div>
+        )}
+        {filter === "review" && runs.some((run) => !run.openedAt) && (
+          <div className="hstack" style={{ padding: "8px 8px 0" }}>
+            <Button size="sm" variant="ghost" icon={CheckCheck} busy={marking} onClick={() => void markAll()} tip={t("runs.markAllTip")}>
+              {t("home.review.markAll")}
+            </Button>
           </div>
         )}
         <div className="list-scroll list-compact">

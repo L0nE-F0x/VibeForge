@@ -72,6 +72,22 @@
   border-color: var(--hover-line);
 }
 
+/* Send, for words waiting in a terminal: tucked into the terminal's lower right instead of centred. */
+.listening.send-bar {
+  left: auto;
+  transform: none;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  animation: send-bar-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes send-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
 .listening.answer .listening-text .faint {
   max-width: 460px;
 }

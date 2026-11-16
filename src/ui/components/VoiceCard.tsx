@@ -7,11 +7,13 @@ import { coreText } from "../core-text.js";
 import { LANGUAGES, useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useToast } from "../state.js";
-import { DICTATE_KEYS, MicButton, useDictationTarget, useVoiceStatus } from "../voice.js";
+import { MicButton, useDictateKeys, useDictationTarget, useVoiceStatus } from "../voice.js";
+import { VoiceKeys } from "./VoiceKeys.js";
 import { Button, Chip, Field, Notice, Select, Toggle } from "./ui.js";
 
 // Settings → Voice: what dictation and talking back found on this machine, the models and voices
-// they use, the keybindings that reach them from anywhere, and a place to try them.
+// they use, the keys and mouse button that dictate, the keybindings that reach them from anywhere,
+// and a place to try them.
 
 function basename(file: string): string {
   return file.slice(file.lastIndexOf("/") + 1);
@@ -105,6 +107,7 @@ export function VoiceCard() {
   const agents = useAgents().data ?? [];
   const status = useVoiceStatus().data;
   const home = useAppInfo().data?.home ?? "";
+  const dictateKeys = useDictateKeys();
   const [patch] = useAction(async (next: Partial<VoiceSettings>) => {
     if (settings) await call("settings.save", { voice: { ...settings.voice, ...next } });
   }, t("voice.saveFailed"));
@@ -164,10 +167,12 @@ export function VoiceCard() {
           />
         </Field>
 
-        <Field label={t("voice.try")} hint={<Rich text={t("voice.tryHint", { keys: DICTATE_KEYS })} />}>
+        <Field label={t("voice.try")} hint={<Rich text={t("voice.tryHint", { keys: dictateKeys })} />}>
           {status.ready ? <TryIt /> : <Chip tone="warn">{t("voice.notReady")}</Chip>}
         </Field>
       </div>
+
+      <VoiceKeys voice={voice} patch={(next) => void patch(next)} />
 
       <div className="section-title">
         <Volume2 size={13} /> {t("voice.talkTitle")}

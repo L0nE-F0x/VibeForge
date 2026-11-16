@@ -20,7 +20,16 @@ import {
   SILENCE_RMS,
   wavFile,
 } from "../../src/core/voice.js";
-import { joinDictation, vocabularyPrompt } from "../../src/shared/dictation.js";
+import {
+  DEFAULT_DICTATE_KEYS,
+  type DictateKeys,
+  dictateKeysLabel,
+  dictateKeysProblem,
+  joinDictation,
+  normalizeDictateKeys,
+  sameDictateKeys,
+  vocabularyPrompt,
+} from "../../src/shared/dictation.js";
 
 /** s16le mono PCM: `seconds` of a sine at `amplitude` (0–1), or silence at 0. */
 function tone(seconds: number, amplitude: number): Buffer {
@@ -158,14 +167,51 @@ describe("voice: settings", () => {
     const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
     const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-data-"));
     const store = new Store(configRoot, dataRoot);
-    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", talkBack: true, speaker: "", agent: "" });
+    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { model: " /m/ggml-base.bin ", language: "Klingon!", autoSend: "yes", talkBack: "loud", speaker: 3 } }));
-    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", talkBack: true, speaker: "", agent: "" });
+    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { language: "de", autoSend: true, talkBack: "off", speaker: "/v/a.onnx", agent: " atlas " } }));
-    expect(store.readSettings().voice).toEqual({ model: "", language: "de", talkBack: false, speaker: "/v/a.onnx", agent: "atlas" });
+    expect(store.readSettings().voice).toMatchObject({ model: "", language: "de", talkBack: false, speaker: "/v/a.onnx", agent: "atlas" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { talkBack: "full" } }));
     expect(store.readSettings().voice.talkBack).toBe(true);
     store.close();
+  });
+
+  it("keeps dictate keys, a mouse button and the Send choice, and drops ones that can't work", () => {
+    const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
+    const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-data-"));
+    const store = new Store(configRoot, dataRoot);
+    const write = (voice: unknown) => fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice }));
+    write({ keys: { code: "F8", ctrl: false, shift: false, alt: false, meta: false }, mouseButton: "back", sendButton: "always" });
+    expect(store.readSettings().voice).toMatchObject({ keys: { code: "F8", ctrl: false }, mouseButton: "back", sendButton: "always" });
+    write({ keys: { code: "KeyV", alt: true, ctrl: "yes" }, mouseButton: "left", sendButton: "sometimes" });
+    expect(store.readSettings().voice).toMatchObject({ keys: { code: "KeyV", alt: true, ctrl: false, shift: false, meta: false }, mouseButton: "off", sendButton: "pointer" });
+    // A plain letter would type, Esc cancels, and a modifier on its own is no key.
+    for (const keys of [{ code: "KeyA" }, { code: "KeyA", shift: true }, { code: "Escape", ctrl: true }, { code: "ShiftLeft", ctrl: true }, "Ctrl+Space"]) {
+      write({ keys });
+      expect(store.readSettings().voice.keys).toEqual(DEFAULT_DICTATE_KEYS);
+    }
+    store.close();
+  });
+});
+
+describe("dictate keys", () => {
+  it("names keys the way the shortcut sheet writes them", () => {
+    expect(dictateKeysLabel(DEFAULT_DICTATE_KEYS)).toBe("Ctrl+Shift+Space");
+    expect(dictateKeysLabel({ code: "KeyD", ctrl: false, shift: false, alt: true, meta: true })).toBe("Alt+Super+D");
+    expect(dictateKeysLabel({ code: "Digit5", ctrl: true, shift: false, alt: false, meta: false })).toBe("Ctrl+5");
+    expect(dictateKeysLabel({ code: "Backquote", ctrl: true, shift: false, alt: false, meta: false })).toBe("Ctrl+`");
+    expect(dictateKeysLabel({ code: "F9", ctrl: false, shift: false, alt: false, meta: false })).toBe("F9");
+  });
+
+  it("only takes keys that leave typing alone", () => {
+    const keys = (code: string, mods: Partial<DictateKeys> = {}): DictateKeys => ({ code, ctrl: false, shift: false, alt: false, meta: false, ...mods });
+    expect(dictateKeysProblem(keys("F12"))).toBeNull();
+    expect(dictateKeysProblem(keys("KeyQ", { meta: true }))).toBeNull();
+    expect(dictateKeysProblem(keys("Space", { shift: true }))).toBe("needsModifier");
+    expect(dictateKeysProblem(keys("Escape", { alt: true }))).toBe("escape");
+    expect(dictateKeysProblem(keys("ControlLeft", { ctrl: true }))).toBe("modifier");
+    expect(sameDictateKeys(normalizeDictateKeys(undefined), DEFAULT_DICTATE_KEYS)).toBe(true);
   });
 });
 

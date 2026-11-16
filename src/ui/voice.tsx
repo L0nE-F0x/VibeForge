@@ -1,6 +1,6 @@
-import { Mic, Square, Volume2 } from "lucide-react";
+import { ArrowUp, Mic, Square, Volume2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { vocabularyPrompt } from "../shared/dictation.js";
+import { DEFAULT_DICTATE_KEYS, DICTATE_BUTTONS, dictateKeysLabel, vocabularyPrompt } from "../shared/dictation.js";
 import type { TalkEvent, VoiceState } from "../shared/api.js";
 import { call, on, useAgents, useEngines, useQuery, useRoutines, useSettings } from "./api.js";
 import { Button } from "./components/ui.js";
@@ -10,16 +10,35 @@ import { Rich } from "./i18n/Rich.js";
 import { useLayer, useNav, useToast } from "./state.js";
 import { micRelease } from "./mic.js";
 import { cue } from "./sounds.js";
-import { isShortcut, shortcutKeys } from "./shortcuts.js";
+import { isShortcut, setDictateKeys } from "./shortcuts.js";
 
-// Hold Ctrl+Shift+Space, or hold the mic, and let go: the words land in the box or terminal that
-// has focus and wait there. A quick click on the mic keeps it listening instead, until the mic (or
-// Stop) is clicked again, for dictating without holding anything down. Esc drops the recording. Super+Alt+V (vibeforge --voice start/stop)
+// Hold Ctrl+Shift+Space (or the keys picked in Settings → Voice), or hold the mic, and let go: the
+// words land in the box or terminal that has focus and wait there. A quick click on the mic keeps
+// it listening instead, until the mic (or Stop) is clicked again, for dictating without holding
+// anything down. A mouse button picked in Settings works like the mic. With words waiting in a
+// terminal, a Send button can stand in for Enter. Esc drops the recording. Super+Alt+V (vibeforge --voice start/stop)
 // does the same for one agent — the one chosen in Settings, or the one you last dictated to —
 // and leaves the words in that agent's chat. Pressing Enter on dictated words is what asks for
 // the answer to be read aloud. Holding the key again cuts that off.
 
-export const DICTATE_KEYS = shortcutKeys("voice.dictate");
+/** The dictate keys as keycaps, as Settings has them now: "Ctrl+Shift+Space". */
+export function useDictateKeys(): string {
+  return dictateKeysLabel(useSettings().data?.voice.keys ?? DEFAULT_DICTATE_KEYS);
+}
+
+/** The mouse button (`MouseEvent.button`) that dictates, so the window's back and forward leave it alone. */
+let dictateButton: number | null = null;
+
+export function mouseDictateButton(): number | null {
+  return dictateButton;
+}
+
+/** While Settings listens for new dictate keys, pressing the old ones doesn't dictate. */
+let capturingKeys = false;
+
+export function setKeyCapture(on: boolean): void {
+  capturingKeys = on;
+}
 /** How long to wait for a message to reach a terminal before giving up on hearing its answer. */
 const PTY_WAIT_MS = 8000;
 
@@ -130,6 +149,8 @@ function armTerminal(target: DictationTarget, words: string): void {
 
 /** What a terminal just sent to its program. Enter after dictated words asks to hear the answer. */
 export function notePtyInput(ptyId: string, data: string): void {
+  // Sent, cleared or given up on by hand: the Send button has nothing left to send.
+  if (waiting && waiting.ptyId === ptyId && /[\r\n\x03\x15\x1b]/.test(data)) setWaiting(null);
   if (!pendingEnter.has(ptyId)) return;
   // Ctrl+U clears the line, Ctrl+C and Esc give up on it.
   if (data.includes("\x15") || data.includes("\x03") || data.includes("\x1b")) {
@@ -194,6 +215,8 @@ interface Session {
   finishing: boolean;
   /** Started with a click on the mic, so it listens until clicked again rather than until let go. */
   latched?: boolean;
+  /** What started it: the keys, the on-screen mic, or the mouse button. */
+  via: "keys" | "mic" | "mouse";
 }
 
 let session: Session | null = null;
@@ -220,7 +243,46 @@ function useSession(): Session | null {
   return useSyncExternalStore(subscribeSession, () => session);
 }
 
+// ------------------------------------------------------------------ words waiting for Enter
+// After dictating into a terminal, a Send button can press its Enter, for whoever is leaning back
+// with only the mouse. Gone once the words are sent, cleared, dictated over, or the terminal goes.
+
+interface Waiting {
+  target: DictationTarget;
+  ptyId: string;
+}
+
+let waiting: Waiting | null = null;
+const waitingListeners = new Set<() => void>();
+
+function setWaiting(next: Waiting | null): void {
+  if (waiting === next) return;
+  waiting = next;
+  for (const notify of waitingListeners) notify();
+}
+
+const subscribeWaiting = (listener: () => void) => {
+  waitingListeners.add(listener);
+  return () => waitingListeners.delete(listener);
+};
+
+function useWaiting(): Waiting | null {
+  return useSyncExternalStore(subscribeWaiting, () => waiting);
+}
+
+/** Press Enter in the terminal the words are waiting in, as if typed there. */
+function sendWaiting(): void {
+  const ready = waiting;
+  if (!ready) return;
+  setWaiting(null);
+  notePtyInput(ready.ptyId, "\r");
+  void call("pty.write", ready.ptyId, "\r").catch(() => undefined);
+  // Back to the terminal, for typing more after the answer.
+  ready.target.element()?.querySelector<HTMLElement>(".xterm-helper-textarea")?.focus();
+}
+
 interface Controller {
+  /** The on-screen mic. */
   begin: (target: DictationTarget) => void;
   /** The recording just begun keeps going until it is stopped. */
   latch: () => void;
@@ -301,6 +363,16 @@ export function VoiceLayer() {
 
   const talkBackOn = () => Boolean(refs.current.settings?.voice.talkBack ?? true);
 
+  /** Words that went into a terminal wait for its Enter: offer a Send button for it, if Settings wants one. */
+  const offerSend = (target: DictationTarget, via: Session["via"]) => {
+    const when = refs.current.settings?.voice.sendButton ?? "pointer";
+    if (when === "off" || (when === "pointer" && via === "keys")) return;
+    // A message box has its own Send next to the mic.
+    if (target.ownsSend) return;
+    const ptyId = target.ptyId?.() ?? null;
+    if (ptyId) setWaiting({ target, ptyId });
+  };
+
   const ensureReady = useCallback((): boolean => {
     if (refs.current.status && !refs.current.status.ready) {
       inform("info", say("voice.notReady"), say("voice.notReadyBody"));
@@ -313,10 +385,10 @@ export function VoiceLayer() {
   }, [go, inform]);
 
   const listen = useCallback(
-    (into: DictationTarget, place: Session["place"]) => {
+    (into: DictationTarget, place: Session["place"], via: Session["via"]) => {
       const gen = generation;
       busy.current = true;
-      setSession({ target: into, place, finishing: false });
+      setSession({ target: into, place, finishing: false, via });
       cue("voiceStart");
       starting = call("voice.start").then(
         () => {
@@ -386,25 +458,28 @@ export function VoiceLayer() {
   );
 
   const begin = useCallback(
-    (into: DictationTarget, place: Session["place"]) => {
+    (into: DictationTarget, place: Session["place"], via: Session["via"]) => {
       if (session || busy.current) return;
+      setWaiting(null);
       // A new turn cuts off an answer that is still being read, and one still on its way.
       void call("voice.silence").catch(() => undefined);
       void call("voice.forget").catch(() => undefined);
-      listen(into, place);
+      listen(into, place, via);
     },
     [listen],
   );
 
-  const beginFocused = useCallback(() => {
-    if (session || busy.current) return;
-    if (!ensureReady()) return;
+  /** Whether it began: false when dictation isn't set up or nothing has focus. */
+  const beginFocused = useCallback((via: Session["via"]): boolean => {
+    if (session || busy.current) return false;
+    if (!ensureReady()) return false;
     const into = onScreen(lastTarget) ? lastTarget : null;
     if (!into) {
       inform("info", say("voice.noTarget"), say("voice.noTargetBody"));
-      return;
+      return false;
     }
-    begin(into, "focus");
+    begin(into, "focus", via);
+    return true;
   }, [begin, ensureReady, inform]);
 
   const beginAgent = useCallback(() => {
@@ -429,6 +504,7 @@ export function VoiceLayer() {
         },
       },
       "agent",
+      "keys",
     );
   }, [begin, deliver, ensureReady, fail, go, inform, resolveAgent]);
 
@@ -484,6 +560,7 @@ export function VoiceLayer() {
           const agentId = target.agentId?.() ?? null;
           if (agentId) lastSpoken = agentId;
           if (talkBackOn()) armTerminal(target, result.text);
+          offerSend(target, ending.via);
           if (!focused()) inform("info", say("voice.pastedInto", { target: target.label }), result.text);
         }
       } catch (error) {
@@ -510,7 +587,7 @@ export function VoiceLayer() {
     controller = {
       begin: (target) => {
         if (!ensureReady()) return;
-        begin(target, "focus");
+        begin(target, "focus", "mic");
       },
       latch: () => {
         if (session && !session.finishing && !session.latched) setSession({ ...session, latched: true });
@@ -549,8 +626,9 @@ export function VoiceLayer() {
       window.clearTimeout(releaseTimer);
       releaseTimer = 0;
     };
-    const isDictate = (event: KeyboardEvent) => isShortcut("voice.dictate", event);
+    const isDictate = (event: KeyboardEvent) => !capturingKeys && isShortcut("voice.dictate", event);
     const down = (event: KeyboardEvent) => {
+      if (capturingKeys) return;
       if (isShortcut("voice.cancel", event) && ((session && !session.finishing) || (!session && talk))) {
         event.preventDefault();
         event.stopPropagation();
@@ -572,12 +650,11 @@ export function VoiceLayer() {
         return;
       }
       if (event.repeat || session) return;
-      holding = true;
-      beginFocused();
+      holding = beginFocused("keys");
     };
     const up = (event: KeyboardEvent) => {
-      // A modifier coming up is not the end of the hold. Only Space is.
-      if (!holding || event.code !== "Space") return;
+      // A modifier coming up is not the end of the hold. Only the key itself (Space) is.
+      if (!holding || event.code !== (refs.current.settings?.voice.keys.code ?? DEFAULT_DICTATE_KEYS.code)) return;
       event.preventDefault();
       event.stopPropagation();
       holding = false;
@@ -607,6 +684,59 @@ export function VoiceLayer() {
     };
   }, [beginFocused, finish, cancel]);
 
+  // The keys and the mouse button Settings picked.
+  const keys = settings?.voice.keys;
+  const button = settings?.voice.mouseButton ?? "off";
+  useEffect(() => {
+    if (keys) setDictateKeys(keys);
+  }, [keys]);
+  useEffect(() => {
+    dictateButton = button === "off" ? null : DICTATE_BUTTONS[button];
+    return () => {
+      dictateButton = null;
+    };
+  }, [button]);
+
+  // The mouse button works like the mic: hold it and let go, or click it to start and click again
+  // to finish. Taken before the window's back and forward, terminals and middle-click paste see it.
+  useEffect(() => {
+    if (button === "off") return;
+    const which = DICTATE_BUTTONS[button];
+    let press: { at: number; started: boolean } | null = null;
+    const take = (event: MouseEvent) => {
+      if (event.button !== which) return false;
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    };
+    const down = (event: MouseEvent) => {
+      if (!take(event)) return;
+      if (session?.via === "mouse" && !session.finishing) {
+        // The press that ends a latched recording, on release.
+        press = { at: Date.now(), started: false };
+        return;
+      }
+      if (session) return;
+      press = beginFocused("mouse") ? { at: Date.now(), started: true } : null;
+    };
+    const up = (event: MouseEvent) => {
+      if (!take(event)) return;
+      const held = press;
+      press = null;
+      if (!held || session?.via !== "mouse") return;
+      if (micRelease(held, Date.now()) === "latch") controller?.latch();
+      else finish();
+    };
+    window.addEventListener("mousedown", down, true);
+    window.addEventListener("mouseup", up, true);
+    window.addEventListener("auxclick", take, true);
+    return () => {
+      window.removeEventListener("mousedown", down, true);
+      window.removeEventListener("mouseup", up, true);
+      window.removeEventListener("auxclick", take, true);
+    };
+  }, [button, beginFocused, finish]);
+
   if (current) {
     return <ListeningBar label={current.target.label} voice={voice} finishing={current.finishing} latched={Boolean(current.latched)} onStop={finish} onCancel={cancel} />;
   }
@@ -623,7 +753,7 @@ export function VoiceLayer() {
       />
     );
   }
-  return null;
+  return <SendBar />;
 }
 
 // ------------------------------------------------------------------ the bars
@@ -635,7 +765,11 @@ function useBarLayer(ref: React.RefObject<HTMLDivElement | null>): void {
   const [box, setBox] = useState<Box | null>(null);
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node) return;
+    // Not drawn (the Send bar with nothing waiting): nothing for the dock to step aside for.
+    if (!node) {
+      setBox(null);
+      return;
+    }
     const next = boxOf(node.getBoundingClientRect());
     setBox((prev) => (prev && prev.left === next.left && prev.top === next.top && prev.right === next.right && prev.bottom === next.bottom ? prev : next));
   });
@@ -699,9 +833,56 @@ function ListeningBar({
   );
 }
 
+/**
+ * Send, for words waiting in a terminal: low on the terminal's right, where the line being written
+ * usually leaves room. Enter in the terminal does the same.
+ */
+function SendBar() {
+  const t = useT();
+  const ready = useWaiting();
+  const ref = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ right: number; bottom: number } | null>(null);
+  useBarLayer(ref);
+  useEffect(() => {
+    if (!ready) return;
+    const measure = () => {
+      const element = ready.target.element();
+      if (!element || !element.isConnected || !element.getClientRects().length) {
+        setWaiting(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      const right = Math.max(12, Math.round(window.innerWidth - rect.right + 14));
+      const bottom = Math.max(12, Math.round(window.innerHeight - rect.bottom + 14));
+      setPlace((prev) => (prev && prev.right === right && prev.bottom === bottom ? prev : { right, bottom }));
+    };
+    measure();
+    // Panes move and close: follow them, and go when this one does.
+    const timer = window.setInterval(measure, 500);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("resize", measure);
+    };
+  }, [ready]);
+  if (!ready || !place) return null;
+  return (
+    <div ref={ref} className="listening send-bar" role="status" aria-live="polite" style={{ right: place.right, bottom: place.bottom }}>
+      <span className="listening-text">
+        <strong>{t("voice.sendReady")}</strong>
+      </span>
+      <Button variant="primary" icon={ArrowUp} onClick={sendWaiting} tip={t("voice.sendTip")}>
+        {t("common.send")}
+      </Button>
+      <Button size="sm" variant="ghost" icon={X} onClick={() => setWaiting(null)} tip={t("voice.sendDismiss")} />
+    </div>
+  );
+}
+
 /** Waiting for an agent, or hearing its answer. */
 function AnswerBar({ who, text, waiting, onStop }: { who: string; text: string; waiting: boolean; onStop: () => void }) {
   const t = useT();
+  const keys = useDictateKeys();
   const ref = useRef<HTMLDivElement>(null);
   useBarLayer(ref);
   return (
@@ -712,7 +893,7 @@ function AnswerBar({ who, text, waiting, onStop }: { who: string; text: string; 
         {text && <span className="faint truncate"> {text}</span>}
       </span>
       <span className="listening-keys faint">
-        <Rich text={t("voice.cutIn", { keys: DICTATE_KEYS })} />
+        <Rich text={t("voice.cutIn", { keys })} />
       </span>
       <Button size="sm" variant="ghost" icon={Square} onClick={onStop}>
         {waiting ? t("common.cancel") : t("voice.silence")}
@@ -725,10 +906,12 @@ function AnswerBar({ who, text, waiting, onStop }: { who: string; text: string; 
 
 /**
  * A mic for dictating into `target`. Click it to start and click again to stop, or hold it and
- * let go; the keys (Ctrl+Shift+Space) are held the same way.
+ * let go; the keys (Ctrl+Shift+Space) are held the same way, and a mouse button picked in Settings
+ * works like the mic.
  */
 export function MicButton({ target, disabled, size, hint }: { target: DictationTarget; disabled?: boolean; size?: "sm"; hint?: string }) {
   const t = useT();
+  const keys = useDictateKeys();
   const current = useSession();
   const ready = useVoiceStatus().data?.ready ?? false;
   const mine = current?.target === target;
@@ -750,7 +933,7 @@ export function MicButton({ target, disabled, size, hint }: { target: DictationT
       pressed={mine && !transcribing}
       busy={transcribing}
       disabled={disabled || (current !== null && !mine)}
-      kbd={DICTATE_KEYS}
+      kbd={keys}
       tip={mine ? t("voice.stopTip") : ready ? (hint ? `${hint}. ${t("voice.micTip")}` : t("voice.micTip")) : t("voice.micSetupTip")}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
