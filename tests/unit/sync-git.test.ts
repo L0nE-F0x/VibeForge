@@ -31,6 +31,10 @@ const copiesLeft = (root: string) => fs.readdirSync(path.join(root, ".git"), { r
 function repo(): string {
   const root = temp();
   git(root, "init", "-q", "-b", "main");
+  // In the repository itself: the merge under test is run by the app, with whatever git finds there.
+  git(root, "config", "user.name", "T");
+  git(root, "config", "user.email", "t@t.invalid");
+  git(root, "config", "commit.gpgsign", "false");
   write(root, "app.txt", "one\ntwo\nthree\n");
   write(root, "notes.md", "alpha\n");
   git(root, "add", "-A");

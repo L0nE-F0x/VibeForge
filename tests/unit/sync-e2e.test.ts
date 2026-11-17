@@ -249,6 +249,8 @@ describe.skipIf(!have)("workspace sync between two machines, with the real Synct
     await b.desk.stopShare(folderId);
     expect((await b.desk.view()).shares).toEqual([]);
     await until("Desk stopping too", async () => (await a.desk.view()).shares.length === 0);
+    // The share is gone from the list a moment before its folder has been tidied.
+    await a.desk.settled();
     expect(a.notes.some((note) => note.includes("Lap stopped syncing Site"))).toBe(true);
     // The files stay; Syncthing's marks go.
     for (const folder of [onA, onB]) {
