@@ -2330,6 +2330,176 @@ h2 {
   }
 }
 
+/* sync: one workspace on two machines, and the choice when both changed a file */
+
+.art-sync {
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+}
+
+.sy-machine {
+  display: flex;
+  flex: 0 1 290px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 10px 14px;
+  border: 1px solid transparent;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--gradient) border-box;
+  box-shadow: 0 0 34px -14px var(--halo);
+}
+
+.sy-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+}
+
+.sy-top b {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sy-top span {
+  color: var(--fg-3);
+}
+
+.sy-ws {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+}
+
+.sy-ws i {
+  grid-row: span 2;
+  align-self: center;
+  color: var(--fg-3);
+  font-style: normal;
+}
+
+.sy-ws b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.sy-ws span {
+  overflow: hidden;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sy-ws.on {
+  border-color: color-mix(in srgb, #34d399 40%, transparent);
+}
+
+.sy-ws.on i,
+.sy-ws.on span {
+  color: #34d399;
+}
+
+.sy-wire {
+  display: flex;
+  flex: 0 0 132px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--fg-3);
+  font-size: 10.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.sy-wire i {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 10px 0 color-mix(in srgb, var(--accent-2) 60%, transparent);
+  animation: sy-flow 2.6s ease-in-out infinite;
+}
+
+.sy-wire i:last-child {
+  animation-delay: 1.3s;
+}
+
+@keyframes sy-flow {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.sy-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-2) 6%, transparent);
+  color: var(--fg-2);
+}
+
+.sy-choice p {
+  margin: 0;
+}
+
+.sy-choice p b {
+  color: var(--fg);
+}
+
+.sy-choice div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sy-choice .m-primary,
+.sy-ghost {
+  padding: 3px 8px;
+  font-size: 10.5px;
+}
+
+.sy-ghost {
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+}
+
+@media (max-width: 760px) {
+  .art-sync {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sy-machine {
+    flex: none;
+  }
+
+  .sy-wire {
+    flex: none;
+    flex-direction: row;
+    padding: 10px 0;
+  }
+
+  .sy-wire i {
+    width: 1px;
+    height: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sy-wire i {
+    animation: none;
+  }
+}
+
 /* undo: the toast that replaced "are you sure?" */
 
 .art-undo {
