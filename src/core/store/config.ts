@@ -37,6 +37,7 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "plan", model: "", projectsFolder: "" },
+    sync: { enabled: false, name: "" },
   };
 }
 
@@ -185,6 +186,11 @@ export class Config {
         mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
         model: cleanModel(str(raw.orchestrator?.model)),
         projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
+      },
+      sync: {
+        enabled: bool(raw.sync?.enabled, defaults.sync.enabled),
+        // One line, as it will sit in a branch name and a notification on the other machine.
+        name: str(raw.sync?.name).replace(/\s+/g, " ").trim().slice(0, 40),
       },
     };
   }

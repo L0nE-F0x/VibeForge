@@ -718,3 +718,100 @@
   border-color: var(--sel-line);
   background: var(--sel-fill);
 }
+
+/* A synced workspace's mark: an arrow for its direction, coloured by how it stands. */
+.sync-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+
+.sync-mark:hover,
+.sync-mark:focus-visible {
+  color: var(--fg);
+}
+
+.sync-mark.synced {
+  color: var(--green);
+}
+
+.sync-mark.syncing {
+  color: var(--accent-2);
+  animation: sync-pulse 1.4s ease-in-out infinite;
+}
+
+.sync-mark:is(.away, .offered) {
+  opacity: 0.55;
+}
+
+.sync-mark.busy {
+  color: var(--accent);
+}
+
+.sync-mark.warn {
+  color: var(--yellow);
+}
+
+@keyframes sync-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-mark.syncing {
+    animation: none;
+  }
+}
+
+/* Another machine asking to pair, or offering a workspace: above the list it will join. */
+.sync-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sync-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--focus-line);
+  background: var(--focus-fill);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.sync-notice > svg {
+  flex: none;
+}
+
+.sync-notice > .grow {
+  min-width: 120px;
+}
+
+/* A file (or commits) both machines changed, with its choices. */
+.sync-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 35%, transparent);
+  background: color-mix(in srgb, var(--yellow) 5%, transparent);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.sync-diff {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--line);
+}

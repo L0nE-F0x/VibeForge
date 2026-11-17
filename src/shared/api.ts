@@ -52,6 +52,11 @@ import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 import type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch } from "../core/orchestrator.js";
 
+import type { MergeResult } from "../core/sync/git-rescue.js";
+import type { SyncMode } from "../core/sync/protocol.js";
+import type { SyncConflict, SyncMachine, SyncOffer, SyncRequest, SyncShare, SyncView } from "../core/sync/types.js";
+
+export type { MergeResult, SyncConflict, SyncMachine, SyncMode, SyncOffer, SyncRequest, SyncShare, SyncView };
 export type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch };
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
@@ -410,6 +415,28 @@ export interface DeskMethods {
   "orchestrator.copyDiff": (copyId: string) => string;
   "orchestrator.applyCopy": (copyId: string) => ApplyResult;
   "orchestrator.discardCopy": (copyId: string) => Deleted;
+
+  /** Sync between machines: this machine, the paired ones, what is shared, offered and waiting for a choice. */
+  "sync.view": () => SyncView;
+  /** Fetches the pinned Syncthing into a copy that doesn't carry it (a git checkout). */
+  "sync.install": () => void;
+  /** Pairs with the machine whose code was pasted. */
+  "sync.addMachine": (code: string) => void;
+  "sync.acceptMachine": (id: string) => void;
+  "sync.ignoreMachine": (id: string) => void;
+  /** Unpairs: everything synced with it stops, the files stay. */
+  "sync.removeMachine": (id: string) => void;
+  "sync.share": (workspaceId: string, machineId: string, options: { mode: SyncMode; filesOnly: boolean }) => void;
+  "sync.updateShare": (folderId: string, options: { mode: SyncMode; filesOnly: boolean }) => void;
+  "sync.stopShare": (folderId: string) => void;
+  /** Takes up a workspace another machine offered, in `folder`. */
+  "sync.acceptOffer": (folderId: string, folder: string) => void;
+  "sync.declineOffer": (folderId: string) => void;
+  /** What putting this machine's version of a file back would change, as a diff. */
+  "sync.conflictDiff": (id: string) => string;
+  "sync.resolveConflict": (id: string, keep: "mine" | "theirs") => void;
+  /** Merges the branch this machine's commits were kept on. */
+  "sync.mergeConflict": (id: string) => MergeResult;
 
   "voice.status": () => VoiceStatus;
   "voice.start": () => void;

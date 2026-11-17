@@ -167,6 +167,15 @@ export interface Settings {
   agentTalk: AgentTalkSettings;
   /** The Orchestrator: which CLI plans, and whether a plan waits for Go. */
   orchestrator: OrchestratorSettings;
+  /** Workspaces synced with your other machines. Off until turned on. */
+  sync: SyncSettings;
+}
+
+/** Sync between machines. Which workspaces and which machines is kept with the data (`sync/state.json`), not here. */
+export interface SyncSettings {
+  enabled: boolean;
+  /** What the other machine calls this one; empty uses the computer's name. */
+  name: string;
 }
 
 export interface OrchestratorSettings {
@@ -335,4 +344,5 @@ export type Topic =
   | "working"
   | "updates"
   | "voice"
-  | "orchestrator";
+  | "orchestrator"
+  | "sync";

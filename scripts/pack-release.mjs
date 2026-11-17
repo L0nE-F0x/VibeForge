@@ -31,9 +31,11 @@ const root = path.resolve(import.meta.dirname, "..");
  * a change here. Vite bundles everything else (React, YAML, the cron parser…) into dist and
  * dist-electron. From electron/ only the .cjs files run from disk: the terminal host, on the
  * person's own Node, and the screen capture the main process loads too; its .ts files are built
- * into dist-electron. scripts/ holds the launcher and `vibeforge tell` (talk.mjs).
+ * into dist-electron. scripts/ holds the launcher and `vibeforge tell` (talk.mjs). vendor/syncthing
+ * is the Syncthing workspace sync runs: not in the repository, fetched here at its pinned version
+ * (scripts/fetch-syncthing.mjs), unmodified, with its license and a note of where its source is.
  */
-export const APP_FILES = ["package.json", "LICENSE", "dist", "dist-electron", "companion", "resources", "scripts", "electron/*.cjs"];
+export const APP_FILES = ["package.json", "LICENSE", "dist", "dist-electron", "companion", "resources", "scripts", "electron/*.cjs", "vendor/syncthing"];
 
 /** True when the archive holds `file` (a path in the checkout), itself or inside a folder it ships. */
 export function ships(file) {
@@ -135,6 +137,9 @@ async function main(out) {
   run("npm", ["ci", "--no-audit", "--no-fund", "--loglevel=error"], { cwd: build, env });
   step("Building (vite build)");
   run("npm", ["run", "build", "--silent"], { cwd: build, env });
+  // The pinned Syncthing for this CPU, checked against the SHA-256 in scripts/syncthing.json.
+  step("Fetching the pinned Syncthing");
+  run(process.execPath, [path.join(build, "scripts", "fetch-syncthing.mjs"), "--to", path.join(build, "vendor", "syncthing"), "--quiet"], { cwd: build, env });
 
   // ------------------------------------------------------------------ copy what runs
 

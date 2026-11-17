@@ -1,0 +1,15 @@
+{
+  "version": "v2.1.7",
+  "license": "MPL-2.0",
+  "source": "https://github.com/syncthing/syncthing/tree/v2.1.7",
+  "builds": {
+    "x64": {
+      "file": "syncthing-linux-amd64-v2.1.7.tar.gz",
+      "sha256": "2edc416e7ed136b7c858ed5f3f02a3b8316589605e54c380228ceea7acbf0142"
+    },
+    "arm64": {
+      "file": "syncthing-linux-arm64-v2.1.7.tar.gz",
+      "sha256": "48e456690cd2b97e7d26b02b5ac35f62a3b36172267b144cfeaf02c993ab955c"
+    }
+  }
+}

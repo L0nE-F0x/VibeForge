@@ -22,6 +22,10 @@ const INTERNAL = [
   // A step's name and git's answer, joined by `failure` in worktrees.ts; the step names are above.
   /^X: X$/,
   /^whisper-cli /,
+  // Syncthing's own trouble, said as it happened, and two checks nobody should ever trip.
+  /^Syncthing/,
+  /^No free port for Syncthing/,
+  /^That file is not inside the workspace\.$/,
 ];
 
 function sources(dir: string): string[] {

@@ -24,6 +24,7 @@ import { desktopNotifier } from "./notify.js";
 import { Quit } from "./quit.js";
 import { Stats } from "./stats.js";
 import { PtySupervisor } from "./supervisor.js";
+import { Sync } from "./sync.js";
 import { adoptShellPath, osDescription } from "./system.js";
 import { Talk } from "./talk.js";
 import { Disposables, startSchedules } from "./timers.js";
@@ -152,7 +153,8 @@ function drawBrandIcon(): void {
   }
 }
 
-const quit = new Quit(ctx, { talk, voice });
+const sync = new Sync(ctx, notify);
+const quit = new Quit(ctx, { talk, voice, sync });
 const tray = new TrayController(ctx, () => void quit.fromTray());
 const mainWindow = new MainWindow(ctx, {
   // Started by the login autostart entry: stay in the tray until opened.
@@ -201,11 +203,14 @@ if (!app.requestSingleInstanceLock()) {
       if (topics.includes("settings") || topics.includes("live")) tray.sync();
       if (topics.includes("settings")) syncCompanion(companionWire(ctx, stats, voice));
       if (topics.includes("settings")) tray.syncWords();
+      // Sync starts and stops with its switch, and tells the paired machines what runs here.
+      if (topics.includes("settings")) void sync.apply();
+      if (topics.includes("live") || topics.includes("working") || topics.includes("workspaces")) sync.liveChanged();
     });
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire(ctx, stats, voice));
     mainWindow.guardPermissions();
-    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, dock, notify, refreshPalette });
+    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, dock, sync, notify, refreshPalette });
     drawBrandIcon();
     tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
@@ -229,6 +234,8 @@ if (!app.requestSingleInstanceLock()) {
     const timers = new Disposables();
     startSchedules(ctx, timers);
     updater.start();
+    // Only when Settings have it on; until then nothing is started and nothing listens.
+    void sync.apply();
     // Stopped in this order at quit.
     timers.add(() => updater.stop(), stopThemeWatch, stopConfigWatch, stopControl, stopTrayWatch);
     app.once("will-quit", () => timers.dispose());

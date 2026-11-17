@@ -192,6 +192,8 @@ export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "wor
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
+/** Sync between machines: follows what the engine reports, and the switch in Settings. */
+export const useSync = () => useQuery("sync", ["sync", "settings", "workspaces"], () => call("sync.view"));
 // Polled: most of it is fixed while VibeForge runs, but whether the terminal host is up isn't.
 export const useAppInfo = () => useQuery("app-info", [], () => call("app.info"));
 export const useUpdate = () => useQuery("updates", ["updates"], () => call("updates.get"));
