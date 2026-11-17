@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-11-17
+
+**2.19.0: sync a workspace with your other machine. Pick the workspaces, pick the direction, and pick up at home where you left off at work.**
+
+### Added
+
+- **Sync a workspace with another machine** (Settings → Sync, off until you turn it on). Pair two machines once by pasting one's code into the other, then right-click a workspace in Code and choose **Sync to …**. Only the workspaces you pick are synced. The other machine asks where to put it and adds it as a workspace. Files go straight between the two, encrypted, over your local network or Tailscale. With a firewall on, Settings → Sync shows the one `ufw` command that lets your other machine connect.
+- **Both ways, send only or receive only**, per workspace, changed any time from either machine. **Files only** leaves git history out; otherwise your branch, commits and stash arrive with the files. `node_modules`, `target` and `.venv` never sync.
+- **No conflict copies left in your folders.** When both machines changed a file before they met, the later change is used and the other is kept for you: **Compare**, **Keep the other's** or **Put mine back**. When both committed on one branch, the other commits are kept on `<branch>-from-<machine>` with **Merge now**.
+- **See when the workspace is in use over there.** A synced workspace's row shows its direction and state, and says when a CLI is working in it on the other machine.
+- **Syncthing is built in.** VibeForge carries one pinned, unmodified Syncthing (MPL 2.0, with its license and source link) and runs it privately while sync is on: no discovery servers, relays, NAT traversal, usage or crash reports, or self-upgrades. Nothing to install, and a Syncthing of your own is left alone. The download grows by about 12 MB.
+
 ## [2.18.0] - 2026-11-17
 
 **2.18.0: dictate from the couch. Pick your own dictate key or a mouse button, and send with a click. Runs can mark the whole review list reviewed at once.**

@@ -5,6 +5,7 @@ Report a vulnerability privately: on GitHub, open **Security → Advisories → 
 In scope:
 
 - **The phone page's server** on `127.0.0.1:4737`: its pairing code, its API, and anything it lets a phone do to a terminal.
+- **Workspace sync** (Settings → Sync): the private Syncthing VibeForge runs on port 22737 once sync is on, how machines are paired, what a paired machine can make this one do, and how the bundled Syncthing is fetched and checked. A flaw in Syncthing itself goes to [Syncthing](https://syncthing.net/security/); tell us too, so the pinned version moves.
 - **The control socket** that `vibeforge tell`, `task`, `apply` and `--voice` use.
 - **The update path**: the release check, the installer behind `vibe-forge.net/install`, and the in-app Update.
 - **The window**: what a web page in the browser dock, a run's output or a file on disk can make the app do.

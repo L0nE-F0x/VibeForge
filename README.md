@@ -201,6 +201,18 @@ then open the https address it prints on your phone, signed in to the same tailn
 
 **Viby** on the phone is the desktop's [Viby](#viby): the same conversation, plan cards and Running list, planned by the same CLI on this computer. Type what to start where, or tap the mic and speak (or hold it and let go). The phone records and this computer's whisper turns it into words, told your workspace names, so it needs whisper.cpp and a model from Settings → Voice. The audio goes over your tailnet to this computer and nowhere else, and isn't kept; the words wait in the box for **Send**. Your phone keyboard's own dictation works in the box too, but that goes through whatever your phone uses for it.
 
+## Sync
+
+**Settings → Sync** keeps the workspaces you pick the same on another machine of yours, a laptop at work and a desktop at home, say. Nothing syncs until you choose a workspace, and one you didn't choose never leaves its machine.
+
+Pair the two once. Turn sync on on both, copy **This machine's code** on one, paste it under **Add a machine** on the other, and accept on the first when it asks. Then right-click a workspace in Code and choose **Sync to …**: both ways, send only or receive only. The other machine asks where to put it, and it turns up there as a workspace. The arrow on a synced workspace's row says how it stands (in sync, syncing, the other machine away), what is running in it over there, and opens its settings. **Stop syncing** ends it on both machines and leaves the files on both; **Unpair** does that for everything shared with a machine.
+
+Files go straight from one machine to the other, encrypted, over your local network (they find each other) or [Tailscale](https://tailscale.com) (the code carries the tailnet address), and only between machines you paired. `node_modules`, `target` and `.venv` never sync. Git history goes along by default, so the branch, commits and stash you left at work are there at home; **Files only** leaves `.git` out, and each machine keeps its own history. A task's separate copy stays on the machine that made it. If a firewall is on (Omarchy's is), Settings → Sync shows one `ufw` command to run so the other machine can connect.
+
+When both machines changed the same file before they met, the later change is used and the other is not left in the folder as a copy: VibeForge keeps it, and the workspace's sync lists it under **Changed on both machines** with **Compare**, **Keep the other's** and **Put mine back**. When both committed on the same branch while apart, the later machine's commits are on the branch and this machine's are kept on `<branch>-from-<machine>`, with **Merge now**. A synced workspace is one checkout on two machines, so it suits one machine at a time: the row shows when a CLI is working in it over there.
+
+Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, unmodified, at one pinned version (MPL 2.0; its license and a note of where its source is sit beside it in `vendor/syncthing/`), and runs privately while sync is on: its own keys and settings, port 22737, and no global discovery, relays, NAT traversal, usage or crash reports, or self-upgrades. A Syncthing you run yourself is neither used nor touched. A git checkout, or a copy built from source, downloads the same pinned release once from Settings → Sync, checked against its SHA-256. `node scripts/fetch-syncthing.mjs --bump vX.Y.Z` moves the pin.
+
 ## Your files
 
 ```
@@ -218,6 +230,8 @@ then open the https address it prints on your phone, signed in to the same tailn
   trash/                        deleted agents, chats, tasks, skills, routines and discarded copies, kept 30 s for Undo
   scratch/<chat>/               Chat mode working folders
   models/  voices/              whisper models and Piper voices downloaded in Settings → Voice
+  sync/                         paired machines and synced workspaces (state.json), the private Syncthing's keys and index,
+                                and versions of files both machines changed, kept until answered and 30 days after
 ~/.config/VibeForge/            the window's browser profile: the browser pane's sign-ins and cookies, caches
 ~/.cache/vibeforge/             the launcher's build log (a git checkout that builds itself)
 ```

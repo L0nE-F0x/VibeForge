@@ -144,6 +144,11 @@ export class TeamService extends ServiceCore {
     return this.workspaces.updateWorkspace(id, patch);
   }
 
+  /** A folder as a workspace of its own, without making it the one Code shows (a workspace another machine synced here). */
+  addWorkspaceQuietly(folder: string, name: string): string {
+    return this.workspaces.addQuietly(folder, name);
+  }
+
   listBranches(id: string): Promise<BranchList> {
     return this.workspaces.listBranches(id);
   }

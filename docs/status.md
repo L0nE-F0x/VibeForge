@@ -1,8 +1,8 @@
 # Status
 
-**2.18.0**, released 2026-11-17. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
+**2.19.0**, 2026-11-17. What shipped is in [CHANGELOG.md](../CHANGELOG.md), what's next in [todo.md](todo.md), and the engineering log up to 2.13.0 in [archive/status-log.md](archive/status-log.md).
 
-Every change runs `npm test` (695 tests at 2.18.0, including the real PTY host driven with `/bin/bash`) on Node 22, 24 and 26, the typecheck (the TypeScript, and the terminal host, `vibeforge tell` and the phone page through JSDoc), lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`, and also packs the ready-made build, installs it into a scratch home and runs the smoke test from there; the Release workflow publishes a tag only once those checks passed on its commit on `main` (since 2.16.0 in two jobs: a build with a read-only token, then a publish that attests the build), and has published every tag from 1.3.0 to 2.17.0. Features are then driven in the built app over CDP with a scratch profile.
+Every change runs `npm test` (753 tests at 2.19.0, including the real PTY host driven with `/bin/bash` and two real Syncthings syncing with each other) on Node 22, 24 and 26, the typecheck (the TypeScript, and the terminal host, `vibeforge tell` and the phone page through JSDoc), lint, an audit of what ships, the coverage floors (85% on `src/core` and `src/shared`, and one per file), and `scripts/smoke.mjs` on the built app. CI runs all of them on each pull request and on `main`, the smoke test under `xvfb-run`, and also packs the ready-made build, installs it into a scratch home and runs the smoke test from there; the Release workflow publishes a tag only once those checks passed on its commit on `main` (since 2.16.0 in two jobs: a build with a read-only token, then a publish that attests the build), and has published every tag from 1.3.0 to 2.17.0. Features are then driven in the built app over CDP with a scratch profile.
 
 ## What has been checked
 
@@ -22,6 +22,7 @@ Every change runs `npm test` (695 tests at 2.18.0, including the real PTY host d
 | Desktop | The tray in the bar and its menu, a notification opening its chat, an image pasted into Claude Code, fcitx5 in a terminal (by hand, 2026-09-28); Start at login at a real login, which found the missing icon fixed in 2.8.1 | The 2.8.1 fix at a real login; the tray's amber corner and pinning; Super+C copying; sounds on real speakers; the browser dock's still image seen by eye |
 | Phone page | Headless Chrome at phone size on loopback, with the real whisper hearing Viby's mic | A real phone over Tailscale Serve, its mic on iOS Safari, the installed page |
 | Routines and upkeep | | A routine firing at a real cron time; Settings → Storage's first upkeep on a large run folder |
+| Sync | Two private Syncthings (the pinned 2.1.7) on one machine over loopback: pairing, an offer taken up, all three directions, a file changed on both sides, commits on both sides while cut off and the merge, stop and unpair (`tests/unit/sync-e2e.test.ts`); the same through two headless windows' Settings card, workspace menu and dialogs; the locked-down settings contacting nothing in a network-less sandbox for 80 s | Two real machines (local discovery was only seen working between two instances on this one); Tailscale; a firewall opened with the `ufw` command Settings shows; more than two machines; both machines packing git refs while apart |
 | Updates | The installer finding the latest release on GitHub | The in-app check and Update (a stand-in release server and command); 2.16's Update through the release's own install.sh and its digest, and the two-job release workflow (added for 2.16.0); Restart after a real update; Copy diagnostics read back from the clipboard |
 
 ## Known limits
@@ -33,6 +34,7 @@ Every change runs `npm test` (695 tests at 2.18.0, including the real PTY host d
 - Which terminal handed out which task lives in memory: after a restart a lead CLI can't `vibeforge apply` tasks it handed out before (Apply on the task still works). Tasks and routines waiting for their folder are kept in `waiting.json` and survive a restart.
 - Viby's (formerly Maestro's) checkouts made before 2.14 (`<project>.worktrees/<branch>`) get no Apply or Discard; remove them by hand.
 - The phone page buzzes only while it is open; a locked phone would need Web Push.
+- Sync: a workspace syncs with one other machine. A synced workspace is one checkout on two machines: when they were on different branches while apart, the branch switched to last is the one both end up on (the other's commits stay on their branch). With a firewall on both machines and neither opened, they can't connect: Settings → Sync shows the command.
 
 ## Risks
 
@@ -40,4 +42,5 @@ Every change runs `npm test` (695 tests at 2.18.0, including the real PTY host d
 - **Plan limits use the CLIs' saved sign-ins.** They're only read, never renewed, but a provider could object. That is one reason the feature is off by default.
 - **Dependencies.** `npm audit` on 2026-11-12: no advisories, with or without dev tools, on Electron 45, Vite 8, Vitest 5 and TypeScript 7. CI fails on a high-severity advisory in what ships, and Dependabot proposes updates weekly. Electron 45's tray, voice and notifications were checked only through the headless smoke and stand-in drives, not on the real bar.
 - **The control socket trusts the terminal a caller names.** A CLI can claim another pane's `VIBEFORGE_PTY`; a per-terminal token in the environment wouldn't stop that, because processes of the same user can read each other's environment.
+- **Syncthing underneath.** Sync drives Syncthing's REST API and reads the names it gives conflict copies; both were read from 2.1.7 on 2026-11-17 and are checked by the two-instance test on every change, so a bump that breaks them fails there. `.git` is synced file by file: git's own commands on both machines within the same seconds can still leave a conflict copy inside `.git`, which the rescue then sorts out (commits are never lost; staged-but-uncommitted state can be).
 - **One machine.** Everything above was checked on the founder's Omarchy desktop; other Arch + Hyprland setups are untested.

@@ -14,6 +14,8 @@ import type { HostLifecycle } from "./host-lifecycle.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
 import type { Stats } from "./stats.js";
+import type { Sync } from "./sync.js";
+import { isSyncMode } from "../src/core/sync/protocol.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import type { Talk } from "./talk.js";
 import type { TrayController } from "./tray-controller.js";
@@ -35,6 +37,7 @@ export interface IpcParts {
   voice: Voice;
   talk: Talk;
   dock: Dock;
+  sync: Sync;
   notify: Notify;
   /** Repaints the window, the page and the tray icon in the theme Settings name. */
   refreshPalette: () => void;
@@ -44,7 +47,12 @@ type Handlers = { [K in Method]: (...args: MethodArgs<K>) => MethodResult<K> | P
 
 function handlers(ctx: MainContext, parts: IpcParts): Handlers {
   const { roots, log, supervisor, words, install, focusWindow } = ctx;
-  const { host, stats, tray, updater, voice, talk, dock, notify, refreshPalette } = parts;
+  const { host, stats, tray, updater, voice, talk, dock, sync, notify, refreshPalette } = parts;
+  /** How a share syncs, from whatever the window sent. */
+  const shareOptions = (value: unknown) => {
+    const raw = value && typeof value === "object" ? (value as { mode?: unknown; filesOnly?: unknown }) : {};
+    return { mode: isSyncMode(raw.mode) ? raw.mode : ("two" as const), filesOnly: raw.filesOnly === true };
+  };
   const s = ctx.svc;
   /** Where the last folder picked sits, so the next folder dialog opens there. */
   let pickedBeside: string | null = null;
@@ -231,6 +239,21 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "orchestrator.copyDiff": (copyId) => s().orchestratorCopyDiff(String(copyId ?? "")),
     "orchestrator.applyCopy": (copyId) => s().orchestratorApplyCopy(String(copyId ?? "")),
     "orchestrator.discardCopy": (copyId) => s().orchestratorDiscardCopy(String(copyId ?? "")),
+
+    "sync.view": () => sync.view(),
+    "sync.install": () => sync.install(),
+    "sync.addMachine": (code) => sync.addMachine(String(code ?? "").slice(0, 2000)),
+    "sync.acceptMachine": (id) => sync.acceptRequest(String(id ?? "")),
+    "sync.ignoreMachine": (id) => sync.ignoreRequest(String(id ?? "")),
+    "sync.removeMachine": (id) => sync.removeMachine(String(id ?? "")),
+    "sync.share": (workspaceId, machineId, options) => sync.share(String(workspaceId ?? ""), String(machineId ?? ""), shareOptions(options)),
+    "sync.updateShare": (folderId, options) => sync.updateShare(String(folderId ?? ""), shareOptions(options)),
+    "sync.stopShare": (folderId) => sync.stopShare(String(folderId ?? "")),
+    "sync.acceptOffer": (folderId, folder) => sync.acceptOffer(String(folderId ?? ""), String(folder ?? "")),
+    "sync.declineOffer": (folderId) => sync.declineOffer(String(folderId ?? "")),
+    "sync.conflictDiff": (id) => sync.conflictDiff(String(id ?? "")),
+    "sync.resolveConflict": (id, keep) => sync.resolveConflict(String(id ?? ""), keep === "mine" ? "mine" : "theirs"),
+    "sync.mergeConflict": (id) => sync.mergeConflict(String(id ?? "")),
 
     "voice.status": () => voice.status(),
     "voice.start": () => voice.start(),

@@ -245,6 +245,12 @@ build_from_source() {
   [[ -f node_modules/node-pty/build/Release/pty.node ]] || die "The terminal engine (node-pty) did not build. Check base-devel and python, then run this again."
   step "Building"
   npm run build --silent >/dev/null
+  # The Syncthing workspace sync runs: the pinned release, checked against its SHA-256. The
+  # ready-made build has it inside. Sync is off until turned on, so a failed download only means
+  # Settings → Sync offers to fetch it then.
+  if [[ -f scripts/fetch-syncthing.mjs ]]; then
+    node scripts/fetch-syncthing.mjs --quiet || note "Could not fetch Syncthing for workspace sync; Settings → Sync can fetch it later."
+  fi
   cd "$HOME"
 }
 

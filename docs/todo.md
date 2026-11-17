@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.18.0, 2026-11-17, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.19.0, 2026-11-17, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -8,6 +8,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.18.0, 2026-11-17, is the lates
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 
 ## Only checked with stand-ins
+
+- **Workspace sync between two real machines** (2.19.0): on a local network, over Tailscale, and with Omarchy's firewall opened by the command Settings → Sync shows. Everything else about it runs against two real Syncthings on one machine.
 
 These work against fake CLIs, synthetic audio and the hidden test window. Nothing is known to be wrong:
 

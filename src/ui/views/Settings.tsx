@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, Workflow, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, Workflow, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -8,6 +8,7 @@ import { checkedAt, installText, showUpdate, updateStatus } from "../components/
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
 import { CompanionCard } from "../components/CompanionCard.js";
+import { SyncCard } from "../components/SyncCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
 import { StorageCard } from "../components/StorageCard.js";
 import { TalkCard } from "../components/TalkCard.js";
@@ -325,6 +326,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
             <Smartphone size={13} /> {t("companion.title")}
           </div>
           <CompanionCard />
+
+          <div className="section-title" id="settings-sync">
+            <Laptop size={13} /> {t("sync.title")}
+          </div>
+          <SyncCard />
 
           <div className="section-title" id="settings-tray">
             <Power size={13} /> {t("tray.title")}

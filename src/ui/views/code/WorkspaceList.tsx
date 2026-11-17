@@ -1,15 +1,18 @@
-import { FolderOpen, FolderPlus, GitBranch, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, FolderOpen, FolderPlus, GitBranch, Laptop, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import type { Workspace } from "../../../shared/api.js";
+import type { SyncShare, Workspace } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
-import { call, useAppInfo, useLive } from "../../api.js";
+import { call, useAppInfo, useLive, useSync } from "../../api.js";
 import { useAttention } from "../../attention.js";
 import { SidePanel, StripItem } from "../../components/SidePanel.js";
-import { Button, Input, Menu, MenuButton, Popover, type MenuItem } from "../../components/ui.js";
+import { SyncNotices } from "../../components/SyncNotices.js";
+import { tipProps } from "../../components/Tooltip.js";
+import { Button, Input, Menu, MenuButton, Modal, Popover, type MenuItem } from "../../components/ui.js";
 import { workspaceMark, WorkspaceState } from "../../components/WorkspaceState.js";
 import { useT } from "../../i18n/index.js";
-import { useAction } from "../../state.js";
+import { useAction, useNav } from "../../state.js";
 import { isShortcut } from "../../shortcuts.js";
+import { shareLine, SyncDialog } from "./SyncDialog.js";
 
 const WORKSPACE_MIME = "application/x-vibeforge-workspace";
 
@@ -42,6 +45,23 @@ export function WorkspaceList({
   };
   const [dragWorkspace, setDragWorkspace] = useState<{ id: string; over: number | null } | null>(null);
   const [workspaceMenu, setWorkspaceMenu] = useState<{ workspace: Workspace; anchor: HTMLElement } | null>(null);
+  const sync = useSync().data;
+  const { go } = useNav();
+  /** The workspace whose sync is being set up or looked at, and the machine it is with. */
+  const [syncing, setSyncing] = useState<{ workspaceId: string; machineId: string } | null>(null);
+  /** With the list folded to its strip, what another machine asks is behind a mark there. */
+  const [asksOpen, setAsksOpen] = useState(false);
+  const asks = (sync?.requests.length ?? 0) + (sync?.offers.length ?? 0);
+  const shareOf = (workspaceId: string) => sync?.shares.find((share) => share.workspaceId === workspaceId) ?? null;
+  /** Sync in a workspace's menu: its share when it has one, else each paired machine, else the way to set sync up. */
+  const syncItems = (workspace: Workspace): MenuItem[] => {
+    const share = shareOf(workspace.id);
+    if (share) return [{ label: t("sync.menuSettings", { machine: share.machineName }), icon: Laptop, onSelect: () => setSyncing({ workspaceId: workspace.id, machineId: share.machineId }) }];
+    if (sync?.running && sync.machines.length) {
+      return sync.machines.map((machine) => ({ label: t("sync.menu", { machine: machine.name }), icon: Laptop, onSelect: () => setSyncing({ workspaceId: workspace.id, machineId: machine.id }) }));
+    }
+    return [{ label: t("sync.menuSetup"), icon: Laptop, onSelect: () => go({ view: "settings", section: "sync" }) }];
+  };
 
   const [renameWorkspace] = useAction(async (workspace: Workspace, name: string) => {
     if (name.trim() && name.trim() !== workspace.name) await call("workspaces.update", workspace.id, { name: name.trim() });
@@ -56,12 +76,14 @@ export function WorkspaceList({
   const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
+    ...syncItems(workspace),
     { label: t("common.rename"), icon: Pencil, onSelect: () => startRename(workspace.id) },
     "sep",
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => onRemove(workspace) },
   ];
 
   return (
+    <>
     <SidePanel
       id="workspaces"
       title={t("code.workspaces")}
@@ -76,6 +98,11 @@ export function WorkspaceList({
           <StripItem label={t("code.addStrip")} onClick={onAdd}>
             <FolderPlus size={16} />
           </StripItem>
+          {asks > 0 && (
+            <StripItem label={t("sync.asks")} onClick={() => setAsksOpen(true)} badge={<span className="ws-state waiting in-strip" />}>
+              <Laptop size={16} className="accent-text" />
+            </StripItem>
+          )}
           {workspaces.map((workspace) => (
             <StripItem
               key={workspace.id}
@@ -90,6 +117,7 @@ export function WorkspaceList({
         </>
       }
     >
+      <SyncNotices view={sync} />
       <div className="list-scroll">
         {workspaces.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("code.addEmpty")}</div>}
         {workspaces.map((workspace, index) => {
@@ -173,6 +201,7 @@ export function WorkspaceList({
                 )}
                 <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
               </span>
+              <SyncMark share={shareOf(workspace.id)} onOpen={(share) => setSyncing({ workspaceId: workspace.id, machineId: share.machineId })} />
               <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
               <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
                 <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
@@ -186,6 +215,45 @@ export function WorkspaceList({
           <Menu items={workspaceItems(workspaceMenu.workspace)} onClose={() => setWorkspaceMenu(null)} />
         </Popover>
       )}
+      {(() => {
+        const workspace = syncing && workspaces.find((item) => item.id === syncing.workspaceId);
+        return workspace && syncing && sync ? <SyncDialog workspace={workspace} machineId={syncing.machineId} view={sync} onClose={() => setSyncing(null)} /> : null;
+      })()}
     </SidePanel>
+      {/* Outside the panel: folded to its strip, the panel draws none of what is inside it. */}
+      {asksOpen && asks > 0 && (
+        <Modal title={t("sync.asks")} icon={Laptop} onClose={() => setAsksOpen(false)}>
+          <SyncNotices view={sync} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/**
+ * A synced workspace's mark: an arrow for its direction, coloured by how it stands (in sync,
+ * syncing, the other machine away, or something to answer). A click opens its sync.
+ */
+function SyncMark({ share, onOpen }: { share: SyncShare | null; onOpen: (share: SyncShare) => void }) {
+  const t = useT();
+  if (!share) return null;
+  const Icon = share.mode === "send" ? ArrowRight : share.mode === "receive" ? ArrowLeft : ArrowLeftRight;
+  // Someone (or some CLI) working over there while this one is open is worth a look, like a conflict.
+  const tone = share.state === "error" || share.conflicts ? "warn" : share.peerLive.length ? "busy" : share.state;
+  const tip = [shareLine(t, share), share.peerLive.length ? t("sync.peerLive", { machine: share.machineName, what: share.peerLive.join(", ") }) : ""].filter(Boolean).join("\n");
+  return (
+    <button
+      type="button"
+      className={`sync-mark ${tone}`}
+      aria-label={tip}
+      {...tipProps(tip)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen(share);
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <Icon size={13} />
+    </button>
   );
 }

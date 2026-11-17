@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { fetchSyncthing, mark, parseSums, pinned, present, RELEASE_KEY, sourceNote } from "../../scripts/fetch-syncthing.mjs";
 import { APP_FILES, ENTRIES, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
 
 // scripts/pack-release.mjs packs a list of files, not the whole checkout. These keep the list in
@@ -18,7 +19,8 @@ const packageOf = (spec: string) =>
 
 describe("the ready-made build's file list", () => {
   it("names files that are there (the build makes dist and dist-electron)", () => {
-    for (const file of APP_FILES.filter((item) => item !== "dist" && item !== "dist-electron")) {
+    // vendor/syncthing is fetched while packing, like dist is built: neither is in the repository.
+    for (const file of APP_FILES.filter((item) => item !== "dist" && item !== "dist-electron" && item !== "vendor/syncthing")) {
       expect(fs.existsSync(path.join(repo, file.replace(/\/\*.*$/, ""))), file).toBe(true);
     }
     // Whole folders, so a module added to the phone page or the scripts ships with it.
@@ -77,3 +79,64 @@ describe("the ready-made build's file list", () => {
     expect(read("scripts/build-release.sh")).toContain("scripts/pack-release.mjs");
   });
 });
+
+describe("the Syncthing a copy of VibeForge carries", () => {
+  const pin = pinned();
+
+  it("is one pinned release, with a checksum for each CPU, never committed", () => {
+    expect(pin.version).toMatch(/^v\d+\.\d+\.\d+$/);
+    expect(pin.license).toBe("MPL-2.0");
+    expect(pin.source).toBe(`https://github.com/syncthing/syncthing/tree/${pin.version}`);
+    expect(Object.keys(pin.builds).sort()).toEqual(["arm64", "x64"]);
+    for (const [arch, build] of Object.entries(pin.builds)) {
+      expect(build.file).toBe(`syncthing-linux-${arch === "x64" ? "amd64" : arch}-${pin.version}.tar.gz`);
+      expect(build.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(read(".gitignore").split("\n")).toContain("vendor/");
+    expect(RELEASE_KEY).toMatch(/^[0-9A-F]{40}$/);
+  });
+
+  it("ships in the ready-made build, with its license and where its source is", () => {
+    expect(shipped("vendor/syncthing/syncthing")).toBe(true);
+    expect(shipped("vendor/syncthing/LICENSE.txt")).toBe(true);
+    expect(shipped("scripts/syncthing.json")).toBe(true);
+    // Packed from the pin, by the same script a checkout uses.
+    expect(read("scripts/pack-release.mjs")).toMatch(/fetch-syncthing\.mjs"\), "--to", path\.join\(build, "vendor", "syncthing"\)/);
+    // And the main process runs that copy, never one found on PATH.
+    expect(read("electron/sync.ts")).toContain('path.join(this.ctx.appRoot, "vendor", "syncthing", "syncthing")');
+    expect(read("electron/sync.ts")).not.toMatch(/resolveBin|which\(/);
+    const note = sourceNote(pin);
+    expect(note).toContain(`Syncthing ${pin.version}`);
+    expect(note).toContain(pin.source);
+    expect(note).toContain("Mozilla Public License 2.0");
+    expect(note).toContain("does not\nchange it");
+  });
+
+  it("is fetched for source builds by the installer, and before the tests in CI", () => {
+    expect(read("scripts/install.sh")).toContain("scripts/fetch-syncthing.mjs");
+    expect(read(path.join(".github", "workflows", "ci.yml"))).toContain("node scripts/fetch-syncthing.mjs");
+  });
+
+  it("reads a release's checksum list for the bump, and refuses one without both builds", () => {
+    const list = ["-----BEGIN PGP SIGNED MESSAGE-----", "", `${"a".repeat(64)}  syncthing-linux-amd64-v9.9.9.tar.gz`, `${"b".repeat(64)}  syncthing-linux-arm64-v9.9.9.tar.gz`, `${"c".repeat(64)}  syncthing-macos-arm64-v9.9.9.zip`].join("\n");
+    expect(parseSums(list, "v9.9.9")).toEqual({
+      x64: { file: "syncthing-linux-amd64-v9.9.9.tar.gz", sha256: "a".repeat(64) },
+      arm64: { file: "syncthing-linux-arm64-v9.9.9.tar.gz", sha256: "b".repeat(64) },
+    });
+    expect(() => parseSums(list, "v9.9.8")).toThrow(/no line for syncthing-linux-amd64-v9\.9\.8/);
+  });
+
+  it("knows a fetched copy by its mark, and fetches nothing when it is there", async () => {
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "vibeforge-vendor-"));
+    expect(present(dir, pin, "x64")).toBe(false);
+    fs.writeFileSync(path.join(dir, "syncthing"), Buffer.alloc(1_100_000));
+    fs.writeFileSync(path.join(dir, "PIN"), mark(pin, "x64"));
+    expect(present(dir, pin, "x64")).toBe(true);
+    // Another CPU's copy, or an older pin's, is not this one.
+    expect(present(dir, pin, "arm64")).toBe(false);
+    expect(present(dir, { ...pin, version: "v0.0.1" }, "x64")).toBe(false);
+    expect(await fetchSyncthing({ dir, arch: "x64" })).toBe("present");
+    await expect(fetchSyncthing({ dir, arch: "riscv64" })).rejects.toThrow(/not pinned for riscv64/);
+  });
+});
+

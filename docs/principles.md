@@ -23,6 +23,7 @@ Anything that goes over the network stays off until you turn it on:
 - **Plan limits** (Settings → Usage and activity) ask Anthropic, xAI, Google, Moonshot, OpenAI and Meta, at most every 3 minutes.
 - **The GitHub graph** (Settings → Usage and activity → GitHub) asks GitHub through your `gh`, at most every 30 minutes, and keeps no token.
 - **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it.
+- **Sync** (Settings → Sync) starts a private Syncthing that listens on port 22737 and announces itself on the local network only. It talks to the machines you paired and to nothing else: no discovery servers, relays, usage or crash reports, or upgrades. Only workspaces you pick are synced.
 - Whisper models and Piper voices download from Hugging Face only when you press Download.
 
 **The update check is the one networked call that is on by default** (`checkUpdates` in `src/core/store/config.ts`). Twenty seconds after start and every six hours, VibeForge asks GitHub's release API for the newest release number. The request carries nothing but your IP address and `VibeForge/<version>` as its user agent. **Update** then downloads that release's `install.sh` from GitHub and runs it only if it matches the SHA-256 GitHub lists for it. Turn it off in **Settings → Updates** (or set `"checkUpdates": false` in `settings.json`); **Check now** still works.

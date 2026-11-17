@@ -11,6 +11,8 @@ import type { Voice } from "./voice.js";
 
 /** How long a quit waits for the phone page's server to close before going on without it. */
 const COMPANION_STOP_MS = 2000;
+/** How long a quit waits for sync's Syncthing to end (it is asked, then told, then killed). */
+const SYNC_STOP_MS = 12_000;
 /** How long a quit waits for deletes that just became final to tidy up after themselves in git. */
 const CLOSE_WAIT_MS = 3000;
 
@@ -21,7 +23,7 @@ export class Quit {
 
   constructor(
     private readonly ctx: MainContext,
-    private readonly parts: { talk: Pick<Talk, "dispose">; voice: Pick<Voice, "dispose"> },
+    private readonly parts: { talk: Pick<Talk, "dispose">; voice: Pick<Voice, "dispose">; sync?: { stop(): Promise<void> } },
   ) {}
 
   /**
@@ -61,6 +63,10 @@ export class Quit {
     const { log } = ctx;
     const stopped = await settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`));
     if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
+    if (this.parts.sync) {
+      const ended = await settleWithin(this.parts.sync.stop(), SYNC_STOP_MS, (error) => log.warn(`Sync did not stop cleanly: ${describeError(error)}`));
+      if (!ended) log.warn("Sync did not stop in time; quitting without waiting for it");
+    }
     this.parts.talk.dispose();
     this.parts.voice.dispose();
     if (!ctx.service) return;
