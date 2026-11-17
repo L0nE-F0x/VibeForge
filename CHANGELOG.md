@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-11-17
+
+**2.18.0: dictate from the couch. Pick your own dictate key or a mouse button, and send with a click. Runs can mark the whole review list reviewed at once.**
+
+### Added
+
+- **Keys and buttons for dictation** (Settings → Voice). Change the dictate key from Ctrl+Shift+Space to any key with Ctrl, Alt or Super, or an F key on its own; a key another shortcut already uses, or one you type with, is refused with the reason. Tooltips, the shortcut sheet and Viby's box show the key you picked.
+- **Dictate with a mouse button.** Pick the back or forward side button, or the middle one, and it works like the mic: hold it and let go, or click it, talk, and click again. The words go to the box or terminal you last clicked. A side button picked here no longer goes back or forward (the other one still does), and the shortcut sheet says so.
+- **A Send button after dictating.** Once dictated words are in a terminal, a small **Send** shows in its lower right corner: a click presses Enter there, the same as pressing it yourself, so talk-back still works. By default it comes after the mic or the mouse button and not after the keys; Settings → Voice can show it after any dictation, or never. Enter, Ctrl+C or Esc in the terminal, a new dictation or × put it away. Message boxes keep their own Send.
+- **Mark all reviewed** at the top of Runs → Review clears the list without opening each run, as Home's button does.
+
+### Fixed
+
+- **Talk-back after dictating into a terminal** is no longer dropped by a click elsewhere, a mouse move or an arrow key before you press Enter. Claude Code has the terminal report focus and the mouse as input, and any of those reports used to count as giving up on the dictated words; now only Ctrl+C, Ctrl+U or Esc does.
+
 ## [2.17.2] - 2026-11-16
 
 **2.17.2: terminals draw in your terminal font again.**

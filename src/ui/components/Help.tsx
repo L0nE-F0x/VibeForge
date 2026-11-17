@@ -1,5 +1,6 @@
 import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, RefreshCw, ScrollText, Stethoscope } from "lucide-react";
 import type { AppInfo, Engine, Settings } from "../../shared/api.js";
+import type { DictateButton } from "../../shared/dictation.js";
 import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
 import { shortcutKeys, shortcutSheet } from "../shortcuts.js";
@@ -154,11 +155,33 @@ interface ShortcutRow {
   text: Key;
 }
 
-// Every key and gesture comes from the one list the app's key handlers read (shortcuts.ts); only
-// the legend of the desk's lights is the sheet's own.
-const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
-  ...shortcutSheet(),
-  {
+const BUTTON_NAMES: Record<Exclude<DictateButton, "off">, Key> = {
+  back: "shortcuts.button.back",
+  forward: "shortcuts.button.forward",
+  middle: "shortcuts.button.middle",
+};
+
+/**
+ * Every key and gesture comes from the one list the app's key handlers read (shortcuts.ts), with
+ * the keys and the mouse button Settings → Voice picked; only the legend of the desk's lights is
+ * the sheet's own.
+ */
+function sheetSections(button: DictateButton): Array<{ group: Key; rows: ShortcutRow[] }> {
+  const sections: Array<{ group: Key; rows: ShortcutRow[] }> = shortcutSheet().map((section) => ({
+    group: section.group,
+    rows: section.rows.flatMap((row): ShortcutRow[] => {
+      // A side button that dictates no longer goes back or forward: the other one still does.
+      if (row.id === "app.sideButtons" && (button === "back" || button === "forward")) {
+        return [button === "back" ? { gesture: BUTTON_NAMES.forward, text: "shortcuts.forward" } : { gesture: BUTTON_NAMES.back, text: "shortcuts.back" }];
+      }
+      if (row.id === "voice.dictate" && button !== "off") return [row, { gesture: BUTTON_NAMES[button], text: "shortcuts.dictateMouse" }];
+      return [row];
+    }),
+  }));
+  return [...sections, LEGEND];
+}
+
+const LEGEND: { group: Key; rows: ShortcutRow[] } = {
     group: "shortcuts.marks",
     rows: [
       { mark: "waiting", text: "ws.waiting" },
@@ -166,11 +189,11 @@ const SHORTCUTS: Array<{ group: Key; rows: ShortcutRow[] }> = [
       { mark: "done", text: "ws.done" },
       { mark: "badge", text: "shortcuts.markBadge" },
     ],
-  },
-];
+};
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   const t = useT();
+  const SHORTCUTS = sheetSections(useSettings().data?.voice.mouseButton ?? "off");
   return (
     <Modal title={t("shortcuts.title")} icon={Keyboard} onClose={onClose} wide>
       <div className="shortcut-grid">

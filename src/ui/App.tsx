@@ -14,7 +14,7 @@ import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Up
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
-import { VoiceLayer } from "./voice.js";
+import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { coreText } from "./core-text.js";
@@ -110,6 +110,8 @@ function Shell() {
     // A mouse's side buttons: back and forward, wherever the pointer is (terminals included).
     const onMouse = (event: MouseEvent) => {
       if (event.button !== 3 && event.button !== 4) return;
+      // A side button picked for dictation (Settings → Voice) is the voice layer's.
+      if (event.button === mouseDictateButton()) return;
       event.preventDefault();
       event.stopPropagation();
       if (event.type === "mouseup") (event.button === 3 ? back : forward)();

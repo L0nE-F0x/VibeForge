@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { isShortcut, runShortcut, shortcutKeys, SHORTCUTS, shortcutSheet, shortcutsFor, type KeyLike, type ShortcutId, type ShortcutScope } from "../../src/ui/shortcuts.js";
+import { dictateClashes, isShortcut, runShortcut, setDictateKeys, shortcutKeys, SHORTCUTS, shortcutSheet, shortcutsFor, type KeyLike, type ShortcutId, type ShortcutScope } from "../../src/ui/shortcuts.js";
 import { appShortcut } from "../../src/ui/terminal-keys.js";
+import { DEFAULT_DICTATE_KEYS } from "../../src/shared/dictation.js";
 
 const press = (key: string, mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean } = {}, code = "") => ({
   key,
@@ -75,7 +76,7 @@ describe("the shortcut registry", () => {
     expect(sheet.flatMap((section) => section.rows.map((row) => row.id))).toEqual(onSheet.map((item) => item.id));
     const row = sheet[0].rows.find((item) => item.id === "app.shortcuts");
     expect(row).toEqual({ id: "app.shortcuts", keys: "Ctrl+Shift+/", gesture: undefined, text: "shortcuts.list" });
-    expect(fs.readFileSync("src/ui/components/Help.tsx", "utf8")).toContain("...shortcutSheet()");
+    expect(fs.readFileSync("src/ui/components/Help.tsx", "utf8")).toContain("shortcutSheet().map(");
   });
 
   it("has no keycaps written by hand outside it: tooltips, hints, the sheet and the tour all ask it", () => {
@@ -229,5 +230,19 @@ describe("running shortcuts", () => {
     expect(shortcutKeys("code.splitRight")).toBe("Ctrl+Shift+D");
     expect(shortcutKeys("voice.dictate")).toBe("Ctrl+Shift+Space");
     expect(isShortcut("voice.dictate", press(" ", { ctrl: true, shift: true }, "Space"))).toBe(true);
+  });
+
+  it("dictates on the keys Settings picked, and says which keys are already taken", () => {
+    try {
+      setDictateKeys({ code: "KeyV", ctrl: false, shift: false, alt: true, meta: false });
+      expect(shortcutKeys("voice.dictate")).toBe("Alt+V");
+      expect(isShortcut("voice.dictate", press("v", { alt: true }, "KeyV"))).toBe(true);
+      expect(isShortcut("voice.dictate", press(" ", { ctrl: true, shift: true }, "Space"))).toBe(false);
+      expect(shortcutSheet().flatMap((section) => section.rows).find((row) => row.id === "voice.dictate")?.keys).toBe("Alt+V");
+      expect(dictateClashes(press("k", { ctrl: true }, "KeyK"))).toContain("app.switcher");
+      expect(dictateClashes(press("v", { alt: true }, "KeyV"))).toEqual([]);
+    } finally {
+      setDictateKeys(DEFAULT_DICTATE_KEYS);
+    }
   });
 });

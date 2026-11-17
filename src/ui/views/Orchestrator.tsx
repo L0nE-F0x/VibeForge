@@ -14,6 +14,7 @@ import { CopyActions, CopyList, CopySheet } from "./OrchestratorCopies.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
 import { shortcutKeys } from "../shortcuts.js";
+import { useDictateKeys } from "../voice.js";
 
 // Maestro: say or type what to start where, and the planner (the CLI picked in Settings, or the
 // first one here that can plan) turns it into a plan that VibeForge carries out. The full view has the
@@ -188,6 +189,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
 
 function Conversation({ view, compact, onEscape }: { view: View | undefined; compact?: boolean; onEscape?: () => void }) {
   const t = useT();
+  const dictateKeys = useDictateKeys();
   const { go } = useNav();
   const { fail } = useToast();
   const engines = useEngines().data ?? [];
@@ -246,7 +248,7 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
         )}
       </div>
       <Composer
-        placeholder={t("orch.placeholder")}
+        placeholder={t("orch.placeholder", { keys: dictateKeys })}
         busy={view?.thinking}
         disabled={!view}
         autoFocus

@@ -1,3 +1,4 @@
+import { dictateKeysLabel, type DictateKeys } from "../shared/dictation.js";
 import type { Key } from "./i18n/index.js";
 
 // Every keyboard shortcut, and the few mouse gestures the shortcut sheet lists, in one place. The
@@ -146,6 +147,30 @@ export type ShortcutIdIn<S extends ShortcutScope> = Extract<Entry, { scope: S; c
 export const SHORTCUTS: readonly Shortcut[] = LIST;
 const BY_ID = new Map<string, Shortcut>(SHORTCUTS.map((shortcut) => [shortcut.id, shortcut]));
 
+/** Shortcuts whose keys Settings changed: only dictation's, for now (Settings → Voice). */
+const CHANGED = new Map<string, Shortcut>();
+
+/** The registry as it stands, with the keys Settings changed. */
+function current(): readonly Shortcut[] {
+  return CHANGED.size ? SHORTCUTS.map((item) => CHANGED.get(item.id) ?? item) : SHORTCUTS;
+}
+
+/** Dictation's keys from Settings → Voice. Held, they dictate; the sheet and the tooltips show them. */
+export function setDictateKeys(keys: DictateKeys): void {
+  const base = BY_ID.get("voice.dictate") as Shortcut;
+  CHANGED.set("voice.dictate", { ...base, keys: dictateKeysLabel(keys), chord: { ctrl: keys.ctrl, shift: keys.shift, alt: keys.alt, meta: keys.meta, code: keys.code } });
+}
+
+/** The other keyed shortcuts this key event already is, which dictating on it would take from them. */
+export function dictateClashes(event: KeyLike): ShortcutId[] {
+  return shortcutsFor(event).filter((id) => id !== "voice.dictate" && id !== "voice.cancel");
+}
+
+/** What a shortcut does, for saying what a key is already for. */
+export function shortcutLabel(id: ShortcutId): Key {
+  return entry(id).label;
+}
+
 /** A key event as the matchers read it; the overlay stack's tests hand in only some of it. */
 export interface KeyLike {
   key: string;
@@ -171,7 +196,7 @@ function pressed(chord: Chord, event: KeyLike): boolean {
 }
 
 function entry(id: ShortcutId): Shortcut {
-  return BY_ID.get(id) as Shortcut;
+  return CHANGED.get(id) ?? (BY_ID.get(id) as Shortcut);
 }
 
 /** Whether a key event is this shortcut's keys. */
@@ -192,12 +217,12 @@ export function numberedKeys(id: "app.views" | "app.workspaces", number: number)
 
 /** Every keyed shortcut a key event is, in the registry's order. */
 export function shortcutsFor(event: KeyLike): ShortcutId[] {
-  return SHORTCUTS.filter((item) => item.chord && pressed(item.chord, event)).map((item) => item.id as ShortcutId);
+  return current().filter((item) => item.chord && pressed(item.chord, event)).map((item) => item.id as ShortcutId);
 }
 
 /** Whether a terminal hands this key to the window instead of the program in it. */
 export function reachesWindow(event: KeyLike): boolean {
-  return SHORTCUTS.some((item) => item.terminal === "window" && item.chord && pressed({ ...item.chord, ...item.inTerminal }, event));
+  return current().some((item) => item.terminal === "window" && item.chord && pressed({ ...item.chord, ...item.inTerminal }, event));
 }
 
 /** What a shortcut does. Returning false says it doesn't apply just now: the key then goes on as if it weren't one. */
@@ -227,7 +252,7 @@ export function runShortcut(
 /** The shortcut sheet's sections: each heading with its rows, keys or a gesture, in the registry's order. */
 export function shortcutSheet(): Array<{ group: Key; rows: Array<{ id: ShortcutId; keys?: string; gesture?: Key; text: Key }> }> {
   const sections = new Map<Key, Array<{ id: ShortcutId; keys?: string; gesture?: Key; text: Key }>>();
-  for (const item of SHORTCUTS) {
+  for (const item of current()) {
     if (item.offSheet) continue;
     const rows = sections.get(item.group) ?? [];
     rows.push({ id: item.id as ShortcutId, keys: item.keys, gesture: item.gesture, text: item.label });

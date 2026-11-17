@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { LogFile } from "../../src/core/log.js";
 import type { VoiceSettings } from "../../src/core/types.js";
+import { DEFAULT_DICTATE_KEYS } from "../../src/shared/dictation.js";
 
 // Downloads go through Electron's network stack, which isn't here; nothing in these tests downloads.
 vi.mock("electron", () => ({ net: {} }));
@@ -44,7 +45,7 @@ echo " [BLANK_AUDIO]"
     fs.writeFileSync(path.join(dataRoot, "models", "ggml-base.en.bin"), Buffer.alloc(1_000_001));
   }
   const states: string[] = [];
-  const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "" };
+  const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer" };
   const log = { info: () => undefined, warn: () => undefined } as unknown as LogFile;
   const instance = new Voice({
     log,
