@@ -297,6 +297,8 @@ export class SyncDesk {
 
   private later(key: string, ms: number, job: () => Promise<void>): void {
     const running = this.timers.get(key);
+    // The window is told at most every so often, not once things go quiet: a long sync never goes quiet.
+    if (running && key === "changed") return;
     if (running) clearTimeout(running);
     const timer = setTimeout(() => {
       this.timers.delete(key);
