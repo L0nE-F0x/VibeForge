@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **A long workspace list is easy to get around.** Above Code's list of workspaces: a **search** box (a workspace's name, by letters in order as Ctrl+K finds it, or a piece of its folder; Escape clears it), and a **filter and sort** menu that shows all, only the ones with terminals open, only the ones waiting for you, or only synced ones, in your own order or **by name**. The filter and sort are remembered; dragging to reorder works while the list shows all of it in your order.
+- **Remove several workspaces at once.** **Select** turns the rows into checkboxes; **All shown** picks everything the search and filter leave, and **Remove** asks once for all of them (the folders stay on disk). Escape or Select again ends it. Removing one from its ⋯ menu works as before.
+
 ## [2.20.0] - 2026-11-18
 
 **2.20.0: call Viby. Talk to it from anywhere in the app and hear it answer, watch it work on screen, and talk over it when you've heard enough.**
