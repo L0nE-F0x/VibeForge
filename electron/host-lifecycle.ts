@@ -3,12 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { whichBin } from "../src/core/engines.js";
 import { describeError } from "../src/core/log.js";
+import { PLAN_NAMES } from "../src/core/plans.js";
 import type { DeskHost } from "../src/core/team-service.js";
 import { gitHead, snapshotGit } from "../src/core/vcs.js";
+import type { Dock } from "./dock.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
 import { lastReply, watchReply } from "./replies.js";
 import { childEnv } from "./shell-env.js";
+import type { Stats } from "./stats.js";
 import type { Talk } from "./talk.js";
 import type { Voice } from "./voice.js";
 
@@ -17,7 +20,7 @@ import type { Voice } from "./voice.js";
 // VibeForge is quitting.
 
 /** The core's way to the terminals, git and the desktop. */
-export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
+export function deskHost(ctx: MainContext, notify: Notify, extras?: { dock?: () => Dock; stats?: () => Stats }): DeskHost {
   const { supervisor, log, words, send } = ctx;
   return {
     spawn: async (request) => {
@@ -33,6 +36,7 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
       }
     },
     send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
+    write: (ptyId, data) => supervisor.write(ptyId, data),
     screen: (ptyId) => supervisor.screen(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
@@ -51,6 +55,36 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
         if (!ctx.win.isVisible()) ctx.win.show();
         ctx.win.focus();
       }
+    },
+    dockCommand: (command) => extras?.dock?.().command(command),
+    codeWorkbench: (event) => send("code-workbench", event),
+    quotas: async () => {
+      const stats = extras?.stats?.();
+      if (!stats || !ctx.service) return "Plan limits and token usage are unavailable.";
+      const lines: string[] = [];
+      const plans = await stats.planSummary(false).catch(() => null);
+      if (plans?.providers.length) {
+        lines.push("Plan limits:");
+        for (const p of plans.providers) {
+          const name = PLAN_NAMES[p.id] ?? p.id;
+          const pct = p.percent !== null ? `${Math.round(p.percent)}% used${p.limiter ? ` (${p.limiter})` : ""}` : "not yet read";
+          lines.push(`- ${name}: ${pct}${p.resetsAt ? `, resets ${p.resetsAt}` : ""}${p.problem ? ` [${p.problem}]` : ""}`);
+        }
+      } else {
+        lines.push("Plan limits: off in Settings (or no signed-in plans with local limits).");
+      }
+      if (ctx.service.getSettings().usage) {
+        const usage = await stats.usage.scan().catch(() => null);
+        if (usage?.sources.length) {
+          lines.push("Token usage today:");
+          for (const src of usage.sources) {
+            const today = src.periods.today.tokens.total;
+            const week = src.periods.week.tokens.total;
+            if (today > 0 || week > 0) lines.push(`- ${src.id}: ${today.toLocaleString("en-US")} today (${week.toLocaleString("en-US")} last 7 days)`);
+          }
+        }
+      }
+      return lines.join("\n");
     },
   };
 }

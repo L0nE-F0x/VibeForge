@@ -4,23 +4,61 @@
 
 import type { EngineRow } from "../core/types.js";
 import { effortLevels } from "./launch-options.js";
+import { inspectsQuotas, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
+
+export * from "./orchestrator-intel.js";
 
 /**
  * start, tell, stop: a CLI (or an agent). workspace: a new workspace (its folder made if it isn't there).
- * apply, discard: a copy waiting for review. show: a running CLI, opened in Code.
+ * apply, discard: a copy waiting for review. show: a running CLI, workspace or view.
  * read: what a running CLI last answered, shown on the card and read out in a call.
+ * inspect: read a CLI's screen/reply, a copy's diff, a workspace's git status/files, or quotas for Viby.
+ * key: send a keystroke/answer (yes, no, enter, escape, option number) to an interactive TUI prompt.
+ * shell: open a shell terminal or run a command in a workspace.
+ * workbench: folders, git branches, browser dock, panes, diffs, or marking runs reviewed.
  * lookup: search runs, git branches and project folders on disk. task: run or create a task. routine: run or toggle a routine.
  */
-export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show" | "read" | "lookup" | "task" | "routine";
+export type OrchestratorStepKind =
+  | "start"
+  | "tell"
+  | "stop"
+  | "workspace"
+  | "apply"
+  | "discard"
+  | "show"
+  | "read"
+  | "inspect"
+  | "key"
+  | "shell"
+  | "workbench"
+  | "lookup"
+  | "task"
+  | "routine";
 
 /** Every kind of step, for checking what a planner wrote. */
-export const STEP_KINDS: readonly OrchestratorStepKind[] = ["start", "tell", "stop", "workspace", "apply", "discard", "show", "read", "lookup", "task", "routine"];
+export const STEP_KINDS: readonly OrchestratorStepKind[] = [
+  "start",
+  "tell",
+  "stop",
+  "workspace",
+  "apply",
+  "discard",
+  "show",
+  "read",
+  "inspect",
+  "key",
+  "shell",
+  "workbench",
+  "lookup",
+  "task",
+  "routine",
+];
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
 export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
 
 /** The steps that change nothing: a plan made only of these goes at once, whatever Settings says. */
-export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read"];
+export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read", "inspect"];
 
 /** Why a step can't run as it stands; the plan card asks the person to fix it. */
 export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt" | "effort" | "folder" | "copy";
@@ -74,6 +112,8 @@ export interface OrchestratorStep {
   reply?: string;
   /** show: a view of the window (SHOW_VIEWS), when it shows one instead of a terminal or a workspace. */
   view?: string;
+  /** Wait for the preceding step's terminal turn to finish before carrying this step out. */
+  after?: boolean;
 }
 
 /** The views a show step can open: the window's own names for them. */
@@ -119,9 +159,9 @@ export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId
 
 export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
 
-/** A word from VibeForge itself about a CLI Maestro started or told: its turn ended, or it closed. */
+/** A word from VibeForge itself about a CLI Maestro started or told: its turn ended, it closed, or it is blocked on a prompt. */
 export interface MaestroNote {
-  kind: "finished" | "ended";
+  kind: "finished" | "ended" | "waiting";
   ptyId: string;
   runId: string | null;
   /** "Claude Code", and where: "VibeForge · fix-tray". */
@@ -136,8 +176,11 @@ export interface MaestroNote {
   reply?: string | null;
 }
 
-/** What Viby says by itself while a call is on: a note about a CLI, or an answer a read step fetched. */
-export type VibyWord = { kind: "note"; note: MaestroNote } | { kind: "read"; engine: string; workspace: string; reply: string; all: boolean; fromScreen: boolean };
+/** What Viby says or does by itself while a call is on: a note about a CLI, an answer a read step fetched, or ending the call. */
+export type VibyWord =
+  | { kind: "note"; note: MaestroNote }
+  | { kind: "read"; engine: string; workspace: string; reply: string; all: boolean; fromScreen: boolean }
+  | { kind: "hangup" };
 
 export interface OrchestratorTurn {
   id: string;
@@ -149,6 +192,8 @@ export interface OrchestratorTurn {
   /** A plan: steps, and where it is. "replaced" is a plan the next answer took over. */
   steps?: OrchestratorStep[];
   plan?: "waiting" | "running" | "done" | "cancelled" | "replaced";
+  /** End the active voice call once this turn (and any plan it runs) has been carried out. */
+  hangup?: boolean;
   /** The CLI that gave this answer (an engine id), so its words keep its name after the planner changes. */
   by?: string;
   /** The answer went wrong. `detail` is what the CLI said, if anything. */
@@ -232,6 +277,8 @@ export interface PlanContext {
     asked?: string;
     /** Its copy's branch, when it works in one. */
     branch?: string;
+    /** Interactive TUI prompt on screen waiting for a person (folder trust, y/n confirmation). */
+    waiting?: string;
   }>;
   /** Copies waiting for review (Apply or Discard). */
   copies?: Array<{ id: string; name: string; branch: string; workspace: string }>;
@@ -283,6 +330,29 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
   }
   if (step.kind === "lookup") {
     return step.prompt.trim() ? null : "prompt";
+  }
+  if (step.kind === "inspect") {
+    if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target)) return null;
+    if (step.target) {
+      const hasCli = context.running.some((item) => item.id === step.target);
+      const hasCopy = (context.copies ?? []).some((item) => item.id === step.target);
+      return hasCli || hasCopy ? null : "target";
+    }
+    if (step.workspaceId) return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
+    return "workspace";
+  }
+  if (step.kind === "key") {
+    if (!context.running.some((item) => item.id === step.target)) return "target";
+    return keySequenceFor(step.prompt) ? null : "prompt";
+  }
+  if (step.kind === "shell") {
+    return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
+  }
+  if (step.kind === "workbench") {
+    const action = parseWorkbenchAction(step);
+    if (!action) return "prompt";
+    if ((action.op === "branch" || action.op === "browser-open") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+    return null;
   }
   if (step.kind === "routine") {
     if (!step.target || (context.routines && !context.routines.some((item) => item.id === step.target))) return "target";

@@ -24,18 +24,20 @@ export function removePane(node: LayoutNode, id: string): LayoutNode | null {
 
 /**
  * Where a CLI started outside Code (by a Maestro plan, or a jump to its session) goes in its
- * workspace: a pane of the same CLI with nothing running in it, when `idle` says which those are;
- * else a new pane beside the focused one (the first, when focus is on none of them); or the only
- * pane of an empty workspace. Feed one placement's layout into the next, so two CLIs started
- * together get a pane each.
+ * workspace: the pane that already holds it (`owns`), else a pane of the same CLI with nothing
+ * running in it, when `idle` says which those are; else a new pane beside the focused one (the
+ * first, when focus is on none of them); or the only pane of an empty workspace. Feed one
+ * placement's layout into the next, so two CLIs started together get a pane each.
  */
 export function placeSession(
   layout: LayoutNode | null | undefined,
   launch: PaneLaunch,
-  opts: { newId: string; focus?: string; idle?: (paneId: string) => boolean },
+  opts: { newId: string; focus?: string; idle?: (paneId: string) => boolean; owns?: (paneId: string) => boolean },
 ): { layout: LayoutNode; paneId: string } {
   const panes = layout ? panesOf(layout) : [];
-  const { idle } = opts;
+  const { owns, idle } = opts;
+  const owner = owns ? panes.find((pane) => owns(pane.id)) : undefined;
+  if (layout && owner) return { layout, paneId: owner.id };
   const free = idle && launch.type === "engine" ? panes.find((pane) => pane.launch.type === "engine" && pane.launch.engineId === launch.engineId && idle(pane.id)) : undefined;
   if (layout && free) return { layout, paneId: free.id };
   const pane: PaneNode = { kind: "pane", id: opts.newId, launch };

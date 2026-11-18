@@ -115,12 +115,13 @@ export class WorkspaceDesk {
 
   // ---------------------------------------------------------------- code mode
 
-  async startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
+  async startShell(opts: { workspaceId?: string; cwd?: string; orchestrated?: boolean; command?: string } & TermSize): Promise<{ ptyId: string }> {
     const workspace = this.core.workspaceById(opts.workspaceId);
     const cwd = workspace?.path ?? opts.cwd ?? "";
     if (!isDirectory(cwd)) throw new Error("That folder does not exist any more.");
     const shell = this.core.store.readSettings().defaultShell || process.env.SHELL || "/bin/bash";
-    const spawned = await this.core.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: null, cols: opts.cols, rows: opts.rows });
+    const command = opts.command?.trim() ?? "";
+    const spawned = await this.core.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: command || null, cols: opts.cols, rows: opts.rows });
     this.core.live.set(spawned.ptyId, {
       ptyId: spawned.ptyId,
       runId: null,
@@ -135,6 +136,7 @@ export class WorkspaceDesk {
       chatId: null,
       taskId: null,
       workspaceId: workspace?.id ?? null,
+      ...(opts.orchestrated ? { orchestrated: true } : {}),
     });
     this.core.emit("live");
     return { ptyId: spawned.ptyId };

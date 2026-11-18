@@ -84,7 +84,7 @@ const ctx = new MainContext({
 const { send, focusWindow, install } = ctx;
 const notify = desktopNotifier(ctx);
 
-const host = deskHost(ctx, notify);
+const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats });
 const dock = new Dock(
   () => ctx.win,
   (state) => send("dock", state),

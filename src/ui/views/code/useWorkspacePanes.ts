@@ -75,6 +75,14 @@ export function useWorkspacePanes({
   const starting = useRef(new Set<string>());
   const fontSizeRef = useRef(13);
   fontSizeRef.current = fontSize;
+  const openedRef = useRef(opened);
+  openedRef.current = opened;
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  /** Workspaces whose saved layout is being read, so two paths never load or populate one twice. */
+  const loadingLayouts = useRef(new Map<string, Promise<LayoutNode | null>>());
+  /** Workspaces loaded in the background before Code opened, whose saved shells still wait to start. */
+  const unstartedShells = useRef(new Set<string>());
 
   const patchRuntime = useCallback(
     (paneId: string, patch: Partial<Runtime>) => {
@@ -139,69 +147,125 @@ export function useWorkspacePanes({
     [fail, patchRuntime, setFocus, layoutsRef],
   );
 
+  const loadWorkspaceLayout = useCallback(
+    (workspace: Workspace): Promise<LayoutNode | null> => {
+      if (workspace.id in layoutsRef.current) return Promise.resolve(layoutsRef.current[workspace.id] ?? null);
+      const inflight = loadingLayouts.current.get(workspace.id);
+      if (inflight) return inflight;
+      const promise = call("layouts.get", workspace.id)
+        .catch(() => null)
+        .then((saved) => {
+          loadingLayouts.current.delete(workspace.id);
+          if (!workspacesRef.current.some((item) => item.id === workspace.id)) return null;
+          if (!(workspace.id in layoutsRef.current)) {
+            setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
+            const panes = saved ? panesOf(saved) : [];
+            const first = panes[0];
+            if (first) setFocus((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] ?? first.id }));
+            if (openedRef.current) {
+              for (const pane of panes) if (pane.launch.type === "shell") void startPane(workspace, pane);
+            } else if (panes.some((pane) => pane.launch.type === "shell")) {
+              unstartedShells.current.add(workspace.id);
+            }
+          }
+          return layoutsRef.current[workspace.id] ?? null;
+        });
+      loadingLayouts.current.set(workspace.id, promise);
+      return promise;
+    },
+    [layoutsRef, setLayouts, setFocus, startPane],
+  );
+
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
   // is the way in. A layout left open from last time brings its shells back.
   useEffect(() => {
-    if (!opened || !current || current.id in layoutsRef.current) return;
-    let cancelled = false;
-    void call("layouts.get", current.id)
-      .catch(() => null)
-      .then((saved) => {
-        if (cancelled || current.id in layoutsRef.current) return;
-        setLayouts((prev) => ({ ...prev, [current.id]: saved }));
-        if (!saved) return;
-        const panes = panesOf(saved);
-        const first = panes[0];
-        if (first) setFocus((prev) => ({ ...prev, [current.id]: prev[current.id] ?? first.id }));
-        for (const pane of panes) if (pane.launch.type === "shell") void startPane(current, pane);
-      });
-    return () => {
-      cancelled = true;
+    if (!opened || !current) return;
+    if (!(current.id in layoutsRef.current)) {
+      void loadWorkspaceLayout(current);
+      return;
+    }
+    if (unstartedShells.current.delete(current.id)) {
+      const saved = layoutsRef.current[current.id];
+      for (const pane of saved ? panesOf(saved) : []) {
+        if (pane.launch.type === "shell" && (runtimeRef.current[pane.id]?.state ?? "idle") === "idle") void startPane(current, pane);
+      }
+    }
+  }, [opened, current, loadWorkspaceLayout, layoutsRef, runtimeRef, startPane]);
+
+  function engineOfTitle(title: string): string {
+    return engines.find((engine) => title.startsWith(engine.label))?.id ?? defaultEngine ?? "";
+  }
+
+  // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
+  // not Code is on screen, so it is there when the person goes to look. Each one once.
+  const placed = useRef(new Set<string>());
+
+  /**
+   * Give `ptyId` a pane in `workspace`, or reuse the one that already holds it: an idle pane of
+   * the same CLI when there is one, else a new pane beside the focused pane.
+   */
+  function showSession(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch, opts: { focus?: boolean } = {}): string {
+    placed.current.add(ptyId);
+    const owns = (paneId: string) => runtimeRef.current[paneId]?.ptyId === ptyId;
+    const idle = (paneId: string) => {
+      const state = runtimeRef.current[paneId]?.state ?? "idle";
+      return state === "idle" || state === "exited";
     };
-  }, [opened, current, startPane, setLayouts, setFocus]);
+    const spot = placeSession(layoutsRef.current[workspace.id], launch, {
+      newId: newPaneId(),
+      focus: focusRef.current[workspace.id],
+      owns,
+      idle,
+    });
+    if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
+    if (runtimeRef.current[spot.paneId]?.ptyId !== ptyId || runtimeRef.current[spot.paneId]?.state !== "live") {
+      patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
+    }
+    // A pane placed on its own (a CLI Maestro started) doesn't take focus from the one being typed
+    // in; it is focused only in a workspace that has no focused pane yet.
+    const focus = opts.focus ?? true;
+    setFocus((prev) => (focus || !prev[workspace.id] ? { ...prev, [workspace.id]: spot.paneId } : prev));
+    return spot.paneId;
+  }
 
   // Jumping here for a specific session: focus its pane, or give it one. The switch to the
   // route's workspace lands a render later, so until then `current` is the one being left.
   useEffect(() => {
     if (!route?.ptyId || !current) return;
     if (route.workspaceId && route.workspaceId !== current.id) return;
-    const layout = layouts[current.id];
+    const layout = layoutsRef.current[current.id];
     if (layout === undefined) return;
-    const owner = (layout ? panesOf(layout) : []).find((pane) => runtime[pane.id]?.ptyId === route.ptyId);
+    const owner = (layout ? panesOf(layout) : []).find((pane) => runtimeRef.current[pane.id]?.ptyId === route.ptyId);
     if (owner) {
       setFocus((prev) => ({ ...prev, [current.id]: owner.id }));
-      terminals.current.get(owner.id)?.focus();
+      const handle = terminals.current.get(owner.id);
+      if (handle) handle.focus();
+      else setTimeout(() => terminals.current.get(owner.id)?.focus(), 0);
       replace({ view: "code", workspaceId: current.id });
       return;
     }
     const session = live.find((item) => item.ptyId === route.ptyId);
     if (!session) return;
-    adopt(current, session.ptyId, session.runId, session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) });
+    if (!route.workspaceId && session.workspaceId && session.workspaceId !== current.id && workspaces.some((item) => item.id === session.workspaceId)) {
+      replace({ view: "code", workspaceId: session.workspaceId, ptyId: route.ptyId });
+      return;
+    }
+    if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) {
+      replace({ view: "code", workspaceId: current.id });
+      return;
+    }
+    const paneId = showSession(
+      current,
+      session.ptyId,
+      session.runId,
+      session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) },
+      { focus: true },
+    );
+    setTimeout(() => terminals.current.get(paneId)?.focus(), 0);
     replace({ view: "code", workspaceId: current.id });
     // Adoption runs once per requested session.
-  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""], replace]);
+  }, [route?.ptyId, route?.workspaceId, current?.id, layouts[current?.id ?? ""], live, workspaces, replace]);
 
-  function engineOfTitle(title: string): string {
-    return engines.find((engine) => title.startsWith(engine.label))?.id ?? defaultEngine ?? "";
-  }
-
-  /** Give a session that is already running a pane: a new one beside the focused pane. */
-  function adopt(workspace: Workspace, ptyId: string, runId: string | null, launch: PaneLaunch) {
-    show(workspace, ptyId, runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id] }));
-  }
-
-  function show(workspace: Workspace, ptyId: string, runId: string | null, spot: { layout: LayoutNode; paneId: string }, opts: { focus?: boolean } = {}) {
-    if (spot.layout !== layoutsRef.current[workspace.id]) updateLayout(workspace.id, spot.layout);
-    patchRuntime(spot.paneId, { ptyId, runId, state: "live", exitText: null });
-    // A pane placed on its own (a CLI Maestro started) doesn't take focus from the one being typed
-    // in; it is focused only in a workspace that has no focused pane yet.
-    const focus = opts.focus ?? true;
-    setFocus((prev) => (focus || !prev[workspace.id] ? { ...prev, [workspace.id]: spot.paneId } : prev));
-  }
-
-  // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
-  // not Code is on screen, so it is there when the person goes to look. Each one once.
-  const placed = useRef(new Set<string>());
   useEffect(() => {
     for (const session of live) {
       if (!session.orchestrated || !session.workspaceId || placed.current.has(session.ptyId)) continue;
@@ -209,35 +273,20 @@ export function useWorkspacePanes({
       if (!workspace) continue;
       placed.current.add(session.ptyId);
       if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) continue;
-      const launch: PaneLaunch = { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) };
+      const launch: PaneLaunch = session.kind === "shell" ? { type: "shell" } : { type: "engine", engineId: session.programEngineId || engineOfTitle(session.title) };
       if (workspace.id in layoutsRef.current) {
-        place(workspace, session, launch);
+        showSession(workspace, session.ptyId, session.runId, launch, { focus: false });
         continue;
       }
       // Not loaded yet: load its saved panes first (and start their shells, as opening it would).
-      void call("layouts.get", workspace.id)
-        .catch(() => null)
-        .then((saved) => {
-          if (!(workspace.id in layoutsRef.current)) {
-            setLayouts((prev) => ({ ...prev, [workspace.id]: saved }));
-            if (opened) {
-              for (const pane of saved ? panesOf(saved) : []) if (pane.launch.type === "shell") void startPane(workspace, pane);
-            }
-          }
-          place(workspace, session, launch);
-        });
+      void loadWorkspaceLayout(workspace).then(() => {
+        if (!workspacesRef.current.some((item) => item.id === workspace.id)) return;
+        if (Object.values(runtimeRef.current).some((state) => state.ptyId === session.ptyId)) return;
+        showSession(workspace, session.ptyId, session.runId, launch, { focus: false });
+      });
     }
     // Only new sessions matter; the rest is read through refs.
-  }, [live, workspaces]);
-
-  /** Into a pane of the same CLI that has nothing running (left from last time), or a new one beside. */
-  function place(workspace: Workspace, session: LiveSession, launch: PaneLaunch) {
-    const idle = (paneId: string) => {
-      const state = runtimeRef.current[paneId]?.state ?? "idle";
-      return state === "idle" || state === "exited";
-    };
-    show(workspace, session.ptyId, session.runId, placeSession(layoutsRef.current[workspace.id], launch, { newId: newPaneId(), focus: focusRef.current[workspace.id], idle }), { focus: false });
-  }
+  }, [live, workspaces, loadWorkspaceLayout]);
 
   /** The first pane of a workspace whose panes were all closed. */
   function openFirst(workspace: Workspace, launch: PaneLaunch) {
@@ -260,7 +309,8 @@ export function useWorkspacePanes({
 
   async function closePane(workspace: Workspace, pane: PaneNode) {
     const state = runtime[pane.id];
-    if (state?.state === "live" && state.ptyId) {
+    const shared = Boolean(state?.ptyId && Object.entries(runtimeRef.current).some(([id, other]) => id !== pane.id && other.ptyId === state.ptyId && other.state === "live"));
+    if (state?.state === "live" && state.ptyId && !shared) {
       const ok = await confirm({
         title: t("code.close.title"),
         body: state.runId || live.find((session) => session.ptyId === state.ptyId)?.runId ? t("code.close.bodyRun") : t("code.close.bodyShell"),
@@ -342,6 +392,8 @@ export function useWorkspacePanes({
 
   /** A removed workspace's panes. */
   function forget(workspaceId: string) {
+    loadingLayouts.current.delete(workspaceId);
+    unstartedShells.current.delete(workspaceId);
     setLayouts((prev) => {
       const copy = { ...prev };
       delete copy[workspaceId];

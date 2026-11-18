@@ -1,4 +1,5 @@
 import type { OrchestratorTurn, VibyWord } from "../shared/orchestrator.js";
+import { teammateSummary } from "../shared/orchestrator-intel.js";
 import { speakable } from "./replies.js";
 import { floatFrame, VAD_FRAME, VAD_FRAME_BYTES, VAD_FRAME_MS, type SpeechDetector } from "./vad.js";
 import { BYTES_PER_SECOND, Endpointer, FRAME_BYTES, meterLevel, rms } from "./voice.js";
@@ -8,7 +9,7 @@ import { BYTES_PER_SECOND, Endpointer, FRAME_BYTES, meterLevel, rms } from "./vo
 
 const FRAME_MS = 30;
 /** A pause this long ends what is being said. Longer than dictation's: people think mid-sentence when they talk to someone. */
-export const CALL_SILENCE_MS = 900;
+export const CALL_SILENCE_MS = 700;
 /** Audio kept from before speech was noticed, so the first syllable isn't lost. */
 const PREROLL_MS = 450;
 /** Of the pause that ended it, this much stays on the end; whisper needs no more. */
@@ -211,7 +212,23 @@ const WORDS: Record<CallWord, string[]> = {
     ...["取消", "不", "不要", "算了", "停"],
   ],
   hangup: [
-    ...["hang up", "end call", "end the call", "goodbye"],
+    ...[
+      "hang up",
+      "hang up now",
+      "end call",
+      "end the call",
+      "end the call now",
+      "you can hang up",
+      "you can hang up now",
+      "you can end the call",
+      "you can end the call now",
+      "goodbye",
+      "talk to you later",
+      "talk soon",
+      "thats all for now",
+      "we are done",
+      "were done",
+    ],
     ...["auflegen", "anruf beenden", "tschüss", "auf wiedersehen"],
     ...["colgar", "cuelga", "terminar llamada", "adiós"],
     ...["raccrocher", "raccroche", "au revoir"],
@@ -233,12 +250,30 @@ const WORDS: Record<CallWord, string[]> = {
 
 const WORD_OF = new Map<string, CallWord>((Object.entries(WORDS) as Array<[CallWord, string[]]>).flatMap(([word, list]) => list.map((item) => [plain(item), word] as [string, CallWord])));
 
-/** Viby's name at either end ("Viby, go ahead", "cancel that, Vibey") is the person being polite, not part of the word. */
+/** Viby's name and polite wrappers at either end ("Viby, go ahead", "Alright thanks Viby, you can end the call now, thank you"). */
 const NAME = /^(?:hey |ok |okay )?(?:viby|vibey|vibe|maestro)\s+|\s+(?:viby|vibey|vibe|maestro|please)$/g;
+const POLITE_LEAD = /^(?:(?:alright|all right|ok|okay|hey|so|well)\s+)*(?:(?:thanks|thank you)\s+)*(?:(?:viby|vibey|vibe|maestro)\s+)?/;
+const POLITE_TAIL = /(?:\s+(?:viby|vibey|vibe|maestro|please|thanks|thank you|for now))+$/;
 
 export function callWord(said: string): CallWord | null {
   const text = plain(said);
-  return WORD_OF.get(text) ?? WORD_OF.get(text.replace(NAME, "").trim()) ?? null;
+  return WORD_OF.get(text) ?? WORD_OF.get(text.replace(NAME, "").trim()) ?? WORD_OF.get(text.replace(POLITE_LEAD, "").replace(POLITE_TAIL, "").trim()) ?? null;
+}
+
+const QUICK_SHOW = /^(?:(?:alright|all right|hey|ok|okay)[,.\s]+)?(?:(?:viby|vibey|vibe|maestro)[,.\s]+)?(?:please[,.\s]+)?(?:switch to|open up|open|show me|show)(?:\s+the)?\s+(.+?)(?:\s+(?:workspace|view|panel|page|tab))?(?:[,.\s]+please)?$/i;
+const COMPOUND = /\b(and|then|also|start|tell|ask|have|run|make|create|new|stop|close|kill|apply|discard|read|what|why|how|branch|copy|diff|file|in|with|for|on)\b/i;
+
+/**
+ * Target of a crisp, unambiguous navigation command ("switch to VibeForge", "open Tasks"), so a
+ * call can jump straight there without waiting on a planning turn; null when anything else is asked.
+ */
+export function quickNav(said: string): string | null {
+  const cleaned = said.replace(/^[,.\s]+|[.!?,\s]+$/g, "").trim();
+  const match = QUICK_SHOW.exec(cleaned);
+  if (!match) return null;
+  const target = match[1].replace(/[,.\s]+$/g, "").trim();
+  if (!target || target.split(/\s+/).length > 4 || COMPOUND.test(target)) return null;
+  return target;
 }
 
 // Whisper writes these for a cough, a click or a chair: the endings of the videos it learned from.
@@ -340,9 +375,10 @@ export function spokenAnswer(turn: OrchestratorTurn, lines: CallLines): string {
 export const READ_START = 900;
 
 export interface WordLines {
-  /** "{engine} in {workspace} finished its turn." and "… closed." */
+  /** "{engine} in {workspace} finished its turn.", "… closed.", and "… is waiting on you:" */
   finished: (who: { engine: string; workspace: string }) => string;
   ended: (who: { engine: string; workspace: string }) => string;
+  waiting?: (who: { engine: string; workspace: string }) => string;
   /** "It says: {reply}" */
   says: (reply: string) => string;
   /** A git summary ("2 commits · 3 files changed") in the person's language. */
@@ -357,16 +393,21 @@ export interface WordLines {
 const aloud = (text: string) => text.replace(/\s+·\s+/g, ", ");
 
 /**
- * What Viby says without being asked, as one thing to say: a note about a CLI with the start of
- * its answer, or the answer a read step fetched (its start, or within reason all of it). With
- * `brief`, for a call that can only show its words, an answer is cut to its first paragraph.
+ * What Viby says without being asked, as one thing to say: a note about a CLI with a natural
+ * teammate summary of its answer (or the prompt it waits on), or the answer a read step fetched.
  */
 export function spokenWord(word: VibyWord, lines: WordLines, brief = false): string {
+  if (word.kind === "hangup") return "";
   if (word.kind === "note") {
     const who = { engine: word.note.engine, workspace: aloud(word.note.workspace) };
+    if (word.note.kind === "waiting") {
+      const head = lines.waiting ? lines.waiting(who) : `${who.engine} in ${who.workspace} is waiting for you.`;
+      return word.note.reply ? `${head} ${word.note.reply}` : head;
+    }
     const parts = [word.note.kind === "finished" ? lines.finished(who) : lines.ended(who)];
     if (word.note.changes) parts.push(`${aloud(lines.changes(word.note.changes))}.`);
-    if (word.note.reply) parts.push(lines.says(word.note.reply));
+    const summary = teammateSummary(word.note.reply);
+    if (summary) parts.push(lines.says(summary));
     return parts.join(" ");
   }
   // A screen holds the CLI's frame and prompt box too: that is for the eye, on the plan's card.

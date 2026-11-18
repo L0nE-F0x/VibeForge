@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-11-18
+
+**2.22.0: faster, natural calls with Viby (warm voice, mute, barge-in while thinking, natural hang-up, and safe steps run at once); unblinded workspace and terminal inspection, step chaining, and full VibeForge workbench controls.**
+
+### Added
+
+- **Viby inspects workspaces, terminals, diffs and quotas, chains multi-step plans, answers TUI prompts, and drives the workbench.** New `inspect` steps read terminal screens, CLI replies, copy diffs, workspace git status/files, and plan limits/token usage in the same turn so Viby can diagnose errors and brainstorm with real context. Steps with `after: true` wait for the preceding CLI turn to settle before starting. Viby notices when a CLI is blocked on an interactive prompt (such as folder trust) and speaks up, `key` steps answer `y/n`, numbered menus, `Enter` or `Esc`, `shell` steps open terminals or run commands, and `workbench` steps create folders, open git branches, drive the browser dock preview, split or zoom panes, open diffs, and mark runs reviewed.
+- **Mute, natural hang-up, and barge-in while Viby thinks during a call.** The call bar now has **Mute** / **Unmute**, talking while Viby is still thinking cuts the turn short to hear what you said instead, and natural goodbyes ("you can end the call now, Viby, thank you" — alone or alongside a final request) sign off and hang up automatically unless you speak up again before it finishes.
+
+### Changed
+
+- **Calls act at once on safe steps and answer faster.** During a call, safe or isolated steps (starting a CLI in its own review copy, telling a CLI, creating a workspace, running a task or routine, and crisp "switch to / open …" navigation) run immediately without waiting for "go", while stopping a CLI, applying or discarding a copy, or editing uncommitted work in place still wait for confirmation. Piper stays warm in memory for the length of a call, Whisper skips slow temperature-fallback retries and listens for current workspace files, branches, tasks and routines, and Claude Code defaults to Haiku during calls when no planner model is pinned.
+
+### Fixed
+
+- **Starting a CLI from a call with Viby no longer opens two panes showing the same terminal.** Following the plan into Code and placing the new CLI raced to load the workspace's panes and each gave the one PTY a pane of its own, so both panes mirrored one session and closing either stopped the other.
+
 ## [2.21.0] - 2026-11-18
 
 **2.21.0: one phone page for all your computers, set up by scanning a QR code; search, filter, sort and batch remove for a long workspace list; and a key to call Viby.**

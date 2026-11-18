@@ -290,6 +290,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "call.get": () => call.get(),
     "call.start": () => call.start(),
     "call.stop": () => call.stop(),
+    "call.mute": (muted) => call.mute(typeof muted === "boolean" ? muted : undefined),
 
     // Anything the window writes is a person: typing, a paste, dictation, the Write box.
     "pty.write": (ptyId, data) => {

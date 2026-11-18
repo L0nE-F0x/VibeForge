@@ -100,11 +100,11 @@ export function whisperThreads(cpus: number): number {
 }
 
 export function serverArgs(opts: { model: string; language: string; port: number; threads: number }): string[] {
-  return ["-m", opts.model, "-l", opts.language, "-t", String(opts.threads), "--host", "127.0.0.1", "--port", String(opts.port), "-nt"];
+  return ["-m", opts.model, "-l", opts.language, "-t", String(opts.threads), "--host", "127.0.0.1", "--port", String(opts.port), "-nt", "-nf"];
 }
 
 export function cliArgs(opts: { model: string; file: string; language: string; prompt: string; threads: number }): string[] {
-  const args = ["-m", opts.model, "-f", opts.file, "-l", opts.language, "-t", String(opts.threads), "-nt", "-np"];
+  const args = ["-m", opts.model, "-f", opts.file, "-l", opts.language, "-t", String(opts.threads), "-nt", "-np", "-nf"];
   if (opts.prompt) args.push("--prompt", opts.prompt);
   return args;
 }
