@@ -90,27 +90,34 @@ export function useCallToggle(): () => void {
   }, [t, go, push, fail]);
 }
 
-/** In the rail, so a call starts and ends from any view, and shows wherever you are while it is on. */
-export function CallRailButton() {
+/**
+ * Viby's one door in the rail, from any view. It opens the quick bar, where you type what to start or
+ * press Call; in Viby's own tab (where the bar has nothing to add) it starts the call; on a call it
+ * hangs up and shows how loud you are.
+ */
+export function VibyRailButton({ inVibyTab, onOpen }: { inVibyTab: boolean; onOpen: () => void }) {
   const t = useT();
   const current = useCall();
   const toggle = useCallToggle();
-  // The rail is always there, so the key works from any view.
+  // The rail is always there, so the call key works from any view.
   useEffect(() => {
     window.addEventListener(TOGGLE_CALL_EVENT, toggle);
     return () => window.removeEventListener(TOGGLE_CALL_EVENT, toggle);
   }, [toggle]);
+  const opens = !current.on && !inVibyTab;
+  const tip = current.on ? t("call.hangUpTip") : inVibyTab ? t("call.startTip") : t("viby.railTip");
+  const kbd = shortcutKeys(opens ? "app.orchestrator" : "app.call");
   return (
     <button
       type="button"
-      className={`rail-btn call-btn${current.on ? " on" : ""}`}
+      className={`rail-btn viby-btn${current.on ? " on" : ""}`}
       aria-pressed={current.on}
-      aria-label={current.on ? t("call.hangUp") : t("call.start")}
-      {...tipProps(current.on ? t("call.hangUpTip") : t("call.startTip"), { kbd: shortcutKeys("app.call"), side: "right" })}
-      onClick={toggle}
+      aria-label={current.on ? t("call.hangUp") : inVibyTab ? t("call.start") : t("viby.railTip")}
+      {...tipProps(tip, { kbd, side: "right" })}
+      onClick={opens ? onOpen : toggle}
     >
-      <Phone size={19} strokeWidth={1.9} />
-      <span>{current.on ? t("call.railOn") : t("call.rail")}</span>
+      <VibySprite mood={callMood(current)} size={19} level={current.level} />
+      <span>{current.on ? t("call.railOn") : t("viby.rail")}</span>
       {current.on && (
         <i className="call-level" aria-hidden>
           <i style={{ transform: `scaleX(${current.phase === "listening" || current.phase === "hearing" ? current.level : 0})` }} />

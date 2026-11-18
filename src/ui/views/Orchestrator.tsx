@@ -227,7 +227,8 @@ export function OrchestratorView() {
   const seesLine = useSeesLine(t);
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const [reviewAnchor, setReviewAnchor] = useState<HTMLElement | null>(null);
-  const [typingOpen, setTypingOpen] = useState(() => Boolean(readDraft<string>(DRAFT_KEY)?.trim()));
+  // Typing and calling sit side by side: the message box is open whenever there is no call.
+  const [typingOpen, setTypingOpen] = useState(() => !callState.on || Boolean(readDraft<string>(DRAFT_KEY)?.trim()));
   const [voiceReady, setVoiceReady] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -236,10 +237,12 @@ export function OrchestratorView() {
       .catch(() => setVoiceReady(null));
   }, [callState.on]);
 
-  // Starting a call tucks the keyboard box away unless a half-typed draft is sitting in it.
+  // Starting a call tucks the keyboard box away unless a half-typed draft is sitting in it;
+  // hanging up brings it back.
   const prevOn = useRef(callState.on);
   useEffect(() => {
     if (callState.on && !prevOn.current && !readDraft<string>(DRAFT_KEY)?.trim()) setTypingOpen(false);
+    if (!callState.on && prevOn.current) setTypingOpen(true);
     prevOn.current = callState.on;
   }, [callState.on]);
 

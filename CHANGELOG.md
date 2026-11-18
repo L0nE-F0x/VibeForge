@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **One button for Viby.** **Call** at the foot of the rail is now **Ask**, with Viby's pixel V. Clicking it opens Viby's bar over any view, where you type what to start or press **Call Viby**. In Viby's own tab it starts the call. On a call it reads **On call** and hangs up, as before. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> work as they did.
+- **Viby's tab has the message box open next to Call Viby.** Typing no longer hides behind the keyboard icon. A call still tucks it away, and hanging up brings it back.
+- **Viby's pixel character is redrawn.** Its face is a rimmed screen now, not an open notch, with eyes that still read at rail size and a mouth that moves while it speaks. The tips of the V light up while it listens, its eyes glance around while it thinks, and the spark goes out when you mute. Its body holds still between poses, so it no longer jitters.
+- **The tour's call step is up to date.** It points at **Ask** and says that safe steps happen at once on a call and that more than one speech model can hear you.
+
 ## [2.23.0] - 2026-11-18
 
 **2.23.0: Viby's panel is the call, with a pixel V and chips you can tap; faster speech models that stay on this machine; and a workspace list you can filter, sort and group.**

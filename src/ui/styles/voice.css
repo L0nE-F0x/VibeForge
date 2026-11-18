@@ -148,7 +148,7 @@
 }
 
 /* The rail's Call button while a call is on: lit, with the microphone's level under its label. */
-.rail-btn.call-btn.on {
+.rail-btn.viby-btn.on {
   color: var(--accent);
   background: var(--sel-fill);
   border-color: var(--sel-line);

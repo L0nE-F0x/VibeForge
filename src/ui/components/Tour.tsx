@@ -160,7 +160,7 @@ const STEPS: Step[] = [
     title: "tour.maestro.title",
     body: "tour.maestro.body",
     route: { view: "orchestrator" },
-    target: [".orch-talk", ".stage"],
+    target: [".viby-view", ".stage"],
     side: "left",
     icon: Workflow,
     keys: [[shortcutKeys("app.orchestrator"), "shortcuts.orchestrator"]],
@@ -169,7 +169,7 @@ const STEPS: Step[] = [
     id: "call",
     title: "tour.call.title",
     body: "tour.call.body",
-    target: [".rail-foot .call-btn"],
+    target: [".rail-foot .viby-btn"],
     side: "right",
     icon: Phone,
     keys: [
