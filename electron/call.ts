@@ -8,12 +8,15 @@ import type { TeamService } from "../src/core/team-service.js";
 import type { TalkOver } from "../src/core/types.js";
 import type { CallPhase, CallState } from "../src/shared/api.js";
 import type { Looking, VibyWord } from "../src/shared/orchestrator.js";
+import { BYTES_PER_SECOND } from "../src/core/voice.js";
 import { vocabularyPrompt } from "../src/shared/dictation.js";
 import type { Ear, Voice } from "./voice.js";
 
 /** After Viby stops talking, the room rings on for a moment; the microphone opens after it. */
 const AFTER_SPEECH_MS = 250;
 const LEVEL_EVERY_MS = 60;
+const LIVE_PEEK_EVERY_MS = 650;
+const LIVE_PEEK_MIN_BYTES = Math.round(0.55 * BYTES_PER_SECOND);
 
 /** What Viby said lately is kept this long, to tell its echo from the person. */
 const SPOKEN_KEEP_MS = 60_000;
@@ -71,12 +74,18 @@ export class Call {
   private heardItself = false;
   /** What Viby said lately and when, to know its own words when they come back through the microphone. */
   private spokenLately: Array<{ line: string; from: number; until: number }> = [];
+  /** Partial words recognized while the person is still mid-sentence. */
+  private liveHeard = "";
+  private peeking = false;
+  private lastPeekAt = 0;
+  private speechStartedAt = 0;
+  private speechDurationMs = 0;
   /** Goes up when a call ends, so an answer that arrives afterwards is not spoken into the next one. */
   private epoch = 0;
 
   constructor(
     private readonly opts: {
-      voice: Pick<Voice, "openEar" | "transcribe" | "status" | "voiceFor" | "speaker" | "dictating">;
+      voice: Pick<Voice, "openEar" | "transcribe" | "status" | "voiceFor" | "speaker" | "dictating"> & Partial<Pick<Voice, "transcribeLive">>;
       service: () => CallService | null;
       /** Where the person is in the window, so "this one" means the terminal in front of them. */
       looking: () => Looking | null;
@@ -101,6 +110,9 @@ export class Call {
       talkOver: this.canTalkOver(),
       heardItself: this.heardItself,
       muted: this.muted,
+      ...(this.liveHeard ? { liveHeard: this.liveHeard } : {}),
+      ...(this.speechStartedAt ? { speechStartedAt: this.speechStartedAt } : {}),
+      ...(this.speechDurationMs ? { speechDurationMs: this.speechDurationMs } : {}),
     };
   }
 
@@ -155,6 +167,11 @@ export class Call {
     this.interrupted = false;
     this.heardItself = false;
     this.spokenLately = [];
+    this.liveHeard = "";
+    this.peeking = false;
+    this.lastPeekAt = 0;
+    this.speechStartedAt = 0;
+    this.speechDurationMs = 0;
     this.phase = "listening";
     this.level = 0;
     const epoch = this.epoch;
@@ -168,7 +185,9 @@ export class Call {
           return;
         }
         const phase: CallPhase = hearing ? "hearing" : "listening";
+        if (phase === "listening" && this.liveHeard) this.liveHeard = "";
         const now = Date.now();
+        if (phase === "hearing") void this.peekWords(epoch);
         if (phase === this.phase && now - this.lastLevelAt < LEVEL_EVERY_MS) return;
         this.lastLevelAt = now;
         this.phase = phase;
@@ -187,6 +206,17 @@ export class Call {
     this.ear = this.opts.voice.openEar(events, this.mode === "auto");
     const voice = this.voiceFile();
     if (voice) this.opts.voice.speaker.warm?.(voice);
+    this.opts.voice.speaker.progress?.((info) => {
+      if (epoch !== this.epoch) return;
+      if (!info) {
+        this.speechStartedAt = 0;
+        this.speechDurationMs = 0;
+        return;
+      }
+      this.speechStartedAt = info.startedAt;
+      this.speechDurationMs = info.durationMs;
+      if (this.phase === "speaking" && info.durationMs > 0) this.opts.send(this.get());
+    });
     // What Viby starts or tells during the call comes up on screen, as it would for someone watching,
     // and what it has to say by itself is said here.
     service.orchestratorCall((word) => this.hear(word));
@@ -202,6 +232,7 @@ export class Call {
     if (next === this.muted) return this.get();
     this.muted = next;
     if (this.muted) {
+      this.liveHeard = "";
       this.setDeaf(true);
       if (!this.busy) {
         this.phase = "listening";
@@ -231,7 +262,12 @@ export class Call {
     this.muted = false;
     this.earDeaf = false;
     this.hangingUp = false;
+    this.liveHeard = "";
+    this.peeking = false;
+    this.speechStartedAt = 0;
+    this.speechDurationMs = 0;
     this.opts.service()?.orchestratorCall(null);
+    this.opts.voice.speaker.progress?.(null);
     this.error = error;
     this.phase = "listening";
     this.level = 0;
@@ -240,6 +276,29 @@ export class Call {
     this.opts.voice.speaker.stop();
     this.opts.log.info(error ? `Call: ended, ${error}` : "Call: ended");
     this.changed();
+  }
+
+  /** Stream partial words while someone is mid-sentence when `whisper-server` is warm. */
+  private async peekWords(epoch: number): Promise<void> {
+    if (this.peeking || this.busy || this.muted || !this.ear?.peek || !this.opts.voice.transcribeLive) return;
+    const now = Date.now();
+    if (now - this.lastPeekAt < LIVE_PEEK_EVERY_MS) return;
+    const pcm = this.ear.peek();
+    if (pcm.length < LIVE_PEEK_MIN_BYTES) return;
+    const service = this.opts.service();
+    if (!service) return;
+    this.peeking = true;
+    this.lastPeekAt = now;
+    try {
+      const text = await this.opts.voice.transcribeLive(pcm, this.vocabulary(service));
+      if (epoch !== this.epoch || this.busy || this.muted || this.phase !== "hearing") return;
+      if (text && !phantom(text, pcm.length / BYTES_PER_SECOND) && text !== this.liveHeard) {
+        this.liveHeard = text;
+        this.opts.send(this.get());
+      }
+    } finally {
+      this.peeking = false;
+    }
   }
 
   /** Names whisper should expect: Viby, agents, CLIs, workspaces, branches, tasks, routines, and files in view. */
@@ -305,6 +364,7 @@ export class Call {
     await this.turn(async (live) => {
       this.move("transcribing");
       const dictation = await this.opts.voice.transcribe(pcm, this.vocabulary(service), "call");
+      this.liveHeard = "";
       if (!live() || !dictation.text || phantom(dictation.text, dictation.seconds)) return;
       // Begun while Viby was still speaking: its own words coming back are not the person's.
       const over = this.saidSince(speechBegan(heardAt, dictation.seconds));
@@ -438,8 +498,13 @@ export class Call {
     // Only what is said with the microphone open can come back through it.
     const spoke = { line, from: Date.now(), until: Number.POSITIVE_INFINITY };
     if (this.open) this.spokenLately.push(spoke);
-    await this.opts.voice.speaker.speak(line, voice);
-    spoke.until = Date.now();
+    try {
+      await this.opts.voice.speaker.speak(line, voice);
+    } finally {
+      spoke.until = Date.now();
+      this.speechStartedAt = 0;
+      this.speechDurationMs = 0;
+    }
     const open = this.open;
     this.open = false;
     if (epoch !== this.epoch || this.interrupted) return;

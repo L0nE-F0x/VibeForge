@@ -500,10 +500,15 @@ export interface MenuItem {
   disabled?: boolean;
   /** A step inside the menu (picking where to go next), so choosing it doesn't close the menu. */
   keepOpen?: boolean;
-  /** One of a set of choices: true shows a tick before it, false keeps the room for one. */
+  /** A tick before the item: true shows it, false keeps the room for one. */
   checked?: boolean;
+  /** Overrides `menuitemradio` when `checked` represents an independent toggle (`menuitemcheckbox`). */
+  role?: "menuitemradio" | "menuitemcheckbox";
 }
 
+export type MenuEntry = MenuItem | "sep" | { heading: ReactNode };
+
+const MENU_FOCUSABLE = ':is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):not(:disabled)';
 const POPOVER_FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /**
@@ -563,7 +568,7 @@ export function Popover({
     entered.current = true;
     const active = document.activeElement;
     if (!active || !(active === anchor || anchor.contains(active))) return;
-    const first = node.querySelector<HTMLElement>(':is([role="menuitem"], [role="menuitemradio"]):not(:disabled)') ?? node.querySelector<HTMLElement>(POPOVER_FOCUSABLE);
+    const first = node.querySelector<HTMLElement>(MENU_FOCUSABLE) ?? node.querySelector<HTMLElement>(POPOVER_FOCUSABLE);
     first?.focus({ preventScroll: true });
   }, [placed, anchor]);
   // Tab past its last control (or Shift+Tab past its first) closes it, and focus goes back to its button.
@@ -599,13 +604,13 @@ export function Popover({
   );
 }
 
-export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClose: () => void }) {
+export function Menu({ items, onClose }: { items: MenuEntry[]; onClose: () => void }) {
   // ↑/↓ move between its items (round the ends), Home/End go to the first and last; the Popover
   // puts focus on the first as it opens.
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     if (!step && event.key !== "Home" && event.key !== "End") return;
-    const entries = [...event.currentTarget.querySelectorAll<HTMLElement>(':is([role="menuitem"], [role="menuitemradio"]):not(:disabled)')];
+    const entries = [...event.currentTarget.querySelectorAll<HTMLElement>(MENU_FOCUSABLE)];
     if (!entries.length) return;
     event.preventDefault();
     const at = entries.indexOf(document.activeElement as HTMLElement);
@@ -617,11 +622,15 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
       {items.map((item, index) =>
         item === "sep" ? (
           <div key={`sep-${index}`} className="menu-sep" />
+        ) : "heading" in item ? (
+          <div key={`head-${index}`} className="list-label menu-label" role="presentation">
+            {item.heading}
+          </div>
         ) : (
           <button
             key={index}
             type="button"
-            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            role={item.checked === undefined ? "menuitem" : (item.role ?? "menuitemradio")}
             aria-checked={item.checked}
             className={cx("menu-item", item.accent && "accent")}
             disabled={item.disabled}
@@ -634,7 +643,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
             {item.checked !== undefined && (item.checked ? <Check size={14} className="accent-text" /> : <span style={{ width: 14, flex: "none" }} />)}
             {item.icon && <item.icon size={14} />}
             <span className="grow truncate">{item.label}</span>
-            {item.hint && <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>{item.hint}</span>}
+            {item.hint !== undefined && <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>{item.hint}</span>}
           </button>
         ),
       )}
@@ -643,7 +652,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
 }
 
 /** A button that opens a menu. */
-export function MenuButton({ items, children, ...button }: Omit<ButtonProps, "onClick"> & { items: Array<MenuItem | "sep"> }) {
+export function MenuButton({ items, children, ...button }: Omit<ButtonProps, "onClick"> & { items: MenuEntry[] }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   return (
     <>

@@ -1722,6 +1722,11 @@ describe("Viby speaks up", () => {
     expect(promptsSaw[1]).toContain("hello world");
     expect(promptsSaw[1]).toContain("Claude: 42% used");
     expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("hello.txt says hello world, and Claude is at 42%.");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.checks?.map((c) => [c.kind, c.label])).toEqual([
+      ["inspect", workspace.name],
+      ["inspect", "plan limits"],
+    ]);
+    expect(ctx.svc.orchestratorView().activity).toBeUndefined();
 
     // 2. First-screen waiting-prompt detection + answering with a `key` step + chained `after: true` shell step!
     const planQueue: Array<Record<string, unknown>> = [];
@@ -1781,6 +1786,26 @@ describe("Viby speaks up", () => {
       { kind: "browser-open", workspaceId: workspace.id, url: "http://localhost:5173" },
       { kind: "pane", workspaceId: workspace.id, action: "split-right" },
     ]);
+
+    // 4. While looking at Viby's own panel in a call, starting a CLI stays in Viby; an explicit `show` step navigates.
+    const shownRoutes: Array<Record<string, unknown>> = [];
+    ctx.host.show = (route) => shownRoutes.push(route);
+    ctx.svc.orchestratorLooking({ view: "orchestrator" });
+    planQueue.push({
+      say: "Started Grok on a branch.",
+      steps: [{ kind: "start", engine: "grok", workspace: workspace.name }],
+    });
+    await ctx.svc.orchestratorAsk("start grok", { view: "orchestrator" });
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(shownRoutes).toEqual([]);
+
+    planQueue.push({
+      say: "Opening Tasks.",
+      steps: [{ kind: "show", target: "tasks" }],
+    });
+    await ctx.svc.orchestratorAsk("open tasks", { view: "orchestrator" });
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(shownRoutes).toEqual([{ view: "tasks" }]);
 
     for (const live of ctx.svc.listLive()) await ctx.svc.killPty(live.ptyId);
     await until(() => ctx.svc.listLive().length === 0);

@@ -166,6 +166,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "engines.save": (rows) => s().saveEngines(rows),
 
     "workspaces.list": () => s().listWorkspaces(),
+    "workspaces.status": () => s().summarizeWorkspaces(),
     "workspaces.add": (folder) => s().addWorkspace(folder),
     "workspaces.remove": (id) => s().removeWorkspace(id),
     "workspaces.select": (id) => s().selectWorkspace(id),
@@ -241,6 +242,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       const text = (value: unknown) => (typeof value === "string" && value.length <= 200 ? value : undefined);
       const view = looking && typeof looking === "object" ? text((looking as Looking).view) : undefined;
       ctx.looking = view ? { view, workspaceId: text((looking as Looking).workspaceId), ptyId: text((looking as Looking).ptyId) } : null;
+      ctx.service?.orchestratorLooking(ctx.looking);
     },
     "orchestrator.stopThinking": () => s().orchestratorStopThinking(),
     "orchestrator.models": (engineId) => s().orchestratorModels(String(engineId ?? "")),

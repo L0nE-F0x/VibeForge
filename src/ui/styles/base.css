@@ -140,6 +140,14 @@ h3,
   fill: var(--accent);
 }
 
+.px-visor {
+  fill: var(--bg-deep);
+}
+
+.px-eye {
+  fill: var(--fg);
+}
+
 input,
 textarea,
 select,

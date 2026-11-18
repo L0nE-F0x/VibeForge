@@ -127,6 +127,8 @@ export interface Ear {
   /** Stop passing on what is heard (Viby is thinking or speaking), or start again. */
   deaf(on: boolean): void;
   close(): void;
+  /** Audio of the current utterance while someone is still speaking; empty otherwise. */
+  peek?: () => Buffer;
   /** It listens for speech itself (the Silero detector), not just for loudness. */
   readonly detects: boolean;
   /** PipeWire is taking the speakers' sound out of what it hears. */
@@ -495,6 +497,26 @@ export class Voice {
     return Boolean(pickModel(this.findModels(), settings.model, settings.language, backends));
   }
 
+  /**
+   * Fast partial words while someone is still speaking in a call: asks `whisper-server` only when
+   * it is already warm in memory, without writing files or logging partial phrases.
+   * A sherpa-onnx model has no warm server, so a call on one of those waits for the full phrase.
+   */
+  async transcribeLive(pcm: Buffer, prompt = ""): Promise<string> {
+    const server = this.server;
+    if (!server || server.port <= 0 || server.child.exitCode !== null || this.serverUses > 0) return "";
+    const bin = this.whisper().server;
+    if (!bin) return "";
+    const audio = pcm.subarray(0, pcm.length - (pcm.length % 2));
+    if (audio.length / BYTES_PER_SECOND < MIN_SECONDS || peakLoudness(audio) < SILENCE_RMS) return "";
+    try {
+      const raw = await this.viaServer(bin, server.model, server.language, audio, prompt);
+      return cleanTranscript(raw);
+    } catch {
+      return "";
+    }
+  }
+
   /** What whisper or sherpa-onnx heard in `pcm`, tidied. */
   private async words(pcm: Buffer, prompt: string, seconds: number, since: number, from: string): Promise<string> {
     const status = this.status();
@@ -599,6 +621,7 @@ export class Voice {
         this.closeEar(ear);
         this.opts.log.info("Voice: the call's microphone closed");
       },
+      peek: () => (ear.deaf || this.recording ? Buffer.alloc(0) : ear.segmenter.peek()),
       get detects() {
         return ear.segmenter.detects;
       },

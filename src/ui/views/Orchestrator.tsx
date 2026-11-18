@@ -1,34 +1,87 @@
-import { Check, CircleAlert, Clock, CornerDownLeft, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Settings as SettingsIcon, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
+import {
+  ArrowUpRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Clock,
+  CornerDownLeft,
+  ExternalLink,
+  FileDiff,
+  FolderPlus,
+  GitBranch,
+  GitMerge,
+  Keyboard,
+  ListTodo,
+  MessageSquare,
+  Mic,
+  MicOff,
+  Pencil,
+  Phone,
+  PhoneOff,
+  Play,
+  RotateCcw,
+  Search,
+  Square,
+  SquareTerminal,
+  Trash2,
+  Volume2,
+  X,
+} from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
-import { effortLevels, launchKind, takesModel, cleanModel } from "../../shared/launch-options.js";
-import { canOrchestrate, KNOWN_MODELS, orchestratorVoiceWords, plannedId, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../shared/orchestrator.js";
-import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
-import { usePtyAttention } from "../attention.js";
-import { CallButton } from "../call.js";
-import { coreText } from "../core-text.js";
+import type {
+  CallState,
+  Engine,
+  LiveSession,
+  MaestroNote,
+  OrchestratorActivity,
+  OrchestratorCheck,
+  OrchestratorSettings,
+  OrchestratorStep,
+  OrchestratorTurn,
+  OrchestratorView as View,
+  StepIssue,
+  StepPatch,
+  Workspace,
+} from "../../shared/api.js";
+import { cleanModel, effortLevels, launchKind, takesModel } from "../../shared/launch-options.js";
+import {
+  brainKind,
+  canOrchestrate,
+  KNOWN_MODELS,
+  orchestratorVoiceWords,
+  plannedId,
+  plannerFor,
+  stepIssue,
+  withPlannedWorkspaces,
+  type PlanContext,
+} from "../../shared/orchestrator.js";
+import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
+import { CallButton, callMood, METER_CELLS, useCall, useCallToggle } from "../call.js";
+import { VibySprite } from "../components/Pixel.js";
 import { Composer } from "../components/Session.js";
-import { Button, Chip, Empty, Logo, Segmented, Select, Spinner, useOverlayStack } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
-import { CopyActions, CopyList, CopySheet } from "./OrchestratorCopies.js";
-import { useT, type Key } from "../i18n/index.js";
-import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
+import { Button, Chip, Input, Popover, Select, Spinner, useOverlayStack } from "../components/ui.js";
+import { coreText } from "../core-text.js";
+import { readDraft } from "../drafts.js";
+import { useT, type Key, type Translator } from "../i18n/index.js";
+import { overlayOpen } from "../overlays.js";
 import { VIEWS } from "../rail.js";
 import { shortcutKeys } from "../shortcuts.js";
-import { useDictateKeys } from "../voice.js";
+import { useAction, useNav, useOverlay, useToast } from "../state.js";
+import { CopyList, CopySheet } from "./OrchestratorCopies.js";
 
-// Maestro: say or type what to start where, and the planner (the CLI picked in Settings, or the
-// first one here that can plan) turns it into a plan that VibeForge carries out. The full view has the
-// conversation and the team; Ctrl+Shift+O opens the same conversation over any view.
+// Viby: a voice-call-first panel where the call is the whole panel, words land live as spoken,
+// active work shows as a single thin line, and completed steps settle into tappable chips under
+// Viby's reply. Ctrl+Shift+O opens a compact keyboard-first drawer over Code sharing the same thread.
 
 export const OPEN_ORCHESTRATOR_EVENT = "vibeforge:open-orchestrator";
 const DRAFT_KEY = "orchestrator";
 
-/** Put the bar away: "Open in Code" on the bar opens the terminal, so the bar mustn't stay over it. */
+/** Put the Ctrl+Shift+O bar away when a chip inside it jumps to a pane in Code. */
 const LeaveBar = createContext<(() => void) | null>(null);
 
-export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
+export { useOrchestrator };
 
 /** A coding CLI: a run VibeForge started, or one typed into a shell. */
 function isCodingCli(session: LiveSession): boolean {
@@ -47,8 +100,22 @@ function usePlanContext(): { context: PlanContext; ready: boolean } {
     return {
       workspaces: (workspaces ?? []).map((item) => ({ id: item.id, name: item.name, folder: item.path, git: true })),
       engines: (engines ?? []).map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
-      running: (live ?? []).filter(isCodingCli).map((item) => ({ id: item.ptyId, engine: item.program || item.title, workspace: (item.workspaceId && names.get(item.workspaceId)) || item.title, folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
-      copies: (copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: (item.workspaceId && names.get(item.workspaceId)) || item.workspaceId })),
+      running: (live ?? [])
+        .filter(isCodingCli)
+        .map((item) => ({
+          id: item.ptyId,
+          engine: item.program || item.title,
+          workspace: (item.workspaceId && names.get(item.workspaceId)) || item.title,
+          folder: item.cwd,
+          working: Boolean(item.working),
+          orchestrated: Boolean(item.orchestrated),
+        })),
+      copies: (copies ?? []).map((item) => ({
+        id: item.id,
+        name: item.name,
+        branch: item.branch,
+        workspace: (item.workspaceId && names.get(item.workspaceId)) || item.workspaceId,
+      })),
     };
   }, [workspaces, engines, live, copies]);
   return { context, ready };
@@ -65,12 +132,10 @@ const ISSUE_KEY: Record<StepIssue, Key> = {
   copy: "orch.issue.copy",
 };
 
-/** What stands in a task's or routine's way says so in its own words; the rest as ISSUE_KEY has it. */
 function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
   if (step.kind === "task" && issue === "target") return "orch.issue.task";
   if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
-  // A show step with nothing to show names no workspace to pick: it could have been a CLI or a view.
   if (step.kind === "show" && issue === "workspace") return "orch.issue.show";
   return ISSUE_KEY[issue];
 }
@@ -88,7 +153,6 @@ function otherStepKey(step: OrchestratorStep): Key {
   return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
 }
 
-/** A live CLI as a person knows it: "Claude Code · VibeForge · fix-tray". */
 function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[]): string {
   if (!session) return "";
   const name = session.program || session.title.split(" · ")[0] || session.title;
@@ -96,82 +160,258 @@ function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[])
   return where ? `${name} · ${where}` : session.title;
 }
 
-// ------------------------------------------------------------------ the full view
+function workingLineText(activity: OrchestratorActivity | null | undefined, t: Translator): string {
+  if (!activity || !activity.label) return t("orch.work.thinking");
+  const target = activity.label;
+  switch (activity.kind) {
+    case "inspect":
+      return t("orch.work.inspect", { target });
+    case "lookup":
+      return t("orch.work.lookup", { target });
+    case "start":
+      return t("orch.work.start", { target });
+    case "workspace":
+      return t("orch.work.workspace", { target });
+    case "tell":
+      return t("orch.work.tell", { target });
+    case "read":
+      return t("orch.work.read", { target });
+    case "shell":
+      return t("orch.work.shell", { target });
+    case "apply":
+      return t("orch.work.apply", { target });
+    case "discard":
+      return t("orch.work.discard", { target });
+    case "stop":
+      return t("orch.work.stop", { target });
+    case "show":
+      return t("orch.work.show", { target });
+    default:
+      return t("orch.work.other", { target });
+  }
+}
+
+function shortBranch(branch: string): string {
+  return branch.replace(/^vibeforge\//, "");
+}
+
+/** Short summary of what Viby can currently see on this machine, for the empty call state. */
+function useSeesLine(t: Translator): string {
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const copyIds = new Set(copies.map((item) => item.openedWorkspaceId).filter(Boolean));
+  const ownWorkspaces = workspaces.filter((item) => !copyIds.has(item.id));
+  const clis = live.filter(isCodingCli);
+  if (ownWorkspaces.length === 0 && clis.length === 0 && copies.length === 0) return t("orch.sees.empty");
+  const parts = [
+    t.count("orch.sees.workspaces", ownWorkspaces.length),
+    clis.length > 0 ? t.count("orch.sees.clis", clis.length) : t("orch.sees.noClis"),
+    ...(copies.length > 0 ? [t.count("orch.reviewCount", copies.length)] : []),
+  ];
+  return t("orch.seesPrefix", { items: parts.join(" · ") });
+}
+
+// ------------------------------------------------------------------ the full Vibe tab
 
 export function OrchestratorView() {
   const t = useT();
-  const { route } = useNav();
+  const { route, go } = useNav();
+  const { fail } = useToast();
   const view = useOrchestrator().data;
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
-  const [saveMode] = useAction(async (mode: "plan" | "go") => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, mode } }), t("settings.saveFailed"));
-  const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "", effort: "" } }), t("settings.saveFailed"));
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const callState = useCall();
+  const toggleCall = useCallToggle();
+  const seesLine = useSeesLine(t);
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
-  const planners = engines.filter((engine) => canOrchestrate(engine));
-  // The planner in use: the one picked, or until then the first one on this machine.
-  const engineId = view?.engineId ?? settings?.orchestrator.engine ?? "";
+  const [reviewAnchor, setReviewAnchor] = useState<HTMLElement | null>(null);
+  const [typingOpen, setTypingOpen] = useState(() => Boolean(readDraft<string>(DRAFT_KEY)?.trim()));
+  const [voiceReady, setVoiceReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void call("voice.status")
+      .then((status) => setVoiceReady(status.ready))
+      .catch(() => setVoiceReady(null));
+  }, [callState.on]);
+
+  // Starting a call tucks the keyboard box away unless a half-typed draft is sitting in it.
+  const prevOn = useRef(callState.on);
+  useEffect(() => {
+    if (callState.on && !prevOn.current && !readDraft<string>(DRAFT_KEY)?.trim()) setTypingOpen(false);
+    prevOn.current = callState.on;
+  }, [callState.on]);
+
+  // Typing a printable key anywhere in the Vibe panel opens the message box when you can't talk.
+  useEffect(() => {
+    if (typingOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || overlayOpen()) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName))) return;
+      if (event.key.length === 1 && event.key.trim() !== "") setTypingOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [typingOpen]);
+
+  const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
+  const turns = view?.turns ?? [];
+  const copies = view?.copies ?? [];
+  const emptyBeforeCall = !callState.on && turns.length === 0 && !view?.thinking;
 
   return (
-    <div className="view">
-      <div className="main">
-        <div className="page-head">
-          <Workflow size={17} className="accent-text" />
-          <h1 className="truncate">{t("orch.title")}</h1>
-          <span className="sub truncate">{t("orch.sub", { engine: engines.find((engine) => engine.id === engineId)?.label ?? engineId })}</span>
-          <span className="grow" />
-          <Select value={engineId} aria-label={t("orch.planner")} style={{ width: 150 }} onChange={(event) => void saveEngine(event.target.value)} {...tipProps(t("orch.plannerTip"))}>
-            {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
-            {planners.map((engine) => (
-              <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== engineId}>
-                {engine.label}
-                {engine.available ? "" : ` ${t("common.notOnPath")}`}
-              </option>
-            ))}
-          </Select>
-          <Segmented
-            value={settings?.orchestrator.mode ?? "plan"}
-            options={[
-              { value: "plan", label: t("orch.mode.plan") },
-              { value: "go", label: t("orch.mode.go") },
-            ]}
-            onChange={(mode) => void saveMode(mode)}
-          />
-          <CallButton />
-          <Button size="sm" variant="ghost" icon={RotateCcw} tip={t("orch.newTip")} disabled={!view?.turns.length} onClick={() => void clear()}>
+    <div className={`view viby-view${callState.on ? " in-call" : ""}`}>
+      <div className="viby-top">
+        <PlannerModelLabel engineId={engineId} locked={callState.on} />
+        <span className="grow" />
+        {copies.length > 0 && (
+          <button
+            type="button"
+            className="viby-chip review-pill"
+            aria-expanded={Boolean(reviewAnchor)}
+            onClick={(event) => setReviewAnchor(reviewAnchor ? null : event.currentTarget)}
+          >
+            <GitBranch size={12} />
+            <span>{t.count("orch.reviewCount", copies.length)}</span>
+          </button>
+        )}
+        {!callState.on && turns.length > 0 && (
+          <Button size="sm" variant="ghost" icon={RotateCcw} tip={t("orch.newTip")} onClick={() => void clear()}>
             {t("orch.new")}
           </Button>
-        </div>
-        <div className="orch-body">
-          <section className="orch-talk">
-            <Conversation view={view} />
-          </section>
-          <aside className="orch-team">
-            <TeamPanel />
-          </aside>
-        </div>
+        )}
       </div>
+
+      {reviewAnchor && copies.length > 0 && (
+        <Popover anchor={reviewAnchor} align="end" onClose={() => setReviewAnchor(null)}>
+          <div className="viby-review-popover">
+            <CopyList copies={copies} workspaces={workspaces} onPick={() => setReviewAnchor(null)} />
+          </div>
+        </Popover>
+      )}
+
+      {emptyBeforeCall ? (
+        <div className="viby-empty">
+          <VibySprite mood="idle" size={64} label={t("orch.title")} className="viby-hero-sprite" />
+          {view && !view.engineReady ? (
+            <div className="orch-problem">
+              <CircleAlert size={14} />
+              <span className="grow">{t("orch.notReady")}</span>
+              <Button size="sm" onClick={() => go({ view: "settings", section: "orchestrator" })}>
+                {t("orch.openSettings")}
+              </Button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="viby-call-hero"
+              {...tipProps(t("call.startTip"), { kbd: shortcutKeys("app.call") })}
+              onClick={toggleCall}
+            >
+              <Phone size={18} strokeWidth={2.1} />
+              <span>{t("call.start")}</span>
+            </button>
+          )}
+          <p className="viby-sees">{seesLine}</p>
+          {voiceReady === false && (
+            <button type="button" className="viby-voice-setup" onClick={() => go({ view: "settings", section: "voice" })}>
+              {t("orch.voiceSetup")}
+            </button>
+          )}
+        </div>
+      ) : (
+        <ConversationStream view={view} callState={callState} seesLine={seesLine} />
+      )}
+
+      <div className="viby-bottom">
+        {typingOpen && (
+          <div className="viby-composer-wrap">
+            <div className="viby-composer-inner">
+              <Composer
+                placeholder={t("orch.typePlaceholder")}
+                busy={view?.thinking}
+                disabled={!view}
+                autoFocus
+                quiet
+                sendLabel={t("common.send")}
+                voiceLabel={t("orch.title")}
+                voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
+                draftKey={DRAFT_KEY}
+                keepKey="orchestrator"
+                onEscape={() => setTypingOpen(false)}
+                onSend={async (text) => {
+                  void call("orchestrator.ask", text).catch((error: unknown) => fail(error, t("orch.failed")));
+                  return true;
+                }}
+              />
+              <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} onClick={() => setTypingOpen(false)} />
+            </div>
+          </div>
+        )}
+
+        {callState.on ? (
+          <LiveCallDock callState={callState} typingOpen={typingOpen} onToggleTyping={() => setTypingOpen((open) => !open)} />
+        ) : emptyBeforeCall ? (
+          !typingOpen && (
+            <div className="viby-corner-actions">
+              <Button size="sm" variant="ghost" icon={Keyboard} tip={t("orch.typeToggle")} onClick={() => setTypingOpen(true)} />
+            </div>
+          )
+        ) : (
+          <div className="viby-after-dock">
+            <button
+              type="button"
+              className="viby-call-again"
+              {...tipProps(t("call.startTip"), { kbd: shortcutKeys("app.call") })}
+              onClick={toggleCall}
+            >
+              <Phone size={15} strokeWidth={2.1} />
+              <span>{t("call.start")}</span>
+            </button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={Keyboard}
+              pressed={typingOpen}
+              tip={t("orch.typeToggle")}
+              onClick={() => setTypingOpen((open) => !open)}
+            />
+          </div>
+        )}
+      </div>
+
       {route.view === "orchestrator" && route.copyId && <CopySheet copyId={route.copyId} copies={view?.copies} />}
     </div>
   );
 }
 
-// ------------------------------------------------------------------ over any view
+// ------------------------------------------------------------------ Ctrl+Shift+O over Code
 
-/** Ctrl+Shift+O: the same conversation, the last few turns, over whatever is open. */
+/** Quick keyboard-first drawer over any view, sharing Viby's exact conversation and action chips. */
 export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   const t = useT();
   const { go } = useNav();
+  const { fail } = useToast();
   const view = useOrchestrator().data;
+  const settings = useSettings().data;
+  const engines = useEngines().data ?? [];
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const callState = useCall();
+  const seesLine = useSeesLine(t);
   const box = useRef<HTMLDivElement>(null);
   useOverlay(true);
-  // Esc closes it, and focus goes back to what had it (the terminal you were typing in).
   useOverlayStack(box, onClose);
+  const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
+
   return createPortal(
     <div className="scrim switcher-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={box} className="switcher orch-bar" role="dialog" aria-modal aria-label={t("orch.title")} tabIndex={-1}>
         <div className="orch-bar-head">
-          <Workflow size={15} className="accent-text" />
+          <VibySprite mood={callMood(callState)} size={18} level={callState.level} />
           <strong>{t("orch.title")}</strong>
+          <PlannerModelLabel engineId={engineId} locked={callState.on} />
           <span className="grow" />
           <CallButton />
           <Button
@@ -188,7 +428,24 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd={shortcutKeys("overlay.close")} onClick={onClose} />
         </div>
         <LeaveBar.Provider value={onClose}>
-          <Conversation view={view} compact onEscape={onClose} />
+          <ConversationStream view={view} callState={callState} seesLine={seesLine} compact />
+          <Composer
+            placeholder={t("orch.typePlaceholder")}
+            busy={view?.thinking}
+            disabled={!view}
+            autoFocus
+            quiet
+            sendLabel={t("common.send")}
+            voiceLabel={t("orch.title")}
+            voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
+            draftKey={DRAFT_KEY}
+            keepKey="orchestrator"
+            onEscape={onClose}
+            onSend={async (text) => {
+              void call("orchestrator.ask", text).catch((error: unknown) => fail(error, t("orch.failed")));
+              return true;
+            }}
+          />
         </LeaveBar.Provider>
       </div>
     </div>,
@@ -196,40 +453,332 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ------------------------------------------------------------------ the conversation
+// ------------------------------------------------------------------ between-calls model label
 
-function Conversation({ view, compact, onEscape }: { view: View | undefined; compact?: boolean; onEscape?: () => void }) {
+function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boolean }) {
   const t = useT();
-  const dictateKeys = useDictateKeys();
-  const { go } = useNav();
-  const { fail } = useToast();
+  const settings = useSettings().data;
   const engines = useEngines().data ?? [];
-  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [save] = useAction(async (orchestrator: OrchestratorSettings) => call("settings.save", { orchestrator }), t("settings.saveFailed"));
+
+  const engine = engines.find((item) => item.id === engineId);
+  const engineLabel = engine?.label ?? (engineId || t("orch.title"));
+  const chosenModel = settings && engineId === settings.orchestrator.engine ? settings.orchestrator.model : "";
+  const isClaude = Boolean(engine && brainKind(engine) === "claude");
+  const modelLabel = chosenModel || (isClaude ? (locked ? "haiku" : t("orch.modelCallDefault")) : t("orch.modelDefault"));
+
+  if (locked) {
+    return (
+      <span className="viby-model locked" {...tipProps(t("orch.modelLocked"))}>
+        <span>{engineLabel}</span>
+        <span className="faint">·</span>
+        <span className="mono">{modelLabel}</span>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="viby-model"
+        aria-expanded={Boolean(anchor)}
+        {...tipProps(t("orch.plannerTip"))}
+        onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}
+      >
+        <span>{engineLabel}</span>
+        <span className="faint">·</span>
+        <span className="mono">{modelLabel}</span>
+        <ChevronDown size={12} className="faint" />
+      </button>
+      {anchor && settings && (
+        <ModelPopover
+          anchor={anchor}
+          engineId={engineId}
+          current={settings.orchestrator}
+          engines={engines}
+          onSave={(next) => void save(next)}
+          onClose={() => setAnchor(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function ModelPopover({
+  anchor,
+  engineId,
+  current,
+  engines,
+  onSave,
+  onClose,
+}: {
+  anchor: HTMLElement;
+  engineId: string;
+  current: OrchestratorSettings;
+  engines: Engine[];
+  onSave: (next: OrchestratorSettings) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const planners = engines.filter((item) => canOrchestrate(item));
+  const activeEngine = engines.find((item) => item.id === engineId);
+  const isClaude = Boolean(activeEngine && brainKind(activeEngine) === "claude");
+  const activeModel = engineId === current.engine ? current.model : "";
+  const [models, setModels] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [typed, setTyped] = useState(activeModel);
+
+  useEffect(() => {
+    let cancelled = false;
+    setModels(null);
+    setLoading(true);
+    void call("orchestrator.models", engineId)
+      .catch(() => [] as string[])
+      .then((list) => {
+        if (!cancelled) setModels(list);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [engineId]);
+
+  const listed = models ?? [];
+  const defaultLabel = isClaude ? t("orch.modelCallDefault") : t("orch.modelDefault");
+
+  return (
+    <Popover anchor={anchor} onClose={onClose}>
+      <div className="viby-model-popover">
+        <div className="list-label">{t("orch.planner")}</div>
+        {planners.map((item) => {
+          const selected = item.id === engineId;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={selected}
+              disabled={!item.available && !selected}
+              className="menu-item"
+              onClick={() => {
+                setCustom(false);
+                setTyped("");
+                onSave({ ...current, engine: item.id, model: "", effort: "" });
+              }}
+            >
+              <span className="viby-menu-check">{selected && <Check size={13} />}</span>
+              <span className="grow truncate">{item.label}</span>
+              {!item.available && <span className="faint small">{t("common.notOnPath")}</span>}
+            </button>
+          );
+        })}
+
+        <div className="list-label" style={{ marginTop: 6 }}>
+          {t("orch.model")}
+        </div>
+        <button
+          type="button"
+          role="menuitemradio"
+          aria-checked={activeModel === "" && !custom}
+          className="menu-item"
+          onClick={() => {
+            onSave({ ...current, engine: engineId, model: "" });
+            onClose();
+          }}
+        >
+          <span className="viby-menu-check">{activeModel === "" && !custom && <Check size={13} />}</span>
+          <span className="grow truncate">{defaultLabel}</span>
+        </button>
+        {activeModel && !listed.includes(activeModel) && (
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={!custom}
+            className="menu-item"
+            onClick={onClose}
+          >
+            <span className="viby-menu-check">{!custom && <Check size={13} />}</span>
+            <span className="grow truncate mono">{activeModel}</span>
+          </button>
+        )}
+        {listed.map((name) => {
+          const selected = activeModel === name && !custom;
+          return (
+            <button
+              key={name}
+              type="button"
+              role="menuitemradio"
+              aria-checked={selected}
+              className="menu-item"
+              onClick={() => {
+                onSave({ ...current, engine: engineId, model: name });
+                onClose();
+              }}
+            >
+              <span className="viby-menu-check">{selected && <Check size={13} />}</span>
+              <span className="grow truncate mono">{name}</span>
+            </button>
+          );
+        })}
+        {loading && <div className="faint small viby-menu-note">{t("orch.modelsLoading")}</div>}
+        {custom ? (
+          <div className="viby-model-custom">
+            <Input
+              className="mono"
+              autoFocus
+              value={typed}
+              placeholder={t("orch.modelPlaceholder")}
+              onChange={(event) => setTyped(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  const cleaned = cleanModel(typed);
+                  onSave({ ...current, engine: engineId, model: cleaned });
+                  onClose();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setCustom(false);
+                }
+              }}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              setTyped(activeModel);
+              setCustom(true);
+            }}
+          >
+            <span className="viby-menu-check" />
+            <span className="grow truncate">{t("orch.modelOther")}</span>
+          </button>
+        )}
+      </div>
+    </Popover>
+  );
+}
+
+// ------------------------------------------------------------------ live call dock
+
+function LiveCallDock({
+  callState,
+  typingOpen,
+  onToggleTyping,
+}: {
+  callState: CallState;
+  typingOpen: boolean;
+  onToggleTyping: () => void;
+}) {
+  const t = useT();
+  const mood = callMood(callState);
+  const muted = Boolean(callState.muted);
+  const lit = Math.round(callState.level * METER_CELLS);
+  const stateLabel =
+    mood === "speaking"
+      ? t("call.state.speaking")
+      : mood === "thinking"
+        ? t("call.state.thinking")
+        : muted
+          ? t("call.muted")
+          : callState.waiting
+            ? t("call.waitingGo")
+            : t("call.state.listening");
+
+  return (
+    <div className={`viby-live-dock state-${mood}`} role="status" aria-live="polite">
+      <div className="viby-live-inner">
+        <VibySprite mood={mood} size={28} level={callState.level} />
+        <strong className="viby-live-label">{stateLabel}</strong>
+        {mood === "listening" && (
+          <span className="meter" aria-hidden>
+            {Array.from({ length: METER_CELLS }, (_, i) => (
+              <i key={i} className={i < lit ? (i >= METER_CELLS - 3 ? "hot" : "on") : undefined} />
+            ))}
+          </span>
+        )}
+        {(mood === "speaking" || mood === "thinking") && callState.talkOver && !muted && (
+          <span className="faint small truncate">{t("call.talkOverHint")}</span>
+        )}
+        <span className="grow" />
+        {callState.phase === "thinking" && (
+          <Button size="sm" variant="ghost" icon={Square} onClick={() => void call("orchestrator.stopThinking")}>
+            {t("orch.stop")}
+          </Button>
+        )}
+        {callState.phase === "speaking" && (
+          <Button size="sm" variant="ghost" icon={Square} onClick={() => void call("voice.silence")}>
+            {t("voice.silence")}
+          </Button>
+        )}
+        <Button size="sm" variant={muted ? "primary" : "ghost"} icon={muted ? Mic : MicOff} onClick={() => void call("call.mute")}>
+          {muted ? t("call.unmute") : t("call.mute")}
+        </Button>
+        <Button size="sm" variant="danger" icon={PhoneOff} tip={t("call.hangUpTip")} onClick={() => void call("call.stop")}>
+          {t("call.hangUp")}
+        </Button>
+        <Button size="sm" variant="ghost" icon={Keyboard} pressed={typingOpen} tip={t("orch.typeToggle")} onClick={onToggleTyping} />
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ the conversation stream
+
+function ConversationStream({
+  view,
+  callState,
+  seesLine,
+  compact,
+}: {
+  view: View | undefined;
+  callState: CallState;
+  seesLine: string;
+  compact?: boolean;
+}) {
+  const t = useT();
+  const { go } = useNav();
+  const engines = useEngines().data ?? [];
   const scroller = useRef<HTMLDivElement>(null);
   const turns = view?.turns ?? [];
   const shown = compact ? turns.slice(-4) : turns;
   const engineLabel = engines.find((engine) => engine.id === view?.engineId)?.label ?? view?.engineId ?? "";
   const [stop] = useAction(async () => call("orchestrator.stopThinking"), t("orch.failed"));
 
-  // Follow the conversation as it grows.
+  // Track which Viby turn arrived while a spoken call was active, so historical turns never re-animate.
+  const initialLastId = useRef<string | null | undefined>(undefined);
+  if (initialLastId.current === undefined && view) initialLastId.current = turns.at(-1)?.id ?? null;
+  const newestVibyId = useMemo(() => {
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      if (turns[i].from === "vibeforge" && !turns[i].note) return turns[i].id;
+    }
+    return null;
+  }, [turns]);
+
+  const showLiveUser =
+    callState.on &&
+    !callState.muted &&
+    (callState.phase === "hearing" || (callState.phase === "transcribing" && !view?.thinking));
+
   const last = turns.at(-1);
   useEffect(() => {
     const node = scroller.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [turns.length, last?.plan, view?.thinking]);
+  }, [turns.length, last?.plan, view?.thinking, view?.activity?.label, showLiveUser, callState.liveHeard]);
 
   return (
-    <>
-      <div className={`orch-turns${compact ? " compact" : ""}`} ref={scroller}>
-        {view && turns.length === 0 && !view.thinking && (
-          <div className="orch-start">
-            {compact ? (
-              <p className="muted">{t("orch.empty.body", { engine: engineLabel })}</p>
-            ) : (
-              <Empty icon={Workflow} title={t("orch.empty.title")}>
-                {t("orch.empty.body", { engine: engineLabel })}
-              </Empty>
-            )}
+    <div className={`orch-turns${compact ? " compact" : ""}`} ref={scroller}>
+      <div className="viby-thread">
+        {view && turns.length === 0 && !view.thinking && !showLiveUser && (
+          <div className="viby-call-ready">
+            {!compact && <VibySprite mood={callMood(callState)} size={52} level={callState.level} />}
+            <p className="viby-sees">{seesLine}</p>
           </div>
         )}
         {view && !view.engineReady && (
@@ -242,41 +791,54 @@ function Conversation({ view, compact, onEscape }: { view: View | undefined; com
           </div>
         )}
         {shown.map((turn) => (
-          <TurnView key={turn.id} turn={turn} engineLabel={engineLabel} compact={compact} />
+          <TurnView
+            key={turn.id}
+            turn={turn}
+            engineLabel={engineLabel}
+            activity={view?.activity}
+            callState={callState}
+            revealLive={
+              callState.on &&
+              callState.spoken &&
+              turn.id === newestVibyId &&
+              turn.id !== initialLastId.current
+            }
+          />
         ))}
+        {showLiveUser && (
+          <div className="orch-turn from-you live-speaking">
+            <span className="orch-said">
+              {callState.liveHeard ? (
+                <>
+                  {callState.liveHeard}
+                  <i className="viby-caret" aria-hidden />
+                </>
+              ) : (
+                <span className="viby-wave" aria-hidden>
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              )}
+            </span>
+          </div>
+        )}
         {view?.thinking && (
           <div className="orch-turn from-vibeforge">
-            <span className="orch-who">
-              <Logo size={16} />
+            <span className="viby-avatar">
+              <VibySprite mood="thinking" size={22} />
             </span>
-            <span className="hstack muted">
-              <Spinner /> {t("orch.thinking", { engine: engineLabel })}
-            </span>
+            <div className="viby-work-line grow">
+              <Spinner />
+              <span className="truncate">{workingLineText(view.activity, t)}</span>
+            </div>
             <Button size="sm" variant="ghost" icon={Square} onClick={() => void stop()}>
               {t("orch.stop")}
             </Button>
           </div>
         )}
       </div>
-      <Composer
-        placeholder={t("orch.placeholder", { keys: dictateKeys })}
-        busy={view?.thinking}
-        disabled={!view}
-        autoFocus
-        quiet
-        sendLabel={t("common.send")}
-        voiceLabel={t("orch.title")}
-        voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
-        draftKey={DRAFT_KEY}
-        keepKey="orchestrator"
-        onEscape={onEscape}
-        onSend={async (text) => {
-          // The answer comes back as a turn; the box is free again at once.
-          void call("orchestrator.ask", text).catch((error: unknown) => fail(error, t("orch.failed")));
-          return true;
-        }}
-      />
-    </>
+    </div>
   );
 }
 
@@ -289,10 +851,23 @@ const PROBLEM_KEY: Record<NonNullable<OrchestratorTurn["problem"]>, Key> = {
   signIn: "orch.problem.signIn",
 };
 
-function TurnView({ turn, engineLabel: current, compact }: { turn: OrchestratorTurn; engineLabel: string; compact?: boolean }) {
+function TurnView({
+  turn,
+  engineLabel: current,
+  activity,
+  callState,
+  revealLive,
+}: {
+  turn: OrchestratorTurn;
+  engineLabel: string;
+  activity: OrchestratorActivity | null | undefined;
+  callState: CallState;
+  revealLive: boolean;
+}) {
   const t = useT();
   const engines = useEngines().data ?? [];
   const engineLabel = (turn.by && (engines.find((engine) => engine.id === turn.by)?.label ?? turn.by)) || current;
+
   if (turn.from === "you") {
     return (
       <div className="orch-turn from-you">
@@ -300,126 +875,617 @@ function TurnView({ turn, engineLabel: current, compact }: { turn: OrchestratorT
       </div>
     );
   }
-  if (turn.note) return <NoteView note={turn.note} />;
+
+  if (turn.note) return <NoteTurnView note={turn.note} />;
+
+  const running = turn.plan === "running";
+  const speakingHere = revealLive && callState.phase === "speaking";
+  const spriteMood = speakingHere ? "speaking" : running ? "thinking" : "idle";
+  const runningStep = running ? turn.steps?.find((step) => step.state === "running") : undefined;
+  const stepActivity: OrchestratorActivity | null =
+    activity ?? (runningStep ? { kind: runningStep.kind, label: runningStep.name || runningStep.branch || runningStep.asked || "" } : null);
+
   return (
     <div className="orch-turn from-vibeforge">
-      <span className="orch-who">
-        <Logo size={16} />
+      <span className="viby-avatar">
+        <VibySprite mood={spriteMood} size={22} animated={speakingHere || running} />
       </span>
-      <div className="vstack grow" style={{ gap: 8, minWidth: 0 }}>
+      <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {turn.problem ? (
           <span className="orch-problem-text">
             <CircleAlert size={13} /> {t(PROBLEM_KEY[turn.problem], { engine: engineLabel })}
             {turn.detail && <span className="orch-detail mono">{turn.detail}</span>}
           </span>
         ) : (
-          turn.text && <span className="orch-said">{turn.text}</span>
+          turn.text && <SpokenText text={turn.text} active={revealLive} callState={callState} />
         )}
-        {turn.steps && <PlanCard turn={turn} compact={compact} />}
+        {running && (
+          <div className="viby-work-line">
+            <Spinner />
+            <span className="truncate">{workingLineText(stepActivity, t)}</span>
+          </div>
+        )}
+        <TurnChips turn={turn} />
+        {turn.steps && turn.plan === "waiting" && <WaitingConfirm turn={turn} callOn={callState.on} />}
       </div>
     </div>
   );
 }
 
-// ------------------------------------------------------------------ the plan card
+/** Reveals Viby's words progressively while Piper speaks them, snapping to full text once done or interrupted. */
+function SpokenText({ text, active, callState }: { text: string; active: boolean; callState: CallState }) {
+  const tokens = useMemo(() => text.trim().split(/(\s+)/), [text]);
+  const arrivedAt = useRef(Date.now());
+  const [shownTokens, setShownTokens] = useState(() => (active ? 1 : tokens.length));
+  const settled = useRef(!active);
 
-const PLAN_KEY: Record<NonNullable<OrchestratorTurn["plan"]>, Key> = {
-  waiting: "orch.plan.waiting",
-  running: "orch.plan.running",
-  done: "orch.plan.done",
-  cancelled: "orch.plan.cancelled",
-  replaced: "orch.plan.replaced",
-};
+  useEffect(() => {
+    if (!active || settled.current) {
+      setShownTokens(tokens.length);
+      return;
+    }
+    // Wait up to 350ms for Piper to enter `speaking`; if it doesn't, show everything immediately.
+    if (callState.phase !== "speaking") {
+      const grace = window.setTimeout(() => {
+        settled.current = true;
+        setShownTokens(tokens.length);
+      }, 350);
+      return () => window.clearTimeout(grace);
+    }
+    const tick = () => {
+      const started = callState.speechStartedAt || arrivedAt.current;
+      const duration = callState.speechDurationMs || Math.max(900, text.length * 60);
+      const ratio = Math.min(1, Math.max(0.06, (Date.now() - started) / duration));
+      const next = Math.max(1, Math.ceil(ratio * tokens.length));
+      setShownTokens((prev) => Math.max(prev, next));
+      if (ratio >= 1) settled.current = true;
+    };
+    tick();
+    const timer = window.setInterval(tick, 45);
+    return () => window.clearInterval(timer);
+  }, [active, callState.phase, callState.speechStartedAt, callState.speechDurationMs, text.length, tokens.length]);
 
-function PlanCard({ turn, compact }: { turn: OrchestratorTurn; compact?: boolean }) {
-  const t = useT();
-  const steps = turn.steps ?? [];
-  const { context: here, ready } = usePlanContext();
-  // The plan's own new workspaces count as there for the steps after them.
-  const context = useMemo(() => withPlannedWorkspaces(here, steps), [here, steps]);
-  const [run, running] = useAction(async () => call("orchestrator.run", turn.id), t("orch.failed"));
-  const [cancel] = useAction(async () => call("orchestrator.cancel", turn.id), t("orch.failed"));
-  const waiting = turn.plan === "waiting";
-  const blocked = waiting && ready ? steps.filter((step) => stepIssue(step, context)).length : 0;
-  const state = turn.plan ?? "done";
+  const wasSpeaking = useRef(false);
+  useEffect(() => {
+    if (active && callState.phase === "speaking") wasSpeaking.current = true;
+    else if (wasSpeaking.current && callState.phase !== "speaking") {
+      settled.current = true;
+      setShownTokens(tokens.length);
+    }
+  }, [active, callState.phase, tokens.length]);
+
+  const visible = shownTokens >= tokens.length ? text : tokens.slice(0, shownTokens).join("");
+  return <span className="orch-said">{visible}</span>;
+}
+
+// ------------------------------------------------------------------ tappable chips under a reply
+
+function TurnChips({ turn }: { turn: OrchestratorTurn }) {
+  const checks = turn.checks ?? [];
+  const steps = turn.plan === "waiting" || turn.plan === "cancelled" || turn.plan === "replaced" ? [] : (turn.steps ?? []).filter((step) => step.state === "done" || step.state === "failed");
+  if (!checks.length && !steps.length) return null;
   return (
-    <div className={`orch-plan state-${state}`}>
-      <div className="orch-plan-head">
-        <Chip tone={state === "waiting" ? "accent" : state === "running" ? "info" : undefined}>{t(PLAN_KEY[state])}</Chip>
-        <span className="faint">{t.count("orch.steps", steps.length)}</span>
-      </div>
-      {steps.map((step) => (
-        <StepRow key={step.id} turnId={turn.id} step={step} plan={steps} editable={waiting} compact={compact} issue={waiting && ready ? stepIssue(step, context) : null} />
+    <div className="viby-chips">
+      {checks.map((check) => (
+        <CheckChip key={check.id} check={check} />
       ))}
-      {waiting && (
-        <div className="orch-plan-foot">
-          {blocked > 0 && blocked < steps.length && <span className="faint grow">{t.count("orch.skipNote", blocked)}</span>}
-          {blocked === steps.length && <span className="faint grow">{t("orch.fixFirst")}</span>}
-          {blocked === 0 && <span className="grow" />}
-          <Button size="sm" variant="ghost" onClick={() => void cancel()}>
-            {t("common.cancel")}
-          </Button>
-          <Button size="sm" variant="primary" icon={Play} busy={running} disabled={!ready || blocked === steps.length} onClick={() => void run()}>
-            {t("orch.go")}
-          </Button>
-        </div>
-      )}
+      {steps.map((step) => (
+        <StepChip key={step.id} step={step} />
+      ))}
     </div>
   );
 }
 
-function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: string; step: OrchestratorStep; plan: OrchestratorStep[]; editable: boolean; compact?: boolean; issue: StepIssue | null }) {
+function CheckChip({ check }: { check: OrchestratorCheck }) {
+  const t = useT();
+  const { go } = useNav();
+  const leaveBar = useContext(LeaveBar);
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const label = t(check.kind === "lookup" ? "orch.chip.lookedUp" : "orch.chip.checked", { target: check.label });
+  const canOpenPty = Boolean(check.ptyId && live.some((item) => item.ptyId === check.ptyId));
+  const copy = check.copyId ? copies.find((item) => item.id === check.copyId) : undefined;
+
+  return (
+    <>
+      <button type="button" className="viby-chip" onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
+        <Search size={11} />
+        <span className="truncate">{label}</span>
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} onClose={() => setAnchor(null)}>
+          <div className="viby-detail-popover">
+            <div className="viby-detail-head">
+              <strong className="truncate grow">{check.summary || label}</strong>
+              {canOpenPty && (
+                <Button
+                  size="sm"
+                  icon={SquareTerminal}
+                  onClick={() => {
+                    setAnchor(null);
+                    leaveBar?.();
+                    go({ view: "code", workspaceId: check.workspaceId ?? undefined, ptyId: check.ptyId ?? undefined });
+                  }}
+                >
+                  {t("orch.open")}
+                </Button>
+              )}
+              {copy && (
+                <Button
+                  size="sm"
+                  icon={FileDiff}
+                  onClick={() => {
+                    setAnchor(null);
+                    leaveBar?.();
+                    go({ view: "orchestrator", copyId: copy.id });
+                  }}
+                >
+                  {t("orch.review")}
+                </Button>
+              )}
+            </div>
+            {check.details && <pre className="viby-detail-pre mono selectable">{check.details}</pre>}
+          </div>
+        </Popover>
+      )}
+    </>
+  );
+}
+
+function StepChip({ step }: { step: OrchestratorStep }) {
   const t = useT();
   const { go } = useNav();
   const leaveBar = useContext(LeaveBar);
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const [undo] = useAction(async () => step.undo && call("undo.delete", step.undo), t("common.undoFailed"));
+  const [replyAnchor, setReplyAnchor] = useState<HTMLElement | null>(null);
+
+  const engine = engines.find((item) => item.id === step.engineId);
+  const workspace = workspaces.find((item) => item.id === step.workspaceId);
+  const targetSession = live.find((item) => item.ptyId === step.target);
+  const openedSession = step.ptyId ? live.find((item) => item.ptyId === step.ptyId) : undefined;
+  const copy = step.kind === "start" ? copies.find((item) => item.id === step.copyId || item.stepId === step.id) : undefined;
+  const targetCopy = step.kind === "apply" || step.kind === "discard" ? copies.find((item) => item.id === step.target) : undefined;
+
+  if (step.state === "failed") {
+    const label = step.name || (step.branch ? shortBranch(step.branch) : "") || workspace?.name || step.asked || step.kind;
+    return (
+      <span className="viby-chip failed" {...tipProps(step.error ? coreText(step.error) : undefined)}>
+        <CircleAlert size={11} />
+        <span className="truncate">
+          {label}
+          {step.error ? ` · ${coreText(step.error)}` : ""}
+        </span>
+      </span>
+    );
+  }
+
+  if (step.kind === "start") {
+    const who = engine?.label ?? step.engineId;
+    const where = step.branch ? shortBranch(step.branch) : workspace?.name ?? step.asked;
+    return (
+      <>
+        <button
+          type="button"
+          className="viby-chip action"
+          disabled={!openedSession && !step.openedWorkspaceId}
+          onClick={() => {
+            leaveBar?.();
+            go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined, ptyId: openedSession ? (step.ptyId ?? undefined) : undefined });
+          }}
+        >
+          <ArrowUpRight size={12} />
+          <span className="truncate">{[who, where].filter(Boolean).join(" · ")}</span>
+        </button>
+        {copy && (
+          <button
+            type="button"
+            className="viby-chip"
+            onClick={() => {
+              leaveBar?.();
+              go({ view: "orchestrator", copyId: copy.id });
+            }}
+          >
+            <FileDiff size={11} />
+            <span>{t("orch.review")}</span>
+          </button>
+        )}
+        {!copy && step.outcome && (
+          <span className="viby-chip settled">
+            <Check size={11} />
+            <span>
+              {step.outcome === "applied"
+                ? t("orch.chip.applied", { target: shortBranch(step.branch) || workspace?.name || "" })
+                : t("orch.chip.discarded", { target: shortBranch(step.branch) || workspace?.name || "" })}
+            </span>
+          </span>
+        )}
+      </>
+    );
+  }
+
+  if (step.kind === "workspace") {
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        disabled={!step.openedWorkspaceId}
+        onClick={() => {
+          if (!step.openedWorkspaceId) return;
+          leaveBar?.();
+          go({ view: "code", workspaceId: step.openedWorkspaceId });
+        }}
+      >
+        <FolderPlus size={11} />
+        <span className="truncate">{step.name || step.asked}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "tell" || step.kind === "key" || step.kind === "shell") {
+    const ptyId = step.kind === "shell" ? step.ptyId : step.target;
+    const session = ptyId ? live.find((item) => item.ptyId === ptyId) : undefined;
+    const wsId = step.kind === "shell" ? step.openedWorkspaceId ?? step.workspaceId : session?.workspaceId;
+    const label =
+      step.kind === "tell"
+        ? t("orch.chip.told", { target: sessionLabel(targetSession, workspaces) || step.asked })
+        : step.kind === "key"
+          ? step.result || sessionLabel(targetSession, workspaces) || step.asked
+          : workspace?.name || step.asked || t("orch.shell");
+    const Icon = step.kind === "tell" ? MessageSquare : step.kind === "key" ? CornerDownLeft : SquareTerminal;
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        disabled={!session && !wsId}
+        onClick={() => {
+          leaveBar?.();
+          go({ view: "code", workspaceId: wsId ?? undefined, ptyId: session ? (ptyId ?? undefined) : undefined });
+        }}
+      >
+        <Icon size={11} />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "read") {
+    const label = sessionLabel(targetSession, workspaces) || step.asked || t("orch.read");
+    return (
+      <>
+        <button type="button" className="viby-chip" onClick={(event) => setReplyAnchor(replyAnchor ? null : event.currentTarget)}>
+          <Volume2 size={11} />
+          <span className="truncate">{label}</span>
+        </button>
+        {replyAnchor && (
+          <Popover anchor={replyAnchor} onClose={() => setReplyAnchor(null)}>
+            <div className="viby-detail-popover">
+              <div className="viby-detail-head">
+                <strong className="truncate grow">{label}</strong>
+                {targetSession && (
+                  <Button
+                    size="sm"
+                    icon={SquareTerminal}
+                    onClick={() => {
+                      setReplyAnchor(null);
+                      leaveBar?.();
+                      go({ view: "code", workspaceId: targetSession.workspaceId ?? undefined, ptyId: targetSession.ptyId });
+                    }}
+                  >
+                    {t("orch.open")}
+                  </Button>
+                )}
+              </div>
+              {step.reply && <pre className="viby-detail-pre mono selectable">{step.reply}</pre>}
+            </div>
+          </Popover>
+        )}
+      </>
+    );
+  }
+
+  if (step.kind === "show") {
+    const shownView = step.view || "";
+    const viewLabel = shownView ? t(VIEWS.find((item) => item.view === shownView)?.label ?? "rail.settings") : "";
+    const label = sessionLabel(targetSession, workspaces) || viewLabel || workspace?.name || step.asked;
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        onClick={() => {
+          leaveBar?.();
+          if (targetSession) go({ view: "code", workspaceId: targetSession.workspaceId ?? undefined, ptyId: targetSession.ptyId });
+          else if (shownView) go({ view: shownView as Parameters<typeof go>[0]["view"] });
+          else if (step.workspaceId) go({ view: "code", workspaceId: step.workspaceId });
+        }}
+      >
+        <ArrowUpRight size={12} />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "task" || step.kind === "routine") {
+    const Icon = step.kind === "task" ? ListTodo : Clock;
+    const label = step.name || step.asked || step.prompt;
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        onClick={() => {
+          leaveBar?.();
+          if (step.kind === "task") go({ view: "tasks", ...(step.target ? { taskId: step.target } : {}) });
+          else go({ view: "routines" });
+        }}
+      >
+        <Icon size={11} />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "apply") {
+    const target = targetCopy?.name || step.asked;
+    return (
+      <span className="viby-chip settled" {...tipProps(step.result ? coreText(step.result) : undefined)}>
+        <GitMerge size={11} />
+        <span className="truncate">{t("orch.chip.applied", { target })}</span>
+      </span>
+    );
+  }
+
+  if (step.kind === "discard") {
+    const target = targetCopy?.name || step.asked;
+    const canUndo = Boolean(step.undo && !copies.some((item) => item.id === step.target));
+    return (
+      <>
+        <span className="viby-chip settled">
+          <Trash2 size={11} />
+          <span className="truncate">{t("orch.chip.discarded", { target })}</span>
+        </span>
+        {canUndo && (
+          <button type="button" className="viby-chip" onClick={() => void undo()}>
+            <RotateCcw size={11} />
+            <span>{t("common.undo")}</span>
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (step.kind === "stop") {
+    return (
+      <span className="viby-chip settled">
+        <Square size={10} />
+        <span className="truncate">{t("orch.chip.stopped", { target: step.asked || t("orch.gone") })}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="viby-chip settled">
+      <Check size={11} />
+      <span className="truncate">{step.result ? coreText(step.result) : step.asked || step.prompt}</span>
+    </span>
+  );
+}
+
+// ------------------------------------------------------------------ proactive CLI notes
+
+function NoteTurnView({ note }: { note: MaestroNote }) {
+  const t = useT();
+  const { go } = useNav();
+  const leaveBar = useContext(LeaveBar);
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const [replyAnchor, setReplyAnchor] = useState<HTMLElement | null>(null);
+  const running = live.some((item) => item.ptyId === note.ptyId);
+  const copy = note.copyId ? copies.find((item) => item.id === note.copyId) : undefined;
+
+  return (
+    <div className="orch-turn from-vibeforge orch-note">
+      <span className="viby-avatar">
+        <VibySprite mood="idle" size={22} animated={false} />
+      </span>
+      <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
+        <span className="orch-said">
+          {t(note.kind === "finished" ? "orch.note.finished" : note.kind === "waiting" ? "orch.note.waiting" : "orch.note.ended", {
+            engine: note.engine,
+            workspace: note.workspace,
+          })}
+          {note.changes && <span className="faint"> · {coreText(note.changes)}</span>}
+        </span>
+        {(running || copy || note.reply) && (
+          <div className="viby-chips">
+            {running && (
+              <button
+                type="button"
+                className="viby-chip action"
+                onClick={() => {
+                  leaveBar?.();
+                  go({ view: "code", workspaceId: note.workspaceId ?? undefined, ptyId: note.ptyId });
+                }}
+              >
+                <ArrowUpRight size={12} />
+                <span>{t("orch.open")}</span>
+              </button>
+            )}
+            {copy && (
+              <button
+                type="button"
+                className="viby-chip"
+                onClick={() => {
+                  leaveBar?.();
+                  go({ view: "orchestrator", copyId: copy.id });
+                }}
+              >
+                <FileDiff size={11} />
+                <span>{t("orch.review")}</span>
+              </button>
+            )}
+            {note.reply && (
+              <button type="button" className="viby-chip" onClick={(event) => setReplyAnchor(replyAnchor ? null : event.currentTarget)}>
+                <MessageSquare size={11} />
+                <span className="truncate" style={{ maxWidth: 240 }}>
+                  {note.reply}
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+        {replyAnchor && note.reply && (
+          <Popover anchor={replyAnchor} onClose={() => setReplyAnchor(null)}>
+            <div className="viby-detail-popover">
+              <pre className="viby-detail-pre mono selectable">{note.reply}</pre>
+            </div>
+          </Popover>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ compact inline confirmation (when Go is needed)
+
+function WaitingConfirm({ turn, callOn }: { turn: OrchestratorTurn; callOn: boolean }) {
+  const t = useT();
+  const steps = turn.steps ?? [];
+  const { context: here, ready } = usePlanContext();
+  const context = useMemo(() => withPlannedWorkspaces(here, steps), [here, steps]);
+  const [run, running] = useAction(async () => call("orchestrator.run", turn.id), t("orch.failed"));
+  const [cancel] = useAction(async () => call("orchestrator.cancel", turn.id), t("orch.failed"));
+  const blocked = ready ? steps.filter((step) => stepIssue(step, context)).length : 0;
+  const [editing, setEditing] = useState(false);
+  const showEditor = editing || blocked > 0;
+
+  return (
+    <div className="viby-confirm">
+      {!showEditor ? (
+        <div className="viby-confirm-summary">
+          {steps.map((step) => (
+            <PendingStepSummary key={step.id} step={step} />
+          ))}
+        </div>
+      ) : (
+        <div className="viby-confirm-editor">
+          {steps.map((step) => (
+            <EditableStepRow key={step.id} turnId={turn.id} step={step} plan={steps} issue={ready ? stepIssue(step, context) : null} />
+          ))}
+        </div>
+      )}
+      <div className="viby-confirm-foot">
+        {blocked > 0 && blocked < steps.length && <span className="faint grow">{t.count("orch.skipNote", blocked)}</span>}
+        {blocked === steps.length && <span className="orch-issue grow">{t("orch.fixFirst")}</span>}
+        {blocked === 0 && (
+          <span className="faint small grow">{callOn ? t("call.waitingGo") : ""}</span>
+        )}
+        {blocked === 0 && (
+          <Button size="sm" variant="ghost" icon={Pencil} pressed={editing} onClick={() => setEditing((open) => !open)}>
+            {t("orch.editSteps")}
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => void cancel()}>
+          {t("common.cancel")}
+        </Button>
+        <Button size="sm" variant="primary" icon={Play} busy={running} disabled={!ready || blocked === steps.length} onClick={() => void run()}>
+          {t("orch.go")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PendingStepSummary({ step }: { step: OrchestratorStep }) {
+  const t = useT();
+  const engines = useEngines().data ?? [];
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
+  const engine = engines.find((item) => item.id === step.engineId);
+  const workspace = workspaces.find((item) => item.id === step.workspaceId);
+  const target = live.find((item) => item.ptyId === step.target);
+  const targetCopy = copies.find((item) => item.id === step.target);
+
+  let text = "";
+  if (step.kind === "start") {
+    text = [engine?.label ?? step.engineId, workspace?.name ?? step.asked, step.branch ? shortBranch(step.branch) : t("orch.inPlace")].filter(Boolean).join(" · ");
+  } else if (step.kind === "apply" || step.kind === "discard") {
+    text = `${step.kind === "apply" ? t("orch.applyStep") : t("orch.discard")} · ${targetCopy?.name ?? step.asked}`;
+  } else if (step.kind === "stop") {
+    text = `${t("orch.close")} · ${sessionLabel(target, workspaces) || step.asked}`;
+  } else if (step.kind === "workspace") {
+    text = `${t("orch.makeWorkspace")} · ${step.name ?? ""}`;
+  } else if (step.kind === "tell") {
+    text = `${t("orch.tell")} · ${sessionLabel(target, workspaces) || step.asked}`;
+  } else {
+    text = step.name || step.asked || step.prompt || step.kind;
+  }
+
+  return (
+    <div className="viby-pending-item">
+      <Chip tone="accent">{text}</Chip>
+      {step.kind === "start" && step.branch && step.dirty ? (
+        <span className="orch-warn">{t.count("orch.dirty", step.dirty, { workspace: workspace?.name ?? "" })}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function EditableStepRow({
+  turnId,
+  step,
+  plan,
+  issue,
+}: {
+  turnId: string;
+  step: OrchestratorStep;
+  plan: OrchestratorStep[];
+  issue: StepIssue | null;
+}) {
+  const t = useT();
+  const engines = useEngines().data ?? [];
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const live = useLive().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
   const [edit] = useAction(async (patch: StepPatch) => call("orchestrator.editStep", turnId, step.id, patch), t("orch.failed"));
   const [remove] = useAction(async () => call("orchestrator.removeStep", turnId, step.id), t("orch.failed"));
-  const [undo] = useAction(async () => step.undo && call("undo.delete", step.undo), t("common.undoFailed"));
+
   const engine = engines.find((item) => item.id === step.engineId);
-  // The plan's own new workspaces, while their steps can still run, for a start step to pick.
   const planned = plan.filter((item) => item.kind === "workspace" && item.state !== "failed" && item.state !== "skipped");
   const workspace = workspaces.find((item) => item.id === step.workspaceId);
   const plannedWorkspace = planned.find((item) => plannedId(item.id) === step.workspaceId);
-  const workspaceName = workspace?.name ?? (plannedWorkspace ? t("orch.planned", { name: plannedWorkspace.name ?? "" }) : step.asked);
   const target = live.find((item) => item.ptyId === step.target);
-  const Icon = STEP_ICON[step.kind];
-  const opened = step.ptyId ? live.find((item) => item.ptyId === step.ptyId) : undefined;
-  const view = useOrchestrator().data;
-  const copies = view?.copies ?? [];
-  const copy = step.kind === "start" && !editable ? copies.find((item) => item.id === step.copyId || item.stepId === step.id) : undefined;
-  const targetCopy = step.kind === "apply" || step.kind === "discard" ? copies.find((item) => item.id === step.target) : undefined;
+  const targetCopy = copies.find((item) => item.id === step.target);
 
-  // A show step that opens a view or a workspace rather than a terminal: named in the window's language.
-  const shownView = step.kind === "show" && step.view ? step.view : "";
-  const shownPlace = shownView ? t(VIEWS.find((item) => item.view === shownView)?.label ?? "rail.settings") : step.kind === "show" && !step.target ? (workspace?.name ?? "") : "";
-
-  let line: ReactNode;
+  let controls: ReactNode;
   if (step.kind === "workspace") {
-    line = editable ? (
+    controls = (
       <div className="orch-step-line">
         <strong>{t("orch.makeWorkspace")}</strong>
-        <TextField value={step.name ?? ""} label={t("orch.workspaceName")} width={150} onDone={(name) => void edit({ name })} />
-        <TextField value={step.folder ?? ""} label={t("orch.folder")} tip={t("orch.folderTip")} mono width={260} onDone={(folder) => void edit({ folder })} />
+        <InlineField value={step.name ?? ""} label={t("orch.workspaceName")} width={140} onDone={(name) => void edit({ name })} />
+        <InlineField value={step.folder ?? ""} label={t("orch.folder")} tip={t("orch.folderTip")} mono width={230} onDone={(folder) => void edit({ folder })} />
         <label className="orch-check" {...tipProps(t("orch.gitInitTip"))}>
           <input type="checkbox" checked={Boolean(step.git)} onChange={(event) => void edit({ git: event.target.checked })} />
           {t("orch.gitInit")}
         </label>
       </div>
-    ) : (
-      <div className="orch-step-line">
-        <strong>{t("orch.makeWorkspace")}</strong>
-        <span>{step.name}</span>
-        <span className="faint mono truncate">{step.folder}</span>
-        {step.git && <Chip>{t("orch.gitInit")}</Chip>}
-      </div>
     );
   } else if (step.kind === "start") {
-    line = editable ? (
+    controls = (
       <div className="orch-step-line">
-        <EnginePick engines={engines} value={step.engineId} onChange={(engineId) => void edit({ engineId })} />
+        <Select value={step.engineId} aria-label={t("orch.engine")} onChange={(event) => void edit({ engineId: event.target.value })}>
+          {!engines.some((item) => item.id === step.engineId) && <option value="">{t("orch.pickEngine")}</option>}
+          {engines.map((item) => (
+            <option key={item.id} value={item.id} disabled={!item.available && item.id !== step.engineId}>
+              {item.label}
+              {item.available ? "" : ` ${t("common.notOnPath")}`}
+            </option>
+          ))}
+        </Select>
         <Select value={step.workspaceId} aria-label={t("orch.workspace")} onChange={(event) => void edit({ workspaceId: event.target.value })}>
           {!workspace && !plannedWorkspace && <option value="">{t("orch.pickWorkspace")}</option>}
           {planned.map((item) => (
@@ -437,183 +1503,61 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         <ModelField engine={engine} value={step.model ?? ""} onDone={(model) => void edit({ model })} />
         <EffortPick engine={engine} value={step.effort ?? ""} onChange={(effort) => void edit({ effort })} />
       </div>
-    ) : (
-      <div className="orch-step-line">
-        <strong>{engine?.label ?? step.engineId}</strong>
-        <span className="faint">·</span>
-        <span>{workspaceName}</span>
-        {step.branch ? (
-          <span className="orch-branch-text mono">
-            <GitBranch size={12} /> {step.branch}
-          </span>
-        ) : (
-          <span className="faint">{t("orch.inPlace")}</span>
-        )}
-        {step.model && <Chip>{step.model}</Chip>}
-        {step.effort && <Chip>{t("orch.effortIs", { effort: step.effort })}</Chip>}
-      </div>
-    );
-  } else if (step.kind === "apply" || step.kind === "discard") {
-    line = (
-      <div className="orch-step-line">
-        <strong>{step.kind === "apply" ? t("orch.applyStep") : t("orch.discard")}</strong>
-        <span className="truncate">{targetCopy ? `${targetCopy.name} · ${workspaces.find((item) => item.id === targetCopy.workspaceId)?.name ?? ""}` : step.asked || t("orch.copyGone")}</span>
-      </div>
     );
   } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
-    line = (
+    controls = (
       <div className="orch-step-line">
         <strong>{t(otherStepKey(step))}</strong>
         <span className="truncate">{step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt}</span>
-        {step.after && <Chip>{t("orch.after")}</Chip>}
       </div>
     );
   } else {
-    line = (
+    controls = (
       <div className="orch-step-line">
-        <strong>{step.kind === "tell" ? t("orch.tell") : step.kind === "show" ? t("orch.show") : step.kind === "read" ? t("orch.read") : t("orch.close")}</strong>
-        <span className="truncate">{sessionLabel(target, workspaces) || shownPlace || step.asked || t("orch.gone")}</span>
-        {step.after && <Chip>{t("orch.after")}</Chip>}
+        <strong>{step.kind === "apply" ? t("orch.applyStep") : step.kind === "discard" ? t("orch.discard") : step.kind === "stop" ? t("orch.close") : step.kind}</strong>
+        <span className="truncate">{targetCopy?.name || sessionLabel(target, workspaces) || step.asked || step.prompt}</span>
       </div>
     );
   }
 
   return (
-    <div className={`orch-step step-${step.state}${issue ? " has-issue" : ""}`}>
-      <span className="orch-step-icon">
-        {step.state === "running" ? <Spinner /> : step.state === "done" ? <Check size={13} /> : step.state === "failed" ? <CircleAlert size={13} /> : <Icon size={13} />}
-      </span>
+    <div className={`orch-step${issue ? " has-issue" : ""}`}>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
-        {line}
-        {(step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && Boolean(step.name))) &&
-          (editable ? (
-            <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" || step.kind === "shell" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
-          ) : (
-            step.prompt && <span className={`orch-prompt-text${compact ? " clamp" : ""}`}>{step.prompt}</span>
-          ))}
-        {step.kind === "start" && editable && step.branch && step.dirty ? (
+        {controls}
+        {(step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && Boolean(step.name))) && (
+          <PromptBox
+            value={step.prompt}
+            label={t("orch.prompt")}
+            placeholder={step.kind === "start" || step.kind === "shell" ? t("orch.promptEmpty") : undefined}
+            onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })}
+          />
+        )}
+        {step.kind === "start" && step.branch && step.dirty ? (
           <span className="orch-warn">{t.count("orch.dirty", step.dirty, { workspace: workspace?.name ?? "" })}</span>
         ) : null}
         {issue && <span className="orch-issue">{t(issueKey(step, issue), { asked: step.asked || "?" })}</span>}
-        {step.state === "failed" && step.error && <span className="orch-issue">{coreText(step.error)}</span>}
-        {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
-        {step.result && <span className="orch-warn">{coreText(step.result)}</span>}
-        {step.reply && <div className={`orch-reply${compact ? " clamp" : ""}`}>{step.reply}</div>}
-        {copy && <CopyActions copy={copy} onLeave={leaveBar} />}
-        {!copy && step.outcome && (
-          <span className="faint">{step.outcome === "applied" ? t("orch.outcome.applied", { workspace: workspace?.name ?? "" }) : t("orch.outcome.discarded")}</span>
-        )}
       </div>
-      {step.state === "done" && step.kind === "start" && step.ptyId && (
-        <Button
-          size="sm"
-          icon={SquareTerminal}
-          disabled={!opened}
-          onClick={() => {
-            leaveBar?.();
-            go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined, ptyId: step.ptyId ?? undefined });
-          }}
-        >
-          {t("orch.open")}
-        </Button>
-      )}
-      {step.state === "done" && step.kind === "workspace" && step.openedWorkspaceId && (
-        <Button
-          size="sm"
-          icon={SquareTerminal}
-          onClick={() => {
-            leaveBar?.();
-            go({ view: "code", workspaceId: step.openedWorkspaceId ?? undefined });
-          }}
-        >
-          {t("orch.open")}
-        </Button>
-      )}
-      {step.state === "done" && step.kind === "discard" && step.undo && !copies.some((item) => item.id === step.target) && (
-        <Button size="sm" variant="ghost" icon={RotateCcw} onClick={() => void undo()}>
-          {t("common.undo")}
-        </Button>
-      )}
-      {editable && <Button size="sm" variant="ghost" icon={X} tip={t("orch.removeStep")} onClick={() => void remove()} />}
+      <Button size="sm" variant="ghost" icon={X} tip={t("orch.removeStep")} onClick={() => void remove()} />
     </div>
   );
 }
 
-const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = {
-  start: Play,
-  tell: MessageSquare,
-  stop: Square,
-  workspace: FolderPlus,
-  apply: GitMerge,
-  discard: Trash2,
-  show: Eye,
-  read: Volume2,
-  inspect: Search,
-  key: CornerDownLeft,
-  shell: SquareTerminal,
-  workbench: Workflow,
-  settings: SettingsIcon,
-  lookup: Search,
-  task: ListTodo,
-  routine: Clock,
-};
-
-/** VibeForge's own word about a CLI Maestro started or told: its turn ended (with the start of its answer), or it closed. */
-function NoteView({ note }: { note: MaestroNote }) {
-  const t = useT();
-  const { go } = useNav();
-  const leaveBar = useContext(LeaveBar);
-  const live = useLive().data ?? [];
-  const copies = useOrchestrator().data?.copies ?? [];
-  const running = live.some((item) => item.ptyId === note.ptyId);
-  const copy = note.copyId ? copies.find((item) => item.id === note.copyId) : undefined;
-  return (
-    <div className="orch-turn from-vibeforge orch-note">
-      <span className="orch-who">
-        <Logo size={16} />
-      </span>
-      <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
-        <span className="orch-said">
-          {t(note.kind === "finished" ? "orch.note.finished" : note.kind === "waiting" ? "orch.note.waiting" : "orch.note.ended", { engine: note.engine, workspace: note.workspace })}
-          {note.changes && <span className="faint"> · {coreText(note.changes)}</span>}
-        </span>
-        {note.reply && <span className="orch-prompt-text clamp">{note.reply}</span>}
-        <div className="orch-copy">
-          {running && (
-            <Button
-              size="sm"
-              icon={SquareTerminal}
-              onClick={() => {
-                leaveBar?.();
-                go({ view: "code", workspaceId: note.workspaceId ?? undefined, ptyId: note.ptyId });
-              }}
-            >
-              {t("orch.open")}
-            </Button>
-          )}
-          {copy && (
-            <Button
-              size="sm"
-              icon={FileDiff}
-              onClick={() => {
-                leaveBar?.();
-                go({ view: "orchestrator", copyId: copy.id });
-              }}
-            >
-              {t("orch.review")}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** A one-line field that tells the plan once it is left (or Enter), or shortly after typing stops. */
-function TextField({ value, label, tip, mono, width, onDone }: { value: string; label: string; tip?: string; mono?: boolean; width?: number; onDone: (value: string) => void }) {
+function InlineField({
+  value,
+  label,
+  tip,
+  mono,
+  width,
+  onDone,
+}: {
+  value: string;
+  label: string;
+  tip?: string;
+  mono?: boolean;
+  width?: number;
+  onDone: (value: string) => void;
+}) {
   const [text, setText] = useState(value);
-  // While it has the keyboard, what was just saved coming back doesn't replace what has been typed
-  // since: a space before a pause, or a key pressed while it saved.
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current) setText(value);
@@ -647,7 +1591,6 @@ function TextField({ value, label, tip, mono, width, onDone }: { value: string; 
   );
 }
 
-/** The new branch, in a copy of the workspace of its own; empty works in the workspace itself. */
 function BranchField({ value, onDone }: { value: string; onDone: (branch: string) => void }) {
   const t = useT();
   const [branch, setBranch] = useState(value);
@@ -668,13 +1611,11 @@ function BranchField({ value, onDone }: { value: string; onDone: (branch: string
   );
 }
 
-/** The model a start step's CLI starts on: its own default, or a name it knows. */
 function ModelField({ engine, value, onDone }: { engine: Engine | undefined; value: string; onDone: (model: string) => void }) {
   const t = useT();
   const [model, setModel] = useState(value);
   useEffect(() => setModel(value), [value]);
   const usable = Boolean(engine && takesModel(engine));
-  // Claude Code's aliases are known without asking it; other CLIs take a name typed in.
   const known = engine && launchKind(engine) === "claude" ? KNOWN_MODELS.claude : undefined;
   const list = `orch-models-${engine?.id ?? "none"}`;
   return (
@@ -706,7 +1647,6 @@ function ModelField({ engine, value, onDone }: { engine: Engine | undefined; val
   );
 }
 
-/** The reasoning effort a start step's CLI starts with: only the levels that CLI takes. */
 function EffortPick({ engine, value, onChange }: { engine: Engine | undefined; value: string; onChange: (effort: string) => void }) {
   const t = useT();
   const levels = engine ? effortLevels(engine) : [];
@@ -730,11 +1670,19 @@ function EffortPick({ engine, value, onChange }: { engine: Engine | undefined; v
   );
 }
 
-/** A step's words, as tall as they are (up to a point), so the whole instruction reads before Go. */
-function PromptBox({ value, label, placeholder, onDone }: { value: string; label: string; placeholder?: string; onDone: (text: string) => void }) {
+function PromptBox({
+  value,
+  label,
+  placeholder,
+  onDone,
+}: {
+  value: string;
+  label: string;
+  placeholder?: string;
+  onDone: (text: string) => void;
+}) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(value);
-  // As TextField: what was just saved doesn't replace what is still being typed.
   const focused = useRef(false);
   useEffect(() => {
     if (!focused.current) setText(value);
@@ -748,7 +1696,7 @@ function PromptBox({ value, label, placeholder, onDone }: { value: string; label
     const node = ref.current;
     if (!node) return;
     node.style.height = "0px";
-    node.style.height = `${Math.min(240, Math.max(44, node.scrollHeight + 2))}px`;
+    node.style.height = `${Math.min(200, Math.max(40, node.scrollHeight + 2))}px`;
   }, [text]);
   return (
     <textarea
@@ -766,85 +1714,5 @@ function PromptBox({ value, label, placeholder, onDone }: { value: string; label
         onDone(text);
       }}
     />
-  );
-}
-
-function EnginePick({ engines, value, onChange }: { engines: Engine[]; value: string; onChange: (id: string) => void }) {
-  const t = useT();
-  return (
-    <Select value={value} aria-label={t("orch.engine")} onChange={(event) => onChange(event.target.value)}>
-      {!engines.some((engine) => engine.id === value) && <option value="">{t("orch.pickEngine")}</option>}
-      {engines.map((engine) => (
-        <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== value}>
-          {engine.label}
-          {engine.available ? "" : ` ${t("common.notOnPath")}`}
-        </option>
-      ))}
-    </Select>
-  );
-}
-
-// ------------------------------------------------------------------ the team
-
-/** Every coding CLI running, the Orchestrator's first, with Open and Stop, and Stop all for its own. */
-function TeamPanel() {
-  const t = useT();
-  const { go } = useNav();
-  const confirm = useConfirm();
-  const live = useLive().data ?? [];
-  const workspaces = useWorkspaces().data?.workspaces ?? [];
-  const attention = usePtyAttention();
-  const clis = live.filter(isCodingCli).sort((a, b) => Number(Boolean(b.orchestrated)) - Number(Boolean(a.orchestrated)) || a.startedAt.localeCompare(b.startedAt));
-  const own = clis.filter((session) => session.orchestrated);
-  const copies = useOrchestrator().data?.copies ?? [];
-  const [stop] = useAction(async (ptyId: string) => call("pty.kill", ptyId), t("orch.stopFailed"));
-  const [stopAll, stoppingAll] = useAction(async () => {
-    const ok = await confirm({ title: t.count("orch.stopAllTitle", own.length), body: t("orch.stopAllBody"), confirm: t("orch.stopAll"), danger: true });
-    if (!ok) return;
-    await Promise.all(own.map((session) => call("pty.kill", session.ptyId)));
-  }, t("orch.stopFailed"));
-
-  return (
-    <div className="vstack" style={{ gap: 8, minHeight: 0, flex: 1 }}>
-      <CopyList copies={copies} workspaces={workspaces} />
-      <div className="orch-team-head">
-        <span className="section-title" style={{ margin: 0 }}>
-          {t("orch.team")}
-        </span>
-        <span className="grow" />
-        {own.length > 0 && (
-          <Button size="sm" variant="danger" icon={Square} busy={stoppingAll} onClick={() => void stopAll()}>
-            {t("orch.stopAll")}
-          </Button>
-        )}
-      </div>
-      {clis.length === 0 && <p className="faint orch-team-empty">{t("orch.teamEmpty")}</p>}
-      <div className="list-scroll" style={{ padding: 0 }}>
-        {clis.map((session) => {
-          const workspace = workspaces.find((item) => item.id === session.workspaceId);
-          const waiting = attention.get(session.ptyId)?.attention === "waiting";
-          return (
-            <div key={session.ptyId} className={`row orch-member${waiting ? " needs-you" : ""}`}>
-              <span className={`dot ${session.working ? "running" : waiting ? "stopped" : ""}`} {...tipProps(session.working ? t("orch.working") : waiting ? t("orch.needsYou") : t("orch.quiet"))} />
-              <span className="vstack grow" style={{ gap: 0, minWidth: 0 }}>
-                <span className="row-title truncate hstack" style={{ gap: 5 }}>
-                  {session.orchestrated && (
-                    <span className="accent-text" style={{ display: "inline-flex", flex: "none" }} {...tipProps(t("orch.mine"))}>
-                      <Workflow size={12} />
-                    </span>
-                  )}
-                  <span className="truncate">{session.program || session.title.split(" · ")[0]}</span>
-                </span>
-                <span className="row-sub truncate">{workspace?.name ?? session.title}</span>
-              </span>
-              <span className="row-actions">
-                <Button size="sm" variant="ghost" icon={SquareTerminal} tip={t("orch.open")} onClick={() => go({ view: "code", workspaceId: session.workspaceId ?? undefined, ptyId: session.ptyId })} />
-                <Button size="sm" variant="ghost" icon={Square} tip={t("orch.stopOne")} onClick={() => void stop(session.ptyId)} />
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }

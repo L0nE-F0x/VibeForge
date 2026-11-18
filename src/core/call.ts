@@ -86,6 +86,12 @@ export class Segmenter {
     this.opts.detector?.reset();
   }
 
+  /** Audio of the utterance still being spoken, once confirmed as speech; empty otherwise. */
+  peek(): Buffer {
+    const confirmed = this.opts.detector ? this.talking && this.voicedMs >= SPEECH_CONFIRM_MS : this.endpointer.phase === "speaking";
+    return confirmed && this.speech.length ? Buffer.concat(this.speech) : Buffer.alloc(0);
+  }
+
   /** What was said, without most of the pause that ended it (`quietMs` of the frames at its end). */
   private take(quietMs: number, frameMs: number): Buffer {
     const drop = Math.max(0, Math.floor((quietMs - TAIL_MS) / frameMs));

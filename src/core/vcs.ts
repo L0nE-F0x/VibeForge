@@ -94,6 +94,64 @@ export async function isGitRepo(cwd: string, timeoutMs = 3000): Promise<boolean>
   return result.code === 0 && result.stdout.trim() === "true";
 }
 
+export interface FolderGitSummary {
+  git: boolean;
+  /** Current branch name, or null when detached or outside a repository. */
+  branch: string | null;
+  /** Changed, staged, conflicted or untracked files in the working tree. */
+  dirty: number;
+  ahead: number;
+  behind: number;
+  /** ISO 8601 committer date of HEAD, when there is at least one commit. */
+  lastCommitAt: string | null;
+}
+
+const NO_GIT_SUMMARY: FolderGitSummary = { git: false, branch: null, dirty: 0, ahead: 0, behind: 0, lastCommitAt: null };
+
+/**
+ * Lightweight read-only git summary for a workspace folder: its branch, uncommitted file count,
+ * upstream ahead/behind counts, and latest commit timestamp. Uses `--no-optional-locks` via execGit.
+ */
+export async function summarizeFolderGit(cwd: string, timeoutMs = 2500): Promise<FolderGitSummary> {
+  if (!cwd) return NO_GIT_SUMMARY;
+  const started = Date.now();
+  const status = await execGit(["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z"], cwd, timeoutMs);
+  if (status.code !== 0 || status.timedOut || status.missing) return NO_GIT_SUMMARY;
+  let oid = "";
+  let branch: string | null = null;
+  let ahead = 0;
+  let behind = 0;
+  let dirty = 0;
+  const entries = status.stdout.split("\0");
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!entry) continue;
+    if (entry.startsWith("# branch.oid ")) oid = entry.slice("# branch.oid ".length).trim();
+    else if (entry.startsWith("# branch.head ")) {
+      const head = entry.slice("# branch.head ".length).trim();
+      branch = head && head !== "(detached)" ? head : null;
+    } else if (entry.startsWith("# branch.ab ")) {
+      const ab = /^\+(\d+) -(\d+)$/.exec(entry.slice("# branch.ab ".length).trim());
+      if (ab) {
+        ahead = Number(ab[1]);
+        behind = Number(ab[2]);
+      }
+    } else if (entry.startsWith("2 ")) {
+      // Rename/copy entries carry the previous path in the next NUL-terminated slot.
+      dirty += 1;
+      index += 1;
+    } else if (/^[1u?] /.test(entry)) {
+      dirty += 1;
+    }
+  }
+  let lastCommitAt: string | null = null;
+  if (/^[0-9a-f]{7,64}$/.test(oid)) {
+    const log = await execGit(["log", "-1", "--format=%cI"], cwd, Math.max(250, timeoutMs - (Date.now() - started)));
+    if (log.code === 0 && !log.timedOut && log.stdout.trim()) lastCommitAt = log.stdout.trim();
+  }
+  return { git: true, branch, dirty, ahead, behind, lastCommitAt };
+}
+
 /**
  * The review summary written to git.txt when a run ends: status, diff stat, and any
  * commits made since the run started. The full patch is `diffSince`, saved beside it.

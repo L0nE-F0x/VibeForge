@@ -74,6 +74,10 @@ export class Store {
     return this.runs.allRuns();
   }
 
+  latestWorkspaceRuns(): Record<string, string> {
+    return this.runs.latestWorkspaceRuns();
+  }
+
   deleteRun(run: RunMeta): void {
     this.runs.deleteRun(run);
   }

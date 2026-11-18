@@ -1,6 +1,6 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { tipProps } from "./Tooltip.js";
-import { mark, scatter, shade, wordmark, type Art } from "../../shared/pixel.js";
+import { mark, scatter, shade, vibyArt, wordmark, type Art, type VibyMood, type VibyTone } from "../../shared/pixel.js";
 
 // Pixel art in the Omarchy manner. Shades come from CSS (--px-0 … --px-3, derived from the
 // theme's accents), so the art follows whichever Omarchy theme is active.
@@ -33,6 +33,85 @@ export function PixelMark({ px = 2, className }: { px?: number; className?: stri
   const art = useMemo(() => mark(), []);
   return <PixelArt art={art} px={px} className={className} />;
 }
+
+const VIBY_TONE_CLASS: Record<VibyTone, string> = {
+  s0: "px-s0",
+  s1: "px-s1",
+  s2: "px-s2",
+  s3: "px-s3",
+  visor: "px-visor",
+  eye: "px-eye",
+};
+
+const SPEAK_SEQ = [0, 1, 2, 1];
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Viby's anthropomorphized V-and-spark character, animated to match its live call mood. */
+export const VibySprite = memo(function VibySprite({
+  mood = "idle",
+  size = 24,
+  level = 0,
+  animated = true,
+  label,
+  className,
+}: {
+  mood?: VibyMood;
+  size?: number;
+  level?: number;
+  animated?: boolean;
+  label?: string;
+  className?: string;
+}) {
+  const [beat, setBeat] = useState(0);
+
+  useEffect(() => {
+    setBeat(0);
+    if (!animated || prefersReducedMotion()) return;
+    if (mood === "idle") {
+      let blinkTimer: number | null = null;
+      const loop = window.setInterval(() => {
+        setBeat(1);
+        blinkTimer = window.setTimeout(() => setBeat(0), 160);
+      }, 4200);
+      return () => {
+        window.clearInterval(loop);
+        if (blinkTimer !== null) window.clearTimeout(blinkTimer);
+      };
+    }
+    if (mood === "thinking") {
+      const loop = window.setInterval(() => setBeat((n) => (n + 1) % 4), 340);
+      return () => window.clearInterval(loop);
+    }
+    if (mood === "speaking") {
+      const loop = window.setInterval(() => setBeat((n) => (n + 1) % SPEAK_SEQ.length), 170);
+      return () => window.clearInterval(loop);
+    }
+    return undefined;
+  }, [mood, animated]);
+
+  const frame = mood === "listening" ? (level > 0.08 ? 1 : 0) : mood === "speaking" ? SPEAK_SEQ[beat % SPEAK_SEQ.length] : beat;
+  const art = useMemo(() => vibyArt(mood, frame), [mood, frame]);
+
+  return (
+    <svg
+      className={className ? `viby-sprite mood-${mood} ${className}` : `viby-sprite mood-${mood}`}
+      width={size}
+      height={size}
+      viewBox={`0 0 ${art.width} ${art.height}`}
+      shapeRendering="crispEdges"
+      role={label ? "img" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
+      {art.cells.map((cell) => (
+        <rect key={`${cell.x}.${cell.y}`} x={cell.x} y={cell.y} width={1} height={1} className={VIBY_TONE_CLASS[cell.tone]} />
+      ))}
+    </svg>
+  );
+});
 
 /**
  * Loose accent pixels, thickest along one edge and thinning out: the drift of squares
