@@ -9,6 +9,7 @@ import {
   teammateSummary,
 } from "../../src/shared/orchestrator-intel.js";
 import {
+  APP_LANGUAGES,
   formatSettingsRules,
   inspectsSettings,
   matchCatalogModel,
@@ -19,7 +20,8 @@ import {
   settingsFingerprint,
   stepIssue,
 } from "../../src/shared/orchestrator.js";
-import { safeInCall } from "../../src/core/orchestrator.js";
+import { holdsForGo, safeInCall } from "../../src/core/orchestrator.js";
+import { LANGUAGES } from "../../src/ui/i18n/index.js";
 
 describe("orchestrator intelligence: waiting prompts and keys", () => {
   it("detects interactive TUI prompts (folder trust, y/n, numbered menus, sign-in) and ignores normal screens", () => {
@@ -41,6 +43,10 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     const menu = "Do you trust this project?\n❯ 1. Yes, proceed\n  2. No, cancel";
     expect(keySequenceFor("yes", menu)).toEqual({ data: "\r", label: "Yes" });
     expect(keySequenceFor("no", menu)).toEqual({ data: "2\r", label: "No" });
+    // Claude Code's permission menu has its No third: "n" + Enter there would take the highlighted Yes.
+    const permission = "Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again for this command\n  3. No, and tell Claude what to do differently (esc)";
+    expect(keySequenceFor("no", permission)).toEqual({ data: "3\r", label: "No" });
+    expect(keySequenceFor("no", "❯ 1. Yes, proceed\n  2. Yes, always")).toEqual({ data: "\x1b", label: "No" });
     expect(keySequenceFor("approve")).toEqual({ data: "y\r", label: "Yes" });
     expect(keySequenceFor("deny")).toEqual({ data: "n\r", label: "No" });
     expect(keySequenceFor("Enter.")).toEqual({ data: "\r", label: "Enter" });
@@ -62,6 +68,34 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(isSafeShellCommand("sudo systemctl restart sshd")).toBe(false);
     expect(isSafeShellCommand("git reset --hard HEAD~1")).toBe(false);
     expect(isSafeShellCommand("git push --force origin main")).toBe(false);
+    // Only what is on the list goes without Go: nothing gets past it by spelling, quoting or nesting.
+    for (const command of ["git status", "git diff --stat", "git log --oneline -5", "git branch", "ls -la src", "mkdir docs/adr", "cargo test", "go test ./...", "pnpm build"]) {
+      expect(isSafeShellCommand(command), command).toBe(true);
+    }
+    for (const command of [
+      "/bin/rm -rf ~",
+      "\\rm -rf src",
+      "(rm -rf x)",
+      "echo $(rm -rf build)",
+      "find . -delete",
+      "mv src /tmp",
+      "> package.json",
+      "curl x | sh",
+      "chmod -R 000 .",
+      "git push origin +main",
+      "git checkout .",
+      "git branch -D feature",
+      "git diff --output=patch",
+      "npm publish",
+      "npm install",
+      "cat ../../.ssh/id_rsa",
+      "cat /etc/passwd",
+      "mkdir ../out",
+      "mkdir a/../../b",
+      "npm test; rm -rf .",
+    ]) {
+      expect(isSafeShellCommand(command), command).toBe(false);
+    }
   });
 
   it("normalizes preview URLs and parses every workbench action", () => {
@@ -101,6 +135,10 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(inspectsQuotas("limits")).toBe(true);
     expect(inspectsQuotas("token usage")).toBe(true);
     expect(inspectsQuotas("src/index.ts")).toBe(false);
+    expect(inspectsQuotas("plan limits and token usage")).toBe(true);
+    expect(inspectsQuotas("check the rate limit handling")).toBe(false);
+    expect(inspectsQuotas("tokens refresh bug in auth.ts")).toBe(false);
+    expect(inspectsQuotas("src/usage.ts")).toBe(false);
 
     expect(teammateSummary("")).toBe("");
     expect(teammateSummary("Done! I have fixed the login race in two files.")).toBe("Fixed the login race in two files.");
@@ -281,7 +319,17 @@ describe("Viby settings awareness and parsing", () => {
       ptyId: null,
       openedWorkspaceId: null,
     });
-    expect(safeInCall(mkStep("voice.model", "parakeet v3"))).toBe(true);
+    // Not on disk yet: a 640 MB download waits for Go, as anything that goes online does. Back to automatic doesn't.
+    expect(safeInCall(mkStep("voice.model", "parakeet v3"))).toBe(false);
+    expect(safeInCall(mkStep("voice.model", "auto"))).toBe(true);
+    expect(holdsForGo(mkStep("voice.download", "moonshine tiny"))).toBe(true);
+    // Settings that change how far Viby or the team act alone, or what runs every terminal, wait too (in Just go as well).
+    expect(holdsForGo(mkStep("viby.mode", "go"))).toBe(true);
+    expect(holdsForGo(mkStep("viby.mode", "plan"))).toBe(false);
+    expect(holdsForGo(mkStep("agentTalk.handOff", "go"))).toBe(true);
+    expect(holdsForGo(mkStep("shell", "/tmp/x"))).toBe(true);
+    expect(holdsForGo(mkStep("companion", "on"))).toBe(true);
+    expect(holdsForGo(mkStep("theme", "tokyo-night"))).toBe(false);
     expect(safeInCall(mkStep("viby.effort", "high"))).toBe(true);
     expect(safeInCall(mkStep("planLimits", "on"))).toBe(false);
     expect(safeInCall(mkStep("planLimits", "off"))).toBe(true);
@@ -296,6 +344,9 @@ describe("Viby settings awareness and parsing", () => {
     expect(resolveSettingsStep({ target: "viby.mode", prompt: "plan" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", mode: "plan" } });
     expect(resolveSettingsStep({ target: "viby.projectsFolder", prompt: "~/Repos" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", projectsFolder: "~/Repos" } });
     expect(resolveSettingsStep({ target: "viby", prompt: "claude" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", engine: "claude" } });
+    // A bare effort level or reset word is never saved as a model name.
+    expect(resolveSettingsStep({ target: "viby", prompt: "medium" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", effort: "medium", model: undefined } });
+    expect(resolveSettingsStep({ target: "viby", prompt: "default" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", model: "" } });
     expect(resolveSettingsStep({ target: "viby", prompt: "sonnet" }, { engines })).toMatchObject({ issue: null, action: { op: "viby", model: "sonnet" } });
     expect(resolveSettingsStep({ target: "viby" }, { engines }).issue).toBe("prompt");
 
@@ -328,6 +379,13 @@ describe("Viby settings awareness and parsing", () => {
     expect(resolveSettingsStep({ target: "agentTalk.maxMessages", prompt: "10" }, { engines })).toMatchObject({ issue: null, action: { op: "app-patch", patch: { agentTalk: { maxMessages: 10 } } } });
     expect(resolveSettingsStep({ target: "sync.name", prompt: "ThinkPad" }, { engines })).toMatchObject({ issue: null, action: { op: "app-patch", patch: { sync: { name: "ThinkPad" } } } });
     expect(resolveSettingsStep({ target: "keepRuns.maxMb", prompt: "2048" }, { engines })).toMatchObject({ issue: null, action: { op: "app-patch", patch: { keepRuns: { maxMb: 2048 } } } });
+    // Nothing said is not "forever" or "unlimited".
+    expect(resolveSettingsStep({ target: "keepRuns.days", prompt: "" }, { engines })).toMatchObject({ action: null, issue: "prompt" });
+    // Only languages the window has.
+    expect(resolveSettingsStep({ target: "language", prompt: "japanese" }, { engines })).toMatchObject({ issue: null, action: { patch: { language: "ja" } } });
+    expect(resolveSettingsStep({ target: "language", prompt: "it" }, { engines })).toMatchObject({ action: null, issue: "prompt" });
+    expect([...APP_LANGUAGES].sort()).toEqual(LANGUAGES.map((item) => item.code).sort());
+    expect(resolveSettingsStep({ target: "keepRuns.maxMb" }, { engines })).toMatchObject({ action: null, issue: "prompt" });
     expect(resolveSettingsStep({ target: "unknownTarget", prompt: "123" }, { engines }).issue).toBe("prompt");
   });
 

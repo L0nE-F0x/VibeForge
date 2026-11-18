@@ -68,8 +68,11 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
     return { data: numberedMenu ? "\r" : "y\r", label: "Yes" };
   }
   if (/^(?:n|no|nope|deny|reject|decline|dont|don't)$/.test(key)) {
-    const hasOptionTwo = /\b2[.)]\s*(?:no|deny|reject|cancel|don't|do not)\b/i.test(tail);
-    return { data: numberedMenu && hasOptionTwo ? "2\r" : "n\r", label: "No" };
+    if (!numberedMenu) return { data: "n\r", label: "No" };
+    // The menu's own "No" wherever it is (Claude Code's is 3, after two kinds of Yes). Without one,
+    // Escape: "n" does nothing in such a menu and the Enter after it would take the highlighted Yes.
+    const no = /(?:^|\n|\s)([1-9])[.)]\s*(?:no|deny|reject|cancel|don't|do not)\b/i.exec(tail);
+    return no ? { data: `${no[1]}\r`, label: "No" } : { data: "\x1b", label: "No" };
   }
   if (/^(?:enter|return)$/.test(key)) return { data: "\r", label: "Enter" };
   if (/^(?:esc|escape)$/.test(key)) return { data: "\x1b", label: "Escape" };
@@ -81,18 +84,33 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
   return null;
 }
 
-const DESTRUCTIVE_SHELL =
-  /(?:^|[;&|]\s*|\s)(?:sudo|su|rm|rmdir|mkfs|dd|kill|pkill|killall|shutdown|reboot|poweroff)\b|\bgit\s+(?:reset\s+--hard|clean\b|push\s+(?:--force|-f)\b|branch\s+-D\b|checkout\s+--\s*\.|restore\s+\.)/;
+/** A path argument that stays inside the folder: not absolute, not from home, never climbing out. */
+const LOCAL_PATH = String.raw`(?!/|~|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
+/**
+ * The commands a `shell` step may run without a Go, each one whole: tests, builds and checks through
+ * the project's own scripts, git that only reads, and listing, reading or making folders in this one.
+ */
+const SAFE_SHELL = [
+  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|run\s+[\w:.-]+)(?:\s+--?[\w=.:-]+)*$/,
+  /^(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)(?:\s+\.\/\.\.\.)?|pytest|python3?\s+-m\s+pytest)(?:\s+--?[\w=.:-]+)*$/,
+  /^git\s+(?:status|log|diff|show|rev-parse)(?:\s+(?!--output)[\w./~^@:=-]+)*$/,
+  /^git\s+(?:remote\s+-v|branch(?:\s+(?:-a|-r|-v|-vv|--list|--show-current))*)$/,
+  new RegExp(String.raw`^(?:ls|tree|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
+  new RegExp(String.raw`^mkdir(?:\s+-p)?(?:\s+${LOCAL_PATH})+$`),
+  /^(?:pwd|git\s+--version|node\s+--version)$/,
+];
 
 /**
- * Whether a `shell` step can run at once during a voice call without asking for Go: opening a
- * blank shell, creating folders, running tests/builds, or checking git is safe; deleting files,
- * force-pushing, hard-resetting, or sudo waits for Go.
+ * Whether a `shell` step can run without asking for Go (in a call, or in "Just go"): a blank shell,
+ * or commands each on the list above joined by `&&`. Anything else waits for Go: deleting, moving,
+ * installing, pushing, redirecting, piping, substituting, and every program not named here. A list
+ * of what is safe, not of what is dangerous: `/bin/rm`, `\rm`, `find -delete` or `$(…)` can't slip past it.
  */
 export function isSafeShellCommand(command: string | undefined): boolean {
   const text = (command ?? "").trim();
   if (!text) return true;
-  return !DESTRUCTIVE_SHELL.test(text);
+  const parts = text.split("&&").map((part) => part.trim());
+  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
 }
 
 export type WorkbenchAction =
@@ -175,7 +193,11 @@ export function parseWorkbenchAction(input: { prompt?: string; target?: string; 
 
 /** Whether an `inspect` step asks for plan limits or token usage rather than a workspace, CLI, or copy. */
 export function inspectsQuotas(text: string | undefined): boolean {
-  return /\b(?:plan[- ]?limits?|limits?|quotas?|token[- ]?usage|tokens?|usage)\b/i.test((text ?? "").trim());
+  // Only when that is all it says ("limits", "plan limits and token usage"): "the rate limit handling"
+  // or src/usage.ts is a file or a screen to look at, not the person's plan.
+  const words = (text ?? "").trim().toLowerCase().split(/[\s,/&+-]+/).filter(Boolean);
+  if (!words.some((word) => /^(?:limits?|quotas?|tokens?|usage)$/.test(word))) return false;
+  return words.every((word) => /^(?:plan|plans|limits?|quotas?|tokens?|usage|rate|and|my|the|current|left|remaining)$/.test(word));
 }
 
 /**

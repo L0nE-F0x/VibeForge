@@ -115,7 +115,8 @@ const NO_GIT_SUMMARY: FolderGitSummary = { git: false, branch: null, dirty: 0, a
 export async function summarizeFolderGit(cwd: string, timeoutMs = 2500): Promise<FolderGitSummary> {
   if (!cwd) return NO_GIT_SUMMARY;
   const started = Date.now();
-  const status = await execGit(["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z"], cwd, timeoutMs);
+  // `-- .`: the workspace folder, not the whole repository it may sit inside (a monorepo package, or a home folder under git).
+  const status = await execGit(["status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z", "--", "."], cwd, timeoutMs);
   if (status.code !== 0 || status.timedOut || status.missing) return NO_GIT_SUMMARY;
   let oid = "";
   let branch: string | null = null;

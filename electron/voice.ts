@@ -797,6 +797,9 @@ export class Voice {
         const timer = setTimeout(() => {
           const idx = waiters.indexOf(entry);
           if (idx >= 0) waiters.splice(idx, 1);
+          // Its answer would still come, and be taken as the next request's: the worker goes, and the
+          // next request starts a fresh one.
+          child.kill("SIGKILL");
           reject(new Error("sherpa-onnx worker timed out."));
         }, timeoutMs);
         waiters.push(entry);
@@ -1025,14 +1028,9 @@ export class Voice {
       },
     })
       .then(async (bytes) => {
-        if (sherpaArchive) {
-          try {
-            await unpackSherpaArchive(sherpaArchive, path.join(this.opts.dataRoot, "sherpa-onnx"), process.arch);
-          } catch (error) {
-            for (const file of files) fs.rmSync(file.target, { force: true });
-            throw error;
-          }
-        }
+        // A runtime that won't unpack leaves the model it came with: those files were checked, and only
+        // the archive (removed below either way) is at fault.
+        if (sherpaArchive) await unpackSherpaArchive(sherpaArchive, path.join(this.opts.dataRoot, "sherpa-onnx"), process.arch);
         this.opts.log.info(`Voice: downloaded ${kind} ${id} (${Math.round(bytes / 1_000_000)} MB)`);
       })
       .catch((error: unknown) => {

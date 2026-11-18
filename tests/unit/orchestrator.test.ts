@@ -512,6 +512,8 @@ describe("the Orchestrator in the service", () => {
     const ctx = withPlanner([
       { say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "First." }] },
       { say: "Which CLI?", steps: [{ kind: "start", engine: "nobody", workspace: "shop", prompt: "Second." }] },
+      { say: "Clearing it out.", steps: [{ kind: "shell", workspace: "shop", prompt: "rm -rf build" }] },
+      { say: "Stopping it.", steps: [{ kind: "key", target: "argy", prompt: "ctrl+c" }] },
     ]);
     ctx.svc.addWorkspace(repo);
     ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
@@ -527,6 +529,43 @@ describe("the Orchestrator in the service", () => {
     await ctx.svc.orchestratorRun(held?.id ?? "");
     expect(ctx.spawns.map((spawn) => path.basename(spawn.cwd))).toEqual(["one", "second"]);
     expect(ctx.spawns[1].argv[0]).toBe("/usr/bin/pasty");
+
+    // Just go still asks before a command that deletes, and before Ctrl+C (a stop by another name).
+    await ctx.svc.orchestratorAsk("delete the build folder");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    await ctx.svc.orchestratorAsk("interrupt argy");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    ctx.svc.close();
+  });
+
+  it("skips a step chained after one that didn't carry out", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([]);
+    const shop = ctx.svc.addWorkspace(repo).workspaces.find((item) => item.path === repo)!;
+    const other = ctx.svc.addWorkspace(ctx.place).workspaces.find((item) => item.path === ctx.place)!;
+    ctx.svc.orchestrator.runner = async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        structuredOutput: {
+          say: "Fixing it, then checking.",
+          steps: [
+            { kind: "start", engine: "argy", workspace: shop.name, prompt: "Fix it." },
+            { kind: "shell", workspace: other.name, prompt: "git status", after: true },
+          ],
+        },
+      }),
+      stderr: "",
+      timedOut: false,
+    });
+    await ctx.svc.orchestratorAsk("fix it and then check");
+    const turn = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(turn.plan).toBe("waiting");
+    // The first step can't happen any more: the second, which depends on it, mustn't happen either.
+    await ctx.svc.removeWorkspace(shop.id);
+    await ctx.svc.orchestratorRun(turn.id);
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.steps?.map((step) => step.state)).toEqual(["skipped", "skipped"]);
+    expect(ctx.spawns).toHaveLength(0);
     ctx.svc.close();
   });
 
@@ -1737,7 +1776,7 @@ describe("Viby speaks up", () => {
       say: "Starting Grok, then running tests.",
       steps: [
         { kind: "start", engine: "grok", workspace: workspace.name },
-        { kind: "shell", workspace: workspace.name, prompt: "echo ok", after: true },
+        { kind: "shell", workspace: workspace.name, prompt: "git status", after: true },
       ],
     });
     await ctx.svc.orchestratorAsk("start grok and then run tests");

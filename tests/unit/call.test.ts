@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { answerTo, callWord, echoes, phantom, quickNav, READ_START, Segmenter, speechBegan, spokenAnswer, spokenWord, waitingPlan } from "../../src/core/call.js";
 import type { LogFile } from "../../src/core/log.js";
+import type { SpeechDetector } from "../../src/core/vad.js";
 import type { VoiceSettings } from "../../src/core/types.js";
 import { BYTES_PER_SECOND, ECHO_SOURCE, echoCancelConf, rms } from "../../src/core/voice.js";
 import type { CallState, OrchestratorTurn } from "../../src/shared/api.js";
@@ -97,6 +98,18 @@ describe("a call's microphone, cut into the things said", () => {
     const done = segmenter.push(silence(1.2));
     expect(done.utterances).toHaveLength(1);
     expect(segmenter.peek().length).toBe(0);
+  });
+
+  it("asks for no partial words once a pause has begun, so none is still running when the final arrives", () => {
+    // A detector that finds any sound speech: what the Segmenter does with it is what is tested.
+    const loud = { probability: (frame: Float32Array) => (frame.some((sample) => Math.abs(sample) > 0.01) ? 1 : 0), reset: () => undefined };
+    const segmenter = new Segmenter({ detector: loud as unknown as SpeechDetector });
+    segmenter.push(tone(0.8));
+    expect(seconds(segmenter.peek())).toBeGreaterThan(0.5);
+    segmenter.push(silence(0.3));
+    expect(segmenter.peek().length).toBe(0);
+    segmenter.push(tone(0.3));
+    expect(seconds(segmenter.peek())).toBeGreaterThan(1);
   });
 });
 

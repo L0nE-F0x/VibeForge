@@ -190,7 +190,9 @@ export const useSkills = () => useQuery("skills", ["skills"], () => call("skills
 export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live", "working"], () => call("routines.list"));
 export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live", "working"], () => call("tasks.list"));
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
-export const useWorkspaceStatus = () => useQuery("workspace-status", ["workspaces", "runs", "tasks", "orchestrator", "sync"], () => call("workspaces.status"));
+// Runs git status in every workspace: only the list and finished runs change what it reports (the 30 s poll
+// catches edits). Sync, Viby and task events come many times a second and would keep git running back to back.
+export const useWorkspaceStatus = () => useQuery("workspace-status", ["workspaces", "runs"], () => call("workspaces.status"));
 export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));

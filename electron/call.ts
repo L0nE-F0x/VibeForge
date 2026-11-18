@@ -490,6 +490,8 @@ export class Call {
       this.changed();
       return;
     }
+    // Two quiet minutes let the standby voice go; it is a call still, so it comes back (and stays warm).
+    this.opts.voice.speaker.warm?.(voice);
     const epoch = this.epoch;
     // Where Viby can't hear itself, the microphone stays open and talking over it stops it.
     this.open = this.canTalkOver() && !this.muted;

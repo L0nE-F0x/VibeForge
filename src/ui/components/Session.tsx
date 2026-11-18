@@ -114,7 +114,11 @@ export function Composer({
   }, [text]);
 
   useEffect(() => {
-    if (autoFocus && mayTakeFocus(ref.current)) ref.current?.focus();
+    const node = ref.current;
+    if (!autoFocus || !node || !mayTakeFocus(node)) return;
+    node.focus();
+    // After a kept draft (or the key that opened Viby's box), not before it.
+    node.setSelectionRange(node.value.length, node.value.length);
   }, [autoFocus]);
 
   async function submit() {

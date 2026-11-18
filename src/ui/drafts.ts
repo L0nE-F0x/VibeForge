@@ -33,6 +33,11 @@ function keepDraft(key: string, value: unknown): void {
   }
 }
 
+/** Keep `value` as the draft under `key`: a message box opened next starts from it. */
+export function seedDraft(key: string, value: string): void {
+  keepDraft(key, value);
+}
+
 export function forgetDraft(key: string): void {
   memory.delete(key);
   try {
