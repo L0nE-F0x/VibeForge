@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Fixed
 
 - **The tour's two terminal steps no longer blank for a second on a first run.** With no terminal open yet they point at the empty workspace, which says the same thing, instead of waiting for a pane that isn't there.
+- **Settings → Phone gives the computer's own address, not one it used to have.** Tailscale Serve keeps the entries of a name a computer had before it was renamed, and that old name no longer opens anything; the address and the QR code could point there, so the phone got nothing. Only the computer's current Tailscale name counts now.
 - **A plan that can't find what to show says so.** "Nothing called “x” to show: no running CLI, workspace or view", where it used to say "No workspace called “x”. Pick one." with nothing to pick from.
 
 ## [2.20.0] - 2026-11-18

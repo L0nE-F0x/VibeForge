@@ -146,6 +146,20 @@ describe("where a phone can open the page, as Tailscale tells it", () => {
     expect(readReach(status("Running"), under, 4737).url).toBeNull();
   });
 
+  it("gives this computer's own name, not one it had before that Serve still lists", () => {
+    // As found on a laptop renamed from "apexforge": the old name comes first and no longer resolves.
+    const renamed = JSON.stringify({
+      TCP: { 443: { HTTPS: true } },
+      Web: {
+        "apexforge.tail1234.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4737" } } },
+        "apexforgelaptop.tail1234.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4737" } } },
+      },
+    });
+    expect(readReach(status("Running", "ApexForgeLaptop.tail1234.ts.net."), renamed, 4737).url).toBe("https://apexforgelaptop.tail1234.ts.net");
+    // Only the old name shares it: the page isn't reachable yet, so the step to share it is the one left.
+    expect(readReach(status("Running"), serve("oldname.tail1234.ts.net:443", "http://127.0.0.1:4737"), 4737)).toMatchObject({ tailscale: "on", url: null });
+  });
+
   it("asks the tailscale on this computer, and says so when there is none", async () => {
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-tailscale-"));
     // A stand-in that answers the two questions the way the real one does.

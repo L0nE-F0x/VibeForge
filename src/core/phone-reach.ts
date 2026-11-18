@@ -42,9 +42,11 @@ export function readReach(status: string | null, serve: string | null, port: num
   const config = serve ? parse(serve) : null;
   const web = config?.Web && typeof config.Web === "object" ? (config.Web as Record<string, { Handlers?: unknown }>) : {};
   const funnels = config?.AllowFunnel && typeof config.AllowFunnel === "object" ? (config.AllowFunnel as Record<string, unknown>) : {};
-  // The address on 443 first: it is the one without a port to type.
+  // Only this computer's own name counts: Serve keeps the entries of a name the machine had before
+  // (a laptop renamed from "apexforge" to "apexforgelaptop"), and that old name no longer resolves,
+  // so a phone sent there gets nothing. The address on 443 first: it is the one without a port to type.
   const shared = Object.keys(web)
-    .filter((host) => servesPort(web[host]?.Handlers, port))
+    .filter((host) => host.toLowerCase().replace(/:\d+$/, "") === name && servesPort(web[host]?.Handlers, port))
     .sort((a, b) => Number(b.endsWith(":443")) - Number(a.endsWith(":443")))[0];
   if (!shared) return { tailscale: "on", name, url: null, funnel: false };
   return { tailscale: "on", name, url: `https://${shared.replace(/:443$/, "")}`, funnel: funnels[shared] === true };
