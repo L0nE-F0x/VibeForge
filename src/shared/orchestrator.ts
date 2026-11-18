@@ -182,6 +182,24 @@ export type VibyWord =
   | { kind: "read"; engine: string; workspace: string; reply: string; all: boolean; fromScreen: boolean }
   | { kind: "hangup" };
 
+export interface OrchestratorCheck {
+  id: string;
+  kind: "lookup" | "inspect";
+  /** Short target label for the chip ("Claude Code · VibeForge", "auth"). */
+  label: string;
+  summary: string;
+  details: string;
+  ptyId?: string | null;
+  workspaceId?: string | null;
+  copyId?: string | null;
+}
+
+export interface OrchestratorActivity {
+  kind: OrchestratorStepKind;
+  /** Short target label for the live line ("Claude Code · VibeForge", "fix-tray"). */
+  label: string;
+}
+
 export interface OrchestratorTurn {
   id: string;
   at: string;
@@ -189,6 +207,8 @@ export interface OrchestratorTurn {
   text: string;
   /** VibeForge's own word about a CLI, not the planner's answer. */
   note?: MaestroNote;
+  /** Inline inspections or lookups Viby carried out while forming this answer. */
+  checks?: OrchestratorCheck[];
   /** A plan: steps, and where it is. "replaced" is a plan the next answer took over. */
   steps?: OrchestratorStep[];
   plan?: "waiting" | "running" | "done" | "cancelled" | "replaced";
@@ -208,6 +228,8 @@ export interface OrchestratorView {
   mode: "plan" | "go";
   /** Waiting for the planning CLI's answer. */
   thinking: boolean;
+  /** What Viby is actively checking or carrying out right now, for the thin live status line. */
+  activity?: OrchestratorActivity | null;
   turns: OrchestratorTurn[];
   /** Copies waiting for a person to apply or discard them, oldest first. */
   copies?: MaestroCopy[];

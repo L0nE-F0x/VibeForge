@@ -38,6 +38,8 @@ import {
   stepIssue,
   type Looking,
   type MaestroCopy,
+  type OrchestratorActivity,
+  type OrchestratorCheck,
   type OrchestratorStep,
   type OrchestratorTurn,
   type OrchestratorView,
@@ -186,6 +188,7 @@ const turnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).sl
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
+  private activity: OrchestratorActivity | null = null;
   private runEpoch = 0;
   private readonly runningPlans = new Map<string, Promise<void>>();
   /** Models each planner listed, kept for this run of VibeForge. */
@@ -256,10 +259,48 @@ export class OrchestratorDesk {
       engineReady: Boolean(planner),
       mode,
       thinking: this.thinking !== null,
+      ...(this.activity ? { activity: this.activity } : {}),
       turns: this.conversation.turns,
       copies: this.copies.list(),
       projectsFolder: this.projectsFolder(),
     };
+  }
+
+  private setActivity(next: OrchestratorActivity | null): void {
+    if (this.activity?.kind === next?.kind && this.activity?.label === next?.label) return;
+    this.activity = next;
+    this.core.emit("orchestrator");
+  }
+
+  private stepActivityLabel(step: OrchestratorStep, context: PlanContext): string {
+    if (step.kind === "start") {
+      const engine = context.engines.find((item) => item.id === step.engineId)?.label || step.engineId;
+      const ws = context.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
+      return step.branch ? `${engine} · ${step.branch}` : [engine, ws].filter(Boolean).join(" · ");
+    }
+    if (step.kind === "inspect") {
+      if (inspectsQuotas(step.prompt)) return "plan limits";
+      if (step.target) {
+        const copy = context.copies?.find((item) => item.id === step.target);
+        if (copy) return copy.name;
+        const run = context.running.find((item) => item.id === step.target);
+        if (run) return `${run.engine} · ${run.workspace}`;
+      }
+      if (step.workspaceId) return context.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
+      return step.asked || step.prompt;
+    }
+    if (step.kind === "lookup") return step.asked || step.prompt;
+    if (step.kind === "workspace") return step.name || step.asked || "";
+    if (step.kind === "tell" || step.kind === "read" || step.kind === "stop" || step.kind === "key") {
+      const run = context.running.find((item) => item.id === step.target);
+      return run ? `${run.engine} · ${run.workspace}` : step.asked;
+    }
+    if (step.kind === "apply" || step.kind === "discard") {
+      const copy = context.copies?.find((item) => item.id === step.target);
+      return copy ? copy.name : step.asked;
+    }
+    if (step.kind === "shell") return context.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
+    return step.name || step.asked || step.view || step.prompt;
   }
 
   /**
@@ -360,9 +401,13 @@ export class OrchestratorDesk {
    * And the call is handed what Viby has to say by itself: a note about a CLI, an answer read out.
    */
   onCall: ((word: VibyWord) => void) | null = null;
+  looking: Looking | null = null;
 
-  private followTo(workspaceId: string | null | undefined, ptyId: string): void {
-    if (this.onCall) this.core.options.host.show?.({ view: "code", ...(workspaceId ? { workspaceId } : {}), ptyId }, false);
+  private followTo(workspaceId: string | null | undefined, ptyId: string, force = false): void {
+    if (!this.onCall) return;
+    // While the person is in Viby's own call panel, keep them there: the chip under Viby's reply opens Code on tap.
+    if (!force && this.looking?.view === "orchestrator") return;
+    this.core.options.host.show?.({ view: "code", ...(workspaceId ? { workspaceId } : {}), ptyId }, false);
   }
 
   /**
@@ -373,15 +418,19 @@ export class OrchestratorDesk {
     const words = text.trim();
     if (!words) return;
     if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
+    if (looking !== undefined) this.looking = looking;
     const now = this.core.now().toISOString();
     this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
     const controller = new AbortController();
     this.thinking = controller;
     this.save();
     try {
-      await this.think(words, controller.signal, looking ?? null);
+      await this.think(words, controller.signal, looking ?? this.looking);
     } finally {
-      if (this.thinking === controller) this.thinking = null;
+      if (this.thinking === controller) {
+        this.thinking = null;
+        this.activity = null;
+      }
       this.save();
     }
   }
@@ -491,11 +540,27 @@ export class OrchestratorDesk {
       return;
     }
     let steps = resolvePlan(plan, context);
+    let checks: OrchestratorCheck[] = [];
     // A plan whose steps are only lookups or inspections: VibeForge gathers the findings at once
     // and hands them back so Viby can answer or give the concrete steps in the same turn.
     if (!signal.aborted && steps.length > 0 && steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, context))) {
+      this.setActivity({ kind: steps[0].kind, label: this.stepActivityLabel(steps[0], context) });
       const results = await Promise.all(steps.map((step) => (step.kind === "lookup" ? this.lookup(step.prompt) : this.inspect(step))));
+      this.setActivity(null);
       if (signal.aborted) return;
+      checks = steps.map((step, idx) => {
+        const copy = step.kind === "inspect" ? copies.find((item) => item.id === step.target) : undefined;
+        const session = step.kind === "inspect" && step.target ? this.core.live.get(step.target) : undefined;
+        return {
+          id: step.id,
+          kind: step.kind as "lookup" | "inspect",
+          label: this.stepActivityLabel(step, context),
+          summary: results[idx].summary,
+          details: results[idx].details.slice(0, 6000),
+          ...(session ? { ptyId: session.ptyId, workspaceId: session.workspaceId } : step.workspaceId ? { workspaceId: step.workspaceId } : {}),
+          ...(copy ? { copyId: copy.id } : {}),
+        };
+      });
       const details = results
         .map((res, idx) => `${steps[idx].kind === "lookup" ? "Lookup" : "Inspection"} "${steps[idx].asked || steps[idx].prompt}":\n${res.details}`)
         .join("\n\n");
@@ -517,7 +582,7 @@ export class OrchestratorDesk {
       }
     }
     if (!steps.length) {
-      this.answer({ text: plan.say, ...(plan.hangup ? { hangup: true } : {}) });
+      this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
       if (plan.hangup) this.onCall?.({ kind: "hangup" });
       return;
     }
@@ -525,7 +590,7 @@ export class OrchestratorDesk {
     const inPlaceDirty = this.onCall ? await this.hasDirtyInPlace(steps) : false;
     // A new plan takes the place of one still waiting for Go.
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
-    const answered = this.answer({ text: plan.say, steps, plan: "waiting", ...(plan.hangup ? { hangup: true } : {}) });
+    const answered = this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), steps, plan: "waiting", ...(plan.hangup ? { hangup: true } : {}) });
     // Just go: at once, unless a step needs fixing, or would stop, apply or throw away someone's work.
     // Showing something or reading an answer out changes nothing, so a plan of only those goes at once either way.
     // In a voice call, safe steps (isolated branch copies, workspaces, tells, tasks, routines) also go at once.
@@ -626,6 +691,7 @@ export class OrchestratorDesk {
     if (!this.thinking) return;
     this.thinking.abort();
     this.thinking = null;
+    this.activity = null;
     if (!silent) this.answer({ text: "", problem: "stopped" });
     this.save();
   }
@@ -634,6 +700,7 @@ export class OrchestratorDesk {
   clear(): void {
     this.thinking?.abort();
     this.thinking = null;
+    this.activity = null;
     this.forgetTold();
     this.runEpoch += 1;
     this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
@@ -786,6 +853,7 @@ export class OrchestratorDesk {
       }
       const sourceWorkspaceId = step.workspaceId || null;
       step.state = "running";
+      this.activity = { kind: step.kind, label: this.stepActivityLabel(step, context) };
       this.save();
       try {
         await this.carryOut(turn, step);
@@ -801,9 +869,11 @@ export class OrchestratorDesk {
         step.error = error instanceof Error ? error.message : String(error);
         prevPtyId = null;
       }
+      this.activity = null;
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       this.save();
     }
+    this.activity = null;
     if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
     turn.plan = "done";
     this.save();
@@ -1005,8 +1075,8 @@ export class OrchestratorDesk {
       const answer = await this.messages.answerOf(step.target);
       if (!answer.reply) throw new Error("It hasn't answered anything yet.");
       step.reply = answer.reply.length > READ_KEEP ? `${answer.reply.slice(0, READ_KEEP).trimEnd()}…` : answer.reply;
-      // In a call its terminal comes up too, so the answer can be read along with.
-      this.followTo(session.workspaceId, step.target);
+      // In a call outside Viby's own panel (or when only the screen can be shown), bring the terminal up.
+      this.followTo(session.workspaceId, step.target, answer.fromScreen);
       this.onCall?.({ kind: "read", ...this.nameOf(session), reply: step.reply, all: step.prompt === "all", fromScreen: answer.fromScreen });
       return;
     }

@@ -140,8 +140,8 @@ function CopyNotice({ copy, engine }: { copy: MaestroCopy; engine: string }) {
   );
 }
 
-/** Copies waiting for review, beside the conversation: they outlive their plan cards and a new conversation. */
-export function CopyList({ copies, workspaces }: { copies: MaestroCopy[]; workspaces: Workspace[] }) {
+/** Copies waiting for review: shown in the top-right review popover, outliving their turns and a cleared thread. */
+export function CopyList({ copies, workspaces, onPick }: { copies: MaestroCopy[]; workspaces: Workspace[]; onPick?: () => void }) {
   const t = useT();
   if (!copies.length) return null;
   return (
@@ -154,14 +154,14 @@ export function CopyList({ copies, workspaces }: { copies: MaestroCopy[]; worksp
       </div>
       <div className="orch-review-list">
         {copies.map((copy) => (
-          <CopyRow key={copy.id} copy={copy} workspaces={workspaces} />
+          <CopyRow key={copy.id} copy={copy} workspaces={workspaces} onPick={onPick} />
         ))}
       </div>
     </>
   );
 }
 
-function CopyRow({ copy, workspaces }: { copy: MaestroCopy; workspaces: Workspace[] }) {
+function CopyRow({ copy, workspaces, onPick }: { copy: MaestroCopy; workspaces: Workspace[]; onPick?: () => void }) {
   const t = useT();
   const { go } = useNav();
   const engines = useEngines().data ?? [];
@@ -178,8 +178,28 @@ function CopyRow({ copy, workspaces }: { copy: MaestroCopy; workspaces: Workspac
         </span>
       </span>
       <span className="row-actions">
-        <Button size="sm" variant="ghost" icon={FileDiff} tip={t("orch.review")} onClick={() => go({ view: "orchestrator", copyId: copy.id })} />
-        {own && <Button size="sm" variant="ghost" icon={SquareTerminal} tip={t("orch.open")} onClick={() => go({ view: "code", workspaceId: own.id })} />}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={FileDiff}
+          tip={t("orch.review")}
+          onClick={() => {
+            onPick?.();
+            go({ view: "orchestrator", copyId: copy.id });
+          }}
+        />
+        {own && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={SquareTerminal}
+            tip={t("orch.open")}
+            onClick={() => {
+              onPick?.();
+              go({ view: "code", workspaceId: own.id });
+            }}
+          />
+        )}
         <Button size="sm" variant="ghost" icon={GitMerge} busy={applying} tip={t("tasks.apply", { workspace: from?.name ?? "" })} onClick={() => void apply()} />
         <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} tip={t("orch.discardTip")} onClick={() => void discard()} />
       </span>

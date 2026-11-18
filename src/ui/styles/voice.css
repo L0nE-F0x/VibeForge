@@ -129,6 +129,20 @@
   gap: 7px;
 }
 
+.listening-jump {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  color: inherit;
+  cursor: pointer;
+  align-items: center;
+  text-align: left;
+}
+
+.listening-jump:hover strong {
+  color: var(--accent);
+}
+
 .listening.call .listening-text .faint {
   max-width: 460px;
 }

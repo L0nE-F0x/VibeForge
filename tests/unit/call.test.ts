@@ -85,6 +85,19 @@ describe("a call's microphone, cut into the things said", () => {
     expect(utterances.length).toBeGreaterThanOrEqual(1);
     expect(seconds(utterances[0])).toBeCloseTo(2, 1);
   });
+
+  it("peeks at the active utterance without consuming it, and clears once the pause ends it", () => {
+    const segmenter = new Segmenter();
+    expect(segmenter.peek().length).toBe(0);
+    segmenter.push(silence(0.3));
+    expect(segmenter.peek().length).toBe(0);
+    segmenter.push(tone(0.8));
+    const mid = segmenter.peek();
+    expect(seconds(mid)).toBeGreaterThan(0.8);
+    const done = segmenter.push(silence(1.2));
+    expect(done.utterances).toHaveLength(1);
+    expect(segmenter.peek().length).toBe(0);
+  });
 });
 
 describe("words a call answers by itself", () => {
@@ -666,6 +679,72 @@ describe("a call with Viby", () => {
     await until(() => aborted === 1 && desk.instance.get().phase === "listening");
     await desk.say();
     expect(desk.spoken).toEqual(["Starting Claude."]);
+  });
+
+  it("streams liveHeard while the person speaks and reports Piper's synthesized speech duration", async () => {
+    let earEvents = null as { heard: (pcm: Buffer) => void; level: (l: number, h: boolean, ms: number) => void; closed: (e: string) => void } | null;
+    let progressCb = null as ((info: { text: string; startedAt: number; durationMs: number } | null) => void) | null;
+    let releaseSpeak = null as (() => void) | null;
+    const states: CallState[] = [];
+    const instance = new Call({
+      voice: {
+        openEar: (ev: typeof earEvents) => {
+          earEvents = ev;
+          return { deaf: () => undefined, close: () => undefined, peek: () => tone(0.8), detects: true, cancelsEcho: false };
+        },
+        transcribeLive: async () => "start codex in",
+        transcribe: async () => ({ text: "start codex in VibeForge", seconds: 1.4, tookMs: 40, empty: null }),
+        status: () => ({ ready: true } as never),
+        voiceFor: () => "/tmp/voice.onnx",
+        dictating: false,
+        speaker: {
+          piper: () => "/usr/bin/piper",
+          player: () => ({ label: "pw-play", argv: () => ["pw-play"] }),
+          warm: () => undefined,
+          unwarm: () => undefined,
+          stop: () => releaseSpeak?.(),
+          progress: (fn: typeof progressCb) => {
+            progressCb = fn;
+          },
+          speak: () =>
+            new Promise<void>((resolve) => {
+              releaseSpeak = resolve;
+              progressCb?.({ text: "Starting Codex.", startedAt: 1000, durationMs: 1450 });
+            }),
+        },
+      } as never,
+      service: () =>
+        ({
+          orchestratorView: () => ({ turns: [{ id: "t1", at: "now", from: "you", text: "hi" }, { id: "t2", at: "now", from: "vibeforge", text: "Starting Codex." }] }),
+          orchestratorCall: () => undefined,
+          orchestratorAsk: async () => undefined,
+          orchestratorRun: async () => undefined,
+          orchestratorCancel: () => undefined,
+          getSettings: () => ({ voice: { talkOver: "never" } }),
+          listAgents: () => [],
+          listEngines: () => [],
+          listWorkspaces: () => ({ workspaces: [] }),
+        }) as never,
+      looking: () => ({ view: "orchestrator" }),
+      words: { say: (k: string) => k, coreText: (s: string) => s } as never,
+      log: { info: () => undefined, warn: () => undefined, error: () => undefined } as never,
+      send: (state) => void states.push(state),
+      afterSpeechMs: 0,
+    });
+
+    instance.start();
+    earEvents!.level(0.5, true, 650);
+    await until(() => instance.get().liveHeard === "start codex in");
+    expect(states.some((s) => s.liveHeard === "start codex in")).toBe(true);
+
+    earEvents!.heard(tone(1.4));
+    await until(() => instance.get().phase === "speaking" && instance.get().speechDurationMs === 1450);
+    expect(instance.get().liveHeard).toBeUndefined();
+    expect(instance.get().speechStartedAt).toBe(1000);
+    releaseSpeak?.();
+    await until(() => instance.get().phase === "listening");
+    expect(instance.get().speechDurationMs).toBeUndefined();
+    instance.stop();
   });
 });
 

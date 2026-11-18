@@ -51,14 +51,37 @@ import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
-import type { Looking, MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch } from "../core/orchestrator.js";
+import type {
+  Looking,
+  MaestroCopy,
+  MaestroNote,
+  OrchestratorActivity,
+  OrchestratorCheck,
+  OrchestratorProblem,
+  OrchestratorStep,
+  OrchestratorTurn,
+  OrchestratorView,
+  StepIssue,
+  StepPatch,
+} from "../core/orchestrator.js";
 
 import type { MergeResult } from "../core/sync/git-rescue.js";
 import type { SyncMode } from "../core/sync/protocol.js";
 import type { SyncConflict, SyncMachine, SyncOffer, SyncRequest, SyncShare, SyncView } from "../core/sync/types.js";
 
 export type { MergeResult, SyncConflict, SyncMachine, SyncMode, SyncOffer, SyncRequest, SyncShare, SyncView };
-export type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch };
+export type {
+  MaestroCopy,
+  MaestroNote,
+  OrchestratorActivity,
+  OrchestratorCheck,
+  OrchestratorProblem,
+  OrchestratorStep,
+  OrchestratorTurn,
+  OrchestratorView,
+  StepIssue,
+  StepPatch,
+};
 import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
 
 export type { ApplyResult, WorkingCopy, BranchList };
@@ -199,6 +222,12 @@ export interface CallState {
   heardItself: boolean;
   /** The microphone is muted by the person while keeping the call open. */
   muted?: boolean;
+  /** Words heard so far while the person is still speaking in this utterance. */
+  liveHeard?: string;
+  /** Epoch ms when Piper audio playback started for the current `speaking` turn. */
+  speechStartedAt?: number;
+  /** Known audio duration in ms for the current `speaking` turn once Piper finishes synthesizing. */
+  speechDurationMs?: number;
 }
 
 export type DownloadKind = "model" | "voice";

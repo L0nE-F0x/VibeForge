@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GLYPHS, identicon, MARK, mark, scatter, seeded, shade, wordmark } from "../../src/shared/pixel.js";
+import { GLYPHS, identicon, MARK, mark, scatter, seeded, shade, vibyArt, wordmark, type VibyMood } from "../../src/shared/pixel.js";
 
 describe("pixel art", () => {
   it("draws every glyph on the same seven-row grid", () => {
@@ -41,5 +41,31 @@ describe("pixel art", () => {
     for (const cell of art.cells) expect(lit.has(`${4 - cell.x},${cell.y}`)).toBe(true);
     expect(art.cells.length).toBeGreaterThanOrEqual(6);
     expect(art.cells.length).toBeLessThanOrEqual(20);
+  });
+
+  it("poses Viby as a 15x15 V-and-spark character across every call mood", () => {
+    const moods: VibyMood[] = ["idle", "listening", "muted", "thinking", "speaking"];
+    for (const mood of moods) {
+      for (let frame = 0; frame < 4; frame += 1) {
+        const art = vibyArt(mood, frame);
+        expect(art.width).toBe(15);
+        expect(art.height).toBe(15);
+        expect(art.cells.every((cell) => cell.x >= 0 && cell.x < 15 && cell.y >= 0 && cell.y < 15)).toBe(true);
+        expect(art.cells.some((cell) => cell.tone === "visor")).toBe(true);
+        expect(art.cells.some((cell) => cell.tone === "eye")).toBe(true);
+        // V tip anchors at (7, 14) on every frame.
+        expect(art.cells.some((cell) => cell.x === 7 && cell.y === 14 && cell.tone === "s3")).toBe(true);
+      }
+    }
+    // Symmetric resting pose is strictly mirrored left-to-right.
+    const idle = vibyArt("idle", 0);
+    const byKey = new Map(idle.cells.map((cell) => [`${cell.x},${cell.y}`, cell.tone]));
+    for (const cell of idle.cells) {
+      expect(byKey.get(`${14 - cell.x},${cell.y}`)).toBe(cell.tone);
+    }
+    // Blink frame closes top row of eyes compared with open frame.
+    expect(vibyArt("idle", 1).cells.filter((cell) => cell.tone === "eye").length).toBeLessThan(
+      idle.cells.filter((cell) => cell.tone === "eye").length,
+    );
   });
 });
