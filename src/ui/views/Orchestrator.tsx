@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
 import { effortLevels, launchKind, takesModel, cleanModel } from "../../shared/launch-options.js";
 import { canOrchestrate, KNOWN_MODELS, orchestratorVoiceWords, plannedId, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../shared/orchestrator.js";
-import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
+import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
 import { usePtyAttention } from "../attention.js";
 import { CallButton } from "../call.js";
 import { coreText } from "../core-text.js";
@@ -28,7 +28,7 @@ const DRAFT_KEY = "orchestrator";
 /** Put the bar away: "Open in Code" on the bar opens the terminal, so the bar mustn't stay over it. */
 const LeaveBar = createContext<(() => void) | null>(null);
 
-export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
+export { useOrchestrator };
 
 /** A coding CLI: a run VibeForge started, or one typed into a shell. */
 function isCodingCli(session: LiveSession): boolean {

@@ -4,9 +4,12 @@ import { isDirectory } from "../fsx.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
 import type { LayoutNode } from "../types.js";
+import { summarizeFolderGit } from "../vcs.js";
 import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
-import type { Launched, TermSize } from "./types.js";
+import type { Launched, TermSize, WorkspaceSummary } from "./types.js";
 import type { ServiceCore } from "./core.js";
+
+const GIT_STATUS_CONCURRENCY = 6;
 
 /** Workspaces, their layouts, and the terminals Code mode opens in them. */
 export class WorkspaceDesk {
@@ -14,6 +17,29 @@ export class WorkspaceDesk {
 
   listWorkspaces(): WorkspaceFile {
     return this.core.store.readWorkspaces();
+  }
+
+  /** Read-only git state and latest run timestamp for every workspace, bounded in concurrency. */
+  async summarizeWorkspaces(): Promise<Record<string, WorkspaceSummary>> {
+    const { workspaces } = this.core.store.readWorkspaces();
+    const lastRuns = this.core.store.latestWorkspaceRuns();
+    const out: Record<string, WorkspaceSummary> = {};
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < workspaces.length) {
+        const workspace = workspaces[nextIndex];
+        nextIndex += 1;
+        const lastRunAt = lastRuns[workspace.id] ?? null;
+        if (!isDirectory(workspace.path)) {
+          out[workspace.id] = { exists: false, git: false, branch: null, dirty: 0, ahead: 0, behind: 0, lastRunAt, lastCommitAt: null };
+          continue;
+        }
+        const git = await summarizeFolderGit(workspace.path).catch(() => ({ git: false, branch: null, dirty: 0, ahead: 0, behind: 0, lastCommitAt: null }));
+        out[workspace.id] = { exists: true, ...git, lastRunAt };
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(GIT_STATUS_CONCURRENCY, workspaces.length) }, () => worker()));
+    return out;
   }
 
   addWorkspace(folder: string): WorkspaceFile {

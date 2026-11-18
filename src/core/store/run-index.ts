@@ -291,6 +291,18 @@ export class RunIndex {
       .filter((run): run is RunMeta => run !== null);
   }
 
+  /** Latest run timestamp (endedAt, else startedAt) recorded in each workspace, for sorting workspaces by activity. */
+  latestWorkspaceRuns(): Record<string, string> {
+    const rows = this.db
+      .prepare("SELECT workspaceId, MAX(COALESCE(endedAt, startedAt)) AS lastAt FROM runs WHERE workspaceId IS NOT NULL GROUP BY workspaceId")
+      .all() as Array<{ workspaceId: string | null; lastAt: string | null }>;
+    const out: Record<string, string> = {};
+    for (const row of rows) {
+      if (row.workspaceId && row.lastAt) out[row.workspaceId] = row.lastAt;
+    }
+    return out;
+  }
+
   /** Forget a run entirely: its index row and its folder, which is only ever `<data>/runs/<id>`. */
   deleteRun(run: RunMeta): void {
     this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);

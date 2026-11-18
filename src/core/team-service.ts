@@ -17,7 +17,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
-import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize } from "./service/types.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -122,6 +122,10 @@ export class TeamService extends ServiceCore {
 
   listWorkspaces(): WorkspaceFile {
     return this.workspaces.listWorkspaces();
+  }
+
+  summarizeWorkspaces(): Promise<Record<string, WorkspaceSummary>> {
+    return this.workspaces.summarizeWorkspaces();
   }
 
   addWorkspace(folder: string): WorkspaceFile {
