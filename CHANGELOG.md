@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-11-18
+
+**2.24.0: one Ask button for Viby, where you type or call; a redrawn pixel Viby that stays readable and still; and a tour that catches up with calls.**
+
 ### Changed
 
 - **One button for Viby.** **Call** at the foot of the rail is now **Ask**, with Viby's pixel V. Clicking it opens Viby's bar over any view, where you type what to start or press **Call Viby**. In Viby's own tab it starts the call. On a call it reads **On call** and hangs up, as before. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> work as they did.

@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.23.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.24.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
