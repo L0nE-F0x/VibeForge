@@ -58,7 +58,10 @@ describe("the tray icon during a call", () => {
 
   it("marks the icon, says the microphone is open, and offers Hang up for as long as the call lasts", () => {
     let hungUp = 0;
-    const actions = { open: () => undefined, hangUp: () => void (hungUp += 1), goAnywhere: () => undefined, openWaiter: () => undefined, settings: () => undefined, setSounds: () => undefined, setNotify: () => undefined, setAutostart: () => undefined, quit: () => undefined };
+    const hangUpNow = () => {
+      hungUp += 1;
+    };
+    const actions = { open: () => undefined, hangUp: hangUpNow, goAnywhere: () => undefined, openWaiter: () => undefined, settings: () => undefined, setSounds: () => undefined, setNotify: () => undefined, setAutostart: () => undefined, quit: () => undefined };
     const icon = new TrayIcon("/icon.png", { mark: "#ffaa00", outline: "#000000", call: "#ff5500" }, actions, words as never);
     icon.show(state);
     const tray = trays.at(-1);
