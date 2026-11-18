@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { answerTo, callWord, echoes, phantom, READ_START, Segmenter, speechBegan, spokenAnswer, spokenWord, waitingPlan } from "../../src/core/call.js";
+import { answerTo, callWord, echoes, phantom, quickNav, READ_START, Segmenter, speechBegan, spokenAnswer, spokenWord, waitingPlan } from "../../src/core/call.js";
 import type { LogFile } from "../../src/core/log.js";
 import type { VoiceSettings } from "../../src/core/types.js";
 import { BYTES_PER_SECOND, ECHO_SOURCE, echoCancelConf, rms } from "../../src/core/voice.js";
@@ -97,6 +97,8 @@ describe("words a call answers by itself", () => {
     expect(callWord("Never mind.")).toBe("cancel");
     expect(callWord("Don't.")).toBe("cancel");
     expect(callWord("Hang up please")).toBe("hangup");
+    expect(callWord("You can end the call now, Viby, thank you.")).toBe("hangup");
+    expect(callWord("Alright thanks Vibey, you can hang up now")).toBe("hangup");
     expect(callWord("Auf Wiedersehen")).toBe("hangup");
     expect(callWord("D'accord.")).toBe("go");
     expect(callWord("はい。")).toBe("go");
@@ -128,8 +130,16 @@ describe("words a call answers by itself", () => {
   });
 
   it("works out when the speech in something heard began", () => {
-    // Two seconds of audio that arrived at 10 s: 0.45 s of it is from before the speech, 0.3 s from after, and 0.9 s of pause ended it.
-    expect(speechBegan(10_000, 2)).toBe(10_000 - 900 - 1250);
+    // Two seconds of audio that arrived at 10 s: 0.45 s of it is from before the speech, 0.3 s from after, and 0.7 s of pause ended it.
+    expect(speechBegan(10_000, 2)).toBe(10_000 - 700 - 1250);
+  });
+
+  it("extracts crisp navigation targets while leaving compound requests to the planner", () => {
+    expect(quickNav("Switch to VibeForge.")).toBe("VibeForge");
+    expect(quickNav("Hey Viby, open the Tasks view please")).toBe("Tasks");
+    expect(quickNav("Show me api-server workspace")).toBe("api-server");
+    expect(quickNav("Open Claude in VibeForge and run tests")).toBe(null);
+    expect(quickNav("What is running right now?")).toBe(null);
   });
 
   it("leaves a sentence for Viby", () => {
@@ -306,6 +316,8 @@ function call(opts: {
     "call.problem": "That went wrong.",
     "call.going": "Going.",
     "call.cancelled": "Cancelled.",
+    "call.bye": "Talk soon.",
+    "call.opened": "Opened {name}.",
     "orch.note.finished": "{engine} in {workspace} finished its turn.",
     "orch.note.ended": "{engine} in {workspace} closed.",
     "call.itSays": "It says: {reply}",
@@ -587,6 +599,73 @@ describe("a call with Viby", () => {
     expect(desk.instance.get()).toMatchObject({ on: false, error: "pw-record exited with code 1" });
     // A call started again starts clean.
     expect(desk.instance.start()).toMatchObject({ on: true, error: null, said: "" });
+  });
+
+  it("mutes and unmutes the microphone without ending the call, and hangs up politely on a full goodbye sentence or plan hangup", async () => {
+    const desk = call({ hears: ["You can end the call now, Viby, thank you."] });
+    desk.instance.start();
+    expect(desk.instance.mute()).toMatchObject({ on: true, muted: true });
+    expect(desk.deaf.at(-1)).toBe(true);
+    // Speech while muted is ignored.
+    desk.hear();
+    await sleep(30);
+    expect(desk.spoken).toEqual([]);
+    expect(desk.instance.mute(false)).toMatchObject({ on: true, muted: false });
+    expect(desk.deaf.at(-1)).toBe(false);
+    // Spoken polite goodbye says bye and hangs up.
+    await desk.say();
+    expect(desk.spoken).toEqual(["Talk soon."]);
+    expect(desk.instance.get().on).toBe(false);
+
+    // A planner turn with hangup: true speaks its sign-off, then ends the call.
+    const byPlan = call({
+      hears: ["start claude and then hang up thanks"],
+      answer: (_text, list) => {
+        list.push(turn({ text: "On it — talk soon!", hangup: true }));
+        byPlan.word({ kind: "hangup" });
+      },
+    });
+    byPlan.instance.start();
+    await byPlan.say();
+    expect(byPlan.spoken).toEqual(["On it — talk soon!"]);
+    expect(byPlan.instance.get().on).toBe(false);
+  });
+
+  it("lets the person barge in while Viby is still thinking", async () => {
+    let releasePlan: (() => void) | null = null;
+    let aborted = 0;
+    const desk = call({
+      hears: ["start codex here", "actually use claude instead"],
+      detects: true,
+      cancelsEcho: true,
+      answer: (text, list) => {
+        if (text === "start codex here") return;
+        list.push(turn({ text: "Starting Claude." }));
+      },
+    });
+    const origAsk = (desk.instance as unknown as { opts: { service: () => Record<string, unknown> } }).opts.service();
+    const origFn = origAsk.orchestratorAsk as (t: string, l: unknown) => Promise<void>;
+    origAsk.orchestratorStopThinking = () => {
+      aborted += 1;
+      releasePlan?.();
+    };
+    origAsk.orchestratorAsk = async (text: string, looking: unknown) => {
+      if (text === "start codex here") {
+        await new Promise<void>((resolve) => {
+          releasePlan = resolve;
+        });
+        return;
+      }
+      await origFn(text, looking);
+    };
+    desk.instance.start();
+    desk.hear();
+    await until(() => desk.instance.get().phase === "thinking");
+    // Barge in mid-thinking: stops the in-flight plan and listens to the corrected instruction.
+    desk.events()?.level(0.6, true, 320);
+    await until(() => aborted === 1 && desk.instance.get().phase === "listening");
+    await desk.say();
+    expect(desk.spoken).toEqual(["Starting Claude."]);
   });
 });
 

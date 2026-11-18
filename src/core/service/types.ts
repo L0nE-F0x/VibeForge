@@ -23,6 +23,8 @@ export interface DeskHost {
   spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number }>;
   /** Paste text into a live session and press Enter, or (`enter` false) leave it there for a person to send. */
   send(ptyId: string, text: string, enter?: boolean): Promise<void>;
+  /** Write raw keystrokes directly to a live PTY (e.g. answering an interactive TUI prompt). */
+  write?(ptyId: string, data: string): Promise<void>;
   /** What a live terminal shows now, as plain text, with its scrollback. */
   screen?(ptyId: string): Promise<string>;
   /** The answer to a prompt sent at or after `since`, from the CLI's own session log; null on abort or timeout. */
@@ -42,7 +44,18 @@ export interface DeskHost {
    * Take the window to a place in it (a view, a workspace or a terminal in Code), as a notification's
    * click does. It is brought to the front too unless `raise` is false.
    */
-  show?(route: { view: string; workspaceId?: string; ptyId?: string }, raise?: boolean): void;
+  show?(route: { view: string; workspaceId?: string; ptyId?: string; copyId?: string; runId?: string }, raise?: boolean): void;
+  /** Drive the browser dock (reload, back, forward, stop). */
+  dockCommand?(command: "back" | "forward" | "reload" | "stop"): void;
+  /** Drive Code's side panel, browser preview URL, or pane layout. */
+  codeWorkbench?(
+    event:
+      | { kind: "browser-open"; workspaceId: string; url: string }
+      | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
+      | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" },
+  ): void;
+  /** Formatted plan limits and token usage summary for Viby's `inspect` step. */
+  quotas?(): Promise<string>;
 }
 
 export interface DeskOptions {

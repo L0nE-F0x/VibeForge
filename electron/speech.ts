@@ -9,13 +9,28 @@ interface Utterance {
   resolve: () => void;
 }
 
+interface StandbyPiper {
+  piper: ChildProcess;
+  voice: string;
+  stderr: string;
+  dead: boolean;
+}
+
+const WARM_IDLE_MS = 2 * 60 * 1000;
+
 /**
  * Speaks with Piper: text in on stdin, raw audio out into pw-play (or paplay, or aplay). One thing
  * at a time, in order; `stop` silences the current one and drops the rest. Nothing is written to disk.
+ *
+ * During a call (`warm`), one standby Piper process with its voice model already loaded waits for
+ * the next line (~45 ms to first audio instead of ~800 ms cold), and ends when the call does.
  */
 export class Speaker {
   private queue: Utterance[] = [];
   private current: { piper: ChildProcess; player: ChildProcess; item: Utterance } | null = null;
+  private standby: StandbyPiper | null = null;
+  private keepWarm = false;
+  private warmTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly opts: {
@@ -57,6 +72,79 @@ export class Speaker {
     current.player.kill("SIGTERM");
   }
 
+  /** Pre-load `voice` in a standby Piper process so the next utterance starts speaking immediately. */
+  warm(voice: string): void {
+    const piper = this.piper();
+    if (!piper || !voice) return;
+    this.keepWarm = true;
+    this.touchWarm();
+    if (this.standby && this.standby.voice === voice && !this.standby.dead && this.standby.piper.exitCode === null && this.standby.piper.signalCode === null) return;
+    this.dropStandby();
+    this.spawnStandby(piper, voice);
+  }
+
+  /** Let the standby Piper process go (when a call ends, or after going unused). */
+  unwarm(): void {
+    this.keepWarm = false;
+    if (this.warmTimer) {
+      clearTimeout(this.warmTimer);
+      this.warmTimer = null;
+    }
+    this.dropStandby();
+  }
+
+  private touchWarm(): void {
+    if (this.warmTimer) clearTimeout(this.warmTimer);
+    this.warmTimer = setTimeout(() => {
+      if (this.current) this.touchWarm();
+      else this.unwarm();
+    }, WARM_IDLE_MS);
+    this.warmTimer.unref();
+  }
+
+  private spawnStandby(piper: string, voice: string): void {
+    const child = spawn(piper, ["-m", voice, "--output-raw", "--sentence-silence", "0.25"], { stdio: ["pipe", "pipe", "pipe"] });
+    const entry: StandbyPiper = { piper: child, voice, stderr: "", dead: false };
+    child.stderr?.on("data", (data: Buffer) => (entry.stderr = (entry.stderr + data.toString()).slice(-2000)));
+    child.stdin?.on("error", () => undefined);
+    child.on("error", () => {
+      entry.dead = true;
+    });
+    child.on("close", () => {
+      entry.dead = true;
+      if (this.standby === entry) this.standby = null;
+    });
+    this.standby = entry;
+  }
+
+  private dropStandby(): void {
+    const entry = this.standby;
+    this.standby = null;
+    if (entry && !entry.dead && entry.piper.exitCode === null && entry.piper.signalCode === null) entry.piper.kill("SIGTERM");
+  }
+
+  private takeStandby(piper: string, voice: string): { child: ChildProcess; getStderr: () => string } {
+    const ready = this.standby;
+    if (ready && ready.voice === voice && !ready.dead && ready.piper.exitCode === null && ready.piper.signalCode === null) {
+      this.standby = null;
+      if (this.keepWarm) {
+        this.touchWarm();
+        this.spawnStandby(piper, voice);
+      }
+      return { child: ready.piper, getStderr: () => ready.stderr };
+    }
+    this.dropStandby();
+    const synth = spawn(piper, ["-m", voice, "--output-raw", "--sentence-silence", "0.25"], { stdio: ["pipe", "pipe", "pipe"] });
+    let stderr = "";
+    synth.stderr?.on("data", (data: Buffer) => (stderr = (stderr + data.toString()).slice(-2000)));
+    synth.stdin?.on("error", () => undefined);
+    if (this.keepWarm) {
+      this.touchWarm();
+      this.spawnStandby(piper, voice);
+    }
+    return { child: synth, getStderr: () => stderr };
+  }
+
   private next(): void {
     const item = this.queue.shift();
     if (!item) {
@@ -77,19 +165,16 @@ export class Speaker {
     } catch {
       /* Piper's usual rate */
     }
-    const synth = spawn(piper, ["-m", item.voice, "--output-raw", "--sentence-silence", "0.25"], { stdio: ["pipe", "pipe", "pipe"] });
+    const { child: synth, getStderr } = this.takeStandby(piper, item.voice);
     const argv = player.argv(rate);
     const play = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "ignore", "pipe"] });
     this.current = { piper: synth, player: play, item };
-    let stderr = "";
-    synth.stderr?.on("data", (data: Buffer) => (stderr = (stderr + data.toString()).slice(-2000)));
     synth.stdout?.pipe(play.stdin!);
     play.stdin?.on("error", () => undefined);
-    synth.stdin?.on("error", () => undefined);
     synth.on("error", (error) => this.opts.log.warn(`Voice: Piper failed to start: ${describeError(error)}`));
     play.on("error", (error) => this.opts.log.warn(`Voice: ${player.label} failed to start: ${describeError(error)}`));
     synth.on("close", (code, signal) => {
-      if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${stderr.trim().split("\n").pop() ?? ""}`);
+      if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${getStderr().trim().split("\n").pop() ?? ""}`);
     });
     let ended = false;
     const end = () => {
@@ -107,6 +192,7 @@ export class Speaker {
   }
 
   dispose(): void {
+    this.unwarm();
     this.stop();
   }
 }

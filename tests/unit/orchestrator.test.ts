@@ -64,7 +64,7 @@ describe("the Orchestrator's plans", () => {
     expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
     expect(asked).toContain("plan");
     expect(asked).not.toContain("--conversation");
-    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace"]);
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace", "after"]);
     expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
     expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
     expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);
@@ -131,7 +131,7 @@ describe("the Orchestrator's plans", () => {
     });
     expect(readBrainOutput(fromGrok).plan).toEqual({
       say: "Starting Claude Code in Dune.",
-      steps: [{ kind: "start", engine: "claude", workspace: "Dune", branch: undefined, prompt: undefined, target: undefined, folder: undefined, git: false, model: undefined, effort: undefined, inPlace: false }],
+      steps: [{ kind: "start", engine: "claude", workspace: "Dune", branch: undefined, prompt: undefined, target: undefined, folder: undefined, git: false, model: undefined, effort: undefined, inPlace: false, after: false }],
     });
     const fromClaude = JSON.stringify({ type: "result", result: "ok", structured_output: { say: "Which workspace?", steps: [] } });
     expect(readBrainOutput(fromClaude).plan).toEqual({ say: "Which workspace?", steps: [] });
@@ -643,7 +643,7 @@ describe("the Orchestrator in the service", () => {
     expect(calls[0].slice(1, 3)).toEqual(["exec", "--json"]);
     expect(calls[0]).toContain("gpt-x");
     const schemaFile = calls[0][calls[0].indexOf("--output-schema") + 1];
-    expect(JSON.parse(fs.readFileSync(schemaFile, "utf8")).required).toEqual(["say", "steps"]);
+    expect(JSON.parse(fs.readFileSync(schemaFile, "utf8")).required).toEqual(["say", "steps", "hangup"]);
     expect(calls[1].slice(1, 3)).toEqual(["exec", "resume"]);
     expect(calls[1].slice(-3)).toEqual(["--", "thread-9", "still there?"]);
     expect(ctx.svc.orchestratorView().turns.map((turn) => turn.text)).toEqual(["hi", "Hello.", "still there?", "Still here."]);
@@ -1092,7 +1092,7 @@ describe("Maestro in the service, 2.16", () => {
     await ctx.svc.orchestratorAsk("Hey Viby, find my android-widget project and start argy in it");
     expect(ctx.calls).toHaveLength(2);
     const secondPrompt = ctx.calls[1].argv[ctx.calls[1].argv.indexOf("-p") + 1];
-    expect(secondPrompt).toContain("[Lookup results from VibeForge]");
+    expect(secondPrompt).toContain("[Findings from VibeForge]");
     expect(secondPrompt).toContain("android-widget-app");
     const lastTurn = ctx.svc.orchestratorView().turns.at(-1);
     expect(lastTurn?.text).toContain("Found android-widget-app on disk.");
@@ -1484,8 +1484,8 @@ describe("Viby speaks up", () => {
     expect(readsAll("everything")).toBe(true);
     expect(readsAll("")).toBe(false);
     const rules = orchestratorRules(context);
-    expect(rules).toContain("- read: read out to the person what a running CLI last answered");
-    expect(rules).toContain("You can't see what a CLI wrote or answered");
+    expect(rules).toContain("- read: read out verbatim to the person what a running CLI last answered");
+    expect(rules).toContain("- inspect: inspect a running CLI's terminal screen and latest reply");
   });
 
   /** A planner that answers with the next plan handed to it, and Go pressed on what it planned. */
@@ -1641,5 +1641,150 @@ describe("Viby speaks up", () => {
     await until(() => notes().length === 1);
     expect(notes()[0].note).toMatchObject({ kind: "finished", reply: "Fixed the login timeout." });
     ctx.svc.close();
+  });
+
+  it("runs safe steps at once in a call without waiting for Go, keeps destructive steps waiting, and signals hangup", async () => {
+    const ctx = desk();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const heard: VibyWord[] = [];
+    ctx.svc.orchestratorCall((word) => heard.push(word));
+
+    // Starting a CLI in a clean workspace during a call runs immediately even under "Show me first".
+    const started = await ctx.ask("start grok here", {
+      say: "On it.",
+      steps: [{ kind: "start", engine: "grok", workspace: workspace.name }],
+    });
+    await until(() => started()?.plan === "done");
+    const ptyId = started()?.steps?.[0].ptyId ?? "";
+    expect(ptyId).toBeTruthy();
+
+    // Stopping a running CLI still waits for Go, and hangup waits until that plan actually runs.
+    const stopAndBye = await ctx.ask("stop grok and hang up", {
+      say: "Stopping it, talk soon.",
+      hangup: true,
+      steps: [{ kind: "stop", target: ptyId }],
+    });
+    expect(stopAndBye()?.plan).toBe("waiting");
+    expect(heard.some((w) => w.kind === "hangup")).toBe(false);
+    await ctx.svc.orchestratorRun(stopAndBye()?.id ?? "");
+    expect(stopAndBye()?.plan).toBe("done");
+    expect(heard.some((w) => w.kind === "hangup")).toBe(true);
+
+    // Crisp local navigation runs in 0 ms without calling the planner runner.
+    let shown: unknown = null;
+    ctx.host.show = (route) => {
+      shown = route;
+    };
+    const quick = await ctx.svc.orchestratorQuickShow("Tasks", "Open Tasks", (name) => `Opened ${name}.`);
+    expect(quick).toBe("Opened Tasks.");
+    expect(shown).toEqual({ view: "tasks" });
+    await until(() => ctx.svc.listLive().length === 0);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await ctx.svc.close();
+  });
+
+  it("inspects workspaces, waiting prompts and quotas in the same turn, answers TUI prompts with key, drives workbench actions, and chains after: true steps", async () => {
+    const ctx = desk();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    fs.writeFileSync(path.join(ctx.place, "hello.txt"), "hello world\n");
+    let screenText = "╭───╮\n│ Do you trust the files in this folder? │\n│ ❯ 1. Yes, proceed │";
+    const written: Array<[string, string]> = [];
+    const workbenchEvents: unknown[] = [];
+    const dockCmds: string[] = [];
+    ctx.host.screen = async () => screenText;
+    ctx.host.write = async (ptyId, data) => {
+      written.push([ptyId, data]);
+    };
+    ctx.host.codeWorkbench = (ev) => workbenchEvents.push(ev);
+    ctx.host.dockCommand = (cmd) => dockCmds.push(cmd);
+    ctx.host.quotas = async () => "Plan limits:\n- Claude: 42% used (5-hour)";
+    ctx.svc.orchestrator.chainSettleMs = 20;
+    ctx.svc.orchestrator.firstPromptMs = 25;
+
+    // 1. Two-pass inspect: reads hello.txt + quotas and feeds findings back into the planner's second pass.
+    const promptsSaw: string[] = [];
+    const twoPassAnswers = [
+      {
+        say: "",
+        steps: [
+          { kind: "inspect", workspace: workspace.name, folder: "hello.txt" },
+          { kind: "inspect", prompt: "limits" },
+        ],
+      },
+      { say: "hello.txt says hello world, and Claude is at 42%.", steps: [] },
+    ];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      promptsSaw.push(argv.join(" "));
+      return { code: 0, stdout: JSON.stringify({ structuredOutput: twoPassAnswers.shift() }), stderr: "", timedOut: false };
+    };
+    await ctx.svc.orchestratorAsk("check hello.txt and my limits");
+    expect(promptsSaw).toHaveLength(2);
+    expect(promptsSaw[1]).toContain("hello world");
+    expect(promptsSaw[1]).toContain("Claude: 42% used");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("hello.txt says hello world, and Claude is at 42%.");
+
+    // 2. First-screen waiting-prompt detection + answering with a `key` step + chained `after: true` shell step!
+    const planQueue: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: planQueue.shift() }), stderr: "", timedOut: false });
+    ctx.svc.orchestratorCall(() => undefined);
+
+    planQueue.push({
+      say: "Starting Grok, then running tests.",
+      steps: [
+        { kind: "start", engine: "grok", workspace: workspace.name },
+        { kind: "shell", workspace: workspace.name, prompt: "echo ok", after: true },
+      ],
+    });
+    await ctx.svc.orchestratorAsk("start grok and then run tests");
+    // Step 1 starts right away; Step 2 waits because `after: true` is set!
+    await until(() => Boolean(ctx.svc.orchestratorView().turns.find((t) => t.steps)?.steps?.[0].ptyId));
+    const chainedTurn = () => ctx.svc.orchestratorView().turns.find((t) => t.steps?.length === 2);
+    const grokPty = chainedTurn()?.steps?.[0].ptyId ?? "";
+    expect(chainedTurn()?.steps?.[1].state).toBe("planned");
+
+    // Because Grok has not gone busy yet and sits on a trust screen, firstPromptMs emits a "waiting" note!
+    await until(() => ctx.svc.orchestratorView().turns.some((t) => t.note?.kind === "waiting"));
+    const waitingNote = ctx.svc.orchestratorView().turns.find((t) => t.note?.kind === "waiting")?.note;
+    expect(waitingNote?.reply).toBe("Do you trust the files in this folder?");
+
+    // Answer the numbered trust prompt with `key` ("yes" -> "\r" on "❯ 1. Yes, proceed")!
+    planQueue.push({ say: "Approving.", steps: [{ kind: "key", target: grokPty, prompt: "yes" }] });
+    await ctx.svc.orchestratorAsk("yes trust it");
+    await until(() => written.length === 1);
+    expect(written[0]).toEqual([grokPty, "\r"]);
+
+    // Now Grok works and finishes its turn -> unblocks chained Step 2 (`shell`)!
+    screenText = "> ";
+    ctx.svc.onPtyActivity(grokPty, true);
+    ctx.svc.onPtyActivity(grokPty, false);
+    await until(() => chainedTurn()?.plan === "done");
+    expect(chainedTurn()?.steps?.[1].state).toBe("done");
+    expect(chainedTurn()?.steps?.[1].ptyId).toBeTruthy();
+
+    // 3. Workbench steps: mkdir, browser preview URL, reload, side panel, pane split, mark-reviewed!
+    planQueue.push({
+      say: "Setting up workbench.",
+      steps: [
+        { kind: "workbench", workspace: workspace.name, prompt: "mkdir", folder: "src/api" },
+        { kind: "workbench", workspace: workspace.name, prompt: "browser", target: "localhost:5173" },
+        { kind: "workbench", prompt: "reload" },
+        { kind: "workbench", workspace: workspace.name, prompt: "split-right" },
+        { kind: "workbench", prompt: "mark-reviewed" },
+      ],
+    });
+    await ctx.svc.orchestratorAsk("create src/api, open localhost:5173, reload, split right, and mark runs reviewed");
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(fs.existsSync(path.join(ctx.place, "src/api"))).toBe(true);
+    expect(ctx.svc.listWorkspaces().workspaces[0].dockUrl).toBe("http://localhost:5173");
+    expect(dockCmds).toEqual(["reload"]);
+    expect(workbenchEvents).toEqual([
+      { kind: "browser-open", workspaceId: workspace.id, url: "http://localhost:5173" },
+      { kind: "pane", workspaceId: workspace.id, action: "split-right" },
+    ]);
+
+    for (const live of ctx.svc.listLive()) await ctx.svc.killPty(live.ptyId);
+    await until(() => ctx.svc.listLive().length === 0);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await ctx.svc.close();
   });
 });

@@ -195,6 +195,8 @@ export interface CallState {
   talkOver: boolean;
   /** Viby heard its own voice in this call and took it for the person's; talking over it is off until the call ends. */
   heardItself: boolean;
+  /** The microphone is muted by the person while keeping the call open. */
+  muted?: boolean;
 }
 
 export type DownloadKind = "model" | "voice";
@@ -508,6 +510,8 @@ export interface DeskMethods {
   /** Opens the microphone and starts a call with Viby; what is heard goes to Viby without waiting for Enter. */
   "call.start": () => CallState;
   "call.stop": () => void;
+  /** Mutes or unmutes the call's microphone without hanging up (toggles when omitted). */
+  "call.mute": (muted?: boolean) => CallState;
 
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
@@ -543,11 +547,18 @@ export interface TrayWaiter {
   route: unknown;
 }
 
+/** A workbench UI action triggered by Viby in Code: browser preview, side panel, or pane splits/zoom. */
+export type CodeWorkbenchEvent =
+  | { kind: "browser-open"; workspaceId: string; url: string }
+  | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
+  | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" };
+
 export interface DeskEvents {
   changed: Topic[];
   "pty-data": { ptyId: string; data: string; first: number; seq: number };
   "pty-exit": { ptyId: string; exitCode: number | null; signal: number | null };
   palette: Palette;
+  "code-workbench": CodeWorkbenchEvent;
   dock: DockState;
   "open-run": { runId: string };
   "open-workspace": { workspaceId: string };

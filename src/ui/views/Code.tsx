@@ -2,7 +2,7 @@ import { Columns2, FolderPlus, PanelRight, Play, Rows2, SquareTerminal, Terminal
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LiveSession, Workspace, WorkspaceFile } from "../../shared/api.js";
 import { shellQuote, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
+import { call, on, useAgents, useAppInfo, useEngines, useLive, useSettings, useWorkspaces } from "../api.js";
 import { setPtyInView, setWorkspaceInView, usePtyAttention } from "../attention.js";
 import type { TalkTarget } from "../components/TalkMenu.js";
 import { tipProps } from "../components/Tooltip.js";
@@ -89,6 +89,48 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   useEffect(() => () => setPtyInView("code", null), []);
 
   useCodeShortcuts(active, current, panes);
+
+  // Workbench UI actions driven by Viby: open preview URLs, switch side-panel tabs, or split/zoom panes.
+  const latestWorkbench = useRef({ workspaces, current, side, panes });
+  latestWorkbench.current = { workspaces, current, side, panes };
+  useEffect(() => {
+    return on("code-workbench", (event) => {
+      const { workspaces: list, current: cur, side: panel, panes: p } = latestWorkbench.current;
+      if (event.kind === "browser-open") {
+        const target = list.find((w) => w.id === event.workspaceId);
+        if (target) setCurrentId(target.id);
+        panel.openInBrowser(event.workspaceId, event.url);
+        return;
+      }
+      if (event.kind === "side") {
+        if (event.workspaceId) {
+          const target = list.find((w) => w.id === event.workspaceId);
+          if (target) setCurrentId(target.id);
+        }
+        if (event.tab === "close") panel.setOpen(false);
+        else {
+          panel.setSide((prev) => ({ ...prev, open: true, tab: event.tab as "files" | "browser" }));
+          panel.setOpen(true);
+        }
+        return;
+      }
+      if (event.kind === "pane") {
+        const ws = (event.workspaceId && list.find((w) => w.id === event.workspaceId)) || cur;
+        if (!ws) return;
+        if (ws.id !== cur?.id) setCurrentId(ws.id);
+        if (event.action === "split-right") p.newTerminal(ws, "row");
+        else if (event.action === "split-down") p.newTerminal(ws, "col");
+        else {
+          const { pane } = p.focusedPane(ws.id);
+          const fallback = p.layouts[ws.id] ? panesOf(p.layouts[ws.id]!)[0] : undefined;
+          const targetPane = pane ?? fallback;
+          if (!targetPane) return;
+          if (event.action === "zoom") p.toggleZoom(ws.id, targetPane.id);
+          else if (event.action === "close") void p.closePane(ws, targetPane);
+        }
+      }
+    });
+  }, []);
 
   // ---------------------------------------------------------------- dictation
 

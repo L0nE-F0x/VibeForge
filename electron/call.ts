@@ -1,4 +1,5 @@
-import { answerTo, callWord, echoes, phantom, speechBegan, spokenAnswer, spokenWord, TALK_OVER_MS, waitingPlan } from "../src/core/call.js";
+import fs from "node:fs";
+import { answerTo, callWord, echoes, phantom, quickNav, speechBegan, spokenAnswer, spokenWord, TALK_OVER_MS, waitingPlan } from "../src/core/call.js";
 import { describeError, type LogFile } from "../src/core/log.js";
 import type { MainText } from "../src/core/main-text.js";
 import { orchestratorVoiceWords } from "../src/core/orchestrator.js";
@@ -17,7 +18,11 @@ const LEVEL_EVERY_MS = 60;
 /** What Viby said lately is kept this long, to tell its echo from the person. */
 const SPOKEN_KEEP_MS = 60_000;
 
-type CallService = Pick<TeamService, "orchestratorView" | "orchestratorAsk" | "orchestratorRun" | "orchestratorCancel" | "orchestratorCall" | "listAgents" | "listEngines" | "listWorkspaces" | "getSettings">;
+type CallService = Pick<
+  TeamService,
+  "orchestratorView" | "orchestratorAsk" | "orchestratorRun" | "orchestratorCancel" | "orchestratorCall" | "listAgents" | "listEngines" | "listWorkspaces" | "getSettings"
+> &
+  Partial<Pick<TeamService, "orchestratorStopThinking" | "orchestratorQuickShow" | "listTasks" | "listRoutines">>;
 
 /**
  * A call with Viby. The microphone stays open; each thing said is turned into words here and
@@ -52,6 +57,14 @@ export class Call {
   private mode: TalkOver = "never";
   /** Viby is speaking with the microphone open: talking now stops it. */
   private open = false;
+  /** Viby is thinking with the microphone open: talking now stops its turn and listens to the new thought. */
+  private thinkingOpen = false;
+  /** The person muted the call's microphone while keeping the call open. */
+  private muted = false;
+  /** Current deaf state pushed to `ear`, so repeated transitions don't send redundant signals. */
+  private earDeaf = false;
+  /** Viby's latest answer asked to end the call once it has been spoken. */
+  private hangingUp = false;
   /** The person talked over Viby in this turn; the rest of what it had to say waits. */
   private interrupted = false;
   /** Viby heard itself in this call: no more talking over it. */
@@ -87,7 +100,15 @@ export class Call {
       error: this.error,
       talkOver: this.canTalkOver(),
       heardItself: this.heardItself,
+      muted: this.muted,
     };
+  }
+
+  private setDeaf(deaf: boolean): void {
+    const wanted = deaf || this.muted;
+    if (this.earDeaf === wanted) return;
+    this.earDeaf = wanted;
+    this.ear?.deaf(wanted);
   }
 
   /** Whether talking while Viby speaks stops it, right now. */
@@ -127,6 +148,10 @@ export class Call {
     this.busy = false;
     this.pending = [];
     this.open = false;
+    this.thinkingOpen = false;
+    this.muted = false;
+    this.earDeaf = false;
+    this.hangingUp = false;
     this.interrupted = false;
     this.heardItself = false;
     this.spokenLately = [];
@@ -136,10 +161,10 @@ export class Call {
     const events = {
       heard: (pcm: Buffer) => void this.answer(pcm),
       level: (level: number, hearing: boolean, speechMs: number) => {
-        if (epoch !== this.epoch) return;
+        if (epoch !== this.epoch || this.muted) return;
         if (this.busy) {
-          // Viby is talking and someone else has started to: it stops and listens.
-          if (this.open && !this.interrupted && hearing && speechMs >= TALK_OVER_MS) this.interrupt();
+          // Viby is thinking or talking and someone else has started to: it stops and listens.
+          if ((this.open || this.thinkingOpen) && !this.interrupted && hearing && speechMs >= TALK_OVER_MS) this.interrupt();
           return;
         }
         const phase: CallPhase = hearing ? "hearing" : "listening";
@@ -160,10 +185,32 @@ export class Call {
     // Echo cancellation is asked for only where it decides whether Viby can be talked over.
     this.mode = service.getSettings().voice.talkOver;
     this.ear = this.opts.voice.openEar(events, this.mode === "auto");
+    const voice = this.voiceFile();
+    if (voice) this.opts.voice.speaker.warm?.(voice);
     // What Viby starts or tells during the call comes up on screen, as it would for someone watching,
     // and what it has to say by itself is said here.
     service.orchestratorCall((word) => this.hear(word));
     this.opts.log.info("Call: started");
+    this.changed();
+    return this.get();
+  }
+
+  /** Mutes or unmutes the microphone during a call; returns the updated state. */
+  mute(on?: boolean): CallState {
+    if (!this.ear) return this.get();
+    const next = on ?? !this.muted;
+    if (next === this.muted) return this.get();
+    this.muted = next;
+    if (this.muted) {
+      this.setDeaf(true);
+      if (!this.busy) {
+        this.phase = "listening";
+        this.level = 0;
+      }
+    } else {
+      const shouldListen = !this.busy || this.open || this.thinkingOpen;
+      this.setDeaf(!shouldListen);
+    }
     this.changed();
     return this.get();
   }
@@ -180,36 +227,60 @@ export class Call {
     this.busy = false;
     this.pending = [];
     this.open = false;
+    this.thinkingOpen = false;
+    this.muted = false;
+    this.earDeaf = false;
+    this.hangingUp = false;
     this.opts.service()?.orchestratorCall(null);
     this.error = error;
     this.phase = "listening";
     this.level = 0;
-    // Hanging up cuts Viby off mid-sentence too.
+    // Hanging up cuts Viby off mid-sentence too, and lets the standby voice process go.
+    this.opts.voice.speaker.unwarm?.();
     this.opts.voice.speaker.stop();
     this.opts.log.info(error ? `Call: ended, ${error}` : "Call: ended");
     this.changed();
   }
 
-  /** Names whisper should expect: the ones Viby's own box tells it. */
+  /** Names whisper should expect: Viby, agents, CLIs, workspaces, branches, tasks, routines, and files in view. */
   private vocabulary(service: CallService): string {
+    const workspaces = service.listWorkspaces().workspaces;
+    const lookedId = this.opts.looking()?.workspaceId;
+    const lookedPath = lookedId ? workspaces.find((item) => item.id === lookedId)?.path : undefined;
+    let files: string[] = [];
+    if (lookedPath) {
+      try {
+        files = fs.readdirSync(lookedPath).filter((name) => !name.startsWith(".")).slice(0, 25);
+      } catch {
+        /* folder unavailable */
+      }
+    }
+    const copies = service.orchestratorView().copies ?? [];
     return vocabularyPrompt([
       "VibeForge",
+      "Omarchy",
+      "Hyprland",
       ...service.listAgents().map((agent) => agent.name),
       ...service.listEngines().map((engine) => engine.label),
-      ...orchestratorVoiceWords(service.listWorkspaces().workspaces.map((item) => item.name)),
+      ...orchestratorVoiceWords(workspaces.map((item) => item.name)),
+      ...copies.map((copy) => copy.name),
+      ...(service.listTasks?.().slice(0, 15).map((task) => task.title) ?? []),
+      ...(service.listRoutines?.().map((routine) => routine.name) ?? []),
+      ...files,
     ]);
   }
 
   /**
-   * Viby's turn to do something: the microphone is not listened to until it is over, and what
-   * Viby had to say by itself meanwhile is said at its end.
+   * Viby's turn to do something: the microphone is not listened to until it is over (unless talking
+   * over is on), and what Viby had to say by itself meanwhile is said at its end.
    */
   private async turn(work: (live: () => boolean) => Promise<void>): Promise<void> {
     const epoch = this.epoch;
     const live = () => epoch === this.epoch;
     this.busy = true;
     this.interrupted = false;
-    this.ear?.deaf(true);
+    this.thinkingOpen = false;
+    this.setDeaf(true);
     try {
       await work(live);
       // Talked over, the rest waits for the next quiet moment.
@@ -220,7 +291,8 @@ export class Call {
     } finally {
       if (live()) {
         this.busy = false;
-        this.ear?.deaf(false);
+        this.thinkingOpen = false;
+        this.setDeaf(false);
         this.move("listening");
       }
     }
@@ -228,7 +300,7 @@ export class Call {
 
   private async answer(pcm: Buffer): Promise<void> {
     const service = this.opts.service();
-    if (this.busy || !this.ear || !service) return;
+    if (this.busy || !this.ear || !service || this.muted) return;
     const heardAt = Date.now();
     await this.turn(async (live) => {
       this.move("transcribing");
@@ -247,6 +319,10 @@ export class Call {
       this.heard = dictation.text;
       const word = callWord(dictation.text);
       if (word === "hangup") {
+        if (dictation.text.trim().split(/\s+/).length >= 4) {
+          await this.say(this.opts.words.say("call.bye"));
+          if (!live() || this.interrupted) return;
+        }
         this.stop();
         return;
       }
@@ -264,24 +340,50 @@ export class Call {
         await this.say(this.opts.words.say("call.cancelled"));
         return;
       }
+      const navTarget = service.orchestratorQuickShow ? quickNav(dictation.text) : null;
+      if (navTarget && service.orchestratorQuickShow) {
+        const shown = await service.orchestratorQuickShow(navTarget, dictation.text, (name) => this.opts.words.say("call.opened", { name }));
+        if (!live()) return;
+        if (shown) {
+          await this.say(shown);
+          return;
+        }
+      }
+      this.hangingUp = false;
+      this.thinkingOpen = this.canTalkOver() && !this.muted;
+      if (this.thinkingOpen) this.setDeaf(false);
       this.move("thinking");
       await service.orchestratorAsk(dictation.text, this.opts.looking());
-      if (!live()) return;
+      this.thinkingOpen = false;
+      if (!live() || this.interrupted) return;
       // No answer: it was stopped from its card or the call's own bar.
       const turn = answerTo(service.orchestratorView().turns);
       if (turn) await this.say(spokenAnswer(turn, { sayGo: this.opts.words.say("call.sayGo"), planReady: this.opts.words.say("call.planReady"), problem: this.opts.words.say("call.problem") }));
+      if (live() && this.hangingUp && !this.interrupted) {
+        this.hangingUp = false;
+        this.stop();
+      }
     });
   }
 
-  /** Viby has something to say that nobody asked for just now: a CLI ended its turn, or an answer was fetched to read out. */
+  /** Viby has something to say that nobody asked for just now: a CLI ended its turn, an answer was fetched to read out, or a plan asked to end the call. */
   private hear(word: VibyWord): void {
     if (!this.ear) return;
+    if (word.kind === "hangup") {
+      if (this.busy) {
+        this.hangingUp = true;
+      } else {
+        this.stop();
+      }
+      return;
+    }
     const { words } = this.opts;
     const line = spokenWord(
       word,
       {
         finished: (who) => words.say("orch.note.finished", who),
         ended: (who) => words.say("orch.note.ended", who),
+        waiting: (who) => words.say("orch.note.waiting", who),
         says: (reply) => words.say("call.itSays", { reply }),
         changes: (summary) => words.coreText(summary),
         more: words.say("call.readMore"),
@@ -300,10 +402,12 @@ export class Call {
     await this.turn(async () => undefined);
   }
 
-  /** The person started talking while Viby was: it stops mid-sentence and listens. */
+  /** The person started talking while Viby was thinking or speaking: it stops and listens. */
   private interrupt(): void {
     this.interrupted = true;
+    this.hangingUp = false;
     this.opts.log.info("Call: talked over, Viby stopped");
+    if (this.phase === "thinking") this.opts.service()?.orchestratorStopThinking?.(true);
     this.opts.voice.speaker.stop();
   }
 
@@ -328,8 +432,8 @@ export class Call {
     }
     const epoch = this.epoch;
     // Where Viby can't hear itself, the microphone stays open and talking over it stops it.
-    this.open = this.canTalkOver();
-    if (this.open) this.ear?.deaf(false);
+    this.open = this.canTalkOver() && !this.muted;
+    this.setDeaf(!this.open);
     this.move("speaking");
     // Only what is said with the microphone open can come back through it.
     const spoke = { line, from: Date.now(), until: Number.POSITIVE_INFINITY };

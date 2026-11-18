@@ -187,7 +187,7 @@ function noteNode(note) {
   const said = el(
     "span",
     { class: "orch-said" },
-    t(note.kind === "finished" ? "orch.note.finished" : "orch.note.ended", { engine: note.engine, workspace: note.workspace }),
+    t(note.kind === "finished" ? "orch.note.finished" : note.kind === "waiting" ? "orch.note.waiting" : "orch.note.ended", { engine: note.engine, workspace: note.workspace }),
     note.changes ? el("span", { class: "faint" }, ` · ${note.changes}`) : null,
   );
   const open = running

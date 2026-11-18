@@ -80,6 +80,16 @@ describe("placing a CLI started outside Code", () => {
     expect(placeSession(layout, { type: "engine", engineId: "codex" }, { newId: "c", idle }).paneId).toBe("c");
   });
 
+  it("reuses the pane that already holds the session instead of splitting a mirror pane", () => {
+    // In a call, Viby both starts the CLI (orchestrated placement) and jumps Code to its ptyId
+    // (route adoption); whichever lands second must keep the first pane rather than open a twin.
+    const first = placeSession(null, claude, { newId: "adopted", owns: () => false, idle: () => false });
+    expect(first).toEqual({ layout: engine("adopted", "claude"), paneId: "adopted" });
+    const second = placeSession(first.layout, claude, { newId: "duplicate", owns: (paneId) => paneId === "adopted", idle: () => false });
+    expect(second).toEqual({ layout: first.layout, paneId: "adopted" });
+    expect(ids(second.layout)).toEqual(["adopted"]);
+  });
+
   it("opens beside the focused pane, the first when focus is on none, or alone in an empty workspace", () => {
     const layout = split("row", pane("a"), pane("b"));
     expect(placeSession(layout, claude, { newId: "n", focus: "b" }).layout).toEqual(split("row", pane("a"), split("row", pane("b"), engine("n", "claude"))));

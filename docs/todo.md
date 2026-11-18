@@ -1,13 +1,13 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.21.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.22.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
-- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0: the call itself (the rail's Call button, the call bar, spoken go/cancel/hang up), what you're looking at said to Viby with each request, `show` for any workspace or view, the window following Viby during a call, Viby speaking up when a CLI it started or told ends its turn, the `read` step ("what did Claude say?"), the Silero speech detector, and talking over Viby with PipeWire's echo cancellation or headphones. Still to do:
-  - **Hearing better, the rest.** Talking over Viby has met one desk's speakers (see below): if PipeWire's canceller lets too much through on other setups, the default should become **Never**. Viby can't be interrupted while it thinks, only while it speaks. Dictation's own start and stop still go by loudness. Silero v6 is published in the same format; v5.1.2 is the one checked.
-  - **Speaking up, the rest.** A CLI whose log VibeForge can't read (Cursor Agent, OpenCode, Copilot, Antigravity and the others) gets a word only after 20 s of work, without its answer, and its answer is never read aloud. Two of the same CLI in one folder share that folder's logs: the newest answer there is the one read.
-  - **Quicker answers.** A planning turn with Viby's real rules took 7–8 s with Claude Code on its default model, and about 5 s on Haiku or Sonnet (Settings → Viby → Model), new session or resumed (measured 2026-11-18; about 1.5 s of it is the CLI starting). Keeping the planner running between turns might save a second; not tried.
+- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0–2.22.0: the call itself, Mute/Unmute, barge-in while speaking or thinking, natural spoken hang-up, immediate safe execution in calls, warm Piper TTS, 0 ms local navigation, two-pass `inspect` (screens, replies, diffs, files, quotas), `after: true` step chaining, core "waiting for you" prompt notes, `key` TUI answers, `shell`, and `workbench` actions. Still to do:
+  - **Hearing better, the rest.** Talking over Viby has met one desk's speakers (see below): if PipeWire's canceller lets too much through on other setups, the default should become **Never**. Dictation's own start and stop still go by loudness. Silero v6 is published in the same format; v5.1.2 is the one checked.
+  - **Speaking up, the rest.** A CLI whose log VibeForge can't read (Cursor Agent, OpenCode, Copilot, Antigravity and the others) gets a completion word only after 20 s of work, without its log answer (though `inspect` can read its terminal screen when asked). Two of the same CLI in one folder share that folder's logs: the newest answer there is the one read.
+  - **Quicker answers.** Keeping the planner running persistently between turns might save ~1.5 s of CLI startup; not tried yet.
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 
@@ -30,7 +30,6 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 ## Left from recent audits
 
-- [ ] **Viby: a "waiting for you" note.** The core can't tell a CLI waiting for a person from one that's quiet; only the window works that out. Moving that into the core would let Viby say so too.
 - [ ] **Neighbouring panes keep their place.** A split or a close remounts the terminal beside it (its scrollback comes back, its scroll position and selection don't). Needs a keyed pane tree in SplitView.
 - [ ] **File names that aren't UTF-8** still go through UTF-8 text when Apply lists what changed. Rare; their content is now carried byte for byte.
 

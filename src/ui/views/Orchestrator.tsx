@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clock, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
+import { Check, CircleAlert, Clock, CornerDownLeft, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
@@ -75,9 +75,13 @@ function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   return ISSUE_KEY[issue];
 }
 
-/** What a lookup, task or routine step will do: a new task has a title (`name`), a routine step says on or off in `prompt`. */
+/** What a lookup, inspect, shell, key, workbench, task or routine step will do. */
 function otherStepKey(step: OrchestratorStep): Key {
   if (step.kind === "lookup") return "orch.lookup";
+  if (step.kind === "inspect") return "orch.inspect";
+  if (step.kind === "shell") return "orch.shell";
+  if (step.kind === "key") return "orch.key";
+  if (step.kind === "workbench") return "orch.workbench";
   if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
   const action = step.prompt.trim().toLowerCase();
   return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
@@ -455,11 +459,12 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         <span className="truncate">{targetCopy ? `${targetCopy.name} · ${workspaces.find((item) => item.id === targetCopy.workspaceId)?.name ?? ""}` : step.asked || t("orch.copyGone")}</span>
       </div>
     );
-  } else if (step.kind === "lookup" || step.kind === "task" || step.kind === "routine") {
+  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "task" || step.kind === "routine") {
     line = (
       <div className="orch-step-line">
         <strong>{t(otherStepKey(step))}</strong>
         <span className="truncate">{step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt}</span>
+        {step.after && <Chip>{t("orch.after")}</Chip>}
       </div>
     );
   } else {
@@ -467,6 +472,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
       <div className="orch-step-line">
         <strong>{step.kind === "tell" ? t("orch.tell") : step.kind === "show" ? t("orch.show") : step.kind === "read" ? t("orch.read") : t("orch.close")}</strong>
         <span className="truncate">{sessionLabel(target, workspaces) || shownPlace || step.asked || t("orch.gone")}</span>
+        {step.after && <Chip>{t("orch.after")}</Chip>}
       </div>
     );
   }
@@ -478,9 +484,9 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
       </span>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {line}
-        {(step.kind === "start" || step.kind === "tell" || (step.kind === "task" && Boolean(step.name))) &&
+        {(step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && Boolean(step.name))) &&
           (editable ? (
-            <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
+            <PromptBox value={step.prompt} label={t("orch.prompt")} placeholder={step.kind === "start" || step.kind === "shell" ? t("orch.promptEmpty") : undefined} onDone={(prompt) => prompt !== step.prompt && void edit({ prompt })} />
           ) : (
             step.prompt && <span className={`orch-prompt-text${compact ? " clamp" : ""}`}>{step.prompt}</span>
           ))}
@@ -541,6 +547,10 @@ const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = {
   discard: Trash2,
   show: Eye,
   read: Volume2,
+  inspect: Search,
+  key: CornerDownLeft,
+  shell: SquareTerminal,
+  workbench: Workflow,
   lookup: Search,
   task: ListTodo,
   routine: Clock,
@@ -562,7 +572,7 @@ function NoteView({ note }: { note: MaestroNote }) {
       </span>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         <span className="orch-said">
-          {t(note.kind === "finished" ? "orch.note.finished" : "orch.note.ended", { engine: note.engine, workspace: note.workspace })}
+          {t(note.kind === "finished" ? "orch.note.finished" : note.kind === "waiting" ? "orch.note.waiting" : "orch.note.ended", { engine: note.engine, workspace: note.workspace })}
           {note.changes && <span className="faint"> · {coreText(note.changes)}</span>}
         </span>
         {note.reply && <span className="orch-prompt-text clamp">{note.reply}</span>}

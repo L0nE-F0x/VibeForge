@@ -10,17 +10,31 @@ import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
 import { cleanModel, effortLevels } from "../shared/launch-options.js";
-import { brainKind, plannedId, SHOW_VIEWS, STEP_KINDS, type Looking, type OrchestratorStep, type PlanContext } from "../shared/orchestrator.js";
+import {
+  brainKind,
+  inspectsQuotas,
+  isSafeShellCommand,
+  keySequenceFor,
+  NEEDS_GO,
+  parseWorkbenchAction,
+  plannedId,
+  SHOW_VIEWS,
+  STEP_KINDS,
+  type Looking,
+  type OrchestratorStep,
+  type PlanContext,
+} from "../shared/orchestrator.js";
 
 export * from "../shared/orchestrator.js";
 
-const STEP_FIELDS = ["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace"] as const;
+const STEP_FIELDS = ["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace", "after"] as const;
 
 export const PLAN_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     say: { type: "string" },
+    hangup: { type: "boolean" },
     steps: {
       type: "array",
       items: {
@@ -38,6 +52,7 @@ export const PLAN_SCHEMA = {
           model: { type: "string" },
           effort: { type: "string" },
           inPlace: { type: "boolean" },
+          after: { type: "boolean" },
         },
         required: ["kind"],
       },
@@ -56,6 +71,7 @@ export const STRICT_PLAN_SCHEMA = {
     ...PLAN_SCHEMA.properties,
     steps: { ...PLAN_SCHEMA.properties.steps, items: { ...PLAN_SCHEMA.properties.steps.items, required: [...STEP_FIELDS] } },
   },
+  required: ["say", "steps", "hangup"],
 } as const;
 
 export interface BrainOptions {
@@ -201,7 +217,7 @@ export function orchestratorRules(context: PlanContext): string {
     ? context.running
         .map(
           (item) =>
-            `- ${item.id}: ${item.engine} in ${item.workspace} (${item.folder}), ${item.working ? "working" : "waiting for input"}${item.orchestrated ? ", you started it" : ""}${item.branch ? `, in its own copy on ${item.branch}` : ""}${item.asked ? `; asked: ${item.asked}` : ""}`,
+            `- ${item.id}: ${item.engine} in ${item.workspace} (${item.folder}), ${item.working ? "working" : item.waiting ? `WAITING ON PROMPT: "${item.waiting}"` : "waiting for input"}${item.orchestrated ? ", you started it" : ""}${item.branch ? `, in its own copy on ${item.branch}` : ""}${item.asked ? `; asked: ${item.asked}` : ""}`,
         )
         .join("\n")
     : "- none";
@@ -220,35 +236,41 @@ export function orchestratorRules(context: PlanContext): string {
     ? `Never pick an engine the person didn't ask for unless they asked to start work without naming a CLI, in which case use their default CLI (${context.defaultEngine}).`
     : "Never pick an engine the person didn't ask for; if they didn't say which, ask.";
   return [
-    "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those), the person's personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, agents, tasks and routines at once.",
-    "Whatever planning CLI runs you under the hood, you are always Viby. The person talks to you, often by voice, so expect dictation slips: misheard names, missing punctuation. Match names generously.",
-    "You never write code, read files or use tools yourself. You turn what the person asks into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
+    "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those, 'VIB', or 'I\\'ll be'), the person's conversational partner, personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, agents, tasks and routines at once.",
+    "Whatever planning CLI runs you under the hood, you are always Viby. The person often talks to you in a live voice call, so expect dictation slips: misheard names ('Oh Marchy' = Omarchy, 'Hyperland' = Hyprland, homophones of workspace and agent names), missing punctuation, or spoken thoughts. Match names generously and infer intent smartly.",
+    "You are both a sharp, warm sounding board when the person wants to think or brainstorm out loud, and a decisive orchestrator when they want something done. You never write code, read files or use tools yourself; you turn actions into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
     "",
     "Steps:",
     "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id or agent name below; leave empty only to use the default CLI when one is marked [default]), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
     `- workspace: make a new workspace. Fields: workspace (its name, in the person's words), folder (only if they said where; otherwise leave it empty and it goes in ${projects}/<name>), git (true when they want it to be a git repository). An existing folder is only added, never changed.`,
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (the session id, branch, folder name, or keywords to search for). VibeForge runs the lookup at once and hands you the findings.",
-    "- tell: send a message to a CLI that is already running. Fields: target (its id below), prompt (the message).",
+    "- inspect: inspect a running CLI's terminal screen and latest reply, a copy's git diff, a workspace's git status/log/diff/files (or a specific file in `folder`), or plan limits and token usage (`prompt: \"limits\"` or `\"usage\"`). VibeForge runs `inspect` immediately and hands you the findings in the same turn so you can diagnose errors, review work, or brainstorm code with the person. Fields: target (a running CLI id or copy id), workspace (workspace name), folder (optional relative file path inside workspace), prompt (what to inspect, e.g. \"screen\", \"diff\", \"status\", \"limits\", or a file path).",
+    "- tell: send a message to a CLI that is already running at its normal input prompt. Fields: target (its id below), prompt (the message).",
+    "- key: answer an interactive TUI prompt or send a keystroke directly to a running CLI (such as folder trust, y/n confirmation, numbered menu choice, Enter, Escape, or Ctrl+C). Fields: target (its id below), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
+    "- shell: open a shell terminal in a workspace, optionally running a command in it. Fields: workspace (workspace name), prompt (shell command to run, e.g. \"npm test\" or \"mkdir -p src/lib\"; leave empty to only open a shell).",
+    "- workbench: control VibeForge's workbench directly. Fields: workspace (workspace name when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"zoom\", \"close-pane\", \"diff\", or \"mark-reviewed\"), folder (path for mkdir), branch (branch name to open as its own workspace), target (URL such as \"http://localhost:5173\" for browser, or copy/run id for diff).",
     "- stop: close a running CLI. Fields: target.",
     "- show: bring something up on the person's screen. It changes nothing, so it never needs asking about. Fields: target (a running CLI's id below, to open its terminal), or workspace (a workspace's name below, to open it in Code), or target as one of home, agents, code, chat, tasks, routines, skills, runs, viby, settings (to open that view).",
-    "- read: read out to the person what a running CLI last answered (\"what did Claude say?\", \"read me its answer\", \"how did it go?\"). It changes nothing, so it never needs asking about. Fields: target (its id below), prompt (\"all\" when they ask for all of it or the whole thing; otherwise leave it empty and the start of it is read).",
+    "- read: read out verbatim to the person what a running CLI last answered (\"read me its whole answer\", \"read what Claude wrote word for word\"). Fields: target (its id below), prompt (\"all\" when they ask for all of it; otherwise empty).",
     "- apply: bring a copy's changes into the workspace it came from. discard: throw a copy away. Fields: target (a copy's id below).",
     "- task: run an existing task on the board, or create and start a new task for an agent. Fields: target (existing task id/title, or the agent's id/name for a new task), workspace (workspace name, for a new task), branch (short title for a new task), prompt (instructions for a new task).",
     "- routine: run a scheduled routine now, or turn it on/off. Fields: target (a routine's id or name below), prompt (\"enable\", \"disable\", or empty to run now).",
+    "- Chaining (`after: true`): set `after: true` on any step that must wait for the immediately preceding step's CLI turn to finish first (for example: Step 1 starts Claude to fix a bug, Step 2 with `after: true` starts Grok to review it or runs `npm test` in a shell). Leave `after` false when steps should run in parallel.",
     "",
     "Rules:",
     "- One start step per CLI the person asks for. Several are fine: they run at the same time.",
     `- Use only the workspaces, engines, agents, tasks, routines, ids and copies listed below, or a workspace this plan makes. ${defaultRule}`,
     "- When they ask for a workspace, session or branch that isn't listed below, use a `lookup` step first to search disk, branches and run history if they are asking you to find an existing one; make it with a `workspace` step if they asked for a new one or gave its folder.",
-    "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do), answer in `say` with no steps.",
+    "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do) or want to brainstorm and talk through an idea before starting work, talk with them naturally in `say` with no steps.",
+    "- When the person says they are done with the call, thanks you and says goodbye, or asks you to end/hang up the call (such as 'you can end the call now, thank you', 'talk to you later', 'that\\'s all, bye'), set top-level `hangup: true` (alongside any final steps they asked for) and give a brief warm sign-off in `say`. Otherwise leave `hangup` false or omitted.",
     "- If they change a plan you just gave, give the whole corrected plan again.",
     "- A request may begin with a line in parentheses saying what is in front of the person right now. \"This\", \"here\", \"this one\" and \"this workspace\" mean what that line names, and so does \"it\" when nothing else was just mentioned: \"tell it to run the tests\" is a tell to the terminal in front of them, \"start Claude here\" a start in that workspace.",
     "- When they ask to switch to, open, go to or see a workspace, a running CLI or a view, that is a show step.",
     "- A tell's prompt is what the person said to pass on, word for word, without the part spoken to you (\"tell Claude to\", \"ask it to\"). Put right a name speech-to-text got wrong; don't shorten it, polish it or add to it.",
-    "- You can't see what a CLI wrote or answered, only whether it is working. When they ask what one said, or how its work went, give a read step and say only that you are reading it out; never guess at its answer.",
+    "- You don't see terminal screens, CLI replies, diffs or files until you ask: use an `inspect` step whenever the person asks why something failed, what a CLI is asking or answered, how a diff or workspace looks, or what their plan limits/tokens are, then summarise clearly in your own words. Use `read` when they specifically ask you to read a CLI's answer out loud verbatim. Never guess at unseen output.",
     "- After a tell or a start, VibeForge itself tells the person when that CLI has answered, with the start of its answer. Don't add a read step for an answer that isn't there yet, and don't tell them to ask for it.",
     "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, or starting something when `steps` is empty — emit a `lookup` or `start` step instead.",
-    "- `say` is one or two short plain sentences in the person's language: what you will do, or your question. No markdown, and never an id such as pty-3: it may be read aloud, so name a CLI by what it is and where (\"Claude in Dune\").",
+    "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('On it — starting Claude on a branch.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name a CLI by what it is and where (\"Claude in Dune\").",
     "",
     "Workspaces:",
     workspaces,
@@ -279,11 +301,13 @@ export interface RawStep {
   model?: string;
   effort?: string;
   inPlace?: boolean;
+  after?: boolean;
 }
 
 export interface RawPlan {
   say: string;
   steps: RawStep[];
+  hangup?: boolean;
 }
 
 /** What one planning turn printed: the plan, its words, the session it reported, and any error. */
@@ -364,6 +388,7 @@ function asPlan(value: unknown): RawPlan | null {
   const steps = Array.isArray(record.steps) ? record.steps : [];
   return {
     say: typeof record.say === "string" ? record.say.trim() : "",
+    ...(record.hangup === true ? { hangup: true } : {}),
     steps: steps.flatMap((item) => {
       if (!item || typeof item !== "object") return [];
       const step = item as Record<string, unknown>;
@@ -382,6 +407,7 @@ function asPlan(value: unknown): RawPlan | null {
           model: field("model"),
           effort: field("effort"),
           inPlace: flag("inPlace"),
+          after: flag("after"),
         },
       ];
     }),
@@ -470,7 +496,21 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
   for (const item of raw.steps) {
     const kind = STEP_KINDS.find((value) => value === item.kind) ?? null;
     if (!kind) continue;
-    const base: OrchestratorStep = { id: newStepId(), kind, engineId: "", workspaceId: "", branch: "", prompt: item.prompt ?? "", target: "", asked: "", state: "planned", error: null, ptyId: null, openedWorkspaceId: null };
+    const base: OrchestratorStep = {
+      id: newStepId(),
+      kind,
+      engineId: "",
+      workspaceId: "",
+      branch: "",
+      prompt: item.prompt ?? "",
+      target: "",
+      asked: "",
+      state: "planned",
+      error: null,
+      ptyId: null,
+      openedWorkspaceId: null,
+      ...(item.after === true ? { after: true } : {}),
+    };
     if (kind === "workspace") {
       const name = (item.workspace ?? "").trim();
       const step: OrchestratorStep = { ...base, prompt: "", name, folder: plannedFolder(name, item.folder, context.projectsFolder ?? ""), git: Boolean(item.git), asked: name };
@@ -512,6 +552,48 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
     } else if (kind === "lookup") {
       const query = (item.prompt || item.target || item.workspace || item.folder || "").trim();
       steps.push({ ...base, prompt: query, asked: query });
+    } else if (kind === "inspect") {
+      const copies = context.copies ?? [];
+      const cli = item.target
+        ? (context.running.find((entry) => entry.id === item.target) ??
+          matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]))
+        : null;
+      const copy = !cli && item.target ? (copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`])) : null;
+      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+      const ws = fresh ?? matchName(item.workspace || (!cli && !copy && !inspectsQuotas(item.target) ? item.target : ""), context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const asked = cli ? `${cli.engine} · ${cli.workspace}` : copy ? `${copy.name} · ${copy.workspace}` : ws ? [ws.name, item.folder].filter(Boolean).join(" · ") : item.prompt || item.target || item.workspace || "";
+      steps.push({
+        ...base,
+        target: cli?.id ?? copy?.id ?? "",
+        workspaceId: ws?.id ?? "",
+        ...(item.folder ? { folder: item.folder.trim() } : {}),
+        prompt: (item.prompt || (inspectsQuotas(item.target) ? item.target : "") || "").trim(),
+        asked,
+      });
+    } else if (kind === "key") {
+      const target =
+        context.running.find((entry) => entry.id === item.target) ??
+        matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]) ??
+        (context.running.length === 1 && !item.target?.trim() ? context.running[0] : null);
+      const asked = target ? `${target.engine} · ${target.workspace}` : (item.target ?? "");
+      steps.push({ ...base, target: target?.id ?? "", prompt: (item.prompt ?? "").trim(), asked });
+    } else if (kind === "shell") {
+      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+      const ws = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      steps.push({ ...base, workspaceId: ws?.id ?? "", prompt: (item.prompt ?? "").trim(), asked: ws?.name || item.workspace || "" });
+    } else if (kind === "workbench") {
+      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+      const ws = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const label = [ws?.name || item.workspace, item.branch || item.folder || item.target || item.prompt].filter(Boolean).join(" · ");
+      steps.push({
+        ...base,
+        workspaceId: ws?.id ?? "",
+        prompt: (item.prompt ?? "").trim(),
+        target: (item.target ?? "").trim(),
+        branch: (item.branch ?? "").trim(),
+        ...(item.folder ? { folder: item.folder.trim() } : {}),
+        asked: label,
+      });
     } else if (kind === "routine") {
       const routines = context.routines ?? [];
       const routine = routines.find((entry) => entry.id === item.target) ?? matchName(item.target || item.workspace, routines, (entry) => [entry.id, entry.name], true);
@@ -591,7 +673,7 @@ export function showView(said: string | undefined): (typeof SHOW_VIEWS)[number] 
  * a view, then a workspace whose name comes close. So a workspace named "Tasks" beats the view,
  * and "settings" is the view even with a workspace called app-settings.
  */
-function showWhat(item: RawStep, context: PlanContext): Pick<OrchestratorStep, "target" | "workspaceId" | "asked"> & { view?: string } {
+export function showWhat(item: RawStep, context: PlanContext): Pick<OrchestratorStep, "target" | "workspaceId" | "asked"> & { view?: string } {
   const running = item.target ? (context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`])) : null;
   if (running) return { target: running.id, workspaceId: "", asked: `${running.engine} · ${running.workspace}` };
   const said = (item.workspace || item.target || "").trim();
@@ -651,4 +733,22 @@ export function emptyPromise(say: string): boolean {
   // Waiting on the person ("I'll start it once you tell me which branch") is an answer, not a promise.
   if (/\b(once|when|after|as soon as|if)\s+(you|you've|you're|you'd)\b|\blet me know\b|\btell me\b|\bconfirm\b/i.test(text)) return false;
   return /\b(i['’]?m|i am|still)\s+(still\s+)?(searching|checking|looking|locating|finding|verifying|opening|starting|working\b|on it\b)|\b(i['’]?ll|i will)\s+(look up|search|check|locate|find|open|start|make)\b|\b(searching|checking|looking up|locating)\s+(the|that|your|for|vibe|on disk)\b/i.test(text);
+}
+
+/**
+ * Whether a step in a voice call can run at once without asking "Say go, or cancel": anything that
+ * only looks, makes or opens a workspace, tells a CLI, runs a task/routine, or starts a CLI in an
+ * isolated review copy (or in a clean/blank checkout). Stopping a CLI, applying or discarding a
+ * copy, or starting work in place over uncommitted edits still waits for Go.
+ */
+export function safeInCall(step: OrchestratorStep): boolean {
+  if (NEEDS_GO.includes(step.kind)) return false;
+  if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return false;
+  if (step.kind === "key") return !keySequenceFor(step.prompt)?.interrupts;
+  if (step.kind === "shell") return isSafeShellCommand(step.prompt);
+  if (step.kind === "workbench") {
+    const action = parseWorkbenchAction(step);
+    return !(action?.op === "pane" && action.action === "close");
+  }
+  return true;
 }

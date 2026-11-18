@@ -35,7 +35,7 @@ export class TeamService extends ServiceCore {
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
   private readonly messages = new MessageDesk(this, this.tasks);
-  readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages, this.tasks, this.routines);
+  readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages, this.tasks, this.routines, this.runs);
 
   constructor(options: DeskOptions) {
     super(options);
@@ -199,8 +199,12 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.listModels(engineId);
   }
 
-  orchestratorStopThinking(): void {
-    this.orchestrator.stopThinking();
+  orchestratorStopThinking(silent = false): void {
+    this.orchestrator.stopThinking(silent);
+  }
+
+  orchestratorQuickShow(target: string, rawSaid: string, sayText: (label: string) => string): Promise<string | null> {
+    return this.orchestrator.quickShow(target, rawSaid, sayText);
   }
 
   orchestratorClear(): void {

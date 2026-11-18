@@ -1,4 +1,4 @@
-import { Phone, PhoneOff, Square, Volume2 } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, Square, Volume2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CallState } from "../shared/api.js";
 import { call, on } from "./api.js";
@@ -15,7 +15,7 @@ import { useBarLayer } from "./voice.js";
 // The rail's button starts and ends it from any view and is lit while it listens; a bar comes up
 // only while something is happening (you are heard, Viby thinks or speaks, a plan waits for "go").
 
-const OFF: CallState = { on: false, phase: "listening", level: 0, heard: "", said: "", waiting: false, spoken: false, error: null, talkOver: false, heardItself: false };
+const OFF: CallState = { on: false, phase: "listening", level: 0, heard: "", said: "", waiting: false, spoken: false, error: null, talkOver: false, heardItself: false, muted: false };
 /** How long an answer that wasn't read aloud stays on the bar. */
 const SAID_MS = 9000;
 /** How long a call that has just begun says what to do, unless something is said sooner. */
@@ -172,7 +172,8 @@ export function CallBar() {
   const readAloud = useRef("");
   if (current.phase === "speaking") readAloud.current = current.said;
   const unread = fresh && current.said !== "" && current.said !== readAloud.current;
-  const quiet = current.phase === "listening" && !current.waiting && !unread;
+  const muted = Boolean(current.muted);
+  const quiet = current.phase === "listening" && !current.waiting && !unread && !muted;
   const greeting = greet && quiet && !current.heard && !current.said;
   const shown = current.on && (!quiet || greeting);
   useBarLayer(ref);
@@ -182,7 +183,7 @@ export function CallBar() {
   const lit = Math.round(current.level * METER_CELLS);
   return (
     <div ref={ref} className="listening call" role="status" aria-live="polite">
-      {phase === "hearing" && (
+      {phase === "hearing" && !muted && (
         <span className="meter" aria-hidden>
           {Array.from({ length: METER_CELLS }, (_, i) => (
             <i key={i} className={i < lit ? (i >= METER_CELLS - 3 ? "hot" : "on") : undefined} />
@@ -191,14 +192,14 @@ export function CallBar() {
       )}
       {(phase === "transcribing" || phase === "thinking") && <span className="spinner" />}
       {phase === "speaking" && <Volume2 size={15} className="accent-text" />}
-      {phase === "listening" && <Phone size={15} className="accent-text" />}
+      {phase === "listening" && (muted ? <MicOff size={15} className="faint" /> : <Phone size={15} className="accent-text" />)}
       <span className="listening-text">
         <strong>
           {phase === "hearing" && t("call.hearing")}
           {phase === "transcribing" && t("voice.transcribing")}
           {phase === "thinking" && t("call.thinking")}
           {phase === "speaking" && t("orch.title")}
-          {phase === "listening" && (current.waiting ? t("call.waitingGo") : t("orch.title"))}
+          {phase === "listening" && (muted ? t("call.muted") : current.waiting ? t("call.waitingGo") : t("orch.title"))}
         </strong>
         {phase === "thinking" && current.heard && <span className="faint truncate"> {current.heard}</span>}
         {(phase === "speaking" || (phase === "listening" && unread)) && current.said && <span className="faint truncate"> {current.said}</span>}
@@ -214,7 +215,10 @@ export function CallBar() {
           {t("voice.silence")}
         </Button>
       )}
-      {phase === "speaking" && current.talkOver && <span className="faint small">{t("call.talkOverHint")}</span>}
+      {(phase === "speaking" || phase === "thinking") && current.talkOver && !muted && <span className="faint small">{t("call.talkOverHint")}</span>}
+      <Button size="sm" variant={muted ? "primary" : "ghost"} icon={muted ? Mic : MicOff} onClick={() => void call("call.mute")}>
+        {muted ? t("call.unmute") : t("call.mute")}
+      </Button>
       <Button size="sm" variant="ghost" icon={PhoneOff} tip={t("call.hangUpTip")} onClick={() => void call("call.stop")}>
         {t("call.hangUp")}
       </Button>
