@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { describeOs, omarchyDoNotDisturb } from "../../electron/system.js";
+import { describeOs, omarchyDoNotDisturb, settleWorkingDir } from "../../electron/system.js";
 
 const missing = () => {
   throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -52,5 +52,21 @@ describe("Omarchy's Do Not Disturb", () => {
     fs.mkdirSync(path.join(dir, ".local", "state", "omarchy"), { recursive: true });
     fs.writeFileSync(path.join(dir, ".local", "state", "omarchy", "notifications.json"), '{"dnd":true}');
     expect(omarchyDoNotDisturb({}, dir)).toBe(true);
+  });
+});
+
+describe("the working folder", () => {
+  it("moves into the home folder, so helpers never start in a deleted install folder", () => {
+    const moved: string[] = [];
+    const warnings: string[] = [];
+    settleWorkingDir({ warn: (line: string) => warnings.push(line) }, "/home/someone", (dir) => moved.push(dir));
+    expect(moved).toEqual(["/home/someone"]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("keeps going with a warning when the home folder can't be entered", () => {
+    const warnings: string[] = [];
+    settleWorkingDir({ warn: (line: string) => warnings.push(line) }, "/nope", missing);
+    expect(warnings).toEqual(["Could not move into /nope: ENOENT"]);
   });
 });

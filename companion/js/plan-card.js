@@ -143,14 +143,16 @@ function stepNode(turn, step, editable) {
     const copy = orch.copies?.find((item) => item.id === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
   } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
-    const what = step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt;
+    // A key step says which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
+    const what = step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.kind === "key" ? [step.prompt, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt;
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(otherStepKey(step))), el("span", { class: "orch-target" }, what)));
   } else {
     const target = orch.running.find((item) => item.ptyId === step.target);
     const kindKey = /** @type {Record<string, string>} */ (KIND_KEYS)[step.kind] || "orch.close";
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(kindKey)), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
   }
-  if (step.kind === "start" || step.kind === "tell" || (step.kind === "task" && step.name)) {
+  // A shell step's command too, as on the computer's card: Go on the phone shouldn't run what it can't see.
+  if (step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && step.name)) {
     if (editable) main.append(promptField(turn, step, value("prompt")));
     else if (step.prompt) main.append(el("span", { class: "orch-prompt-text" }, step.prompt));
   }

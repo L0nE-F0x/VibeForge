@@ -13,11 +13,11 @@ import {
   emptyPromise,
   folderNameOk,
   formatSettingsRules,
+  holdsForGo,
   inspectsQuotas,
   inspectsSettings,
   keySequenceFor,
   lookingLine,
-  NEEDS_GO,
   ONLY_LOOKS,
   parseWorkbenchAction,
   PLANNED_PREFIX,
@@ -223,6 +223,8 @@ export class OrchestratorDesk {
   runner: BrainRunner = spawnBrain;
   /** Quiet time before a chained `after: true` step considers the previous PTY turn settled. */
   chainSettleMs = 1200;
+  /** How long a chained step waits on a terminal that never got busy before going ahead. */
+  chainIdleMs = 15_000;
   /** Time before checking whether a newly started CLI is stuck on a folder-trust/permission prompt. */
   firstPromptMs = 8000;
 
@@ -719,14 +721,19 @@ export class OrchestratorDesk {
           `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.`,
         ].join("\n"),
       );
+      let followed = false;
       if (followUp && !signal.aborted && !followUp.timedOut) {
         const nextOut = readBrainOutput(followUp.stdout);
         if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
         if (nextOut.plan) {
           plan = nextOut.plan;
           steps = resolvePlan(plan, context);
+          followed = true;
         }
       }
+      if (signal.aborted) return;
+      // No answer to the findings: they are the answer (on its checks), not a plan to inspect it all again.
+      if (!followed) steps = [];
     }
     if (!steps.length) {
       this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
@@ -743,8 +750,8 @@ export class OrchestratorDesk {
     // In a voice call, safe steps (isolated branch copies, workspaces, tells, tasks, routines) also go at once.
     const checked = withPlannedWorkspaces(context, steps);
     const ready = steps.every((step) => !stepIssue(step, checked));
-    const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step));
-    if (ready && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !NEEDS_GO.includes(step.kind))))) {
+    const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
+    if (ready && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))) {
       void this.run(answered.id);
     }
   }
@@ -850,6 +857,8 @@ export class OrchestratorDesk {
     this.activity = null;
     this.forgetTold();
     this.runEpoch += 1;
+    // Plans waiting on a terminal to finish end now, instead of staying "running" in the old conversation.
+    for (const ptyId of [...this.chainWaiters.keys()]) this.settleChainWaiters(ptyId, false);
     this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
     this.save();
   }
@@ -994,12 +1003,21 @@ export class OrchestratorDesk {
     let prevPtyId: string | null = null;
     let prevSourceWorkspaceId: string | null = null;
     let prevOpenedWorkspaceId: string | null = null;
+    // Whether the step before carried out: one marked `after` depends on it, so it doesn't run when that
+    // one failed or was skipped ("fix it, then push" must not push a fix that never started).
+    let prevOk = true;
     for (const step of turn.steps ?? []) {
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+      if (step.after && !prevOk) {
+        step.state = "skipped";
+        this.save();
+        continue;
+      }
       if (step.after && prevPtyId) {
         const settled = await this.waitForChainedPty(prevPtyId, epoch, turn);
         if (!settled || this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) {
           step.state = "skipped";
+          prevOk = false;
           this.save();
           continue;
         }
@@ -1017,6 +1035,7 @@ export class OrchestratorDesk {
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       if (stepIssue(step, context)) {
         step.state = "skipped";
+        prevOk = false;
         this.save();
         continue;
       }
@@ -1027,6 +1046,7 @@ export class OrchestratorDesk {
       try {
         await this.carryOut(turn, step);
         step.state = "done";
+        prevOk = true;
         const producedPty = step.ptyId || (step.kind === "tell" ? step.target : null);
         if (producedPty) {
           prevPtyId = producedPty;
@@ -1037,6 +1057,7 @@ export class OrchestratorDesk {
         step.state = "failed";
         step.error = error instanceof Error ? error.message : String(error);
         prevPtyId = null;
+        prevOk = false;
       }
       this.activity = null;
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
@@ -1065,6 +1086,13 @@ export class OrchestratorDesk {
       const set = this.chainWaiters.get(ptyId) ?? new Set();
       set.add(done);
       this.chainWaiters.set(ptyId, set);
+      // Only going busy and then quiet settles the wait. A terminal that never gets busy (a command that
+      // finished at once, a CLI already idle) would hold the plan "running" for good: once it has been
+      // quiet this long with nothing pending, the next step goes.
+      const idle = setTimeout(() => {
+        if (set.has(done) && !this.core.live.get(ptyId)?.working && !this.chainTimers.has(ptyId)) done(true);
+      }, this.chainIdleMs);
+      idle.unref();
     });
   }
 
@@ -1299,6 +1327,10 @@ export class OrchestratorDesk {
       const target = path.isAbsolute(raw) ? path.resolve(raw) : ws ? path.resolve(ws.path, raw) : path.resolve(expandHome(this.projectsFolder()), raw);
       if (target === path.parse(target).root || target === os.homedir()) throw new Error("Refusing to modify root or home directory directly.");
       if (ws && !path.isAbsolute(raw) && !isInside(ws.path, target)) throw new Error("Folder path stays inside its workspace.");
+      // Without a workspace a relative folder belongs in the projects folder, and no folder goes outside home, the projects folder or a workspace.
+      if (!ws && !path.isAbsolute(raw) && !isInside(path.resolve(expandHome(this.projectsFolder())), target)) throw new Error("Folder path stays inside the projects folder.");
+      const roots = [os.homedir(), path.resolve(expandHome(this.projectsFolder())), ...this.core.store.readWorkspaces().workspaces.map((item) => item.path)];
+      if (!roots.some((root) => isInside(root, target))) throw new Error("Folder path stays inside your home, projects or workspace folders.");
       fs.mkdirSync(target, { recursive: true });
       step.result = `Created ${tildify(target)}.`;
       return;

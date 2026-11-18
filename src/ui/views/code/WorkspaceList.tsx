@@ -85,7 +85,8 @@ export function WorkspaceList({
   const live = useLive().data ?? [];
   const attention = useAttention();
   const ptyAttention = usePtyAttention();
-  const statuses = useWorkspaceStatus().data;
+  const workspaceStatus = useWorkspaceStatus();
+  const statuses = workspaceStatus.data;
   const copies = useOrchestrator().data?.copies ?? [];
   const tasks = useTasks().data ?? [];
   const home = useAppInfo().data?.home ?? "";
@@ -483,7 +484,8 @@ export function WorkspaceList({
               {t("code.addEmpty")}
             </div>
           )}
-          {workspaces.length > 0 && shown.length === 0 && (
+          {/* Before git has answered every workspace looks clean and branchless: no "nothing matches" (or a button that drops the saved filter) yet. */}
+          {workspaces.length > 0 && shown.length === 0 && workspaceStatus.loaded && (
             <div className="vstack faint" style={{ padding: "12px 10px", gap: 8, alignItems: "flex-start" }}>
               <span>{emptyMessage}</span>
               <Button

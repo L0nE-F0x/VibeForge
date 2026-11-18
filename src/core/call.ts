@@ -25,6 +25,8 @@ const SPEECH_OFF = 0.35;
 const SPEECH_CONFIRM_MS = 3 * VAD_FRAME_MS;
 /** A sound that never became speech is let go after this much quiet, long before a pause would end it. */
 const BLIP_QUIET_MS = 320;
+/** No partial words are asked for once a pause this long has begun (see `peek`). */
+const PEEK_QUIET_MS = 200;
 
 export interface Heard {
   /** Each thing said that ended in this stretch of audio, as 16 kHz mono s16le. */
@@ -86,8 +88,13 @@ export class Segmenter {
     this.opts.detector?.reset();
   }
 
-  /** Audio of the utterance still being spoken, once confirmed as speech; empty otherwise. */
+  /**
+   * Audio of the utterance still being spoken, once confirmed as speech; empty otherwise, and empty
+   * once a pause has begun: the words won't change, and a partial started then would still be on
+   * whisper-server (one inference at a time) when the final transcript of this utterance arrives.
+   */
   peek(): Buffer {
+    if (this.quietMs >= PEEK_QUIET_MS) return Buffer.alloc(0);
     const confirmed = this.opts.detector ? this.talking && this.voicedMs >= SPEECH_CONFIRM_MS : this.endpointer.phase === "speaking";
     return confirmed && this.speech.length ? Buffer.concat(this.speech) : Buffer.alloc(0);
   }

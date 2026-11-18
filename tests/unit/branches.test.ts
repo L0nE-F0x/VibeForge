@@ -151,4 +151,18 @@ describe("a second checkout", () => {
     expect(await summarizeFolderGit("")).toEqual({ git: false, branch: null, dirty: 0, ahead: 0, behind: 0, lastCommitAt: null });
     svc.close();
   });
+
+  it("counts only the workspace folder's changes, not the rest of the repository it sits in", async () => {
+    const dir = repoOnFeature();
+    fs.mkdirSync(path.join(dir, "packages", "web"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "packages", "api"), { recursive: true });
+    for (const file of ["web/page.ts", "api/one.ts", "api/two.ts"]) fs.writeFileSync(path.join(dir, "packages", file), "v1\n");
+    git(dir, "add", "packages");
+    git(dir, "commit", "-qm", "packages");
+    for (const file of ["web/page.ts", "api/one.ts", "api/two.ts"]) fs.writeFileSync(path.join(dir, "packages", file), "v2\n");
+
+    expect(await summarizeFolderGit(path.join(dir, "packages", "web"))).toMatchObject({ git: true, branch: "feat/phone-companion", dirty: 1 });
+    expect(await summarizeFolderGit(path.join(dir, "packages", "api"))).toMatchObject({ git: true, dirty: 2 });
+    expect(await summarizeFolderGit(dir)).toMatchObject({ git: true, dirty: 3 });
+  });
 });

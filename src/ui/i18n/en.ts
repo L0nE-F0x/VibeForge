@@ -1800,6 +1800,8 @@ export const en = {
   "core.orchBadWorkbench": "Unsupported workbench action.",
   "core.orchProtectedFolder": "Refusing to modify root or home directory directly.",
   "core.orchOutsideWorkspace": "Folder path stays inside its workspace.",
+  "core.orchOutsideProjects": "Folder path stays inside the projects folder.",
+  "core.orchOutsideRoots": "Folder path stays inside your home, projects or workspace folders.",
   "core.orchNoDiffTarget": "No copy or run matched \"{target}\".",
   "voice.sherpaAuto": "Downloaded automatically with Parakeet, Canary or Moonshine models",
   "voice.modelTip.parakeet": "Fast on CPU, top accuracy · 25 European languages",

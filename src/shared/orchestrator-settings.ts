@@ -234,6 +234,9 @@ function parseBool(raw: string): boolean | null {
   return null;
 }
 
+/** The languages the window comes in: `LANGUAGES` in src/ui/i18n/index.ts (a test keeps the two alike). */
+export const APP_LANGUAGES: readonly string[] = ["en", "de", "es", "fr", "pt", "ja", "zh"];
+
 function isResetWord(raw: string): boolean {
   return /^(?:auto|automatic|default|reset|clear|best|none)$/.test(raw.trim().toLowerCase().replace(/[.!]+$/, ""));
 }
@@ -482,6 +485,13 @@ export function resolveSettingsStep(
           if (maybeEngine && isPlannerRow({ id: maybeEngine.id, bin: maybeEngine.bin ?? maybeEngine.id })) {
             if (!maybeEngine.available) return { action: null, issue: "engineMissing", asked: maybeEngine.label };
             engine = maybeEngine.id;
+          } else if (isResetWord(value)) {
+            // "default" is the model going back to the CLI's own, not a model called "default".
+            model = "";
+          } else if (/^(?:none|minimal|low|medium|high|xhigh|max)$/.test(lower)) {
+            // An effort level said on its own ("medium") is the effort, not a model of that name,
+            // which every later planning turn would fail on.
+            effort = lower;
           } else {
             const cleaned = cleanModel(value);
             if (cleaned) model = cleaned;
@@ -694,7 +704,8 @@ export function resolveSettingsStep(
   if (/^(?:language|applanguage|uilanguage)$/.test(key)) {
     const clean = squash(value);
     const lang = clean === "auto" || clean === "system" || clean === "desktop" ? "system" : SPOKEN_LANGS[clean] ?? (/^[a-z]{2,3}$/.test(value.toLowerCase()) ? value.toLowerCase() : "");
-    if (!lang || lang === "auto") return { action: null, issue: "prompt", asked: value || "language" };
+    // Only a language the window has (Italian would show English, with nothing picked in Settings).
+    if (!lang || lang === "auto" || (lang !== "system" && !APP_LANGUAGES.includes(lang))) return { action: null, issue: "prompt", asked: value || "language" };
     const summary = `App language · ${lang}`;
     return { action: { op: "app-patch", patch: { language: lang }, summary }, issue: null, asked: summary };
   }
@@ -883,14 +894,15 @@ export function resolveSettingsStep(
   }
 
   if (/^(?:keeprunsdays|rundays)$/.test(key)) {
-    const num = /^(?:0|forever|always|all|unlimited)$/i.test(value) ? 0 : Math.round(Number(value));
+    // Nothing said is not 0 (Number("") is): 0 would keep runs forever.
+    const num = !value ? Number.NaN : /^(?:0|forever|always|all|unlimited)$/i.test(value) ? 0 : Math.round(Number(value));
     if (!Number.isFinite(num) || num < 0 || num > 36500) return { action: null, issue: "prompt", asked: value || "keepRuns.days" };
     const summary = `Keep runs · ${num === 0 ? "forever" : `${num} days`}`;
     return { action: { op: "app-patch", patch: { keepRuns: { days: num } }, summary }, issue: null, asked: summary };
   }
 
   if (/^(?:keeprunsmaxmb|runmaxmb|storagecap)$/.test(key)) {
-    const num = /^(?:0|none|unlimited|forever)$/i.test(value) ? 0 : Math.round(Number(value));
+    const num = !value ? Number.NaN : /^(?:0|none|unlimited|forever)$/i.test(value) ? 0 : Math.round(Number(value));
     if (!Number.isFinite(num) || num < 0 || num > 1_000_000) return { action: null, issue: "prompt", asked: value || "keepRuns.maxMb" };
     const summary = `Run storage cap · ${num === 0 ? "unlimited" : `${num} MB`}`;
     return { action: { op: "app-patch", patch: { keepRuns: { maxMb: num } }, summary }, issue: null, asked: summary };

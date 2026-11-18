@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-11-19
+
+**2.24.1: Viby's voice speaks again after an update, Viby asks before anything risky, and fixes across calls, speech and the workspace list.**
+
+### Fixed
+
+- **Viby's voice is back after an update.** Update moved the folder the app was started from, so Piper, which can't start without one, failed every reply while you could still be heard. The app now starts its helpers from your home folder.
+- **Viby asks before a command that could do harm, in a call and in Just go.** A shell step goes at once only when it runs tests or a build, reads git, or lists or makes folders here; anything else, however it is spelled, waits for **Go**. Ctrl+C, a download, turning on something networked, switching Viby to Just go, and the default shell wait too.
+- **Saying “no” to a CLI's question answers no.** On Claude Code's menu, where No is the third choice, it used to take the highlighted Yes.
+- **A step that depends on the one before it doesn't run when that one failed**, a chain no longer waits for good on a terminal that never got busy, and **New** ends one that is waiting.
+- **Telling Viby “medium” sets its effort**, not a model called “medium” that every later turn failed on. An empty value no longer keeps runs forever, and only languages the app comes in can be picked.
+- **Viby's panel during a call:** a step you edit is saved before you say go, an error while hearing you shows in the call's bar, the first key that opens the message box is kept (with the cursor after it), the review list doesn't open by itself, and a step that sends a key or runs a command shows which.
+- **Hearing you on a call:** the words shown while you speak no longer hold up the final transcript, a speech model that took too long can't answer the next thing you say, a runtime that fails to unpack keeps the model it came with, and Viby's voice stays quick to start through a long call.
+- **The workspace list:** the count of uncommitted files is the workspace folder's own, not the whole repository's; git is asked again when workspaces or runs change, not many times a second during a sync; and a saved filter doesn't say “nothing matches” before git has answered.
+- Inspecting “the rate limit handling” reads it instead of your plan's limits, and a folder Viby makes stays in your home, projects or a workspace.
+
 ## [2.24.0] - 2026-11-18
 
 **2.24.0: one Ask button for Viby, where you type or call; a redrawn pixel Viby that stays readable and still; and a tour that catches up with calls.**

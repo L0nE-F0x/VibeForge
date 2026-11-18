@@ -139,16 +139,13 @@ export function CallButton() {
   );
 }
 
-/** What the call is doing outside Viby's own panel. Inside Viby, the panel itself is the call. */
-export function CallBar() {
-  const t = useT();
-  const { route, go } = useNav();
-  const { push } = useToast();
-  const current = useCall();
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * Whether the call's last line (`said`) was never read aloud and is still new: no voice here, or it
+ * was an error (whisper failing, say). Such a line stays up long enough to read; one read aloud has
+ * been heard and doesn't.
+ */
+export function useUnreadSaid(current: CallState): boolean {
   const [fresh, setFresh] = useState(false);
-
-  // An answer nobody read aloud (no voice here, or it was an error) stays up long enough to read.
   useEffect(() => {
     if (!current.said) {
       setFresh(false);
@@ -158,6 +155,19 @@ export function CallBar() {
     const timer = window.setTimeout(() => setFresh(false), SAID_MS);
     return () => window.clearTimeout(timer);
   }, [current.said]);
+  const readAloud = useRef("");
+  if (current.phase === "speaking") readAloud.current = current.said;
+  return fresh && current.said !== "" && current.said !== readAloud.current;
+}
+
+/** What the call is doing outside Viby's own panel. Inside Viby, the panel itself is the call. */
+export function CallBar() {
+  const t = useT();
+  const { route, go } = useNav();
+  const { push } = useToast();
+  const current = useCall();
+  const ref = useRef<HTMLDivElement>(null);
+  const unread = useUnreadSaid(current);
 
   // A call that has just begun says what to do, until something is said or a few seconds pass:
   // a lit button in the rail alone doesn't tell someone new that they can simply talk.
@@ -187,10 +197,6 @@ export function CallBar() {
     heardItself.current = current.heardItself;
   }, [current.heardItself, push, t]);
 
-  // What was read aloud has been heard; it doesn't stay up afterwards.
-  const readAloud = useRef("");
-  if (current.phase === "speaking") readAloud.current = current.said;
-  const unread = fresh && current.said !== "" && current.said !== readAloud.current;
   const muted = Boolean(current.muted);
   const quiet = current.phase === "listening" && !current.waiting && !unread && !muted;
   const greeting = greet && quiet && !current.heard && !current.said;

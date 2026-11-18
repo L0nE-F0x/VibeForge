@@ -57,13 +57,13 @@ import {
   type PlanContext,
 } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
-import { CallButton, callMood, METER_CELLS, useCall, useCallToggle } from "../call.js";
+import { CallButton, callMood, METER_CELLS, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { Composer } from "../components/Session.js";
 import { tipProps } from "../components/Tooltip.js";
 import { Button, Chip, Input, Popover, Select, Spinner, useOverlayStack } from "../components/ui.js";
 import { coreText } from "../core-text.js";
-import { readDraft } from "../drafts.js";
+import { readDraft, seedDraft } from "../drafts.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { overlayOpen } from "../overlays.js";
 import { VIEWS } from "../rail.js";
@@ -253,7 +253,12 @@ export function OrchestratorView() {
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || overlayOpen()) return;
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName))) return;
-      if (event.key.length === 1 && event.key.trim() !== "") setTypingOpen(true);
+      if (event.key.length === 1 && event.key.trim() !== "") {
+        // The key that opened the box is the first letter typed in it, not lost on the page behind.
+        event.preventDefault();
+        seedDraft(DRAFT_KEY, (readDraft<string>(DRAFT_KEY) ?? "") + event.key);
+        setTypingOpen(true);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -263,6 +268,11 @@ export function OrchestratorView() {
   const turns = view?.turns ?? [];
   const copies = view?.copies ?? [];
   const emptyBeforeCall = !callState.on && turns.length === 0 && !view?.thinking;
+  // The last copy applied or discarded removes the pill: forget its anchor too, or the popover would
+  // open by itself (on a detached button, in the corner) when the next copy appears.
+  useEffect(() => {
+    if (copies.length === 0) setReviewAnchor(null);
+  }, [copies.length]);
 
   return (
     <div className={`view viby-view${callState.on ? " in-call" : ""}`}>
@@ -470,6 +480,10 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
   const chosenModel = settings && engineId === settings.orchestrator.engine ? settings.orchestrator.model : "";
   const isClaude = Boolean(engine && brainKind(engine) === "claude");
   const modelLabel = chosenModel || (isClaude ? (locked ? "haiku" : t("orch.modelCallDefault")) : t("orch.modelDefault"));
+  // A call starting while the popover is open closes it for good, rather than it coming back on hang-up.
+  useEffect(() => {
+    if (locked) setAnchor(null);
+  }, [locked]);
 
   if (locked) {
     return (
@@ -683,6 +697,8 @@ function LiveCallDock({
   const mood = callMood(callState);
   const muted = Boolean(callState.muted);
   const lit = Math.round(callState.level * METER_CELLS);
+  // The call bar is hidden in this tab, so a line nobody read aloud (an error above all) shows here.
+  const unread = useUnreadSaid(callState);
   const stateLabel =
     mood === "speaking"
       ? t("call.state.speaking")
@@ -709,6 +725,7 @@ function LiveCallDock({
         {(mood === "speaking" || mood === "thinking") && callState.talkOver && !muted && (
           <span className="faint small truncate">{t("call.talkOverHint")}</span>
         )}
+        {callState.phase === "listening" && unread && <span className="faint small truncate">{callState.said}</span>}
         <span className="grow" />
         {callState.phase === "thinking" && (
           <Button size="sm" variant="ghost" icon={Square} onClick={() => void call("orchestrator.stopThinking")}>
@@ -1511,7 +1528,14 @@ function EditableStepRow({
     controls = (
       <div className="orch-step-line">
         <strong>{t(otherStepKey(step))}</strong>
-        <span className="truncate">{step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt}</span>
+        <span className="truncate">
+          {step.kind === "task" && step.name
+            ? [step.name, step.asked].filter(Boolean).join(" · ")
+            : step.kind === "key"
+              ? // Which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
+                [step.prompt, step.asked].filter(Boolean).join(" · ")
+              : step.asked || step.name || step.prompt}
+        </span>
       </div>
     );
   } else {
@@ -1565,12 +1589,16 @@ function InlineField({
   useEffect(() => {
     if (!focused.current) setText(value);
   }, [value]);
+  // The latest onDone, read when the timer fires: callers pass a new arrow each render, and during a
+  // call the thread re-renders with every meter tick, which would restart the timer before it ever fired.
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
   useEffect(() => {
     const trimmed = text.trim();
     if (trimmed === value) return;
-    const timer = setTimeout(() => onDone(trimmed), 250);
+    const timer = setTimeout(() => doneRef.current(trimmed), 250);
     return () => clearTimeout(timer);
-  }, [text, value, onDone]);
+  }, [text, value]);
   return (
     <input
       className={`orch-field${mono ? " mono" : ""}`}
@@ -1690,11 +1718,14 @@ function PromptBox({
   useEffect(() => {
     if (!focused.current) setText(value);
   }, [value]);
+  // As in InlineField: the latest onDone, so re-renders during a call don't keep restarting the timer.
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
   useEffect(() => {
     if (text === value) return;
-    const timer = setTimeout(() => onDone(text), 250);
+    const timer = setTimeout(() => doneRef.current(text), 250);
     return () => clearTimeout(timer);
-  }, [text, value, onDone]);
+  }, [text, value]);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;

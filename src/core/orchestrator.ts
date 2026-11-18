@@ -777,18 +777,35 @@ export function emptyPromise(say: string): boolean {
  * isolated review copy (or in a clean/blank checkout). Stopping a CLI, applying or discarding a
  * copy, or starting work in place over uncommitted edits still waits for Go.
  */
-export function safeInCall(step: OrchestratorStep): boolean {
-  if (NEEDS_GO.includes(step.kind)) return false;
+export function safeInCall(step: OrchestratorStep, context: PlanContext | null = null): boolean {
+  if (holdsForGo(step, context)) return false;
   if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return false;
-  if (step.kind === "key") return !keySequenceFor(step.prompt)?.interrupts;
-  if (step.kind === "shell") return isSafeShellCommand(step.prompt);
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     return !(action?.op === "pane" && action.action === "close");
   }
-  if (step.kind === "settings") {
-    const parsed = resolveSettingsStep(step, { engines: [] });
-    return !(parsed.action?.op === "app-patch" && parsed.action.networkOn);
-  }
   return true;
+}
+
+/**
+ * Whether a step waits for Go even in "Just go" mode (and so in a call too): stopping, applying or
+ * throwing away work, a shell command that isn't plainly harmless, Ctrl+C (a stop by another name),
+ * and a setting that turns something networked on, downloads, or changes how far Viby acts alone.
+ */
+export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
+  if (NEEDS_GO.includes(step.kind)) return true;
+  if (step.kind === "key") return Boolean(keySequenceFor(step.prompt)?.interrupts);
+  if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
+  if (step.kind === "settings") {
+    const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
+    if (!action) return false;
+    if (action.op === "voice-download") return true;
+    if (action.op === "voice-model" || action.op === "voice-speaker") return Boolean(action.downloadId);
+    if (action.op === "viby") return action.mode === "go";
+    if (action.op === "app-patch") {
+      const agentTalk = action.patch.agentTalk as { handOff?: string } | undefined;
+      return Boolean(action.networkOn) || "defaultShell" in action.patch || agentTalk?.handOff === "go";
+    }
+  }
+  return false;
 }
