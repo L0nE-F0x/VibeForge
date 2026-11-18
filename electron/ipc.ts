@@ -272,7 +272,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "voice.start": () => voice.start(),
     "voice.stop": (prompt) => voice.stop(typeof prompt === "string" ? prompt.slice(0, 1000) : ""),
     "voice.cancel": () => voice.cancel(),
-    "voice.download": (kind, id) => voice.startDownload(kind === "voice" ? "voice" : "model", String(id)),
+    "voice.download": (kind, id) => voice.startDownload(kind === "voice" ? "voice" : kind === "sherpa" ? "sherpa" : "model", String(id)),
     "voice.stopDownload": () => voice.stopDownload(),
     "voice.speak": (text, voiceFile) => void talk.say(null, "VibeForge", String(text).slice(0, 2000), typeof voiceFile === "string" ? voiceFile : "", "full"),
     "voice.silence": () => voice.speaker.stop(),

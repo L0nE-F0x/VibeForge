@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clock, CornerDownLeft, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
+import { Check, CircleAlert, Clock, CornerDownLeft, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Settings as SettingsIcon, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
@@ -75,13 +75,14 @@ function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   return ISSUE_KEY[issue];
 }
 
-/** What a lookup, inspect, shell, key, workbench, task or routine step will do. */
+/** What a lookup, inspect, shell, key, workbench, settings, task or routine step will do. */
 function otherStepKey(step: OrchestratorStep): Key {
   if (step.kind === "lookup") return "orch.lookup";
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
+  if (step.kind === "settings") return "orch.settings";
   if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
   const action = step.prompt.trim().toLowerCase();
   return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
@@ -104,7 +105,7 @@ export function OrchestratorView() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const [saveMode] = useAction(async (mode: "plan" | "go") => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, mode } }), t("settings.saveFailed"));
-  const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "" } }), t("settings.saveFailed"));
+  const [saveEngine] = useAction(async (engine: string) => settings && call("settings.save", { orchestrator: { ...settings.orchestrator, engine, model: "", effort: "" } }), t("settings.saveFailed"));
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const planners = engines.filter((engine) => canOrchestrate(engine));
   // The planner in use: the one picked, or until then the first one on this machine.
@@ -459,7 +460,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         <span className="truncate">{targetCopy ? `${targetCopy.name} · ${workspaces.find((item) => item.id === targetCopy.workspaceId)?.name ?? ""}` : step.asked || t("orch.copyGone")}</span>
       </div>
     );
-  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "task" || step.kind === "routine") {
+  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
     line = (
       <div className="orch-step-line">
         <strong>{t(otherStepKey(step))}</strong>
@@ -551,6 +552,7 @@ const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = {
   key: CornerDownLeft,
   shell: SquareTerminal,
   workbench: Workflow,
+  settings: SettingsIcon,
   lookup: Search,
   task: ListTodo,
   routine: Clock,

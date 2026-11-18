@@ -199,7 +199,7 @@ export interface CallState {
   muted?: boolean;
 }
 
-export type DownloadKind = "model" | "voice";
+export type DownloadKind = "model" | "voice" | "sherpa";
 
 /** What dictation found on this machine. */
 export interface VoiceStatus {
@@ -207,6 +207,8 @@ export interface VoiceStatus {
   recorder: string | null;
   server: string | null;
   cli: string | null;
+  /** sherpa-onnx-offline path for ONNX models (Parakeet, Canary, Moonshine), or null when not installed yet. */
+  sherpa?: string | null;
   /** The model that will be loaded, or null when none was found. */
   model: string | null;
   /** Every model file found, best first. */

@@ -56,6 +56,28 @@ export interface DeskHost {
   ): void;
   /** Formatted plan limits and token usage summary for Viby's `inspect` step. */
   quotas?(): Promise<string>;
+  /** Live voice, STT and TTS status on this machine, for Viby's context and `inspect` step. */
+  voiceStatus?(): {
+    ready: boolean;
+    recorder: string | null;
+    server: string | null;
+    cli: string | null;
+    sherpa?: string | null;
+    model: string | null;
+    models: string[];
+    modelDir: string;
+    language: string;
+    piper: string | null;
+    voices: string[];
+    speaker: string | null;
+    voiceDir: string;
+    download: { kind: "model" | "voice" | "sherpa"; id: string; received: number; total: number } | null;
+    downloadError: string | null;
+  };
+  /** Start downloading a pinned STT model, Piper voice, or sherpa-onnx runtime from Viby's `settings` step. */
+  voiceDownload?(kind: "model" | "voice" | "sherpa", id: string): void;
+  /** Login autostart state and setter, for Viby's `settings` step. */
+  autostart?: { get(): boolean; set(on: boolean): boolean };
 }
 
 export interface DeskOptions {

@@ -12,7 +12,9 @@ import {
   detectWaitingPrompt,
   emptyPromise,
   folderNameOk,
+  formatSettingsRules,
   inspectsQuotas,
+  inspectsSettings,
   keySequenceFor,
   lookingLine,
   NEEDS_GO,
@@ -21,10 +23,13 @@ import {
   PLANNED_PREFIX,
   plannedFolder,
   plannedId,
+  resolveSettingsStep,
   safeInCall,
   sessionGone,
+  settingsFingerprint,
   withPlannedWorkspaces,
   type MaestroNote,
+  type PlanSettingsContext,
   type StepPatch,
   brainKind,
   canOrchestrate,
@@ -46,12 +51,28 @@ import {
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
 import { speakable } from "../replies.js";
+import { findSherpa } from "../sherpa.js";
+import { listThemes } from "../theme.js";
 import { isGitRepo, summarizeSnapshot } from "../vcs.js";
+import {
+  findPiper,
+  findWhisper,
+  isEnglishOnly,
+  listenLanguage,
+  modelBackend,
+  pickModel,
+  pickVoice,
+  planRecorder,
+  scanPiperVoices,
+  scanVoiceModels,
+  voiceName,
+  type VoiceBackend,
+} from "../voice.js";
 import type { ApplyResult } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { MessageDesk } from "./messages.js";
 import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
-import type { LiveSession } from "../types.js";
+import type { LiveSession, Settings } from "../types.js";
 import { cleanModel, effortLevels, takesModel } from "../../shared/launch-options.js";
 import type { RoutineDesk } from "./routines.js";
 import type { RunDesk } from "./runs.js";
@@ -88,6 +109,8 @@ interface Conversation {
   begun: boolean;
   /** Non-copy workspaces present when the session began, so adding one refreshes a planner that caches rules on turn 1. */
   workspacesKey?: string;
+  /** Settings fingerprint from the previous turn, so a resumed session hears when settings changed. */
+  settingsKey?: string;
   turns: OrchestratorTurn[];
 }
 
@@ -339,7 +362,8 @@ export class OrchestratorDesk {
       enabled: item.enabled,
       ...(item.agentName ? { agent: item.agentName } : {}),
     }));
-    const defaultPick = this.core.store.readSettings().defaultEngine;
+    const allSettings = this.core.store.readSettings();
+    const defaultPick = allSettings.defaultEngine;
     const defaultEngine = defaultPick && this.core.resolveEngine(defaultPick) ? defaultPick : undefined;
     return {
       workspaces,
@@ -351,6 +375,118 @@ export class OrchestratorDesk {
       ...(tasks.length ? { tasks } : {}),
       ...(routines.length ? { routines } : {}),
       projectsFolder: this.projectsFolder(),
+      settings: this.buildSettingsContext(allSettings, rows),
+    };
+  }
+
+  private buildSettingsContext(all: Settings = this.core.store.readSettings(), rows = this.core.store.readEngineRows()): PlanSettingsContext {
+    const planner = this.planner();
+    const availablePlanners = rows
+      .filter((row) => canOrchestrate(row))
+      .map((row) => {
+        const kind = brainKind(row);
+        const models = (kind && KNOWN_MODELS[kind]) ?? this.models.get(row.id) ?? [];
+        return {
+          id: row.id,
+          label: row.label,
+          available: Boolean(this.core.resolveEngine(row.id)),
+          models: [...models],
+          efforts: [...effortLevels(row)],
+        };
+      });
+
+    const hostVoice = this.core.options.host.voiceStatus?.();
+    const home = os.homedir();
+    const dataRoot = this.core.options.dataRoot;
+    const models = hostVoice ? hostVoice.models : scanVoiceModels(home, dataRoot);
+    const voices = hostVoice ? hostVoice.voices : scanPiperVoices(home, dataRoot);
+    const whisper = hostVoice
+      ? { server: hostVoice.server, cli: hostVoice.cli }
+      : findWhisper(this.core.options.host.resolveBin, { server: process.env.VIBEFORGE_WHISPER_SERVER, cli: process.env.VIBEFORGE_WHISPER_CLI });
+    const sherpaCli = hostVoice
+      ? (hostVoice.sherpa ?? null)
+      : findSherpa(this.core.options.host.resolveBin, dataRoot, { cli: process.env.VIBEFORGE_SHERPA_CLI }).cli;
+    const recorder = hostVoice
+      ? hostVoice.recorder
+      : (planRecorder(this.core.options.host.resolveBin, process.env.VIBEFORGE_VOICE_RECORDER)?.label ?? null);
+    const piper = hostVoice ? hostVoice.piper : findPiper(this.core.options.host.resolveBin, process.env.VIBEFORGE_PIPER);
+
+    const backends = new Set<VoiceBackend>();
+    if (whisper.server || whisper.cli) backends.add("whisper");
+    if (sherpaCli) backends.add("sherpa");
+    const runnableModel = hostVoice ? (hostVoice.ready ? hostVoice.model : null) : pickModel(models, all.voice.model, all.voice.language, backends);
+    const activeModelPath = hostVoice ? hostVoice.model : (runnableModel ?? pickModel(models, all.voice.model, all.voice.language));
+    const activeSpeakerPath = hostVoice
+      ? hostVoice.speaker
+      : pickVoice(voices, all.voice.speaker, all.language === "system" ? "en" : all.language);
+
+    let availableThemes: string[] = [];
+    try {
+      availableThemes = listThemes().themes.map((t) => t.id);
+    } catch {
+      availableThemes = [];
+    }
+
+    return {
+      viby: {
+        planner,
+        pickedEngine: all.orchestrator.engine,
+        mode: all.orchestrator.mode,
+        model: planner && planner === all.orchestrator.engine ? all.orchestrator.model : "",
+        effort: planner && planner === all.orchestrator.engine ? (all.orchestrator.effort ?? "") : "",
+        projectsFolder: this.projectsFolder(),
+        availablePlanners,
+      },
+      voice: {
+        ready: hostVoice ? hostVoice.ready : Boolean(recorder && runnableModel),
+        activeModel: activeModelPath ? path.basename(activeModelPath) : "",
+        pickedModel: all.voice.model ? path.basename(all.voice.model) : "",
+        installedModels: models.map((file) => ({
+          name: path.basename(file),
+          path: file,
+          backend: modelBackend(file),
+          englishOnly: isEnglishOnly(file),
+        })),
+        runtimes: {
+          whisperServer: Boolean(whisper.server),
+          whisperCli: Boolean(whisper.cli),
+          sherpa: Boolean(sherpaCli),
+          recorder,
+          piper: Boolean(piper),
+        },
+        language: activeModelPath ? listenLanguage(activeModelPath, all.voice.language) : all.voice.language,
+        talkBack: all.voice.talkBack,
+        talkOver: all.voice.talkOver,
+        activeSpeaker: activeSpeakerPath ? voiceName(activeSpeakerPath) : "",
+        pickedSpeaker: all.voice.speaker ? voiceName(all.voice.speaker) : "",
+        installedVoices: voices.map((file) => ({ name: voiceName(file), path: file })),
+        mouseButton: all.voice.mouseButton,
+        sendButton: all.voice.sendButton,
+        agent: all.voice.agent,
+      },
+      app: {
+        defaultEngine: all.defaultEngine,
+        defaultShell: all.defaultShell,
+        theme: all.theme,
+        ...(availableThemes.length ? { availableThemes } : {}),
+        language: all.language,
+        terminalFontSize: all.terminalFontSize,
+        terminalFontFamily: all.terminalFontFamily,
+        notify: all.notify,
+        sounds: { ...all.sounds },
+        tray: all.tray,
+        closeToTray: all.closeToTray,
+        ...(this.core.options.host.autostart ? { autostart: this.core.options.host.autostart.get() } : {}),
+        usage: all.usage,
+        planLimits: all.planLimits,
+        quotaAlerts: all.quotaAlerts,
+        activity: all.activity,
+        checkUpdates: all.checkUpdates,
+        companion: { enabled: all.companion.enabled, port: all.companion.port },
+        sync: { enabled: all.sync.enabled, name: all.sync.name },
+        agentTalk: { ...all.agentTalk },
+        keepRuns: { ...all.keepRuns },
+      },
     };
   }
 
@@ -393,10 +529,11 @@ export class OrchestratorDesk {
   }
 
   private async think(words: string, signal: AbortSignal, looking: Looking | null): Promise<void> {
-    const { engine: picked, mode, model: chosen } = this.settings();
+    const { engine: picked, mode, model: chosen, effort: chosenEffort } = this.settings();
     const engineId = this.planner();
-    // A model picked for another planner means nothing to this one.
+    // A model or effort picked for another planner means nothing to this one.
     const explicitModel = engineId === picked ? chosen : "";
+    const explicitEffort = engineId === picked ? (chosenEffort ?? "") : "";
     const engine = engineId ? this.core.resolveEngine(engineId) : null;
     if (!engine || !canOrchestrate(engine.row)) {
       this.answer({ text: "", problem: "noEngine" });
@@ -410,6 +547,7 @@ export class OrchestratorDesk {
       .filter((w) => !copies.some((c) => c.openedWorkspaceId === w.id))
       .map((w) => `${w.id}:${w.name}`)
       .join("|");
+    const currentSettingsKey = settingsFingerprint(context.settings);
     const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
     const workspacesChanged = Boolean(
       this.conversation.begun &&
@@ -418,8 +556,15 @@ export class OrchestratorDesk {
         brainKind(engine.row) === "grok",
     );
     if (this.conversation.engineId !== engineId || workspacesChanged) {
-      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false, workspacesKey: currentWorkspacesKey };
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false, workspacesKey: currentWorkspacesKey, settingsKey: currentSettingsKey };
     }
+    const settingsChanged = Boolean(
+      this.conversation.begun &&
+        this.conversation.settingsKey !== undefined &&
+        this.conversation.settingsKey !== currentSettingsKey &&
+        context.settings,
+    );
+    const settingsLine = settingsChanged && context.settings ? `(Updated settings:\n${formatSettingsRules(context.settings).join("\n")})` : "";
     const work = path.join(this.dir, "work");
     fs.mkdirSync(work, { recursive: true });
     // Codex reads the schema from a file.
@@ -428,8 +573,9 @@ export class OrchestratorDesk {
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
     const turn = async (said: string, ctx: PlanContext = context) => {
-      const text = here ? `${here}\n${said}` : said;
-      const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, schemaFile });
+      const prefix = [here, this.conversation.begun ? settingsLine : ""].filter(Boolean).join("\n");
+      const text = prefix ? `${prefix}\n${said}` : said;
+      const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, effort: explicitEffort, schemaFile });
       return args ? this.runner([engine.binPath, ...args], work, signal) : null;
     };
     const initialText = (switchedEngine || workspacesChanged) && !this.conversation.begun ? this.recap(words) : words;
@@ -486,6 +632,7 @@ export class OrchestratorDesk {
     if (sessionId) this.conversation.sessionId = sessionId;
     this.conversation.begun = true;
     this.conversation.workspacesKey = currentWorkspacesKey;
+    this.conversation.settingsKey = currentSettingsKey;
     if (!plan) {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
@@ -684,7 +831,29 @@ export class OrchestratorDesk {
         }
       }
     }
-    steps[at] = { ...current, ...clean };
+    const nextStep: OrchestratorStep = { ...current, ...clean };
+    if (nextStep.kind === "settings") {
+      const rows = this.core.store.readEngineRows();
+      const agents = this.core.store.listAgents().map((item) => ({ id: item.id, name: item.name }));
+      const resolved = resolveSettingsStep(
+        {
+          target: nextStep.target,
+          prompt: nextStep.prompt,
+          engine: nextStep.engineId,
+          model: nextStep.model,
+          effort: nextStep.effort,
+          folder: nextStep.folder,
+          branch: nextStep.branch,
+        },
+        {
+          engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
+          agents,
+          settings: this.buildSettingsContext(),
+        },
+      );
+      nextStep.asked = resolved.asked;
+    }
+    steps[at] = nextStep;
     this.save();
     // Another workspace or branch: whether its uncommitted edits stay behind is asked again.
     if ("workspaceId" in clean || "branch" in clean) {
@@ -913,6 +1082,10 @@ export class OrchestratorDesk {
       await this.carryOutWorkbench(step);
       return;
     }
+    if (step.kind === "settings") {
+      await this.carryOutSettings(step);
+      return;
+    }
     if (step.kind === "lookup") {
       const found = await this.lookup(step.prompt);
       step.result = found.summary;
@@ -1103,14 +1276,139 @@ export class OrchestratorDesk {
     }
   }
 
+  private async carryOutSettings(step: OrchestratorStep): Promise<void> {
+    const context = await this.context();
+    const resolved = resolveSettingsStep(
+      {
+        target: step.target,
+        prompt: step.prompt,
+        engine: step.engineId,
+        model: step.model,
+        effort: step.effort,
+        folder: step.folder,
+        branch: step.branch,
+      },
+      context,
+    );
+    const action = resolved.action;
+    if (!action) throw new Error("Unsupported settings change.");
+
+    if (action.op === "viby") {
+      const current = this.core.getSettings().orchestrator;
+      const activePlanner = this.planner();
+      const nextEngine = action.engine !== undefined ? action.engine : (current.engine || activePlanner);
+      const changedEngine = action.engine !== undefined && action.engine !== (current.engine || activePlanner);
+      const nextModel = action.model !== undefined ? action.model : changedEngine ? "" : current.model;
+      const nextEffort = action.effort !== undefined ? action.effort : changedEngine ? "" : (current.effort ?? "");
+      const nextMode = action.mode ?? current.mode;
+      const nextProjectsFolder = action.projectsFolder !== undefined ? action.projectsFolder : current.projectsFolder;
+      this.core.saveSettings({
+        orchestrator: {
+          engine: nextEngine,
+          mode: nextMode,
+          model: nextModel,
+          projectsFolder: nextProjectsFolder,
+          ...(nextEffort ? { effort: nextEffort } : {}),
+        },
+      });
+      step.result = `Updated ${action.summary}.`;
+      return;
+    }
+
+    if (action.op === "voice-model") {
+      const currentVoice = this.core.getSettings().voice;
+      const nextModel = action.model
+        ? path.isAbsolute(action.model)
+          ? action.model
+          : path.join(this.core.options.dataRoot, "models", action.model)
+        : "";
+      this.core.saveSettings({ voice: { ...currentVoice, model: nextModel } });
+      if (action.downloadId) this.core.options.host.voiceDownload?.("model", action.downloadId);
+      step.result = action.downloadId
+        ? `Downloading ${action.downloadId} and selected it for voice.`
+        : `Updated ${action.summary}.`;
+      return;
+    }
+
+    if (action.op === "voice-download") {
+      this.core.options.host.voiceDownload?.(action.kind, action.id);
+      step.result = `Started ${action.summary.toLowerCase()}.`;
+      return;
+    }
+
+    if (action.op === "voice-speaker") {
+      const currentVoice = this.core.getSettings().voice;
+      const nextSpeaker = action.speaker
+        ? path.isAbsolute(action.speaker)
+          ? action.speaker
+          : path.join(this.core.options.dataRoot, "voices", action.speaker)
+        : "";
+      this.core.saveSettings({ voice: { ...currentVoice, speaker: nextSpeaker } });
+      if (action.downloadId) this.core.options.host.voiceDownload?.("voice", action.downloadId);
+      step.result = action.downloadId
+        ? `Downloading ${action.downloadId} and selected it as speaker.`
+        : `Updated ${action.summary}.`;
+      return;
+    }
+
+    if (action.op === "voice-patch") {
+      const currentVoice = this.core.getSettings().voice;
+      this.core.saveSettings({ voice: { ...currentVoice, ...action.patch } });
+      step.result = `Updated ${action.summary}.`;
+      return;
+    }
+
+    const current = this.core.getSettings();
+    const rawPatch = action.patch;
+    const merged: Parameters<ServiceCore["saveSettings"]>[0] = {};
+    for (const [k, v] of Object.entries(rawPatch)) {
+      if (k === "sounds" && v && typeof v === "object") {
+        merged.sounds = { ...current.sounds, ...(v as Partial<Settings["sounds"]>) };
+      } else if (k === "agentTalk" && v && typeof v === "object") {
+        merged.agentTalk = { ...current.agentTalk, ...(v as Partial<Settings["agentTalk"]>) };
+      } else if (k === "sync" && v && typeof v === "object") {
+        merged.sync = { ...current.sync, ...(v as Partial<Settings["sync"]>) };
+      } else if (k === "keepRuns" && v && typeof v === "object") {
+        merged.keepRuns = { ...current.keepRuns, ...(v as Partial<Settings["keepRuns"]>) };
+      } else if (k === "companion" && v && typeof v === "object") {
+        merged.companion = v as Partial<Settings["companion"]>;
+      } else {
+        (merged as Record<string, unknown>)[k] = v;
+      }
+    }
+    if (Object.keys(merged).length > 0) this.core.saveSettings(merged);
+    if (action.autostart !== undefined) this.core.options.host.autostart?.set(action.autostart);
+    step.result = `Updated ${action.summary}.`;
+  }
+
   /**
-   * Read-only inspection of quotas/usage, a copy's diff, a running CLI's screen and latest reply,
-   * or a workspace's git state and files, so Viby can diagnose, review and brainstorm with real facts.
+   * Read-only inspection of quotas/usage, settings/voice, a copy's diff, a running CLI's screen and
+   * latest reply, or a workspace's git state and files, so Viby can diagnose, review and brainstorm with real facts.
    */
   async inspect(step: OrchestratorStep): Promise<{ summary: string; details: string }> {
     if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target)) {
       const details = (await this.core.options.host.quotas?.()) ?? "Plan limits and token usage are not enabled in Settings.";
       return { summary: oneLine(details, 140), details };
+    }
+    if (inspectsSettings(step.prompt) || inspectsSettings(step.target)) {
+      const query = `${step.prompt} ${step.target}`;
+      const planner = this.planner();
+      if (planner && /\b(?:planner|viby|orchestrator)[- ]models?\b/i.test(query) && !this.models.has(planner)) {
+        await this.listModels(planner).catch(() => []);
+      }
+      const settings = this.buildSettingsContext();
+      const lines = [...formatSettingsRules(settings)];
+      const liveVoice = this.core.options.host.voiceStatus?.();
+      if (liveVoice?.download) {
+        lines.push(`- Active download: ${liveVoice.download.kind} ${liveVoice.download.id} (${Math.round(liveVoice.download.received / 1_000_000)} / ${Math.round(liveVoice.download.total / 1_000_000)} MB)`);
+      }
+      if (liveVoice?.downloadError) {
+        lines.push(`- Last download error: ${liveVoice.downloadError}`);
+      }
+      return {
+        summary: `Planner: ${settings.viby.planner || "none"} (${settings.viby.model || "default"}, ${settings.viby.effort || "low"}) · Voice: ${settings.voice.activeModel || "none"}`,
+        details: lines.join("\n"),
+      };
     }
     const copy = step.target ? this.copies.list().find((item) => item.id === step.target) : undefined;
     if (copy) {

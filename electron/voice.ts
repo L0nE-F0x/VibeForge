@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -6,28 +6,37 @@ import path from "node:path";
 import { hyprlandBindings } from "../src/core/control.js";
 import { describeError, type LogFile } from "../src/core/log.js";
 import { Segmenter } from "../src/core/call.js";
+import {
+  findSherpa,
+  parseSherpaOutput,
+  resolveSherpaModel,
+  SHERPA_PIN,
+  SHERPA_WORKER_SCRIPT,
+  sherpaCliArgs,
+  sherpaMark,
+  sherpaSourceNote,
+  type SherpaRuntime,
+} from "../src/core/sherpa.js";
 import type { VoiceSettings } from "../src/core/types.js";
 import { readVadModel, SpeechDetector, VAD_MODEL, type VadModel } from "../src/core/vad.js";
 import {
   BYTES_PER_SECOND,
   cleanTranscript,
-  isVoiceFile,
   pickVoice,
+  scanPiperVoices,
+  scanVoiceModels,
   VOICE_CATALOG,
-  voiceDirs,
   voiceName,
   voiceUrls,
   cliArgs,
   findWhisper,
-  isModelFile,
   listenLanguage,
   MAX_SECONDS,
   meterLevel,
   MIN_SECONDS,
   MODEL_CATALOG,
-  modelDirs,
-  modelRank,
-  modelUrl,
+  modelBackend,
+  modelFiles,
   peakLoudness,
   pickModel,
   planRecorder,
@@ -37,6 +46,7 @@ import {
   wavFile,
   whisperThreads,
   type Recorder,
+  type VoiceBackend,
 } from "../src/core/voice.js";
 import type { Dictation, DownloadKind, VoiceState, VoiceStatus } from "../src/shared/api.js";
 import { type Download, downloadFiles } from "./download.js";
@@ -45,9 +55,8 @@ import { Speaker } from "./speech.js";
 
 const LEVEL_EVERY_MS = 60;
 /**
- * whisper-server is stopped after this long unused, to give its memory back and close its port: it
- * listens on loopback with no key, so any program here could use it while it runs. The next
- * recording loads it again while the person is still speaking.
+ * Warm recognizers (whisper-server or the sherpa-onnx stdio worker) are stopped after this long
+ * unused, to give their memory back. The next recording loads the model again while the person is still speaking.
  */
 const SERVER_IDLE_MS = 2 * 60 * 1000;
 const SERVER_READY_MS = 90_000;
@@ -59,6 +68,47 @@ interface Server {
   model: string;
   language: string;
   ready: Promise<void>;
+}
+
+interface SherpaWorker {
+  child: ChildProcess;
+  model: string;
+  language: string;
+  ready: Promise<void>;
+  queue: Promise<void>;
+  send: (wav: Buffer) => Promise<string>;
+}
+
+export async function unpackSherpaArchive(archiveFile: string, destDir: string, arch: string): Promise<void> {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-sherpa-"));
+  const out = path.join(work, "out");
+  fs.mkdirSync(out, { recursive: true });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile("tar", ["-xjf", archiveFile, "-C", out, "--strip-components=1", "--no-same-owner"], { timeout: 60_000 }, (error, _stdout, stderr) => {
+        if (error) reject(new Error(`Could not unpack sherpa-onnx: ${String(stderr || error.message).trim().split("\n")[0]}`));
+        else resolve();
+      });
+    });
+    const staged = `${destDir}.next`;
+    fs.rmSync(staged, { recursive: true, force: true });
+    fs.mkdirSync(path.join(staged, "bin"), { recursive: true });
+    fs.copyFileSync(path.join(out, "bin", "sherpa-onnx-offline"), path.join(staged, "bin", "sherpa-onnx-offline"));
+    fs.chmodSync(path.join(staged, "bin", "sherpa-onnx-offline"), 0o755);
+    if (fs.existsSync(path.join(out, "lib"))) {
+      fs.cpSync(path.join(out, "lib"), path.join(staged, "lib"), { recursive: true, verbatimSymlinks: true });
+    }
+    if (fs.existsSync(path.join(out, "LICENSE"))) {
+      fs.copyFileSync(path.join(out, "LICENSE"), path.join(staged, "LICENSE"));
+    }
+    fs.writeFileSync(path.join(staged, "SOURCE.txt"), sherpaSourceNote());
+    fs.writeFileSync(path.join(staged, "PIN"), sherpaMark(arch));
+    fs.rmSync(destDir, { recursive: true, force: true });
+    fs.renameSync(staged, destDir);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+    fs.rmSync(archiveFile, { force: true });
+  }
 }
 
 interface Recording {
@@ -128,10 +178,11 @@ export class Voice {
   private recording: Recording | null = null;
   private transcribing = false;
   private server: Server | null = null;
+  private sherpaWorker: SherpaWorker | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
-  /** whisper-cli runs under way, with the folder holding each one's audio, for a quit to clear. */
+  /** whisper-cli / sherpa-onnx-offline runs under way, with the folder holding each one's audio, for a quit to clear. */
   private readonly cliRuns = new Map<ChildProcess, string>();
-  /** Requests whisper-server is answering now; it isn't stopped under them. */
+  /** Requests a warm recognizer is answering now; it isn't stopped under them. */
   private serverUses = 0;
   /** A call's open microphone. */
   private ear: OpenEar | null = null;
@@ -176,30 +227,23 @@ export class Voice {
     return findWhisper(this.opts.resolveBin, { server: process.env.VIBEFORGE_WHISPER_SERVER, cli: process.env.VIBEFORGE_WHISPER_CLI });
   }
 
+  private sherpa(): SherpaRuntime {
+    return findSherpa(this.opts.resolveBin, this.opts.dataRoot, { cli: process.env.VIBEFORGE_SHERPA_CLI });
+  }
+
+  private backends(whisper: { server: string | null; cli: string | null }, sherpa: SherpaRuntime): Set<VoiceBackend> {
+    const out = new Set<VoiceBackend>();
+    if (whisper.server || whisper.cli) out.add("whisper");
+    if (sherpa.cli) out.add("sherpa");
+    return out;
+  }
+
   private modelDir(): string {
     return path.join(this.opts.dataRoot, "models");
   }
 
   private findModels(): string[] {
-    const found: string[] = [];
-    for (const dir of modelDirs(this.opts.home, this.opts.dataRoot)) {
-      let names: string[];
-      try {
-        names = fs.readdirSync(dir);
-      } catch {
-        continue;
-      }
-      for (const name of names) {
-        const file = path.join(dir, name);
-        if (!isModelFile(name) || found.some((other) => path.basename(other) === name)) continue;
-        try {
-          if (fs.statSync(file).size > 1_000_000) found.push(file);
-        } catch {
-          /* gone since the listing */
-        }
-      }
-    }
-    return found.sort((a, b) => modelRank(b) - modelRank(a) || a.localeCompare(b));
+    return scanVoiceModels(this.opts.home, this.opts.dataRoot);
   }
 
   private voiceDir(): string {
@@ -208,23 +252,7 @@ export class Voice {
 
   /** Piper voices: .onnx files with their .onnx.json, up to three folders deep (the AUR nests them by language). */
   findVoices(): string[] {
-    const found: string[] = [];
-    const walk = (dir: string, depth: number) => {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      const names = new Set(entries.map((entry) => entry.name));
-      for (const entry of entries) {
-        const file = path.join(dir, entry.name);
-        if (entry.isDirectory() && depth < 3) walk(file, depth + 1);
-        else if (isVoiceFile(entry.name, names) && !found.some((other) => voiceName(other) === voiceName(file))) found.push(file);
-      }
-    };
-    for (const dir of voiceDirs(this.opts.home, this.opts.dataRoot)) walk(dir, 0);
-    return found.sort((a, b) => voiceName(a).localeCompare(voiceName(b)));
+    return scanPiperVoices(this.opts.home, this.opts.dataRoot);
   }
 
   /** The keybinding lines for this Hyprland (Omarchy's Lua config, or hyprland.conf), and whether they are in. */
@@ -269,19 +297,23 @@ export class Voice {
   status(): VoiceStatus {
     const settings = this.opts.settings();
     const whisper = this.whisper();
+    const sherpa = this.sherpa();
+    const backends = this.backends(whisper, sherpa);
     const models = this.findModels();
-    const model = pickModel(models, settings.model, settings.language);
+    const runnableModel = pickModel(models, settings.model, settings.language, backends);
+    const model = runnableModel ?? pickModel(models, settings.model, settings.language);
     const recorder = this.recorder();
     const voices = this.findVoices();
     return {
       recorder: recorder?.label ?? null,
       server: whisper.server,
       cli: whisper.cli,
+      sherpa: sherpa.cli,
       model,
       models,
       modelDir: this.modelDir(),
       language: model ? listenLanguage(model, settings.language) : settings.language,
-      ready: Boolean(recorder && (whisper.server || whisper.cli) && model),
+      ready: Boolean(recorder && runnableModel),
       catalog: MODEL_CATALOG.map((choice) => ({ ...choice, path: models.find((file) => path.basename(file) === choice.file) ?? null })),
       download: this.download ? { kind: this.download.kind, id: this.download.id, received: this.download.received, total: this.download.total } : null,
       downloadError: this.downloadError,
@@ -299,6 +331,32 @@ export class Voice {
     };
   }
 
+  private checkReady(status: VoiceStatus, needRecorder: boolean, gone = false): void {
+    if (needRecorder && !status.recorder) {
+      throw new Error("No recorder found. VibeForge records with pw-record (PipeWire), parec or arecord.");
+    }
+    if (!status.model) {
+      if (!status.server && !status.cli && !status.sherpa) {
+        throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
+      }
+      throw new Error(gone ? "The whisper model is gone. Settings → Voice can download one." : "No whisper model found. Settings → Voice can download one.");
+    }
+    if (modelBackend(status.model) === "sherpa") {
+      if (!status.sherpa) throw new Error("sherpa-onnx is not installed. Settings → Voice can download it.");
+    } else if (!status.server && !status.cli) {
+      throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
+    }
+  }
+
+  private warmRecognizer(status: VoiceStatus): void {
+    if (!status.model) return;
+    if (modelBackend(status.model) === "sherpa") {
+      void this.ensureSherpaWorker(status.model, status.language).catch(() => undefined);
+    } else if (status.server) {
+      void this.ensureServer(status.server, status.model, status.language).catch(() => undefined);
+    }
+  }
+
   // ---------------------------------------------------------------- recording
 
   start(): void {
@@ -308,9 +366,8 @@ export class Voice {
     if (this.transcribing) throw new Error("Still turning the last recording into text.");
     const status = this.status();
     const recorder = this.recorder();
+    this.checkReady(status, true);
     if (!recorder) throw new Error("No recorder found. VibeForge records with pw-record (PipeWire), parec or arecord.");
-    if (!status.server && !status.cli) throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
-    if (!status.model) throw new Error("No whisper model found. Settings → Voice can download one.");
 
     const child = spawn(recorder.argv[0], recorder.argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
     const recording: Recording = {
@@ -347,7 +404,7 @@ export class Voice {
     this.opts.state({ phase: "recording", level: 0, seconds: 0, speech: null });
     this.opts.log.info(`Voice: recording with ${recorder.label}`);
     // Loading a model takes a moment; do it while the person talks.
-    if (status.server) void this.ensureServer(status.server, status.model, status.language).catch(() => undefined);
+    this.warmRecognizer(status);
   }
 
   private async endRecording(recording: Recording): Promise<Buffer> {
@@ -431,24 +488,33 @@ export class Voice {
     }
   }
 
-  /** Whether speech can be turned into words here: whisper.cpp and a model. A recorder isn't needed for that. */
+  /** Whether speech can be turned into words here: whisper.cpp or sherpa-onnx and a matching model. */
   canTranscribe(): boolean {
     const settings = this.opts.settings();
-    const whisper = this.whisper();
-    return Boolean((whisper.server || whisper.cli) && pickModel(this.findModels(), settings.model, settings.language));
+    const backends = this.backends(this.whisper(), this.sherpa());
+    return Boolean(pickModel(this.findModels(), settings.model, settings.language, backends));
   }
 
-  /** What whisper heard in `pcm`, tidied. */
+  /** What whisper or sherpa-onnx heard in `pcm`, tidied. */
   private async words(pcm: Buffer, prompt: string, seconds: number, since: number, from: string): Promise<string> {
     const status = this.status();
-    if (!status.model) throw new Error("The whisper model is gone. Settings → Voice can download one.");
-    if (!status.server && !status.cli) throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
-    const via = status.server ? "whisper-server" : "whisper-cli";
-    const raw = status.server
-      ? await this.viaServer(status.server, status.model, status.language, pcm, prompt)
-      : await this.viaCli(status.cli as string, status.model, status.language, pcm, prompt);
+    this.checkReady(status, false, true);
+    const model = status.model!;
+    let via: string;
+    let raw: string;
+    if (modelBackend(model) === "sherpa") {
+      const result = await this.viaSherpa(model, status.language, pcm);
+      via = result.via;
+      raw = result.raw;
+    } else if (status.server) {
+      via = "whisper-server";
+      raw = await this.viaServer(status.server, model, status.language, pcm, prompt);
+    } else {
+      via = "whisper-cli";
+      raw = await this.viaCli(status.cli as string, model, status.language, pcm, prompt, seconds);
+    }
     const text = cleanTranscript(raw);
-    this.opts.log.info(`Voice: ${seconds.toFixed(1)} s${from} transcribed in ${((Date.now() - since) / 1000).toFixed(1)} s by ${via} with ${path.basename(status.model)}`);
+    this.opts.log.info(`Voice: ${seconds.toFixed(1)} s${from} transcribed in ${((Date.now() - since) / 1000).toFixed(1)} s by ${via} with ${path.basename(model)}`);
     return text;
   }
 
@@ -504,9 +570,8 @@ export class Voice {
     if (this.ear) throw new Error("A call is already listening.");
     const status = this.status();
     const recorder = this.recorder();
+    this.checkReady(status, true);
     if (!recorder) throw new Error("No recorder found. VibeForge records with pw-record (PipeWire), parec or arecord.");
-    if (!status.server && !status.cli) throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
-    if (!status.model) throw new Error("No whisper model found. Settings → Voice can download one.");
 
     const ear: OpenEar = { child: null, echo: null, segmenter: new Segmenter({ detector: this.detector() }), deaf: false, skipped: false, lastLevelAt: 0 };
     this.ear = ear;
@@ -523,7 +588,7 @@ export class Voice {
       });
     this.opts.log.info(`Voice: a call is listening with ${recorder.label}${ear.segmenter.detects ? " and the speech detector" : ", by loudness"}`);
     // The model loads while the first thing is being said, and stays loaded for the call.
-    if (status.server) void this.ensureServer(status.server, status.model, status.language).catch(() => undefined);
+    this.warmRecognizer(status);
     return {
       deaf: (deaf) => {
         ear.deaf = deaf;
@@ -591,7 +656,7 @@ export class Voice {
     });
   }
 
-  // ---------------------------------------------------------------- whisper
+  // ---------------------------------------------------------------- whisper & sherpa-onnx
 
   private ensureServer(bin: string, model: string, language: string): Promise<void> {
     this.touchServer();
@@ -635,6 +700,118 @@ export class Voice {
     return server.ready;
   }
 
+  private ensureSherpaWorker(model: string, language: string): Promise<SherpaWorker> {
+    this.touchServer();
+    const current = this.sherpaWorker;
+    if (current && current.model === model && current.language === language && current.child.exitCode === null) {
+      return current.ready.then(() => current);
+    }
+    if (process.env.VIBEFORGE_SHERPA_NO_SERVER === "1") return Promise.reject(new Error("sherpa-onnx worker disabled"));
+    const sherpa = this.sherpa();
+    const python = this.opts.resolveBin("python3");
+    if (!sherpa.cApiLib || !python) return Promise.reject(new Error("sherpa-onnx worker unavailable"));
+    let names: string[];
+    try {
+      names = fs.readdirSync(model);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const spec = resolveSherpaModel(model, names);
+    if (!spec) return Promise.reject(new Error(`sherpa-onnx model incomplete at ${model}`));
+
+    this.stopServer();
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(sherpa.libDir ? { LD_LIBRARY_PATH: [sherpa.libDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") } : {}),
+    };
+    const payload = JSON.stringify({ ...spec, cApiLib: sherpa.cApiLib, language, threads: whisperThreads(os.cpus().length) });
+    const child = spawn(python, ["-u", "-c", SHERPA_WORKER_SCRIPT, payload], { env, stdio: ["pipe", "pipe", "pipe"] });
+    let stderr = "";
+    let stdoutBuf = "";
+    let closedError: Error | null = null;
+    const queuedLines: string[] = [];
+    const waiters: Array<{ resolve: (line: string) => void; reject: (err: Error) => void }> = [];
+    const failAll = (err: Error) => {
+      closedError = err;
+      while (waiters.length) waiters.shift()!.reject(err);
+    };
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-4000);
+    });
+    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+      stdoutBuf += chunk;
+      let nl = stdoutBuf.indexOf("\n");
+      while (nl >= 0) {
+        const line = stdoutBuf.slice(0, nl).trim();
+        stdoutBuf = stdoutBuf.slice(nl + 1);
+        if (line) {
+          const waiter = waiters.shift();
+          if (waiter) waiter.resolve(line);
+          else queuedLines.push(line);
+        }
+        nl = stdoutBuf.indexOf("\n");
+      }
+    });
+    child.on("error", (err) => failAll(new Error(describeError(err))));
+    child.on("close", (code) => {
+      if (this.sherpaWorker === worker) this.sherpaWorker = null;
+      failAll(new Error(`sherpa-onnx worker exited (${code ?? "?"}): ${stderr.trim().split("\n").pop() ?? ""}`));
+    });
+    const nextLine = (timeoutMs: number): Promise<string> => {
+      if (queuedLines.length) return Promise.resolve(queuedLines.shift()!);
+      if (closedError) return Promise.reject(closedError);
+      return new Promise<string>((resolve, reject) => {
+        const entry = {
+          resolve: (line: string) => {
+            clearTimeout(timer);
+            resolve(line);
+          },
+          reject: (err: Error) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        };
+        const timer = setTimeout(() => {
+          const idx = waiters.indexOf(entry);
+          if (idx >= 0) waiters.splice(idx, 1);
+          reject(new Error("sherpa-onnx worker timed out."));
+        }, timeoutMs);
+        waiters.push(entry);
+      });
+    };
+
+    const started = Date.now();
+    this.opts.log.info(`Voice: starting sherpa-onnx worker with ${path.basename(model)}`);
+    const worker: SherpaWorker = {
+      child,
+      model,
+      language,
+      ready: Promise.resolve(),
+      queue: Promise.resolve(),
+      send: async (wav: Buffer) => {
+        const frame = Buffer.allocUnsafe(4 + wav.length);
+        frame.writeUInt32LE(wav.length, 0);
+        wav.copy(frame, 4);
+        await new Promise<void>((resolve, reject) => child.stdin!.write(frame, (err) => (err ? reject(err) : resolve())));
+        const line = await nextLine(TRANSCRIBE_TIMEOUT_MS);
+        const parsed = JSON.parse(line) as { ok?: boolean; text?: unknown; error?: unknown };
+        if (!parsed.ok) throw new Error(`sherpa-onnx: ${String(parsed.error ?? "failed")}`);
+        return typeof parsed.text === "string" ? parsed.text : "";
+      },
+    };
+    worker.ready = (async () => {
+      const first = await nextLine(SERVER_READY_MS);
+      const parsed = JSON.parse(first) as { ready?: boolean };
+      if (!parsed.ready) throw new Error("sherpa-onnx worker did not report ready");
+      this.opts.log.info(`Voice: sherpa-onnx ready in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    })();
+    this.sherpaWorker = worker;
+    worker.ready.catch(() => {
+      if (this.sherpaWorker === worker) this.stopServer();
+    });
+    return worker.ready.then(() => worker);
+  }
+
   private touchServer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
@@ -649,6 +826,9 @@ export class Voice {
     const server = this.server;
     this.server = null;
     if (server?.child && server.child.exitCode === null) server.child.kill("SIGTERM");
+    const worker = this.sherpaWorker;
+    this.sherpaWorker = null;
+    if (worker?.child && worker.child.exitCode === null) worker.child.kill("SIGTERM");
   }
 
   private async viaServer(bin: string, model: string, language: string, pcm: Buffer, prompt: string): Promise<string> {
@@ -672,13 +852,13 @@ export class Voice {
     }
   }
 
-  private async viaCli(bin: string, model: string, language: string, pcm: Buffer, prompt: string): Promise<string> {
+  private async viaCli(bin: string, model: string, language: string, pcm: Buffer, prompt: string, seconds?: number): Promise<string> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
     const file = path.join(dir, "speech.wav");
     try {
       fs.writeFileSync(file, wavFile(pcm), { mode: 0o600 });
       return await new Promise<string>((resolve, reject) => {
-        const child = spawn(bin, cliArgs({ model, file, language, prompt, threads: whisperThreads(os.cpus().length) }), { stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(bin, cliArgs({ model, file, language, prompt, threads: whisperThreads(os.cpus().length), seconds }), { stdio: ["ignore", "pipe", "pipe"] });
         this.cliRuns.set(child, dir);
         let stdout = "";
         let stderr = "";
@@ -698,26 +878,109 @@ export class Voice {
     }
   }
 
+  private async viaSherpa(model: string, language: string, pcm: Buffer): Promise<{ via: string; raw: string }> {
+    const sherpa = this.sherpa();
+    if (!sherpa.cli) throw new Error("sherpa-onnx is not installed. Settings → Voice can download it.");
+    const wav = wavFile(pcm);
+    let worker: SherpaWorker | null = null;
+    try {
+      worker = await this.ensureSherpaWorker(model, language);
+    } catch {
+      worker = null;
+    }
+    if (worker) {
+      this.serverUses += 1;
+      try {
+        const job = worker.queue.then(() => worker!.send(wav));
+        worker.queue = job.then(
+          () => undefined,
+          () => undefined,
+        );
+        return { via: "sherpa-onnx", raw: await job };
+      } finally {
+        this.serverUses -= 1;
+        this.touchServer();
+      }
+    }
+    return { via: "sherpa-onnx-offline", raw: await this.viaSherpaCli(sherpa, model, language, wav) };
+  }
+
+  private async viaSherpaCli(sherpa: SherpaRuntime, model: string, language: string, wav: Buffer): Promise<string> {
+    const spec = resolveSherpaModel(model, fs.readdirSync(model));
+    if (!spec) throw new Error(`The ONNX model at ${path.basename(model)} is incomplete.`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
+    const file = path.join(dir, "speech.wav");
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(sherpa.libDir ? { LD_LIBRARY_PATH: [sherpa.libDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") } : {}),
+    };
+    try {
+      fs.writeFileSync(file, wav, { mode: 0o600 });
+      return await new Promise<string>((resolve, reject) => {
+        const child = spawn(sherpa.cli!, sherpaCliArgs(spec, { wavFile: file, language, threads: whisperThreads(os.cpus().length) }), {
+          env,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        this.cliRuns.set(child, dir);
+        let stdout = "";
+        let stderr = "";
+        const timer = setTimeout(() => child.kill("SIGKILL"), TRANSCRIBE_TIMEOUT_MS);
+        child.stdout?.on("data", (data: Buffer) => (stdout += data.toString()));
+        child.stderr?.on("data", (data: Buffer) => (stderr = (stderr + data.toString()).slice(-8000)));
+        child.on("error", reject);
+        child.on("close", (code, signal) => {
+          clearTimeout(timer);
+          this.cliRuns.delete(child);
+          if (code === 0) resolve(parseSherpaOutput(`${stdout}\n${stderr}`));
+          else reject(new Error(`sherpa-onnx-offline ${signal ? `was stopped (${signal})` : `exited with code ${code}`}: ${stderr.trim().split("\n").pop() ?? ""}`));
+        });
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   // ---------------------------------------------------------------- models
 
-  /** Downloads a whisper model or a Piper voice from Hugging Face; progress arrives as status changes. */
+  /** Downloads a speech-to-text model (and sherpa-onnx when an ONNX model needs it) or a Piper voice; progress arrives as status changes. */
   startDownload(kind: DownloadKind, id: string): void {
+    let sherpaArchive: string | null = null;
     const files: Download[] | null =
       kind === "model"
         ? (() => {
             const choice = MODEL_CATALOG.find((item) => item.id === id);
-            return choice ? [{ url: modelUrl(choice), target: path.join(this.modelDir(), choice.file), bytes: choice.bytes, sha256: choice.sha256 }] : null;
-          })()
-        : (() => {
-            const choice = VOICE_CATALOG.find((item) => item.id === id);
             if (!choice) return null;
-            const urls = voiceUrls(choice);
-            const base = path.join(this.voiceDir(), `${choice.id}.onnx`);
-            return [
-              { url: urls.model, target: base, ...choice.model },
-              { url: urls.config, target: `${base}.json`, ...choice.config },
-            ];
-          })();
+            const list: Download[] = modelFiles(choice).map((part) => ({
+              url: part.url,
+              target: path.join(this.modelDir(), part.relPath),
+              bytes: part.bytes,
+              sha256: part.sha256,
+            }));
+            if (choice.backend === "sherpa" && !this.sherpa().cli) {
+              const build = SHERPA_PIN.builds[process.arch];
+              if (!build) throw new Error(`sherpa-onnx ${SHERPA_PIN.version} is not available for ${process.arch}.`);
+              sherpaArchive = path.join(this.opts.dataRoot, build.file);
+              list.push({ url: build.url, target: sherpaArchive, bytes: build.bytes, sha256: build.sha256 });
+            }
+            return list;
+          })()
+        : kind === "sherpa"
+          ? (() => {
+              const build = SHERPA_PIN.builds[process.arch];
+              if (!build) return null;
+              sherpaArchive = path.join(this.opts.dataRoot, build.file);
+              return [{ url: build.url, target: sherpaArchive, bytes: build.bytes, sha256: build.sha256 }];
+            })()
+          : (() => {
+              const choice = VOICE_CATALOG.find((item) => item.id === id);
+              if (!choice) return null;
+              const urls = voiceUrls(choice);
+              const base = path.join(this.voiceDir(), `${choice.id}.onnx`);
+              return [
+                { url: urls.model, target: base, ...choice.model },
+                { url: urls.config, target: `${base}.json`, ...choice.config },
+              ];
+            })();
     if (!files) throw new Error(`Unknown ${kind} ${id}`);
     if (this.download) throw new Error("Something is already downloading.");
     const abort = new AbortController();
@@ -738,13 +1001,24 @@ export class Voice {
         }
       },
     })
-      .then((bytes) => this.opts.log.info(`Voice: downloaded ${kind} ${id} (${Math.round(bytes / 1_000_000)} MB)`))
+      .then(async (bytes) => {
+        if (sherpaArchive) {
+          try {
+            await unpackSherpaArchive(sherpaArchive, path.join(this.opts.dataRoot, "sherpa-onnx"), process.arch);
+          } catch (error) {
+            for (const file of files) fs.rmSync(file.target, { force: true });
+            throw error;
+          }
+        }
+        this.opts.log.info(`Voice: downloaded ${kind} ${id} (${Math.round(bytes / 1_000_000)} MB)`);
+      })
       .catch((error: unknown) => {
         if (abort.signal.aborted) return;
         this.downloadError = describeError(error).split("\n")[0];
         this.opts.log.warn(`Voice: downloading ${kind} ${id} failed: ${this.downloadError}`);
       })
       .finally(() => {
+        if (sherpaArchive) fs.rmSync(sherpaArchive, { force: true });
         this.download = null;
         this.opts.changed();
       });

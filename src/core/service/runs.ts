@@ -277,7 +277,7 @@ export class RunDesk {
       dataRoot: root,
       runs: folderBytes(path.join(root, "runs")),
       runCount: this.core.store.allRuns().length,
-      voice: folderBytes(path.join(root, "models")) + folderBytes(path.join(root, "voices")),
+      voice: folderBytes(path.join(root, "models")) + folderBytes(path.join(root, "voices")) + folderBytes(path.join(root, "sherpa-onnx")),
       logs: folderBytes(path.join(root, "logs")),
       scratch: folderBytes(path.join(root, "scratch")),
     };

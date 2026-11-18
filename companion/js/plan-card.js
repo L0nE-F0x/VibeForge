@@ -48,6 +48,7 @@ function otherStepKey(step) {
   if (step.kind === "shell") return "orch.shell";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
+  if (step.kind === "settings") return "orch.settings";
   if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
   const action = step.prompt.trim().toLowerCase();
   return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
@@ -141,7 +142,7 @@ function stepNode(turn, step, editable) {
   } else if (step.kind === "apply" || step.kind === "discard") {
     const copy = orch.copies?.find((item) => item.id === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
-  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "task" || step.kind === "routine") {
+  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
     const what = step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt;
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(otherStepKey(step))), el("span", { class: "orch-target" }, what)));
   } else {

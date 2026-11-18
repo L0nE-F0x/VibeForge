@@ -4,6 +4,16 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Store } from "../../src/core/store.js";
 import {
+  findSherpa,
+  parseSherpaOutput,
+  resolveSherpaModel,
+  SHERPA_PIN,
+  sherpaCliArgs,
+  sherpaMark,
+  sherpaPresent,
+  sherpaSourceNote,
+} from "../../src/core/sherpa.js";
+import {
   BYTES_PER_SECOND,
   cleanTranscript,
   cliArgs,
@@ -12,13 +22,19 @@ import {
   isModelFile,
   listenLanguage,
   meterLevel,
+  MODEL_CATALOG,
+  modelBackend,
+  modelSupportsLanguage,
   peakLoudness,
   pickModel,
   planRecorder,
   rms,
+  scanPiperVoices,
+  scanVoiceModels,
   serverArgs,
   SILENCE_RMS,
   wavFile,
+  whisperAudioCtx,
 } from "../../src/core/voice.js";
 import {
   DEFAULT_DICTATE_KEYS,
@@ -238,5 +254,129 @@ describe("the mic button", () => {
     expect(micRelease({ at: 1000, started: true }, 1000 + MIC_TAP_MS + 1)).toBe("finish");
     // The click that ends a latched recording didn't start one: it finishes, however quick.
     expect(micRelease({ at: 1000, started: false }, 1000 + 80)).toBe("finish");
+  });
+});
+
+describe("fast laptop speech-to-text models and sherpa-onnx", () => {
+  it("offers Parakeet, Canary, Moonshine, Distil-Whisper and quantized Whisper models alongside classic ggml models", () => {
+    const ids = MODEL_CATALOG.map((item) => item.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "parakeet-tdt-0.6b-v3-int8",
+        "parakeet-tdt-0.6b-v2-int8",
+        "canary-180m-flash-int8",
+        "moonshine-base-en-int8",
+        "moonshine-tiny-en-int8",
+        "distil-small.en",
+        "small.en-q5_1",
+        "small-q5_1",
+        "base.en",
+        "small.en",
+        "base",
+        "small",
+        "large-v3-turbo-q5_0",
+      ]),
+    );
+    expect(modelBackend("/m/parakeet-tdt-0.6b-v3-int8")).toBe("sherpa");
+    expect(modelBackend("/m/ggml-distil-small.en.bin")).toBe("whisper");
+    expect(isEnglishOnly("/m/parakeet-tdt-0.6b-v2-int8")).toBe(true);
+    expect(isEnglishOnly("/m/parakeet-tdt-0.6b-v3-int8")).toBe(false);
+    expect(isEnglishOnly("/m/moonshine-tiny-en-int8")).toBe(true);
+    expect(isEnglishOnly("/m/canary-180m-flash-int8")).toBe(false);
+  });
+
+  it("knows each model family's language coverage and filters pickModel by available backends", () => {
+    expect(modelSupportsLanguage("/m/parakeet-tdt-0.6b-v3-int8", "de")).toBe(true);
+    expect(modelSupportsLanguage("/m/parakeet-tdt-0.6b-v3-int8", "pt")).toBe(true);
+    expect(modelSupportsLanguage("/m/parakeet-tdt-0.6b-v3-int8", "ja")).toBe(false);
+    expect(modelSupportsLanguage("/m/canary-180m-flash-int8", "fr")).toBe(true);
+    expect(modelSupportsLanguage("/m/canary-180m-flash-int8", "pt")).toBe(false);
+    expect(listenLanguage("/m/canary-180m-flash-int8", "auto")).toBe("en");
+    expect(listenLanguage("/m/canary-180m-flash-int8", "es")).toBe("es");
+
+    const both = ["/m/parakeet-tdt-0.6b-v3-int8", "/m/ggml-small-q5_1.bin"];
+    expect(pickModel(both, "", "en", new Set(["whisper", "sherpa"]))).toBe("/m/parakeet-tdt-0.6b-v3-int8");
+    expect(pickModel(both, "", "en", new Set(["whisper"]))).toBe("/m/ggml-small-q5_1.bin");
+    // Japanese falls back from European-only Parakeet v3 to multilingual Whisper.
+    expect(pickModel(both, "", "ja", new Set(["whisper", "sherpa"]))).toBe("/m/ggml-small-q5_1.bin");
+    expect(pickModel(both, "", "en", new Set())).toBeNull();
+  });
+
+  it("sizes whisper-cli's encoder context (-ac) to short utterances while keeping --prompt last", () => {
+    expect(whisperAudioCtx(0)).toBe(1500);
+    expect(whisperAudioCtx(2.5)).toBe(256);
+    expect(whisperAudioCtx(7.6)).toBe(512);
+    expect(whisperAudioCtx(28)).toBe(1500);
+    const shortArgs = cliArgs({ model: "/m.bin", file: "/a.wav", language: "en", prompt: "Names: Viby.", threads: 4, seconds: 3.2 });
+    expect(shortArgs).toEqual(expect.arrayContaining(["-ac", "320"]));
+    expect(shortArgs.slice(-2)).toEqual(["--prompt", "Names: Viby."]);
+    const longArgs = cliArgs({ model: "/m.bin", file: "/a.wav", language: "en", prompt: "", threads: 4, seconds: 29 });
+    expect(longArgs).not.toContain("-ac");
+  });
+
+  it("detects sherpa-onnx model directories, builds CLI flags, and parses JSON output", () => {
+    const parakeet = resolveSherpaModel("/models/parakeet-tdt-0.6b-v3-int8", ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]);
+    expect(parakeet).toMatchObject({ kind: "nemo_transducer", encoder: "/models/parakeet-tdt-0.6b-v3-int8/encoder.int8.onnx" });
+    expect(sherpaCliArgs(parakeet!, { wavFile: "/tmp/s.wav", language: "en", threads: 4 })).toEqual(
+      expect.arrayContaining(["--model-type=nemo_transducer", "--num-threads=4", "/tmp/s.wav"]),
+    );
+
+    const canary = resolveSherpaModel("/models/canary-180m-flash-int8", ["encoder.int8.onnx", "decoder.int8.onnx", "tokens.txt"]);
+    expect(canary?.kind).toBe("canary");
+    expect(sherpaCliArgs(canary!, { wavFile: "/tmp/s.wav", language: "de", threads: 4 })).toEqual(
+      expect.arrayContaining(["--canary-src-lang=de", "--canary-tgt-lang=de", "--canary-use-pnc=1"]),
+    );
+
+    const moonshine = resolveSherpaModel("/models/moonshine-tiny-en-int8", ["preprocess.onnx", "encode.int8.onnx", "uncached_decode.int8.onnx", "cached_decode.int8.onnx", "tokens.txt"]);
+    expect(moonshine?.kind).toBe("moonshine");
+    expect(sherpaCliArgs(moonshine!, { wavFile: "/tmp/s.wav", language: "en", threads: 2 })).toContain("--moonshine-encoder=/models/moonshine-tiny-en-int8/encode.int8.onnx");
+
+    const sense = resolveSherpaModel("/models/sense-voice-small", ["model.int8.onnx", "tokens.txt"]);
+    expect(sense?.kind).toBe("sense_voice");
+    expect(sherpaCliArgs(sense!, { wavFile: "/tmp/s.wav", language: "auto", threads: 2 })).toContain("--sense-voice-use-itn=1");
+
+    // Incomplete or still-downloading (.part) directories are ignored.
+    expect(resolveSherpaModel("/models/parakeet-tdt-0.6b-v3-int8", ["encoder.int8.onnx.part", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"])).toBeNull();
+    expect(resolveSherpaModel("/models/empty", ["notes.txt"])).toBeNull();
+
+    expect(parseSherpaOutput('info line\n{"lang": "", "text": "Switch to VibeForge."}\ndone\n')).toBe("Switch to VibeForge.");
+    expect(parseSherpaOutput("no json here")).toBe("");
+  });
+
+  it("scans models & voices on disk and locates VibeForge's pinned sherpa-onnx runtime", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-sherpa-home-"));
+    const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-sherpa-data-"));
+    const runtimeDir = path.join(dataRoot, "sherpa-onnx");
+    fs.mkdirSync(path.join(runtimeDir, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(runtimeDir, "lib"), { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, "bin", "sherpa-onnx-offline"), Buffer.alloc(20_000), { mode: 0o755 });
+    fs.writeFileSync(path.join(runtimeDir, "lib", "libsherpa-onnx-c-api.so"), "so");
+    fs.writeFileSync(path.join(runtimeDir, "PIN"), sherpaMark("x64"));
+
+    expect(sherpaPresent(runtimeDir, "x64")).toBe(true);
+    expect(sherpaPresent(runtimeDir, "arm64")).toBe(false);
+    expect(sherpaSourceNote()).toContain(SHERPA_PIN.version);
+    expect(findSherpa(() => null, dataRoot)).toEqual({
+      cli: path.join(runtimeDir, "bin", "sherpa-onnx-offline"),
+      libDir: path.join(runtimeDir, "lib"),
+      cApiLib: path.join(runtimeDir, "lib", "libsherpa-onnx-c-api.so"),
+    });
+
+    const parakeetDir = path.join(dataRoot, "models", "parakeet-tdt-0.6b-v3-int8");
+    fs.mkdirSync(parakeetDir, { recursive: true });
+    fs.writeFileSync(path.join(parakeetDir, "encoder.int8.onnx"), Buffer.alloc(150_000));
+    fs.writeFileSync(path.join(parakeetDir, "decoder.int8.onnx"), "d");
+    fs.writeFileSync(path.join(parakeetDir, "joiner.int8.onnx"), "j");
+    fs.writeFileSync(path.join(parakeetDir, "tokens.txt"), "t");
+    fs.writeFileSync(path.join(dataRoot, "models", "ggml-base.en.bin"), Buffer.alloc(1_000_001));
+
+    const models = scanVoiceModels(home, dataRoot);
+    expect(models).toEqual([parakeetDir, path.join(dataRoot, "models", "ggml-base.en.bin")]);
+
+    const voicesDir = path.join(dataRoot, "voices");
+    fs.mkdirSync(voicesDir, { recursive: true });
+    fs.writeFileSync(path.join(voicesDir, "en_US-lessac-medium.onnx"), "m");
+    fs.writeFileSync(path.join(voicesDir, "en_US-lessac-medium.onnx.json"), "{}");
+    expect(scanPiperVoices(home, dataRoot)).toEqual([path.join(voicesDir, "en_US-lessac-medium.onnx")]);
   });
 });

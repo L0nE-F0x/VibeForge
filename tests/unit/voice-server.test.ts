@@ -9,7 +9,7 @@ import { DEFAULT_DICTATE_KEYS } from "../../src/shared/dictation.js";
 // Downloads go through Electron's network stack, which isn't here; nothing in these tests downloads.
 vi.mock("electron", () => ({ net: {} }));
 
-const { Voice } = await import("../../electron/voice.js");
+const { unpackSherpaArchive, Voice } = await import("../../electron/voice.js");
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-server-"));
@@ -115,5 +115,142 @@ describe("whisper-cli, when there is no whisper-server", () => {
     instance.dispose();
     expect(fs.existsSync(path.dirname(audio))).toBe(false);
     await words;
+  });
+});
+
+describe("sherpa-onnx backend in Voice", () => {
+  it("transcribes ONNX models via sherpa-onnx-offline without whisper.cpp installed", async () => {
+    const dataRoot = tempDir();
+    const bin = tempDir();
+    const sherpaCli = path.join(bin, "sherpa-onnx-offline");
+    fs.writeFileSync(
+      sherpaCli,
+      `#!/usr/bin/env node
+process.stderr.write('{"lang": "", "text": "Switch to VibeForge now."}\\n');
+`,
+      { mode: 0o755 },
+    );
+    const parakeetDir = path.join(dataRoot, "models", "parakeet-tdt-0.6b-v3-int8");
+    fs.mkdirSync(parakeetDir, { recursive: true });
+    fs.writeFileSync(path.join(parakeetDir, "encoder.int8.onnx"), Buffer.alloc(150_000));
+    fs.writeFileSync(path.join(parakeetDir, "decoder.int8.onnx"), "d");
+    fs.writeFileSync(path.join(parakeetDir, "joiner.int8.onnx"), "j");
+    fs.writeFileSync(path.join(parakeetDir, "tokens.txt"), "t");
+
+    const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer", talkOver: "auto" };
+    const log = { info: () => undefined, warn: () => undefined } as unknown as LogFile;
+    const instance = new Voice({
+      log,
+      home: tempDir(),
+      dataRoot,
+      settings: () => settings,
+      resolveBin: (name) => (name === "sherpa-onnx-offline" ? sherpaCli : name === "pw-record" ? "/usr/bin/pw-record" : null),
+      state: () => undefined,
+      changed: () => undefined,
+      speaking: () => undefined,
+      language: () => "en",
+      controlSocket: path.join(dataRoot, "control.sock"),
+      launcher: () => "vibeforge",
+    });
+    try {
+      const status = instance.status();
+      expect(status.ready).toBe(true);
+      expect(status.sherpa).toBe(sherpaCli);
+      expect(status.model).toBe(parakeetDir);
+      expect(instance.canTranscribe()).toBe(true);
+      const heard = await instance.transcribe(speech());
+      expect(heard.text).toBe("Switch to VibeForge now.");
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  it("keeps the warm sherpa stdio worker loaded and stops it after the idle timeout", async () => {
+    const dataRoot = tempDir();
+    const bin = tempDir();
+    const pidFile = path.join(bin, "sherpa-pid");
+    const fakePython = path.join(bin, "python3");
+    fs.writeFileSync(
+      fakePython,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+process.stdout.write(JSON.stringify({ ready: true }) + "\\n");
+let buf = Buffer.alloc(0);
+process.stdin.on("data", (chunk) => {
+  buf = Buffer.concat([buf, chunk]);
+  while (buf.length >= 4) {
+    const len = buf.readUInt32LE(0);
+    if (buf.length < 4 + len) break;
+    const wav = buf.subarray(4, 4 + len);
+    buf = buf.subarray(4 + len);
+    const riff = wav.toString("ascii", 0, 4);
+    process.stdout.write(JSON.stringify({ ok: riff === "RIFF", text: "Warm Parakeet heard you." }) + "\\n");
+  }
+});
+`,
+      { mode: 0o755 },
+    );
+    const runtimeDir = path.join(dataRoot, "sherpa-onnx");
+    fs.mkdirSync(path.join(runtimeDir, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(runtimeDir, "lib"), { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, "bin", "sherpa-onnx-offline"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(runtimeDir, "lib", "libsherpa-onnx-c-api.so"), "so");
+
+    const parakeetDir = path.join(dataRoot, "models", "parakeet-tdt-0.6b-v3-int8");
+    fs.mkdirSync(parakeetDir, { recursive: true });
+    fs.writeFileSync(path.join(parakeetDir, "encoder.int8.onnx"), Buffer.alloc(150_000));
+    fs.writeFileSync(path.join(parakeetDir, "decoder.int8.onnx"), "d");
+    fs.writeFileSync(path.join(parakeetDir, "joiner.int8.onnx"), "j");
+    fs.writeFileSync(path.join(parakeetDir, "tokens.txt"), "t");
+
+    const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer", talkOver: "auto" };
+    const log = { info: () => undefined, warn: () => undefined } as unknown as LogFile;
+    const instance = new Voice({
+      log,
+      home: tempDir(),
+      dataRoot,
+      settings: () => settings,
+      resolveBin: (name) => (name === "python3" ? fakePython : null),
+      state: () => undefined,
+      changed: () => undefined,
+      speaking: () => undefined,
+      language: () => "en",
+      controlSocket: path.join(dataRoot, "control.sock"),
+      launcher: () => "vibeforge",
+      serverIdleMs: 350,
+    });
+    try {
+      expect((await instance.transcribe(speech())).text).toBe("Warm Parakeet heard you.");
+      const workerPid = Number(fs.readFileSync(pidFile, "utf8"));
+      expect(alive(workerPid)).toBe(true);
+      expect((await instance.transcribe(speech())).text).toBe("Warm Parakeet heard you.");
+      expect(Number(fs.readFileSync(pidFile, "utf8"))).toBe(workerPid);
+      for (const end = Date.now() + 10_000; alive(workerPid) && Date.now() < end; ) await sleep(50);
+      expect(alive(workerPid)).toBe(false);
+    } finally {
+      instance.dispose();
+    }
+  });
+
+  it("unpacks a sherpa-onnx release archive atomically with its PIN and SOURCE.txt", async () => {
+    const work = tempDir();
+    const pkgDir = path.join(work, "sherpa-onnx-v1.13.8-linux-x64");
+    fs.mkdirSync(path.join(pkgDir, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(pkgDir, "lib"), { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, "bin", "sherpa-onnx-offline"), Buffer.alloc(20_000, 1), { mode: 0o755 });
+    fs.writeFileSync(path.join(pkgDir, "lib", "libsherpa-onnx-c-api.so"), "so");
+    fs.writeFileSync(path.join(pkgDir, "LICENSE"), "Apache-2.0");
+    const archive = path.join(work, "sherpa.tar.bz2");
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("tar", ["-cjf", archive, "-C", work, "sherpa-onnx-v1.13.8-linux-x64"]);
+
+    const dest = path.join(work, "installed");
+    await unpackSherpaArchive(archive, dest, "x64");
+    expect(fs.existsSync(archive)).toBe(false);
+    expect(fs.existsSync(path.join(dest, "bin", "sherpa-onnx-offline"))).toBe(true);
+    expect(fs.existsSync(path.join(dest, "lib", "libsherpa-onnx-c-api.so"))).toBe(true);
+    expect(fs.existsSync(path.join(dest, "PIN"))).toBe(true);
+    expect(fs.existsSync(path.join(dest, "SOURCE.txt"))).toBe(true);
   });
 });

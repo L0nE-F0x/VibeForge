@@ -20,7 +20,16 @@ import type { Voice } from "./voice.js";
 // VibeForge is quitting.
 
 /** The core's way to the terminals, git and the desktop. */
-export function deskHost(ctx: MainContext, notify: Notify, extras?: { dock?: () => Dock; stats?: () => Stats }): DeskHost {
+export function deskHost(
+  ctx: MainContext,
+  notify: Notify,
+  extras?: {
+    dock?: () => Dock;
+    stats?: () => Stats;
+    voice?: () => Voice;
+    tray?: () => { readonly autostart: boolean; setAutostart(on: boolean): void; sync(): void };
+  },
+): DeskHost {
   const { supervisor, log, words, send } = ctx;
   return {
     spawn: async (request) => {
@@ -86,6 +95,24 @@ export function deskHost(ctx: MainContext, notify: Notify, extras?: { dock?: () 
       }
       return lines.join("\n");
     },
+    ...(extras?.voice
+      ? {
+          voiceStatus: () => extras.voice!().status(),
+          voiceDownload: (kind, id) => extras.voice!().startDownload(kind, id),
+        }
+      : {}),
+    ...(extras?.tray
+      ? {
+          autostart: {
+            get: () => extras.tray!().autostart,
+            set: (on) => {
+              extras.tray!().setAutostart(on);
+              extras.tray!().sync();
+              return extras.tray!().autostart;
+            },
+          },
+        }
+      : {}),
   };
 }
 

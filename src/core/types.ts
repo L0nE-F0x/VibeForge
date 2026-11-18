@@ -185,6 +185,8 @@ export interface OrchestratorSettings {
   mode: "plan" | "go";
   /** A model for that CLI to plan with; empty keeps its own default. */
   model: string;
+  /** Reasoning effort for the planning CLI ("low", "medium", "high"…); omitted/empty uses "low". */
+  effort?: string;
   /** Where a workspace Maestro makes gets its folder; empty: where most workspaces are, else ~/Projects. */
   projectsFolder: string;
 }
