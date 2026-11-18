@@ -205,20 +205,26 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     }
   }, t("code.addFailed"));
 
-  const [removeWorkspace] = useAction(async (workspace: Workspace) => {
-    const running = live.filter((session) => session.workspaceId === workspace.id).length;
+  /** Removes one workspace, or several picked in the list, after one question. True once they're gone. */
+  const [removeWorkspaces] = useAction(async (picked: Workspace[]) => {
+    if (!picked.length) return false;
+    const ids = new Set(picked.map((workspace) => workspace.id));
+    const running = live.filter((session) => session.workspaceId && ids.has(session.workspaceId)).length;
     const ok = await confirm({
-      title: t("code.removeTitle", { name: workspace.name }),
-      body: [t("code.removeBody"), running ? t.count("code.removeRunning", running) : ""].filter(Boolean).join(" "),
-      confirm: t("code.removeConfirm"),
+      title: picked.length === 1 ? t("code.removeTitle", { name: picked[0].name }) : t.count("code.removeManyTitle", picked.length),
+      body: [picked.length === 1 ? t("code.removeBody") : t("code.removeManyBody"), running ? t.count("code.removeRunning", running) : ""].filter(Boolean).join(" "),
+      confirm: picked.length === 1 ? t("code.removeConfirm") : t.count("code.removeManyConfirm", picked.length),
       danger: true,
     });
-    if (!ok) return;
-    await call("workspaces.remove", workspace.id);
-    await call("dock.release", workspace.id).catch(() => undefined);
-    side.forgetDock(workspace.id);
-    panes.forget(workspace.id);
-    if (currentId === workspace.id) setCurrentId(null);
+    if (!ok) return false;
+    for (const workspace of picked) {
+      await call("workspaces.remove", workspace.id);
+      await call("dock.release", workspace.id).catch(() => undefined);
+      side.forgetDock(workspace.id);
+      panes.forget(workspace.id);
+      if (currentId === workspace.id) setCurrentId(null);
+    }
+    return true;
   }, t("code.removeFailed"));
 
   function select(workspace: Workspace) {
@@ -240,7 +246,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <WorkspaceList workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={(workspace) => void removeWorkspace(workspace)} onBranch={setBranchFor} />
+        <WorkspaceList workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
 
         {!current ? (
           <Empty

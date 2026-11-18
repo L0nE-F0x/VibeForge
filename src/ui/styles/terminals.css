@@ -590,6 +590,27 @@
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
+/* Search, filter and Select above the workspace list. */
+.workspace-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-picking {
+  gap: 4px;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+.workspace-row[aria-pressed="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+  color: var(--fg);
+}
+
 .rail-setting {
   display: flex;
   align-items: center;
