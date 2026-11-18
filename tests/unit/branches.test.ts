@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openBranchCheckout, readBranches } from "../../src/core/branches.js";
 import { TeamService, type DeskHost } from "../../src/core/team-service.js";
+import { summarizeFolderGit } from "../../src/core/vcs.js";
 
 const kept: string[] = [];
 
@@ -120,6 +121,34 @@ describe("a second checkout", () => {
     const listed = await svc.listBranches(first.workspaces[0].id);
     expect(listed.current).toBe("feat/phone-companion");
     expect(listed.branches.find((branch) => branch.name === "main")?.checkout).toBe(opened.workspaces[1].path);
+    svc.close();
+  });
+
+  it("summarizes git branch, dirty files (including renames), commit date and non-git or missing folders", async () => {
+    const dir = repoOnFeature();
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-br-plain-"));
+    const ephemeral = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-br-gone-"));
+    kept.push(plain, ephemeral);
+
+    const svc = service();
+    const a = svc.addWorkspace(dir).lastWorkspaceId!;
+    const b = (await svc.openBranch(a, "main")).lastWorkspaceId!;
+    const c = svc.addWorkspace(plain).lastWorkspaceId!;
+    const d = svc.addWorkspace(ephemeral).lastWorkspaceId!;
+    fs.rmSync(ephemeral, { recursive: true, force: true });
+
+    // Rename one tracked file + add one untracked file + set upstream to main (1 commit ahead) -> 2 dirty, ahead=1.
+    git(dir, "branch", "--set-upstream-to=main");
+    git(dir, "mv", "a.txt", "renamed.txt");
+    fs.writeFileSync(path.join(dir, "new.txt"), "draft\n");
+
+    const status = await svc.summarizeWorkspaces();
+    expect(status[a]).toMatchObject({ exists: true, git: true, branch: "feat/phone-companion", dirty: 2, ahead: 1, behind: 0 });
+    expect(status[a].lastCommitAt).toBeTruthy();
+    expect(status[b]).toMatchObject({ exists: true, git: true, branch: "main", dirty: 0 });
+    expect(status[c]).toMatchObject({ exists: true, git: false, branch: null, dirty: 0, lastCommitAt: null });
+    expect(status[d]).toMatchObject({ exists: false, git: false, branch: null, dirty: 0 });
+    expect(await summarizeFolderGit("")).toEqual({ git: false, branch: null, dirty: 0, ahead: 0, behind: 0, lastCommitAt: null });
     svc.close();
   });
 });

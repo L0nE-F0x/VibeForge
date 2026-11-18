@@ -73,7 +73,12 @@ describe("the run index", () => {
     }
     expect(store.queryRuns({ limit: 2 }).map((run) => run.title)).toEqual(["Notes three", "Notes two"]);
     expect(store.queryRuns({ limit: 0 })).toHaveLength(1);
+    expect(store.searchRuns("notes", 1)).toBeDefined();
     expect(store.searchRuns("notes", 1)).toHaveLength(1);
+    const runs = store.allRuns();
+    store.saveRun({ ...runs[0], workspaceId: "ws-1", endedAt: "2026-11-01T09:15:00.000Z" });
+    store.saveRun({ ...runs[1], workspaceId: "ws-1", endedAt: null });
+    expect(store.latestWorkspaceRuns()).toEqual({ "ws-1": "2026-11-01T09:15:00.000Z" });
     store.close();
   });
 });

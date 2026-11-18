@@ -304,3 +304,11 @@ button.rail-logo:focus-visible {
   padding: 6px 9px 4px;
   font-size: var(--fs-xs);
 }
+
+.list-label.menu-label {
+  padding: 6px 9px 3px;
+}
+
+.list-label.menu-label:first-child {
+  padding-top: 4px;
+}

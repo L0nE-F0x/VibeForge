@@ -166,6 +166,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "engines.save": (rows) => s().saveEngines(rows),
 
     "workspaces.list": () => s().listWorkspaces(),
+    "workspaces.status": () => s().summarizeWorkspaces(),
     "workspaces.add": (folder) => s().addWorkspace(folder),
     "workspaces.remove": (id) => s().removeWorkspace(id),
     "workspaces.select": (id) => s().selectWorkspace(id),

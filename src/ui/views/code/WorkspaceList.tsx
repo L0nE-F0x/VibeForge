@@ -1,25 +1,68 @@
-import { ArrowLeft, ArrowLeftRight, ArrowRight, FolderOpen, FolderPlus, GitBranch, Laptop, ListChecks, ListFilter, MoreHorizontal, Pencil, Search, Square, SquareCheck, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUpDown,
+  FileDiff,
+  FolderOpen,
+  FolderPlus,
+  FolderTree,
+  GitBranch,
+  Laptop,
+  ListChecks,
+  ListFilter,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  Search,
+  Square,
+  SquareCheck,
+  Trash2,
+  X,
+} from "lucide-react";
+import { Fragment, useRef, useState } from "react";
 import type { SyncShare, Workspace } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
-import { call, useAppInfo, useLive, useSync } from "../../api.js";
-import { useAttention } from "../../attention.js";
+import { call, useAppInfo, useLive, useOrchestrator, useSync, useTasks, useWorkspaceStatus } from "../../api.js";
+import { useAttention, usePtyAttention } from "../../attention.js";
 import { SidePanel, StripItem } from "../../components/SidePanel.js";
 import { SyncNotices } from "../../components/SyncNotices.js";
 import { tipProps } from "../../components/Tooltip.js";
-import { Button, Input, Menu, MenuButton, Modal, Popover, type MenuItem } from "../../components/ui.js";
+import { Button, Input, Menu, MenuButton, Modal, Popover, type MenuEntry, type MenuItem } from "../../components/ui.js";
 import { workspaceMark, WorkspaceState } from "../../components/WorkspaceState.js";
 import { useT } from "../../i18n/index.js";
 import { useAction, useNav } from "../../state.js";
 import { isShortcut } from "../../shortcuts.js";
-import { DEFAULT_WORKSPACE_VIEW, loadWorkspaceView, saveWorkspaceView, viewWorkspaces, type WorkspaceFacts, type WorkspaceFilter, type WorkspaceSort, type WorkspaceView } from "../../workspace-view.js";
+import {
+  activityTime,
+  DEFAULT_WORKSPACE_VIEW,
+  FILTERS,
+  filterCounts,
+  groupWorkspaces,
+  isDefaultWorkspaceView,
+  leafFolder,
+  loadWorkspaceView,
+  SORTS,
+  saveWorkspaceView,
+  toggleFilter,
+  viewWorkspaces,
+  type WorkspaceFacts,
+  type WorkspaceFilter,
+  type WorkspaceSort,
+  type WorkspaceView,
+} from "../../workspace-view.js";
 import { shareLine, SyncDialog } from "./SyncDialog.js";
 
 const WORKSPACE_MIME = "application/x-vibeforge-workspace";
 
+interface CopyReview {
+  name: string;
+  open: () => void;
+}
+
 /**
  * Code's list of workspaces: pick one, drag to reorder, double-click or F2 to rename, ⋯ for the rest.
- * Above it, a search, a filter and sort menu, and Select, which picks several to remove at once.
+ * Above it, a search, a composable filter/sort/group menu, active view pills, and Select to remove several.
  */
 export function WorkspaceList({
   workspaces,
@@ -41,9 +84,14 @@ export function WorkspaceList({
   const t = useT();
   const live = useLive().data ?? [];
   const attention = useAttention();
+  const ptyAttention = usePtyAttention();
+  const statuses = useWorkspaceStatus().data;
+  const copies = useOrchestrator().data?.copies ?? [];
+  const tasks = useTasks().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const [renaming, setRenaming] = useState<string | null>(null);
   const skipBlurRef = useRef(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   const startRename = (id: string) => {
     skipBlurRef.current = false;
     setRenaming(id);
@@ -78,8 +126,40 @@ export function WorkspaceList({
   }, t("code.moveFailed"));
 
   const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
 
-  // ------------------------------------------------ search, filter, sort, select
+  /** A Viby copy or isolated task copy waiting for review on this workspace. */
+  const copyReviewFor = (workspaceId: string): CopyReview | null => {
+    const ownCopy = copies.find((copy) => copy.openedWorkspaceId === workspaceId);
+    if (ownCopy) return { name: ownCopy.name, open: () => go({ view: "orchestrator", copyId: ownCopy.id }) };
+    const sourceCopy = copies.find((copy) => (!copy.openedWorkspaceId || !workspaceIds.has(copy.openedWorkspaceId)) && copy.workspaceId === workspaceId);
+    if (sourceCopy) return { name: sourceCopy.name, open: () => go({ view: "orchestrator", copyId: sourceCopy.id }) };
+    const taskCopy = tasks.find((task) => task.workspaceId === workspaceId && task.status === "review" && Boolean(task.copy));
+    if (taskCopy) return { name: taskCopy.title, open: () => go({ view: "tasks", taskId: taskCopy.id }) };
+    return null;
+  };
+
+  const activityOf = (workspaceId: string): number => {
+    const status = statuses?.[workspaceId];
+    let latest = Math.max(activityTime(status?.lastRunAt), activityTime(status?.lastCommitAt));
+    for (const session of live) {
+      if (session.workspaceId !== workspaceId) continue;
+      latest = Math.max(latest, activityTime(session.quietAt), activityTime(session.cliSince), activityTime(session.startedAt));
+    }
+    for (const mark of ptyAttention.values()) {
+      if (mark.workspaceId === workspaceId) latest = Math.max(latest, activityTime(mark.since));
+    }
+    for (const copy of copies) {
+      if (copy.openedWorkspaceId === workspaceId || copy.workspaceId === workspaceId) latest = Math.max(latest, activityTime(copy.at));
+    }
+    for (const task of tasks) {
+      if (task.workspaceId !== workspaceId) continue;
+      latest = Math.max(latest, activityTime(task.updatedAt), activityTime(task.lastRun?.endedAt), activityTime(task.lastRun?.startedAt));
+    }
+    return latest;
+  };
+
+  // ------------------------------------------------ search, filter, sort, group, select
   const [query, setQuery] = useState("");
   const [view, setViewState] = useState<WorkspaceView>(loadWorkspaceView);
   const setView = (next: Partial<WorkspaceView>) => {
@@ -90,19 +170,42 @@ export function WorkspaceList({
   /** Ids picked while Select is on; null while it's off. */
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [removing, setRemoving] = useState(false);
-  const facts = (workspace: Workspace): WorkspaceFacts => ({
-    name: workspace.name,
-    path: tildify(workspace.path, home),
-    open: liveCount(workspace.id) > 0,
-    waiting: attention.get(workspace.id) === "waiting",
-    synced: shareOf(workspace.id) !== null,
-  });
-  const narrowed = query.trim() !== "" || view.filter !== "all";
-  const shown = viewWorkspaces(workspaces, facts, view, query, t.language);
-  // Folded to its strip there is no search or filter to see, so the strip only follows the sort.
-  const stripped = view.sort === "manual" ? workspaces : viewWorkspaces(workspaces, facts, { ...view, filter: "all" }, "", t.language);
-  // Dragging moves a workspace in your own order, so it's there only while the list shows all of it that way.
-  const canDrag = !narrowed && view.sort === "manual" && !selected;
+  const factsCache = new Map<string, WorkspaceFacts>();
+  const facts = (workspace: Workspace): WorkspaceFacts => {
+    const cached = factsCache.get(workspace.id);
+    if (cached) return cached;
+    const sessions = live.filter((session) => session.workspaceId === workspace.id);
+    const status = statuses?.[workspace.id];
+    const ownCopy = copies.find((copy) => copy.openedWorkspaceId === workspace.id);
+    const computed: WorkspaceFacts = {
+      name: workspace.name,
+      path: tildify(workspace.path, home),
+      open: sessions.length > 0,
+      working: sessions.some((session) => Boolean(session.working)),
+      waiting: attention.get(workspace.id) === "waiting",
+      review: copyReviewFor(workspace.id) !== null,
+      synced: shareOf(workspace.id) !== null,
+      git: status?.git ?? Boolean(ownCopy),
+      branch: status?.branch ?? ownCopy?.branch ?? null,
+      dirty: status?.dirty ?? 0,
+      ahead: status?.ahead ?? 0,
+      activityAt: activityOf(workspace.id),
+    };
+    factsCache.set(workspace.id, computed);
+    return computed;
+  };
+
+  const hasQuery = query.trim() !== "";
+  const hasFilters = view.filters.length > 0;
+  const narrowed = hasQuery || hasFilters;
+  const viewChanged = !isDefaultWorkspaceView(view);
+  const groups = groupWorkspaces(workspaces, facts, view, query, t.language);
+  const shown = groups.flatMap((group) => group.items);
+  const counts = filterCounts(workspaces, facts, view.filters, query);
+  // Folded to its strip there is no search or filter to see, so the strip only follows the sort and grouping.
+  const stripped = view.sort === "manual" && view.group === "none" ? workspaces : viewWorkspaces(workspaces, facts, { ...view, filters: [] }, "", t.language);
+  // Dragging moves a workspace in your own order, so it's there only while the list shows all of it flat that way.
+  const canDrag = !narrowed && view.sort === "manual" && view.group === "none" && !selected;
   // Only what is on screen gets removed: a pick that a new search hid stays picked but out of it.
   const picked = selected ? shown.filter((workspace) => selected.has(workspace.id)) : [];
   const toggle = (id: string) =>
@@ -120,20 +223,90 @@ export function WorkspaceList({
       setRemoving(false);
     }
   };
+
   const filterLabels: Record<WorkspaceFilter, string> = {
-    all: t("code.filter.all"),
     open: t("code.filter.open"),
+    working: t("code.filter.working"),
     waiting: t("code.filter.waiting"),
+    review: t("code.filter.review"),
+    dirty: t("code.filter.dirty"),
     synced: t("code.filter.synced"),
   };
-  const sortLabels: Record<WorkspaceSort, string> = { manual: t("code.sort.manual"), name: t("code.sort.name") };
-  const viewItems: Array<MenuItem | "sep"> = [
-    ...(Object.keys(filterLabels) as WorkspaceFilter[]).map((filter) => ({ label: filterLabels[filter], checked: view.filter === filter, onSelect: () => setView({ filter }) })),
+  const sortLabels: Record<WorkspaceSort, string> = {
+    manual: t("code.sort.manual"),
+    name: t("code.sort.name"),
+    parent: t("code.sort.parent"),
+    recent: t("code.sort.recent"),
+    changes: t("code.sort.changes"),
+  };
+  const sortShortLabels: Record<Exclude<WorkspaceSort, "manual">, string> = {
+    name: t("code.sortShort.name"),
+    parent: t("code.sortShort.parent"),
+    recent: t("code.sortShort.recent"),
+    changes: t("code.sortShort.changes"),
+  };
+
+  const viewItems: MenuEntry[] = [
+    { heading: t("code.view.filterHeading") },
+    {
+      label: t("code.filter.all"),
+      role: "menuitemcheckbox",
+      checked: !hasFilters,
+      hint: counts.all,
+      keepOpen: true,
+      onSelect: () => setView({ filters: [] }),
+    },
+    ...FILTERS.map(
+      (filter): MenuItem => ({
+        label: filterLabels[filter],
+        role: "menuitemcheckbox",
+        checked: view.filters.includes(filter),
+        hint: counts[filter],
+        keepOpen: true,
+        onSelect: () => setView({ filters: toggleFilter(view.filters, filter) }),
+      }),
+    ),
     "sep",
-    ...(Object.keys(sortLabels) as WorkspaceSort[]).map((sort) => ({ label: sortLabels[sort], checked: view.sort === sort, onSelect: () => setView({ sort }) })),
+    { heading: t("code.view.sortHeading") },
+    ...SORTS.map(
+      (sort): MenuItem => ({
+        label: sortLabels[sort],
+        role: "menuitemradio",
+        checked: view.sort === sort,
+        keepOpen: true,
+        onSelect: () => setView({ sort }),
+      }),
+    ),
+    "sep",
+    { heading: t("code.view.groupHeading") },
+    {
+      label: t("code.group.parent"),
+      role: "menuitemcheckbox",
+      checked: view.group === "parent",
+      keepOpen: true,
+      onSelect: () => setView({ group: view.group === "parent" ? "none" : "parent" }),
+    },
+    ...(viewChanged ? ["sep" as const, { label: t("code.view.reset"), icon: RotateCcw, onSelect: () => setView(DEFAULT_WORKSPACE_VIEW) }] : []),
   ];
-  const viewChanged = view.filter !== DEFAULT_WORKSPACE_VIEW.filter || view.sort !== DEFAULT_WORKSPACE_VIEW.sort;
+
+  const activeSummary = [
+    ...view.filters.map((filter) => filterLabels[filter]),
+    view.sort !== "manual" ? sortLabels[view.sort] : "",
+    view.group === "parent" ? t("code.group.parent") : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const viewTip = activeSummary ? `${t("code.viewTip")}: ${activeSummary}` : t("code.viewTip");
   const showTools = workspaces.length > 1 || narrowed || viewChanged || selected !== null;
+
+  const emptyMessage =
+    !hasQuery && view.filters.length === 1
+      ? t(`code.emptyFilter.${view.filters[0]}`)
+      : !hasQuery && view.filters.length > 1
+        ? t("code.noMatchFilters")
+        : t("code.noMatch");
+  const clearLabel = hasQuery && hasFilters ? t("code.clearSearch") : hasQuery ? t("code.clearQuery") : view.filters.length > 1 ? t("code.clearFilters") : t("code.filter.all");
+
   const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
@@ -143,232 +316,333 @@ export function WorkspaceList({
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void onRemove([workspace]) },
   ];
 
+  let flatIndex = -1;
+
   return (
     <>
-    <SidePanel
-      id="workspaces"
-      title={t("code.workspaces")}
-      defaultWidth={250}
-      actions={
-        <Button size="sm" icon={FolderPlus} onClick={onAdd} tip={t("code.addTip")}>
-          {t("code.add")}
-        </Button>
-      }
-      strip={
-        <>
-          <StripItem label={t("code.addStrip")} onClick={onAdd}>
-            <FolderPlus size={16} />
-          </StripItem>
-          {asks > 0 && (
-            <StripItem label={t("sync.asks")} onClick={() => setAsksOpen(true)} badge={<span className="ws-state waiting in-strip" />}>
-              <Laptop size={16} className="accent-text" />
+      <SidePanel
+        id="workspaces"
+        title={t("code.workspaces")}
+        defaultWidth={250}
+        actions={
+          <Button size="sm" icon={FolderPlus} onClick={onAdd} tip={t("code.addTip")}>
+            {t("code.add")}
+          </Button>
+        }
+        strip={
+          <>
+            <StripItem label={t("code.addStrip")} onClick={onAdd}>
+              <FolderPlus size={16} />
             </StripItem>
-          )}
-          {stripped.map((workspace) => (
-            <StripItem
-              key={workspace.id}
-              label={`${workspace.name} — ${tildify(workspace.path, home)}`}
-              selected={workspace.id === currentId}
-              onClick={() => onSelect(workspace)}
-              badge={<WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} strip />}
-            >
-              <span className="strip-initials">{workspace.name.slice(0, 2).toUpperCase()}</span>
-            </StripItem>
-          ))}
-        </>
-      }
-    >
-      <SyncNotices view={sync} />
-      {showTools && (
-        <div className="workspace-tools">
-          <div className="hstack" style={{ gap: 4 }}>
-            <div className="hstack grow" style={{ position: "relative", minWidth: 0 }}>
-              <Search size={13} className="faint" style={{ position: "absolute", left: 9, pointerEvents: "none" }} />
-              <Input
-                placeholder={t("code.search")}
-                aria-label={t("code.search")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (query) setQuery("");
-                  else event.currentTarget.blur();
-                }}
-                style={{ paddingLeft: 28 }}
+            {asks > 0 && (
+              <StripItem label={t("sync.asks")} onClick={() => setAsksOpen(true)} badge={<span className="ws-state waiting in-strip" />}>
+                <Laptop size={16} className="accent-text" />
+              </StripItem>
+            )}
+            {stripped.map((workspace) => (
+              <StripItem
+                key={workspace.id}
+                label={`${workspace.name} — ${tildify(workspace.path, home)}`}
+                selected={workspace.id === currentId}
+                onClick={() => onSelect(workspace)}
+                badge={<WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} strip />}
+              >
+                <span className="strip-initials">{workspace.name.slice(0, 2).toUpperCase()}</span>
+              </StripItem>
+            ))}
+          </>
+        }
+      >
+        <SyncNotices view={sync} />
+        {showTools && (
+          <div className="workspace-tools">
+            <div className="hstack" style={{ gap: 4 }}>
+              <div className="hstack grow" style={{ position: "relative", minWidth: 0 }}>
+                <Search size={13} className="faint" style={{ position: "absolute", left: 9, pointerEvents: "none" }} />
+                <Input
+                  ref={searchRef}
+                  placeholder={t("code.search")}
+                  aria-label={t("code.search")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (query) setQuery("");
+                    else event.currentTarget.blur();
+                  }}
+                  style={{ paddingLeft: 28, paddingRight: hasQuery ? 58 : undefined }}
+                />
+                {hasQuery && (
+                  <span className="workspace-search-tail">
+                    <span className="faint mono" style={{ fontSize: "var(--fs-xs)" }}>
+                      {shown.length}/{workspaces.length}
+                    </span>
+                    <button
+                      type="button"
+                      className="workspace-search-clear"
+                      aria-label={t("code.clearQuery")}
+                      {...tipProps(t("code.clearQuery"))}
+                      onClick={() => {
+                        setQuery("");
+                        searchRef.current?.focus();
+                      }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                )}
+              </div>
+              <MenuButton
+                size="sm"
+                variant="ghost"
+                icon={ListFilter}
+                className={viewChanged ? "accent-text" : undefined}
+                aria-label={viewTip}
+                title={viewTip}
+                items={viewItems}
+              >
+                {hasFilters ? view.filters.length : null}
+              </MenuButton>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={ListChecks}
+                pressed={selected !== null}
+                className={selected ? "accent-text" : undefined}
+                tip={selected ? t("code.selectDone") : t("code.selectTip")}
+                onClick={() => setSelected(selected ? null : new Set())}
               />
             </div>
-            <MenuButton
-              size="sm"
-              variant="ghost"
-              icon={ListFilter}
-              className={viewChanged ? "accent-text" : undefined}
-              title={viewChanged ? `${t("code.viewTip")}: ${[view.filter !== "all" ? filterLabels[view.filter] : "", view.sort !== "manual" ? sortLabels[view.sort] : ""].filter(Boolean).join(", ")}` : t("code.viewTip")}
-              items={viewItems}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={ListChecks}
-              pressed={selected !== null}
-              className={selected ? "accent-text" : undefined}
-              tip={selected ? t("code.selectDone") : t("code.selectTip")}
-              onClick={() => setSelected(selected ? null : new Set())}
-            />
+            {viewChanged && (
+              <div className="workspace-active-view">
+                {view.filters.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className="chip accent workspace-chip"
+                    onClick={() => setView({ filters: toggleFilter(view.filters, filter) })}
+                  >
+                    <span className="truncate">{filterLabels[filter]}</span>
+                    <X size={11} />
+                  </button>
+                ))}
+                {view.sort !== "manual" && (
+                  <button type="button" className="chip workspace-chip" onClick={() => setView({ sort: "manual" })}>
+                    <ArrowUpDown size={11} />
+                    <span className="truncate">{sortShortLabels[view.sort]}</span>
+                    <X size={11} />
+                  </button>
+                )}
+                {view.group === "parent" && (
+                  <button type="button" className="chip workspace-chip" onClick={() => setView({ group: "none" })}>
+                    <FolderTree size={11} />
+                    <span className="truncate">{t("code.group.parentShort")}</span>
+                    <X size={11} />
+                  </button>
+                )}
+                {hasFilters && !hasQuery && (
+                  <span className="faint mono" style={{ marginLeft: "auto", fontSize: "var(--fs-xs)" }}>
+                    {shown.length}/{workspaces.length}
+                  </span>
+                )}
+              </div>
+            )}
+            {selected && (
+              <div className="hstack workspace-picking">
+                <span className="faint grow" style={{ whiteSpace: "nowrap" }}>
+                  {t.count("code.selected", picked.length)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!shown.length || picked.length === shown.length}
+                  onClick={() => setSelected(new Set([...selected, ...shown.map((workspace) => workspace.id)]))}
+                >
+                  {t("code.selectAll")}
+                </Button>
+                <Button size="sm" variant="danger" icon={Trash2} busy={removing} disabled={!picked.length} onClick={() => void removePicked()} tip={t("code.removeSelectedTip")}>
+                  {t("code.removeSelected")}
+                </Button>
+              </div>
+            )}
           </div>
-          {selected && (
-            <div className="hstack workspace-picking">
-              <span className="faint grow" style={{ whiteSpace: "nowrap" }}>{t.count("code.selected", picked.length)}</span>
-              <Button size="sm" variant="ghost" disabled={!shown.length || picked.length === shown.length} onClick={() => setSelected(new Set([...selected, ...shown.map((workspace) => workspace.id)]))}>
-                {t("code.selectAll")}
-              </Button>
-              <Button size="sm" variant="danger" icon={Trash2} busy={removing} disabled={!picked.length} onClick={() => void removePicked()} tip={t("code.removeSelectedTip")}>
-                {t("code.removeSelected")}
+        )}
+        <div
+          className="list-scroll"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && selected && !event.defaultPrevented) {
+              event.preventDefault();
+              setSelected(null);
+            }
+          }}
+        >
+          {workspaces.length === 0 && (
+            <div className="faint" style={{ padding: "12px 10px" }}>
+              {t("code.addEmpty")}
+            </div>
+          )}
+          {workspaces.length > 0 && shown.length === 0 && (
+            <div className="vstack faint" style={{ padding: "12px 10px", gap: 8, alignItems: "flex-start" }}>
+              <span>{emptyMessage}</span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (hasQuery) setQuery("");
+                  if (hasFilters) setView({ filters: [] });
+                }}
+              >
+                {clearLabel}
               </Button>
             </div>
           )}
-        </div>
-      )}
-      <div
-        className="list-scroll"
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && selected && !event.defaultPrevented) {
-            event.preventDefault();
-            setSelected(null);
-          }
-        }}
-      >
-        {workspaces.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("code.addEmpty")}</div>}
-        {workspaces.length > 0 && shown.length === 0 && (
-          <div className="vstack faint" style={{ padding: "12px 10px", gap: 8, alignItems: "flex-start" }}>
-            <span>{t("code.noMatch")}</span>
-            <Button
-              size="sm"
-              onClick={() => {
-                setQuery("");
-                setView({ filter: "all" });
-              }}
-            >
-              {t("code.clearSearch")}
-            </Button>
-          </div>
-        )}
-        {shown.map((workspace, index) => {
-          const isPicked = selected?.has(workspace.id) ?? false;
-          const over = dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
-          return (
-            <div
-              key={workspace.id}
-              className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
-              role="button"
-              tabIndex={0}
-              aria-current={!selected && workspace.id === currentId ? "true" : undefined}
-              aria-pressed={selected ? isPicked : undefined}
-              draggable={canDrag && renaming !== workspace.id}
-              onClick={() => (selected ? toggle(workspace.id) : onSelect(workspace))}
-              onDoubleClick={() => {
-                if (!selected) startRename(workspace.id);
-              }}
-              onKeyDown={(event) => {
-                if (selected) {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    toggle(workspace.id);
-                  }
-                  return;
-                }
-                if (event.key === "Enter") onSelect(workspace);
-                if (isShortcut("workspace.rename", event)) startRename(workspace.id);
-              }}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                if (!selected) setWorkspaceMenu({ workspace, anchor: event.currentTarget });
-              }}
-              onDragStart={(event) => {
-                event.dataTransfer.setData(WORKSPACE_MIME, workspace.id);
-                event.dataTransfer.effectAllowed = "move";
-                setDragWorkspace({ id: workspace.id, over: null });
-              }}
-              onDragEnd={() => setDragWorkspace(null)}
-              onDragOver={(event) => {
-                if (!dragWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-                const rect = event.currentTarget.getBoundingClientRect();
-                const at = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
-                if (dragWorkspace.over !== at) setDragWorkspace({ ...dragWorkspace, over: at });
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                const drag = dragWorkspace;
-                setDragWorkspace(null);
-                if (!drag || drag.over === null) return;
-                const from = workspaces.findIndex((item) => item.id === drag.id);
-                const to = drag.over > from ? drag.over - 1 : drag.over;
-                if (from >= 0 && to !== from) void moveWorkspace(drag.id, to);
-              }}
-            >
-              {selected ? (
-                isPicked ? <SquareCheck size={15} className="accent-text" style={{ flex: "none" }} /> : <Square size={15} className="faint" style={{ flex: "none" }} />
-              ) : (
-                <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />
+          {groups.map((group) => (
+            <Fragment key={group.folder || "__all__"}>
+              {view.group === "parent" && (
+                <div className="workspace-group">
+                  <FolderOpen size={11} style={{ flex: "none" }} />
+                  <span className="mono truncate grow">{group.folder}</span>
+                  <span className="mono">{group.items.length}</span>
+                </div>
               )}
-              <span className="vstack grow" style={{ gap: 0 }}>
-                {renaming === workspace.id ? (
-                  <Input
-                    autoFocus
-                    defaultValue={workspace.name}
-                    onClick={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    onFocus={(event) => {
-                      skipBlurRef.current = false;
-                      event.target.select();
-                    }}
-                    onBlur={(event) => {
-                      if (skipBlurRef.current) {
-                        skipBlurRef.current = false;
-                        return;
-                      }
-                      void renameWorkspace(workspace, event.target.value);
+              {group.items.map((workspace) => {
+                flatIndex += 1;
+                const index = flatIndex;
+                const known = facts(workspace);
+                const leaf = leafFolder(known.path);
+                const subLine =
+                  view.group === "parent"
+                    ? leaf !== workspace.name
+                      ? [leaf, known.branch].filter(Boolean).join(" · ")
+                      : (known.branch ?? leaf)
+                    : known.path;
+                const isPicked = selected?.has(workspace.id) ?? false;
+                const over = dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
+                return (
+                  <div
+                    key={workspace.id}
+                    className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={!selected && workspace.id === currentId ? "true" : undefined}
+                    aria-pressed={selected ? isPicked : undefined}
+                    draggable={canDrag && renaming !== workspace.id}
+                    onClick={() => (selected ? toggle(workspace.id) : onSelect(workspace))}
+                    onDoubleClick={() => {
+                      if (!selected) startRename(workspace.id);
                     }}
                     onKeyDown={(event) => {
-                      event.stopPropagation();
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        event.currentTarget.blur();
+                      if (selected) {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          toggle(workspace.id);
+                        }
+                        return;
                       }
-                      if (event.key === "Escape") {
-                        event.preventDefault();
-                        skipBlurRef.current = true;
-                        setRenaming(null);
-                      }
+                      if (event.key === "Enter") onSelect(workspace);
+                      if (isShortcut("workspace.rename", event)) startRename(workspace.id);
                     }}
-                  />
-                ) : (
-                  <span className="row-title truncate">{workspace.name}</span>
-                )}
-                <span className="row-sub truncate mono">{tildify(workspace.path, home)}</span>
-              </span>
-              <SyncMark share={shareOf(workspace.id)} onOpen={(share) => setSyncing({ workspaceId: workspace.id, machineId: share.machineId })} />
-              <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
-              {!selected && <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-                <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
-              </span>}
-            </div>
-          );
-        })}
-      </div>
-      {workspaceMenu && (
-        <Popover anchor={workspaceMenu.anchor} onClose={() => setWorkspaceMenu(null)} align="end">
-          <Menu items={workspaceItems(workspaceMenu.workspace)} onClose={() => setWorkspaceMenu(null)} />
-        </Popover>
-      )}
-      {(() => {
-        const workspace = syncing && workspaces.find((item) => item.id === syncing.workspaceId);
-        return workspace && syncing && sync ? <SyncDialog workspace={workspace} machineId={syncing.machineId} view={sync} onClose={() => setSyncing(null)} /> : null;
-      })()}
-    </SidePanel>
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      if (!selected) setWorkspaceMenu({ workspace, anchor: event.currentTarget });
+                    }}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(WORKSPACE_MIME, workspace.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      setDragWorkspace({ id: workspace.id, over: null });
+                    }}
+                    onDragEnd={() => setDragWorkspace(null)}
+                    onDragOver={(event) => {
+                      if (!dragWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const at = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
+                      if (dragWorkspace.over !== at) setDragWorkspace({ ...dragWorkspace, over: at });
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const drag = dragWorkspace;
+                      setDragWorkspace(null);
+                      if (!drag || drag.over === null) return;
+                      const from = workspaces.findIndex((item) => item.id === drag.id);
+                      const to = drag.over > from ? drag.over - 1 : drag.over;
+                      if (from >= 0 && to !== from) void moveWorkspace(drag.id, to);
+                    }}
+                  >
+                    {selected ? (
+                      isPicked ? (
+                        <SquareCheck size={15} className="accent-text" style={{ flex: "none" }} />
+                      ) : (
+                        <Square size={15} className="faint" style={{ flex: "none" }} />
+                      )
+                    ) : (
+                      <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />
+                    )}
+                    <span className="vstack grow" style={{ gap: 0 }}>
+                      {renaming === workspace.id ? (
+                        <Input
+                          autoFocus
+                          defaultValue={workspace.name}
+                          onClick={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          onFocus={(event) => {
+                            skipBlurRef.current = false;
+                            event.target.select();
+                          }}
+                          onBlur={(event) => {
+                            if (skipBlurRef.current) {
+                              skipBlurRef.current = false;
+                              return;
+                            }
+                            void renameWorkspace(workspace, event.target.value);
+                          }}
+                          onKeyDown={(event) => {
+                            event.stopPropagation();
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              skipBlurRef.current = true;
+                              setRenaming(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <span className="row-title truncate">{workspace.name}</span>
+                      )}
+                      <span className="row-sub truncate mono">{subLine}</span>
+                    </span>
+                    <span className="workspace-marks">
+                      <DirtyMark dirty={known.dirty ?? 0} branch={known.branch ?? null} />
+                      <ReviewMark review={copyReviewFor(workspace.id)} />
+                      <SyncMark share={shareOf(workspace.id)} onOpen={(share) => setSyncing({ workspaceId: workspace.id, machineId: share.machineId })} />
+                      <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
+                    </span>
+                    {!selected && (
+                      <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+                        <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+        {workspaceMenu && (
+          <Popover anchor={workspaceMenu.anchor} onClose={() => setWorkspaceMenu(null)} align="end">
+            <Menu items={workspaceItems(workspaceMenu.workspace)} onClose={() => setWorkspaceMenu(null)} />
+          </Popover>
+        )}
+        {(() => {
+          const workspace = syncing && workspaces.find((item) => item.id === syncing.workspaceId);
+          return workspace && syncing && sync ? <SyncDialog workspace={workspace} machineId={syncing.machineId} view={sync} onClose={() => setSyncing(null)} /> : null;
+        })()}
+      </SidePanel>
       {/* Outside the panel: folded to its strip, the panel draws none of what is inside it. */}
       {asksOpen && asks > 0 && (
         <Modal title={t("sync.asks")} icon={Laptop} onClose={() => setAsksOpen(false)}>
@@ -376,6 +650,40 @@ export function WorkspaceList({
         </Modal>
       )}
     </>
+  );
+}
+
+/** Quiet count of uncommitted files in a workspace's git checkout; hidden when clean. */
+function DirtyMark({ dirty, branch }: { dirty: number; branch: string | null }) {
+  const t = useT();
+  if (dirty <= 0) return null;
+  const tip = branch ? t.count("code.dirtyBranchTip", dirty, { branch, count: dirty }) : t.count("code.dirtyTip", dirty, { count: dirty });
+  return (
+    <span className="git-dirty-mark" role="img" aria-label={tip} {...tipProps(tip)}>
+      ±{dirty}
+    </span>
+  );
+}
+
+/** Mark on a workspace that is (or holds) a copy waiting for review; clicking opens its diff sheet. */
+function ReviewMark({ review }: { review: CopyReview | null }) {
+  const t = useT();
+  if (!review) return null;
+  const tip = t("code.reviewCopyTip", { name: review.name });
+  return (
+    <button
+      type="button"
+      className="review-mark"
+      aria-label={tip}
+      {...tipProps(tip)}
+      onClick={(event) => {
+        event.stopPropagation();
+        review.open();
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <FileDiff size={13} />
+    </button>
   );
 }
 

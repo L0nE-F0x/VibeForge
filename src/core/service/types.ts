@@ -257,3 +257,15 @@ export interface RunHit extends RunView {
   snippet: string;
 }
 
+/** Git state and recent run timestamp for a workspace in Code's workspace list. */
+export interface WorkspaceSummary {
+  exists: boolean;
+  git: boolean;
+  branch: string | null;
+  dirty: number;
+  ahead: number;
+  behind: number;
+  lastRunAt: string | null;
+  lastCommitAt: string | null;
+}
+

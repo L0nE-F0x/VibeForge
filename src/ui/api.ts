@@ -190,6 +190,8 @@ export const useSkills = () => useQuery("skills", ["skills"], () => call("skills
 export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live", "working"], () => call("routines.list"));
 export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live", "working"], () => call("tasks.list"));
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
+export const useWorkspaceStatus = () => useQuery("workspace-status", ["workspaces", "runs", "tasks", "orchestrator", "sync"], () => call("workspaces.status"));
+export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
 /** Sync between machines: follows what the engine reports, and the switch in Settings. */
