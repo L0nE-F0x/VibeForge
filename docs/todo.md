@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.20.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.21.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -14,7 +14,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.20.0, 2026-11-18, is the lates
 ## Only checked with stand-ins
 
 - **Workspace sync between two real machines** (2.19.0): on a local network, over Tailscale, and with Omarchy's firewall opened by the command Settings → Sync shows. Everything else about it runs against two real Syncthings on one machine.
-- **One phone page for two real computers** (after 2.20.0): a real phone, over Tailscale, with the desktop and the laptop both shared. Driven so far between two local ports in headless Chrome; a tailnet's names are covered by unit tests only. **Scan its QR code** inside the page has never run: it needs Chrome on Android (the camera and its barcode reader), which no desktop Chrome has. The phone camera opening Settings → Phone's QR code is the same link the tests open, but hasn't been pointed at a real screen.
+- **One phone page for two real computers** (2.21.0): a real phone, over Tailscale, with the desktop and the laptop both shared. Driven so far between two local ports in headless Chrome; a tailnet's names are covered by unit tests only. Settings → Phone's address and QR code were checked against the laptop's real Tailscale (a renamed machine, #98), and the desktop's page was opened over the tailnet at phone size. **Scan its QR code** inside the page has never run: it needs Chrome on Android (the camera and its barcode reader), which no desktop Chrome has. The phone camera opening Settings → Phone's QR code is the same link the tests open, but hasn't been pointed at a real screen.
 
 These work against fake CLIs, synthetic audio and the hidden test window. Nothing is known to be wrong:
 

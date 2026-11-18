@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-11-18
+
+**2.21.0: one phone page for all your computers, set up by scanning a QR code; search, filter, sort and batch remove for a long workspace list; and a key to call Viby.**
+
 ### Added
 
 - **One phone page for all your computers.** The page now shows the computer it is looking at by name, on the landing page and (once there are two) on the desk. Tap it for **Computers**: each one with who is working or waiting there, a tap to switch, and **Add a computer**. Adding takes the other computer's QR code from its Settings → Phone, scanned from inside the page (Chrome on Android), or its name and pairing code typed in; the name alone is enough for a machine on the same tailnet. Each computer keeps its own pairing code, the phone opens on the one it showed last, and a computer whose code was replaced asks for it again by name while the others carry on. **Remove** takes an added computer off the phone.
