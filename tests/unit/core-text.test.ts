@@ -26,6 +26,7 @@ const INTERNAL = [
   // A step's name and git's answer, joined by `failure` in worktrees.ts; the step names are above.
   /^X: X$/,
   /^whisper-cli /,
+  /^sherpa-onnx(?:-offline| worker| model|:)/,
   // Syncthing's own trouble, said as it happened, and two checks nobody should ever trip.
   /^Syncthing/,
   /^No free port for Syncthing/,

@@ -182,12 +182,16 @@ export class Config {
         maxHandOffs: Math.max(1, count(raw.agentTalk?.maxHandOffs, 50, defaults.agentTalk.maxHandOffs)),
         leadApplies: bool(raw.agentTalk?.leadApplies, defaults.agentTalk.leadApplies),
       },
-      orchestrator: {
-        engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
-        mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
-        model: cleanModel(str(raw.orchestrator?.model)),
-        projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
-      },
+      orchestrator: (() => {
+        const effort = str(raw.orchestrator?.effort).trim().toLowerCase();
+        return {
+          engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
+          mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
+          model: cleanModel(str(raw.orchestrator?.model)),
+          projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
+          ...(/^[a-z]{2,12}$/.test(effort) ? { effort } : {}),
+        };
+      })(),
       sync: {
         enabled: bool(raw.sync?.enabled, defaults.sync.enabled),
         // One line, as it will sit in a branch name and a notification on the other machine.

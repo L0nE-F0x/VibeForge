@@ -12,12 +12,15 @@ import type { EngineRow } from "./types.js";
 import { cleanModel, effortLevels } from "../shared/launch-options.js";
 import {
   brainKind,
+  formatSettingsRules,
   inspectsQuotas,
+  inspectsSettings,
   isSafeShellCommand,
   keySequenceFor,
   NEEDS_GO,
   parseWorkbenchAction,
   plannedId,
+  resolveSettingsStep,
   SHOW_VIEWS,
   STEP_KINDS,
   type Looking,
@@ -82,6 +85,8 @@ export interface BrainOptions {
   resume: boolean;
   /** A model the person picked; empty keeps the CLI's own default. */
   model?: string;
+  /** Reasoning effort the person picked; empty defaults to "low" so planning answers quickly. */
+  effort?: string;
   /** Codex reads the schema from a file. */
   schemaFile?: string;
 }
@@ -89,18 +94,21 @@ export interface BrainOptions {
 /**
  * One planning turn's command line, tools off or read-only, output held to the plan's schema.
  * - Grok Build 1.0.77: `-p` one turn, `--rules`, `--json-schema`, `-s <uuid>` names a session that `-r`
- *   resumes, low `--reasoning-effort`.
+ *   resumes, low `--reasoning-effort` unless configured otherwise.
  * - Claude Code 2.1: `--print`, `--append-system-prompt`, `--session-id`/`--resume`, and `--tools ""`
- *   with only options after it, as it takes every word up to the next one. Low effort, and
+ *   with only options after it, as it takes every word up to the next one. Low effort by default, and
  *   `--strict-mcp-config` with no MCP config, so none of the person's MCP servers start for a plan.
  * - Codex 0.16x: `exec --json`, `--output-schema <file>`, a read-only sandbox, the rules as developer
- *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort.
+ *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort by default.
  * - Antigravity CLI: `-p` with the rules in the message (it has no option for them), `--json-schema`,
- *   plan mode, `--conversation <id>` from its last answer. Low effort: a first turn at its default took 80 s.
+ *   plan mode, `--conversation <id>` from its last answer. Low effort by default: a first turn at its default took 80 s.
  */
 export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   const kind = brainKind(row);
   const model = cleanModel(opts.model);
+  const allowedEfforts = effortLevels(row);
+  const requestedEffort = (opts.effort ?? "").trim().toLowerCase();
+  const effort = requestedEffort && allowedEfforts.includes(requestedEffort) ? requestedEffort : "low";
   if (kind === "grok") {
     return [
       ...row.args,
@@ -117,9 +125,9 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       "--no-subagents",
       "--no-plan",
       "--disable-web-search",
-      // Planning is light work: a low effort answers sooner.
+      // Planning is light work: a low effort answers sooner unless the person chose higher.
       "--reasoning-effort",
-      "low",
+      effort,
       ...(model ? ["-m", model] : []),
       opts.resume ? "-r" : "-s",
       opts.sessionId,
@@ -139,7 +147,7 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       opts.rules,
       // Planning is light work, and needs none of the person's MCP servers (each one is started first).
       "--effort",
-      "low",
+      effort,
       "--strict-mcp-config",
       ...(model ? ["--model", model] : []),
       opts.resume ? "--resume" : "--session-id",
@@ -158,7 +166,7 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       "-c",
       'sandbox_mode="read-only"',
       "-c",
-      'model_reasoning_effort="low"',
+      `model_reasoning_effort=${JSON.stringify(effort)}`,
       // -c takes TOML, and a JSON string is a TOML basic string.
       "-c",
       `developer_instructions=${JSON.stringify(opts.rules)}`,
@@ -180,7 +188,7 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       "--mode",
       "plan",
       "--effort",
-      "low",
+      effort,
       ...(model ? ["--model", model] : []),
       ...(resume ? ["--conversation", opts.sessionId] : []),
     ];
@@ -244,11 +252,12 @@ export function orchestratorRules(context: PlanContext): string {
     "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id or agent name below; leave empty only to use the default CLI when one is marked [default]), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
     `- workspace: make a new workspace. Fields: workspace (its name, in the person's words), folder (only if they said where; otherwise leave it empty and it goes in ${projects}/<name>), git (true when they want it to be a git repository). An existing folder is only added, never changed.`,
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (the session id, branch, folder name, or keywords to search for). VibeForge runs the lookup at once and hands you the findings.",
-    "- inspect: inspect a running CLI's terminal screen and latest reply, a copy's git diff, a workspace's git status/log/diff/files (or a specific file in `folder`), or plan limits and token usage (`prompt: \"limits\"` or `\"usage\"`). VibeForge runs `inspect` immediately and hands you the findings in the same turn so you can diagnose errors, review work, or brainstorm code with the person. Fields: target (a running CLI id or copy id), workspace (workspace name), folder (optional relative file path inside workspace), prompt (what to inspect, e.g. \"screen\", \"diff\", \"status\", \"limits\", or a file path).",
+    "- inspect: inspect a running CLI's terminal screen and latest reply, a copy's git diff, a workspace's git status/log/diff/files (or a specific file in `folder`), plan limits and token usage (`prompt: \"limits\"` or `\"usage\"`), or current Viby/VibeForge/voice settings and models (`prompt: \"settings\"`, `\"voice\"`, or `\"themes\"`). VibeForge runs `inspect` immediately and hands you the findings in the same turn so you can diagnose errors, review work, or answer configuration questions accurately. Fields: target (a running CLI id or copy id), workspace (workspace name), folder (optional relative file path inside workspace), prompt (what to inspect, e.g. \"screen\", \"diff\", \"status\", \"limits\", \"settings\", \"voice\", or a file path).",
     "- tell: send a message to a CLI that is already running at its normal input prompt. Fields: target (its id below), prompt (the message).",
     "- key: answer an interactive TUI prompt or send a keystroke directly to a running CLI (such as folder trust, y/n confirmation, numbered menu choice, Enter, Escape, or Ctrl+C). Fields: target (its id below), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
     "- shell: open a shell terminal in a workspace, optionally running a command in it. Fields: workspace (workspace name), prompt (shell command to run, e.g. \"npm test\" or \"mkdir -p src/lib\"; leave empty to only open a shell).",
     "- workbench: control VibeForge's workbench directly. Fields: workspace (workspace name when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"zoom\", \"close-pane\", \"diff\", or \"mark-reviewed\"), folder (path for mkdir), branch (branch name to open as its own workspace), target (URL such as \"http://localhost:5173\" for browser, or copy/run id for diff).",
+    "- settings: change VibeForge settings — including your own planning CLI, model, reasoning effort, plan/go mode, and voice/STT model or download — directly on the person's behalf. Fields: target (\"viby\", \"viby.engine\", \"viby.model\", \"viby.effort\", \"viby.mode\", \"viby.projectsFolder\", \"voice.model\", \"voice.download\", \"voice.speaker\", \"voice.language\", \"voice.talkBack\", \"voice.talkOver\", \"voice.mouseButton\", \"voice.sendButton\", \"voice.agent\", \"defaultEngine\", \"defaultShell\", \"theme\", \"language\", \"terminalFontSize\", \"terminalFontFamily\", \"notify\", \"sounds\", \"sounds.volume\", \"tray\", \"closeToTray\", \"autostart\", \"usage\", \"planLimits\", \"quotaAlerts\", \"activity\", \"checkUpdates\", \"agentTalk\", \"agentTalk.lead\", \"agentTalk.handOff\", \"companion\", \"sync\", \"sync.name\", \"keepRuns.days\", \"keepRuns.maxMb\"), prompt (new value, such as \"parakeet-tdt-0.6b-v3-int8\", \"claude\", \"sonnet\", \"medium\", \"go\", \"tokyo-night\", \"15\", \"on\", \"off\", or \"auto\"), plus optional engine, model, effort and folder when target is \"viby\". Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
     "- stop: close a running CLI. Fields: target.",
     "- show: bring something up on the person's screen. It changes nothing, so it never needs asking about. Fields: target (a running CLI's id below, to open its terminal), or workspace (a workspace's name below, to open it in Code), or target as one of home, agents, code, chat, tasks, routines, skills, runs, viby, settings (to open that view).",
     "- read: read out verbatim to the person what a running CLI last answered (\"read me its whole answer\", \"read what Claude wrote word for word\"). Fields: target (its id below), prompt (\"all\" when they ask for all of it; otherwise empty).",
@@ -286,6 +295,7 @@ export function orchestratorRules(context: PlanContext): string {
     copies,
     ...(tasks ? ["", "Tasks on the board:", tasks] : []),
     ...(routines ? ["", "Scheduled routines:", routines] : []),
+    ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings)] : []),
   ].join("\n");
 }
 
@@ -554,21 +564,47 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push({ ...base, prompt: query, asked: query });
     } else if (kind === "inspect") {
       const copies = context.copies ?? [];
-      const cli = item.target
+      const globalInspect = inspectsQuotas(item.target) || inspectsSettings(item.target);
+      const cli = item.target && !globalInspect
         ? (context.running.find((entry) => entry.id === item.target) ??
           matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]))
         : null;
-      const copy = !cli && item.target ? (copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`])) : null;
+      const copy = !cli && item.target && !globalInspect
+        ? (copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]))
+        : null;
       const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const ws = fresh ?? matchName(item.workspace || (!cli && !copy && !inspectsQuotas(item.target) ? item.target : ""), context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const ws = fresh ?? matchName(item.workspace || (!cli && !copy && !globalInspect ? item.target : ""), context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
       const asked = cli ? `${cli.engine} · ${cli.workspace}` : copy ? `${copy.name} · ${copy.workspace}` : ws ? [ws.name, item.folder].filter(Boolean).join(" · ") : item.prompt || item.target || item.workspace || "";
       steps.push({
         ...base,
         target: cli?.id ?? copy?.id ?? "",
         workspaceId: ws?.id ?? "",
         ...(item.folder ? { folder: item.folder.trim() } : {}),
-        prompt: (item.prompt || (inspectsQuotas(item.target) ? item.target : "") || "").trim(),
+        prompt: (item.prompt || (globalInspect ? item.target : "") || "").trim(),
         asked,
+      });
+    } else if (kind === "settings") {
+      const resolved = resolveSettingsStep(
+        {
+          target: item.target,
+          prompt: item.prompt,
+          engine: item.engine,
+          model: item.model,
+          effort: item.effort,
+          folder: item.folder,
+          branch: item.branch,
+        },
+        context,
+      );
+      steps.push({
+        ...base,
+        target: (item.target ?? "").trim(),
+        prompt: (item.prompt ?? "").trim(),
+        engineId: (item.engine ?? "").trim(),
+        ...(item.model ? { model: cleanModel(item.model) } : {}),
+        ...(item.effort ? { effort: item.effort.trim().toLowerCase() } : {}),
+        ...(item.folder ? { folder: item.folder.trim() } : {}),
+        asked: resolved.asked,
       });
     } else if (kind === "key") {
       const target =
@@ -749,6 +785,10 @@ export function safeInCall(step: OrchestratorStep): boolean {
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     return !(action?.op === "pane" && action.action === "close");
+  }
+  if (step.kind === "settings") {
+    const parsed = resolveSettingsStep(step, { engines: [] });
+    return !(parsed.action?.op === "app-patch" && parsed.action.networkOn);
   }
   return true;
 }

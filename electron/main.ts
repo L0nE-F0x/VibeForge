@@ -84,7 +84,7 @@ const ctx = new MainContext({
 const { send, focusWindow, install } = ctx;
 const notify = desktopNotifier(ctx);
 
-const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats });
+const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats, voice: () => voice, tray: () => tray });
 const dock = new Dock(
   () => ctx.win,
   (state) => send("dock", state),
@@ -218,6 +218,7 @@ if (!app.requestSingleInstanceLock()) {
     ctx.service.onChange((topics) => {
       send("changed", topics);
       if (topics.includes("settings") || topics.includes("live")) tray.sync();
+      if (topics.includes("settings")) refreshPalette();
       if (topics.includes("settings")) syncCompanion(companionWire(ctx, stats, voice));
       if (topics.includes("settings")) tray.syncWords();
       // Sync starts and stops with its switch, and tells the paired machines what runs here.

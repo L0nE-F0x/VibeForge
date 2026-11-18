@@ -140,6 +140,19 @@ function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   return ISSUE_KEY[issue];
 }
 
+/** What a lookup, inspect, shell, key, workbench, settings, task or routine step will do. */
+function otherStepKey(step: OrchestratorStep): Key {
+  if (step.kind === "lookup") return "orch.lookup";
+  if (step.kind === "inspect") return "orch.inspect";
+  if (step.kind === "shell") return "orch.shell";
+  if (step.kind === "key") return "orch.key";
+  if (step.kind === "workbench") return "orch.workbench";
+  if (step.kind === "settings") return "orch.settings";
+  if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
+  const action = step.prompt.trim().toLowerCase();
+  return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
+}
+
 function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[]): string {
   if (!session) return "";
   const name = session.program || session.title.split(" · ")[0] || session.title;
@@ -555,7 +568,7 @@ function ModelPopover({
               onClick={() => {
                 setCustom(false);
                 setTyped("");
-                onSave({ ...current, engine: item.id, model: "" });
+                onSave({ ...current, engine: item.id, model: "", effort: "" });
               }}
             >
               <span className="viby-menu-check">{selected && <Check size={13} />}</span>
@@ -1489,6 +1502,13 @@ function EditableStepRow({
         <BranchField value={step.branch} onDone={(branch) => void edit({ branch })} />
         <ModelField engine={engine} value={step.model ?? ""} onDone={(model) => void edit({ model })} />
         <EffortPick engine={engine} value={step.effort ?? ""} onChange={(effort) => void edit({ effort })} />
+      </div>
+    );
+  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
+    controls = (
+      <div className="orch-step-line">
+        <strong>{t(otherStepKey(step))}</strong>
+        <span className="truncate">{step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt}</span>
       </div>
     );
   } else {

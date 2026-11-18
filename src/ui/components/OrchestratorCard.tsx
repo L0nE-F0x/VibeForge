@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { effortLevels } from "../../shared/launch-options.js";
 import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useQuery, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
@@ -8,7 +9,7 @@ import { Field, Input, Segmented, Select } from "./ui.js";
 
 const OTHER = "\u0000other";
 
-/** Settings → Orchestrator: which of your CLIs plans, with which model, and whether a plan waits for Go. */
+/** Settings → Orchestrator: which of your CLIs plans, with which model and effort, and whether a plan waits for Go. */
 export function OrchestratorCard() {
   const t = useT();
   const settings = useSettings().data;
@@ -21,11 +22,14 @@ export function OrchestratorCard() {
   const planners = engines.filter((engine) => canOrchestrate(engine));
   // Until one is picked, the first planner on this machine is the one shown (and used).
   const engineId = plannerFor(current.engine, engines) || current.engine;
+  const selectedEngine = engines.find((engine) => engine.id === engineId);
+  const levels = selectedEngine ? effortLevels(selectedEngine) : [];
+  const currentEffort = engineId === current.engine ? (current.effort ?? "") : "";
   return (
     <div className="card vstack" style={{ gap: 14 }}>
       <div className="form-grid">
         <Field label={t("orch.planner")} hint={t("orch.plannerHint")}>
-          <Select value={engineId} onChange={(event) => void save({ ...current, engine: event.target.value, model: "" })}>
+          <Select value={engineId} onChange={(event) => void save({ ...current, engine: event.target.value, model: "", effort: "" })}>
             {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
             {planners.map((engine) => (
               <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== engineId}>
@@ -37,6 +41,17 @@ export function OrchestratorCard() {
         </Field>
         <Field label={t("orch.model")} hint={t("orch.modelHint")}>
           <ModelPick key={engineId} engineId={engineId} value={engineId === current.engine ? current.model : ""} onChange={(model) => void save({ ...current, engine: engineId, model })} />
+        </Field>
+        <Field label={t("orch.effort")} hint={t("orch.effortHint")}>
+          <Select value={currentEffort} disabled={!levels.length && !currentEffort} onChange={(event) => void save({ ...current, engine: engineId, effort: event.target.value })}>
+            <option value="">{t("orch.effortLowDefault")}</option>
+            {currentEffort && !levels.includes(currentEffort) && <option value={currentEffort}>{currentEffort}</option>}
+            {levels.map((level) => (
+              <option key={level} value={level}>
+                {t("orch.effortIs", { effort: level })}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label={t("orch.modeLabel")} hint={current.mode === "plan" ? t("orch.mode.planHint") : t("orch.mode.goHint")}>
           <Segmented

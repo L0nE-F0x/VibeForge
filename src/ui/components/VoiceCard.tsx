@@ -2,9 +2,10 @@ import { Copy, Download, FolderOpen, Keyboard, Mic, Square, Volume2 } from "luci
 import { useRef, useState } from "react";
 import type { DownloadKind, VoiceSettings, VoiceStatus } from "../../shared/api.js";
 import { tildify } from "../../shared/text.js";
+import { isEnglishOnly, modelBackend, type ModelChoice } from "../../shared/voice-catalog.js";
 import { call, useAgents, useAppInfo, useSettings } from "../api.js";
 import { coreText } from "../core-text.js";
-import { LANGUAGES, useT } from "../i18n/index.js";
+import { LANGUAGES, useT, type Key } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { useAction, useToast } from "../state.js";
 import { MicButton, useDictateKeys, useDictationTarget, useVoiceStatus } from "../voice.js";
@@ -100,6 +101,16 @@ function TryIt() {
   );
 }
 
+function modelCatalogTip(choice: ModelChoice, t: (key: Key) => string): string {
+  if (choice.note === "parakeet") return t("voice.modelTip.parakeet");
+  if (choice.note === "parakeetEn") return t("voice.modelTip.parakeetEn");
+  if (choice.note === "canary") return t("voice.modelTip.canary");
+  if (choice.note === "moonshine") return t("voice.modelTip.moonshine");
+  if (choice.note === "distil") return t("voice.modelTip.distil");
+  if (choice.note === "whisperQuant") return choice.englishOnly ? t("voice.modelTip.whisperQuantEn") : t("voice.modelTip.whisperQuant");
+  return choice.englishOnly ? t("voice.englishOnly") : t("voice.multilingual");
+}
+
 export function VoiceCard() {
   const t = useT();
   const { push } = useToast();
@@ -111,6 +122,7 @@ export function VoiceCard() {
   const [patch] = useAction(async (next: Partial<VoiceSettings>) => {
     if (settings) await call("settings.save", { voice: { ...settings.voice, ...next } });
   }, t("voice.saveFailed"));
+  const [downloadSherpa] = useAction(async () => call("voice.download", "sherpa", "runtime"), t("voice.downloadFailed"));
   const [install, installing] = useAction(async () => {
     const file = await call("voice.installBindings");
     push("success", t("voice.bindingsAdded"), tildify(file, home));
@@ -118,7 +130,10 @@ export function VoiceCard() {
   if (!settings || !status) return null;
   const voice = settings.voice;
   const whisper = status.server ?? status.cli;
-  const englishOnly = status.model ? /\.en([.-]|\.bin$)/i.test(basename(status.model)) : false;
+  const sherpa = status.sherpa ?? null;
+  const activeBackend = status.model ? modelBackend(status.model) : null;
+  const hasSherpaModel = status.models.some((file) => modelBackend(file) === "sherpa");
+  const englishOnly = status.model ? isEnglishOnly(status.model) : false;
   const canSpeak = Boolean(status.piper && status.player && status.speaker);
 
   return (
@@ -127,9 +142,20 @@ export function VoiceCard() {
         <Notice icon={Mic}>{t("voice.privacy")}</Notice>
         <div className="vstack" style={{ gap: 10 }}>
           <StatusRow ok={Boolean(status.recorder)} label={t("voice.recorder")} detail={status.recorder ?? t("voice.recorderMissing")} />
-          <StatusRow ok={Boolean(whisper)} label="whisper.cpp" detail={whisper ? `${tildify(whisper, home)}${status.server ? "" : ` · ${t("voice.cliOnly")}`}` : t("voice.whisperMissing")}>
-            {!whisper && <code className="selectable mono">sudo pacman -S whisper-cpp</code>}
-          </StatusRow>
+          {(Boolean(whisper) || activeBackend !== "sherpa") && (
+            <StatusRow ok={Boolean(whisper)} label="whisper.cpp" detail={whisper ? `${tildify(whisper, home)}${status.server ? "" : ` · ${t("voice.cliOnly")}`}` : t("voice.whisperMissing")}>
+              {!whisper && <code className="selectable mono">sudo pacman -S whisper-cpp</code>}
+            </StatusRow>
+          )}
+          {(Boolean(sherpa) || hasSherpaModel || !whisper) && (
+            <StatusRow ok={Boolean(sherpa) || !hasSherpaModel} label="sherpa-onnx" detail={sherpa ? tildify(sherpa, home) : hasSherpaModel ? t("voice.whisperMissing") : t("voice.sherpaAuto")}>
+              {!sherpa && hasSherpaModel && (
+                <Button size="sm" icon={Download} busy={status.download?.kind === "sherpa"} disabled={Boolean(status.download)} onClick={() => void downloadSherpa()}>
+                  {t("voice.download")}
+                </Button>
+              )}
+            </StatusRow>
+          )}
           <StatusRow ok={Boolean(status.model)} label={t("voice.model")} detail={status.model ? tildify(status.model, home) : t("voice.modelMissing")}>
             {status.model && <Button size="sm" variant="ghost" icon={FolderOpen} tip={t("common.openFileManager")} onClick={() => void call("app.openPath", status.model!.replace(/\/[^/]+$/, ""))} />}
           </StatusRow>
@@ -162,7 +188,7 @@ export function VoiceCard() {
           <Downloads
             status={status}
             kind="model"
-            items={status.catalog.map((choice) => ({ ...choice, tip: choice.englishOnly ? t("voice.englishOnly") : t("voice.multilingual") }))}
+            items={status.catalog.map((choice) => ({ ...choice, tip: modelCatalogTip(choice, t) }))}
             hint={t("voice.downloadHint", { dir: tildify(status.modelDir, home) })}
           />
         </Field>

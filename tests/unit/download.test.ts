@@ -10,7 +10,8 @@ const netFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
 vi.mock("electron", () => ({ net: { fetch: (url: string, init: RequestInit) => netFetch(url, init) } }));
 
 const { downloadFiles } = await import("../../electron/download.js");
-const { MODEL_CATALOG, modelUrl, PIPER_COMMIT, VOICE_CATALOG, voiceUrls, WHISPER_COMMIT } = await import("../../src/core/voice.js");
+const { SHERPA_PIN } = await import("../../src/core/sherpa.js");
+const { DISTIL_SMALL_EN_COMMIT, MODEL_CATALOG, modelFiles, modelUrl, PIPER_COMMIT, VOICE_CATALOG, voiceUrls, WHISPER_COMMIT } = await import("../../src/core/voice.js");
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-download-"));
@@ -140,21 +141,41 @@ describe("downloading models and voices", () => {
 
   it("fetches every catalog file from a fixed commit, with its size and SHA-256", () => {
     expect(WHISPER_COMMIT).toMatch(/^[0-9a-f]{40}$/);
+    expect(DISTIL_SMALL_EN_COMMIT).toMatch(/^[0-9a-f]{40}$/);
     expect(PIPER_COMMIT).toMatch(/^[0-9a-f]{40}$/);
-    const pins = [
-      ...MODEL_CATALOG.map((choice) => ({ url: modelUrl(choice), pin: choice, mb: choice.mb })),
-      ...VOICE_CATALOG.flatMap((choice) => [
-        { url: voiceUrls(choice).model, pin: choice.model, mb: choice.mb },
-        { url: voiceUrls(choice).config, pin: choice.config, mb: 0 },
-      ]),
-    ];
-    for (const { url, pin, mb } of pins) {
-      expect(url).toMatch(new RegExp(`^https://huggingface\\.co/[^/]+/[^/]+/resolve/(${WHISPER_COMMIT}|${PIPER_COMMIT})/`));
+
+    for (const choice of MODEL_CATALOG) {
+      expect(choice.commit, choice.id).toMatch(/^[0-9a-f]{40}$/);
+      expect(modelUrl(choice), choice.id).toMatch(/^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[0-9a-f]{40}\//);
+      expect(choice.sha256, choice.id).toMatch(/^[0-9a-f]{64}$/);
+      expect(Math.abs(choice.bytes / 1_048_576 - choice.mb) / choice.mb, choice.id).toBeLessThan(0.1);
+      const parts = modelFiles(choice);
+      expect(parts.reduce((sum, part) => sum + part.bytes, 0), choice.id).toBe(choice.bytes);
+      for (const part of parts) {
+        expect(part.url).toMatch(new RegExp(`^https://huggingface\\.co/${choice.repo}/resolve/${choice.commit}/`));
+        expect(part.sha256, part.url).toMatch(/^[0-9a-f]{64}$/);
+        expect(part.bytes, part.url).toBeGreaterThan(1000);
+      }
+    }
+
+    const voicePins = VOICE_CATALOG.flatMap((choice) => [
+      { url: voiceUrls(choice).model, pin: choice.model, mb: choice.mb },
+      { url: voiceUrls(choice).config, pin: choice.config, mb: 0 },
+    ]);
+    for (const { url, pin, mb } of voicePins) {
+      expect(url).toMatch(new RegExp(`^https://huggingface\\.co/[^/]+/[^/]+/resolve/${PIPER_COMMIT}/`));
       expect(pin.sha256, url).toMatch(/^[0-9a-f]{64}$/);
       expect(pin.bytes, url).toBeGreaterThan(1000);
-      // The button's rough size stays near the real one.
       if (mb) expect(Math.abs(pin.bytes / 1_048_576 - mb) / mb, url).toBeLessThan(0.1);
     }
-    expect(new Set(pins.map((item) => item.pin.sha256)).size).toBe(pins.length);
+
+    for (const [arch, build] of Object.entries(SHERPA_PIN.builds)) {
+      expect(build.url, arch).toMatch(new RegExp(`^https://github\\.com/k2-fsa/sherpa-onnx/releases/download/${SHERPA_PIN.version}/`));
+      expect(build.sha256, arch).toMatch(/^[0-9a-f]{64}$/);
+      expect(build.bytes, arch).toBeGreaterThan(10_000_000);
+    }
+
+    const topHashes = [...MODEL_CATALOG.map((item) => item.sha256), ...voicePins.map((item) => item.pin.sha256), ...Object.values(SHERPA_PIN.builds).map((b) => b.sha256)];
+    expect(new Set(topHashes).size).toBe(topHashes.length);
   });
 });

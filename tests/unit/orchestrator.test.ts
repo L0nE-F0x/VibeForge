@@ -1813,3 +1813,158 @@ describe("Viby speaks up", () => {
     await ctx.svc.close();
   });
 });
+
+describe("Viby settings awareness and self-configuration", () => {
+  it("passes configured reasoning effort to Grok, Claude, Codex and Antigravity, falling back to low when unset or invalid", () => {
+    const grokRow = { id: "grok", label: "Grok Build", bin: "grok", args: [] };
+    const claudeRow = { id: "claude", label: "Claude Code", bin: "claude", args: [] };
+    const codexRow = { id: "codex", label: "Codex", bin: "codex", args: [] };
+    const agyRow = { id: "agy", label: "Antigravity", bin: "agy", args: [] };
+
+    expect(brainArgs(grokRow, { text: "hi", rules: "r", sessionId: "s", resume: false, effort: "high" })).toEqual(
+      expect.arrayContaining(["--reasoning-effort", "high"]),
+    );
+    expect(brainArgs(claudeRow, { text: "hi", rules: "r", sessionId: "s", resume: false, effort: "medium" })).toEqual(
+      expect.arrayContaining(["--effort", "medium"]),
+    );
+    expect(brainArgs(claudeRow, { text: "hi", rules: "r", sessionId: "s", resume: false, effort: "minimal" })).toEqual(
+      expect.arrayContaining(["--effort", "low"]),
+    );
+    expect(brainArgs(codexRow, { text: "hi", rules: "r", sessionId: "", resume: false, schemaFile: "/w/s.json", effort: "high" })).toContain(
+      'model_reasoning_effort="high"',
+    );
+    expect(brainArgs(agyRow, { text: "hi", rules: "r", sessionId: "", resume: false, effort: "max" })).toEqual(
+      expect.arrayContaining(["--effort", "max"]),
+    );
+  });
+
+  it("shows Viby its own settings & voice models, inspects settings live, and reconfigures itself, voice STT, and VibeForge settings", async () => {
+    const downloads: Array<[string, string]> = [];
+    let autostartOn = false;
+    const ctx = setup();
+    const baseEnPath = path.join(ctx.dataRoot, "models", "ggml-base.en.bin");
+    fs.mkdirSync(path.join(ctx.dataRoot, "models"), { recursive: true });
+    fs.writeFileSync(baseEnPath, Buffer.alloc(1_000_001));
+    ctx.host.voiceStatus = () => ({
+      ready: true,
+      recorder: "pw-record",
+      server: "/usr/bin/whisper-server",
+      cli: "/usr/bin/whisper-cli",
+      sherpa: null,
+      model: baseEnPath,
+      models: [baseEnPath],
+      modelDir: path.join(ctx.dataRoot, "models"),
+      language: "en",
+      piper: "/usr/bin/piper",
+      voices: [],
+      speaker: null,
+      voiceDir: path.join(ctx.dataRoot, "voices"),
+      download: null,
+      downloadError: null,
+    });
+    ctx.host.voiceDownload = (kind, id) => downloads.push([kind, id]);
+    ctx.host.autostart = {
+      get: () => autostartOn,
+      set: (on) => {
+        autostartOn = on;
+        return autostartOn;
+      },
+    };
+    const enginesFile = path.join(ctx.configRoot, "engines.json");
+    const enginesJson = JSON.parse(fs.readFileSync(enginesFile, "utf8")) as { engines: unknown[] };
+    enginesJson.engines.push(
+      { id: "grok", label: "Grok Build", bin: "argy", args: [] },
+      { id: "claude", label: "Claude Code", bin: "pasty", args: [] },
+    );
+    fs.writeFileSync(enginesFile, JSON.stringify(enginesJson));
+
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7", effort: "low", projectsFolder: "" } });
+
+    const calls: string[][] = [];
+    const answers: Array<Record<string, unknown>> = [
+      // Turn 1: inspect settings & voice in two-pass turn
+      { say: "", steps: [{ kind: "inspect", prompt: "settings and voice" }] },
+      { say: "You're on Grok 4.7 with ggml-base.en.bin.", steps: [] },
+      // Turn 2: plan a settings step to switch voice model, theme, font size, sound volume, autostart, and Viby itself to Claude Sonnet medium effort in Go mode
+      {
+        say: "Switching voice to Parakeet v3, updating your theme and switching myself to Claude Sonnet on medium effort.",
+        steps: [
+          { kind: "settings", target: "voice.model", prompt: "parakeet v3" },
+          { kind: "settings", target: "voice.speaker", prompt: "en_US-lessac-medium" },
+          { kind: "settings", target: "voice.language", prompt: "en" },
+          { kind: "settings", target: "theme", prompt: "apex-forge" },
+          { kind: "settings", target: "terminalFontSize", prompt: "14" },
+          { kind: "settings", target: "sounds.volume", prompt: "50%" },
+          { kind: "settings", target: "autostart", prompt: "on" },
+          { kind: "settings", target: "viby", engine: "claude", model: "sonnet", effort: "medium", prompt: "go" },
+        ],
+      },
+      // Turn 3 (now running on Claude Code with --model sonnet --effort medium!): change Viby effort to high on the same session
+      {
+        say: "Moved myself to high effort.",
+        steps: [{ kind: "settings", target: "viby.effort", prompt: "high" }],
+      },
+      // Turn 4 (resumed Claude session): sees `(Updated settings: ...)` with effort=high!
+      { say: "Now running on high effort.", steps: [] },
+    ];
+
+    ctx.svc.orchestrator.runner = async (argv) => {
+      calls.push(argv);
+      const next = answers.shift() ?? { say: "", steps: [] };
+      return { code: 0, stdout: JSON.stringify({ structuredOutput: next, structured_output: next }), stderr: "", timedOut: false };
+    };
+
+    // Turn 1: rules include Viby's active planner/model/effort and installed + catalog voice models; inspect returns live configuration
+    await ctx.svc.orchestratorAsk("what settings and voice models do I have?");
+    const turn1Rules = calls[0][calls[0].indexOf("--rules") + 1];
+    expect(turn1Rules).toContain("Your settings & VibeForge configuration:");
+    expect(turn1Rules).toContain("planner=grok, model=grok-4.7, effort=low, mode=plan");
+    expect(turn1Rules).toContain("installed STT models: [ggml-base.en.bin]");
+    expect(turn1Rules).toContain("parakeet-tdt-0.6b-v3-int8 (640MB, sherpa");
+    expect(calls[1][calls[1].indexOf("-p") + 1]).toContain("[Findings from VibeForge]");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("You're on Grok 4.7 with ggml-base.en.bin.");
+
+    // Turn 2: plan waits in `plan` mode; edit one step on the card, then run Go!
+    await ctx.svc.orchestratorAsk("switch voice to parakeet v3 and switch yourself to claude sonnet medium");
+    const waitingTurn = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(waitingTurn.plan).toBe("waiting");
+    const fontStep = waitingTurn.steps!.find((s) => s.target === "terminalFontSize")!;
+    ctx.svc.orchestratorEditStep(waitingTurn.id, fontStep.id, { prompt: "15" });
+    expect(ctx.svc.orchestratorView().turns.at(-1)!.steps!.find((s) => s.id === fontStep.id)?.asked).toBe("Terminal font size · 15px");
+
+    await ctx.svc.orchestratorRun(waitingTurn.id);
+    const updated = ctx.svc.getSettings();
+    expect(updated.voice.model).toBe(path.join(ctx.dataRoot, "models", "parakeet-tdt-0.6b-v3-int8"));
+    expect(updated.voice.speaker).toBe(path.join(ctx.dataRoot, "voices", "en_US-lessac-medium.onnx"));
+    expect(updated.voice.language).toBe("en");
+    expect(downloads).toEqual([
+      ["model", "parakeet-tdt-0.6b-v3-int8"],
+      ["voice", "en_US-lessac-medium"],
+    ]);
+    expect(updated.theme).toBe("apex-forge");
+    expect(updated.terminalFontSize).toBe(15);
+    expect(updated.sounds.volume).toBe(0.5);
+    expect(autostartOn).toBe(true);
+    expect(updated.orchestrator).toEqual({ engine: "claude", mode: "go", model: "sonnet", projectsFolder: "", effort: "medium" });
+
+    // Turn 3: now planned by Claude Code (`pasty`) with `--model sonnet --effort medium`, and since mode is now `go`, runs immediately!
+    await ctx.svc.orchestratorAsk("bump your effort to high");
+    const claudeCall = calls[3];
+    expect(claudeCall[0]).toBe("/usr/bin/pasty");
+    expect(claudeCall).toEqual(expect.arrayContaining(["--model", "sonnet", "--effort", "medium"]));
+    const until = async (check: () => boolean) => {
+      for (let i = 0; i < 60 && !check(); i += 1) await new Promise((r) => setTimeout(r, 20));
+      expect(check()).toBe(true);
+    };
+    await until(() => ctx.svc.getSettings().orchestrator.effort === "high");
+
+    // Turn 4: resumes the same Claude session with `--effort high` and prepends `(Updated settings: ...)`!
+    await ctx.svc.orchestratorAsk("what effort are you on now?");
+    const resumedClaude = calls[4];
+    expect(resumedClaude).toEqual(expect.arrayContaining(["--resume", "--effort", "high"]));
+    expect(resumedClaude.at(-1)).toContain("(Updated settings:");
+    expect(resumedClaude.at(-1)).toContain("effort=high");
+
+    await ctx.svc.close();
+  });
+});

@@ -5,17 +5,20 @@
 import type { EngineRow } from "../core/types.js";
 import { effortLevels } from "./launch-options.js";
 import { inspectsQuotas, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
+import { inspectsSettings, resolveSettingsStep, type PlanSettingsContext } from "./orchestrator-settings.js";
 
 export * from "./orchestrator-intel.js";
+export * from "./orchestrator-settings.js";
 
 /**
  * start, tell, stop: a CLI (or an agent). workspace: a new workspace (its folder made if it isn't there).
  * apply, discard: a copy waiting for review. show: a running CLI, workspace or view.
  * read: what a running CLI last answered, shown on the card and read out in a call.
- * inspect: read a CLI's screen/reply, a copy's diff, a workspace's git status/files, or quotas for Viby.
+ * inspect: read a CLI's screen/reply, a copy's diff, a workspace's git status/files, quotas, or settings for Viby.
  * key: send a keystroke/answer (yes, no, enter, escape, option number) to an interactive TUI prompt.
  * shell: open a shell terminal or run a command in a workspace.
  * workbench: folders, git branches, browser dock, panes, diffs, or marking runs reviewed.
+ * settings: change VibeForge settings, including Viby's own planner/model/effort and voice/STT models.
  * lookup: search runs, git branches and project folders on disk. task: run or create a task. routine: run or toggle a routine.
  */
 export type OrchestratorStepKind =
@@ -31,6 +34,7 @@ export type OrchestratorStepKind =
   | "key"
   | "shell"
   | "workbench"
+  | "settings"
   | "lookup"
   | "task"
   | "routine";
@@ -49,6 +53,7 @@ export const STEP_KINDS: readonly OrchestratorStepKind[] = [
   "key",
   "shell",
   "workbench",
+  "settings",
   "lookup",
   "task",
   "routine",
@@ -312,6 +317,8 @@ export interface PlanContext {
   routines?: Array<{ id: string; name: string; schedule: string; enabled: boolean; agent?: string }>;
   /** Where a new workspace goes when the person doesn't say. */
   projectsFolder?: string;
+  /** Viby's own settings, voice/STT models, and VibeForge configuration. */
+  settings?: PlanSettingsContext;
 }
 
 /**
@@ -354,7 +361,7 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     return step.prompt.trim() ? null : "prompt";
   }
   if (step.kind === "inspect") {
-    if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target)) return null;
+    if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target) || inspectsSettings(step.prompt) || inspectsSettings(step.target)) return null;
     if (step.target) {
       const hasCli = context.running.some((item) => item.id === step.target);
       const hasCopy = (context.copies ?? []).some((item) => item.id === step.target);
@@ -362,6 +369,9 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     }
     if (step.workspaceId) return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
     return "workspace";
+  }
+  if (step.kind === "settings") {
+    return resolveSettingsStep(step, context).issue;
   }
   if (step.kind === "key") {
     if (!context.running.some((item) => item.id === step.target)) return "target";
