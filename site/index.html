@@ -189,7 +189,7 @@
                 <span class="m-rail-btn"><svg><use href="#i-sparkles" /></svg><i>Skills</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-history" /></svg><i>Runs</i><b class="m-badge" data-demo-badge>2</b></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-workflow" /></svg><i>Viby</i></span>
-                <span class="m-rail-btn m-rail-call m-hide-sm"><svg><use href="#i-phone" /></svg><i>Call</i></span>
+                <span class="m-rail-btn m-rail-call m-hide-sm"><!-- brand:mark --><svg class="mark" viewBox="0 0 11 11" width="22" height="22" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1" class="px-s0"/><rect x="4" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="1" width="1" height="1" class="px-s0"/><rect x="6" y="1" width="1" height="1" class="px-s0"/><rect x="5" y="2" width="1" height="1" class="px-s0"/><rect x="0" y="3" width="1" height="1" class="px-s1"/><rect x="1" y="3" width="1" height="1" class="px-s1"/><rect x="9" y="3" width="1" height="1" class="px-s1"/><rect x="10" y="3" width="1" height="1" class="px-s1"/><rect x="0" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="4" width="1" height="1" class="px-s1"/><rect x="9" y="4" width="1" height="1" class="px-s1"/><rect x="10" y="4" width="1" height="1" class="px-s1"/><rect x="1" y="5" width="1" height="1" class="px-s2"/><rect x="2" y="5" width="1" height="1" class="px-s2"/><rect x="8" y="5" width="1" height="1" class="px-s2"/><rect x="9" y="5" width="1" height="1" class="px-s2"/><rect x="1" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="6" width="1" height="1" class="px-s2"/><rect x="8" y="6" width="1" height="1" class="px-s2"/><rect x="9" y="6" width="1" height="1" class="px-s2"/><rect x="2" y="7" width="1" height="1" class="px-s2"/><rect x="3" y="7" width="1" height="1" class="px-s2"/><rect x="7" y="7" width="1" height="1" class="px-s2"/><rect x="8" y="7" width="1" height="1" class="px-s2"/><rect x="2" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="8" width="1" height="1" class="px-s3"/><rect x="7" y="8" width="1" height="1" class="px-s3"/><rect x="8" y="8" width="1" height="1" class="px-s3"/><rect x="3" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="9" width="1" height="1" class="px-s3"/><rect x="6" y="9" width="1" height="1" class="px-s3"/><rect x="7" y="9" width="1" height="1" class="px-s3"/><rect x="4" y="10" width="1" height="1" class="px-s3"/><rect x="5" y="10" width="1" height="1" class="px-s3"/><rect x="6" y="10" width="1" height="1" class="px-s3"/></svg><!-- /brand:mark --><i>Ask</i></span>
                 <span class="m-rail-foot is-live" data-demo-pulse><svg><use href="#i-activity" /></svg><i data-demo-live>1 live</i><span class="m-meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-circle-help" /></svg><i>Help</i></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-settings" /></svg><i>Settings</i></span>
@@ -339,9 +339,9 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Tell VibeForge what to start</h3>
-              <p>Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> anywhere to open Viby, VibeForge's orchestrator, and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
+              <p>Click <b>Ask</b> at the foot of the rail, or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> from any view, to open Viby, VibeForge's orchestrator, and type or dictate what you want running: <i>“In web-app, have Claude Code fix the mobile nav menu, and start Codex to write tests for checkout.”</i> One of your signed-in CLIs (Grok Build, Claude Code, Codex, or Antigravity) turns that into a plan without touching any files. Press <b>Go</b> and each CLI opens on its own git branch in a separate worktree, leaving your main checkout untouched.</p>
               <p>No API key and nothing extra to download: planning uses the CLI subscription you're already signed in to. Edit any step or branch name before pressing <b>Go</b>, or switch to <b>Just go</b> to launch right away. It starts only the CLIs and agents you name, or your default CLI when you don't say which.</p>
-              <p>It runs your saved agents, tasks and routines too (<i>“have Atlas review the README”</i>, <i>“run the fix-login task”</i>, <i>“pause the nightly routine”</i>), and can look up a past session, branch or project folder before it plans.</p>
+              <p>It runs your saved agents, tasks and routines too (<i>“have Atlas review the README”</i>, <i>“run the fix-login task”</i>, <i>“pause the nightly routine”</i>). Before it plans it can read a terminal's screen, a CLI's last answer, a copy's diff, a workspace's git status or your plan limits, and it can chain steps so one starts when the last CLI has finished. Ask it to change VibeForge itself, too: <i>“plan with Codex”</i>, <i>“download a Piper voice”</i>, <i>“use the dark theme”</i>.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">
@@ -362,18 +362,17 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-phone" /></svg></span>
               <h3>Or call Viby and talk it through</h3>
-              <p>Click <b>Call</b> at the foot of the rail and just talk. Say something, pause, and Viby answers out loud, then listens again until you hang up. It works from any view and knows which workspace and terminal you're looking at, so <i>“tell this one to run the tests”</i> and <i>“switch to the landing-page workspace”</i> mean the ones in front of you, and the window follows what Viby does.</p>
-              <p>When a CLI it started or told finishes its turn, Viby says so, and for Claude Code, Codex, Grok Build and Kimi it reads you the first lines of the answer. <i>“What did Claude say?”</i> reads the rest. Plans still wait for <b>Go</b>, and saying <i>“go”</i> counts. Talk over Viby and it stops to listen, where it can't hear itself: PipeWire cancels the echo for the call, or you wear headphones.</p>
-              <p>All of it stays on your machine. whisper.cpp hears you, Piper speaks, and a small speech model tells your voice from your keyboard. Each answer is a turn of your own planning CLI, so expect a few seconds.</p>
+              <p>Click <b>Call Viby</b> in the <b>Ask</b> bar or on Viby's own tab, or press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> from any view, and just talk. Your words appear while you're still speaking, Viby answers out loud, then listens again until you hang up or say goodbye. It works from any view and knows which workspace and terminal you're looking at, so <i>“tell this one to run the tests”</i> and <i>“switch to the landing-page workspace”</i> mean the ones in front of you, and the window follows what Viby does.</p>
+              <p>When a CLI it started or told finishes its turn, Viby says so, and for Claude Code, Codex, Grok Build and Kimi it reads you the first lines of the answer. <i>“What did Claude say?”</i> reads the rest. Safe steps happen at once on a call: starting a CLI in its own copy, telling a CLI something, opening a workspace, running a task. Stopping a CLI, applying or discarding a copy, or editing uncommitted work in place still waits for <i>“go”</i>. Talk over Viby, even while it's thinking, and it stops to listen, where it can't hear itself: PipeWire cancels the echo for the call, or you wear headphones. <b>Mute</b> when you need a moment.</p>
+              <p>All of it stays on your machine. Whisper, Parakeet, Canary or Moonshine hears you (pick one in <b>Settings → Voice</b>), Piper speaks, and a small speech model tells your voice from your keyboard. Each answer is a turn of your own planning CLI, so expect a few seconds.</p>
             </div>
             <div class="art art-orch art-call" aria-hidden="true">
               <div class="or-bar">
                 <div class="or-head"><svg><use href="#i-phone" /></svg><b>On a call with Viby</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
                 <div class="or-you">Tell this one to run the tests.</div>
-                <div class="or-say"><svg><use href="#i-volume" /></svg>Telling Claude Code in landing-page. Say go, or cancel.</div>
-                <div class="or-you">Go.</div>
+                <div class="or-say"><svg><use href="#i-volume" /></svg>Telling Claude Code in landing-page to run the tests.</div>
                 <div class="or-say"><svg><use href="#i-volume" /></svg>Claude Code in landing-page finished its turn. It says: all 18 tests pass.</div>
-                <div class="or-foot"><span>or just talk</span><span>Stop reading</span><span class="or-hang"><svg><use href="#i-phone" /></svg>Hang up</span></div>
+                <div class="or-foot"><span>or just talk</span><span>Mute</span><span class="or-hang"><svg><use href="#i-phone" /></svg>Hang up</span></div>
               </div>
             </div>
           </article>
@@ -455,6 +454,19 @@
             </div>
           </article>
 
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-folder-open" /></svg></span>
+              <h3>A long workspace list, narrowed</h3>
+              <p>Filter by <b>Waiting for you</b>, <b>CLI working</b>, <b>Uncommitted changes</b>, <b>Copy waiting for review</b>, <b>Terminals open</b> or <b>Synced</b>, each with a count. Sort by name, your order, parent folder, recent activity or changes, group by folder, and search by branch.</p>
+            </div>
+            <div class="art art-ember art-filter" aria-hidden="true">
+              <div class="em-chips"><span class="tk-chip">Waiting for you · 1</span><span class="tk-chip">Uncommitted · 2</span></div>
+              <div class="em-row wants"><i class="em-px lit"></i><b>landing-page</b><span>3 files changed · your turn</span></div>
+              <div class="em-row"><i class="em-px work"></i><b>weather-api</b><span>rate-limit · 1 file changed</span></div>
+            </div>
+          </article>
+
           <article class="card wide reveal" data-glow>
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-bot" /></svg></span>
@@ -497,7 +509,7 @@
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-mic" /></svg></span>
               <h3>Talk to your agents</h3>
               <p>
-                Hold <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd>, or a mouse button you pick, to dictate into the active chat or terminal, then click <b>Send</b> without reaching for the keyboard. Press <kbd>Super</kbd> <kbd>Alt</kbd> <kbd>V</kbd> from anywhere on your desktop to dictate to a chosen agent, and your words wait in its chat until you hit Enter. Transcribed locally with whisper.cpp.
+                Hold <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd>, or a mouse button you pick, to dictate into the active chat or terminal, then click <b>Send</b> without reaching for the keyboard. Press <kbd>Super</kbd> <kbd>Alt</kbd> <kbd>V</kbd> from anywhere on your desktop to dictate to a chosen agent, and your words wait in its chat until you hit Enter. Transcribed on your machine by the speech model you pick: Whisper, Parakeet, Canary or Moonshine.
               </p>
             </div>
             <div class="art art-voice" data-voice-art aria-hidden="true">
@@ -661,7 +673,7 @@
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
           <h2>Inside the real app.</h2>
-          <p>Screenshots of VibeForge 2.20.0 at work, in the Apex Forge theme.</p>
+          <p>Screenshots of VibeForge 2.23 at work, in the Apex Forge theme.</p>
         </div>
         <div class="tour reveal" data-tour>
           <div class="tour-tabs" role="tablist" aria-label="Screenshots">
@@ -672,16 +684,16 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=2.20.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, eight terminals running, two runs to review, Claude Code and Codex waiting for you by name, the terminals live now, the six workspaces with three glowing because their CLIs are waiting, and Call at the foot of the rail." />
+              <img src="assets/app-home.webp?v=2.23.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, eight terminals running, two runs to review, Claude Code and Codex waiting for you by name, the terminals live now, the six workspaces with three glowing because their CLIs are waiting, and Ask, Viby's button, at the foot of the rail." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=2.20.0" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.20.0 release tag at the top, a diffstat of the call's code from 2.19.0 to 2.20.0, Claude Code summing up the release in the focused pane, three workspaces glowing in the list, and the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=2.23.0" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.23.0 release tag at the top, a diffstat of Viby's and the workspace list's code from 2.22.0 to 2.23.0, Claude Code summing up the release in the focused pane, three workspaces glowing in the list, and the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp?v=2.20.0" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace and working in its own copy, the finished ones with their diff." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=2.23.0" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace and working in its own copy, the finished ones with their diff." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-viby.webp?v=2.20.0" width="1890" height="1138" alt="Viby during a call: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan, each step with Open in Code, Review changes, Apply and Discard for its own copy. Below the plan Viby notes that Claude Code finished its turn, with the first line of its answer, and the call's bar is reading that aloud, with Stop reading and Hang up. Beside it the two copies wait under To review above the CLIs running." loading="lazy" />
+              <img src="assets/app-viby.webp?v=2.23.0" width="1890" height="1138" alt="Viby's tab during a call: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan and leaves chips to open each CLI and review its changes. Below, Viby notes that Claude Code finished its turn, with chips to open it in Code, review the changes and read its answer. The call bar along the bottom shows Speaking, with Stop reading, Mute and Hang up, and 2 to review waits at the top right. In the rail, Ask has become On call." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs.</p>
@@ -777,7 +789,8 @@
             <dl class="keys">
               <div><dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Jump to any agent, chat, workspace, task, routine, or skill, or search past runs by transcript</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>1</kbd>…<kbd>9</kbd></dt><dd>Home, Agents, Code, Chat, Tasks, Routines, Skills, Runs, Viby</dd></div>
-              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Open Viby from any view to start CLIs on new branches</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></dt><dd>Ask Viby from any view to start CLIs on new branches</dd></div>
+              <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>L</kbd></dt><dd>Call Viby, or hang up</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>D</kbd>/<kbd>E</kbd></dt><dd>Split a new terminal to the right or below</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>M</kbd></dt><dd>Maximize the focused pane</dd></div>
               <div><dt><kbd>Ctrl</kbd><kbd>Z</kbd></dt><dd>Undo a delete while its toast is up</dd></div>

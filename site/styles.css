@@ -1993,6 +1993,13 @@ h2 {
   color: var(--fg-2);
 }
 
+.em-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
 .em-row b {
   color: var(--fg);
   font-weight: 600;

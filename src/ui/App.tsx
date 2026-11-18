@@ -14,7 +14,7 @@ import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Up
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
-import { CallBar, CallRailButton, TOGGLE_CALL_EVENT } from "./call.js";
+import { CallBar, TOGGLE_CALL_EVENT, VibyRailButton } from "./call.js";
 import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
@@ -351,7 +351,7 @@ function Rail() {
         );
       })}
       <div className="rail-foot">
-        <CallRailButton />
+        <VibyRailButton inVibyTab={route.view === "orchestrator"} onOpen={() => window.dispatchEvent(new Event(OPEN_ORCHESTRATOR_EVENT))} />
         <button
           type="button"
           className="rail-btn"

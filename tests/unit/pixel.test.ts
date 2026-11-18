@@ -63,6 +63,14 @@ describe("pixel art", () => {
     for (const cell of idle.cells) {
       expect(byKey.get(`${14 - cell.x},${cell.y}`)).toBe(cell.tone);
     }
+    // The body holds still in every pose (only the spark, arm tips and face change), so it doesn't jitter.
+    const body = (mood: VibyMood, frame: number) =>
+      vibyArt(mood, frame)
+        .cells.filter((cell) => cell.y >= 5 && cell.tone !== "visor" && cell.tone !== "eye")
+        .map((cell) => `${cell.x},${cell.y},${cell.tone}`)
+        .sort()
+        .join(" ");
+    for (const mood of moods) for (let frame = 0; frame < 4; frame += 1) expect(body(mood, frame)).toBe(body("idle", 0));
     // Blink frame closes top row of eyes compared with open frame.
     expect(vibyArt("idle", 1).cells.filter((cell) => cell.tone === "eye").length).toBeLessThan(
       idle.cells.filter((cell) => cell.tone === "eye").length,
