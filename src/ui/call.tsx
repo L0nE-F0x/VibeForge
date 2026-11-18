@@ -1,7 +1,9 @@
-import { Mic, MicOff, Phone, PhoneOff, Square, Volume2 } from "lucide-react";
+import { Mic, MicOff, Phone, PhoneOff, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CallState } from "../shared/api.js";
+import type { VibyMood } from "../shared/pixel.js";
 import { call, on } from "./api.js";
+import { VibySprite } from "./components/Pixel.js";
 import { tipProps } from "./components/Tooltip.js";
 import { Button } from "./components/ui.js";
 import { useT } from "./i18n/index.js";
@@ -13,14 +15,23 @@ import { useBarLayer } from "./voice.js";
 // A call with Viby (electron/call.ts): the microphone stays open and what is said goes to Viby
 // without waiting for Enter, so the call is started on purpose and shows for as long as it is on.
 // The rail's button starts and ends it from any view and is lit while it listens; a bar comes up
-// only while something is happening (you are heard, Viby thinks or speaks, a plan waits for "go").
+// outside Viby's own tab while something is happening.
 
 const OFF: CallState = { on: false, phase: "listening", level: 0, heard: "", said: "", waiting: false, spoken: false, error: null, talkOver: false, heardItself: false, muted: false };
 /** How long an answer that wasn't read aloud stays on the bar. */
 const SAID_MS = 9000;
 /** How long a call that has just begun says what to do, unless something is said sooner. */
 const GREET_MS = 8000;
-const METER_CELLS = 14;
+export const METER_CELLS = 14;
+
+/** Collapse the call's five mechanical phases into Viby's clear live mood. */
+export function callMood(current: CallState): VibyMood {
+  if (!current.on) return "idle";
+  if (current.phase === "speaking") return "speaking";
+  if (current.phase === "thinking" || current.phase === "transcribing") return "thinking";
+  if (current.muted) return "muted";
+  return "listening";
+}
 
 /** Starts a call, or hangs up: the window's own key for it (shortcuts.ts, "app.call") says so with this. */
 export const TOGGLE_CALL_EVENT = "vibeforge:toggle-call";
@@ -54,7 +65,7 @@ export function useCall(): CallState {
 }
 
 /** Start a call, or hang up. Without dictation set up, it says what is missing instead. */
-function useCallToggle(): () => void {
+export function useCallToggle(): () => void {
   const t = useT();
   const { go } = useNav();
   const { push, fail } = useToast();
@@ -121,9 +132,10 @@ export function CallButton() {
   );
 }
 
-/** What the call is doing, while it is doing something. Quietly listening shows in the rail alone. */
+/** What the call is doing outside Viby's own panel. Inside Viby, the panel itself is the call. */
 export function CallBar() {
   const t = useT();
+  const { route, go } = useNav();
   const { push } = useToast();
   const current = useCall();
   const ref = useRef<HTMLDivElement>(null);
@@ -175,14 +187,27 @@ export function CallBar() {
   const muted = Boolean(current.muted);
   const quiet = current.phase === "listening" && !current.waiting && !unread && !muted;
   const greeting = greet && quiet && !current.heard && !current.said;
-  const shown = current.on && (!quiet || greeting);
+  const shown = route.view !== "orchestrator" && current.on && (!quiet || greeting);
   useBarLayer(ref);
   if (!shown) return null;
 
+  const mood = callMood(current);
   const { phase } = current;
   const lit = Math.round(current.level * METER_CELLS);
+  const stateLabel =
+    mood === "speaking"
+      ? t("call.state.speaking")
+      : mood === "thinking"
+        ? t("call.state.thinking")
+        : muted
+          ? t("call.muted")
+          : current.waiting
+            ? t("call.waitingGo")
+            : t("call.state.listening");
+
   return (
     <div ref={ref} className="listening call" role="status" aria-live="polite">
+      <VibySprite mood={mood} size={20} level={current.level} />
       {phase === "hearing" && !muted && (
         <span className="meter" aria-hidden>
           {Array.from({ length: METER_CELLS }, (_, i) => (
@@ -190,21 +215,13 @@ export function CallBar() {
           ))}
         </span>
       )}
-      {(phase === "transcribing" || phase === "thinking") && <span className="spinner" />}
-      {phase === "speaking" && <Volume2 size={15} className="accent-text" />}
-      {phase === "listening" && (muted ? <MicOff size={15} className="faint" /> : <Phone size={15} className="accent-text" />)}
-      <span className="listening-text">
-        <strong>
-          {phase === "hearing" && t("call.hearing")}
-          {phase === "transcribing" && t("voice.transcribing")}
-          {phase === "thinking" && t("call.thinking")}
-          {phase === "speaking" && t("orch.title")}
-          {phase === "listening" && (muted ? t("call.muted") : current.waiting ? t("call.waitingGo") : t("orch.title"))}
-        </strong>
-        {phase === "thinking" && current.heard && <span className="faint truncate"> {current.heard}</span>}
+      <button type="button" className="listening-text listening-jump" onClick={() => go({ view: "orchestrator" })}>
+        <strong>{stateLabel}</strong>
+        {phase === "hearing" && current.liveHeard && <span className="faint truncate"> {current.liveHeard}</span>}
+        {(phase === "thinking" || phase === "transcribing") && (current.liveHeard || current.heard) && <span className="faint truncate"> {current.liveHeard || current.heard}</span>}
         {(phase === "speaking" || (phase === "listening" && unread)) && current.said && <span className="faint truncate"> {current.said}</span>}
         {greeting && <span className="faint truncate"> {t("call.listeningHint")}</span>}
-      </span>
+      </button>
       {phase === "thinking" && (
         <Button size="sm" variant="ghost" icon={Square} onClick={() => void call("orchestrator.stopThinking")}>
           {t("orch.stop")}

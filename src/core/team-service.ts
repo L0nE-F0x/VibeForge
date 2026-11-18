@@ -187,6 +187,10 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.ask(text, looking);
   }
 
+  orchestratorLooking(looking: Looking | null): void {
+    this.orchestrator.looking = looking;
+  }
+
   /**
    * A call is on (`heard` takes what Viby says by itself: a note about a CLI, an answer read out),
    * or over (null). While one is on, the window follows what Viby starts and tells.

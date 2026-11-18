@@ -3,6 +3,12 @@ import fs from "node:fs";
 import { describeError, type LogFile } from "../src/core/log.js";
 import { findPiper, planPlayer, voiceRate, type Player } from "../src/core/voice.js";
 
+export interface SpeechProgress {
+  text: string;
+  startedAt: number;
+  durationMs: number;
+}
+
 interface Utterance {
   text: string;
   voice: string;
@@ -31,6 +37,7 @@ export class Speaker {
   private standby: StandbyPiper | null = null;
   private keepWarm = false;
   private warmTimer: NodeJS.Timeout | null = null;
+  private progressListener: ((info: SpeechProgress | null) => void) | null = null;
 
   constructor(
     private readonly opts: {
@@ -40,6 +47,11 @@ export class Speaker {
       speaking: (text: string | null) => void;
     },
   ) {}
+
+  /** Subscribe to audio playback timing (first audio arrival + total synthesized duration). */
+  progress(listener: ((info: SpeechProgress | null) => void) | null): void {
+    this.progressListener = listener;
+  }
 
   piper(): string | null {
     return findPiper(this.opts.resolveBin, process.env.VIBEFORGE_PIPER);
@@ -169,6 +181,22 @@ export class Speaker {
     const argv = player.argv(rate);
     const play = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "ignore", "pipe"] });
     this.current = { piper: synth, player: play, item };
+    let bytes = 0;
+    let startedAt = 0;
+    let ended = false;
+    synth.stdout?.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (!startedAt && !ended) {
+        startedAt = Date.now();
+        this.progressListener?.({ text: item.text, startedAt, durationMs: 0 });
+      }
+    });
+    synth.stdout?.on("end", () => {
+      if (startedAt && !ended) {
+        const durationMs = Math.max(180, Math.round((bytes / (rate * 2)) * 1000));
+        this.progressListener?.({ text: item.text, startedAt, durationMs });
+      }
+    });
     synth.stdout?.pipe(play.stdin!);
     play.stdin?.on("error", () => undefined);
     synth.on("error", (error) => this.opts.log.warn(`Voice: Piper failed to start: ${describeError(error)}`));
@@ -176,10 +204,10 @@ export class Speaker {
     synth.on("close", (code, signal) => {
       if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${getStderr().trim().split("\n").pop() ?? ""}`);
     });
-    let ended = false;
     const end = () => {
       if (ended) return;
       ended = true;
+      this.progressListener?.(null);
       if (synth.exitCode === null && synth.signalCode === null) synth.kill("SIGTERM");
       this.current = null;
       item.resolve();
