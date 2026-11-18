@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-11-18
+
+**2.23.0: Viby's panel is the call, with a pixel V and chips you can tap; faster speech models that stay on this machine; and a workspace list you can filter, sort and group.**
+
+### Added
+
+- **Viby's panel is the call.** The Vibe tab opens on a pixel V and one **Call Viby** button, with a line of what it sees: workspaces, running CLIs, and copies waiting for review. A live call shows Listening, Thinking, or Speaking, and your words appear while you are still talking. Viby's reply keeps pace with its voice. Finished work becomes chips you can tap: open that terminal, review a copy, or see what it checked. Hanging up ends the audio and leaves the thread. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> over Code is the same thread in a short bar.
+- **Faster speech models, still on this machine.** Settings → Voice can hear with Parakeet, Canary, or Moonshine as well as Whisper, including smaller Whisper builds. Parakeet and Canary cover more than English; Moonshine and the smaller English Whisper builds are for short phrases on a laptop, and one compact Whisper build hears many languages. The first of the new models also brings the program that runs them. Each row says how quick it is and which languages it hears. Nothing is sent off this computer.
+- **Viby can change settings.** It can see which CLI plans for it, the model and effort, and which speech models and voices are already here. Ask it to switch those, download a model or a Piper voice, or change appearance, sound, the tray, usage, the phone page, sync, and how long runs are kept. A change that turns the network on still waits for you to say go. Settings → Viby has its own effort choice.
+- **A long workspace list can be narrowed and grouped.** The filter menu combines Terminals open, CLI working, Waiting for you, Copy waiting for review, Uncommitted changes, and Synced, and each choice shows how many match. Sort by name, your order, parent folder, recent activity, or uncommitted changes, and group by parent folder. Search also matches the git branch. A clean workspace stays quiet; a dirty one shows how many files changed, and a copy waiting for review can be opened from its row.
+
+### Changed
+
+- **Switching Viby's planner clears its effort.** The next CLI has its own levels, so the previous choice does not come along.
+
 ## [2.22.0] - 2026-11-18
 
 **2.22.0: faster, natural calls with Viby (warm voice, mute, barge-in while thinking, natural hang-up, and safe steps run at once); unblinded workspace and terminal inspection, step chaining, and full VibeForge workbench controls.**
