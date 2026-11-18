@@ -21,7 +21,8 @@ const plain = (text: string) =>
 describe("which one do I use", () => {
   it("fits one screen", () => {
     expect(WHICH_ONE.length).toBeGreaterThanOrEqual(8);
-    expect(WHICH_ONE.length).toBeLessThanOrEqual(10);
+    // The tour's card and Help's sheet were looked at with twelve rows in an 880 px tall window.
+    expect(WHICH_ONE.length).toBeLessThanOrEqual(12);
     expect(new Set(WHICH_ONE.map((row) => row.want)).size).toBe(WHICH_ONE.length);
   });
 

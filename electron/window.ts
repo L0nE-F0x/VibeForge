@@ -95,7 +95,9 @@ export class MainWindow {
       if (tray.icon.shown && tray.host && ctx.service.getSettings().tray && ctx.service.getSettings().closeToTray) {
         event.preventDefault();
         ctx.win?.hide();
-        if (!this.trayNoticeShown && ctx.service.getSettings().notify) {
+        // A call goes on with the window closed: said each time, as the microphone is still open.
+        if (tray.calling && ctx.service.getSettings().notify) notify({ title: words.say("main.callStillOn"), body: words.say("main.callStillOnBody") });
+        else if (!this.trayNoticeShown && ctx.service.getSettings().notify) {
           this.trayNoticeShown = true;
           notify({ title: words.say("main.stillRunning"), body: words.say("main.stillRunningBody") });
         }

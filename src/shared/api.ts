@@ -221,6 +221,10 @@ export interface VoiceStatus {
   piper: string | null;
   /** The audio player's name ("pw-play"), or null. */
   player: string | null;
+  /** A call listens for speech itself: the detector's model that comes with VibeForge can be read. */
+  detector: boolean;
+  /** PipeWire can be asked to cancel echo for a call: its recorder, `pipewire` and `pw-cli` are all here. */
+  echoCancel: boolean;
   /** Every Piper voice found. */
   voices: string[];
   /** The voice answers are read in unless an agent has its own. */

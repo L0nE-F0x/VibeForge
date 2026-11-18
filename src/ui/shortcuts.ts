@@ -123,6 +123,8 @@ const LIST = [
 
   // ---------------------------------------------------------------- voice
   { id: "voice.dictate", keys: "Ctrl+Shift+Space", label: "shortcuts.dictate", group: "shortcuts.voice", scope: "voice", paused: "never", chord: { ctrl: true, shift: true, alt: false, meta: false, code: "Space" }, terminal: "first" },
+  // With Shift, so a terminal's own Ctrl+L (clear the screen) stays the program's.
+  { id: "app.call", keys: "Ctrl+Shift+L", label: "shortcuts.call", group: "shortcuts.voice", scope: "app", paused: "never", once: true, chord: ctrlShift("l"), terminal: "window" },
   { id: "voice.cancel", keys: "Esc", label: "shortcuts.dictateCancel", group: "shortcuts.voice", scope: "voice", paused: "never", chord: { key: "Escape" }, terminal: "first" },
 
   // ---------------------------------------------------------------- editing

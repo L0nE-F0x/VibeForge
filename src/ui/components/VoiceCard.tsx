@@ -185,6 +185,8 @@ export function VoiceCard() {
           </StatusRow>
           <StatusRow ok={Boolean(status.player)} label={t("voice.player")} detail={status.player ?? t("voice.playerMissing")} />
           <StatusRow ok={Boolean(status.speaker)} label={t("voice.voice")} detail={status.speaker ? tildify(status.speaker, home) : t("voice.voiceMissing")} />
+          <StatusRow ok={status.detector} label={t("voice.detector")} detail={status.detector ? t("voice.detectorOn") : t("voice.detectorOff")} />
+          <StatusRow ok={status.echoCancel} label={t("voice.echo")} detail={status.echoCancel ? t("voice.echoOn") : t("voice.echoOff")} />
         </div>
         <div className="form-grid">
           <Field hint={t("voice.talkBackHint")}>

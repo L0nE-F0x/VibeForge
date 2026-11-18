@@ -28,9 +28,11 @@ export const WHICH_ONE: Array<{ want: Key; places: Place[] }> = [
   { want: "whichOne.routines", places: [{ view: "routines" }] },
   { want: "whichOne.agents", places: [{ view: "agents" }, { view: "skills" }] },
   { want: "whichOne.maestro", places: [{ view: "orchestrator" }] },
+  { want: "whichOne.call", places: [{ view: "orchestrator" }] },
   { want: "whichOne.together", places: [{ view: "settings", section: "together" }] },
   { want: "whichOne.runs", places: [{ view: "runs" }] },
   { want: "whichOne.phone", places: [{ view: "settings", section: "phone" }] },
+  { want: "whichOne.sync", places: [{ view: "settings", section: "sync" }] },
   { want: "whichOne.voice", places: [{ view: "settings", section: "voice" }] },
 ];
 

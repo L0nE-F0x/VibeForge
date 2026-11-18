@@ -7,6 +7,7 @@ import { Button } from "./components/ui.js";
 import { useT } from "./i18n/index.js";
 import { cue } from "./sounds.js";
 import { useNav, useToast } from "./state.js";
+import { shortcutKeys } from "./shortcuts.js";
 import { useBarLayer } from "./voice.js";
 
 // A call with Viby (electron/call.ts): the microphone stays open and what is said goes to Viby
@@ -17,7 +18,12 @@ import { useBarLayer } from "./voice.js";
 const OFF: CallState = { on: false, phase: "listening", level: 0, heard: "", said: "", waiting: false, spoken: false, error: null, talkOver: false, heardItself: false };
 /** How long an answer that wasn't read aloud stays on the bar. */
 const SAID_MS = 9000;
+/** How long a call that has just begun says what to do, unless something is said sooner. */
+const GREET_MS = 8000;
 const METER_CELLS = 14;
+
+/** Starts a call, or hangs up: the window's own key for it (shortcuts.ts, "app.call") says so with this. */
+export const TOGGLE_CALL_EVENT = "vibeforge:toggle-call";
 
 let state: CallState = OFF;
 const listeners = new Set<() => void>();
@@ -78,13 +84,18 @@ export function CallRailButton() {
   const t = useT();
   const current = useCall();
   const toggle = useCallToggle();
+  // The rail is always there, so the key works from any view.
+  useEffect(() => {
+    window.addEventListener(TOGGLE_CALL_EVENT, toggle);
+    return () => window.removeEventListener(TOGGLE_CALL_EVENT, toggle);
+  }, [toggle]);
   return (
     <button
       type="button"
       className={`rail-btn call-btn${current.on ? " on" : ""}`}
       aria-pressed={current.on}
       aria-label={current.on ? t("call.hangUp") : t("call.start")}
-      {...tipProps(current.on ? t("call.hangUpTip") : t("call.startTip"), { side: "right" })}
+      {...tipProps(current.on ? t("call.hangUpTip") : t("call.startTip"), { kbd: shortcutKeys("app.call"), side: "right" })}
       onClick={toggle}
     >
       <Phone size={19} strokeWidth={1.9} />
@@ -104,7 +115,7 @@ export function CallButton() {
   const current = useCall();
   const toggle = useCallToggle();
   return (
-    <Button size="sm" variant={current.on ? "primary" : "ghost"} icon={current.on ? PhoneOff : Phone} tip={current.on ? t("call.hangUpTip") : t("call.startTip")} onClick={toggle}>
+    <Button size="sm" variant={current.on ? "primary" : "ghost"} icon={current.on ? PhoneOff : Phone} tip={current.on ? t("call.hangUpTip") : t("call.startTip")} kbd={shortcutKeys("app.call")} onClick={toggle}>
       {current.on ? t("call.hangUp") : t("call.start")}
     </Button>
   );
@@ -129,6 +140,19 @@ export function CallBar() {
     return () => window.clearTimeout(timer);
   }, [current.said]);
 
+  // A call that has just begun says what to do, until something is said or a few seconds pass:
+  // a lit button in the rail alone doesn't tell someone new that they can simply talk.
+  const [greet, setGreet] = useState(false);
+  useEffect(() => {
+    if (!current.on) {
+      setGreet(false);
+      return;
+    }
+    setGreet(true);
+    const timer = window.setTimeout(() => setGreet(false), GREET_MS);
+    return () => window.clearTimeout(timer);
+  }, [current.on]);
+
   // The microphone closed by itself: say so, as the call is over without a Hang up. Only as it
   // happens: a window opened later isn't told about a call that ended before it.
   const wasOn = useRef(current.on);
@@ -149,7 +173,8 @@ export function CallBar() {
   if (current.phase === "speaking") readAloud.current = current.said;
   const unread = fresh && current.said !== "" && current.said !== readAloud.current;
   const quiet = current.phase === "listening" && !current.waiting && !unread;
-  const shown = current.on && !quiet;
+  const greeting = greet && quiet && !current.heard && !current.said;
+  const shown = current.on && (!quiet || greeting);
   useBarLayer(ref);
   if (!shown) return null;
 
@@ -177,6 +202,7 @@ export function CallBar() {
         </strong>
         {phase === "thinking" && current.heard && <span className="faint truncate"> {current.heard}</span>}
         {(phase === "speaking" || (phase === "listening" && unread)) && current.said && <span className="faint truncate"> {current.said}</span>}
+        {greeting && <span className="faint truncate"> {t("call.listeningHint")}</span>}
       </span>
       {phase === "thinking" && (
         <Button size="sm" variant="ghost" icon={Square} onClick={() => void call("orchestrator.stopThinking")}>

@@ -117,7 +117,18 @@ const updater = new Updater({
 
 const voice = makeVoice(ctx);
 const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
-const viby = new Call({ voice, service: () => ctx.service, looking: () => ctx.looking, words: ctx.words, log, send: (state) => send("call", state) });
+const viby = new Call({
+  voice,
+  service: () => ctx.service,
+  looking: () => ctx.looking,
+  words: ctx.words,
+  log,
+  send: (state) => {
+    send("call", state);
+    // The tray says so too: the microphone is open whether or not the window is.
+    tray.call(state.on);
+  },
+});
 
 /** Repaints in the theme Settings name (or Omarchy's own): the page, the window and the tray icon. */
 function refreshPalette(): void {
@@ -126,7 +137,7 @@ function refreshPalette(): void {
   send("palette", ctx.palette);
   if (ctx.win && !ctx.win.isDestroyed()) ctx.win.setBackgroundColor(ctx.palette.background);
   drawBrandIcon();
-  tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
+  tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon, ctx.palette.accent);
 }
 
 /** The colours the icon was last drawn in: a focus or a Settings change that keeps them costs nothing. */
@@ -157,7 +168,11 @@ function drawBrandIcon(): void {
 
 const sync = new Sync(ctx, notify);
 const quit = new Quit(ctx, { talk, voice, sync });
-const tray = new TrayController(ctx, () => void quit.fromTray());
+const tray = new TrayController(
+  ctx,
+  () => void quit.fromTray(),
+  () => viby.stop(),
+);
 const mainWindow = new MainWindow(ctx, {
   // Started by the login autostart entry: stay in the tray until opened.
   startHidden: process.argv.includes(HIDDEN_ARG),
@@ -214,7 +229,7 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow.guardPermissions();
     registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, call: viby, dock, sync, notify, refreshPalette });
     drawBrandIcon();
-    tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
+    tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon, ctx.palette.accent);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
     // login) gets the icon again instead of leaving VibeForge running with nothing to open it from.
     const stopTrayWatch = tray.watchHost();
