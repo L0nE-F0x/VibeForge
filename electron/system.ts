@@ -70,3 +70,17 @@ export function omarchyDoNotDisturb(env: NodeJS.ProcessEnv = process.env, home =
     return false;
   }
 }
+
+/**
+ * Moves the app into the home folder. It starts wherever the launcher or the last restart left it,
+ * often inside its own install folder, which Update renames and later deletes. Every helper started
+ * from a deleted folder inherits it, and Python ones such as Piper die at startup on it
+ * (FileNotFoundError from os.getcwd), so spoken replies went silent after an update.
+ */
+export function settleWorkingDir(log: Pick<LogFile, "warn">, home = os.homedir(), chdir: (dir: string) => void = process.chdir): void {
+  try {
+    chdir(home);
+  } catch (error) {
+    log.warn(`Could not move into ${home}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
