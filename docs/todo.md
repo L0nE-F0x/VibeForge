@@ -1,10 +1,10 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.22.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (2.23.0, 2026-11-18, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
-- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0–2.22.0: the call itself, Mute/Unmute, barge-in while speaking or thinking, natural spoken hang-up, immediate safe execution in calls, warm Piper TTS, 0 ms local navigation, two-pass `inspect` (screens, replies, diffs, files, quotas), `after: true` step chaining, core "waiting for you" prompt notes, `key` TUI answers, `shell`, and `workbench` actions. Still to do:
+- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0–2.23.0: the call itself, Mute/Unmute, barge-in while speaking or thinking, natural spoken hang-up, immediate safe execution in calls, warm Piper TTS, 0 ms local navigation, two-pass `inspect` (screens, replies, diffs, files, quotas), `after: true` step chaining, core "waiting for you" prompt notes, `key` TUI answers, `shell`, and `workbench` actions. 2.23.0 makes the Vibe tab the call (a pixel V, live words, and tappable chips), adds faster on-device speech models, and lets Viby read and change settings. Still to do:
   - **Hearing better, the rest.** Talking over Viby has met one desk's speakers (see below): if PipeWire's canceller lets too much through on other setups, the default should become **Never**. Dictation's own start and stop still go by loudness. Silero v6 is published in the same format; v5.1.2 is the one checked.
   - **Speaking up, the rest.** A CLI whose log VibeForge can't read (Cursor Agent, OpenCode, Copilot, Antigravity and the others) gets a completion word only after 20 s of work, without its log answer (though `inspect` can read its terminal screen when asked). Two of the same CLI in one folder share that folder's logs: the newest answer there is the one read.
   - **Quicker answers.** Keeping the planner running persistently between turns might save ~1.5 s of CLI startup; not tried yet.
