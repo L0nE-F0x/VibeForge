@@ -905,8 +905,8 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 10px 0 8px;
+  gap: 1px;
+  padding: 8px 0 6px;
   background: var(--bg-dark);
   border-right: 1px solid var(--line);
 }
@@ -933,7 +933,7 @@ h1 {
   align-items: center;
   gap: 2px;
   width: 48px;
-  padding: 4px 0 3px;
+  padding: 3px 0 2px;
   border: 1px solid transparent;
   color: var(--fg-3);
 }
@@ -969,6 +969,15 @@ h1 {
 
 .m-rail-foot {
   margin-top: auto;
+}
+
+/* Call sits at the rail's foot, above the live pulse, as in the app. */
+.m-rail-call {
+  margin-top: auto;
+}
+
+.m-rail-call + .m-rail-foot {
+  margin-top: 0;
 }
 
 .m-rail-foot.is-live {
@@ -2228,6 +2237,48 @@ h2 {
 .or-foot {
   justify-content: flex-end;
   border-top: 1px solid var(--line);
+}
+
+/* a call with Viby: the same bar, as a conversation said out loud (src/ui/call.tsx) */
+
+.art-call .or-say {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.art-call .or-say svg,
+.or-hang svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  margin-top: 2px;
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2;
+}
+
+.art-call .or-foot {
+  margin-top: 2px;
+  padding: 8px 0 0;
+  gap: 14px;
+}
+
+.art-call .or-foot > span:first-child {
+  margin-right: auto;
+  color: var(--fg-3);
+}
+
+.or-hang {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-2);
+}
+
+.or-hang svg {
+  margin-top: 0;
+  stroke: currentColor;
 }
 
 /* phone: the phone page, as a paired phone shows the desk (companion/app.css) */
@@ -4055,6 +4106,11 @@ html:not(.reveal-ready) .reveal {
   .toast,
   .build-hint {
     display: none;
+  }
+
+  /* With Call hidden, the live pulse is the foot again. */
+  .m-rail-call + .m-rail-foot {
+    margin-top: auto;
   }
 
   .bento {

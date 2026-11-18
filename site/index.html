@@ -22,7 +22,7 @@
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <link rel="preload" href="assets/fonts/jetbrains-mono-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="assets/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="stylesheet" href="styles.css?v=2.20.0" />
+    <link rel="stylesheet" href="styles.css?v=2.20.0-1" />
     <!-- Without JavaScript nothing would fade in, so everything shows at once. -->
     <noscript><style>.reveal { opacity: 1; transform: none; animation: none; }</style></noscript>
     <script type="application/ld+json">
@@ -86,6 +86,7 @@
       <symbol id="i-star" viewBox="0 0 24 24"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/></symbol>
       <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
       <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
       <symbol id="i-laptop" viewBox="0 0 24 24"><rect width="18" height="12" x="3" y="4"/><path d="M2 20h20"/></symbol>
@@ -188,6 +189,7 @@
                 <span class="m-rail-btn"><svg><use href="#i-sparkles" /></svg><i>Skills</i></span>
                 <span class="m-rail-btn"><svg><use href="#i-history" /></svg><i>Runs</i><b class="m-badge" data-demo-badge>2</b></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-workflow" /></svg><i>Viby</i></span>
+                <span class="m-rail-btn m-rail-call m-hide-sm"><svg><use href="#i-phone" /></svg><i>Call</i></span>
                 <span class="m-rail-foot is-live" data-demo-pulse><svg><use href="#i-activity" /></svg><i data-demo-live>1 live</i><span class="m-meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-circle-help" /></svg><i>Help</i></span>
                 <span class="m-rail-btn m-hide-sm"><svg><use href="#i-settings" /></svg><i>Settings</i></span>
@@ -358,6 +360,26 @@
 
           <article class="card wide full reveal" data-glow>
             <div class="card-copy">
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-phone" /></svg></span>
+              <h3>Or call Viby and talk it through</h3>
+              <p>Click <b>Call</b> at the foot of the rail and just talk. Say something, pause, and Viby answers out loud, then listens again until you hang up. It works from any view and knows which workspace and terminal you're looking at, so <i>“tell this one to run the tests”</i> and <i>“switch to the landing-page workspace”</i> mean the ones in front of you, and the window follows what Viby does.</p>
+              <p>When a CLI it started or told finishes its turn, Viby says so, and for Claude Code, Codex, Grok Build and Kimi it reads you the first lines of the answer. <i>“What did Claude say?”</i> reads the rest. Plans still wait for <b>Go</b>, and saying <i>“go”</i> counts. Talk over Viby and it stops to listen, where it can't hear itself: PipeWire cancels the echo for the call, or you wear headphones.</p>
+              <p>All of it stays on your machine. whisper.cpp hears you, Piper speaks, and a small speech model tells your voice from your keyboard. Each answer is a turn of your own planning CLI, so expect a few seconds.</p>
+            </div>
+            <div class="art art-orch art-call" aria-hidden="true">
+              <div class="or-bar">
+                <div class="or-head"><svg><use href="#i-phone" /></svg><b>On a call with Viby</b><span class="or-mic"><svg><use href="#i-mic" /></svg>listening</span></div>
+                <div class="or-you">Tell this one to run the tests.</div>
+                <div class="or-say"><svg><use href="#i-volume" /></svg>Telling Claude Code in landing-page. Say go, or cancel.</div>
+                <div class="or-you">Go.</div>
+                <div class="or-say"><svg><use href="#i-volume" /></svg>Claude Code in landing-page finished its turn. It says: all 18 tests pass.</div>
+                <div class="or-foot"><span>or just talk</span><span>Stop reading</span><span class="or-hang"><svg><use href="#i-phone" /></svg>Hang up</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-messages-square" /></svg></span>
               <h3>Your agents talk to each other</h3>
               <p>Every terminal has <code>vibeforge</code> on its <code>PATH</code>. Claude Code can ask Grok for a second opinion with <code>vibeforge tell grok --wait</code>, or delegate a subtask to another agent with <code>vibeforge task</code>. Delegated tasks run on their own branch in a git worktree and report back with a patch when they finish. You can also make one CLI the lead so it hands subtasks to faster or cheaper agents, pausing for your approval unless you let it start automatically.</p>
@@ -494,7 +516,7 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-volume" /></svg></span>
               <h3>And they answer out loud</h3>
-              <p>When you dictate a prompt, Piper reads the first paragraph of the reply aloud in that agent's voice, right on your machine. Hold the dictate key again to interrupt.</p>
+              <p>When you dictate a prompt, Piper reads the first paragraph of the reply aloud in that agent's voice, right on your machine. Hold the dictate key again to interrupt. On a call, Viby does the talking.</p>
             </div>
             <div class="art art-answer" data-answer-art aria-hidden="true">
               <div class="a-line"><svg><use href="#i-volume" /></svg><b>Test writer</b><span>Added four token expiry tests. All pass.</span></div>
@@ -584,15 +606,15 @@
               <p>When a new release is out, <b>Help</b> shows a badge. Click <b>Update</b> to read the release notes, watch the installer run in a real terminal, and restart.</p>
             </div>
             <div class="art art-update" data-update-art aria-hidden="true">
-              <div class="up-head"><b>Update VibeForge</b><span class="chip ok">2.18.1</span></div>
+              <div class="up-head"><b>Update VibeForge</b><span class="chip ok">2.20.1</span></div>
               <p class="up-line">VibeForge 2.20.1 is available. You have 2.20.0.</p>
               <div class="up-term">
                 <div><span class="t-acc">▸</span> Updating ~/.local/share/vibeforge-app</div>
-                <div><span class="t-acc">▸</span> Downloading VibeForge 2.18.1, ready-made</div>
+                <div><span class="t-acc">▸</span> Downloading VibeForge 2.20.1, ready-made</div>
                 <div><span class="t-dim">It matches the release's SHA256SUMS.</span></div>
-                <div class="t-ok"><span>✓</span> VibeForge 2.18.1 is installed.</div>
+                <div class="t-ok"><span>✓</span> VibeForge 2.20.1 is installed.</div>
               </div>
-              <div class="up-foot"><span>Updated. Restart to start using 2.18.1.</span><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Restart</span></div>
+              <div class="up-foot"><span>Updated. Restart to start using 2.20.1.</span><span class="m-primary"><svg><use href="#i-rotate-ccw" /></svg>Restart</span></div>
             </div>
           </article>
 
@@ -639,7 +661,7 @@
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
           <h2>Inside the real app.</h2>
-          <p>Screenshots of VibeForge 2.12.1 and 2.14.1 at work, in the Apex Forge theme.</p>
+          <p>Screenshots of VibeForge 2.20.0 at work, in the Apex Forge theme.</p>
         </div>
         <div class="tour reveal" data-tour>
           <div class="tour-tabs" role="tablist" aria-label="Screenshots">
@@ -650,16 +672,16 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=2.17.1" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, nine terminals running, three runs to review, Claude Code and Codex waiting for you by name, the terminals live now, and the six workspaces with two glowing because their CLIs are waiting." />
+              <img src="assets/app-home.webp?v=2.20.0" width="1890" height="1138" alt="VibeForge's Home: the pixel wordmark beside a year of commits, eight terminals running, two runs to review, Claude Code and Codex waiting for you by name, the terminals live now, the six workspaces with three glowing because their CLIs are waiting, and Call at the foot of the rail." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=2.17.1" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.12 release tags, a diffstat of Viby's code from 2.11.0 to 2.12.1 in the focused pane, a TypeScript watch its title bar names, two workspaces glowing in the list, and the file tree on the right." loading="lazy" />
+              <img src="assets/app-code.webp?v=2.20.0" width="1890" height="1138" alt="Code mode on the VibeForge repository: git log with the 2.20.0 release tag at the top, a diffstat of the call's code from 2.19.0 to 2.20.0, Claude Code summing up the release in the focused pane, three workspaces glowing in the list, and the file tree on the right." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp?v=2.17.1" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace, the finished ones with their diff." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=2.20.0" width="1890" height="1138" alt="The task board with cards in To do, Running, Review and Done, each assigned to an agent and a workspace and working in its own copy, the finished ones with their diff." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-viby.webp?v=2.17.1" width="1890" height="1138" alt="Viby: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan, each step with Open in Code, Review changes, Apply and Discard for its own copy, and beside it the two copies wait under To review above the CLIs running." loading="lazy" />
+              <img src="assets/app-viby.webp?v=2.20.0" width="1890" height="1138" alt="Viby during a call: asked what's running, it answers in a sentence; asked to start Claude Code in landing-page on hero-copy and Codex in weather-api on rate-limit, it carries out the plan, each step with Open in Code, Review changes, Apply and Discard for its own copy. Below the plan Viby notes that Claude Code finished its turn, with the first line of its answer, and the call's bar is reading that aloud, with Stop reading and Hang up. Beside it the two copies wait under To review above the CLIs running." loading="lazy" />
             </figure>
           </div>
           <p class="tour-caption" data-tour-caption><b>Home</b> Running terminals, CLIs waiting on your input, diffs to review, and upcoming scheduled runs.</p>
@@ -863,6 +885,6 @@ npm run build && ./scripts/vibeforge</pre>
       </p>
     </footer>
 
-    <script src="main.js?v=2.17.0" defer></script>
+    <script src="main.js?v=2.20.0-1" defer></script>
   </body>
 </html>

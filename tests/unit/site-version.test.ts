@@ -36,5 +36,9 @@ describe("the website's version", () => {
     const [offered] = all(/VibeForge ([\d.]+) is available\./g);
     expect(have).toBe(version);
     expect(isNewer(offered, have)).toBe(true);
+    // The art names the offered version five times; once it offered 2.20.1 and installed 2.18.1.
+    const art = html.slice(html.indexOf("data-update-art"), html.indexOf("</article>", html.indexOf("data-update-art")));
+    const named = [...art.matchAll(/\b(\d+\.\d+\.\d+)\b/g)].map((match) => match[1]).filter((found) => found !== have);
+    expect(named).toEqual([offered, offered, offered, offered, offered]);
   });
 });
