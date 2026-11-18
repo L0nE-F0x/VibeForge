@@ -25,7 +25,7 @@ import { Quit } from "./quit.js";
 import { Stats } from "./stats.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Sync } from "./sync.js";
-import { adoptShellPath, osDescription } from "./system.js";
+import { adoptShellPath, osDescription, settleWorkingDir } from "./system.js";
 import { Call } from "./call.js";
 import { Talk } from "./talk.js";
 import { Disposables, startSchedules } from "./timers.js";
@@ -42,6 +42,7 @@ const APP_ID = "dev.vibeforge.app";
 const roots = defaultRoots();
 ensureLayout(roots.configRoot, roots.dataRoot);
 const log = new LogFile(path.join(roots.dataRoot, "logs", "vibeforge.log"));
+settleWorkingDir(log);
 
 process.on("uncaughtException", (error) => {
   console.error(error);
