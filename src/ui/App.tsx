@@ -14,7 +14,7 @@ import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Up
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
-import { CallBar, CallRailButton } from "./call.js";
+import { CallBar, CallRailButton, TOGGLE_CALL_EVENT } from "./call.js";
 import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
@@ -103,6 +103,7 @@ function Shell() {
         setSwitcher(false);
         if (viewRef.current !== "orchestrator") setOrchestrator((open) => !open);
       },
+      "app.call": () => void window.dispatchEvent(new Event(TOGGLE_CALL_EVENT)),
       "app.shortcuts": () => void window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)),
       "app.panel": () => void window.dispatchEvent(new Event(TOGGLE_PANEL_EVENT)),
       "app.devtools": () => void call("app.toggleDevTools"),
@@ -386,6 +387,7 @@ function Rail() {
         <button
           type="button"
           className="rail-btn"
+          data-tour="settings"
           aria-current={route.view === "settings" ? "page" : undefined}
           {...tipProps(t("rail.tip.settings"), { kbd: shortcutKeys("app.settings"), side: "right" })}
           onClick={() => go({ view: "settings" })}

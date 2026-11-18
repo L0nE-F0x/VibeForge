@@ -16,10 +16,13 @@ export interface TrayState {
   sounds: boolean;
   notify: boolean;
   autostart: boolean;
+  /** A call with Viby is on: the microphone is open, whether or not the window is. */
+  call: boolean;
 }
 
 export interface TrayActions {
   open(): void;
+  hangUp(): void;
   goAnywhere(): void;
   openWaiter(index: number): void;
   settings(): void;
@@ -38,14 +41,18 @@ function hexRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
-/** The app icon with a square pixel in the corner, outlined so it reads on any bar. */
-function withMark(base: NativeImage, color: string, outline: string): NativeImage {
+/**
+ * The app icon with a square pixel in a corner, outlined so it reads on any bar: the lower right
+ * one for someone waiting, the upper right one (`top`) for an open microphone.
+ */
+function withMark(base: NativeImage, color: string, outline: string, top = false): NativeImage {
   const bitmap = Buffer.from(base.toBitmap());
   const [r, g, b] = hexRgb(color);
   const [or, og, ob] = hexRgb(outline);
-  for (let y = SIZE - MARK; y < SIZE; y += 1) {
+  const from = top ? 0 : SIZE - MARK;
+  for (let y = from; y < from + MARK; y += 1) {
     for (let x = SIZE - MARK; x < SIZE; x += 1) {
-      const edge = x === SIZE - MARK || y === SIZE - MARK;
+      const edge = x === SIZE - MARK || y === (top ? MARK - 1 : SIZE - MARK);
       const at = (y * SIZE + x) * 4;
       // Chromium bitmaps are BGRA.
       bitmap[at] = edge ? ob : b;
@@ -65,6 +72,7 @@ export interface TrayWords {
 
 function status(state: TrayState, words: TrayWords): string {
   const parts: string[] = [];
+  if (state.call) parts.push(words.say("tray.status.call"));
   if (state.waiting) parts.push(words.count("tray.status.waiting", state.waiting));
   if (state.live) parts.push(words.count("tray.status.running", state.live));
   return parts.length ? parts.join(" · ") : words.say("tray.status.nothing");
@@ -72,25 +80,35 @@ function status(state: TrayState, words: TrayWords): string {
 
 export class TrayIcon {
   private tray: Tray | null = null;
-  private images: { plain: NativeImage; marked: NativeImage } | null = null;
+  private images: { plain: NativeImage; marked: NativeImage; calling: NativeImage; both: NativeImage } | null = null;
   private state: TrayState | null = null;
   /** The icon in the theme's colours; without it, the one at iconPath. */
   private base: NativeImage | null = null;
 
   constructor(
     private iconPath: string,
-    private colors: { mark: string; outline: string },
+    private colors: { mark: string; outline: string; call: string },
     private actions: TrayActions,
     private words: TrayWords,
   ) {}
 
   /** Made on first use: image work waits for the app to be ready. */
-  private icons(): { plain: NativeImage; marked: NativeImage } {
+  private icons(): { plain: NativeImage; marked: NativeImage; calling: NativeImage; both: NativeImage } {
     if (!this.images) {
       const plain = (this.base ?? nativeImage.createFromPath(this.iconPath)).resize({ width: SIZE, height: SIZE, quality: "best" });
-      this.images = { plain, marked: plain.isEmpty() ? plain : withMark(plain, this.colors.mark, this.colors.outline) };
+      if (plain.isEmpty()) this.images = { plain, marked: plain, calling: plain, both: plain };
+      else {
+        const marked = withMark(plain, this.colors.mark, this.colors.outline);
+        this.images = { plain, marked, calling: withMark(plain, this.colors.call, this.colors.outline, true), both: withMark(marked, this.colors.call, this.colors.outline, true) };
+      }
     }
     return this.images;
+  }
+
+  /** The icon for what is going on: someone waiting, a call, both or neither. */
+  private imageFor(state: TrayState): NativeImage {
+    const icons = this.icons();
+    return state.call ? (state.waiting ? icons.both : icons.calling) : state.waiting ? icons.marked : icons.plain;
   }
 
   get shown(): boolean {
@@ -115,12 +133,12 @@ export class TrayIcon {
     this.show(state);
   }
 
-  recolor(mark: string, outline: string, base: NativeImage | null = this.base): void {
-    if (mark === this.colors.mark && outline === this.colors.outline && base === this.base) return;
-    this.colors = { mark, outline };
+  recolor(mark: string, outline: string, base: NativeImage | null = this.base, call: string = this.colors.call): void {
+    if (mark === this.colors.mark && outline === this.colors.outline && call === this.colors.call && base === this.base) return;
+    this.colors = { mark, outline, call };
     this.base = base && !base.isEmpty() ? base : null;
     this.images = null;
-    if (this.tray && this.state) this.tray.setImage(this.state.waiting ? this.icons().marked : this.icons().plain);
+    if (this.tray && this.state) this.tray.setImage(this.imageFor(this.state));
   }
 
   update(state: TrayState): void {
@@ -128,13 +146,15 @@ export class TrayIcon {
     if (!tray) return;
     const was = this.state;
     this.state = state;
-    if (!was || Boolean(was.waiting) !== Boolean(state.waiting)) tray.setImage(state.waiting ? this.icons().marked : this.icons().plain);
+    if (!was || Boolean(was.waiting) !== Boolean(state.waiting) || was.call !== state.call) tray.setImage(this.imageFor(state));
     if (was && JSON.stringify(was) === JSON.stringify(state)) return;
     const say = (key: Key) => this.words.say(key);
     tray.setToolTip(`VibeForge · ${status(state, this.words)}`);
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: say("tray.menu.open"), click: () => this.actions.open() },
+        // While the microphone is open, the way to close it is here too, window or no window.
+        ...(state.call ? [{ label: say("call.hangUpTip"), click: () => this.actions.hangUp() }] : []),
         ...state.waiters.map((label, index) => ({ label, click: () => this.actions.openWaiter(index) })),
         { label: status(state, this.words), enabled: false },
         { label: say("tray.menu.goAnywhere"), accelerator: "Ctrl+K", click: () => this.actions.goAnywhere() },

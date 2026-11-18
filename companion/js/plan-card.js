@@ -58,6 +58,7 @@ function issueKey(step, issue) {
   if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
   if (step.kind === "task" && issue === "target") return "orch.issue.task";
   if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  if (step.kind === "show" && issue === "workspace") return "orch.issue.show";
   return ISSUE_KEYS[issue] || "orch.fixFirst";
 }
 /** A plan's own new workspace, as later steps in it name it until it is made. */

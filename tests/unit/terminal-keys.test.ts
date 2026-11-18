@@ -36,15 +36,17 @@ describe("terminal clipboard keys", () => {
 
 describe("app shortcuts in a terminal", () => {
   it("keeps the app's Ctrl+Shift keys from the program", () => {
-    for (const letter of ["I", "B", "M", "D", "E", "W", "K", "O"]) expect(appShortcut(key(letter, { ctrl: true, shift: true }))).toBe(true);
+    for (const letter of ["I", "B", "M", "D", "E", "W", "K", "O", "L"]) expect(appShortcut(key(letter, { ctrl: true, shift: true }))).toBe(true);
     expect(appShortcut(key("?", { ctrl: true, shift: true }, "Slash"))).toBe(true);
     expect(appShortcut(key("3", { ctrl: true }))).toBe(true);
     expect(appShortcut(key("3", { alt: true }, "Digit3"))).toBe(true);
   });
 
-  it("leaves Ctrl+Shift+L to the program: nothing in the app uses it", () => {
-    expect(appShortcut(key("L", { ctrl: true, shift: true }))).toBe(false);
+  it("leaves Ctrl+Shift+J to the program: nothing in the app uses it", () => {
+    expect(appShortcut(key("J", { ctrl: true, shift: true }))).toBe(false);
     expect(appShortcut(key("k", { ctrl: true }))).toBe(false);
+    // Ctrl+Shift+L calls Viby; plain Ctrl+L still clears the program's screen.
+    expect(appShortcut(key("l", { ctrl: true }))).toBe(false);
   });
 });
 

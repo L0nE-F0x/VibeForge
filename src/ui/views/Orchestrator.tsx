@@ -70,6 +70,8 @@ function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
   if (step.kind === "task" && issue === "target") return "orch.issue.task";
   if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  // A show step with nothing to show names no workspace to pick: it could have been a CLI or a view.
+  if (step.kind === "show" && issue === "workspace") return "orch.issue.show";
   return ISSUE_KEY[issue];
 }
 

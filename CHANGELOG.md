@@ -14,10 +14,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **The phone page opens when its computer is off.** The page keeps a copy of itself on the phone and uses it when the computer it was installed from doesn't answer within four seconds, so with two computers the app still opens and shows the other one. The computer's own files always come first, so an update still reaches the phone the next time it opens.
 - **A long workspace list is easy to get around.** Above Code's list of workspaces: a **search** box (a workspace's name, by letters in order as Ctrl+K finds it, or a piece of its folder; Escape clears it), and a **filter and sort** menu that shows all, only the ones with terminals open, only the ones waiting for you, or only synced ones, in your own order or **by name**. The filter and sort are remembered; dragging to reorder works while the list shows all of it in your order.
 - **Remove several workspaces at once.** **Select** turns the rows into checkboxes; **All shown** picks everything the search and filter leave, and **Remove** asks once for all of them (the folders stay on disk). Escape or Select again ends it. Removing one from its ⋯ menu works as before.
+- **A key for calling Viby.** <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> starts a call from any view, terminals included, and hangs up again. It is on the shortcut sheet, the Call button's tooltip and the tour.
+- **The tray shows an open microphone.** While a call is on, the tray icon gets a mark in its upper corner, its tooltip says the microphone is open, and its menu has **Hang up the call with Viby**. Closing the window to the tray during a call says so in a notification each time.
+- **Settings → Voice says what a call can do here**: whether the speech detector was found, and whether PipeWire's echo cancellation can be asked for (which decides if you can talk over Viby without headphones).
 
 ### Changed
 
 - **The phone page's server answers a page that was loaded from another machine on the same tailnet**, which is what lets one page show two computers. It answers no other page (a browser's cross-origin check, with the allowed origin named per request), still asks for the pairing code on every request, and the page's own policy lets it send requests to its own tailnet's machines and nowhere else. The command in Settings and the README now starts with `sudo`, which `tailscale serve` needs on Linux unless you made yourself its operator.
+- **The welcome tour catches up with the app.** Three new steps: calling Viby (the rail's Call button, and what voice needs), CLIs asking each other (`vibeforge tell`, `vibeforge task`, **Send to…** on a pane's title bar), and what Settings adds (your phone, sync with your other machine, voice, themes and languages). The rail's step says a view glows when a CLI in it is waiting for you, and Viby's says it also runs agents, tasks and routines and takes you to a workspace or view. Sixteen steps, about two minutes.
+- **Which one do I use?** (the tour, Help and the README) gains two rows: talking it through on a call, and the same workspace on your other machine.
+- **A call says what to do when it starts.** For its first eight seconds, or until you speak, the bar reads "Listening. Say something and pause; “hang up” ends the call." After that a quiet call shows in the rail alone, as before.
+
+### Fixed
+
+- **The tour's two terminal steps no longer blank for a second on a first run.** With no terminal open yet they point at the empty workspace, which says the same thing, instead of waiting for a pane that isn't there.
+- **A plan that can't find what to show says so.** "Nothing called “x” to show: no running CLI, workspace or view", where it used to say "No workspace called “x”. Pick one." with nothing to pick from.
 
 ## [2.20.0] - 2026-11-18
 

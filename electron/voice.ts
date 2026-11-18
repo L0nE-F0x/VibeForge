@@ -287,6 +287,8 @@ export class Voice {
       downloadError: this.downloadError,
       piper: this.speaker.piper(),
       player: this.speaker.player()?.label ?? null,
+      detector: this.vadModel() !== null,
+      echoCancel: this.canCancelEcho(recorder),
       voices,
       speaker: this.voiceFor(),
       voiceDir: this.voiceDir(),
@@ -464,6 +466,17 @@ export class Voice {
    * by loudness). VIBEFORGE_VAD_MODEL names another file, or "off".
    */
   private detector(): SpeechDetector | null {
+    const model = this.vadModel();
+    return model ? new SpeechDetector(model) : null;
+  }
+
+  /** Only PipeWire's own recorder can be pointed at the echo-cancelled microphone, and its client and `pw-cli` set that up. */
+  private canCancelEcho(recorder: Recorder | null): boolean {
+    return recorder?.label === "pw-record" && process.env.VIBEFORGE_ECHO_CANCEL !== "off" && Boolean(this.opts.resolveBin("pipewire") && this.opts.resolveBin("pw-cli"));
+  }
+
+  /** The detector's model, read once. */
+  private vadModel(): VadModel | null {
     if (this.vad === undefined) {
       const named = process.env.VIBEFORGE_VAD_MODEL?.trim();
       const file = named && named !== "off" ? named : !named && this.opts.appRoot ? path.join(this.opts.appRoot, "resources", "vad", VAD_MODEL.file) : null;
@@ -476,7 +489,7 @@ export class Voice {
         }
       }
     }
-    return this.vad ? new SpeechDetector(this.vad) : null;
+    return this.vad;
   }
 
   /**
@@ -497,8 +510,7 @@ export class Voice {
 
     const ear: OpenEar = { child: null, echo: null, segmenter: new Segmenter({ detector: this.detector() }), deaf: false, skipped: false, lastLevelAt: 0 };
     this.ear = ear;
-    // Only PipeWire's own recorder can be pointed at the echo-cancelled microphone.
-    const wantsEcho = cancelEcho && recorder.label === "pw-record" && process.env.VIBEFORGE_ECHO_CANCEL !== "off";
+    const wantsEcho = cancelEcho && this.canCancelEcho(recorder);
     void (wantsEcho ? startEchoCancel({ resolveBin: this.opts.resolveBin, dir: path.join(this.opts.dataRoot, "voice"), log: this.opts.log }) : Promise.resolve(null))
       .catch(() => null)
       .then((echo) => {

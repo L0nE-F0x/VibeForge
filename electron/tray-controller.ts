@@ -22,18 +22,23 @@ export class TrayController {
    * closed to the tray there could only come back by launching VibeForge again.
    */
   private hosted = true;
+  /** A call with Viby is on. */
+  private onCall = false;
   private readonly autostartPath = autostartFile(process.env, os.homedir());
 
   constructor(
     private readonly ctx: MainContext,
     quit: () => void,
+    /** Ends the call with Viby, from the tray's menu. */
+    hangUp: () => void = () => undefined,
   ) {
     const { focusWindow, send } = ctx;
     this.icon = new TrayIcon(
       ctx.iconPath,
-      { mark: ctx.palette.accent2, outline: ctx.palette.darkerBackground },
+      { mark: ctx.palette.accent2, outline: ctx.palette.darkerBackground, call: ctx.palette.accent },
       {
         open: () => focusWindow(),
+        hangUp,
         goAnywhere: () => {
           focusWindow();
           send("open-switcher", true);
@@ -84,6 +89,18 @@ export class TrayController {
     return launcherCommand(process.env, os.homedir(), `"${process.execPath}" "${this.ctx.appRoot}"`);
   }
 
+  /** Whether a call with Viby is on, for the window's close to say so. */
+  get calling(): boolean {
+    return this.onCall;
+  }
+
+  /** A call began or ended: the icon and its menu say so for as long as the microphone is open. */
+  call(on: boolean): void {
+    if (on === this.onCall) return;
+    this.onCall = on;
+    this.sync();
+  }
+
   /** Who the page says is waiting; the menu changes only when that does. */
   attention(state: MethodArgs<"app.attention">[0]): void {
     const { count, waiters } = attentionFrom(state);
@@ -103,6 +120,7 @@ export class TrayController {
       sounds: settings.sounds.on,
       notify: settings.notify,
       autostart: readAutostart(this.autostartPath),
+      call: this.onCall,
     };
   }
 

@@ -119,6 +119,9 @@ describe("the shortcut registry", () => {
       [press("ArrowLeft", { alt: true, ctrl: true }), ["app.back", "tour.back"]],
       [press("ArrowRight", { alt: true }), ["app.forward", "tour.next"]],
       [press("O", { ctrl: true, shift: true }), ["app.orchestrator"]],
+      [press("L", { ctrl: true, shift: true }), ["app.call"]],
+      // Plain Ctrl+L clears a terminal's screen: it is nobody's here.
+      [press("l", { ctrl: true }), []],
       [press("?", { ctrl: true, shift: true }, "Slash"), ["app.shortcuts"]],
       [press("B", { ctrl: true, shift: true }), ["app.panel"]],
       [press("I", { ctrl: true, shift: true }), ["app.devtools"]],
