@@ -17,6 +17,7 @@ export function makeVoice(ctx: MainContext): Voice {
     log,
     home: os.homedir(),
     dataRoot: roots.dataRoot,
+    appRoot: ctx.appRoot,
     settings: () => ctx.svc().getSettings().voice,
     resolveBin: (bin) => whichBin(bin),
     state: (state) => send("voice", state),

@@ -7,6 +7,7 @@ import type { TeamService } from "../src/core/team-service.js";
 import type { Palette } from "../src/core/theme.js";
 import type { InstallKind } from "../src/core/updates.js";
 import type { DeskEvents } from "../src/shared/api.js";
+import type { Looking } from "../src/shared/orchestrator.js";
 import type { AppPage } from "./guards.js";
 import type { PtySupervisor } from "./supervisor.js";
 
@@ -45,6 +46,8 @@ export class MainContext {
   /** The core: made once Electron is ready, gone again after shutdown. */
   service: TeamService | null = null;
   palette: Palette;
+  /** Where the person is in the window (its view, and in Code the workspace and terminal), as the page last said. */
+  looking: Looking | null = null;
   /** A quit has begun: the window closes without asking, and the terminal host stays down. */
   quitting = false;
 

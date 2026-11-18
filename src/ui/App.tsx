@@ -4,7 +4,7 @@ import type { UsagePeriod } from "../shared/api.js";
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
-import { useAttention, useChatAttention, type Attention } from "./attention.js";
+import { useAttention, useChatAttention, usePtyInView, useWorkspaceInView, type Attention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
@@ -14,6 +14,7 @@ import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Up
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
+import { CallBar, CallRailButton } from "./call.js";
 import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
@@ -162,10 +163,19 @@ function Shell() {
     };
   }, [go, open, back, forward, push]);
 
+  // Viby is told where you are, so "this one" and "here" mean the terminal and workspace in front.
+  const workspaceInView = useWorkspaceInView();
+  const codePty = usePtyInView("code");
+  useEffect(() => {
+    const code = route.view === "code";
+    void call("app.looking", { view: route.view, ...(code && workspaceInView ? { workspaceId: workspaceInView } : {}), ...(code && codePty ? { ptyId: codePty } : {}) }).catch(() => undefined);
+  }, [route.view, workspaceInView, codePty]);
+
   return (
     <div className="app">
       <Guides />
       <VoiceLayer />
+      <CallBar />
       <SessionWatch />
       {switcher && <Switcher onClose={() => setSwitcher(false)} />}
       {orchestrator && <OrchestratorBar onClose={closeOrchestrator} />}
@@ -340,6 +350,7 @@ function Rail() {
         );
       })}
       <div className="rail-foot">
+        <CallRailButton />
         <button
           type="button"
           className="rail-btn"

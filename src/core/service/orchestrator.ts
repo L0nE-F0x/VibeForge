@@ -11,7 +11,9 @@ import {
   cleanBranch,
   emptyPromise,
   folderNameOk,
+  lookingLine,
   NEEDS_GO,
+  ONLY_LOOKS,
   PLANNED_PREFIX,
   plannedFolder,
   plannedId,
@@ -29,13 +31,16 @@ import {
   readBrainOutput,
   resolvePlan,
   stepIssue,
+  type Looking,
   type MaestroCopy,
   type OrchestratorStep,
   type OrchestratorTurn,
   type OrchestratorView,
   type PlanContext,
+  type VibyWord,
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
+import { speakable } from "../replies.js";
 import { isGitRepo, summarizeSnapshot } from "../vcs.js";
 import type { ApplyResult } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
@@ -60,6 +65,8 @@ const START_SIZE = { cols: 120, rows: 32 };
 const NOTE_AFTER_WORK_MS = 20_000;
 /** At most one word about a CLI this often, so one that flickers between busy and quiet stays quiet. */
 const NOTE_EVERY_MS = 60_000;
+/** The most of a CLI's answer a read step keeps on its card. */
+const READ_KEEP = 20_000;
 /** Turns the planner is reminded of when its session is gone and a new one starts. */
 const RECAP_TURNS = 6;
 /** Folders on disk a lookup names at most, and how long it may look for them. */
@@ -326,8 +333,22 @@ export class OrchestratorDesk {
     };
   }
 
-  /** What the person said or typed. The answer, and any plan, arrive as later turns. */
-  async ask(text: string): Promise<void> {
+  /**
+   * The call that is on, or null. While one is, the window follows Viby: a CLI it starts or tells
+   * comes up in Code, without the window being raised over whatever else the person has in front.
+   * And the call is handed what Viby has to say by itself: a note about a CLI, an answer read out.
+   */
+  onCall: ((word: VibyWord) => void) | null = null;
+
+  private followTo(workspaceId: string | null | undefined, ptyId: string): void {
+    if (this.onCall) this.core.options.host.show?.({ view: "code", ...(workspaceId ? { workspaceId } : {}), ptyId }, false);
+  }
+
+  /**
+   * What the person said or typed. The answer, and any plan, arrive as later turns. `looking` is
+   * where they are in the window, which the planner is told so "this one" and "here" mean something.
+   */
+  async ask(text: string, looking?: Looking | null): Promise<void> {
     const words = text.trim();
     if (!words) return;
     if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
@@ -337,7 +358,7 @@ export class OrchestratorDesk {
     this.thinking = controller;
     this.save();
     try {
-      await this.think(words, controller.signal);
+      await this.think(words, controller.signal, looking ?? null);
     } finally {
       if (this.thinking === controller) this.thinking = null;
       this.save();
@@ -350,7 +371,7 @@ export class OrchestratorDesk {
     return full;
   }
 
-  private async think(words: string, signal: AbortSignal): Promise<void> {
+  private async think(words: string, signal: AbortSignal, looking: Looking | null): Promise<void> {
     const { engine: picked, mode, model: chosen } = this.settings();
     const engineId = this.planner();
     // A model picked for another planner means nothing to this one.
@@ -381,7 +402,10 @@ export class OrchestratorDesk {
     // Codex reads the schema from a file.
     const schemaFile = path.join(work, "plan-schema.json");
     fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
-    const turn = async (text: string, ctx: PlanContext = context) => {
+    // Said ahead of every request, not in the rules: a resumed session may not read those again.
+    const here = lookingLine(looking, context);
+    const turn = async (said: string, ctx: PlanContext = context) => {
+      const text = here ? `${here}\n${said}` : said;
       const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, schemaFile });
       return args ? this.runner([engine.binPath, ...args], work, signal) : null;
     };
@@ -476,8 +500,10 @@ export class OrchestratorDesk {
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
     const answered = this.answer({ text: plan.say, steps, plan: "waiting" });
     // Just go: at once, unless a step needs fixing, or would stop, apply or throw away someone's work.
+    // Showing something or reading an answer out changes nothing, so a plan of only those goes at once either way.
     const checked = withPlannedWorkspaces(context, steps);
-    if (mode === "go" && steps.every((step) => !stepIssue(step, checked) && !NEEDS_GO.includes(step.kind))) void this.run(answered.id);
+    const ready = steps.every((step) => !stepIssue(step, checked));
+    if (ready && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || (mode === "go" && steps.every((step) => !NEEDS_GO.includes(step.kind))))) void this.run(answered.id);
   }
 
   /** What a new planner session is told: the last few turns, then what the person just said. */
@@ -541,6 +567,7 @@ export class OrchestratorDesk {
   clear(): void {
     this.thinking?.abort();
     this.thinking = null;
+    this.forgetTold();
     this.runEpoch += 1;
     this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
     this.save();
@@ -712,6 +739,7 @@ export class OrchestratorDesk {
       const launched = await this.workspaces.startEngine({ workspaceId, engineId: step.engineId, agentId: step.agentId, copyOf, prompt: step.prompt, orchestrated: true, model: step.model, effort: step.effort, ...START_SIZE });
       step.ptyId = launched.ptyId;
       step.runId = launched.runId;
+      this.followTo(workspaceId, launched.ptyId);
       return;
     }
     if (step.kind === "lookup") {
@@ -771,13 +799,21 @@ export class OrchestratorDesk {
       step.undo = deleted.undo;
       return;
     }
-    if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "show") {
-      const session = this.core.live.get(step.target);
-      if (!this.core.options.host.show) throw new Error("VibeForge can't show it from here.");
-      this.core.options.host.show({ view: "code", ...(session?.workspaceId ? { workspaceId: session.workspaceId } : {}), ptyId: step.target });
+      const show = this.core.options.host.show;
+      if (!show) throw new Error("VibeForge can't show it from here.");
+      if (step.target) {
+        if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
+        const session = this.core.live.get(step.target);
+        show({ view: "code", ...(session?.workspaceId ? { workspaceId: session.workspaceId } : {}), ptyId: step.target });
+      } else if (step.view) show({ view: step.view });
+      else {
+        if (!this.core.workspaceById(step.workspaceId)) throw new Error("That workspace is gone.");
+        show({ view: "code", workspaceId: step.workspaceId });
+      }
       return;
     }
+    if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "tell") {
       // Looked at again now: a pane whose CLI has quit since the plan was made is a bare shell,
       // and the message would run there as a command.
@@ -788,6 +824,19 @@ export class OrchestratorDesk {
       // not at all after Stop. It is checked for its CLI once more as it goes in.
       const sent = await this.messages.tell({ fromPty: null, to: to.handle, text: step.prompt, fromPerson: true });
       if (!sent.ok) throw new Error(sent.error);
+      this.followTo(session?.workspaceId, step.target);
+      this.hearBack(step.target, step.prompt);
+      return;
+    }
+    if (step.kind === "read") {
+      const session = this.core.live.get(step.target);
+      if (!session || !isCodingCli(session)) throw new Error("That CLI isn't running any more.");
+      const answer = await this.messages.answerOf(step.target);
+      if (!answer.reply) throw new Error("It hasn't answered anything yet.");
+      step.reply = answer.reply.length > READ_KEEP ? `${answer.reply.slice(0, READ_KEEP).trimEnd()}…` : answer.reply;
+      // In a call its terminal comes up too, so the answer can be read along with.
+      this.followTo(session.workspaceId, step.target);
+      this.onCall?.({ kind: "read", ...this.nameOf(session), reply: step.reply, all: step.prompt === "all", fromScreen: answer.fromScreen });
       return;
     }
     await this.core.killPty(step.target);
@@ -937,11 +986,54 @@ export class OrchestratorDesk {
   /** When each CLI Maestro started began working, and when it was last spoken of. */
   private readonly workingSince = new Map<string, number>();
   private readonly lastNote = new Map<string, number>();
+  /** Tells whose answer is still waited for in the CLI's own log, by terminal. */
+  private readonly awaited = new Map<string, AbortController>();
+  /** CLIs told something whose logs VibeForge can't read: the end of their next turn gets a word, as for one Viby started. */
+  private readonly told = new Set<string>();
 
-  /** A CLI went busy or quiet: one Maestro started that ends a turn after real work gets a word. */
+  /**
+   * A tell went in: its answer gets a word when it comes, however short the work was. A CLI whose
+   * log can't be read is listened to like one Viby started, for that one turn.
+   */
+  private hearBack(ptyId: string, words: string): void {
+    this.awaited.get(ptyId)?.abort();
+    this.awaited.delete(ptyId);
+    const waiting = new AbortController();
+    const answer = this.messages.awaitAnswer(ptyId, words, waiting.signal);
+    if (!answer) {
+      this.told.add(ptyId);
+      return;
+    }
+    this.told.delete(ptyId);
+    this.awaited.set(ptyId, waiting);
+    void answer.then((reply) => {
+      if (this.awaited.get(ptyId) !== waiting) return;
+      this.awaited.delete(ptyId);
+      const session = this.core.live.get(ptyId);
+      if (reply === null || !session) return;
+      // One word about a turn: going quiet after it says nothing more.
+      const now = this.core.now().getTime();
+      const last = this.lastNote.get(ptyId);
+      if (last !== undefined && now - last < NOTE_EVERY_MS) return;
+      this.lastNote.set(ptyId, now);
+      return this.noteFinished(session, reply);
+    });
+  }
+
+  private forgetTold(ptyId?: string): void {
+    for (const [id, waiting] of this.awaited) {
+      if (ptyId && id !== ptyId) continue;
+      waiting.abort();
+      this.awaited.delete(id);
+    }
+    if (ptyId) this.told.delete(ptyId);
+    else this.told.clear();
+  }
+
+  /** A CLI went busy or quiet: one Maestro started (or told, see hearBack) that ends a turn after real work gets a word. */
   onActivity(ptyId: string, working: boolean): void {
     const session = this.core.live.get(ptyId);
-    if (!session?.orchestrated) return;
+    if (!session || (!session.orchestrated && !this.told.has(ptyId))) return;
     const now = this.core.now().getTime();
     if (working) {
       if (!this.workingSince.has(ptyId)) this.workingSince.set(ptyId, now);
@@ -949,7 +1041,10 @@ export class OrchestratorDesk {
     }
     const since = this.workingSince.get(ptyId);
     this.workingSince.delete(ptyId);
-    if (since === undefined || now - since < NOTE_AFTER_WORK_MS) return;
+    if (since === undefined) return;
+    // The turn it was told to take is over, long or short.
+    this.told.delete(ptyId);
+    if (now - since < NOTE_AFTER_WORK_MS) return;
     const last = this.lastNote.get(ptyId);
     if (last !== undefined && now - last < NOTE_EVERY_MS) return;
     this.lastNote.set(ptyId, now);
@@ -958,7 +1053,9 @@ export class OrchestratorDesk {
 
   /** A CLI Maestro started closed by itself (not stopped by a person or a step): a word, with what it changed. */
   onExit(session: LiveSession | undefined): void {
-    if (!session?.orchestrated) return;
+    if (!session) return;
+    this.forgetTold(session.ptyId);
+    if (!session.orchestrated) return;
     this.workingSince.delete(session.ptyId);
     this.lastNote.delete(session.ptyId);
     const run = session.runId ? this.core.store.getRun(session.runId) : null;
@@ -966,7 +1063,8 @@ export class OrchestratorDesk {
     this.addNote(session, "ended", run?.changes ?? null);
   }
 
-  private async noteFinished(session: LiveSession): Promise<void> {
+  /** `answered` is its answer when that is known already; otherwise its own log is asked. */
+  private async noteFinished(session: LiveSession, answered?: string): Promise<void> {
     const run = session.runId ? this.core.store.getRun(session.runId) : null;
     let changes: string | null = null;
     try {
@@ -974,29 +1072,39 @@ export class OrchestratorDesk {
     } catch {
       changes = null;
     }
+    const reply = answered ?? (await this.messages.answerOf(session.ptyId, true).catch(() => ({ reply: "" }))).reply;
     // Gone while git was asked: its exit says so instead.
     if (!this.core.isLive(session.ptyId)) return;
-    this.addNote(session, "finished", changes);
+    this.addNote(session, "finished", changes, reply);
   }
 
-  private addNote(session: LiveSession, kind: MaestroNote["kind"], changes: string | null): void {
+  /** A CLI as a note and a read step name it: "Claude Code", and its workspace. */
+  private nameOf(session: LiveSession): { engine: string; workspace: string } {
     const workspace = session.workspaceId ? this.core.workspaceById(session.workspaceId) : null;
+    return { engine: session.program || session.title.split(" · ")[0] || session.title, workspace: workspace?.name ?? session.title };
+  }
+
+  private addNote(session: LiveSession, kind: MaestroNote["kind"], changes: string | null, reply = ""): void {
     const copy = session.workspaceId ? this.copies.list().find((item) => item.openedWorkspaceId === session.workspaceId) : undefined;
+    // The start of its answer: enough to know how it went, and short enough to be said in a call.
+    const said = speakable(reply, "summary");
     const note: MaestroNote = {
       kind,
       ptyId: session.ptyId,
       runId: session.runId,
-      engine: session.program || session.title.split(" · ")[0] || session.title,
-      workspace: workspace?.name ?? session.title,
+      ...this.nameOf(session),
       workspaceId: session.workspaceId,
       copyId: copy?.id ?? null,
       changes: changes && changes !== "No changes" ? changes : null,
+      ...(said ? { reply: said } : {}),
     };
     this.conversation.turns.push({ id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", text: "", note });
     this.save();
+    this.onCall?.({ kind: "note", note });
   }
 
   close(): void {
+    this.forgetTold();
     this.thinking?.abort();
     this.thinking = null;
   }

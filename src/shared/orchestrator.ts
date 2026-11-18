@@ -8,12 +8,19 @@ import { effortLevels } from "./launch-options.js";
 /**
  * start, tell, stop: a CLI (or an agent). workspace: a new workspace (its folder made if it isn't there).
  * apply, discard: a copy waiting for review. show: a running CLI, opened in Code.
+ * read: what a running CLI last answered, shown on the card and read out in a call.
  * lookup: search runs, git branches and project folders on disk. task: run or create a task. routine: run or toggle a routine.
  */
-export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show" | "lookup" | "task" | "routine";
+export type OrchestratorStepKind = "start" | "tell" | "stop" | "workspace" | "apply" | "discard" | "show" | "read" | "lookup" | "task" | "routine";
+
+/** Every kind of step, for checking what a planner wrote. */
+export const STEP_KINDS: readonly OrchestratorStepKind[] = ["start", "tell", "stop", "workspace", "apply", "discard", "show", "read", "lookup", "task", "routine"];
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
 export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
+
+/** The steps that change nothing: a plan made only of these goes at once, whatever Settings says. */
+export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read"];
 
 /** Why a step can't run as it stands; the plan card asks the person to fix it. */
 export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt" | "effort" | "folder" | "copy";
@@ -33,9 +40,9 @@ export interface OrchestratorStep {
   workspaceId: string;
   /** start: the new branch, in its own copy of the workspace. Empty when the folder isn't a git repository. */
   branch: string;
-  /** start: its first instruction. tell: the message. */
+  /** start: its first instruction. tell: the message. read: "all" for the whole answer, empty for the start of it. */
   prompt: string;
-  /** tell, stop: the terminal. */
+  /** tell, stop, read: the terminal. */
   target: string;
   /** What the plan named, for a workspace, engine or terminal VibeForge couldn't find. */
   asked: string;
@@ -63,6 +70,20 @@ export interface OrchestratorStep {
   result?: string | null;
   /** discard: the token that undoes it, while it can be undone. */
   undo?: string | null;
+  /** read: what that CLI last answered, as it wrote it. It stays on this machine: the planner is never sent it. */
+  reply?: string;
+  /** show: a view of the window (SHOW_VIEWS), when it shows one instead of a terminal or a workspace. */
+  view?: string;
+}
+
+/** The views a show step can open: the window's own names for them. */
+export const SHOW_VIEWS = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "orchestrator", "settings"] as const;
+
+/** Where the person is in the window when they speak to Viby: the view, and in Code the workspace and the terminal with focus. */
+export interface Looking {
+  view: string;
+  workspaceId?: string;
+  ptyId?: string;
 }
 
 /**
@@ -98,7 +119,7 @@ export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId
 
 export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
 
-/** A word from VibeForge itself about a CLI Maestro started: its turn ended after real work, or it closed. */
+/** A word from VibeForge itself about a CLI Maestro started or told: its turn ended, or it closed. */
 export interface MaestroNote {
   kind: "finished" | "ended";
   ptyId: string;
@@ -111,7 +132,12 @@ export interface MaestroNote {
   copyId: string | null;
   /** "2 commits · 3 files changed", when git could say. */
   changes: string | null;
+  /** The start of what it answered, when its own log has that. */
+  reply?: string | null;
 }
+
+/** What Viby says by itself while a call is on: a note about a CLI, or an answer a read step fetched. */
+export type VibyWord = { kind: "note"; note: MaestroNote } | { kind: "read"; engine: string; workspace: string; reply: string; all: boolean; fromScreen: boolean };
 
 export interface OrchestratorTurn {
   id: string;
@@ -268,6 +294,11 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
     if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
     return step.prompt.trim() ? null : "prompt";
+  }
+  if (step.kind === "show" && !step.target) {
+    // A view, or a workspace opened in Code; neither needs anything to be running.
+    if (step.view) return (SHOW_VIEWS as readonly string[]).includes(step.view) ? null : "workspace";
+    return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
   }
   if (!context.running.some((item) => item.id === step.target)) return "target";
   if (step.kind === "tell" && !step.prompt.trim()) return "prompt";

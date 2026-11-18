@@ -4,7 +4,7 @@ What VibeForge does and won't do. A change that breaks one of these needs a reas
 
 ## It runs the CLIs you already sign in to
 
-VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Viby plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything. It is told what Viby shows you: your workspaces, CLIs, agents, tasks, routines, and what's running or waiting for review. Past runs and folder names go to it only when you ask it to find something, and folder names only from where projects are kept (your projects folder and `~/Projects`).
+VibeForge never calls a model API and never holds an API key. Every engine is a coding CLI on your `PATH` that you signed in to yourself; VibeForge starts it in a real terminal and gives it a home. If a CLI isn't signed in, its terminal shows the CLI's own sign-in. Viby plans with one of those CLIs, on that CLI's own subscription, in a turn that can't change anything. It is told what Viby shows you: your workspaces, CLIs, agents, tasks, routines, and what's running or waiting for review, and with each request the view, workspace and terminal in front of you. It is never sent what a CLI answered: Viby reads that from the CLI's own log on this machine, for you. Past runs and folder names go to it only when you ask it to find something, and folder names only from where projects are kept (your projects folder and `~/Projects`).
 
 Plan limits, when you turn them on, read the sign-in a CLI saved on this machine to ask its provider for your usage. VibeForge never renews, rewrites or keeps that sign-in, and saves only the percentages.
 
@@ -31,8 +31,9 @@ Anything that goes over the network stays off until you turn it on:
 ## A person decides each step
 
 - Writing or assigning a task starts nothing. **Execute** does.
-- Viby shows a plan as a card that waits for **Go**. **Just go** is a setting you choose.
+- Viby shows a plan as a card that waits for **Go**. **Just go** is a setting you choose. A plan that only shows you something (a workspace, a view, a terminal) or reads a CLI's answer out goes at once: it changes nothing.
 - Dictated words land in the box or terminal and wait for you to press Enter.
+- A call with Viby is the one place speech sends itself: you start it on purpose, the rail shows it for as long as the microphone is open, and what you say reaches only Viby, never a terminal. A plan Viby makes in a call waits for **Go** like any other; a spoken "go" is that Go. When Viby speaks up by itself in a call (a CLI ended its turn), it only tells you; nothing is started by it.
 - Work done in a task's or Viby's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
 - A task one CLI hands another waits for you under **Ask first**, the default. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
 
@@ -46,7 +47,7 @@ An agent has one engine. VibeForge doesn't route work between models, pick a che
 
 ## Voice stays on this machine
 
-[whisper.cpp](https://github.com/ggml-org/whisper.cpp) turns speech into text and [Piper](https://github.com/OHF-Voice/piper1-gpl) reads answers aloud, both locally. No audio is sent to a service or kept. The phone's mic records on the phone and sends the audio over your tailnet to this computer's whisper, and nowhere else.
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) turns speech into text and [Piper](https://github.com/OHF-Voice/piper1-gpl) reads answers aloud, both locally. In a call, the Silero model that tells speech from other sound comes with VibeForge and runs here too, and echo is cancelled by this machine's own PipeWire. No audio is sent to a service or kept. The phone's mic records on the phone and sends the audio over your tailnet to this computer's whisper, and nowhere else.
 
 ## Honest limits
 

@@ -407,10 +407,13 @@ function clip(text: string, max: number): string {
   return `${cut.slice(0, cut.lastIndexOf(" ")).trim()}…`;
 }
 
-/** What to say for a reply: its first paragraph for a summary, all of it (within reason) otherwise. */
-export function speakable(markdown: string, mode: TalkBack): string {
+/** The most of a reply that is read aloud in one go: some four minutes of speech. */
+export const SPEAK_MAX = 4000;
+
+/** What to say for a reply: its first paragraph for a summary, all of it (within reason, or up to `max` characters) otherwise. */
+export function speakable(markdown: string, mode: TalkBack, max = SPEAK_MAX): string {
   if (mode === "off") return "";
   const paragraphs = plain(markdown, mode === "full");
   if (mode === "summary") return clip(paragraphs.find((paragraph) => !/^A code block/.test(paragraph)) ?? "", 360);
-  return clip(paragraphs.join(" "), 4000);
+  return clip(paragraphs.join(" "), max);
 }

@@ -93,6 +93,11 @@ export function setPtyInView(owner: string, ptyId: string | null): void {
   changed();
 }
 
+/** The terminal a view shows with focus, by the view that said so ("code", a task, a run). */
+export function usePtyInView(owner: string): string | null {
+  return useSyncExternalStore(subscribe, () => ptysInView.get(owner) ?? null);
+}
+
 export function usePtysInView(): ReadonlySet<string> {
   return new Set(useSyncExternalStore(subscribe, () => ptysInView).values());
 }

@@ -283,6 +283,23 @@
   overflow: hidden;
 }
 
+/* What a read step fetched: a CLI's answer as it wrote it, scrolled when it is long. */
+.orch-reply {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-left: 2px solid var(--line);
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.orch-reply.clamp {
+  max-height: 120px;
+}
+
 .orch-issue {
   color: var(--accent-2);
   font-size: var(--fs-sm);

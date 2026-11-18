@@ -190,6 +190,13 @@ export function VoiceCard() {
           <Field hint={t("voice.talkBackHint")}>
             <Toggle checked={voice.talkBack} onChange={(talkBack) => void patch({ talkBack })} label={t("voice.talkBack")} />
           </Field>
+          <Field label={t("voice.talkOver")} hint={t("voice.talkOverHint")}>
+            <Select value={voice.talkOver} onChange={(event) => void patch({ talkOver: event.target.value as VoiceSettings["talkOver"] })}>
+              <option value="auto">{t("voice.talkOver.auto")}</option>
+              <option value="always">{t("voice.talkOver.always")}</option>
+              <option value="never">{t("voice.talkOver.never")}</option>
+            </Select>
+          </Field>
           <Field label={t("voice.voice")} hint={t("voice.voiceHint")}>
             <div className="hstack" style={{ gap: 6 }}>
               <Select value={status.voices.includes(voice.speaker) ? voice.speaker : ""} onChange={(event) => void patch({ speaker: event.target.value })} disabled={!status.voices.length}>

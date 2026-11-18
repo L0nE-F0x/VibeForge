@@ -1,0 +1,11 @@
+Silero VAD v5.1.2, in whisper.cpp's ggml format
+
+This folder holds the Silero voice-activity model exactly as the whisper.cpp project published it;
+VibeForge does not change it. A call with Viby uses it to tell speech from other sound
+(src/core/vad.ts), on this machine.
+
+File:     ggml-silero-v5.1.2.bin, 885,098 bytes
+SHA-256:  29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf
+From:     https://huggingface.co/ggml-org/whisper-vad (revision 9ffd54a1e1ee413ddf265af9913beaf518d1639b)
+Model:    https://github.com/snakers4/silero-vad
+License:  MIT, Copyright (c) 2020-present Silero Team, in LICENSE.txt beside this file.

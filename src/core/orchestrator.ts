@@ -10,7 +10,7 @@ import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
 import { cleanModel, effortLevels } from "../shared/launch-options.js";
-import { brainKind, plannedId, type OrchestratorStep, type PlanContext } from "../shared/orchestrator.js";
+import { brainKind, plannedId, SHOW_VIEWS, STEP_KINDS, type Looking, type OrchestratorStep, type PlanContext } from "../shared/orchestrator.js";
 
 export * from "../shared/orchestrator.js";
 
@@ -27,7 +27,7 @@ export const PLAN_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          kind: { type: "string", enum: ["start", "tell", "stop", "workspace", "apply", "discard", "show", "lookup", "task", "routine"] },
+          kind: { type: "string", enum: [...STEP_KINDS] },
           engine: { type: "string" },
           workspace: { type: "string" },
           branch: { type: "string" },
@@ -230,7 +230,8 @@ export function orchestratorRules(context: PlanContext): string {
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (the session id, branch, folder name, or keywords to search for). VibeForge runs the lookup at once and hands you the findings.",
     "- tell: send a message to a CLI that is already running. Fields: target (its id below), prompt (the message).",
     "- stop: close a running CLI. Fields: target.",
-    "- show: open a running CLI in Code for the person to look at. Fields: target.",
+    "- show: bring something up on the person's screen. It changes nothing, so it never needs asking about. Fields: target (a running CLI's id below, to open its terminal), or workspace (a workspace's name below, to open it in Code), or target as one of home, agents, code, chat, tasks, routines, skills, runs, viby, settings (to open that view).",
+    "- read: read out to the person what a running CLI last answered (\"what did Claude say?\", \"read me its answer\", \"how did it go?\"). It changes nothing, so it never needs asking about. Fields: target (its id below), prompt (\"all\" when they ask for all of it or the whole thing; otherwise leave it empty and the start of it is read).",
     "- apply: bring a copy's changes into the workspace it came from. discard: throw a copy away. Fields: target (a copy's id below).",
     "- task: run an existing task on the board, or create and start a new task for an agent. Fields: target (existing task id/title, or the agent's id/name for a new task), workspace (workspace name, for a new task), branch (short title for a new task), prompt (instructions for a new task).",
     "- routine: run a scheduled routine now, or turn it on/off. Fields: target (a routine's id or name below), prompt (\"enable\", \"disable\", or empty to run now).",
@@ -241,8 +242,13 @@ export function orchestratorRules(context: PlanContext): string {
     "- When they ask for a workspace, session or branch that isn't listed below, use a `lookup` step first to search disk, branches and run history if they are asking you to find an existing one; make it with a `workspace` step if they asked for a new one or gave its folder.",
     "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do), answer in `say` with no steps.",
     "- If they change a plan you just gave, give the whole corrected plan again.",
+    "- A request may begin with a line in parentheses saying what is in front of the person right now. \"This\", \"here\", \"this one\" and \"this workspace\" mean what that line names, and so does \"it\" when nothing else was just mentioned: \"tell it to run the tests\" is a tell to the terminal in front of them, \"start Claude here\" a start in that workspace.",
+    "- When they ask to switch to, open, go to or see a workspace, a running CLI or a view, that is a show step.",
+    "- A tell's prompt is what the person said to pass on, word for word, without the part spoken to you (\"tell Claude to\", \"ask it to\"). Put right a name speech-to-text got wrong; don't shorten it, polish it or add to it.",
+    "- You can't see what a CLI wrote or answered, only whether it is working. When they ask what one said, or how its work went, give a read step and say only that you are reading it out; never guess at its answer.",
+    "- After a tell or a start, VibeForge itself tells the person when that CLI has answered, with the start of its answer. Don't add a read step for an answer that isn't there yet, and don't tell them to ask for it.",
     "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, or starting something when `steps` is empty — emit a `lookup` or `start` step instead.",
-    "- `say` is one or two short plain sentences in the person's language: what you will do, or your question. No markdown.",
+    "- `say` is one or two short plain sentences in the person's language: what you will do, or your question. No markdown, and never an id such as pty-3: it may be read aloud, so name a CLI by what it is and where (\"Claude in Dune\").",
     "",
     "Workspaces:",
     workspaces,
@@ -461,9 +467,8 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
   const steps: OrchestratorStep[] = [];
   // The workspaces this plan makes, under placeholder ids, for its later steps to name.
   const planned: PlanContext["workspaces"] = [];
-  const kinds = ["start", "tell", "stop", "workspace", "apply", "discard", "show", "lookup", "task", "routine"] as const;
   for (const item of raw.steps) {
-    const kind = kinds.find((value) => value === item.kind) ?? null;
+    const kind = STEP_KINDS.find((value) => value === item.kind) ?? null;
     if (!kind) continue;
     const base: OrchestratorStep = { id: newStepId(), kind, engineId: "", workspaceId: "", branch: "", prompt: item.prompt ?? "", target: "", asked: "", state: "planned", error: null, ptyId: null, openedWorkspaceId: null };
     if (kind === "workspace") {
@@ -537,13 +542,91 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
       const asked = copy ? `${copy.name} · ${copy.workspace}` : (item.target ?? "");
       steps.push({ ...base, prompt: "", target: copy?.id ?? "", asked });
+    } else if (kind === "show") {
+      steps.push({ ...base, prompt: "", ...showWhat(item, context) });
     } else {
       const target = context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]);
       const asked = target ? `${target.engine} · ${target.workspace}` : (item.target ?? "");
-      steps.push({ ...base, prompt: kind === "tell" ? base.prompt : "", target: target?.id ?? "", asked });
+      steps.push({ ...base, prompt: kind === "tell" ? base.prompt : kind === "read" && readsAll(item.prompt) ? "all" : "", target: target?.id ?? "", asked });
     }
   }
   return steps;
+}
+
+/** A read step asked for the whole answer ("all", "all of it", "full"), not just the start of it. */
+export function readsAll(said: string | undefined): boolean {
+  return /^(all|all of it|everything|full|the whole thing|whole)$/.test((said ?? "").trim().toLowerCase().replace(/[.!]+$/, ""));
+}
+
+/** What people call the views, beyond the window's own names for them. */
+const VIEW_NAMES: Record<string, (typeof SHOW_VIEWS)[number]> = {
+  viby: "orchestrator",
+  vibey: "orchestrator",
+  vibe: "orchestrator",
+  maestro: "orchestrator",
+  agent: "agents",
+  teammates: "agents",
+  terminals: "code",
+  terminal: "code",
+  chats: "chat",
+  task: "tasks",
+  board: "tasks",
+  taskboard: "tasks",
+  routine: "routines",
+  skill: "skills",
+  run: "runs",
+  history: "runs",
+  setting: "settings",
+};
+
+/** The view a show step named ("tasks", "the Tasks view", "Viby"), or null when it named none. */
+export function showView(said: string | undefined): (typeof SHOW_VIEWS)[number] | null {
+  const name = squash(said ?? "").replace(/^the/, "").replace(/(view|panel|page|tab)$/, "");
+  if (!name) return null;
+  return SHOW_VIEWS.find((view) => view === name) ?? VIEW_NAMES[name] ?? null;
+}
+
+/**
+ * What a show step shows, in this order: a running CLI it named, a workspace called exactly that,
+ * a view, then a workspace whose name comes close. So a workspace named "Tasks" beats the view,
+ * and "settings" is the view even with a workspace called app-settings.
+ */
+function showWhat(item: RawStep, context: PlanContext): Pick<OrchestratorStep, "target" | "workspaceId" | "asked"> & { view?: string } {
+  const running = item.target ? (context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`])) : null;
+  if (running) return { target: running.id, workspaceId: "", asked: `${running.engine} · ${running.workspace}` };
+  const said = (item.workspace || item.target || "").trim();
+  const exact = context.workspaces.filter((entry) => squash(entry.name) === squash(said));
+  const view = exact.length === 1 ? null : (showView(item.target) ?? showView(item.workspace));
+  const workspace = exact.length === 1 ? exact[0] : view ? null : matchName(said, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+  if (workspace) return { target: "", workspaceId: workspace.id, asked: workspace.name };
+  if (view) return { target: "", workspaceId: "", view, asked: view === "orchestrator" ? "Viby" : `${view[0].toUpperCase()}${view.slice(1)}` };
+  return { target: "", workspaceId: "", asked: said };
+}
+
+/**
+ * What is in front of the person, said to the planner ahead of their words, so "this one" and
+ * "here" mean something. It goes with each request and not in the rules, which a resumed session
+ * may not read again. Empty when where they are says nothing (Viby's own panel, Home).
+ */
+export function lookingLine(looking: Looking | null | undefined, context: PlanContext): string {
+  if (!looking) return "";
+  const parts: string[] = [];
+  if (looking.view === "code") {
+    const workspace = context.workspaces.find((item) => item.id === looking.workspaceId);
+    const running = context.running.find((item) => item.id === looking.ptyId);
+    if (!workspace && !running) return "";
+    parts.push("the Code view");
+    if (workspace) parts.push(`workspace "${workspace.name}"`);
+    if (running) parts.push(`terminal ${running.id} running ${running.engine}`);
+    else if (looking.ptyId) parts.push("a terminal with no coding CLI in it");
+  } else {
+    const view = (SHOW_VIEWS as readonly string[]).includes(looking.view) && looking.view !== "orchestrator" && looking.view !== "home" ? looking.view : "";
+    const running = context.running.find((item) => item.id === looking.ptyId);
+    if (!view) return "";
+    parts.push(`the ${view[0].toUpperCase()}${view.slice(1)} view`);
+    if (running) parts.push(`terminal ${running.id} running ${running.engine} in ${running.workspace}`);
+  }
+  return `(In front of the person right now: ${parts.join(", ")}.)`;
 }
 
 /**

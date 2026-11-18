@@ -45,9 +45,9 @@ export function deskHost(ctx: MainContext, notify: Notify): DeskHost {
     snapshotGit: (cwd, startHead) => snapshotGit(cwd, 5000, startHead),
     gitHead: (cwd) => gitHead(cwd),
     // Maestro's show step: the page goes there as it does for a clicked notification.
-    show: (route) => {
+    show: (route, raise = true) => {
       send("open-route", { route });
-      if (ctx.win && !ctx.win.isDestroyed()) {
+      if (raise && ctx.win && !ctx.win.isDestroyed()) {
         if (!ctx.win.isVisible()) ctx.win.show();
         ctx.win.focus();
       }

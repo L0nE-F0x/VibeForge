@@ -778,7 +778,7 @@ export function VoiceLayer() {
 const METER_CELLS = 14;
 
 /** Registers the bar as a floating layer so the browser dock steps aside while it covers it. */
-function useBarLayer(ref: React.RefObject<HTMLDivElement | null>): void {
+export function useBarLayer(ref: React.RefObject<HTMLDivElement | null>): void {
   const [box, setBox] = useState<Box | null>(null);
   useLayoutEffect(() => {
     const node = ref.current;

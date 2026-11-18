@@ -50,7 +50,7 @@ import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
-import type { MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch } from "../core/orchestrator.js";
+import type { Looking, MaestroCopy, MaestroNote, OrchestratorProblem, OrchestratorStep, OrchestratorTurn, OrchestratorView, StepIssue, StepPatch } from "../core/orchestrator.js";
 
 import type { MergeResult } from "../core/sync/git-rescue.js";
 import type { SyncMode } from "../core/sync/protocol.js";
@@ -170,6 +170,31 @@ export interface TalkEvent {
   who: string;
   /** What is being said (for "speaking"). */
   text: string;
+}
+
+/** Where a call with Viby is: waiting for you, hearing you, working out the words, waiting for Viby, or Viby talking. */
+export type CallPhase = "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
+
+/** A call with Viby: the microphone stays open, what you say goes to Viby, and the answer is read aloud. */
+export interface CallState {
+  on: boolean;
+  phase: CallPhase;
+  /** 0–1, for the meter, while it is listening. */
+  level: number;
+  /** What was last heard. */
+  heard: string;
+  /** What Viby last answered. */
+  said: string;
+  /** A plan waits for a spoken "go" or "cancel" (or its card's buttons). */
+  waiting: boolean;
+  /** Answers can be read aloud here: Piper, a voice and a player are all found. */
+  spoken: boolean;
+  /** Why the call ended, when it ended by itself (the microphone closed). */
+  error: string | null;
+  /** Talking while Viby speaks stops it: the speech detector is listening, and Viby can't hear itself (echo cancellation, or headphones as Settings say). */
+  talkOver: boolean;
+  /** Viby heard its own voice in this call and took it for the person's; talking over it is off until the call ends. */
+  heardItself: boolean;
 }
 
 export type DownloadKind = "model" | "voice";
@@ -401,6 +426,8 @@ export interface DeskMethods {
   "orchestrator.get": () => OrchestratorView;
   /** Say something to the Orchestrator. Resolves once it has answered (the answer comes as a turn). */
   "orchestrator.ask": (text: string) => void;
+  /** Where the person is in the window now, for Viby: said whenever it changes. */
+  "app.looking": (looking: Looking | null) => void;
   "orchestrator.stopThinking": () => void;
   /** The models a planning CLI offers (Claude Code's aliases, or what Grok Build and Antigravity list). */
   "orchestrator.models": (engineId: string) => string[];
@@ -457,6 +484,11 @@ export interface DeskMethods {
   /** Appends the keybinding lines to the Hyprland config (after a backup); returns the file. */
   "voice.installBindings": () => string;
 
+  "call.get": () => CallState;
+  /** Opens the microphone and starts a call with Viby; what is heard goes to Viby without waiting for Enter. */
+  "call.start": () => CallState;
+  "call.stop": () => void;
+
   "pty.write": (ptyId: string, data: string) => void;
   "pty.send": (ptyId: string, text: string) => void;
 
@@ -510,6 +542,8 @@ export interface DeskEvents {
   "host-crash": string;
   voice: VoiceState;
   "voice-talk": TalkEvent;
+  /** A call with Viby began, moved on or ended; many times a second while it listens, for the meter. */
+  call: CallState;
   /** `vibeforge --voice …` from a keybinding. */
   "voice-command": { action: VoiceAction };
 }

@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Call Viby.** A **Call** button at the foot of the rail (and **Call Viby** in Viby's panel and its bar) opens the microphone and keeps it open: say something, pause, and it goes to Viby as if typed in its box; Viby's answer is read aloud, and it listens again until you hang up. It works from any view, so you can talk to Viby while you watch Code. The rail's button stays lit with the microphone's level for as long as the call is on, and a bar comes up only while something is happening: you are heard, Viby is thinking or speaking, or a plan is waiting.
+- **Plans still wait for Go in a call**, as **Show me first** / **Just go** says. Viby reads the plan and asks; saying "go" or "cancel" on its own answers it at once, without another planning turn, and the card's buttons work as before. "Hang up" ends the call.
+- **It listens for speech, not for noise.** A call tells a voice from a keyboard, a door or music with the Silero voice-activity model (MIT, 885 KB), which now comes with VibeForge and runs on this machine. Without it (a build that lacks the file) a call goes by loudness, as dictation's meter does.
+- **Talk over Viby.** Start talking while Viby speaks and it stops to listen, where it can't hear itself: for the length of a call VibeForge asks PipeWire to cancel the speakers' sound out of the microphone (its own echo-cancel module, in a process that ends with the call; your sound setup is not changed), or you tell Settings → Voice you wear headphones. Elsewhere, and under **Never**, one side talks at a time as before: the microphone isn't listened to while Viby speaks, and **Stop reading** on the bar cuts it off.
+- **Viby never takes its own voice for yours.** What is heard while Viby speaks is checked against what it was saying; its own words coming back are dropped, and after one clear case talking over is off for the rest of that call. So "go" said over "Say go, or cancel" has to be said again once Viby is quiet. "That's enough", "wait" or "got it" only stop it.
+- Holding the dictate key during a call still dictates into the box or terminal with focus, and the call hears none of it.
+- **Viby knows what you're looking at.** Typed or spoken, each request tells Viby the view you're in, and in Code the workspace and the terminal with focus, so "tell this one to run the tests" and "start Claude here" mean the ones in front of you. A message you ask it to pass on goes word for word.
+- **"Switch to …", "show me …".** Viby can open any workspace in Code and any view (Tasks, Runs, Settings and the rest), not only a running CLI's terminal. Showing changes nothing, so a plan that only shows goes at once, even under **Show me first**.
+- **The window follows Viby during a call.** A CLI it starts or tells comes up in Code as it happens, without VibeForge being raised over another app you have in front.
+- **Viby speaks up.** During a call, when a CLI Viby started or told ends its turn, Viby says so and reads the first lines of its answer ("Claude Code in api finished its turn. It says: all 12 tests pass"). It waits for a moment when nobody is talking and never cuts in. The same note in Viby's panel now carries those first lines, call or no call, and a CLI Viby only told gets a note too.
+- **"What did Claude say?"** A new **Read out** step fetches a running CLI's last answer: all of it on the plan's card, and in a call the start of it aloud (ask for "all of it" for the rest), with its terminal brought up beside it. Reading changes nothing, so it goes at once. The answer comes from the CLI's own session log (Claude Code, Codex, Grok Build, Kimi Code); for the others the end of the screen is on the card and nothing is read aloud. The answer is never sent to the CLI that plans.
+- **Everything stays on this machine**, as with dictation: whisper.cpp hears, Piper speaks, and the silence between the things you say is dropped as it arrives. Without Piper or a voice, the answers show on the bar instead.
+
 ## [2.19.0] - 2026-11-17
 
 **2.19.0: sync a workspace with your other machine. Pick the workspaces, pick the direction, and pick up at home where you left off at work.**

@@ -26,6 +26,7 @@ import { Stats } from "./stats.js";
 import { PtySupervisor } from "./supervisor.js";
 import { Sync } from "./sync.js";
 import { adoptShellPath, osDescription } from "./system.js";
+import { Call } from "./call.js";
 import { Talk } from "./talk.js";
 import { Disposables, startSchedules } from "./timers.js";
 import { TrayController } from "./tray-controller.js";
@@ -116,6 +117,7 @@ const updater = new Updater({
 
 const voice = makeVoice(ctx);
 const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
+const viby = new Call({ voice, service: () => ctx.service, looking: () => ctx.looking, words: ctx.words, log, send: (state) => send("call", state) });
 
 /** Repaints in the theme Settings name (or Omarchy's own): the page, the window and the tray icon. */
 function refreshPalette(): void {
@@ -210,7 +212,7 @@ if (!app.requestSingleInstanceLock()) {
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire(ctx, stats, voice));
     mainWindow.guardPermissions();
-    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, dock, sync, notify, refreshPalette });
+    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, call: viby, dock, sync, notify, refreshPalette });
     drawBrandIcon();
     tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at
