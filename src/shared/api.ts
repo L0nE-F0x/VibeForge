@@ -256,6 +256,20 @@ export interface CompanionStatus {
   unsigned?: number;
 }
 
+/** How a phone reaches the phone page, as this computer's Tailscale tells it. */
+export interface PhoneReach {
+  /** Tailscale on this computer: not installed, installed but not connected, or connected. */
+  tailscale: "missing" | "off" | "on";
+  /** What this computer is called on the tailnet ("desktop.tail1234.ts.net"), once connected. */
+  name: string | null;
+  /** The https address a phone opens: where Tailscale Serve shares the page. Null until it does. */
+  url: string | null;
+  /** That address is open to the internet too (Tailscale Funnel), not only to your own devices. */
+  funnel: boolean;
+  /** The command that shares the page, to run once in a terminal. */
+  command?: string;
+}
+
 export interface PtySnapshot {
   ansi: string;
   /** The screen as text, for the phone. The window keeps using `ansi`. */
@@ -333,6 +347,8 @@ export interface DeskMethods {
   "settings.save": (patch: Partial<Settings>) => Settings;
   /** Whether the phone page is listening, and why not when it failed to bind. */
   "companion.status": () => CompanionStatus;
+  /** Where a phone can open the page, asked of this computer's Tailscale. Nothing is changed. */
+  "companion.reach": () => PhoneReach;
   "engines.list": () => Engine[];
   "engines.recheck": () => Engine[];
   "engines.save": (rows: EngineRow[]) => Engine[];

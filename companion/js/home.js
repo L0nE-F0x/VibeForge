@@ -2,56 +2,57 @@
 // Before the desk: pairing with the code from the computer, and the landing page a paired phone
 // opens on, with how it works and the phone's own settings.
 
+import { linkCode } from "./address.js";
 import { checkCode, forget } from "./api.js";
 import { wordmark } from "./art.js";
 import { forgetSeen } from "./buzz.js";
-import { el, sheet } from "./dom.js";
+import { computerChip, severalComputers } from "./computers.js";
+import { codeField, el, sheet } from "./dom.js";
 import { setView, update } from "./pages.js";
-import { BUZZ_KEY, buzzShownOn, PLANS_KEY, parts, plansOpen, state, TEXT_KEY, TOKEN_KEY, TUCK_KEY, textLarge, tuckFinished } from "./state.js";
+import { BUZZ_KEY, buzzShownOn, COMPUTER_KEY, computerLabel, computers, PLANS_KEY, parts, plansOpen, saveComputer, state, TEXT_KEY, TUCK_KEY, textLarge, tuckFinished } from "./state.js";
 import { t } from "./words.js";
 
+/** The computer on show, as this phone keeps it. */
+function shownComputer() {
+  return computers().find((item) => item.url === state.base) ?? computers()[0];
+}
+
 export function pairPage() {
-  // Kept out of sight and out of the browser's autofill: the code is a key to this computer.
-  const input = el("input", {
-    id: "code",
-    type: "password",
-    autocomplete: "off",
-    autocapitalize: "off",
-    autocorrect: "off",
-    spellcheck: "false",
-    placeholder: "vf_…",
-    onkeydown: (event) => {
-      if (event.key === "Enter") void pair(input.value);
-    },
-  });
-  const reveal = el("button", {
-    class: "ghost reveal",
-    type: "button",
-    "aria-pressed": "false",
-    onclick: () => {
-      const shown = input.type === "password";
-      input.type = shown ? "text" : "password";
-      paintReveal(reveal, shown);
-    },
-  });
-  paintReveal(reveal, false);
-  parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(input.value) }, t("phone.continue"));
+  const code = codeField("code", () => void pair(code.input.value));
+  parts.pair = el("button", { class: "btn", type: "button", onclick: () => void pair(code.input.value) }, t("phone.continue"));
+  // With several computers, the page says whose code it wants, and the others are one tap away.
+  const several = severalComputers();
   return el(
     "section",
     {},
     el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
-    el("p", { class: "muted lede" }, t("phone.pairLead")),
-    el("div", { class: "card stack" }, el("label", {}, t("phone.code"), el("span", { class: "code-field" }, input, reveal)), parts.pair),
+    several ? computerChip() : null,
+    el("p", { class: "muted lede" }, several ? t("phone.pairLeadNamed", { name: computerLabel(shownComputer()) }) : t("phone.pairLead")),
+    el("div", { class: "card stack" }, el("label", {}, t("phone.code"), code.node), parts.pair),
   );
 }
 
 /**
- * @param {HTMLButtonElement} button
- * @param {boolean} shown
+ * The link Settings → Phone shows, and draws as a QR code, carries the pairing code: a phone that
+ * opens it is paired with the computer the link is for, with nothing to type. A code that isn't
+ * that computer's (a new one was made since) leaves the page as it was, asking for the code.
  */
-function paintReveal(button, shown) {
-  button.textContent = shown ? t("phone.codeHide") : t("phone.codeShow");
-  button.setAttribute("aria-pressed", String(shown));
+export async function pairFromLink() {
+  const code = linkCode(window.location.hash);
+  if (!code) return;
+  // Out of the address bar and the phone's history at once: the code is a key to this computer.
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  const home = computers()[0];
+  try {
+    const answer = home.token === code ? {} : await checkCode(code, "");
+    saveComputer({ ...home, token: code, name: typeof answer.computer === "string" && answer.computer ? answer.computer : home.name });
+  } catch {
+    return;
+  }
+  localStorage.setItem(COMPUTER_KEY, "");
+  state.base = "";
+  state.token = code;
+  state.view = "home";
 }
 
 /** @param {string} code */
@@ -61,9 +62,10 @@ async function pair(code) {
   state.error = "";
   update();
   try {
-    await checkCode(given);
+    const answer = await checkCode(given);
+    const shown = shownComputer();
+    saveComputer({ ...shown, token: given, name: typeof answer.computer === "string" && answer.computer ? answer.computer : shown.name });
     state.token = given;
-    localStorage.setItem(TOKEN_KEY, state.token);
     state.busy = false;
     forgetSeen();
     setView("home");
@@ -194,6 +196,7 @@ export function homePage() {
       el("div", { class: "brand" }, wordmark(), el("h1", {}, "VibeForge")),
       el("p", { class: "home-kind" }, t("phone.homeKind")),
       el("p", { class: "muted home-blurb" }, t("phone.homeBlurb")),
+      computerChip(),
       el(
         "div",
         { class: "home-actions" },

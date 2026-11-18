@@ -292,7 +292,7 @@ async function micFinish() {
     const limit = window.setTimeout(() => upload.abort(), hearTimeout(pcm.byteLength));
     let response;
     try {
-      response = await fetch("/api/orchestrator/hear", { method: "POST", headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/octet-stream" }, body: pcm, signal: upload.signal });
+      response = await fetch(`${state.base}/api/orchestrator/hear`, { method: "POST", headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/octet-stream" }, body: pcm, signal: upload.signal });
     } catch {
       // Cancel let go of it: nothing to say.
       if (mic !== mine) return;

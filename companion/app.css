@@ -884,6 +884,71 @@ html.keyboard .credit { display: none; }
 
 .code-field .reveal { flex: none; min-height: 44px; padding: 0 12px; font-size: 12px; }
 
+/* Which computer is on show: its name, and the way to the others. */
+.computer-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  text-align: start;
+  font-weight: 500;
+}
+
+.computer-chip .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home .computer-chip { margin: 28px 0 0; }
+
+.home .computer-chip + .home-actions { margin-top: 10px; }
+
+/* The list of computers: each one a row to tap, the added ones with Remove at the end. */
+.computers { padding-block: 2px; }
+
+.computer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.computer:first-child { border-top: 0; }
+
+.computer-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  padding: 12px 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+
+.computer-pick .small { margin-top: 4px; }
+
+.computer-pick:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+.computer-pick:active .title { color: var(--accent); }
+
+.add-lead { margin: 0; }
+
+/* The camera, while it reads the other computer's QR code. */
+.scan { display: flex; flex-direction: column; gap: 10px; }
+
+.scan[hidden] { display: none; }
+
+.scan-view {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: var(--bg-deep);
+  border: 1px solid var(--line-2);
+}
+
 .home-forget { display: flex; flex-direction: column; gap: 10px; }
 
 .home-forget p { margin: 0; }

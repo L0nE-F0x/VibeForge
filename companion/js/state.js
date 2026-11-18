@@ -13,11 +13,22 @@
 /** @typedef {import("../../src/core/companion-orchestrator.js").PhoneRunning} PhoneRunning */
 /** @typedef {import("../../src/core/plans.js").PlanSummary} PlanSummary */
 /** @typedef {import("../../src/core/plans.js").PlanProvider} PlanProvider */
-/** @typedef {"pair" | "home" | "desk" | "launch" | "session" | "maestro"} View */
+/** @typedef {"pair" | "home" | "desk" | "launch" | "session" | "maestro" | "computers"} View */
+/**
+ * A computer this phone shows. `url` is where its page is ("https://laptop.tail1234.ts.net"), and
+ * empty for the one this page was loaded from. `token` is its pairing code, empty until it is given.
+ * @typedef {{ url: string, token: string, name: string }} Computer
+ */
 /** @typedef {{ ptyId: string, runId: string }} SessionQuery */
 /** A panel over the page (`sheet` in dom.js). @typedef {HTMLDivElement & { open: () => void }} Sheet */
 
+/** The pairing code of the computer this page was loaded from. */
 export const TOKEN_KEY = "vibeforge-phone";
+/** What that computer calls itself, once it has said. */
+export const NAME_KEY = "vibeforge-computer-name";
+/** The other computers this phone shows, and the address of the one on show (empty: the one this page came from). */
+export const COMPUTERS_KEY = "vibeforge-computers";
+export const COMPUTER_KEY = "vibeforge-computer";
 export const PLANS_KEY = "vibeforge-plans-open";
 export const RUNS_KEY = "vibeforge-runs-open";
 export const INSTALL_KEY = "vibeforge-install-dismissed";
@@ -26,11 +37,83 @@ export const BUZZ_KEY = "vibeforge-buzz";
 export const TUCK_KEY = "vibeforge-tuck-finished";
 export const TEXT_KEY = "vibeforge-large-text";
 
-const token = localStorage.getItem(TOKEN_KEY) || "";
+/** @returns {Computer[]} */
+function otherComputers() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COMPUTERS_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+    return saved
+      .filter((item) => item && typeof item.url === "string" && item.url)
+      .map((item) => ({ url: item.url, token: typeof item.token === "string" ? item.token : "", name: typeof item.name === "string" ? item.name : "" }));
+  } catch {
+    return [];
+  }
+}
+
+/** Every computer this phone shows: the one the page came from first, then the ones added. @returns {Computer[]} */
+export function computers() {
+  return [{ url: "", token: localStorage.getItem(TOKEN_KEY) || "", name: localStorage.getItem(NAME_KEY) || "" }, ...otherComputers()];
+}
+
+/**
+ * Keeps a computer: a new one, or a new code or name for one already here.
+ * @param {Computer} computer
+ */
+export function saveComputer(computer) {
+  if (!computer.url) {
+    if (computer.token) localStorage.setItem(TOKEN_KEY, computer.token);
+    else localStorage.removeItem(TOKEN_KEY);
+    if (computer.name) localStorage.setItem(NAME_KEY, computer.name);
+    return;
+  }
+  const rest = otherComputers().filter((item) => item.url !== computer.url);
+  const at = otherComputers().findIndex((item) => item.url === computer.url);
+  rest.splice(at < 0 ? rest.length : at, 0, { url: computer.url, token: computer.token, name: computer.name });
+  localStorage.setItem(COMPUTERS_KEY, JSON.stringify(rest));
+}
+
+/**
+ * What a computer calls itself, as it just said: kept, so the list of computers reads by name.
+ * @param {string} url
+ * @param {unknown} name
+ */
+export function nameComputer(url, name) {
+  if (typeof name !== "string" || !name.trim()) return;
+  const found = computers().find((item) => item.url === url);
+  if (found && found.name !== name.trim()) saveComputer({ ...found, name: name.trim().slice(0, 80) });
+}
+
+/**
+ * Takes an added computer off this phone. The one the page came from stays: it only loses its code.
+ * @param {string} url
+ */
+export function removeComputer(url) {
+  if (!url) return;
+  localStorage.setItem(COMPUTERS_KEY, JSON.stringify(otherComputers().filter((item) => item.url !== url)));
+}
+
+/**
+ * What to call a computer: its own name, else the first part of its address ("laptop" of laptop.tail1234.ts.net).
+ * @param {Computer} computer
+ */
+export function computerLabel(computer) {
+  if (computer.name) return computer.name;
+  try {
+    const host = computer.url ? new URL(computer.url).hostname : window.location.hostname;
+    return /^[\d.]+$/.test(host) || host === "localhost" ? host : host.split(".")[0];
+  } catch {
+    return computer.url;
+  }
+}
+
+/** The one on show: the one last chosen, while it is still here. */
+const shown = computers().find((item) => item.url === (localStorage.getItem(COMPUTER_KEY) || "")) || computers()[0];
+const token = shown.token;
 
 /**
  * @typedef {object} State
- * @property {string} token
+ * @property {string} base Where the computer on show answers: empty for the one this page came from, else its address.
+ * @property {string} token The pairing code of the computer on show.
  * @property {View} view
  * @property {DeskPayload | null} desk
  * @property {SessionPayload | null} session
@@ -46,6 +129,7 @@ const token = localStorage.getItem(TOKEN_KEY) || "";
 
 /** @type {State} */
 export const state = {
+  base: shown.url,
   token,
   /** A paired phone opens here. Enter reaches the desk; the name on the desk comes back. */
   view: token ? "home" : "pair",
@@ -69,6 +153,9 @@ export const state = {
  * @property {HTMLSpanElement} bannerText
  * @property {HTMLButtonElement} bannerClose
  * @property {HTMLButtonElement} pair
+ * @property {HTMLButtonElement} addComputer
+ * @property {HTMLParagraphElement} addNote
+ * @property {HTMLDivElement} computerList
  * @property {HTMLParagraphElement} buzzNote
  * @property {HTMLButtonElement} buzz
  * @property {HTMLDivElement} plans

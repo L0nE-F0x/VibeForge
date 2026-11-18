@@ -2,9 +2,9 @@
 // Talking to the computer: a request, the poll that keeps the page current, and an action
 // someone tapped, run with the buttons held.
 
-import { watch } from "./buzz.js";
+import { forgetSeen, watch } from "./buzz.js";
 import { show, update } from "./pages.js";
-import { parts, state, TOKEN_KEY } from "./state.js";
+import { COMPUTER_KEY, computers, nameComputer, parts, saveComputer, state } from "./state.js";
 import { loadWords, t, wordsLoaded } from "./words.js";
 
 /** The poll: one at a time, the next two seconds after the last one ends, slower while the computer doesn't answer. */
@@ -27,23 +27,29 @@ const ACTION_TIMEOUT_MS = 60_000;
 const GATEWAY_DOWN = [502, 503, 504];
 /** The last answer to each read, by its ETag: the computer answers 304 when nothing changed, and this stands in. @type {Map<string, { etag: string, body: any }>} */
 const seen = new Map();
-/** The app version the page was loaded from, once the computer has said it. */
+/** The app version the page was loaded from: written into the page, or (by a computer too old for that) its first answer. */
 let version = "";
+/** The version the page last loaded itself again for, so a page that came back the same doesn't try forever. */
+const RELOADED_KEY = "vibeforge-reloaded-for";
 
 /**
  * The computer's answer, read as JSON. A refusal throws with what it said; a link that fails throws `offline`.
  * A read (GET) sends the ETag of its last answer, and a 304 gives that answer back.
  * @param {string} path
- * @param {{ method?: string, body?: BodyInit, timeout?: number, refused?: string, type?: string, acts?: boolean }} [options] `refused`: what a refusal that gives no reason means here.
+ * @param {{ method?: string, body?: BodyInit, timeout?: number, refused?: string, type?: string, acts?: boolean, computer?: { url: string, token: string } }} [options] `refused`: what a refusal that gives no reason means here.
  *   `acts`: it changes something on the computer, so one that got no answer in time may still have been done.
+ *   `computer`: another computer than the one on show (one being added, or asked how it is doing). Nothing of its answer is kept.
  * @returns {Promise<any>}
  */
 export async function call(path, options = {}) {
   const method = options.method || "GET";
+  const own = !options.computer;
+  const base = options.computer ? options.computer.url : state.base;
+  const token = options.computer ? options.computer.token : state.token;
   /** @type {Record<string, string>} */
   const headers = { ...(options.body ? { "Content-Type": options.type || "application/json" } : {}) };
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const last = method === "GET" ? seen.get(path) : undefined;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const last = own && method === "GET" ? seen.get(path) : undefined;
   if (last) headers["If-None-Match"] = last.etag;
   const abort = options.timeout ? new AbortController() : null;
   const limit = abort ? window.setTimeout(() => abort.abort(), options.timeout) : 0;
@@ -54,7 +60,7 @@ export async function call(path, options = {}) {
   // An answer that isn't the computer's JSON came from something in between, not from VibeForge.
   let ours = true;
   try {
-    response = await fetch(path, { method, headers, body: options.body, signal: abort?.signal, cache: "no-store" });
+    response = await fetch(`${base}${path}`, { method, headers, body: options.body, signal: abort?.signal, cache: "no-store" });
     if (response.status === 304 && last) return last.body;
     body = await response.json().catch(() => {
       if (abort?.signal.aborted) throw new Error("timed out");
@@ -69,22 +75,32 @@ export async function call(path, options = {}) {
   }
   if (!response.ok && (!ours || GATEWAY_DOWN.includes(response.status))) throw Object.assign(new Error(t("phone.offline")), { offline: true });
   if (response.status === 401 && path !== "/api/pair") {
-    forget();
-    throw new Error(body.error || t("phone.pairLead"));
+    // Its code no longer works. Only for the computer still on show: the answer of one switched away from changes nothing.
+    if (own && base === state.base) forget();
+    throw Object.assign(new Error(body.error || t("phone.pairLead")), { unpaired: true });
   }
   if (!response.ok) throw Object.assign(new Error(body.error || options.refused || t("phone.error.failed")), { working: body.working === true });
   const etag = method === "GET" ? response.headers?.get?.("ETag") : null;
-  if (etag) seen.set(path, { etag, body });
+  if (etag && own && base === state.base) seen.set(path, { etag, body });
   return body;
 }
 
 /**
- * Asks the computer whether a pairing code is its own. It gives up as a poll does, so a link that
- * doesn't answer says the computer is offline and Continue comes back.
+ * Asks a computer whether a pairing code is its own: the one on show, or one at another address that
+ * is being added. It gives up as a poll does, so a link that doesn't answer says the computer is
+ * offline and the button comes back. The answer carries what the computer calls itself.
  * @param {string} code
+ * @param {string} [url]
+ * @returns {Promise<{ computer?: string }>}
  */
-export function checkCode(code) {
-  return call("/api/pair", { method: "POST", body: JSON.stringify({ token: code }), timeout: POLL_TIMEOUT_MS, refused: t("phone.codeWrong") });
+export function checkCode(code, url) {
+  return call("/api/pair", {
+    method: "POST",
+    body: JSON.stringify({ token: code }),
+    timeout: POLL_TIMEOUT_MS,
+    refused: t("phone.codeWrong"),
+    ...(url === undefined ? {} : { computer: { url, token: "" } }),
+  });
 }
 
 /**
@@ -95,10 +111,11 @@ export function post(path, body) {
   return call(path, { method: "POST", body: JSON.stringify(body), timeout: ACTION_TIMEOUT_MS, acts: true });
 }
 
-/** The code no longer works here: back to pairing. */
+/** The code of the computer on show no longer works: back to pairing with it. It stays in the list. */
 export function forget() {
+  const shown = computers().find((item) => item.url === state.base);
+  if (shown) saveComputer({ ...shown, token: "" });
   state.token = "";
-  localStorage.removeItem(TOKEN_KEY);
   state.desk = null;
   state.session = null;
   seen.clear();
@@ -108,6 +125,36 @@ export function forget() {
     state.view = "pair";
     show();
   }
+}
+
+/**
+ * Shows another of this phone's computers. Nothing of the one before stays on the page: its desk,
+ * its session, what was being said to its Orchestrator, and what it was last seen doing (so the
+ * other computer's work, already under way, is not buzzed as news).
+ * @param {string} url
+ */
+export function showComputer(url) {
+  const next = computers().find((item) => item.url === url);
+  if (!next) return;
+  localStorage.setItem(COMPUTER_KEY, next.url);
+  state.base = next.url;
+  state.token = next.token;
+  state.desk = null;
+  state.session = null;
+  state.orch = null;
+  state.orchDraft = "";
+  state.plans = null;
+  state.error = "";
+  state.actionError = "";
+  seen.clear();
+  forgetSeen();
+  plansAt = 0;
+  pollFailures = 0;
+  window.clearTimeout(timer);
+  timer = 0;
+  state.view = next.token ? "desk" : "pair";
+  show();
+  void refresh();
 }
 
 /**
@@ -143,6 +190,7 @@ async function poll() {
     // A change of page has already replaced what this one would show: the next poll asks for that page.
     if (mine !== state.ticket) return;
     checkVersion(payload.version);
+    nameComputer(state.base, payload.computer);
     // Plan limits move slowly, and reading them may ask the providers: once a minute is plenty, and
     // the page doesn't wait for them (a provider that is slow to answer would hold every update).
     if (Date.now() - plansAt > PLANS_EVERY_MS) {
@@ -212,9 +260,30 @@ export function pageIdle() {
  * @param {unknown} next
  */
 function checkVersion(next) {
-  if (typeof next !== "string" || !next) return;
-  if (!version) version = next;
-  else if (next !== version && pageIdle()) window.location.reload();
+  // Only the computer this page was loaded from: another of yours may well run another version.
+  if (state.base || typeof next !== "string" || !next) return;
+  if (!version) version = ownVersion() || next;
+  if (next !== version && pageIdle()) reloadOnce(next);
+}
+
+function ownVersion() {
+  if (typeof document === "undefined") return "";
+  return document.querySelector('meta[name="vibeforge-version"]')?.getAttribute("content") || "";
+}
+
+/**
+ * Loads the page again, once for each version: a page that comes back the same (from the phone's
+ * own copy, with the computer too slow to send the new one) would otherwise reload at every poll.
+ * @param {string} next
+ */
+function reloadOnce(next) {
+  try {
+    if (sessionStorage.getItem(RELOADED_KEY) === next) return;
+    sessionStorage.setItem(RELOADED_KEY, next);
+  } catch {
+    // Nowhere to remember it: load again as before.
+  }
+  window.location.reload();
 }
 
 function schedule(delay = POLL_MS) {

@@ -16,7 +16,7 @@ function pick(file: string, name: string): string {
 /** Timers the page sets on `window`, made when it asks, so fake timers stand in. */
 const timers = { setTimeout: (run: () => void, ms: number) => setTimeout(run, ms), clearTimeout: (id: NodeJS.Timeout) => clearTimeout(id) };
 
-type PageState = { token: string; view: string; busy: boolean; error: string };
+type PageState = { base: string; token: string; view: string; busy: boolean; error: string };
 
 describe("pairing from the phone", () => {
   beforeEach(() => {
@@ -27,9 +27,11 @@ describe("pairing from the phone", () => {
   });
 
   /** The page's own pair(), run on its own against a computer that answers as `fetch` does. */
-  function pairing(fetch: (route: string, init: { signal?: AbortSignal; body?: string }) => Promise<unknown>) {
+  function pairing(fetch: (route: string, init: { signal?: AbortSignal; body?: string }) => Promise<unknown>, kept: Record<string, string> = {}) {
     const script = [
-      `const state = { token: "", view: "pair", busy: false, error: "" }; const TOKEN_KEY = "vibeforge-phone";`,
+      `const state = { base: "", token: "", view: "pair", busy: false, error: "" };`,
+      // What the phone keeps of its computers (state.js), as the page reads and writes it.
+      ...["TOKEN_KEY", "NAME_KEY", "COMPUTERS_KEY", "otherComputers", "computers", "saveComputer"].map((name) => pick("state.js", name)),
       `const t = (key) => key;`,
       `function update() {}`,
       `function forget() { throw new Error("pairing never forgets"); }`,
@@ -37,11 +39,13 @@ describe("pairing from the phone", () => {
       `function setView(next) { state.view = next; }`,
       `const seen = new Map();`,
       ...["POLL_TIMEOUT_MS", "GATEWAY_DOWN", "call", "checkCode"].map((name) => pick("api.js", name)),
+      pick("home.js", "shownComputer"),
       pick("home.js", "pair"),
       `globalThis.page = { pair, state };`,
     ].join("\n");
-    const stored = new Map<string, string>();
-    const context = vm.createContext({ window: timers, fetch, AbortController, localStorage: { setItem: (key: string, value: string) => stored.set(key, value) } });
+    const stored = new Map<string, string>(Object.entries(kept));
+    const localStorage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) };
+    const context = vm.createContext({ window: timers, fetch, AbortController, localStorage });
     vm.runInContext(script, context);
     return { page: context.page as { pair(code: string): Promise<void>; state: PageState }, stored };
   }
@@ -95,6 +99,26 @@ describe("pairing from the phone", () => {
     expect(page.state).toMatchObject({ error: "", busy: false, token: "vf_right", view: "home" });
     expect(stored.get("vibeforge-phone")).toBe("vf_right");
     expect(asked.at(-1)).toBe('/api/pair {"token":"vf_right"}');
+  });
+
+  it("keeps a code with the computer it is for, under the name that computer gives", async () => {
+    const laptop = "https://laptop.tail1234.ts.net";
+    const asked: string[] = [];
+    // The desktop the page came from is paired; the laptop was added and has lost its code (a new one was made there).
+    const { page, stored } = pairing(
+      (route) => {
+        asked.push(route);
+        return reply(200, { ok: true, computer: "Laptop" });
+      },
+      { "vibeforge-phone": "vf_desktop", "vibeforge-computers": JSON.stringify([{ url: laptop, token: "", name: "" }]) },
+    );
+    page.state.base = laptop;
+    await page.pair("vf_laptop");
+    expect(asked).toEqual([`${laptop}/api/pair`]);
+    expect(page.state).toMatchObject({ error: "", token: "vf_laptop", view: "home" });
+    expect(JSON.parse(stored.get("vibeforge-computers") ?? "[]")).toEqual([{ url: laptop, token: "vf_laptop", name: "Laptop" }]);
+    // The desktop's own code is untouched.
+    expect(stored.get("vibeforge-phone")).toBe("vf_desktop");
   });
 });
 

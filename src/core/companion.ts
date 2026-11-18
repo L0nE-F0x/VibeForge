@@ -124,6 +124,8 @@ export interface DeskPayload {
   workspaces: DeskWorkspace[];
   /** The app's version, which the server adds: a page from another version loads itself again. */
   version?: string;
+  /** What this computer is called, which the server adds: a phone that shows several tells them apart by it. */
+  computer?: string;
 }
 
 export interface DeskRun {

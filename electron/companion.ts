@@ -1,3 +1,4 @@
+import os from "node:os";
 import { buildDesk, COMPANION_RECENT_MS, isCodingSession, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
 import { CompanionHttpError, startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type OrchestratorActions, type SessionPayload } from "../src/core/companion-http.js";
 import { buildPhoneOrchestrator, orchestratorDictationWords } from "../src/core/companion-orchestrator.js";
@@ -112,6 +113,8 @@ async function apply(wire: CompanionWire): Promise<void> {
       actions: actionsFor(wire),
       language: () => wire.service.getSettings().language,
       version: wire.version,
+      // The name Sync gives this machine, when it has one: the same computer under the same name.
+      computer: () => wire.service.getSettings().sync.name || os.hostname(),
     });
     boundToken = settings.token;
     status = { listening: true, url, error: null };

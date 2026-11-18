@@ -2,6 +2,8 @@
 // The page's words in the phone's language, from the app's own catalogs (GET /api/text), and
 // numbers, times and states said the way the desktop says them.
 
+import { state } from "./state.js";
+
 /** @type {Record<string, string>} */
 export let words = {};
 export let language = "en";
@@ -9,6 +11,8 @@ let loaded = false;
 
 /** How long the page waits for its words before it shows itself with the ones below. */
 const WORDS_TIMEOUT_MS = 8000;
+/** The words as a computer last sent them, for a page that opens while none can be asked. */
+const WORDS_KEY = "vibeforge-words";
 
 /**
  * The words the first pages need, in English, for when the computer's don't arrive (a slow link, an
@@ -19,6 +23,9 @@ const FALLBACK = {
   "phone.offline": "The computer is not serving the page.",
   "phone.timedOut": "The computer didn't answer in time. It may still be doing it: look before you try again.",
   "phone.pairLead": "Enter the pairing code from Settings → Phone on the computer.",
+  "phone.pairLeadNamed": "Enter the pairing code from Settings → Phone on {name}.",
+  "phone.computers": "Computers",
+  "phone.back": "Back",
   "phone.code": "Pairing code",
   "phone.codeShow": "Show",
   "phone.codeHide": "Hide",
@@ -43,19 +50,42 @@ export async function loadWords() {
   const abort = new AbortController();
   const limit = window.setTimeout(() => abort.abort(), WORDS_TIMEOUT_MS);
   try {
-    const response = await fetch("/api/text", { signal: abort.signal, cache: "no-store" });
+    // From the computer on show: the one the page came from may be off, with the page out of the phone's own copy.
+    const response = await fetch(`${state.base}/api/text`, { signal: abort.signal, cache: "no-store" });
     if (!response.ok) throw new Error(String(response.status));
     const body = await response.json();
     words = body.words || {};
     language = body.language || "en";
     document.documentElement.lang = language;
     loaded = true;
+    try {
+      localStorage.setItem(WORDS_KEY, JSON.stringify({ language, words }));
+    } catch {
+      // No room to keep them: the page asks again next time, as before.
+    }
   } catch {
-    if (!loaded) words = { ...FALLBACK };
+    if (!loaded) lastWords();
   } finally {
     window.clearTimeout(limit);
   }
   return loaded;
+}
+
+/**
+ * The computer didn't send the page's words (it is off, and the page came from the phone's own
+ * copy): the ones it sent last time stand in, and the English few when there are none.
+ */
+function lastWords() {
+  words = { ...FALLBACK };
+  try {
+    const kept = JSON.parse(localStorage.getItem(WORDS_KEY) || "null");
+    if (!kept || typeof kept.words !== "object" || !kept.words) return;
+    words = { ...FALLBACK, ...kept.words };
+    language = typeof kept.language === "string" ? kept.language : "en";
+    document.documentElement.lang = language;
+  } catch {
+    // Unreadable: the English few.
+  }
 }
 
 /**

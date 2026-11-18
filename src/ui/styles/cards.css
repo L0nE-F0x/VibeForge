@@ -396,3 +396,71 @@
   font-size: var(--fs-xs);
   text-align: center;
 }
+
+/* Settings → Phone: numbered steps. A step's number becomes a tick once it is done. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-n {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  font: 600 11px/1 var(--font-mono);
+}
+
+.step.done .step-n {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+
+.step-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.step-title {
+  font-weight: 600;
+}
+
+.step-text {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+
+.phone-address {
+  overflow-wrap: anywhere;
+}
+
+/* The QR code keeps its own white ground, so a phone's camera reads it in any theme. */
+.phone-qr-row {
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.phone-qr {
+  flex: none;
+  width: 176px;
+  height: 176px;
+}
