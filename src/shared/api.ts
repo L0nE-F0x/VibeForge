@@ -20,6 +20,7 @@ import type {
   TaskInput,
   TaskView,
   TermSize,
+  WorkspaceSummary,
 } from "../core/team-service.js";
 import type { Palette, ThemeChoice, ThemeList } from "../core/theme.js";
 import type {
@@ -123,6 +124,7 @@ export type {
   TaskStatus,
   TaskView,
   TermSize,
+  WorkspaceSummary,
   Topic,
   AgentTalkSettings,
   OrchestratorSettings,
@@ -389,6 +391,8 @@ export interface DeskMethods {
   "engines.save": (rows: EngineRow[]) => Engine[];
 
   "workspaces.list": () => WorkspaceFile;
+  /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */
+  "workspaces.status": () => Record<string, WorkspaceSummary>;
   "workspaces.add": (folder: string) => WorkspaceFile;
   "workspaces.remove": (id: string) => WorkspaceFile;
   "workspaces.select": (id: string) => void;

@@ -56,7 +56,7 @@ import {
   withPlannedWorkspaces,
   type PlanContext,
 } from "../../shared/orchestrator.js";
-import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
+import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
 import { CallButton, callMood, METER_CELLS, useCall, useCallToggle } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { Composer } from "../components/Session.js";
@@ -81,7 +81,7 @@ const DRAFT_KEY = "orchestrator";
 /** Put the Ctrl+Shift+O bar away when a chip inside it jumps to a pane in Code. */
 const LeaveBar = createContext<(() => void) | null>(null);
 
-export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
+export { useOrchestrator };
 
 /** A coding CLI: a run VibeForge started, or one typed into a shell. */
 function isCodingCli(session: LiveSession): boolean {
