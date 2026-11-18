@@ -9,6 +9,7 @@ import { listThemes } from "../src/core/theme.js";
 import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import type { Looking } from "../src/shared/orchestrator.js";
 import { companionStatus } from "./companion.js";
+import { phoneReach, serveCommand } from "../src/core/phone-reach.js";
 import type { Dock } from "./dock.js";
 import { isAppPage, relaunchArgs } from "./guards.js";
 import type { HostLifecycle } from "./host-lifecycle.js";
@@ -152,6 +153,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       return next;
     },
     "companion.status": () => companionStatus(),
+    "companion.reach": async () => {
+      const port = s().getSettings().companion.port;
+      return { ...(await phoneReach(port)), command: serveCommand(port) };
+    },
     "engines.list": () => s().listEngines(),
     "engines.recheck": async () => {
       await adoptShellPath(log);

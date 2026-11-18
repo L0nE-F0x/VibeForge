@@ -102,9 +102,11 @@ const PAGES: Record<string, { name: string; type: string }> = {
   "/app.css": { name: "app.css", type: "text/css; charset=utf-8" },
   "/app.js": { name: "app.js", type: "text/javascript; charset=utf-8" },
   // app.js's modules (companion/js), each by name: nothing else in the folder is served.
+  "/js/address.js": { name: "js/address.js", type: "text/javascript; charset=utf-8" },
   "/js/api.js": { name: "js/api.js", type: "text/javascript; charset=utf-8" },
   "/js/art.js": { name: "js/art.js", type: "text/javascript; charset=utf-8" },
   "/js/buzz.js": { name: "js/buzz.js", type: "text/javascript; charset=utf-8" },
+  "/js/computers.js": { name: "js/computers.js", type: "text/javascript; charset=utf-8" },
   "/js/desk.js": { name: "js/desk.js", type: "text/javascript; charset=utf-8" },
   "/js/dom.js": { name: "js/dom.js", type: "text/javascript; charset=utf-8" },
   "/js/home.js": { name: "js/home.js", type: "text/javascript; charset=utf-8" },
@@ -137,6 +139,8 @@ export interface CompanionHttpOptions {
   language?: () => string;
   /** This app's version, on the desk: a page from another version loads itself again. */
   version?: string;
+  /** What this computer is called, for a phone that shows more than one. */
+  computer?: () => string;
 }
 
 export interface CompanionHttp {
@@ -225,7 +229,7 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown, req?:
     res.end(payload);
     return;
   }
-  headers.Vary = "Accept-Encoding";
+  headers.Vary = "Origin, Accept-Encoding";
   if (status === 200 && req.method === "GET") {
     // Weak: the same answer, gzipped or not.
     const etag = `W/"${createHash("sha1").update(payload).digest("base64url")}"`;
@@ -293,6 +297,47 @@ export function hostAllowed(host: string | undefined): boolean {
   return /^(127\.0\.0\.1|localhost|\[::1\]|([a-z0-9-]+\.)+ts\.net\.?)(:\d{1,5})?$/.test((host ?? "").trim().toLowerCase());
 }
 
+const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/;
+
+/** The tailnet of a tailnet name: `tail1234.ts.net` of `desktop.tail1234.ts.net`. */
+function tailnetOf(host: string | undefined): string | null {
+  return /^[a-z0-9-]+\.((?:[a-z0-9-]+\.)*ts\.net)\.?(?::\d{1,5})?$/.exec((host ?? "").trim().toLowerCase())?.[1] ?? null;
+}
+
+/**
+ * One phone page shows several computers: the page a phone loaded from one of yours asks the others
+ * too, and a browser only lets it read the answer when this computer says that page may. That is a
+ * page from another machine on the same tailnet (or, on this computer itself, from another local
+ * port). The pairing code is still asked of every request; this opens nothing by itself.
+ * Returns the origin to name in the answer, or null for a page that may not.
+ */
+export function peerOrigin(origin: string | undefined, host: string | undefined): string | null {
+  const from = (origin ?? "").trim().toLowerCase();
+  if (!from) return null;
+  const secure = /^https:\/\/(.+)$/.exec(from)?.[1];
+  const tailnet = tailnetOf(secure);
+  if (tailnet) return tailnet === tailnetOf(host) ? from : null;
+  const local = /^http:\/\/(.+)$/.exec(from)?.[1];
+  return local && LOOPBACK.test(local) && LOOPBACK.test((host ?? "").trim().toLowerCase()) ? from : null;
+}
+
+/**
+ * Where the page may send requests: the computer it came from and, for the other computers a phone
+ * adds, the machines of the same tailnet (other local ports, for a page opened on this computer).
+ */
+export function connectSources(host: string | undefined): string {
+  const tailnet = tailnetOf(host);
+  if (tailnet) return `'self' https://*.${tailnet}:*`;
+  return LOOPBACK.test((host ?? "").trim().toLowerCase()) ? "'self' http://127.0.0.1:* http://localhost:*" : "'self'";
+}
+
+/** The page, told which version of the app it came from: it loads itself again when the computer runs another. */
+function withVersion(html: Buffer, version: string | undefined): Buffer {
+  const safe = (version ?? "").replace(/[^0-9A-Za-z.+-]/g, "");
+  if (!safe) return html;
+  return Buffer.from(html.toString("utf8").replace("<head>", `<head>\n    <meta name="vibeforge-version" content="${safe}" />`));
+}
+
 /** Thrown once the server is stopping: the request gets no answer, its connection is cut. */
 class Stopping extends Error {}
 
@@ -308,6 +353,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (tailnetHost(req.headers.host) && !req.headers["tailscale-user-login"]) served.unsigned();
   const url = new URL(req.url || "/", "http://127.0.0.1");
   const method = req.method || "GET";
+  // The page of another of your computers, asking this one (peerOrigin). Set here so a refusal can be read too.
+  const peer = url.pathname.startsWith("/api/") ? peerOrigin(req.headers.origin, req.headers.host) : null;
+  if (peer) {
+    res.setHeader("Access-Control-Allow-Origin", peer);
+    res.setHeader("Access-Control-Expose-Headers", "ETag");
+    res.setHeader("Vary", "Origin");
+  }
+  // A browser asks first whether that page may send the pairing code and a body.
+  if (method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    if (!peer) throw new CompanionHttpError("phone.error.host", 403);
+    res.writeHead(204, {
+      "Access-Control-Allow-Methods": "GET, POST",
+      "Access-Control-Allow-Headers": "Authorization, Content-Type, If-None-Match",
+      "Access-Control-Max-Age": "600",
+      ...(req.headers["access-control-request-private-network"] ? { "Access-Control-Allow-Private-Network": "true" } : {}),
+      "Content-Length": 0,
+    });
+    res.end();
+    return;
+  }
   if (method === "GET" && url.pathname === "/icon.png") {
     if (!opts.icon) throw new CompanionHttpError("phone.error.notFound", 404);
     const icon = fs.readFileSync(opts.icon);
@@ -324,13 +389,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (page) {
     const file = pagePath(opts.root, page.name);
     if (!file) throw new CompanionHttpError("phone.error.notFound", 404);
-    const body = fs.readFileSync(file);
+    const read = fs.readFileSync(file);
+    const body = page.name === "index.html" ? withVersion(read, opts.version) : read;
     res.writeHead(200, {
       "Content-Type": page.type,
       "Content-Length": body.length,
       "Cache-Control": "no-store",
-      "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+      "Content-Security-Policy": `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ${connectSources(req.headers.host)}; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'`,
       // No other page may show this one in a frame and have the phone tap its buttons.
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
@@ -350,7 +415,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     const body = (await readBody(req)) as { token?: unknown };
     stillServing(served);
     if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
-    sendJson(res, 200, { ok: true });
+    sendJson(res, 200, { ok: true, computer: opts.computer?.() ?? "" });
     return;
   }
   if (!tokenMatches(opts.token, bearerToken(req.headers.authorization))) {
@@ -358,7 +423,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   served.paired = true;
   if (method === "GET" && url.pathname === "/api/desk") {
-    sendJson(res, 200, { ...opts.actions.desk(), version: opts.version ?? "" }, req);
+    sendJson(res, 200, { ...opts.actions.desk(), version: opts.version ?? "", computer: opts.computer?.() ?? "" }, req);
     return;
   }
   if (method === "GET" && url.pathname === "/api/plans") {

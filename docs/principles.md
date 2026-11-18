@@ -22,7 +22,7 @@ Anything that goes over the network stays off until you turn it on:
 
 - **Plan limits** (Settings → Usage and activity) ask Anthropic, xAI, Google, Moonshot, OpenAI and Meta, at most every 3 minutes.
 - **The GitHub graph** (Settings → Usage and activity → GitHub) asks GitHub through your `gh`, at most every 30 minutes, and keeps no token.
-- **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it.
+- **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it, and you turn that on yourself. Settings only asks this computer's own `tailscale` where things stand. A phone that shows two of your computers asks each one directly, with that computer's own code; a computer answers a page from another machine on the same tailnet, and no other.
 - **Sync** (Settings → Sync) starts a private Syncthing that listens on port 22737 and announces itself on the local network only. It talks to the machines you paired and to nothing else: no discovery servers, relays, usage or crash reports, or upgrades. Only workspaces you pick are synced.
 - Whisper models and Piper voices download from Hugging Face only when you press Download.
 

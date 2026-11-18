@@ -3,6 +3,7 @@
 // above them.
 
 import { brandMark, planMark, wordmark } from "./art.js";
+import { computerChip, severalComputers } from "./computers.js";
 import { bar, el } from "./dom.js";
 import { setView, update } from "./pages.js";
 import { openLaunch, openSession } from "./session.js";
@@ -41,6 +42,8 @@ export function deskPage() {
     "section",
     {},
     el("div", { class: "top brand-top" }, deskWordmark(), parts.buzz, maestro),
+    // Whose desk this is, once there is more than one.
+    severalComputers() ? computerChip() : null,
     parts.plans,
     parts.list,
   );

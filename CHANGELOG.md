@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **One phone page for all your computers.** The page now shows the computer it is looking at by name, on the landing page and (once there are two) on the desk. Tap it for **Computers**: each one with who is working or waiting there, a tap to switch, and **Add a computer**. Adding takes the other computer's QR code from its Settings → Phone, scanned from inside the page (Chrome on Android), or its name and pairing code typed in; the name alone is enough for a machine on the same tailnet. Each computer keeps its own pairing code, the phone opens on the one it showed last, and a computer whose code was replaced asks for it again by name while the others carry on. **Remove** takes an added computer off the phone.
+- **Settings → Phone is four steps that tick themselves off:** turn the page on, connect this computer and the phone with Tailscale, share the page, open it on the phone. VibeForge asks this computer's own `tailscale` where things stand (`status` and `serve status`, nothing over the network, and it changes nothing), so only the step that is left is spelled out: where to get Tailscale, the command to connect it, or the one command that shares the page. It says so when Tailscale Funnel has the address open to the internet.
+- **A QR code pairs the phone.** Step 4 shows the page's address and, behind **Show QR code**, a code that holds the address and the pairing code: point the phone's camera at it and the page opens already paired, with nothing to type. The code is taken out of the address bar as soon as the page has read it, and is never sent as part of a request.
+- **The phone page opens when its computer is off.** The page keeps a copy of itself on the phone and uses it when the computer it was installed from doesn't answer within four seconds, so with two computers the app still opens and shows the other one. The computer's own files always come first, so an update still reaches the phone the next time it opens.
+
+### Changed
+
+- **The phone page's server answers a page that was loaded from another machine on the same tailnet**, which is what lets one page show two computers. It answers no other page (a browser's cross-origin check, with the allowed origin named per request), still asks for the pairing code on every request, and the page's own policy lets it send requests to its own tailnet's machines and nowhere else. The command in Settings and the README now starts with `sudo`, which `tailscale serve` needs on Linux unless you made yourself its operator.
+
 ## [2.20.0] - 2026-11-18
 
 **2.20.0: call Viby. Talk to it from anywhere in the app and hear it answer, watch it work on screen, and talk over it when you've heard enough.**

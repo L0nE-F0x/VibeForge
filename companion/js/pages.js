@@ -3,6 +3,7 @@
 // poll or an action without touching what is being typed.
 
 import { refresh } from "./api.js";
+import { computersPage, scanCancel, updateComputers } from "./computers.js";
 import { deskPage, updateDesk } from "./desk.js";
 import { el } from "./dom.js";
 import { homePage, pairPage } from "./home.js";
@@ -24,8 +25,10 @@ export function show() {
   state.ticket += 1;
   // The mic belongs to the Orchestrator's box: leaving the page puts it down.
   if (state.view !== "maestro") micCancel();
+  // And the camera to the list of computers.
+  if (state.view !== "computers") scanCancel();
   // The install offer only shows on the code and the landing page (app.css), never over a text box.
-  document.body.dataset.view = state.token ? state.view : "pair";
+  document.body.dataset.view = state.token || state.view === "computers" ? state.view : "pair";
   setParts(/** @type {Parts} */ ({}));
   parts.banner = banner();
   app.replaceChildren(parts.banner, page(), credit());
@@ -39,6 +42,10 @@ export function update() {
   parts.banner.hidden = !said;
   if (parts.bannerText.textContent !== said) parts.bannerText.textContent = said;
   parts.bannerClose.hidden = !state.actionError;
+  if (state.view === "computers") {
+    updateComputers();
+    return;
+  }
   if (!state.token || state.view === "pair") {
     if (parts.pair) parts.pair.disabled = state.busy;
     return;
@@ -75,12 +82,14 @@ function banner() {
 
 /** @param {View} next */
 export function setView(next) {
-  state.view = state.token ? next : "pair";
+  // Without a code for the computer on show there is only the page that asks for it, and the list of computers.
+  state.view = state.token || next === "computers" ? next : "pair";
   show();
   if (state.token) void refresh();
 }
 
 function page() {
+  if (state.view === "computers") return computersPage();
   if (state.view === "pair" || !state.token) return pairPage();
   if (state.view === "home") return homePage();
   if (state.view === "launch") return launchPage();

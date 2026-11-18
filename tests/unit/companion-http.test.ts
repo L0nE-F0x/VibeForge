@@ -7,7 +7,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { companionStatus, LISTEN_RETRY_MS, stopCompanion, syncCompanion, type CompanionWire } from "../../electron/companion.js";
 import { newCompanionToken } from "../../src/core/companion.js";
-import { hostAllowed, startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
+import { connectSources, hostAllowed, peerOrigin, startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-phone-http-"));
@@ -239,6 +239,89 @@ describe("who the phone page answers", () => {
   });
 });
 
+describe("a phone that shows more than one computer", () => {
+  const desktop = "studio.tail1234.ts.net";
+  const laptop = "https://laptop.tail1234.ts.net";
+
+  it("lets the page of another machine on the same tailnet ask, and no other page", () => {
+    expect(peerOrigin(laptop, desktop)).toBe(laptop);
+    expect(peerOrigin("https://Laptop.tail1234.ts.net:8443", `${desktop}:443`)).toBe("https://laptop.tail1234.ts.net:8443");
+    // A page opened on the computer itself, asking another local port (two copies of the app, side by side).
+    expect(peerOrigin("http://127.0.0.1:4738", "127.0.0.1:4737")).toBe("http://127.0.0.1:4738");
+    expect(peerOrigin("http://localhost:4738", "127.0.0.1:4737")).toBe("http://localhost:4738");
+    for (const [origin, host] of [
+      [undefined, desktop],
+      ["", desktop],
+      ["null", desktop],
+      ["https://laptop.tail9999.ts.net", desktop],
+      ["http://laptop.tail1234.ts.net", desktop],
+      ["https://evil.example", desktop],
+      ["https://laptop.tail1234.ts.net.evil.example", desktop],
+      ["https://ts.net", desktop],
+      ["http://127.0.0.1:4738", desktop],
+      [laptop, "127.0.0.1:4737"],
+      ["https://127.0.0.1:4738", "127.0.0.1:4737"],
+      ["http://192.168.1.20:4737", "127.0.0.1:4737"],
+    ] as const) {
+      expect(peerOrigin(origin, host), `${origin} asking ${host}`).toBeNull();
+    }
+  });
+
+  it("lets the page send requests to its own tailnet's machines only", () => {
+    expect(connectSources(desktop)).toBe("'self' https://*.tail1234.ts.net:*");
+    expect(connectSources("Studio.Tail1234.TS.NET:8443")).toBe("'self' https://*.tail1234.ts.net:*");
+    expect(connectSources("127.0.0.1:4737")).toBe("'self' http://127.0.0.1:* http://localhost:*");
+    expect(connectSources("localhost")).toBe("'self' http://127.0.0.1:* http://localhost:*");
+    for (const host of [undefined, "", "evil.example", "ts.net"]) expect(connectSources(host), String(host)).toBe("'self'");
+  });
+
+  it("answers the other machine's page with the code, says no to a page from anywhere else, and never without the code", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({ port: 0, token, root: path.join(import.meta.dirname, "../../companion"), icon: null, actions: actions(), version: "2.21.0", computer: () => "Studio" });
+    const code = { Authorization: `Bearer ${token}` };
+    try {
+      // What a browser asks first, before it sends the code from another machine's page.
+      const first = await request(server.port, "/api/desk", { method: "OPTIONS", host: desktop, headers: { Origin: laptop, "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "authorization" } });
+      expect(first.status).toBe(204);
+      expect(first.headers["access-control-allow-origin"]).toBe(laptop);
+      expect(first.headers["access-control-allow-headers"]).toContain("Authorization");
+      expect(first.headers["access-control-allow-headers"]).toContain("Content-Type");
+      expect(first.headers["access-control-allow-methods"]).toBe("GET, POST");
+      expect(first.headers["access-control-allow-credentials"]).toBeUndefined();
+      for (const origin of ["https://laptop.tail9999.ts.net", "https://evil.example", "http://127.0.0.1:9000"]) {
+        const refused = await request(server.port, "/api/desk", { method: "OPTIONS", host: desktop, headers: { Origin: origin, "Access-Control-Request-Method": "GET" } });
+        expect(refused.status, origin).toBe(403);
+        expect(refused.headers["access-control-allow-origin"], origin).toBeUndefined();
+        // Asked anyway (as a plain request can be): answered, but a browser keeps the answer from that page.
+        const read = await request(server.port, "/api/desk", { host: desktop, headers: { Origin: origin, ...code } });
+        expect(read.headers["access-control-allow-origin"], origin).toBeUndefined();
+      }
+      const desk = await request(server.port, "/api/desk", { host: desktop, headers: { Origin: laptop, ...code } });
+      expect(desk.status).toBe(200);
+      expect(desk.headers["access-control-allow-origin"]).toBe(laptop);
+      expect(desk.headers["access-control-expose-headers"]).toBe("ETag");
+      expect(JSON.parse(desk.raw.toString("utf8"))).toMatchObject({ computer: "Studio", version: "2.21.0" });
+      // A refusal can be read too, so the page can say the code no longer works.
+      const wrong = await request(server.port, "/api/desk", { host: desktop, headers: { Origin: laptop, Authorization: `Bearer ${newCompanionToken()}` } });
+      expect(wrong.status).toBe(401);
+      expect(wrong.headers["access-control-allow-origin"]).toBe(laptop);
+      const paired = await request(server.port, "/api/pair", { method: "POST", host: desktop, headers: { Origin: laptop, "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
+      expect(JSON.parse(paired.raw.toString("utf8"))).toEqual({ ok: true, computer: "Studio" });
+      // The page's own files are for the computer they came from: nothing lets another page read them.
+      const page = await request(server.port, "/", { host: desktop, headers: { Origin: laptop } });
+      expect(page.headers["access-control-allow-origin"]).toBeUndefined();
+      expect(page.headers["content-security-policy"]).toContain("connect-src 'self' https://*.tail1234.ts.net:*;");
+      expect(page.raw.toString("utf8")).toContain('<meta name="vibeforge-version" content="2.21.0" />');
+      const local = await request(server.port, "/");
+      expect(local.headers["content-security-policy"]).toContain("connect-src 'self' http://127.0.0.1:* http://localhost:*;");
+      const script = await request(server.port, "/app.js", { host: desktop });
+      expect(script.raw.toString("utf8")).toBe(fs.readFileSync(path.join(import.meta.dirname, "../../companion/app.js"), "utf8"));
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 describe("the phone page's own files", () => {
   const root = path.join(import.meta.dirname, "../../companion");
 
@@ -313,7 +396,7 @@ describe("what the phone page sends over a slow link", () => {
       expect(first.status).toBe(200);
       expect(first.headers["content-encoding"]).toBe("gzip");
       expect(first.headers["cache-control"]).toBe("no-store");
-      expect(first.headers.vary).toBe("Accept-Encoding");
+      expect(first.headers.vary).toBe("Origin, Accept-Encoding");
       expect(first.raw.length).toBeLessThan(1000);
       expect(JSON.parse(zlib.gunzipSync(first.raw).toString("utf8")).screen).toBe(screen);
       const etag = String(first.headers.etag);

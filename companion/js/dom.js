@@ -44,6 +44,45 @@ export function bar(percent, className) {
 }
 
 /**
+ * A box for a pairing code, kept out of sight and out of the browser's autofill (the code is a key
+ * to a computer), with Show beside it.
+ * @param {string} id
+ * @param {() => void} onEnter
+ * @returns {{ input: HTMLInputElement, node: HTMLSpanElement }}
+ */
+export function codeField(id, onEnter) {
+  const input = el("input", {
+    id,
+    type: "password",
+    autocomplete: "off",
+    autocapitalize: "off",
+    autocorrect: "off",
+    spellcheck: "false",
+    placeholder: "vf_…",
+    onkeydown: (event) => {
+      if (event.key === "Enter") onEnter();
+    },
+  });
+  /** @param {boolean} shown */
+  const paint = (shown) => {
+    reveal.textContent = shown ? t("phone.codeHide") : t("phone.codeShow");
+    reveal.setAttribute("aria-pressed", String(shown));
+  };
+  const reveal = el("button", {
+    class: "ghost reveal",
+    type: "button",
+    "aria-pressed": "false",
+    onclick: () => {
+      const shown = input.type === "password";
+      input.type = shown ? "text" : "password";
+      paint(shown);
+    },
+  });
+  paint(false);
+  return { input, node: el("span", { class: "code-field" }, input, reveal) };
+}
+
+/**
  * A panel over the landing. Closing it shows the three buttons again; the page is not rebuilt.
  * @param {string} title
  * @param {...Child} nodes

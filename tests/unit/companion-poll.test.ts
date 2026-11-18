@@ -57,19 +57,20 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
     });
   const script = [
     // What the page's modules share (companion/js/state.js), and what api.js keeps to itself.
-    `const state = { token: "vf_test", view: "desk", ticket: 0, desk: null, session: null, orch: null, error: "", actionError: "", busy: false, orchDraft: "", plans: null, sessionQuery: { ptyId: "", runId: "" } };`,
+    `const state = { base: "", token: "vf_test", view: "desk", ticket: 0, desk: null, session: null, orch: null, error: "", actionError: "", busy: false, orchDraft: "", plans: null, sessionQuery: { ptyId: "", runId: "" } };`,
     `const parts = {};`,
     `let timer = 0; let plansAt = ${opts.plans ? 0 : "Infinity"}; const PLANS_EVERY_MS = 60000; let updates = 0; let reloads = 0;`,
     `const t = (key) => key;`,
     `function forget() { state.token = ""; }`,
     `function watch() {}`,
+    `function nameComputer() {}`,
     `function show() { state.ticket += 1; }`,
     `function update() { updates += 1; }`,
     `function wordsLoaded() { return true; }`,
     `function loadWords() { return Promise.resolve(true); }`,
-    ...["POLL_MS", "POLL_SLOWEST_MS", "POLL_TIMEOUT_MS", "GATEWAY_DOWN", "seen"].map((name) => line("const", name)),
+    ...["POLL_MS", "POLL_SLOWEST_MS", "POLL_TIMEOUT_MS", "GATEWAY_DOWN", "seen", "RELOADED_KEY"].map((name) => line("const", name)),
     ...["polling", "pollAgain", "pollFailures", "version"].map((name) => line("let", name)),
-    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "withBusy"].map(pick),
+    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "ownVersion", "reloadOnce", "withBusy"].map(pick),
     `globalThis.page = { refresh, withBusy, state: () => ({ desk: state.desk, plans: state.plans, error: state.error, actionError: state.actionError, pollFailures, updates, reloads }), setView(next) { state.view = next; show(); void refresh(); }, set(patch) { Object.assign(state, patch); } };`,
   ].join("\n");
   const context = vm.createContext({
@@ -230,5 +231,19 @@ describe("the phone page's poll", () => {
     link.page.set({ orchDraft: "" });
     await vi.advanceTimersByTimeAsync(2200);
     expect(link.page.state().reloads).toBeGreaterThan(0);
+  });
+
+  it("asks the computer on show at its own address, and never reloads for another computer's version", async () => {
+    let version = "2.21.0";
+    const link = pagePoll((route) => ({ ms: 50, body: route.endsWith("/api/desk") ? { workspaces: [{ id: "laptop" }], version } : {} }));
+    // The page came from the desktop; the laptop is on show.
+    link.page.set({ base: "https://laptop.tail1234.ts.net" });
+    void link.page.refresh();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(link.fetches.map((seen) => seen.route)).toEqual(["https://laptop.tail1234.ts.net/api/desk"]);
+    expect(link.page.state().desk).toEqual({ workspaces: [{ id: "laptop" }], version: "2.21.0" });
+    version = "2.22.0";
+    await vi.advanceTimersByTimeAsync(4200);
+    expect(link.page.state().reloads).toBe(0);
   });
 });

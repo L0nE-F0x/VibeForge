@@ -11,9 +11,11 @@
 //   js/desk.js       the desk and plan limits         js/session.js starting someone, and one session
 //   js/maestro.js    the Orchestrator                 js/plan-card.js  a plan's card
 //   js/mic.js        talking to it                    js/install.js the install offer
+//   js/computers.js  the computers this phone shows   js/address.js a computer's address, as typed
 
 import { refresh } from "./js/api.js";
 import { listenForInstall, offerInstall } from "./js/install.js";
+import { pairFromLink } from "./js/home.js";
 import { show } from "./js/pages.js";
 import { openSession } from "./js/session.js";
 import { state, TEXT_KEY } from "./js/state.js";
@@ -76,8 +78,11 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void refresh();
 });
 
-void loadWords().then(() => {
-  show();
-  offerInstall();
-  if (state.token) void refresh();
-});
+void loadWords()
+  // A link from Settings → Phone pairs the phone before the first page shows.
+  .then(() => pairFromLink())
+  .then(() => {
+    show();
+    offerInstall();
+    if (state.token) void refresh();
+  });
