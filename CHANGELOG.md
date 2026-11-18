@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-11-18
+
+**2.20.0: call Viby. Talk to it from anywhere in the app and hear it answer, watch it work on screen, and talk over it when you've heard enough.**
+
 ### Added
 
 - **Call Viby.** A **Call** button at the foot of the rail (and **Call Viby** in Viby's panel and its bar) opens the microphone and keeps it open: say something, pause, and it goes to Viby as if typed in its box; Viby's answer is read aloud, and it listens again until you hang up. It works from any view, so you can talk to Viby while you watch Code. The rail's button stays lit with the microphone's level for as long as the call is on, and a bar comes up only while something is happening: you are heard, Viby is thinking or speaking, or a plan is waiting.
