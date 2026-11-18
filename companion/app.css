@@ -1090,6 +1090,7 @@ html.keyboard .credit { display: none; }
 .orch-prompt { min-height: 44px; padding: 9px 10px; resize: none; line-height: 1.45; }
 
 .orch-prompt-text { color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.orch-reply { max-height: 40vh; overflow-y: auto; padding: 8px 10px; border-left: 2px solid var(--line); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .orch-issue { color: var(--amber); font-size: 11.5px; }
 

@@ -178,7 +178,7 @@ function paintTurns() {
 }
 
 /**
- * VibeForge's own word about a CLI Maestro started: its turn ended after real work, or it closed.
+ * VibeForge's own word about a CLI Maestro started or told: its turn ended (with the start of its answer), or it closed.
  * @param {NonNullable<PhoneTurn["note"]>} note
  */
 function noteNode(note) {
@@ -195,7 +195,8 @@ function noteNode(note) {
     : note.runId
       ? el("button", { class: "ghost small-btn", type: "button", "data-act": "open", disabled: state.busy, onclick: () => openSession({ ptyId: "", runId: /** @type {string} */ (note.runId) }) }, t("phone.orchOpen"))
       : null;
-  return el("div", { class: "orch-turn from-vibeforge orch-note" }, whoMark(), el("div", { class: "orch-body" }, said, open ? el("div", { class: "orch-step-actions" }, open) : null));
+  const reply = note.reply ? el("span", { class: "orch-prompt-text" }, note.reply) : null;
+  return el("div", { class: "orch-turn from-vibeforge orch-note" }, whoMark(), el("div", { class: "orch-body" }, said, reply, open ? el("div", { class: "orch-step-actions" }, open) : null));
 }
 
 /** @param {PhoneTurn} turn */

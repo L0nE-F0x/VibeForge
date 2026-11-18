@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { brainArgs, canOrchestrate, cleanBranch, emptyPromise, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, resolvePlan, routineAction, sessionGone, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../src/core/orchestrator.js";
+import { brainArgs, canOrchestrate, cleanBranch, emptyPromise, lookingLine, matchName, orchestratorRules, plannedId, plannerFor, readBrainOutput, readsAll, resolvePlan, routineAction, sessionGone, showView, signedOut, stepIssue, withPlannedWorkspaces, type PlanContext, type VibyWord } from "../../src/core/orchestrator.js";
 import { agyModels, grokModels, plannerEnv, spawnBrain, type BrainRun } from "../../src/core/service/orchestrator.js";
 import type { EngineRow } from "../../src/core/types.js";
 import { setup, started, tempDir, until } from "./fixtures/service-harness.js";
@@ -940,7 +940,9 @@ describe("Maestro in the service, 2.16", () => {
       await ctx.svc.orchestratorRun(turn?.id ?? "");
       return ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id);
     };
-    await ask("show me two");
+    // Showing changes nothing, so it goes without Go.
+    await ctx.svc.orchestratorAsk("show me two");
+    await until(() => shown.length === 1);
     expect(shown).toEqual([{ view: "code", workspaceId: two.step.openedWorkspaceId, ptyId: two.step.ptyId }]);
     const done = await ask("apply one and throw away two");
     expect(done?.steps?.map((step) => step.state)).toEqual(["done", "done"]);
@@ -1334,5 +1336,310 @@ describe("Viby's agent, task and routine steps do what the board and Chat do", (
     } finally {
       process.env.HOME = saved;
     }
+  });
+});
+
+describe("Viby across the window", () => {
+  const here: PlanContext = {
+    ...context,
+    workspaces: [...context.workspaces, { id: "tasks-ws", name: "Tasks", folder: "~/Projects/tasks", git: true }, { id: "app-settings", name: "app-settings", folder: "~/Projects/app-settings", git: true }],
+  };
+  const shows = (steps: Array<Record<string, unknown>>, ctx: PlanContext = here) => resolvePlan({ say: "", steps: steps.map((step) => ({ kind: "show", ...step })) }, ctx);
+
+  it("shows a running CLI, a workspace or a view, whichever was named", () => {
+    const steps = shows([{ target: "pty-4" }, { workspace: "dune" }, { target: "Dune" }, { target: "runs" }, { target: "the Viby panel" }, { workspace: "settings" }, { target: "Tasks" }, { target: "nowhere at all" }]);
+    expect(steps.map((step) => [step.target, step.workspaceId, step.view ?? "", step.asked])).toEqual([
+      ["pty-4", "", "", "Codex · Dune"],
+      ["", "dune", "", "Dune"],
+      // Named as a target, it is the CLI running there: its terminal opens that workspace too.
+      ["pty-4", "", "", "Codex · Dune"],
+      ["", "", "runs", "Runs"],
+      ["", "", "orchestrator", "Viby"],
+      // The view, though a workspace's name holds the word; a workspace called exactly that wins.
+      ["", "", "settings", "Settings"],
+      ["", "tasks-ws", "", "Tasks"],
+      ["", "", "", "nowhere at all"],
+    ]);
+    expect(steps.map((step) => stepIssue(step, here))).toEqual([null, null, null, null, null, null, null, "workspace"]);
+    // A workspace removed since, and a CLI that has closed.
+    expect(stepIssue(steps[1], { ...here, workspaces: [] })).toBe("workspace");
+    expect(stepIssue(steps[0], { ...here, running: [] })).toBe("target");
+    expect(stepIssue({ ...steps[3], view: "nope" }, here)).toBe("workspace");
+  });
+
+  it("knows the views by the names people use", () => {
+    expect(["tasks", "the task board", "Runs view", "history", "Vibey", "terminals", "Settings page", "code"].map((said) => showView(said))).toEqual(["tasks", "tasks", "runs", "runs", "orchestrator", "code", "settings", "code"]);
+    expect(showView("the moon")).toBeNull();
+    expect(showView("")).toBeNull();
+    expect(showView(undefined)).toBeNull();
+  });
+
+  it("tells the planner what is in front of the person, when that says something", () => {
+    expect(lookingLine({ view: "code", workspaceId: "dune", ptyId: "pty-4" }, context)).toBe('(In front of the person right now: the Code view, workspace "Dune", terminal pty-4 running Codex.)');
+    expect(lookingLine({ view: "code", workspaceId: "notes", ptyId: "pty-9" }, context)).toBe('(In front of the person right now: the Code view, workspace "Notes", a terminal with no coding CLI in it.)');
+    expect(lookingLine({ view: "code", workspaceId: "notes" }, context)).toBe('(In front of the person right now: the Code view, workspace "Notes".)');
+    expect(lookingLine({ view: "tasks", ptyId: "pty-4" }, context)).toBe("(In front of the person right now: the Tasks view, terminal pty-4 running Codex in Dune.)");
+    expect(lookingLine({ view: "runs" }, context)).toBe("(In front of the person right now: the Runs view.)");
+    // Nothing worth saying: its own panel, Home, Code with nothing open, a view it doesn't know.
+    for (const looking of [null, undefined, { view: "orchestrator" }, { view: "home" }, { view: "code" }, { view: "code", workspaceId: "gone" }, { view: "elsewhere" }]) expect(lookingLine(looking, context)).toBe("");
+    const rules = orchestratorRules(context);
+    expect(rules).toContain("a line in parentheses saying what is in front of the person");
+    expect(rules).toContain("word for word");
+    expect(rules).toContain("to open that view");
+  });
+
+  it("says where the person is ahead of their words, and keeps the words as they were said", async () => {
+    const ctx = withPlanner([{ say: "Nothing to do.", steps: [] }]);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    await ctx.svc.orchestratorAsk("what is this one doing?", { view: "code", workspaceId: workspace.id });
+    const text = ctx.calls[0].argv[ctx.calls[0].argv.indexOf("-p") + 1];
+    expect(text).toBe(`(In front of the person right now: the Code view, workspace "${workspace.name}".)\nwhat is this one doing?`);
+    expect(ctx.svc.orchestratorView().turns[0]).toMatchObject({ from: "you", text: "what is this one doing?" });
+    ctx.svc.close();
+  });
+
+  it("shows at once without Go, as it changes nothing: a workspace, then a view", async () => {
+    const ctx = withPlanner([]);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const shown: unknown[] = [];
+    ctx.host.show = (route, raise) => shown.push([route, raise]);
+    const answers = [
+      { say: "Here it is.", steps: [{ kind: "show", workspace: workspace.name }] },
+      { say: "Here are your tasks.", steps: [{ kind: "show", target: "tasks" }] },
+      { say: "Showing it.", steps: [{ kind: "show", target: "nowhere" }] },
+    ];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: answers.shift() }), stderr: "", timedOut: false });
+    // Show me first is on: a plan that only shows still goes by itself.
+    expect(ctx.svc.getSettings().orchestrator.mode).toBe("plan");
+    await ctx.svc.orchestratorAsk("switch to my workspace");
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    await ctx.svc.orchestratorAsk("show me my tasks");
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    expect(shown).toEqual([
+      [{ view: "code", workspaceId: workspace.id }, undefined],
+      [{ view: "tasks" }, undefined],
+    ]);
+    // One that names nothing here waits on its card instead.
+    await ctx.svc.orchestratorAsk("show me nowhere");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    expect(shown).toHaveLength(2);
+    ctx.svc.close();
+  });
+
+  it("follows what Viby starts and tells during a call, without raising the window", async () => {
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const shown: unknown[] = [];
+    ctx.host.show = (route, raise) => shown.push([route, raise]);
+    const answers: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: answers.shift() }), stderr: "", timedOut: false });
+    const go = async (text: string, plan: Record<string, unknown>) => {
+      answers.push(plan);
+      await ctx.svc.orchestratorAsk(text);
+      const turn = ctx.svc.orchestratorView().turns.at(-1);
+      await ctx.svc.orchestratorRun(turn?.id ?? "");
+      return ctx.svc.orchestratorView().turns.find((item) => item.id === turn?.id)?.steps?.[0];
+    };
+    // Outside a call the window stays where it is.
+    const quiet = await go("start argy", { say: "Starting.", steps: [{ kind: "start", engine: "argy", workspace: workspace.name }] });
+    expect(quiet?.state).toBe("done");
+    expect(shown).toEqual([]);
+
+    ctx.svc.orchestratorCall(() => undefined);
+    const started = await go("start another", { say: "Starting.", steps: [{ kind: "start", engine: "argy", workspace: workspace.name }] });
+    expect(shown).toEqual([[{ view: "code", workspaceId: workspace.id, ptyId: started?.ptyId }, false]]);
+    // Past the moment a CLI that just started is left to draw its first screen.
+    at += 6000;
+    const told = await go("tell the first to wrap up", { say: "Telling it.", steps: [{ kind: "tell", target: quiet?.ptyId, prompt: "Wrap up." }] });
+    expect(told?.state).toBe("done");
+    expect(shown.at(-1)).toEqual([{ view: "code", workspaceId: workspace.id, ptyId: quiet?.ptyId }, false]);
+
+    ctx.svc.orchestratorCall(null);
+    await go("and again", { say: "Starting.", steps: [{ kind: "start", engine: "argy", workspace: workspace.name }] });
+    expect(shown).toHaveLength(2);
+    ctx.svc.close();
+  });
+});
+
+describe("Viby speaks up", () => {
+  it("plans a read of a running CLI's answer: its start, or all of it when asked", () => {
+    const steps = resolvePlan(
+      {
+        say: "",
+        steps: [
+          { kind: "read", target: "pty-4" },
+          { kind: "read", target: "Codex in Dune", prompt: "All of it." },
+          { kind: "read", target: "the one in Notes", prompt: "what did it say" },
+        ],
+      },
+      context,
+    );
+    expect(steps.map((step) => [step.kind, step.target, step.prompt])).toEqual([
+      ["read", "pty-4", ""],
+      ["read", "pty-4", "all"],
+      ["read", "", ""],
+    ]);
+    expect(steps.map((step) => stepIssue(step, context))).toEqual([null, null, "target"]);
+    expect(readsAll("everything")).toBe(true);
+    expect(readsAll("")).toBe(false);
+    const rules = orchestratorRules(context);
+    expect(rules).toContain("- read: read out to the person what a running CLI last answered");
+    expect(rules).toContain("You can't see what a CLI wrote or answered");
+  });
+
+  /** A planner that answers with the next plan handed to it, and Go pressed on what it planned. */
+  function desk(opts: Parameters<typeof setup>[0] = {}) {
+    const ctx = withPlanner([], opts);
+    const answers: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: answers.shift() }), stderr: "", timedOut: false });
+    const ask = async (text: string, plan: Record<string, unknown>) => {
+      answers.push(plan);
+      await ctx.svc.orchestratorAsk(text);
+      const id = ctx.svc.orchestratorView().turns.at(-1)?.id ?? "";
+      return () => ctx.svc.orchestratorView().turns.find((item) => item.id === id);
+    };
+    return { ...ctx, ask };
+  }
+
+  it("reads a CLI's last answer from its own log at once, without Go, and hands it to a call", async () => {
+    const ctx = desk();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const logged = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "grok" });
+    const bare = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const asked: unknown[] = [];
+    let answer: string | null = "## Done\n\nAll 12 tests pass.";
+    ctx.host.lastReply = async (opts) => {
+      asked.push(opts.kind);
+      return answer;
+    };
+    let screen = "";
+    ctx.host.screen = async () => screen;
+    const shown: unknown[] = [];
+    ctx.host.show = (route, raise) => shown.push([route, raise]);
+    const heard: VibyWord[] = [];
+    ctx.svc.orchestratorCall((word) => heard.push(word));
+
+    // Show me first is on, and it still goes at once: reading changes nothing.
+    const read = await ctx.ask("what did grok say?", { say: "Reading it out.", steps: [{ kind: "read", target: logged.ptyId }] });
+    await until(() => read()?.plan === "done");
+    expect(read()?.steps?.[0]).toMatchObject({ state: "done", reply: "## Done\n\nAll 12 tests pass." });
+    expect(asked).toEqual(["grok"]);
+    expect(heard).toEqual([{ kind: "read", engine: "Grok Build", workspace: workspace.name, reply: "## Done\n\nAll 12 tests pass.", all: false, fromScreen: false }]);
+    // In a call its terminal comes up as well, without the window being raised.
+    expect(shown).toEqual([[{ view: "code", workspaceId: workspace.id, ptyId: logged.ptyId }, false]]);
+
+    // A CLI whose log VibeForge can't read: the end of its screen, marked as such.
+    screen = "╭────╮\n│ ok │\n╰────╯\nAll done here.";
+    const fromScreen = await ctx.ask("and argy, all of it?", { say: "Reading it out.", steps: [{ kind: "read", target: bare.ptyId, prompt: "all" }] });
+    await until(() => fromScreen()?.plan === "done");
+    expect(fromScreen()?.steps?.[0].reply).toContain("All done here.");
+    expect(heard.at(-1)).toMatchObject({ kind: "read", engine: "Argy", all: true, fromScreen: true });
+
+    // Nothing answered yet: the step says so.
+    answer = null;
+    screen = "";
+    const nothing = await ctx.ask("what did grok say now?", { say: "Reading it out.", steps: [{ kind: "read", target: logged.ptyId }] });
+    await until(() => nothing()?.plan === "done");
+    expect(nothing()?.steps?.[0]).toMatchObject({ state: "failed", error: "It hasn't answered anything yet." });
+    expect(heard).toHaveLength(2);
+
+    // With something that changes work beside it, the plan waits for Go like any other.
+    answer = "Fine.";
+    const mixed = await ctx.ask("read it and stop it", { say: "Reading, then closing.", steps: [{ kind: "read", target: logged.ptyId }, { kind: "stop", target: logged.ptyId }] });
+    expect(mixed()?.plan).toBe("waiting");
+    ctx.svc.close();
+  });
+
+  it("hears back from a CLI it told: the answer to those words, however short the work", async () => {
+    let at = Date.now();
+    const ctx = desk({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "grok" });
+    at += 6000;
+    const watched: Array<{ kind: string; words: string }> = [];
+    let answered: (reply: string | null) => void = () => undefined;
+    ctx.host.watchReply = (opts) => {
+      watched.push({ kind: opts.kind, words: opts.words });
+      return new Promise((resolve) => {
+        answered = resolve;
+        opts.signal.addEventListener("abort", () => resolve(null));
+      });
+    };
+    const heard: VibyWord[] = [];
+    ctx.svc.orchestratorCall((word) => heard.push(word));
+    const notes = () => ctx.svc.orchestratorView().turns.filter((turn) => turn.note);
+
+    const told = await ctx.ask("tell grok to run the tests", { say: "Telling it.", steps: [{ kind: "tell", target: running.ptyId, prompt: "Run the tests.\nAll of them." }] });
+    await ctx.svc.orchestratorRun(told()?.id ?? "");
+    expect(told()?.steps?.[0].state).toBe("done");
+    expect(watched).toEqual([{ kind: "grok", words: "Run the tests." }]);
+    expect(notes()).toEqual([]);
+
+    // Eight seconds of work: too short for a word about a CLI it started, but this was asked for.
+    at += 8000;
+    answered("All 12 tests pass.\n\nThe slow one took 4 s.");
+    await until(() => notes().length === 1);
+    expect(notes()[0].note).toMatchObject({ kind: "finished", ptyId: running.ptyId, engine: "Grok Build", workspace: workspace.name, reply: "All 12 tests pass." });
+    expect(heard).toEqual([{ kind: "note", note: notes()[0].note }]);
+
+    // Told again, and the CLI closes before it answers: nothing more is waited for, or said.
+    at += 120_000;
+    const again = await ctx.ask("tell it to lint", { say: "Telling it.", steps: [{ kind: "tell", target: running.ptyId, prompt: "Lint." }] });
+    await ctx.svc.orchestratorRun(again()?.id ?? "");
+    expect(watched).toHaveLength(2);
+    await ctx.exit(running.ptyId);
+    answered("Too late.");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(notes()).toHaveLength(1);
+    ctx.svc.close();
+  });
+
+  it("listens to a told CLI whose log it can't read for that one turn, as to one it started", async () => {
+    let at = Date.now();
+    const ctx = desk({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    at += 6000;
+    const notes = () => ctx.svc.orchestratorView().turns.filter((turn) => turn.note);
+    // Its own turns, before Viby told it anything, are the person's business.
+    ctx.svc.onPtyActivity(running.ptyId, true);
+    at += 30_000;
+    ctx.svc.onPtyActivity(running.ptyId, false);
+    at += 6000;
+    const told = await ctx.ask("tell argy to run the tests", { say: "Telling it.", steps: [{ kind: "tell", target: running.ptyId, prompt: "Run the tests." }] });
+    await ctx.svc.orchestratorRun(told()?.id ?? "");
+    expect(told()?.steps?.[0].state).toBe("done");
+    ctx.svc.onPtyActivity(running.ptyId, true);
+    at += 30_000;
+    ctx.svc.onPtyActivity(running.ptyId, false);
+    await until(() => notes().length === 1);
+    expect(notes()[0].note).toMatchObject({ kind: "finished", ptyId: running.ptyId, engine: "Argy" });
+    expect(notes()[0].note?.reply).toBeUndefined();
+    // The turn after that is the person's again.
+    at += 120_000;
+    ctx.svc.onPtyActivity(running.ptyId, true);
+    at += 30_000;
+    ctx.svc.onPtyActivity(running.ptyId, false);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(notes()).toHaveLength(1);
+    ctx.svc.close();
+  });
+
+  it("puts the start of its answer in the word about a CLI it started", async () => {
+    let at = Date.now();
+    const ctx = desk({ now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    ctx.host.lastReply = async () => "Fixed the login timeout.\n\n- `auth.ts`: the retry\n- tests";
+    const started = await ctx.ask("start grok", { say: "Starting.", steps: [{ kind: "start", engine: "grok", workspace: workspace.name, prompt: "Fix it.", inPlace: true }] });
+    await ctx.svc.orchestratorRun(started()?.id ?? "");
+    const ptyId = started()?.steps?.[0].ptyId ?? "";
+    ctx.svc.onPtyActivity(ptyId, true);
+    at += 30_000;
+    ctx.svc.onPtyActivity(ptyId, false);
+    const notes = () => ctx.svc.orchestratorView().turns.filter((turn) => turn.note);
+    await until(() => notes().length === 1);
+    expect(notes()[0].note).toMatchObject({ kind: "finished", reply: "Fixed the login timeout." });
+    ctx.svc.close();
   });
 });

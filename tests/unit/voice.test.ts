@@ -168,9 +168,9 @@ describe("voice: settings", () => {
     const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
     const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-data-"));
     const store = new Store(configRoot, dataRoot);
-    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer" });
+    expect(store.readSettings().voice).toEqual({ model: "", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer", talkOver: "auto" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { model: " /m/ggml-base.bin ", language: "Klingon!", autoSend: "yes", talkBack: "loud", speaker: 3 } }));
-    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer" });
+    expect(store.readSettings().voice).toEqual({ model: "/m/ggml-base.bin", language: "auto", talkBack: true, speaker: "", agent: "", keys: DEFAULT_DICTATE_KEYS, mouseButton: "off", sendButton: "pointer", talkOver: "auto" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { language: "de", autoSend: true, talkBack: "off", speaker: "/v/a.onnx", agent: " atlas " } }));
     expect(store.readSettings().voice).toMatchObject({ model: "", language: "de", talkBack: false, speaker: "/v/a.onnx", agent: "atlas" });
     fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice: { talkBack: "full" } }));
@@ -185,6 +185,11 @@ describe("voice: settings", () => {
     const write = (voice: unknown) => fs.writeFileSync(path.join(configRoot, "settings.json"), JSON.stringify({ voice }));
     write({ keys: { code: "F8", ctrl: false, shift: false, alt: false, meta: false }, mouseButton: "back", sendButton: "always" });
     expect(store.readSettings().voice).toMatchObject({ keys: { code: "F8", ctrl: false }, mouseButton: "back", sendButton: "always" });
+    // Talking over Viby: one of its three answers, or the default.
+    write({ talkOver: "always" });
+    expect(store.readSettings().voice.talkOver).toBe("always");
+    write({ talkOver: "sometimes" });
+    expect(store.readSettings().voice.talkOver).toBe("auto");
     write({ keys: { code: "KeyV", alt: true, ctrl: "yes" }, mouseButton: "left", sendButton: "sometimes" });
     expect(store.readSettings().voice).toMatchObject({ keys: { code: "KeyV", alt: true, ctrl: false, shift: false, meta: false }, mouseButton: "off", sendButton: "pointer" });
     // A plain letter would type, Esc cancels, and a modifier on its own is no key.

@@ -4,6 +4,10 @@ What's next. What shipped is in `CHANGELOG.md` (2.19.0, 2026-11-17, is the lates
 
 ## Next up
 
+- [ ] **Viby across the app, by voice** (founder, 2026-11-18). In (Unreleased): the call itself (the rail's Call button, the call bar, spoken go/cancel/hang up), what you're looking at said to Viby with each request, `show` for any workspace or view, the window following Viby during a call, Viby speaking up when a CLI it started or told ends its turn, the `read` step ("what did Claude say?"), the Silero speech detector, and talking over Viby with PipeWire's echo cancellation or headphones. Still to do:
+  - **Hearing better, the rest.** Talking over Viby has met one desk's speakers (see below): if PipeWire's canceller lets too much through on other setups, the default should become **Never**. Viby can't be interrupted while it thinks, only while it speaks. Dictation's own start and stop still go by loudness. Silero v6 is published in the same format; v5.1.2 is the one checked.
+  - **Speaking up, the rest.** A CLI whose log VibeForge can't read (Cursor Agent, OpenCode, Copilot, Antigravity and the others) gets a word only after 20 s of work, without its answer, and its answer is never read aloud. Two of the same CLI in one folder share that folder's logs: the newest answer there is the one read.
+  - **Quicker answers.** A planning turn with Viby's real rules took 7–8 s with Claude Code on its default model, and about 5 s on Haiku or Sonnet (Settings → Viby → Model), new session or resumed (measured 2026-11-18; about 1.5 s of it is the CLI starting). Keeping the planner running between turns might save a second; not tried.
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 
@@ -14,6 +18,8 @@ What's next. What shipped is in `CHANGELOG.md` (2.19.0, 2026-11-17, is the lates
 These work against fake CLIs, synthetic audio and the hidden test window. Nothing is known to be wrong:
 
 - Dictation and talk-back with a real microphone and speakers, including talk-back from a CLI typed into a Code terminal.
+- **A call with Viby**, beyond the founder's first one: whether the pause that ends a turn (0.9 s) feels right over a longer session, whether a real keyboard or the room sets the speech detector off (made-up typing, tones and hiss don't), and Viby speaking up about a real CLI's answer.
+- **Talking over Viby on other speakers.** The founder's call (2026-11-18) is the only one on real speakers: Viby stopped cleanly when talked over and didn't cut itself off. Laptop speakers beside their microphone, Bluetooth, a loud room, and whether whisper hears as well through the canceller as without it, are untried. The echo guard (Viby's own words dropped, talking over switched off for the call) has only run in tests.
 - The 0.8.0 sounds on real speakers.
 - The tray's amber corner and pinning it from the tray's arrow, on the real bar. (The tray and its menu were checked by hand on 2026-09-28.)
 - The 2.8.1 Start at login fix across a real login. A real login found the missing icon; the fix was checked against a stand-in tray host.

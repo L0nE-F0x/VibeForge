@@ -55,7 +55,7 @@ http.createServer((req, res) => {
   );
   fs.mkdirSync(path.join(dataRoot, "models"), { recursive: true });
   fs.writeFileSync(path.join(dataRoot, "models", "ggml-base.en.bin"), Buffer.alloc(1_000_001));
-  const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer" };
+  const settings: VoiceSettings = { model: "", language: "auto", talkBack: false, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer", talkOver: "auto" };
   const log = { info: () => undefined, warn: () => undefined } as unknown as LogFile;
   const instance = new Voice({
     log,

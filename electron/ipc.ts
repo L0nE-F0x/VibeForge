@@ -7,6 +7,7 @@ import { listDir } from "../src/core/files.js";
 import { describeError } from "../src/core/log.js";
 import { listThemes } from "../src/core/theme.js";
 import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import type { Looking } from "../src/shared/orchestrator.js";
 import { companionStatus } from "./companion.js";
 import type { Dock } from "./dock.js";
 import { isAppPage, relaunchArgs } from "./guards.js";
@@ -17,6 +18,7 @@ import type { Stats } from "./stats.js";
 import type { Sync } from "./sync.js";
 import { isSyncMode } from "../src/core/sync/protocol.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
+import type { Call } from "./call.js";
 import type { Talk } from "./talk.js";
 import type { TrayController } from "./tray-controller.js";
 import type { Updater } from "./updater.js";
@@ -36,6 +38,7 @@ export interface IpcParts {
   updater: Updater;
   voice: Voice;
   talk: Talk;
+  call: Call;
   dock: Dock;
   sync: Sync;
   notify: Notify;
@@ -47,7 +50,7 @@ type Handlers = { [K in Method]: (...args: MethodArgs<K>) => MethodResult<K> | P
 
 function handlers(ctx: MainContext, parts: IpcParts): Handlers {
   const { roots, log, supervisor, words, install, focusWindow } = ctx;
-  const { host, stats, tray, updater, voice, talk, dock, sync, notify, refreshPalette } = parts;
+  const { host, stats, tray, updater, voice, talk, call, dock, sync, notify, refreshPalette } = parts;
   /** How a share syncs, from whatever the window sent. */
   const shareOptions = (value: unknown) => {
     const raw = value && typeof value === "object" ? (value as { mode?: unknown; filesOnly?: unknown }) : {};
@@ -228,7 +231,12 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "live.list": () => s().liveForView(),
     "orchestrator.get": () => s().orchestratorView(),
-    "orchestrator.ask": (text) => s().orchestratorAsk(String(text ?? "")),
+    "orchestrator.ask": (text) => s().orchestratorAsk(String(text ?? ""), ctx.looking),
+    "app.looking": (looking) => {
+      const text = (value: unknown) => (typeof value === "string" && value.length <= 200 ? value : undefined);
+      const view = looking && typeof looking === "object" ? text((looking as Looking).view) : undefined;
+      ctx.looking = view ? { view, workspaceId: text((looking as Looking).workspaceId), ptyId: text((looking as Looking).ptyId) } : null;
+    },
     "orchestrator.stopThinking": () => s().orchestratorStopThinking(),
     "orchestrator.models": (engineId) => s().orchestratorModels(String(engineId ?? "")),
     "orchestrator.clear": () => s().orchestratorClear(),
@@ -273,6 +281,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     },
     "voice.forget": (ptyId) => talk.forget(typeof ptyId === "string" ? ptyId : undefined),
     "voice.installBindings": () => voice.installBindings(),
+
+    "call.get": () => call.get(),
+    "call.start": () => call.start(),
+    "call.stop": () => call.stop(),
 
     // Anything the window writes is a person: typing, a paste, dictation, the Write box.
     "pty.write": (ptyId, data) => {

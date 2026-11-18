@@ -35,7 +35,7 @@ const ISSUE_KEYS = {
   copy: "orch.issue.copy",
 };
 /** The word for each kind of step that isn't a start (which shows its CLI and workspace instead). @type {Record<string, string>} */
-const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", apply: "orch.applyStep", discard: "orch.discard" };
+const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", read: "orch.read", apply: "orch.applyStep", discard: "orch.discard" };
 
 /**
  * What a lookup, task or routine step will do, as on the computer's card: a new task has a title
@@ -148,6 +148,7 @@ function stepNode(turn, step, editable) {
     else if (step.prompt) main.append(el("span", { class: "orch-prompt-text" }, step.prompt));
   }
   if (step.result) main.append(el("span", { class: "orch-warn" }, step.result));
+  if (step.reply) main.append(el("div", { class: "orch-reply" }, step.reply));
   if (step.issue) main.append(el("span", { class: "orch-issue" }, t(issueKey(step, step.issue), { asked: step.asked || "?" })));
   if (step.state === "failed" && step.error) main.append(el("span", { class: "orch-error" }, step.error));
   if (step.state === "skipped") main.append(el("span", { class: "small faint" }, t("orch.skipped")));

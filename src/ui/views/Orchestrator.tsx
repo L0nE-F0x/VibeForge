@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Clock, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Workflow, X, ExternalLink } from "lucide-react";
+import { Check, CircleAlert, Clock, Eye, FileDiff, FolderPlus, GitBranch, GitMerge, ListTodo, MessageSquare, Play, RotateCcw, Search, Square, SquareTerminal, Trash2, Volume2, Workflow, X, ExternalLink } from "lucide-react";
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Engine, LiveSession, MaestroNote, OrchestratorStep, OrchestratorTurn, OrchestratorView as View, StepIssue, StepPatch, Workspace } from "../../shared/api.js";
@@ -6,6 +6,7 @@ import { effortLevels, launchKind, takesModel, cleanModel } from "../../shared/l
 import { canOrchestrate, KNOWN_MODELS, orchestratorVoiceWords, plannedId, stepIssue, withPlannedWorkspaces, type PlanContext } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useQuery, useSettings, useWorkspaces } from "../api.js";
 import { usePtyAttention } from "../attention.js";
+import { CallButton } from "../call.js";
 import { coreText } from "../core-text.js";
 import { Composer } from "../components/Session.js";
 import { Button, Chip, Empty, Logo, Segmented, Select, Spinner, useOverlayStack } from "../components/ui.js";
@@ -13,6 +14,7 @@ import { tipProps } from "../components/Tooltip.js";
 import { CopyActions, CopyList, CopySheet } from "./OrchestratorCopies.js";
 import { useT, type Key } from "../i18n/index.js";
 import { useAction, useConfirm, useNav, useOverlay, useToast } from "../state.js";
+import { VIEWS } from "../rail.js";
 import { shortcutKeys } from "../shortcuts.js";
 import { useDictateKeys } from "../voice.js";
 
@@ -127,6 +129,7 @@ export function OrchestratorView() {
             ]}
             onChange={(mode) => void saveMode(mode)}
           />
+          <CallButton />
           <Button size="sm" variant="ghost" icon={RotateCcw} tip={t("orch.newTip")} disabled={!view?.turns.length} onClick={() => void clear()}>
             {t("orch.new")}
           </Button>
@@ -163,6 +166,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           <Workflow size={15} className="accent-text" />
           <strong>{t("orch.title")}</strong>
           <span className="grow" />
+          <CallButton />
           <Button
             size="sm"
             variant="ghost"
@@ -381,6 +385,10 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
   const copy = step.kind === "start" && !editable ? copies.find((item) => item.id === step.copyId || item.stepId === step.id) : undefined;
   const targetCopy = step.kind === "apply" || step.kind === "discard" ? copies.find((item) => item.id === step.target) : undefined;
 
+  // A show step that opens a view or a workspace rather than a terminal: named in the window's language.
+  const shownView = step.kind === "show" && step.view ? step.view : "";
+  const shownPlace = shownView ? t(VIEWS.find((item) => item.view === shownView)?.label ?? "rail.settings") : step.kind === "show" && !step.target ? (workspace?.name ?? "") : "";
+
   let line: ReactNode;
   if (step.kind === "workspace") {
     line = editable ? (
@@ -455,8 +463,8 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
   } else {
     line = (
       <div className="orch-step-line">
-        <strong>{step.kind === "tell" ? t("orch.tell") : step.kind === "show" ? t("orch.show") : t("orch.close")}</strong>
-        <span className="truncate">{sessionLabel(target, workspaces) || step.asked || t("orch.gone")}</span>
+        <strong>{step.kind === "tell" ? t("orch.tell") : step.kind === "show" ? t("orch.show") : step.kind === "read" ? t("orch.read") : t("orch.close")}</strong>
+        <span className="truncate">{sessionLabel(target, workspaces) || shownPlace || step.asked || t("orch.gone")}</span>
       </div>
     );
   }
@@ -481,6 +489,7 @@ function StepRow({ turnId, step, plan, editable, compact, issue }: { turnId: str
         {step.state === "failed" && step.error && <span className="orch-issue">{coreText(step.error)}</span>}
         {step.state === "skipped" && <span className="faint">{t("orch.skipped")}</span>}
         {step.result && <span className="orch-warn">{coreText(step.result)}</span>}
+        {step.reply && <div className={`orch-reply${compact ? " clamp" : ""}`}>{step.reply}</div>}
         {copy && <CopyActions copy={copy} onLeave={leaveBar} />}
         {!copy && step.outcome && (
           <span className="faint">{step.outcome === "applied" ? t("orch.outcome.applied", { workspace: workspace?.name ?? "" }) : t("orch.outcome.discarded")}</span>
@@ -529,12 +538,13 @@ const STEP_ICON: Record<OrchestratorStep["kind"], typeof Play> = {
   apply: GitMerge,
   discard: Trash2,
   show: Eye,
+  read: Volume2,
   lookup: Search,
   task: ListTodo,
   routine: Clock,
 };
 
-/** VibeForge's own word about a CLI Maestro started: its turn ended after real work, or it closed. */
+/** VibeForge's own word about a CLI Maestro started or told: its turn ended (with the start of its answer), or it closed. */
 function NoteView({ note }: { note: MaestroNote }) {
   const t = useT();
   const { go } = useNav();
@@ -553,6 +563,7 @@ function NoteView({ note }: { note: MaestroNote }) {
           {t(note.kind === "finished" ? "orch.note.finished" : "orch.note.ended", { engine: note.engine, workspace: note.workspace })}
           {note.changes && <span className="faint"> · {coreText(note.changes)}</span>}
         </span>
+        {note.reply && <span className="orch-prompt-text clamp">{note.reply}</span>}
         <div className="orch-copy">
           {running && (
             <Button

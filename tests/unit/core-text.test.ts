@@ -13,6 +13,10 @@ const INTERNAL = [
   /^Run is not valid$/,
   /^Agent is missing$/,
   /^Nothing is being recorded\.$/,
+  // A second call is never started over the first: Call.start answers with the one that is on.
+  /^A call is already listening\.$/,
+  // Reading the speech detector's file: caught where it is read, and logged; the call then listens by loudness.
+  /speech detector/,
   /^whisper-server/,
   /answered X/,
   /^GitHub sent no contribution calendar\.$/,

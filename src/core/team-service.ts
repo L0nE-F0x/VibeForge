@@ -9,7 +9,7 @@ import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
-import type { OrchestratorView, StepPatch } from "./orchestrator.js";
+import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
@@ -183,8 +183,16 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.view();
   }
 
-  orchestratorAsk(text: string): Promise<void> {
-    return this.orchestrator.ask(text);
+  orchestratorAsk(text: string, looking?: Looking | null): Promise<void> {
+    return this.orchestrator.ask(text, looking);
+  }
+
+  /**
+   * A call is on (`heard` takes what Viby says by itself: a note about a CLI, an answer read out),
+   * or over (null). While one is on, the window follows what Viby starts and tells.
+   */
+  orchestratorCall(heard: ((word: VibyWord) => void) | null): void {
+    this.orchestrator.onCall = heard;
   }
 
   orchestratorModels(engineId: string): Promise<string[]> {

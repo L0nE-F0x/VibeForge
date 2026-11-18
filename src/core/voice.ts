@@ -20,17 +20,55 @@ export interface Recorder {
   argv: string[];
 }
 
-/** The first recorder on this machine that can write raw 16 kHz mono s16le to stdout. */
-export function planRecorder(resolveBin: (bin: string) => string | null, override?: string): Recorder | null {
+/**
+ * The first recorder on this machine that can write raw 16 kHz mono s16le to stdout. With
+ * `target`, PipeWire's recorder takes that node instead of the default microphone.
+ */
+export function planRecorder(resolveBin: (bin: string) => string | null, override?: string, target?: string): Recorder | null {
   // For tests and odd setups: a shell command whose stdout is that same raw audio.
   if (override?.trim()) return { label: "custom", argv: ["/bin/sh", "-c", override.trim()] };
   const pw = resolveBin("pw-record");
-  if (pw) return { label: "pw-record", argv: [pw, "--rate", String(SAMPLE_RATE), "--channels", "1", "--format", "s16", "--raw", "-"] };
+  if (pw) return { label: "pw-record", argv: [pw, ...(target ? ["--target", target] : []), "--rate", String(SAMPLE_RATE), "--channels", "1", "--format", "s16", "--raw", "-"] };
   const pa = resolveBin("parec");
   if (pa) return { label: "parec", argv: [pa, "--format=s16le", `--rate=${SAMPLE_RATE}`, "--channels=1", "--raw"] };
   const alsa = resolveBin("arecord");
   if (alsa) return { label: "arecord", argv: [alsa, "-q", "-f", "S16_LE", "-r", String(SAMPLE_RATE), "-c", "1", "-t", "raw"] };
   return null;
+}
+
+// ------------------------------------------------------------------ echo cancellation
+
+/** The microphone a call records from while PipeWire takes the speakers' sound out of it. */
+export const ECHO_SOURCE = "vibeforge.call.microphone";
+
+/**
+ * A PipeWire client's configuration that does nothing but cancel echo (libpipewire-module-echo-cancel,
+ * WebRTC's canceller): it listens to the default microphone and to whatever the default speakers
+ * are playing (`monitor.mode`), and offers the microphone without that sound as ECHO_SOURCE. It
+ * lives in a process of its own (`pipewire -c <this file>`), so it is there for a call and gone
+ * with it, and nothing in the person's own PipeWire setup is touched. Its priority is the lowest,
+ * so it never becomes anyone's default microphone.
+ */
+export function echoCancelConf(): string {
+  return `context.properties = { log.level = 0 }
+context.spa-libs = {
+  audio.convert.* = audioconvert/libspa-audioconvert
+  support.* = support/libspa-support
+}
+context.modules = [
+  { name = libpipewire-module-rt args = { } flags = [ ifexists nofail ] }
+  { name = libpipewire-module-protocol-native }
+  { name = libpipewire-module-client-node }
+  { name = libpipewire-module-adapter }
+  { name = libpipewire-module-echo-cancel
+    args = {
+      monitor.mode = true
+      capture.props = { node.name = "vibeforge.call.capture" }
+      source.props = { node.name = "${ECHO_SOURCE}" node.description = "VibeForge call (echo cancelled)" priority.session = 1 priority.driver = 1 }
+    }
+  }
+]
+`;
 }
 
 // ------------------------------------------------------------------ whisper.cpp

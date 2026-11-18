@@ -251,7 +251,15 @@ export interface VoiceSettings {
   mouseButton: DictateButton;
   /** A Send button over a terminal once dictated words are in it, for sending without Enter. */
   sendButton: SendButton;
+  /**
+   * In a call, talking while Viby speaks stops it: "auto" when PipeWire's echo cancellation is
+   * running for the call (VibeForge starts it), "always" (headphones: Viby can't hear itself),
+   * or "never" (one side talks at a time, as before).
+   */
+  talkOver: TalkOver;
 }
+
+export type TalkOver = "auto" | "always" | "never";
 
 export interface Workspace {
   id: string;

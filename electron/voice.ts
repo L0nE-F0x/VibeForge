@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { hyprlandBindings } from "../src/core/control.js";
 import { describeError, type LogFile } from "../src/core/log.js";
+import { Segmenter } from "../src/core/call.js";
 import type { VoiceSettings } from "../src/core/types.js";
+import { readVadModel, SpeechDetector, VAD_MODEL, type VadModel } from "../src/core/vad.js";
 import {
   BYTES_PER_SECOND,
   cleanTranscript,
@@ -38,6 +40,7 @@ import {
 } from "../src/core/voice.js";
 import type { Dictation, DownloadKind, VoiceState, VoiceStatus } from "../src/shared/api.js";
 import { type Download, downloadFiles } from "./download.js";
+import { type EchoCancel, startEchoCancel } from "./echo.js";
 import { Speaker } from "./speech.js";
 
 const LEVEL_EVERY_MS = 60;
@@ -69,6 +72,40 @@ interface Recording {
   error: string | null;
 }
 
+/** The microphone held open for a call. */
+export interface Ear {
+  /** Stop passing on what is heard (Viby is thinking or speaking), or start again. */
+  deaf(on: boolean): void;
+  close(): void;
+  /** It listens for speech itself (the Silero detector), not just for loudness. */
+  readonly detects: boolean;
+  /** PipeWire is taking the speakers' sound out of what it hears. */
+  readonly cancelsEcho: boolean;
+}
+
+export interface EarEvents {
+  /** One thing said, as 16 kHz mono s16le. */
+  heard: (pcm: Buffer) => void;
+  /**
+   * The meter, and whether someone is speaking, many times a second. `speechMs` is how much speech
+   * the detector has heard in what is being said (0 when it goes by loudness).
+   */
+  level: (level: number, hearing: boolean, speechMs: number) => void;
+  /** The recorder stopped by itself; `error` is what it said. Not called after `close`. */
+  closed: (error: string) => void;
+}
+
+interface OpenEar {
+  /** The recorder, once it has started: echo cancellation is set up first when it can be. */
+  child: ChildProcess | null;
+  echo: EchoCancel | null;
+  segmenter: Segmenter;
+  deaf: boolean;
+  /** Heard nothing last time (deaf, or a dictation had the mic): what was half-heard before is stale. */
+  skipped: boolean;
+  lastLevelAt: number;
+}
+
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
@@ -96,6 +133,8 @@ export class Voice {
   private readonly cliRuns = new Map<ChildProcess, string>();
   /** Requests whisper-server is answering now; it isn't stopped under them. */
   private serverUses = 0;
+  /** A call's open microphone. */
+  private ear: OpenEar | null = null;
   private download: { kind: DownloadKind; id: string; received: number; total: number; abort: AbortController } | null = null;
   private downloadError: string | null = null;
   readonly speaker: Speaker;
@@ -118,6 +157,8 @@ export class Voice {
       controlSocket: string;
       /** The command that runs VibeForge, for keybindings. */
       launcher: () => string;
+      /** Where VibeForge is installed: the speech detector's model is in its resources. Without it, a call listens by loudness. */
+      appRoot?: string;
       /** For tests: how long whisper-server is kept unused. */
       serverIdleMs?: number;
     },
@@ -364,24 +405,26 @@ export class Voice {
   }
 
   /**
-   * Words for speech recorded somewhere else: the phone page's mic, as 16 kHz mono s16le. The same
-   * checks and the same whisper as a recording here; the window's own recording isn't touched.
+   * Words for speech recorded somewhere else: the phone page's mic, or one thing said in a call,
+   * as 16 kHz mono s16le. The same checks and the same whisper as a recording here; the window's
+   * own recording isn't touched.
    */
-  async transcribe(pcm: Buffer, prompt = ""): Promise<Dictation> {
+  async transcribe(pcm: Buffer, prompt = "", source: "phone" | "call" = "phone"): Promise<Dictation> {
+    const from = source === "call" ? " in a call" : " from the phone";
     const startedAt = Date.now();
     const audio = pcm.subarray(0, pcm.length - (pcm.length % 2));
     const seconds = audio.length / BYTES_PER_SECOND;
     const result = (empty: Dictation["empty"], text = ""): Dictation => ({ text, seconds, tookMs: Date.now() - startedAt, empty });
     if (seconds < MIN_SECONDS) return result("short");
     if (peakLoudness(audio) < SILENCE_RMS) {
-      this.opts.log.info(`Voice: ${seconds.toFixed(1)} s of silence from the phone, not transcribed`);
+      this.opts.log.info(`Voice: ${seconds.toFixed(1)} s of silence${from}, not transcribed`);
       return result("silent");
     }
     try {
-      const text = await this.words(audio, prompt, seconds, startedAt, " from the phone");
+      const text = await this.words(audio, prompt, seconds, startedAt, from);
       return result(text ? null : "nothing", text);
     } catch (error) {
-      this.opts.log.warn(`Voice: transcription from the phone failed: ${describeError(error).split("\n")[0]}`);
+      this.opts.log.warn(`Voice: transcription${from} failed: ${describeError(error).split("\n")[0]}`);
       throw error;
     }
   }
@@ -405,6 +448,135 @@ export class Voice {
     const text = cleanTranscript(raw);
     this.opts.log.info(`Voice: ${seconds.toFixed(1)} s${from} transcribed in ${((Date.now() - since) / 1000).toFixed(1)} s by ${via} with ${path.basename(status.model)}`);
     return text;
+  }
+
+  // ---------------------------------------------------------------- a call's microphone
+
+  /** Dictation has the microphone, or is turning what it recorded into words. */
+  get dictating(): boolean {
+    return this.recording !== null || this.transcribing;
+  }
+
+  private vad: VadModel | null | undefined;
+
+  /**
+   * A speech detector for one call, or null when its model can't be read (the call then listens
+   * by loudness). VIBEFORGE_VAD_MODEL names another file, or "off".
+   */
+  private detector(): SpeechDetector | null {
+    if (this.vad === undefined) {
+      const named = process.env.VIBEFORGE_VAD_MODEL?.trim();
+      const file = named && named !== "off" ? named : !named && this.opts.appRoot ? path.join(this.opts.appRoot, "resources", "vad", VAD_MODEL.file) : null;
+      this.vad = null;
+      if (file) {
+        try {
+          this.vad = readVadModel(fs.readFileSync(file));
+        } catch (error) {
+          this.opts.log.warn(`Voice: no speech detector, listening by loudness: ${describeError(error)}`);
+        }
+      }
+    }
+    return this.vad ? new SpeechDetector(this.vad) : null;
+  }
+
+  /**
+   * Opens the microphone for a call and keeps it open: each thing said arrives by itself, cut out
+   * where the speaker paused. Silence is dropped as it comes and nothing is written anywhere. While
+   * a dictation is recording, the words are that dictation's and the call hears nothing.
+   *
+   * With `cancelEcho`, PipeWire is first asked to take the speakers' sound out of the microphone
+   * (electron/echo.ts); the recorder starts once that is there, or without it when this machine can't.
+   */
+  openEar(on: EarEvents, cancelEcho = false): Ear {
+    if (this.ear) throw new Error("A call is already listening.");
+    const status = this.status();
+    const recorder = this.recorder();
+    if (!recorder) throw new Error("No recorder found. VibeForge records with pw-record (PipeWire), parec or arecord.");
+    if (!status.server && !status.cli) throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
+    if (!status.model) throw new Error("No whisper model found. Settings → Voice can download one.");
+
+    const ear: OpenEar = { child: null, echo: null, segmenter: new Segmenter({ detector: this.detector() }), deaf: false, skipped: false, lastLevelAt: 0 };
+    this.ear = ear;
+    // Only PipeWire's own recorder can be pointed at the echo-cancelled microphone.
+    const wantsEcho = cancelEcho && recorder.label === "pw-record" && process.env.VIBEFORGE_ECHO_CANCEL !== "off";
+    void (wantsEcho ? startEchoCancel({ resolveBin: this.opts.resolveBin, dir: path.join(this.opts.dataRoot, "voice"), log: this.opts.log }) : Promise.resolve(null))
+      .catch(() => null)
+      .then((echo) => {
+        if (this.ear !== ear) {
+          echo?.stop();
+          return;
+        }
+        ear.echo = echo;
+        this.record(ear, (echo && planRecorder(this.opts.resolveBin, undefined, echo.target)) || recorder, on);
+      });
+    this.opts.log.info(`Voice: a call is listening with ${recorder.label}${ear.segmenter.detects ? " and the speech detector" : ", by loudness"}`);
+    // The model loads while the first thing is being said, and stays loaded for the call.
+    if (status.server) void this.ensureServer(status.server, status.model, status.language).catch(() => undefined);
+    return {
+      deaf: (deaf) => {
+        ear.deaf = deaf;
+      },
+      close: () => {
+        if (this.ear !== ear) return;
+        this.ear = null;
+        this.closeEar(ear);
+        this.opts.log.info("Voice: the call's microphone closed");
+      },
+      get detects() {
+        return ear.segmenter.detects;
+      },
+      get cancelsEcho() {
+        return Boolean(ear.echo?.running);
+      },
+    };
+  }
+
+  private closeEar(ear: OpenEar): void {
+    if (ear.child && ear.child.exitCode === null && ear.child.signalCode === null) ear.child.kill("SIGTERM");
+    ear.echo?.stop();
+  }
+
+  /** Starts a call's recorder and passes on what it hears. */
+  private record(ear: OpenEar, recorder: Recorder, on: EarEvents): void {
+    const child = spawn(recorder.argv[0], recorder.argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    ear.child = child;
+    let stderr = "";
+    let failed = "";
+    child.stderr?.on("data", (data: Buffer) => {
+      stderr = (stderr + data.toString()).slice(-2000);
+    });
+    child.on("error", (error) => {
+      failed = describeError(error);
+    });
+    child.on("close", (code) => {
+      if (this.ear !== ear) return;
+      this.ear = null;
+      ear.echo?.stop();
+      const why = failed || stderr.trim().split("\n").pop() || `${recorder.label} exited with code ${code}`;
+      this.opts.log.warn(`Voice: the call's microphone closed: ${why}`);
+      on.closed(why);
+    });
+    child.stdout?.on("data", (data: Buffer) => {
+      if (this.ear !== ear) return;
+      if (ear.deaf || this.recording) {
+        if (!ear.skipped) {
+          ear.skipped = true;
+          ear.segmenter.reset();
+          on.level(0, false, 0);
+        }
+        return;
+      }
+      ear.skipped = false;
+      const heard = ear.segmenter.push(data);
+      const now = Date.now();
+      // What was said first, then the level: whoever listens knows it has something to answer
+      // before it hears that the room went quiet.
+      for (const pcm of heard.utterances) on.heard(pcm);
+      if (heard.utterances.length || now - ear.lastLevelAt >= LEVEL_EVERY_MS) {
+        ear.lastLevelAt = now;
+        on.level(heard.level, heard.hearing, heard.speechMs);
+      }
+    });
   }
 
   // ---------------------------------------------------------------- whisper
@@ -454,8 +626,8 @@ export class Voice {
   private touchServer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      // A recording (up to three minutes) or an answer on its way still needs it.
-      if (this.recording || this.serverUses > 0) this.touchServer();
+      // A recording (up to three minutes), an answer on its way or a call still needs it.
+      if (this.recording || this.serverUses > 0 || this.ear) this.touchServer();
       else this.stopServer();
     }, this.opts.serverIdleMs ?? SERVER_IDLE_MS);
     this.idleTimer.unref();
@@ -575,6 +747,10 @@ export class Voice {
       clearTimeout(this.recording.timer);
       this.recording.child.kill("SIGTERM");
       this.recording = null;
+    }
+    if (this.ear) {
+      this.closeEar(this.ear);
+      this.ear = null;
     }
     this.download?.abort.abort();
     if (this.idleTimer) clearTimeout(this.idleTimer);

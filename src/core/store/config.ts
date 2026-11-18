@@ -24,7 +24,7 @@ export function defaultSettings(): Settings {
     tourDone: false,
     checkUpdates: true,
     language: "system",
-    voice: { model: "", language: "auto", talkBack: true, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer" },
+    voice: { model: "", language: "auto", talkBack: true, speaker: "", agent: "", keys: { ...DEFAULT_DICTATE_KEYS }, mouseButton: "off", sendButton: "pointer", talkOver: "auto" },
     sounds: { on: true, volume: 0.6, voice: true, attention: true, finished: true, routines: false, inFront: false },
     tray: true,
     closeToTray: true,
@@ -83,6 +83,7 @@ function normalizeVoiceSettings(value: unknown, defaults: VoiceSettings): VoiceS
     keys: normalizeDictateKeys(raw.keys),
     mouseButton: raw.mouseButton === "back" || raw.mouseButton === "forward" || raw.mouseButton === "middle" ? raw.mouseButton : defaults.mouseButton,
     sendButton: raw.sendButton === "off" || raw.sendButton === "always" || raw.sendButton === "pointer" ? raw.sendButton : defaults.sendButton,
+    talkOver: raw.talkOver === "always" || raw.talkOver === "never" || raw.talkOver === "auto" ? raw.talkOver : defaults.talkOver,
   };
 }
 

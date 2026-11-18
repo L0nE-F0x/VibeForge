@@ -8,6 +8,8 @@ import type { LiveSession } from "./types.js";
 
 /** Turns the phone is sent: the end of the conversation. The computer keeps the rest. */
 export const PHONE_TURNS = 40;
+/** Of an answer a read step fetched, the phone is sent this much; the computer's card has all of it. */
+export const PHONE_REPLY = 4000;
 
 export interface PhoneStep extends OrchestratorStep {
   /** What stands in its way, while its plan waits for Go (the desktop card's check). */
@@ -87,7 +89,8 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
       ...turn,
       steps: turn.steps.map((step) => {
         const opened = step.ptyId ? coding.find((item) => item.ptyId === step.ptyId) : undefined;
-        return { ...step, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? step.runId ?? null };
+        const reply = step.reply && step.reply.length > PHONE_REPLY ? { reply: `${step.reply.slice(0, PHONE_REPLY).trimEnd()}…` } : {};
+        return { ...step, ...reply, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? step.runId ?? null };
       }),
     };
   });

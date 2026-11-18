@@ -199,15 +199,46 @@ export class MessageDesk {
 
   /** The CLI's last finished answer: its own log when VibeForge can read it, else the end of its screen. */
   private async lastAnswer(from: Reachable): Promise<string> {
+    return (await this.loggedAnswer(from)) || this.screenOf(from.ptyId);
+  }
+
+  /** The CLI's last finished answer from its own log; empty when VibeForge can't read that CLI's log, or it holds none yet. */
+  private async loggedAnswer(from: Reachable): Promise<string> {
     const session = this.core.live.get(from.ptyId);
     const engine = session ? this.roster.engineOf(session) : null;
     const kind = engine ? replyLogFor(engine.id, engine.bin) : null;
-    if (kind && this.core.options.host.lastReply && session) {
-      const since = Date.parse(session.cliSince ?? session.startedAt) - 5000;
-      const reply = await this.core.options.host.lastReply({ kind, cwd: from.cwd, since }).catch(() => null);
-      if (reply?.trim()) return cleanText(reply);
-    }
-    return this.screenOf(from.ptyId);
+    if (!kind || !this.core.options.host.lastReply || !session) return "";
+    const since = Date.parse(session.cliSince ?? session.startedAt) - 5000;
+    const reply = await this.core.options.host.lastReply({ kind, cwd: from.cwd, since }).catch(() => null);
+    return reply?.trim() ? cleanText(reply) : "";
+  }
+
+  /**
+   * What the coding CLI in `ptyId` last answered, for Viby to show and read out. `fromScreen` when
+   * its log couldn't say and the end of its screen stands in; with `logOnly` that is left out.
+   */
+  async answerOf(ptyId: string, logOnly = false): Promise<{ reply: string; fromScreen: boolean }> {
+    const from = this.list().find((item) => item.ptyId === ptyId);
+    if (!from) return { reply: "", fromScreen: false };
+    const logged = await this.loggedAnswer(from);
+    if (logged || logOnly) return { reply: logged, fromScreen: false };
+    return { reply: await this.screenOf(ptyId), fromScreen: true };
+  }
+
+  /**
+   * Waits for the answer to words just sent to `ptyId`, in that CLI's own log. Null at once for a
+   * CLI whose log VibeForge can't read; else the answer, or null when none came or `signal` aborted.
+   */
+  awaitAnswer(ptyId: string, words: string, signal: AbortSignal): Promise<string | null> | null {
+    const session = this.core.live.get(ptyId);
+    const engine = session ? this.roster.engineOf(session) : null;
+    const watch = this.core.options.host.watchReply;
+    const kind = engine && watch ? replyLogFor(engine.id, engine.bin) : null;
+    if (!session || !kind || !watch) return null;
+    const cwd = session.programCwd || (session.runId ? this.core.store.getRun(session.runId)?.cwd : null) || session.cwd;
+    return watch({ kind, cwd, since: this.nowMs() - 2000, words: cleanText(words).split("\n")[0], signal })
+      .then((reply) => (reply?.trim() ? cleanText(reply) : null))
+      .catch(() => null);
   }
 
   private async screenOf(ptyId: string): Promise<string> {
