@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -500,6 +500,8 @@ export interface MenuItem {
   disabled?: boolean;
   /** A step inside the menu (picking where to go next), so choosing it doesn't close the menu. */
   keepOpen?: boolean;
+  /** One of a set of choices: true shows a tick before it, false keeps the room for one. */
+  checked?: boolean;
 }
 
 const POPOVER_FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -561,7 +563,7 @@ export function Popover({
     entered.current = true;
     const active = document.activeElement;
     if (!active || !(active === anchor || anchor.contains(active))) return;
-    const first = node.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? node.querySelector<HTMLElement>(POPOVER_FOCUSABLE);
+    const first = node.querySelector<HTMLElement>(':is([role="menuitem"], [role="menuitemradio"]):not(:disabled)') ?? node.querySelector<HTMLElement>(POPOVER_FOCUSABLE);
     first?.focus({ preventScroll: true });
   }, [placed, anchor]);
   // Tab past its last control (or Shift+Tab past its first) closes it, and focus goes back to its button.
@@ -603,7 +605,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     if (!step && event.key !== "Home" && event.key !== "End") return;
-    const entries = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+    const entries = [...event.currentTarget.querySelectorAll<HTMLElement>(':is([role="menuitem"], [role="menuitemradio"]):not(:disabled)')];
     if (!entries.length) return;
     event.preventDefault();
     const at = entries.indexOf(document.activeElement as HTMLElement);
@@ -619,7 +621,8 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
           <button
             key={index}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
             className={cx("menu-item", item.accent && "accent")}
             disabled={item.disabled}
             style={item.danger ? { color: "var(--red)" } : undefined}
@@ -628,6 +631,7 @@ export function Menu({ items, onClose }: { items: Array<MenuItem | "sep">; onClo
               item.onSelect();
             }}
           >
+            {item.checked !== undefined && (item.checked ? <Check size={14} className="accent-text" /> : <span style={{ width: 14, flex: "none" }} />)}
             {item.icon && <item.icon size={14} />}
             <span className="grow truncate">{item.label}</span>
             {item.hint && <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>{item.hint}</span>}

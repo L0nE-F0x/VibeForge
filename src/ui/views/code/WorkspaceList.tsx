@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowLeftRight, ArrowRight, FolderOpen, FolderPlus, GitBranch, Laptop, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, FolderOpen, FolderPlus, GitBranch, Laptop, ListChecks, ListFilter, MoreHorizontal, Pencil, Search, Square, SquareCheck, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import type { SyncShare, Workspace } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
@@ -12,11 +12,15 @@ import { workspaceMark, WorkspaceState } from "../../components/WorkspaceState.j
 import { useT } from "../../i18n/index.js";
 import { useAction, useNav } from "../../state.js";
 import { isShortcut } from "../../shortcuts.js";
+import { DEFAULT_WORKSPACE_VIEW, loadWorkspaceView, saveWorkspaceView, viewWorkspaces, type WorkspaceFacts, type WorkspaceFilter, type WorkspaceSort, type WorkspaceView } from "../../workspace-view.js";
 import { shareLine, SyncDialog } from "./SyncDialog.js";
 
 const WORKSPACE_MIME = "application/x-vibeforge-workspace";
 
-/** Code's list of workspaces: pick one, drag to reorder, double-click or F2 to rename, ⋯ for the rest. */
+/**
+ * Code's list of workspaces: pick one, drag to reorder, double-click or F2 to rename, ⋯ for the rest.
+ * Above it, a search, a filter and sort menu, and Select, which picks several to remove at once.
+ */
 export function WorkspaceList({
   workspaces,
   currentId,
@@ -29,7 +33,8 @@ export function WorkspaceList({
   currentId: string | null;
   onSelect: (workspace: Workspace) => void;
   onAdd: () => void;
-  onRemove: (workspace: Workspace) => void;
+  /** Remove these (one, or several picked), after asking; true once they're gone. */
+  onRemove: (workspaces: Workspace[]) => Promise<boolean>;
   /** Open a branch of it beside it, as its own workspace. */
   onBranch: (workspace: Workspace) => void;
 }) {
@@ -73,13 +78,69 @@ export function WorkspaceList({
   }, t("code.moveFailed"));
 
   const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
+
+  // ------------------------------------------------ search, filter, sort, select
+  const [query, setQuery] = useState("");
+  const [view, setViewState] = useState<WorkspaceView>(loadWorkspaceView);
+  const setView = (next: Partial<WorkspaceView>) => {
+    const merged = { ...view, ...next };
+    setViewState(merged);
+    saveWorkspaceView(merged);
+  };
+  /** Ids picked while Select is on; null while it's off. */
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const facts = (workspace: Workspace): WorkspaceFacts => ({
+    name: workspace.name,
+    path: tildify(workspace.path, home),
+    open: liveCount(workspace.id) > 0,
+    waiting: attention.get(workspace.id) === "waiting",
+    synced: shareOf(workspace.id) !== null,
+  });
+  const narrowed = query.trim() !== "" || view.filter !== "all";
+  const shown = viewWorkspaces(workspaces, facts, view, query, t.language);
+  // Folded to its strip there is no search or filter to see, so the strip only follows the sort.
+  const stripped = view.sort === "manual" ? workspaces : viewWorkspaces(workspaces, facts, { ...view, filter: "all" }, "", t.language);
+  // Dragging moves a workspace in your own order, so it's there only while the list shows all of it that way.
+  const canDrag = !narrowed && view.sort === "manual" && !selected;
+  // Only what is on screen gets removed: a pick that a new search hid stays picked but out of it.
+  const picked = selected ? shown.filter((workspace) => selected.has(workspace.id)) : [];
+  const toggle = (id: string) =>
+    setSelected((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const removePicked = async () => {
+    setRemoving(true);
+    try {
+      if (await onRemove(picked)) setSelected(null);
+    } finally {
+      setRemoving(false);
+    }
+  };
+  const filterLabels: Record<WorkspaceFilter, string> = {
+    all: t("code.filter.all"),
+    open: t("code.filter.open"),
+    waiting: t("code.filter.waiting"),
+    synced: t("code.filter.synced"),
+  };
+  const sortLabels: Record<WorkspaceSort, string> = { manual: t("code.sort.manual"), name: t("code.sort.name") };
+  const viewItems: Array<MenuItem | "sep"> = [
+    ...(Object.keys(filterLabels) as WorkspaceFilter[]).map((filter) => ({ label: filterLabels[filter], checked: view.filter === filter, onSelect: () => setView({ filter }) })),
+    "sep",
+    ...(Object.keys(sortLabels) as WorkspaceSort[]).map((sort) => ({ label: sortLabels[sort], checked: view.sort === sort, onSelect: () => setView({ sort }) })),
+  ];
+  const viewChanged = view.filter !== DEFAULT_WORKSPACE_VIEW.filter || view.sort !== DEFAULT_WORKSPACE_VIEW.sort;
+  const showTools = workspaces.length > 1 || narrowed || viewChanged || selected !== null;
   const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
     ...syncItems(workspace),
     { label: t("common.rename"), icon: Pencil, onSelect: () => startRename(workspace.id) },
     "sep",
-    { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => onRemove(workspace) },
+    { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void onRemove([workspace]) },
   ];
 
   return (
@@ -103,7 +164,7 @@ export function WorkspaceList({
               <Laptop size={16} className="accent-text" />
             </StripItem>
           )}
-          {workspaces.map((workspace) => (
+          {stripped.map((workspace) => (
             <StripItem
               key={workspace.id}
               label={`${workspace.name} — ${tildify(workspace.path, home)}`}
@@ -118,9 +179,83 @@ export function WorkspaceList({
       }
     >
       <SyncNotices view={sync} />
-      <div className="list-scroll">
+      {showTools && (
+        <div className="workspace-tools">
+          <div className="hstack" style={{ gap: 4 }}>
+            <div className="hstack grow" style={{ position: "relative", minWidth: 0 }}>
+              <Search size={13} className="faint" style={{ position: "absolute", left: 9, pointerEvents: "none" }} />
+              <Input
+                placeholder={t("code.search")}
+                aria-label={t("code.search")}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (query) setQuery("");
+                  else event.currentTarget.blur();
+                }}
+                style={{ paddingLeft: 28 }}
+              />
+            </div>
+            <MenuButton
+              size="sm"
+              variant="ghost"
+              icon={ListFilter}
+              className={viewChanged ? "accent-text" : undefined}
+              title={viewChanged ? `${t("code.viewTip")}: ${[view.filter !== "all" ? filterLabels[view.filter] : "", view.sort !== "manual" ? sortLabels[view.sort] : ""].filter(Boolean).join(", ")}` : t("code.viewTip")}
+              items={viewItems}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={ListChecks}
+              pressed={selected !== null}
+              className={selected ? "accent-text" : undefined}
+              tip={selected ? t("code.selectDone") : t("code.selectTip")}
+              onClick={() => setSelected(selected ? null : new Set())}
+            />
+          </div>
+          {selected && (
+            <div className="hstack workspace-picking">
+              <span className="faint grow" style={{ whiteSpace: "nowrap" }}>{t.count("code.selected", picked.length)}</span>
+              <Button size="sm" variant="ghost" disabled={!shown.length || picked.length === shown.length} onClick={() => setSelected(new Set([...selected, ...shown.map((workspace) => workspace.id)]))}>
+                {t("code.selectAll")}
+              </Button>
+              <Button size="sm" variant="danger" icon={Trash2} busy={removing} disabled={!picked.length} onClick={() => void removePicked()} tip={t("code.removeSelectedTip")}>
+                {t("code.removeSelected")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      <div
+        className="list-scroll"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && selected && !event.defaultPrevented) {
+            event.preventDefault();
+            setSelected(null);
+          }
+        }}
+      >
         {workspaces.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("code.addEmpty")}</div>}
-        {workspaces.map((workspace, index) => {
+        {workspaces.length > 0 && shown.length === 0 && (
+          <div className="vstack faint" style={{ padding: "12px 10px", gap: 8, alignItems: "flex-start" }}>
+            <span>{t("code.noMatch")}</span>
+            <Button
+              size="sm"
+              onClick={() => {
+                setQuery("");
+                setView({ filter: "all" });
+              }}
+            >
+              {t("code.clearSearch")}
+            </Button>
+          </div>
+        )}
+        {shown.map((workspace, index) => {
+          const isPicked = selected?.has(workspace.id) ?? false;
           const over = dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
           return (
             <div
@@ -128,17 +263,27 @@ export function WorkspaceList({
               className={`row workspace-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${dragWorkspace?.id === workspace.id ? " is-dragging" : ""}${over === index ? " drop-before" : ""}${over === index + 1 ? " drop-after" : ""}`}
               role="button"
               tabIndex={0}
-              aria-current={workspace.id === currentId ? "true" : undefined}
-              draggable={renaming !== workspace.id}
-              onClick={() => onSelect(workspace)}
-              onDoubleClick={() => startRename(workspace.id)}
+              aria-current={!selected && workspace.id === currentId ? "true" : undefined}
+              aria-pressed={selected ? isPicked : undefined}
+              draggable={canDrag && renaming !== workspace.id}
+              onClick={() => (selected ? toggle(workspace.id) : onSelect(workspace))}
+              onDoubleClick={() => {
+                if (!selected) startRename(workspace.id);
+              }}
               onKeyDown={(event) => {
+                if (selected) {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    toggle(workspace.id);
+                  }
+                  return;
+                }
                 if (event.key === "Enter") onSelect(workspace);
                 if (isShortcut("workspace.rename", event)) startRename(workspace.id);
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
-                setWorkspaceMenu({ workspace, anchor: event.currentTarget });
+                if (!selected) setWorkspaceMenu({ workspace, anchor: event.currentTarget });
               }}
               onDragStart={(event) => {
                 event.dataTransfer.setData(WORKSPACE_MIME, workspace.id);
@@ -164,7 +309,11 @@ export function WorkspaceList({
                 if (from >= 0 && to !== from) void moveWorkspace(drag.id, to);
               }}
             >
-              <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />
+              {selected ? (
+                isPicked ? <SquareCheck size={15} className="accent-text" style={{ flex: "none" }} /> : <Square size={15} className="faint" style={{ flex: "none" }} />
+              ) : (
+                <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />
+              )}
               <span className="vstack grow" style={{ gap: 0 }}>
                 {renaming === workspace.id ? (
                   <Input
@@ -203,9 +352,9 @@ export function WorkspaceList({
               </span>
               <SyncMark share={shareOf(workspace.id)} onOpen={(share) => setSyncing({ workspaceId: workspace.id, machineId: share.machineId })} />
               <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveCount(workspace.id)} />
-              <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+              {!selected && <span className="row-actions" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
                 <MenuButton size="sm" variant="ghost" icon={MoreHorizontal} title={t("code.workspaceActions")} items={workspaceItems(workspace)} />
-              </span>
+              </span>}
             </div>
           );
         })}
