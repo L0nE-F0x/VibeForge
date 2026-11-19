@@ -24,16 +24,16 @@ Anything that goes over the network stays off until you turn it on:
 - **The GitHub graph** (Settings → Usage and activity → GitHub) asks GitHub through your `gh`, at most every 30 minutes, and keeps no token.
 - **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it, and you turn that on yourself. Settings only asks this computer's own `tailscale` where things stand. A phone that shows two of your computers asks each one directly, with that computer's own code; a computer answers a page from another machine on the same tailnet, and no other.
 - **Sync** (Settings → Sync) starts a private Syncthing that listens on port 22737 and announces itself on the local network only. It talks to the machines you paired and to nothing else: no discovery servers, relays, usage or crash reports, or upgrades. Only workspaces you pick are synced.
-- Whisper models and Piper voices download from Hugging Face only when you press Download.
+- Speech models and Piper voices download from Hugging Face, and sherpa-onnx (which runs Parakeet, Canary and Moonshine) from its GitHub release, only when you press Download or say go to a download Viby planned.
 
 **The update check is the one networked call that is on by default** (`checkUpdates` in `src/core/store/config.ts`). Twenty seconds after start and every six hours, VibeForge asks GitHub's release API for the newest release number. The request carries nothing but your IP address and `VibeForge/<version>` as its user agent. **Update** then downloads that release's `install.sh` from GitHub and runs it only if it matches the SHA-256 GitHub lists for it. Turn it off in **Settings → Updates** (or set `"checkUpdates": false` in `settings.json`); **Check now** still works.
 
 ## A person decides each step
 
 - Writing or assigning a task starts nothing. **Execute** does.
-- Viby shows a plan as a card that waits for **Go**. **Just go** is a setting you choose. A plan that only shows you something (a workspace, a view, a terminal) or reads a CLI's answer out goes at once: it changes nothing.
+- Viby shows a plan as a card that waits for **Go**. **Just go** is a setting you choose; even then, anything risky waits for **Go**: deleting, clearing an agent's memory, stopping, applying or discarding, tidying runs, a shell command other than tests, a build, reading git or making folders, <kbd>Ctrl</kbd>+<kbd>C</kbd>, a download, adding or removing a CLI, or a setting that turns something networked on. A plan that only shows you something (a workspace, a view, a terminal) or reads a CLI's answer out goes at once: it changes nothing.
 - Dictated words land in the box or terminal and wait for you to press Enter.
-- A call with Viby is the one place speech sends itself: you start it on purpose, the rail shows it for as long as the microphone is open, and what you say reaches only Viby, never a terminal. In a call, steps that work in their own copy, pass a message to a CLI, or only open or read something run at once; steps that stop a CLI, apply or discard a copy, or start work in place over uncommitted edits still wait for **Go** (a spoken "go" is that Go). When Viby speaks up by itself in a call (a CLI ended its turn), it only tells you; nothing is started by it.
+- A call with Viby is the one place speech sends itself: you start it on purpose, the rail shows it for as long as the microphone is open, and what you say reaches only Viby, never a terminal. In a call, steps that work in their own copy, pass a message to a CLI, or only open or read something run at once; everything that waits in Just go, and starting work in place over uncommitted edits, still waits for **Go** (a spoken "go" is that Go). When Viby speaks up by itself in a call (a CLI ended its turn), it only tells you; nothing is started by it.
 - Work done in a task's or Viby's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit.
 - A task one CLI hands another waits for you under **Ask first**, the default. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
 
@@ -47,7 +47,7 @@ An agent has one engine. VibeForge doesn't route work between models, pick a che
 
 ## Voice stays on this machine
 
-[whisper.cpp](https://github.com/ggml-org/whisper.cpp) turns speech into text and [Piper](https://github.com/OHF-Voice/piper1-gpl) reads answers aloud, both locally. In a call, the Silero model that tells speech from other sound comes with VibeForge and runs here too, and echo is cancelled by this machine's own PipeWire. No audio is sent to a service or kept. The phone's mic records on the phone and sends the audio over your tailnet to this computer's whisper, and nowhere else.
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp), or sherpa-onnx for Parakeet, Canary and Moonshine, turns speech into text and [Piper](https://github.com/OHF-Voice/piper1-gpl) speaks Viby's replies, both locally. Viby is the only voice: coding CLIs don't speak. In a call, the Silero model that tells speech from other sound comes with VibeForge and runs here too, and echo is cancelled by this machine's own PipeWire. No audio is sent to a service or kept. The phone's mic records on the phone and sends the audio over your tailnet to this computer's speech model, and nowhere else.
 
 ## Honest limits
 
