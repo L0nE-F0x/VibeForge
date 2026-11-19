@@ -9,7 +9,7 @@
 import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
-import { cleanModel, effortLevels } from "../shared/launch-options.js";
+import { agyModelEffort, cleanModel, effortLevels } from "../shared/launch-options.js";
 import {
   brainKind,
   formatSettingsRules,
@@ -101,7 +101,8 @@ export interface BrainOptions {
  * - Codex 0.16x: `exec --json`, `--output-schema <file>`, a read-only sandbox, the rules as developer
  *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort by default.
  * - Antigravity CLI: `-p` with the rules in the message (it has no option for them), `--json-schema`,
- *   plan mode, `--conversation <id>` from its last answer. Low effort by default: a first turn at its default took 80 s.
+ *   plan mode, `--conversation <id>` from its last answer. Low effort by default (a first turn at its default
+ *   took 80 s), unless a model is named: its ids carry their own effort (agyModelEffort).
  */
 export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   const kind = brainKind(row);
@@ -177,6 +178,8 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   }
   if (kind === "agy") {
     const resume = opts.resume && opts.sessionId;
+    // Its model ids carry their own effort, and it refuses an --effort that says otherwise.
+    const picked = agyModelEffort(model, effort, effort === requestedEffort);
     return [
       ...row.args,
       "-p",
@@ -187,9 +190,8 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       JSON.stringify(STRICT_PLAN_SCHEMA),
       "--mode",
       "plan",
-      "--effort",
-      effort,
-      ...(model ? ["--model", model] : []),
+      ...(picked.effort ? ["--effort", picked.effort] : []),
+      ...(picked.model ? ["--model", picked.model] : []),
       ...(resume ? ["--conversation", opts.sessionId] : []),
     ];
   }
@@ -351,6 +353,8 @@ export function readBrainOutput(stdout: string): BrainOutput {
     text = String(outer.text ?? outer.result ?? outer.response ?? "");
     sessionId = String(outer.sessionId ?? outer.session_id ?? outer.conversation_id ?? "");
     if (outer.is_error === true) error = text;
+    // Antigravity: {"status":"ERROR","error":"invalid model selection …"}.
+    else if (outer.status === "ERROR") error = String(outer.error ?? "") || text || "error";
     candidates.push(outer.structuredOutput, outer.structured_output);
   } else {
     // Codex: one event per line.

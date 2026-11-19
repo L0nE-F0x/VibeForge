@@ -1877,6 +1877,35 @@ describe("Viby settings awareness and self-configuration", () => {
     );
   });
 
+  it("never gives Antigravity an --effort that conflicts with the effort its model id carries", () => {
+    const agyRow = { id: "agy", label: "Antigravity", bin: "agy", args: [] };
+    const tail = (opts: { model?: string; effort?: string }) => {
+      const args = brainArgs(agyRow, { text: "hi", rules: "r", sessionId: "", resume: false, ...opts }) ?? [];
+      return args.slice(args.indexOf("plan") + 1);
+    };
+    // The default model plans at the quick low effort.
+    expect(tail({})).toEqual(["--effort", "low"]);
+    expect(tail({ effort: "xhigh" })).toEqual(["--effort", "xhigh"]);
+    // A model picked from the list, effort left at its default: the model's own level, no low beside it
+    // (agy: "--model gemini-4-neon-xhigh conflicts with --effort=low").
+    expect(tail({ model: "gemini-4-neon-xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    // A model with no levels of its own refuses any --effort.
+    expect(tail({ model: "gemini-pro-orchestrator" })).toEqual(["--model", "gemini-pro-orchestrator"]);
+    // Both picked and they agree: the model alone says it.
+    expect(tail({ model: "gemini-4-neon-xhigh", effort: "xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    // Both picked and they differ: the chosen effort on the model's base name.
+    expect(tail({ model: "gemini-4-neon-high", effort: "xhigh" })).toEqual(["--effort", "xhigh", "--model", "gemini-4-neon"]);
+    expect(tail({ model: "claude-opus-5-5-low", effort: "high" })).toEqual(["--effort", "high", "--model", "claude-opus-5-5"]);
+  });
+
+  it("reads Antigravity's error answer as an error, with its own words", () => {
+    const out = readBrainOutput(
+      '{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \\"gemini-4-neon-high\\" --effort \\"xhigh\\"): --model gemini-4-neon-high conflicts with --effort=xhigh","finished_reason":"error"}',
+    );
+    expect(out.plan).toBeNull();
+    expect(out.error).toContain("conflicts with --effort=xhigh");
+  });
+
   it("shows Viby its own settings & voice models, inspects settings live, and reconfigures itself, voice STT, and VibeForge settings", async () => {
     const downloads: Array<[string, string]> = [];
     let autostartOn = false;

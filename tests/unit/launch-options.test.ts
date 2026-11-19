@@ -32,6 +32,11 @@ describe("a CLI's model and effort", () => {
     expect(launchOptionArgs(row("grok"), { model: "grok-4.7", effort: "low" })).toEqual(["-m", "grok-4.7", "--reasoning-effort", "low"]);
     expect(launchOptionArgs(row("codex"), { effort: "xhigh" })).toEqual(["-c", 'model_reasoning_effort="xhigh"']);
     expect(launchOptionArgs(row("agy"), { model: "gemini-3.8-pro", effort: "max" })).toEqual(["--model", "gemini-3.8-pro", "--effort", "max"]);
+    // Antigravity's model ids carry their own effort, and it refuses an --effort beside one that says another.
+    expect(launchOptionArgs(row("agy"), { model: "gemini-4-neon-high", effort: "xhigh" })).toEqual(["--model", "gemini-4-neon", "--effort", "xhigh"]);
+    expect(launchOptionArgs(row("agy"), { model: "gemini-4-neon-xhigh", effort: "xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    expect(launchOptionArgs(row("agy"), { model: "gemini-4-neon-xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    expect(launchOptionArgs(row("agy"), { effort: "xhigh" })).toEqual(["--effort", "xhigh"]);
     expect(launchOptionArgs(row("copilot"), { effort: "none" })).toEqual(["--reasoning-effort", "none"]);
     expect(launchOptionArgs(row("pi"), { model: "openai/gpt-5", effort: "off" })).toEqual(["--model", "openai/gpt-5", "--thinking", "off"]);
     expect(launchOptionArgs(row("cursor-agent"), { model: "claude-opus-4-8[effort=high]", effort: "high" })).toEqual(["--model", "claude-opus-4-8[effort=high]"]);

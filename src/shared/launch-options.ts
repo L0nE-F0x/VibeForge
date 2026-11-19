@@ -64,6 +64,26 @@ export function cleanModel(value: string | undefined): string {
   return /^[\w.:/@[\]=,+-]{1,120}$/.test(model) && !model.startsWith("-") ? model : "";
 }
 
+/** An effort level at the end of an Antigravity model id: "gemini-4-neon-high" is Neon at high. */
+const AGY_EFFORT_SUFFIX = /-(low|medium|high|xhigh|max)$/;
+
+/**
+ * The model and effort Antigravity CLI is given. Its model ids carry their own effort
+ * ("gemini-4-neon-xhigh"), and it refuses `--effort` beside one that says another level
+ * ("--model gemini-4-neon-high conflicts with --effort=xhigh"), or beside a model with no levels
+ * ("--effort is not supported for model gemini-pro-orchestrator"). So with a model named:
+ * - an effort the person chose that differs from the id's own goes on the model's base name
+ *   ("gemini-4-neon" with `--effort xhigh`), which agy checks against that model's levels;
+ * - a fallback effort (`explicit` false, such as the planner's quick "low") is left to the model.
+ * `effort` comes back empty when `--effort` should be left out.
+ */
+export function agyModelEffort(model: string, effort: string, explicit = true): { model: string; effort: string } {
+  if (!model) return { model, effort };
+  const own = AGY_EFFORT_SUFFIX.exec(model)?.[1];
+  if (!explicit || !effort || effort === own) return { model, effort: "" };
+  return { model: own ? model.slice(0, -own.length - 1) : model, effort };
+}
+
 /**
  * The options that start a CLI on `model` with `effort`. A model or an effort the CLI doesn't take
  * is left out, so a step that names one can never start it with an option it refuses.
@@ -72,7 +92,9 @@ export function launchOptionArgs(row: Pick<EngineRow, "id" | "bin">, opts: { mod
   const kind = launchKind(row);
   if (!kind) return [];
   const flags = FLAGS[kind];
-  const model = cleanModel(opts.model);
-  const effort = (opts.effort ?? "").trim().toLowerCase();
-  return [...(model ? flags.model(model) : []), ...(flags.effort && flags.efforts.includes(effort) ? flags.effort(effort) : [])];
+  const cleaned = cleanModel(opts.model);
+  const asked = (opts.effort ?? "").trim().toLowerCase();
+  const taken = flags.effort && flags.efforts.includes(asked) ? asked : "";
+  const { model, effort } = kind === "agy" ? agyModelEffort(cleaned, taken) : { model: cleaned, effort: taken };
+  return [...(model ? flags.model(model) : []), ...(flags.effort && effort ? flags.effort(effort) : [])];
 }
