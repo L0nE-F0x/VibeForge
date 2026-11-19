@@ -43,7 +43,6 @@ export class LibraryDesk {
       places,
       skills: input.skills ? input.skills.filter((id) => this.core.store.getSkill(id)) : (existing?.skills ?? []),
       allowRoutines: typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
-      voice: typeof input.voice === "string" ? input.voice.trim() : (existing?.voice ?? ""),
       goodAt: typeof input.goodAt === "string" ? oneLine(input.goodAt) : (existing?.goodAt ?? ""),
       tier: input.tier === undefined ? (existing?.tier ?? "") : agentTier(input.tier),
       createdAt: existing?.createdAt || now,

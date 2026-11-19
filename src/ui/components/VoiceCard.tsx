@@ -12,9 +12,8 @@ import { MicButton, useDictateKeys, useDictationTarget, useVoiceStatus } from ".
 import { VoiceKeys } from "./VoiceKeys.js";
 import { Button, Chip, Field, Notice, Select, Toggle } from "./ui.js";
 
-// Settings → Voice: what dictation and talking back found on this machine, the models and voices
-// they use, the keys and mouse button that dictate, the keybindings that reach them from anywhere,
-// and a place to try them.
+// Settings → Voice: speech-to-text, dictate keys and buttons, Viby's voice, and the desktop
+// keybinding that reaches VibeForge from anywhere.
 
 function basename(file: string): string {
   return file.slice(file.lastIndexOf("/") + 1);

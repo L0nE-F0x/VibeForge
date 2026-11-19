@@ -284,11 +284,9 @@ export class Voice {
     return file;
   }
 
-  /** The voice file to read with: `wanted` (an agent's) when it exists, else the one in Settings, else a sensible one. */
-  voiceFor(wanted = ""): string | null {
-    const voices = this.findVoices();
-    if (wanted && voices.includes(wanted)) return wanted;
-    return pickVoice(voices, this.opts.settings().speaker, this.opts.language());
+  /** Viby's voice file: the one picked in Settings, else a sensible one in the app's language. */
+  voiceFor(): string | null {
+    return pickVoice(this.findVoices(), this.opts.settings().speaker, this.opts.language());
   }
 
   /** Where `vibeforge` reaches this app: fixed at start, so reading it scans nothing. */

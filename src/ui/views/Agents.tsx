@@ -1,5 +1,4 @@
 import {
-  Volume2,
   Bot,
   BookOpen,
   Brain,
@@ -28,7 +27,6 @@ import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, ty
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
-import { useVoiceStatus } from "../voice.js";
 
 /** Save on Ctrl+S while a form is on screen. */
 export function useSaveShortcut(save: () => void, enabled: boolean): void {
@@ -590,21 +588,19 @@ function SettingsTab({ agent }: { agent: Agent }) {
   const others = (useAgents().data ?? []).filter((item) => item.id !== agent.id);
   const running = (useLive().data ?? []).some((session) => session.agentId === agent.id && session.runId);
   const engines = useEngines().data ?? [];
-  const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, voice: agent.voice, goodAt: agent.goodAt, tier: agent.tier });
-  const { name, engine, allow, voice, goodAt, tier } = form;
+  const [form, setForm] = useDraftState(`agent:${agent.id}:settings`, { name: agent.name, engine: agent.engine, allow: agent.allowRoutines, goodAt: agent.goodAt, tier: agent.tier });
+  const { name, engine, allow, goodAt, tier } = form;
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
   const setAllow = (next: boolean) => setForm((prev) => ({ ...prev, allow: next }));
-  const setVoice = (next: string) => setForm((prev) => ({ ...prev, voice: next }));
   const setGoodAt = (next: string) => setForm((prev) => ({ ...prev, goodAt: next }));
   const setTier = (next: AgentTier) => setForm((prev) => ({ ...prev, tier: next }));
-  const voices = useVoiceStatus().data?.voices ?? [];
   const dirty =
-    name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || voice !== agent.voice || oneLine(goodAt ?? "") !== agent.goodAt || (tier ?? "") !== agent.tier;
+    name.trim() !== agent.name || engine !== agent.engine || allow !== agent.allowRoutines || oneLine(goodAt ?? "") !== agent.goodAt || (tier ?? "") !== agent.tier;
   const engineRow = useMemo(() => engines.find((item) => item.id === engine), [engines, engine]);
 
   const [save, saving] = useAction(async () => {
-    await call("agents.save", { ...agent, name: name.trim(), engine, allowRoutines: allow, voice, goodAt: goodAt ?? "", tier: tier ?? "" });
+    await call("agents.save", { ...agent, name: name.trim(), engine, allowRoutines: allow, goodAt: goodAt ?? "", tier: tier ?? "" });
     // A new engine is worth a word; the rest just saves.
     if (engine !== agent.engine) push("success", t("agents.updated"), t("agents.engineFromNext", { engine: engineRow?.label ?? engine }));
   }, t("common.saveFailed"));
@@ -654,20 +650,6 @@ function SettingsTab({ agent }: { agent: Agent }) {
             />
           </Field>
         </div>
-        <Field label={t("voice.agentVoice")} hint={voices.length ? t("voice.agentVoiceHint") : t("voice.agentVoiceNone")}>
-          <div className="hstack" style={{ gap: 6, maxWidth: 420 }}>
-            <Select value={voice} onChange={(event) => setVoice(event.target.value)} disabled={!voices.length && !voice}>
-              <option value="">{t("voice.agentVoiceDefault")}</option>
-              {voice && !voices.includes(voice) && <option value={voice}>{voice.slice(voice.lastIndexOf("/") + 1)} ({t("voice.missing")})</option>}
-              {voices.map((file) => (
-                <option key={file} value={file}>
-                  {file.slice(file.lastIndexOf("/") + 1).replace(/\.onnx$/, "")}
-                </option>
-              ))}
-            </Select>
-            <Button icon={Volume2} disabled={!voices.length} tip={t("voice.hearIt")} onClick={() => void call("voice.speak", t("voice.agentSample", { name }), voice)} />
-          </div>
-        </Field>
         <SaveState dirty={dirty} saving={saving} />
         <div className="section-title" style={{ marginTop: 28 }}>
           {t("common.dangerZone")}

@@ -347,7 +347,6 @@ export function OrchestratorView() {
                 busy={view?.thinking}
                 disabled={!view}
                 autoFocus
-                quiet
                 sendLabel={t("common.send")}
                 voiceLabel={t("orch.title")}
                 voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
@@ -447,7 +446,6 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
             busy={view?.thinking}
             disabled={!view}
             autoFocus
-            quiet
             sendLabel={t("common.send")}
             voiceLabel={t("orch.title")}
             voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}

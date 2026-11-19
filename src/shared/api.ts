@@ -186,17 +186,6 @@ export interface VoiceState {
   speech: SpeechPhase | null;
 }
 
-/** An answer being waited for, read aloud, or finished with. */
-export interface TalkEvent {
-  /** The terminal the answer comes from; null for a test phrase. */
-  ptyId: string | null;
-  stage: "waiting" | "speaking" | "done";
-  /** Who is answering: the agent's name, or the session's title. */
-  who: string;
-  /** What is being said (for "speaking"). */
-  text: string;
-}
-
 /** Where a call with Viby is: waiting for you, hearing you, working out the words, waiting for Viby, or Viby talking. */
 export type CallPhase = "listening" | "hearing" | "transcribing" | "thinking" | "speaking";
 
@@ -212,7 +201,7 @@ export interface CallState {
   said: string;
   /** A plan waits for a spoken "go" or "cancel" (or its card's buttons). */
   waiting: boolean;
-  /** Answers can be read aloud here: Piper, a voice and a player are all found. */
+  /** Viby's answers can be read aloud here: talk-back is on and Piper, a voice and a player are all found. */
   spoken: boolean;
   /** Why the call ended, when it ended by itself (the microphone closed). */
   error: string | null;
@@ -252,7 +241,7 @@ export interface VoiceStatus {
   catalog: Array<ModelChoice & { path: string | null }>;
   download: { kind: DownloadKind; id: string; received: number; total: number } | null;
   downloadError: string | null;
-  /** Piper, for reading answers aloud; null when it isn't installed. */
+  /** Piper, for Viby's spoken replies; null when it isn't installed. */
   piper: string | null;
   /** The audio player's name ("pw-play"), or null. */
   player: string | null;
@@ -262,7 +251,7 @@ export interface VoiceStatus {
   echoCancel: boolean;
   /** Every Piper voice found. */
   voices: string[];
-  /** The voice answers are read in unless an agent has its own. */
+  /** Viby's Piper voice. */
   speaker: string | null;
   voiceDir: string;
   voiceCatalog: Array<VoiceChoice & { path: string | null }>;
@@ -529,15 +518,9 @@ export interface DeskMethods {
   "voice.cancel": () => void;
   "voice.download": (kind: DownloadKind, id: string) => void;
   "voice.stopDownload": () => void;
-  /** Reads a phrase aloud, in a voice file or the default one. */
-  "voice.speak": (text: string, voice?: string) => void;
+  /** Reads a sample phrase aloud in Viby's voice. */
+  "voice.speak": (text: string) => void;
   "voice.silence": () => void;
-  /**
-   * Waits for the answer to `words` in this terminal and reads it aloud (as Settings says).
-   * False when the terminal's program leaves no log to read and will not be heard from.
-   */
-  "voice.expect": (ptyId: string, words: string) => boolean;
-  "voice.forget": (ptyId?: string) => void;
   /** Appends the keybinding lines to the Hyprland config (after a backup); returns the file. */
   "voice.installBindings": () => string;
 
@@ -607,7 +590,6 @@ export interface DeskEvents {
   "run-finished": RunEnded;
   "host-crash": string;
   voice: VoiceState;
-  "voice-talk": TalkEvent;
   /** A call with Viby began, moved on or ended; many times a second while it listens, for the meter. */
   call: CallState;
   /** `vibeforge --voice …` from a keybinding. */

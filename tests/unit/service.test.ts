@@ -12,16 +12,16 @@ import { gitHead, snapshotGit } from "../../src/core/vcs.js";
 import { agentIn, INTERVAL, setup, started, tempDir, until } from "./fixtures/service-harness.js";
 
 describe("agents", () => {
-  it("keeps an agent's voice until it is changed", async () => {
+  it("ignores a legacy per-agent voice field in agent.yaml and drops it on save", async () => {
     const ctx = setup();
     const agent = await agentIn(ctx);
-    expect(agent.voice).toBe("");
-    const voiced = ctx.svc.saveAgent({ ...agent, voice: " /v/en_GB-alan-medium.onnx " });
-    expect(voiced.voice).toBe("/v/en_GB-alan-medium.onnx");
-    // Saving from a form that doesn't know about voices leaves it alone.
-    const { voice: _voice, ...rest } = voiced;
-    expect(ctx.svc.saveAgent({ ...rest, brief: "New brief." }).voice).toBe("/v/en_GB-alan-medium.onnx");
-    expect(ctx.svc.getAgent(agent.id)?.voice).toBe("/v/en_GB-alan-medium.onnx");
+    const file = path.join(ctx.configRoot, "agents", agent.id, "agent.yaml");
+    fs.appendFileSync(file, "voice: /v/en_GB-alan-medium.onnx\n");
+    const loaded = ctx.svc.getAgent(agent.id);
+    expect(loaded).toMatchObject({ id: agent.id, name: agent.name });
+    expect("voice" in (loaded ?? {})).toBe(false);
+    ctx.svc.saveAgent({ ...agent, brief: "Updated brief." });
+    expect(fs.readFileSync(file, "utf8")).not.toContain("voice:");
     ctx.svc.close();
   });
 
