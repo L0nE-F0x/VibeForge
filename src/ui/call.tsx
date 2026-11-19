@@ -82,7 +82,7 @@ export function useCallToggle(): () => void {
           return;
         }
         const started = await call("call.start");
-        if (!started.spoken) push("info", t("call.start"), t("call.noVoice"));
+        if (!started.spoken && (await call("settings.get")).voice.talkBack) push("info", t("call.start"), t("call.noVoice"));
       } catch (error) {
         fail(error, t("voice.failed"));
       }

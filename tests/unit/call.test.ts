@@ -253,6 +253,7 @@ const log = { info: () => undefined, warn: () => undefined } as unknown as LogFi
 function call(opts: {
   hears: string[];
   voiced?: boolean;
+  talkBack?: boolean;
   answer?: (text: string, turns: OrchestratorTurn[]) => void;
   /** Settings' word on talking over Viby, and what the microphone can do. */
   talkOver?: "auto" | "always" | "never";
@@ -272,6 +273,8 @@ function call(opts: {
   const looked: unknown[] = [];
   const follows: boolean[] = [];
   let dictating = false;
+  let talkBack = opts.talkBack ?? true;
+  let talkOver: "auto" | "always" | "never" = opts.talkOver ?? "auto";
   /** How long each thing heard is said to be. */
   let seconds = 2;
   let heard: ((word: VibyWord) => void) | null = null;
@@ -280,6 +283,8 @@ function call(opts: {
   const echoAsked: boolean[] = [];
   let speaking: (() => void) | null = null;
   let stops = 0;
+  const warmed: string[] = [];
+  let unwarmed = 0;
   const voice = {
     openEar: (on: NonNullable<typeof events>, cancelEcho: boolean) => {
       events = on;
@@ -303,6 +308,10 @@ function call(opts: {
     speaker: {
       piper: () => "/usr/bin/piper",
       player: () => ({ label: "pw-play", argv: () => [] }),
+      warm: (file: string) => void warmed.push(file),
+      unwarm: () => {
+        unwarmed += 1;
+      },
       speak: (text: string) => {
         spoken.push(text);
         if (!opts.slowSpeech) return Promise.resolve();
@@ -331,7 +340,7 @@ function call(opts: {
     },
     orchestratorRun: async (id: string) => void ran.push(id),
     orchestratorCancel: (id: string) => void cancelled.push(id),
-    getSettings: () => ({ voice: { talkOver: opts.talkOver ?? "auto" } }),
+    getSettings: () => ({ voice: { talkBack, talkOver } }),
     listAgents: () => [{ name: "Atlas" }],
     listEngines: () => [{ label: "Claude Code" }],
     listWorkspaces: () => ({ workspaces: [{ name: "api-server" }] }),
@@ -390,6 +399,14 @@ function call(opts: {
     },
     echoAsked,
     stops: () => stops,
+    warmed,
+    unwarmed: () => unwarmed,
+    setTalkBack: (on: boolean) => {
+      talkBack = on;
+    },
+    setTalkOver: (mode: "auto" | "always" | "never") => {
+      talkOver = mode;
+    },
     isSpeaking: () => speaking !== null,
     finishSpeaking: () => {
       speaking?.();
@@ -607,6 +624,48 @@ describe("a call with Viby", () => {
     expect(desk.spoken).toEqual([]);
     expect(desk.states.map((state) => state.phase)).not.toContain("speaking");
     expect(desk.instance.get().said).toBe("Two are running.");
+  });
+
+  it("stays silent when Viby talk-back is turned off, and stops immediately if toggled off mid-call", async () => {
+    const quiet = call({ hears: ["what's running?"], talkBack: false });
+    expect(quiet.instance.start().spoken).toBe(false);
+    expect(quiet.warmed).toEqual([]);
+    await quiet.say();
+    expect(quiet.spoken).toEqual([]);
+    expect(quiet.states.map((state) => state.phase)).not.toContain("speaking");
+    expect(quiet.instance.get().said).toBe("Two are running.");
+    quiet.word({ kind: "read", engine: "Claude Code", workspace: "api", reply: "All tests pass.", all: false, fromScreen: false });
+    await sleep(20);
+    expect(quiet.spoken).toEqual([]);
+    expect(quiet.instance.get().said).toBe("All tests pass.");
+    quiet.instance.stop();
+
+    // Turning talk-back off mid-speech cuts Viby off at once; turning it back on resumes speaking.
+    const live = call({ hears: ["first", "second", "third"], slowSpeech: true });
+    expect(live.instance.start().spoken).toBe(true);
+    expect(live.warmed).toEqual(["/voices/amy.onnx"]);
+    live.hear();
+    await until(() => live.isSpeaking());
+    expect(live.spoken).toEqual(["Two are running."]);
+    live.setTalkBack(false);
+    live.instance.syncSettings();
+    expect(live.stops()).toBe(1);
+    expect(live.unwarmed()).toBe(1);
+    await until(() => live.instance.get().phase === "listening");
+    expect(live.instance.get().spoken).toBe(false);
+    await live.say();
+    expect(live.spoken).toEqual(["Two are running."]);
+    expect(live.instance.get().said).toBe("Two are running.");
+    live.setTalkBack(true);
+    live.instance.syncSettings();
+    expect(live.instance.get().spoken).toBe(true);
+    expect(live.warmed).toEqual(["/voices/amy.onnx", "/voices/amy.onnx", "/voices/amy.onnx"]);
+    live.hear();
+    await until(() => live.isSpeaking());
+    expect(live.spoken).toEqual(["Two are running.", "Two are running."]);
+    live.finishSpeaking();
+    await until(() => live.instance.get().phase === "listening");
+    live.instance.stop();
   });
 
   it("says what went wrong, shows the meter, and ends when the microphone closes", async () => {

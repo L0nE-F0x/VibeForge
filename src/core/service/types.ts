@@ -98,8 +98,6 @@ export interface AgentInput {
   places: string[];
   skills?: string[];
   allowRoutines?: boolean;
-  /** A Piper voice file; empty uses the one in Settings. */
-  voice?: string;
   goodAt?: string;
   tier?: AgentTier;
 }

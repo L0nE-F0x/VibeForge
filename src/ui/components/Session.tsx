@@ -13,7 +13,7 @@ import { tipProps } from "./Tooltip.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { coreText } from "../core-text.js";
-import { expectAnswer, expectOnEnter, MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
+import { MicButton, setDictationTarget, useDictationTarget, useDraft } from "../voice.js";
 import { changesFor } from "../changes-text.js";
 import { mayTakeFocus } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
@@ -31,12 +31,10 @@ export function Composer({
   sendLabel,
   voiceLabel,
   voiceScope,
-  voicePty,
   voiceAgent,
   draftKey,
   keepKey,
   onEscape,
-  quiet,
   voiceWords,
 }: {
   placeholder: string;
@@ -51,8 +49,6 @@ export function Composer({
   voiceLabel?: string;
   /** Focus anywhere in here (the session's terminal, say) makes this box where dictation lands. */
   voiceScope?: RefObject<HTMLElement | null>;
-  /** The terminal messages from this box reach, for hearing the answer after Enter. */
-  voicePty?: () => string | null;
   /** The agent this chat belongs to, so the desktop key can come back to them. */
   voiceAgent?: string | null;
   /** Words dictated for this chat from the desktop key arrive under this key. */
@@ -61,8 +57,6 @@ export function Composer({
   keepKey?: string | null;
   /** Esc in the box: close it (what's typed stays, under `keepKey`). */
   onEscape?: () => void;
-  /** Dictated words sent from here aren't answered aloud (the Orchestrator answers in text). */
-  quiet?: boolean;
   /** Names whisper should expect in this box, beyond the agents and CLIs it always gets. */
   voiceWords?: () => string[];
 }) {
@@ -73,8 +67,6 @@ export function Composer({
   const box = useRef<HTMLDivElement>(null);
   const textRef = useRef(text);
   textRef.current = text;
-  // Dictated words not sent yet: once they are, the answer is listened for.
-  const dictated = useRef("");
 
   const dictation = useDictationTarget(() => ({
     label: voiceLabel ?? placeholder,
@@ -82,7 +74,6 @@ export function Composer({
     ownsSend: true,
     agentId: () => voiceAgent ?? null,
     insert: (words) => {
-      dictated.current = joinDictation(dictated.current, words);
       const next = joinDictation(textRef.current, words);
       setText(next);
       requestAnimationFrame(() => {
@@ -92,7 +83,6 @@ export function Composer({
         node.selectionStart = node.selectionEnd = next.length;
       });
     },
-    ptyId: voicePty,
     words: voiceWords,
   }));
 
@@ -124,14 +114,11 @@ export function Composer({
   async function submit() {
     const value = textRef.current.trim();
     if (!value || busy || disabled) return;
-    const words = dictated.current;
     const sentFrom = keepKey;
     const ok = await onSend(value);
     if (ok === false) return;
     if (sentFrom) forgetDraft(sentFrom);
     setText("");
-    dictated.current = "";
-    if (words && !quiet) expectAnswer(dictation.target, words);
   }
 
   function insert(snippet: string) {
@@ -179,10 +166,7 @@ export function Composer({
           placeholder={placeholder}
           disabled={disabled}
           onChange={(event) => {
-            const next = event.target.value;
-            setText(next);
-            // Emptied by hand: what gets typed next was not dictated.
-            if (!next.trim()) dictated.current = "";
+            setText(event.target.value);
           }}
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
@@ -307,7 +291,6 @@ export function SessionPane({
   // The desktop key's words for this chat.
   useDraft(typing ? chat?.id : null, (words) => {
     toTerminal.target.insert(words);
-    expectOnEnter(toTerminal.target, words);
   });
 
   function closeComposer() {
@@ -348,7 +331,6 @@ export function SessionPane({
       sendLabel={livePty ? t("common.send") : last ? t("common.continue") : t("common.start")}
       voiceLabel={chat?.title ?? t("agents.newChat")}
       voiceScope={root}
-      voicePty={() => livePtyRef.current}
       voiceAgent={chat?.agentId ?? null}
       draftKey={chat?.id}
       keepKey={keepKey}

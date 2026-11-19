@@ -144,8 +144,9 @@ export class Call {
     this.changed();
   }
 
-  /** The voice Viby speaks in, or null when nothing can be read aloud here. */
+  /** The voice Viby speaks in, or null when Viby talk-back is off or nothing can be read aloud here. */
   private voiceFile(): string | null {
+    if (this.opts.service()?.getSettings().voice.talkBack === false) return null;
     const { voice } = this.opts;
     return voice.speaker.piper() && voice.speaker.player() ? voice.voiceFor() : null;
   }
@@ -244,6 +245,21 @@ export class Call {
     }
     this.changed();
     return this.get();
+  }
+
+  /** Applies Voice settings changed mid-call: turning talk-back off silences Viby immediately. */
+  syncSettings(): void {
+    if (!this.ear) return;
+    const service = this.opts.service();
+    if (service) this.mode = service.getSettings().voice.talkOver;
+    const voice = this.voiceFile();
+    if (!voice) {
+      this.opts.voice.speaker.unwarm?.();
+      this.opts.voice.speaker.stop();
+    } else {
+      this.opts.voice.speaker.warm?.(voice);
+    }
+    this.changed();
   }
 
   stop(): void {

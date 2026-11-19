@@ -138,7 +138,7 @@ export function formatSettingsRules(settings: PlanSettingsContext): string[] {
   return [
     `- Viby (you): planner=${viby.planner || "none"}${viby.pickedEngine ? "" : " (auto)"}, model=${viby.model || "default"}, effort=${viby.effort || "low (default)"}, mode=${viby.mode}, projectsFolder=${viby.projectsFolder || "~/Projects"}; available planners: ${planners || "none"}`,
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
-    `- Voice output & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
+    `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, 20).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
   ];
 }
@@ -584,23 +584,23 @@ export function resolveSettingsStep(
     return { action: null, issue: "prompt", asked: wanted || "voice download" };
   }
 
-  if (/^(?:voicespeaker|voicevoice|speaker|ttsvoice|tts|pipervoice)$/.test(key)) {
+  if (/^(?:voicespeaker|voicevoice|vibyspeaker|speaker|ttsvoice|tts|pipervoice)$/.test(key) || (key === "vibyvoice" && parseBool(value) === null)) {
     const wanted = value || modelArg;
-    if (!wanted) return { action: null, issue: "prompt", asked: "speaker voice" };
+    if (!wanted) return { action: null, issue: "prompt", asked: "Viby voice" };
     if (isResetWord(wanted)) {
-      const summary = "Speaker voice · auto";
+      const summary = "Viby voice · auto";
       return { action: { op: "voice-speaker", speaker: "", summary }, issue: null, asked: summary };
     }
     const installed = context.settings?.voice.installedVoices ?? [];
     const direct = installed.find((item) => item.path === wanted || squash(item.name) === squash(wanted.replace(/\.onnx$/i, "")));
     if (direct) {
-      const summary = `Speaker voice · ${direct.name}`;
+      const summary = `Viby voice · ${direct.name}`;
       return { action: { op: "voice-speaker", speaker: direct.path, summary }, issue: null, asked: summary };
     }
     const choice = matchCatalogVoice(wanted);
     if (choice) {
       const onDisk = installed.find((item) => item.name === choice.id);
-      const summary = onDisk ? `Speaker voice · ${choice.id}` : `Speaker voice · ${choice.id} (download & select)`;
+      const summary = onDisk ? `Viby voice · ${choice.id}` : `Viby voice · ${choice.id} (download & select)`;
       return {
         action: { op: "voice-speaker", speaker: onDisk?.path ?? `${choice.id}.onnx`, ...(onDisk ? {} : { downloadId: choice.id }), summary },
         issue: null,
@@ -622,10 +622,10 @@ export function resolveSettingsStep(
     return { action: { op: "voice-patch", patch: { language: mapped }, summary }, issue: null, asked: summary };
   }
 
-  if (/^(?:voicetalkback|talkback|readaloud|readanswersaloud)$/.test(key)) {
+  if (/^(?:voicetalkback|vibytalkback|vibyvoice|talkback|readaloud|readanswersaloud)$/.test(key)) {
     const flag = parseBool(value);
     if (flag === null) return { action: null, issue: "prompt", asked: value || "talkBack" };
-    const summary = `Read answers aloud · ${flag ? "on" : "off"}`;
+    const summary = `Viby spoken replies · ${flag ? "on" : "off"}`;
     return { action: { op: "voice-patch", patch: { talkBack: flag }, summary }, issue: null, asked: summary };
   }
 

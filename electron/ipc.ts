@@ -5,6 +5,7 @@ import { app, clipboard, dialog, ipcMain, shell } from "electron";
 import type { TalkRequest } from "../src/core/control.js";
 import { listDir } from "../src/core/files.js";
 import { describeError } from "../src/core/log.js";
+import { speakable } from "../src/core/replies.js";
 import { listThemes } from "../src/core/theme.js";
 import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
 import type { Looking } from "../src/shared/orchestrator.js";
@@ -20,7 +21,6 @@ import type { Sync } from "./sync.js";
 import { isSyncMode } from "../src/core/sync/protocol.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import type { Call } from "./call.js";
-import type { Talk } from "./talk.js";
 import type { TrayController } from "./tray-controller.js";
 import type { Updater } from "./updater.js";
 import type { Voice } from "./voice.js";
@@ -38,7 +38,6 @@ export interface IpcParts {
   tray: TrayController;
   updater: Updater;
   voice: Voice;
-  talk: Talk;
   call: Call;
   dock: Dock;
   sync: Sync;
@@ -51,7 +50,7 @@ type Handlers = { [K in Method]: (...args: MethodArgs<K>) => MethodResult<K> | P
 
 function handlers(ctx: MainContext, parts: IpcParts): Handlers {
   const { roots, log, supervisor, words, install, focusWindow } = ctx;
-  const { host, stats, tray, updater, voice, talk, call, dock, sync, notify, refreshPalette } = parts;
+  const { host, stats, tray, updater, voice, call, dock, sync, notify, refreshPalette } = parts;
   /** How a share syncs, from whatever the window sent. */
   const shareOptions = (value: unknown) => {
     const raw = value && typeof value === "object" ? (value as { mode?: unknown; filesOnly?: unknown }) : {};
@@ -276,17 +275,12 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "voice.cancel": () => voice.cancel(),
     "voice.download": (kind, id) => voice.startDownload(kind === "voice" ? "voice" : kind === "sherpa" ? "sherpa" : "model", String(id)),
     "voice.stopDownload": () => voice.stopDownload(),
-    "voice.speak": (text, voiceFile) => void talk.say(null, "VibeForge", String(text).slice(0, 2000), typeof voiceFile === "string" ? voiceFile : "", "full"),
-    "voice.silence": () => voice.speaker.stop(),
-    "voice.expect": (ptyId, words) => {
-      try {
-        return talk.expect(String(ptyId), String(words ?? "").slice(0, 2000));
-      } catch (error) {
-        log.warn(`Voice: could not wait for an answer: ${describeError(error)}`);
-        return false;
-      }
+    "voice.speak": (text) => {
+      const line = speakable(String(text).slice(0, 2000), "full");
+      const file = voice.voiceFor();
+      if (line && file && voice.speaker.piper() && voice.speaker.player()) void voice.speaker.speak(line, file);
     },
-    "voice.forget": (ptyId) => talk.forget(typeof ptyId === "string" ? ptyId : undefined),
+    "voice.silence": () => voice.speaker.stop(),
     "voice.installBindings": () => voice.installBindings(),
 
     "call.get": () => call.get(),

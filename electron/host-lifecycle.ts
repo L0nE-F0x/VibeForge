@@ -12,7 +12,6 @@ import type { Notify } from "./notify.js";
 import { lastReply, watchReply } from "./replies.js";
 import { childEnv } from "./shell-env.js";
 import type { Stats } from "./stats.js";
-import type { Talk } from "./talk.js";
 import type { Voice } from "./voice.js";
 
 // The terminal host (electron/pty-host.cjs) owns every terminal. This starts it, relays what it
@@ -167,7 +166,7 @@ export class HostLifecycle {
 
   constructor(
     private readonly ctx: MainContext,
-    private readonly parts: { voice: Pick<Voice, "controlSocket">; talk: Pick<Talk, "exited"> },
+    private readonly parts: { voice: Pick<Voice, "controlSocket"> },
   ) {}
 
   /** Why the terminal host is down, for a page that loads after it happened. */
@@ -214,7 +213,6 @@ export class HostLifecycle {
     });
     supervisor.onProgram.add((event) => {
       ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd);
-      if (!event.argv) this.parts.talk.exited(event.ptyId);
     });
     supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
     supervisor.onCrash.add((message) => {
@@ -243,8 +241,8 @@ export class HostLifecycle {
     });
   }
 
-  /** A terminal is over, however it ended: the core records it, then a spoken-answer wait on it ends. */
+  /** A terminal is over, however it ended: the core records it. */
   private ended(ptyId: string, exitCode: number | null, signal: number | null): void {
-    void this.ctx.service?.onPtyExit(ptyId, exitCode, signal).then(() => this.parts.talk.exited(ptyId));
+    void this.ctx.service?.onPtyExit(ptyId, exitCode, signal);
   }
 }

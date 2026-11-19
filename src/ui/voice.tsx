@@ -1,8 +1,8 @@
-import { ArrowUp, Mic, Square, Volume2, X } from "lucide-react";
+import { ArrowUp, Mic, Square, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DEFAULT_DICTATE_KEYS, DICTATE_BUTTONS, dictateKeysLabel, vocabularyPrompt } from "../shared/dictation.js";
 import { typedIn } from "../shared/terminal-input.js";
-import type { TalkEvent, VoiceState } from "../shared/api.js";
+import type { VoiceState } from "../shared/api.js";
 import { call, on, useAgents, useEngines, useQuery, useRoutines, useSettings } from "./api.js";
 import { Button } from "./components/ui.js";
 import { boxOf, type Box } from "./floating.js";
@@ -19,8 +19,7 @@ import { isShortcut, setDictateKeys } from "./shortcuts.js";
 // anything down. A mouse button picked in Settings works like the mic. With words waiting in a
 // terminal, a Send button can stand in for Enter. Esc drops the recording. Super+Alt+V (vibeforge --voice start/stop)
 // does the same for one agent — the one chosen in Settings, or the one you last dictated to —
-// and leaves the words in that agent's chat. Pressing Enter on dictated words is what asks for
-// the answer to be read aloud. Holding the key again cuts that off.
+// and leaves the words in that agent's chat. Spoken voice belongs only to Viby (call.tsx).
 
 /** The dictate keys as keycaps, as Settings has them now: "Ctrl+Shift+Space". */
 export function useDictateKeys(): string {
@@ -40,8 +39,6 @@ let capturingKeys = false;
 export function setKeyCapture(on: boolean): void {
   capturingKeys = on;
 }
-/** How long to wait for a message to reach a terminal before giving up on hearing its answer. */
-const PTY_WAIT_MS = 8000;
 
 export interface DictationTarget {
   /** Shown while listening: where the words will go. */
@@ -54,7 +51,7 @@ export interface DictationTarget {
   ownsSend?: boolean;
   /** The agent this box belongs to, so the desktop key can come back to them. */
   agentId?: () => string | null;
-  /** The terminal the words reach, once there is one, to hear its answer. */
+  /** The terminal the words reach, once there is one, for the Send button. */
   ptyId?: () => string | null;
   /** Names this target expects to hear, such as the files in its workspace. */
   words?: () => string[] | Promise<string[]>;
@@ -138,17 +135,9 @@ export function useDraft(chatId: string | null | undefined, take: (text: string)
 }
 
 // ------------------------------------------------------------------ a terminal's Enter
-// Pasting into a terminal does not send. The next Enter does, and that is when the answer is read.
+// Pasting into a terminal does not send. When the person sends or clears by hand, dismiss the Send button.
 
-const pendingEnter = new Map<string, string>();
-
-function armTerminal(target: DictationTarget, words: string): void {
-  if (target.ownsSend) return;
-  const ptyId = target.ptyId?.() ?? null;
-  if (ptyId && words.trim()) pendingEnter.set(ptyId, words);
-}
-
-/** What a terminal just sent to its program. Enter after dictated words asks to hear the answer. */
+/** What a terminal just sent to its program: clears the Send button once sent or cancelled by hand. */
 export function notePtyInput(ptyId: string, data: string): void {
   // Only what was typed counts: a terminal also reports focus (Claude Code asks for it, and
   // pressing Send moves focus), the mouse and arrow keys as escape sequences.
@@ -158,23 +147,12 @@ export function notePtyInput(ptyId: string, data: string): void {
   const sent = /[\r\n]/.test(typed);
   // Sent, cleared or given up on by hand: the Send button has nothing left to send.
   if (waiting && waiting.ptyId === ptyId && (gaveUp || sent)) setWaiting(null);
-  if (!pendingEnter.has(ptyId)) return;
-  if (gaveUp) {
-    pendingEnter.delete(ptyId);
-    return;
-  }
-  if (!sent) return;
-  const words = pendingEnter.get(ptyId) ?? "";
-  pendingEnter.delete(ptyId);
-  if (words.trim()) controller?.expectPty(ptyId, words);
 }
 
 // ------------------------------------------------------------------ state from the main process
 
 let state: VoiceState = { phase: "idle", level: 0, seconds: 0, speech: null };
 const stateListeners = new Set<() => void>();
-let talk: TalkEvent | null = null;
-const talkListeners = new Set<() => void>();
 let wired = false;
 
 function wire(): void {
@@ -183,10 +161,6 @@ function wire(): void {
   on("voice", (next) => {
     state = next;
     for (const notify of stateListeners) notify();
-  });
-  on("voice-talk", (event) => {
-    talk = event.stage === "done" ? null : event;
-    for (const notify of talkListeners) notify();
   });
 }
 
@@ -199,14 +173,9 @@ function subscribe(set: Set<() => void>) {
 }
 
 const subscribeState = subscribe(stateListeners);
-const subscribeTalk = subscribe(talkListeners);
 
 export function useVoiceState(): VoiceState {
   return useSyncExternalStore(subscribeState, () => state);
-}
-
-function useTalk(): TalkEvent | null {
-  return useSyncExternalStore(subscribeTalk, () => talk);
 }
 
 export const useVoiceStatus = () => useQuery("voice", ["voice", "settings", "engines"], () => call("voice.status"));
@@ -294,37 +263,14 @@ interface Controller {
   latch: () => void;
   finish: () => void;
   cancel: () => void;
-  expectFromTarget: (target: DictationTarget, words: string) => void;
-  expectPty: (ptyId: string, words: string) => void;
-  talkBack: () => boolean;
 }
 
 let controller: Controller | null = null;
-
-/** A composer sent words that were dictated into it: listen for the answer. */
-export function expectAnswer(target: DictationTarget, words: string): void {
-  controller?.expectFromTarget(target, words);
-}
-
-/** Dictated words were pasted into a terminal from elsewhere (the desktop key): its next Enter sends them. */
-export function expectOnEnter(target: DictationTarget, words: string): void {
-  if (controller?.talkBack()) armTerminal(target, words);
-}
 
 // ------------------------------------------------------------------ small helpers
 
 function focused(): boolean {
   return document.hasFocus();
-}
-
-async function waitForPty(target: DictationTarget, ms = PTY_WAIT_MS): Promise<string | null> {
-  const started = Date.now();
-  for (;;) {
-    const asking = onScreen(target) ? target : onScreen(lastTarget) ? lastTarget : target;
-    const ptyId = asking.ptyId?.() ?? null;
-    if (ptyId || Date.now() - started > ms) return ptyId;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
 }
 
 const EMPTY_KEYS: Record<"short" | "silent" | "nothing", Key> = {
@@ -351,7 +297,6 @@ export function VoiceLayer() {
   const routines = useRoutines().data;
   const current = useSession();
   const voice = useVoiceState();
-  const spoken = useTalk();
   const busy = useRef(false);
 
   const refs = useRef({ status: status.data, settings, agents, engines, routines });
@@ -366,8 +311,6 @@ export function VoiceLayer() {
     },
     [push],
   );
-
-  const talkBackOn = () => Boolean(refs.current.settings?.voice.talkBack ?? true);
 
   /** Words that went into a terminal wait for its Enter: offer a Send button for it, if Settings wants one. */
   const offerSend = (target: DictationTarget, via: Session["via"]) => {
@@ -417,22 +360,6 @@ export function VoiceLayer() {
     [fail, inform],
   );
 
-  const expectPty = useCallback((ptyId: string, words: string) => {
-    if (!talkBackOn() || !words.trim()) return;
-    void call("voice.expect", ptyId, words).catch(() => undefined);
-  }, []);
-
-  const expectFromTarget = useCallback(
-    (target: DictationTarget, words: string) => {
-      if (!talkBackOn() || !words.trim()) return;
-      void (async () => {
-        const ptyId = (await waitForPty(target)) ?? null;
-        if (ptyId) expectPty(ptyId, words);
-      })();
-    },
-    [expectPty],
-  );
-
   /** The desktop key's agent: the one in Settings, or the one last dictated to. */
   const resolveAgent = useCallback((): { id: string; name: string } | null => {
     const list = refs.current.agents;
@@ -467,9 +394,8 @@ export function VoiceLayer() {
     (into: DictationTarget, place: Session["place"], via: Session["via"]) => {
       if (session || busy.current) return;
       setWaiting(null);
-      // A new turn cuts off an answer that is still being read, and one still on its way.
+      // Starting dictation silences any speech currently playing.
       void call("voice.silence").catch(() => undefined);
-      void call("voice.forget").catch(() => undefined);
       listen(into, place, via);
     },
     [listen],
@@ -565,7 +491,6 @@ export function VoiceLayer() {
         if (ending.place === "focus") {
           const agentId = target.agentId?.() ?? null;
           if (agentId) lastSpoken = agentId;
-          if (talkBackOn()) armTerminal(target, result.text);
           offerSend(target, ending.via);
           if (!focused()) inform("info", say("voice.pastedInto", { target: target.label }), result.text);
         }
@@ -600,14 +525,11 @@ export function VoiceLayer() {
       },
       finish,
       cancel,
-      expectFromTarget,
-      expectPty,
-      talkBack: talkBackOn,
     };
     return () => {
       controller = null;
     };
-  }, [begin, finish, cancel, ensureReady, expectFromTarget, expectPty]);
+  }, [begin, finish, cancel, ensureReady]);
 
   // A keybinding outside the window: `vibeforge --voice start|stop|cancel`.
   useEffect(
@@ -635,16 +557,12 @@ export function VoiceLayer() {
     const isDictate = (event: KeyboardEvent) => !capturingKeys && isShortcut("voice.dictate", event);
     const down = (event: KeyboardEvent) => {
       if (capturingKeys) return;
-      if (isShortcut("voice.cancel", event) && ((session && !session.finishing) || (!session && talk))) {
+      if (isShortcut("voice.cancel", event) && session && !session.finishing) {
         event.preventDefault();
         event.stopPropagation();
         holding = false;
         clearRelease();
-        if (session && !session.finishing) cancel();
-        else {
-          void call("voice.silence").catch(() => undefined);
-          void call("voice.forget").catch(() => undefined);
-        }
+        cancel();
         return;
       }
       // While the key is held, its repeats are the hold's, whichever modifiers are still down: Ctrl
@@ -756,19 +674,6 @@ export function VoiceLayer() {
 
   if (current) {
     return <ListeningBar label={current.target.label} voice={voice} finishing={current.finishing} latched={Boolean(current.latched)} onStop={finish} onCancel={cancel} />;
-  }
-  if (spoken) {
-    return (
-      <AnswerBar
-        who={spoken.who}
-        text={spoken.stage === "speaking" ? spoken.text : ""}
-        waiting={spoken.stage === "waiting"}
-        onStop={() => {
-          void call("voice.silence").catch(() => undefined);
-          void call("voice.forget").catch(() => undefined);
-        }}
-      />
-    );
   }
   return <SendBar />;
 }
@@ -895,29 +800,6 @@ function SendBar() {
         {t("common.send")}
       </Button>
       <Button size="sm" variant="ghost" icon={X} onMouseDown={keepFocus} onClick={() => setWaiting(null)} tip={t("voice.sendDismiss")} />
-    </div>
-  );
-}
-
-/** Waiting for an agent, or hearing its answer. */
-function AnswerBar({ who, text, waiting, onStop }: { who: string; text: string; waiting: boolean; onStop: () => void }) {
-  const t = useT();
-  const keys = useDictateKeys();
-  const ref = useRef<HTMLDivElement>(null);
-  useBarLayer(ref);
-  return (
-    <div ref={ref} className="listening answer" role="status" aria-live="polite">
-      {text ? <Volume2 size={15} className="accent-text" /> : <span className="spinner" />}
-      <span className="listening-text">
-        <strong>{text ? who : waiting ? t("voice.waitingFor", { name: who }) : t("voice.speaking")}</strong>
-        {text && <span className="faint truncate"> {text}</span>}
-      </span>
-      <span className="listening-keys faint">
-        <Rich text={t("voice.cutIn", { keys })} />
-      </span>
-      <Button size="sm" variant="ghost" icon={Square} onClick={onStop}>
-        {waiting ? t("common.cancel") : t("voice.silence")}
-      </Button>
     </div>
   );
 }
