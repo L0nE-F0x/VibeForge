@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Viby plans with any Antigravity model you pick.** Antigravity's model names carry their own effort (“Gemini 4 Neon (XHigh)”), and it refused the `--effort` VibeForge always added beside one, so every model but the default failed. A model now keeps its own level; an effort you choose that differs goes on that model's base name, and if the model doesn't offer it, Viby shows Antigravity's own words saying which levels it has. Starting Antigravity as a step gets the same fix.
+
 ## [2.24.1] - 2026-11-19
 
 **2.24.1: Viby's voice speaks again after an update, Viby asks before anything risky, and fixes across calls, speech and the workspace list.**
