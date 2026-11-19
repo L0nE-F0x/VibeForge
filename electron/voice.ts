@@ -339,7 +339,7 @@ export class Voice {
       if (!status.server && !status.cli && !status.sherpa) {
         throw new Error("whisper.cpp is not installed. Settings → Voice shows how to add it.");
       }
-      throw new Error(gone ? "The whisper model is gone. Settings → Voice can download one." : "No whisper model found. Settings → Voice can download one.");
+      throw new Error(gone ? "The speech model is gone. Settings → Voice can download one." : "No speech model found. Settings → Voice can download one.");
     }
     if (modelBackend(status.model) === "sherpa") {
       if (!status.sherpa) throw new Error("sherpa-onnx is not installed. Settings → Voice can download it.");

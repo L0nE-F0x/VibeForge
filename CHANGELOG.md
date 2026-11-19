@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-19
+
+**3.0.1: the tour, the help and the website catch up with 3.0.**
+
+### Changed
+
+- **The welcome tour knows what Viby can do now.** Its Viby step says Viby can make, change and delete your agents, skills, tasks, routines, chats and workspaces, open any of them and undo a delete, and that deleting, stopping or applying always waits for Go. Its call step says only Viby speaks, and that **Viby's voice** in Settings → Voice picks its voice or turns it off. The workspaces step mentions filtering, sorting and grouping the list, and Tasks says Viby can run a task too.
+- **“Which one do I use?” points at Ask.** Calling Viby is **Ask**, then **Call Viby** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd>); it still said **Call**, which 2.24 renamed. The Ctrl+Shift+O shortcut and Viby's rail tip say what it does now.
+- **Speech setup no longer assumes Whisper.** Viby's tab, the “not ready to talk” notice and the missing-model messages say a speech model, as Parakeet, Canary and Moonshine work too.
+
 ## [3.0.0] - 2026-11-19
 
 **3.0: only Viby speaks, and Viby can do anything in VibeForge you can do with the mouse and keyboard.**
