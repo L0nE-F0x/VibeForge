@@ -114,6 +114,11 @@ export class ServiceCore {
     entry.restore(this.trash.restore(entry.bin));
   }
 
+  /** The most recent delete still inside its undo window, or null when none is left. */
+  latestUndoToken(): string | null {
+    return [...this.undoable.keys()].at(-1) ?? null;
+  }
+
   // ---------------------------------------------------------------- events
 
   onChange(listener: (topics: Topic[]) => void): () => void {

@@ -33,36 +33,83 @@ const ISSUE_KEYS = {
   effort: "orch.issue.effort",
   folder: "orch.issue.folder",
   copy: "orch.issue.copy",
+  schedule: "orch.issue.schedule",
+  name: "orch.issue.name",
 };
 /** The word for each kind of step that isn't a start (which shows its CLI and workspace instead). @type {Record<string, string>} */
 const KIND_KEYS = { tell: "orch.tell", stop: "orch.close", show: "orch.show", read: "orch.read", apply: "orch.applyStep", discard: "orch.discard" };
 
 /**
- * What a lookup, task or routine step will do, as on the computer's card: a new task has a title
- * (`name`), and a routine step says on or off in `prompt`.
+ * What a non-start step will do, matching `otherStepKey` in src/ui/views/Orchestrator.tsx.
  * @param {PhoneStep} step
  */
 function otherStepKey(step) {
+  const act = (step.action || "").trim().toLowerCase();
   if (step.kind === "lookup") return "orch.lookup";
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
   if (step.kind === "settings") return "orch.settings";
-  if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
-  const action = step.prompt.trim().toLowerCase();
-  return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
+  if (step.kind === "workspace") {
+    if (act === "rename") return "orch.workspaceRename";
+    if (act === "remove") return "orch.workspaceRemove";
+    if (act === "move") return "orch.workspaceMove";
+    return "orch.makeWorkspace";
+  }
+  if (step.kind === "agent") {
+    if (act === "create") return "orch.agentNew";
+    if (act === "delete") return "orch.agentDelete";
+    if (act.startsWith("memory-")) return "orch.agentMemory";
+    return "orch.agentEdit";
+  }
+  if (step.kind === "skill") {
+    if (act === "create") return "orch.skillNew";
+    if (act === "delete") return "orch.skillDelete";
+    return "orch.skillEdit";
+  }
+  if (step.kind === "chat") {
+    if (act === "create") return "orch.chatNew";
+    if (act === "send") return "orch.chatSend";
+    if (act === "delete") return "orch.chatDelete";
+    return "orch.chat";
+  }
+  if (step.kind === "run") return act === "tidy" ? "orch.runTidy" : "orch.run";
+  if (step.kind === "talk") return "orch.talk";
+  if (step.kind === "task") {
+    if (act === "edit") return "orch.taskEdit";
+    if (act === "delete") return "orch.taskDelete";
+    if (act === "status") return "orch.taskStatus";
+    if (act === "stop") return "orch.taskStop";
+    if (act === "continue") return "orch.taskContinue";
+    if (act === "handoff") return "orch.taskHandoff";
+    if (act === "apply") return "orch.applyStep";
+    if (act === "discard") return "orch.discard";
+    return act === "create" || act === "create-run" || (!act && Boolean(step.name)) ? "orch.taskNew" : "orch.taskRun";
+  }
+  if (act === "create") return "orch.routineNew";
+  if (act === "edit") return "orch.routineEdit";
+  if (act === "delete") return "orch.routineDelete";
+  const promptAct = step.prompt.trim().toLowerCase();
+  return act === "enable" || promptAct === "enable" ? "orch.routineOn" : act === "disable" || promptAct === "disable" ? "orch.routineOff" : "orch.routineRun";
 }
 
 /**
- * What stands in a task's or routine's way, in its own words.
+ * What stands in a step's way, in its own words.
  * @param {PhoneStep} step
  * @param {string} issue
  */
 function issueKey(step, issue) {
   if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
+  if (step.kind === "routine" && issue === "engine") return "orch.issue.agent";
   if (step.kind === "task" && issue === "target") return "orch.issue.task";
   if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  if (step.kind === "agent" && issue === "target") return "orch.issue.agent";
+  if (step.kind === "skill" && issue === "target") return "orch.issue.skill";
+  if (step.kind === "skill" && issue === "engine") return "orch.issue.agent";
+  if (step.kind === "chat" && issue === "target") return "orch.issue.chat";
+  if (step.kind === "run" && issue === "target") return "orch.issue.run";
+  if (step.kind === "run" && issue === "engine") return "orch.issue.agent";
   if (step.kind === "show" && issue === "workspace") return "orch.issue.show";
   return ISSUE_KEYS[issue] || "orch.fixFirst";
 }
@@ -113,7 +160,7 @@ function stepNode(turn, step, editable) {
       ? el("span", { class: "px working", "aria-hidden": "true" })
       : glyph(step.state === "done" ? "done" : step.state === "failed" ? "failed" : step.kind);
   const main = el("div", { class: "orch-step-main" });
-  if (step.kind === "workspace") {
+  if (step.kind === "workspace" && (!step.action || step.action === "create")) {
     main.append(
       editable
         ? el("div", { class: "orch-step-line" }, el("strong", {}, t("orch.makeWorkspace")), textField(turn, step, "name", value("name") || "", t("orch.workspaceName")))
@@ -142,17 +189,46 @@ function stepNode(turn, step, editable) {
   } else if (step.kind === "apply" || step.kind === "discard") {
     const copy = orch.copies?.find((item) => item.id === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
-  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
+  } else if (
+    step.kind === "workspace" ||
+    step.kind === "lookup" ||
+    step.kind === "inspect" ||
+    step.kind === "shell" ||
+    step.kind === "key" ||
+    step.kind === "workbench" ||
+    step.kind === "settings" ||
+    step.kind === "task" ||
+    step.kind === "routine" ||
+    step.kind === "agent" ||
+    step.kind === "skill" ||
+    step.kind === "chat" ||
+    step.kind === "run" ||
+    step.kind === "talk"
+  ) {
     // A key step says which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
-    const what = step.kind === "task" && step.name ? [step.name, step.asked].filter(Boolean).join(" · ") : step.kind === "key" ? [step.prompt, step.asked].filter(Boolean).join(" · ") : step.asked || step.name || step.prompt;
+    const what =
+      step.kind === "task" && step.name && step.action !== "edit"
+        ? [step.name, step.asked].filter(Boolean).join(" · ")
+        : step.kind === "key"
+          ? [step.prompt, step.asked].filter(Boolean).join(" · ")
+          : step.asked || step.name || step.prompt;
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(otherStepKey(step))), el("span", { class: "orch-target" }, what)));
   } else {
     const target = orch.running.find((item) => item.ptyId === step.target);
     const kindKey = /** @type {Record<string, string>} */ (KIND_KEYS)[step.kind] || "orch.close";
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(kindKey)), el("span", { class: "orch-target" }, target?.label || step.asked || t("orch.gone"))));
   }
-  // A shell step's command too, as on the computer's card: Go on the phone shouldn't run what it can't see.
-  if (step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && step.name)) {
+  // Show prompt editor for steps carrying an instruction, brief, body, or message.
+  const hasPrompt =
+    step.kind === "start" ||
+    step.kind === "tell" ||
+    step.kind === "shell" ||
+    (step.kind === "task" && Boolean(step.name || step.action === "create" || step.action === "create-run" || step.action === "edit" || step.action === "continue")) ||
+    (step.kind === "routine" && (step.action === "create" || step.action === "edit")) ||
+    (step.kind === "agent" && (step.action === "create" || step.action === "edit" || step.action === "memory-set" || step.action === "memory-append")) ||
+    (step.kind === "skill" && (step.action === "create" || step.action === "edit")) ||
+    (step.kind === "chat" && (step.action === "create" || step.action === "send"));
+  if (hasPrompt) {
     if (editable) main.append(promptField(turn, step, value("prompt")));
     else if (step.prompt) main.append(el("span", { class: "orch-prompt-text" }, step.prompt));
   }

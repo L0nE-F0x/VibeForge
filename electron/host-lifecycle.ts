@@ -99,6 +99,7 @@ export function deskHost(
       ? {
           voiceStatus: () => extras.voice!().status(),
           voiceDownload: (kind, id) => extras.voice!().startDownload(kind, id),
+          voiceStopDownload: () => extras.voice!().stopDownload(),
         }
       : {}),
     ...(extras?.tray

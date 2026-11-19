@@ -25,7 +25,7 @@ type CallService = Pick<
   TeamService,
   "orchestratorView" | "orchestratorAsk" | "orchestratorRun" | "orchestratorCancel" | "orchestratorCall" | "listAgents" | "listEngines" | "listWorkspaces" | "getSettings"
 > &
-  Partial<Pick<TeamService, "orchestratorStopThinking" | "orchestratorQuickShow" | "listTasks" | "listRoutines">>;
+  Partial<Pick<TeamService, "orchestratorStopThinking" | "orchestratorQuickShow" | "listTasks" | "listRoutines" | "listSkills">>;
 
 /**
  * A call with Viby. The microphone stays open; each thing said is turned into words here and
@@ -325,6 +325,7 @@ export class Call {
       ...copies.map((copy) => copy.name),
       ...(service.listTasks?.().slice(0, 15).map((task) => task.title) ?? []),
       ...(service.listRoutines?.().map((routine) => routine.name) ?? []),
+      ...(service.listSkills?.().map((skill) => skill.name) ?? []),
       ...files,
     ]);
   }
