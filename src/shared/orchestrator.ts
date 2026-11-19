@@ -168,7 +168,7 @@ export interface OrchestratorStep {
   skills?: string[];
   /** Agent ids attached to a skill step, or secondary target PTY id for a talk step. */
   agents?: string[];
-  /** Raw options string ("notify=false, shareCheckout=true, isolated=true, tier=strong, voice=lessac"). */
+  /** Raw options string ("notify=false, shareCheckout=true, isolated=true, tier=strong"). */
   options?: string;
   /** Deep-link route extras for `show` steps (e.g. agentId, tab, taskId, routineId, skillId, chatId, runId, section). */
   route?: Record<string, string>;
@@ -374,7 +374,6 @@ export interface PlanContext {
     skills?: string[];
     allowRoutines?: boolean;
     tier?: string;
-    voice?: string;
   }>;
   /** Reusable skills (SKILL.md know-how attached to agents). */
   skills?: Array<{ id: string; name: string; description?: string; agents?: string[] }>;

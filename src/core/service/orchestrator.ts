@@ -21,7 +21,6 @@ import {
   isClearWord,
   keySequenceFor,
   lookingLine,
-  matchCatalogVoice,
   normalizeAgentAction,
   normalizeChatAction,
   normalizeRoutineStepAction,
@@ -417,7 +416,6 @@ export class OrchestratorDesk {
       ...(item.skills.length ? { skills: item.skills.map((sid) => skillNames.get(sid) ?? sid) } : {}),
       allowRoutines: item.allowRoutines,
       ...(item.tier ? { tier: item.tier } : {}),
-      ...(item.voice ? { voice: voiceName(item.voice) } : {}),
     }));
     const skills = rawSkills.map((item) => {
       const attached = rawAgents.filter((a) => a.skills.includes(item.id)).map((a) => a.name);
@@ -1415,23 +1413,6 @@ export class OrchestratorDesk {
     return path.resolve(expandHome(trimmed));
   }
 
-  private resolveAgentVoice(raw: string): string {
-    const trimmed = raw.trim();
-    if (!trimmed || isClearWord(trimmed)) return "";
-    const voicesDir = path.join(this.core.options.dataRoot, "voices");
-    const installed = this.core.options.host.voiceStatus?.()?.voices ?? scanPiperVoices(os.homedir(), this.core.options.dataRoot);
-    const direct = installed.find((file) => file === trimmed || path.basename(file) === trimmed || voiceName(file).toLowerCase() === trimmed.toLowerCase());
-    if (direct) return direct;
-    const partial = installed.filter((file) => voiceName(file).toLowerCase().includes(trimmed.toLowerCase()));
-    if (partial.length === 1) return partial[0];
-    const catalog = matchCatalogVoice(trimmed);
-    if (catalog) {
-      const expected = path.join(voicesDir, `${catalog.id}.onnx`);
-      return expected;
-    }
-    return trimmed;
-  }
-
   private async carryOutAgent(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
     if (!this.library) throw new Error("That agent no longer exists.");
     const action = normalizeAgentAction(step.action, Boolean(step.target));
@@ -1443,7 +1424,6 @@ export class OrchestratorDesk {
       const allowRoutines = opts.bool("allowRoutines") ?? opts.bool("routines") ?? true;
       const goodAt = (step.description?.trim() || opts.str("goodAt") || "").trim();
       const tier = parseAgentTier(opts.str("tier")) ?? "";
-      const voice = opts.has("voice") ? this.resolveAgentVoice(opts.str("voice") ?? "") : "";
       const saved = this.library.saveAgent({
         name: (step.name ?? "").trim(),
         engine: step.engineId,
@@ -1453,7 +1433,6 @@ export class OrchestratorDesk {
         allowRoutines,
         goodAt,
         tier,
-        voice,
       });
       step.target = saved.id;
       step.result = `Created agent ${saved.name}.`;
@@ -1535,7 +1514,6 @@ export class OrchestratorDesk {
             : opts.str("goodAt")
           : existing.goodAt;
     const tier = opts.has("tier") ? (parseAgentTier(opts.str("tier")) ?? existing.tier) : existing.tier;
-    const voice = opts.has("voice") ? this.resolveAgentVoice(opts.str("voice") ?? "") : existing.voice;
     const saved = this.library.saveAgent({
       id: existing.id,
       name: step.name?.trim() || existing.name,
@@ -1546,7 +1524,6 @@ export class OrchestratorDesk {
       allowRoutines,
       goodAt,
       tier,
-      voice,
     });
     step.result = `Updated agent ${saved.name}.`;
   }
@@ -2381,7 +2358,7 @@ export class OrchestratorDesk {
       const memory = this.library?.readMemory(agent.id) ?? this.core.store.readMemory(agent.id);
       const parts = [
         `Agent "${agent.name}" (id: ${agent.id})`,
-        `Engine: ${agent.engine} · allowRoutines: ${agent.allowRoutines ? "yes" : "no"}${agent.tier ? ` · tier: ${agent.tier}` : ""}${agent.voice ? ` · voice: ${voiceName(agent.voice)}` : ""}`,
+        `Engine: ${agent.engine} · allowRoutines: ${agent.allowRoutines ? "yes" : "no"}${agent.tier ? ` · tier: ${agent.tier}` : ""}`,
         ...(agent.goodAt ? [`Good at: ${agent.goodAt}`] : []),
         `Allowed folders:\n${agent.places.map((p) => `- ${tildify(p)}`).join("\n") || "(none)"}`,
         `Skills: ${agent.skills.join(", ") || "(none)"}`,
