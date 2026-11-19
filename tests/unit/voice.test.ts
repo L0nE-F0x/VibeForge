@@ -180,7 +180,7 @@ describe("voice: words", () => {
 });
 
 describe("voice: settings", () => {
-  it("reads answers aloud by default, and repairs a hand-edited voice block", () => {
+  it("speaks Viby's replies by default, and repairs a hand-edited voice block", () => {
     const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-"));
     const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-data-"));
     const store = new Store(configRoot, dataRoot);

@@ -257,6 +257,22 @@ describe("Viby settings awareness and parsing", () => {
       issue: null,
       action: { op: "voice-patch", patch: { talkBack: false } },
     });
+    expect(resolveSettingsStep({ target: "viby.talkBack", prompt: "on" }, { engines })).toMatchObject({
+      issue: null,
+      action: { op: "voice-patch", patch: { talkBack: true } },
+    });
+    expect(resolveSettingsStep({ target: "viby.voice", prompt: "off" }, { engines })).toMatchObject({
+      issue: null,
+      action: { op: "voice-patch", patch: { talkBack: false } },
+    });
+    expect(resolveSettingsStep({ target: "viby.voice", prompt: "lessac" }, { engines })).toMatchObject({
+      issue: null,
+      action: { op: "voice-speaker", speaker: "en_US-lessac-medium.onnx", downloadId: "en_US-lessac-medium" },
+    });
+    expect(resolveSettingsStep({ target: "viby.speaker", prompt: "auto" }, { engines })).toMatchObject({
+      issue: null,
+      action: { op: "voice-speaker", speaker: "" },
+    });
     expect(resolveSettingsStep({ target: "voice.talkOver", prompt: "headphones" }, { engines })).toMatchObject({
       issue: null,
       action: { op: "voice-patch", patch: { talkOver: "always" } },

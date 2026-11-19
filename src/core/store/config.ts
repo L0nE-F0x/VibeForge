@@ -50,7 +50,7 @@ function names(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string"))] : [];
 }
 
-/** Older settings said "summary", "full", or "off". Reading aloud is now on or off; on is the first paragraph. */
+/** Older settings said "summary", "full", or "off". Viby's spoken replies are now on or off. */
 function talkBackFlag(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") return value;
   if (value === "off") return false;

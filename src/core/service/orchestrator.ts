@@ -12,13 +12,28 @@ import {
   detectWaitingPrompt,
   emptyPromise,
   folderNameOk,
+  formatScheduleBrief,
   formatSettingsRules,
   holdsForGo,
   inspectsQuotas,
   inspectsSettings,
+  inspectsStorage,
+  isClearWord,
   keySequenceFor,
   lookingLine,
+  normalizeAgentAction,
+  normalizeChatAction,
+  normalizeRoutineStepAction,
+  normalizeRunAction,
+  normalizeSkillAction,
+  normalizeTalkAction,
+  normalizeTaskStepAction,
+  normalizeWorkspaceAction,
   ONLY_LOOKS,
+  parseAgentTier,
+  parseOptions,
+  parseRoutineSchedule,
+  parseTaskStatus,
   parseWorkbenchAction,
   PLANNED_PREFIX,
   plannedFolder,
@@ -52,8 +67,10 @@ import {
   type VibyWord,
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
+import { taskPrompt } from "../preamble.js";
 import { speakable } from "../replies.js";
 import { findSherpa } from "../sherpa.js";
+import { MEMORY_STARTER } from "../store/library.js";
 import { listThemes } from "../theme.js";
 import { isGitRepo, summarizeSnapshot } from "../vcs.js";
 import {
@@ -71,7 +88,9 @@ import {
   type VoiceBackend,
 } from "../voice.js";
 import type { ApplyResult } from "../worktrees.js";
+import type { ChatDesk } from "./chats.js";
 import type { ServiceCore } from "./core.js";
+import type { LibraryDesk } from "./library.js";
 import type { MessageDesk } from "./messages.js";
 import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
 import type { LiveSession, Settings } from "../types.js";
@@ -113,6 +132,8 @@ interface Conversation {
   workspacesKey?: string;
   /** Settings fingerprint from the previous turn, so a resumed session hears when settings changed. */
   settingsKey?: string;
+  /** Agents/skills/routines/tasks/chats fingerprint so a resumed session hears when library items changed. */
+  libraryKey?: string;
   turns: OrchestratorTurn[];
 }
 
@@ -235,6 +256,8 @@ export class OrchestratorDesk {
     private readonly tasks?: TaskDesk,
     private readonly routines?: RoutineDesk,
     private readonly runs?: RunDesk,
+    private readonly library?: LibraryDesk,
+    private readonly chats?: ChatDesk,
   ) {
     this.conversation = this.load();
     this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
@@ -305,6 +328,7 @@ export class OrchestratorDesk {
     }
     if (step.kind === "inspect") {
       if (inspectsQuotas(step.prompt)) return "plan limits";
+      if (inspectsStorage(step.prompt) || step.action === "storage") return "storage";
       if (step.target) {
         const copy = context.copies?.find((item) => item.id === step.target);
         if (copy) return copy.name;
@@ -381,29 +405,73 @@ export class OrchestratorDesk {
     );
     const rawAgents = this.core.store.listAgents();
     const agentNames = new Map(rawAgents.map((item) => [item.id, item.name]));
+    const rawSkills = this.core.store.listSkills();
+    const skillNames = new Map(rawSkills.map((item) => [item.id, item.name]));
     const agents = rawAgents.map((item) => ({
       id: item.id,
       name: item.name,
       engine: item.engine,
       ...(item.goodAt ? { goodAt: item.goodAt } : {}),
       ...(item.places.length ? { places: item.places.map(tildify) } : {}),
+      ...(item.skills.length ? { skills: item.skills.map((sid) => skillNames.get(sid) ?? sid) } : {}),
+      allowRoutines: item.allowRoutines,
+      ...(item.tier ? { tier: item.tier } : {}),
     }));
-    const tasks = this.core.store
-      .listTasks()
-      .slice(0, 20)
-      .map((item) => ({
+    const skills = rawSkills.map((item) => {
+      const attached = rawAgents.filter((a) => a.skills.includes(item.id)).map((a) => a.name);
+      return {
         id: item.id,
-        title: item.title,
-        status: item.status,
-        ...(item.workspaceId && names.get(item.workspaceId) ? { workspace: names.get(item.workspaceId) } : {}),
-        ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
-      }));
+        name: item.name,
+        ...(item.description ? { description: item.description } : {}),
+        ...(attached.length ? { agents: attached } : {}),
+      };
+    });
+    const rawTasks = this.tasks ? this.tasks.listTasks() : this.core.store.listTasks().map((t) => ({ ...t, waiting: null }));
+    const tasks = rawTasks.slice(0, 25).map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      ...(item.workspaceId && names.get(item.workspaceId) ? { workspace: names.get(item.workspaceId) } : {}),
+      ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+      ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
+      ...(item.agentId ? { agentId: item.agentId } : {}),
+      isolated: item.isolated,
+      ...(item.copy ? { hasCopy: true } : {}),
+      ...(item.waiting ? { waiting: true } : {}),
+    }));
     const routines = (this.routines ? this.routines.listRoutines() : []).map((item) => ({
       id: item.id,
       name: item.name,
       schedule: item.description,
       enabled: item.enabled,
       ...(item.agentName ? { agent: item.agentName } : {}),
+      ...(item.agentId ? { agentId: item.agentId } : {}),
+      notify: item.notify,
+      shareCheckout: item.shareCheckout,
+      ...(item.waiting ? { waiting: true } : {}),
+      ...(item.stillRunning ? { running: true } : {}),
+    }));
+    const rawChats = this.chats ? this.chats.listChats() : [];
+    const chats = [...rawChats]
+      .sort((a, b) => Number(b.live) - Number(a.live) || b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 20)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        engine: item.engine,
+        ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
+        agentId: item.agentId,
+        live: item.live,
+      }));
+    const runs = this.core.store.queryRuns({ limit: 15 }).map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      engine: item.engine,
+      origin: item.origin,
+      opened: Boolean(item.openedAt),
+      ...(item.changes ? { changes: item.changes } : {}),
+      ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
     }));
     const allSettings = this.core.store.readSettings();
     const defaultPick = allSettings.defaultEngine;
@@ -415,8 +483,11 @@ export class OrchestratorDesk {
       running,
       copies: copies.map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
       ...(agents.length ? { agents } : {}),
+      ...(skills.length ? { skills } : {}),
       ...(tasks.length ? { tasks } : {}),
       ...(routines.length ? { routines } : {}),
+      ...(chats.length ? { chats } : {}),
+      ...(runs.length ? { runs } : {}),
       projectsFolder: this.projectsFolder(),
       settings: this.buildSettingsContext(allSettings, rows),
     };
@@ -599,6 +670,7 @@ export class OrchestratorDesk {
       .map((w) => `${w.id}:${w.name}`)
       .join("|");
     const currentSettingsKey = settingsFingerprint(context.settings);
+    const currentLibraryKey = libraryFingerprint(context);
     const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
     const workspacesChanged = Boolean(
       this.conversation.begun &&
@@ -607,7 +679,15 @@ export class OrchestratorDesk {
         brainKind(engine.row) === "grok",
     );
     if (this.conversation.engineId !== engineId || workspacesChanged) {
-      this.conversation = { ...this.conversation, sessionId: randomUUID(), engineId, begun: false, workspacesKey: currentWorkspacesKey, settingsKey: currentSettingsKey };
+      this.conversation = {
+        ...this.conversation,
+        sessionId: randomUUID(),
+        engineId,
+        begun: false,
+        workspacesKey: currentWorkspacesKey,
+        settingsKey: currentSettingsKey,
+        libraryKey: currentLibraryKey,
+      };
     }
     const settingsChanged = Boolean(
       this.conversation.begun &&
@@ -615,7 +695,13 @@ export class OrchestratorDesk {
         this.conversation.settingsKey !== currentSettingsKey &&
         context.settings,
     );
+    const libraryChanged = Boolean(
+      this.conversation.begun &&
+        this.conversation.libraryKey !== undefined &&
+        this.conversation.libraryKey !== currentLibraryKey,
+    );
     const settingsLine = settingsChanged && context.settings ? `(Updated settings:\n${formatSettingsRules(context.settings).join("\n")})` : "";
+    const libraryLine = libraryChanged ? formatLibraryUpdate(context) : "";
     const work = path.join(this.dir, "work");
     fs.mkdirSync(work, { recursive: true });
     // Codex reads the schema from a file.
@@ -624,7 +710,7 @@ export class OrchestratorDesk {
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
     const turn = async (said: string, ctx: PlanContext = context) => {
-      const prefix = [here, this.conversation.begun ? settingsLine : ""].filter(Boolean).join("\n");
+      const prefix = [here, this.conversation.begun ? settingsLine : "", this.conversation.begun ? libraryLine : ""].filter(Boolean).join("\n");
       const text = prefix ? `${prefix}\n${said}` : said;
       const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, effort: explicitEffort, schemaFile });
       return args ? this.runner([engine.binPath, ...args], work, signal) : null;
@@ -684,6 +770,7 @@ export class OrchestratorDesk {
     this.conversation.begun = true;
     this.conversation.workspacesKey = currentWorkspacesKey;
     this.conversation.settingsKey = currentSettingsKey;
+    this.conversation.libraryKey = currentLibraryKey;
     if (!plan) {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
@@ -878,14 +965,14 @@ export class OrchestratorDesk {
     if (at < 0) throw new Error("That plan is gone.");
     const current = steps[at];
     const clean: Partial<OrchestratorStep> = {};
-    for (const key of ["engineId", "workspaceId", "branch", "prompt", "target", "model", "effort", "name", "folder"] as const) {
+    for (const key of ["engineId", "agentId", "workspaceId", "branch", "prompt", "target", "model", "effort", "name", "folder", "description", "schedule", "status", "options"] as const) {
       if (typeof patch[key] === "string") clean[key] = patch[key];
     }
     if (typeof clean.branch === "string") clean.branch = cleanBranch(clean.branch);
     if (typeof clean.model === "string") clean.model = cleanModel(clean.model);
     if (typeof clean.effort === "string") clean.effort = clean.effort.trim().toLowerCase();
     if (typeof patch.git === "boolean") clean.git = patch.git;
-    if (current.kind === "workspace" && typeof clean.name === "string" && !("folder" in clean)) {
+    if (current.kind === "workspace" && (!current.action || current.action === "create") && typeof clean.name === "string" && !("folder" in clean)) {
       const oldDefault = plannedFolder(current.name ?? "", "", this.projectsFolder());
       if (!current.folder || current.folder === oldDefault) {
         clean.folder = plannedFolder(clean.name, "", this.projectsFolder());
@@ -920,6 +1007,8 @@ export class OrchestratorDesk {
           effort: nextStep.effort,
           folder: nextStep.folder,
           branch: nextStep.branch,
+          name: nextStep.name,
+          options: nextStep.options,
         },
         {
           engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
@@ -1110,10 +1199,15 @@ export class OrchestratorDesk {
 
   private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
     if (step.kind === "workspace") {
-      const workspaceId = await this.makeWorkspace(step);
-      step.openedWorkspaceId = workspaceId;
-      // The plan's later steps named it by its placeholder; now it has a real id.
-      for (const later of turn.steps ?? []) if (later.workspaceId === plannedId(step.id)) later.workspaceId = workspaceId;
+      await this.carryOutWorkspace(turn, step);
+      return;
+    }
+    if (step.kind === "agent") {
+      await this.carryOutAgent(turn, step);
+      return;
+    }
+    if (step.kind === "skill") {
+      await this.carryOutSkill(turn, step);
       return;
     }
     if (step.kind === "start") {
@@ -1190,45 +1284,23 @@ export class OrchestratorDesk {
       return;
     }
     if (step.kind === "routine") {
-      if (!this.routines) throw new Error("That routine no longer exists.");
-      const action = step.prompt.trim().toLowerCase();
-      if (action === "enable" || action === "disable") {
-        this.routines.setRoutineEnabled(step.target, action === "enable");
-        return;
-      }
-      // As Run now on the board: with another CLI busy in its folder, it waits its turn there.
-      const launched = await this.routines.runRoutineNow(step.target, START_SIZE);
-      if ("ptyId" in launched) {
-        step.ptyId = launched.ptyId;
-        step.runId = launched.runId;
-      } else step.result = waitsTurn(launched.behind);
+      await this.carryOutRoutine(turn, step);
       return;
     }
     if (step.kind === "task") {
-      if (!this.tasks) throw new Error("That task no longer exists.");
-      let taskId = step.target;
-      if (!taskId) {
-        if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
-        const workspace = this.core.workspaceById(step.workspaceId);
-        // In its own copy where the board would make one: a git workspace with a commit to copy.
-        const isolated = Boolean(workspace) && (await isGitRepo(workspace?.path ?? "").catch(() => false)) && (await hasCommit(workspace?.path ?? ""));
-        const saved = this.tasks.saveTask({
-          title: step.name || branchFromPrompt(step.prompt),
-          body: step.prompt,
-          agentId: step.agentId || null,
-          workspaceId: step.workspaceId || null,
-          isolated,
-        });
-        taskId = saved.id;
-        step.target = taskId;
-      }
-      // As Execute on the board: a fresh start with its instructions (never a Continue of its last
-      // session), and in the workspace itself it waits its turn while another CLI is busy there.
-      const launched = await this.tasks.executeTask(taskId, START_SIZE);
-      if ("ptyId" in launched) {
-        step.ptyId = launched.ptyId;
-        step.runId = launched.runId;
-      } else step.result = waitsTurn(launched.behind);
+      await this.carryOutTask(turn, step);
+      return;
+    }
+    if (step.kind === "chat") {
+      await this.carryOutChat(turn, step);
+      return;
+    }
+    if (step.kind === "run") {
+      await this.carryOutRun(step);
+      return;
+    }
+    if (step.kind === "talk") {
+      await this.carryOutTalk(step);
       return;
     }
     if (step.kind === "apply") {
@@ -1248,6 +1320,8 @@ export class OrchestratorDesk {
         if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
         const session = this.core.live.get(step.target);
         show({ view: "code", ...(session?.workspaceId ? { workspaceId: session.workspaceId } : {}), ptyId: step.target });
+      } else if (step.route) {
+        show(step.route as Parameters<typeof show>[0]);
       } else if (step.view) show({ view: step.view });
       else {
         if (!this.core.workspaceById(step.workspaceId)) throw new Error("That workspace is gone.");
@@ -1282,6 +1356,604 @@ export class OrchestratorDesk {
       return;
     }
     await this.core.killPty(step.target);
+  }
+
+  private async carryOutWorkspace(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    const action = normalizeWorkspaceAction(step.action);
+    if (!action || action === "create") {
+      const workspaceId = await this.makeWorkspace(step);
+      step.openedWorkspaceId = workspaceId;
+      const created = this.core.workspaceById(workspaceId);
+      substitutePlannedId(turn.steps, plannedId(step.id), workspaceId, created?.path);
+      return;
+    }
+    const wsId = step.workspaceId || step.target;
+    if (!wsId || wsId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+    const ws = this.core.workspaceById(wsId);
+    if (!ws) throw new Error("That workspace is gone.");
+    if (action === "rename") {
+      const nextName = (step.name || step.prompt || "").trim();
+      if (!folderNameOk(nextName)) throw new Error("A new workspace needs a name that isn't a path.");
+      this.workspaces.updateWorkspace(ws.id, { name: nextName });
+      step.openedWorkspaceId = ws.id;
+      step.result = `Renamed to ${nextName}.`;
+      return;
+    }
+    if (action === "remove") {
+      await this.workspaces.removeWorkspace(ws.id);
+      step.result = `Removed workspace ${ws.name}.`;
+      return;
+    }
+    if (action === "move") {
+      const list = this.workspaces.listWorkspaces().workspaces;
+      const cur = list.findIndex((item) => item.id === ws.id);
+      if (cur < 0) throw new Error("That workspace is gone.");
+      const pos = (step.status || step.prompt || parseOptions(step.options).str("index") || "").trim().toLowerCase();
+      let toIndex = cur;
+      if (pos === "top" || pos === "first") toIndex = 0;
+      else if (pos === "bottom" || pos === "last") toIndex = Math.max(0, list.length - 1);
+      else if (pos === "up") toIndex = Math.max(0, cur - 1);
+      else if (pos === "down") toIndex = Math.min(list.length - 1, cur + 1);
+      else if (/^\d+$/.test(pos)) toIndex = Math.max(0, Math.min(list.length - 1, Number(pos) - 1));
+      else throw new Error("Say where to move the workspace (top, bottom, up, down, or a position number).");
+      this.workspaces.moveWorkspace(ws.id, toIndex);
+      step.openedWorkspaceId = ws.id;
+      step.result = `Moved ${ws.name} to position ${toIndex + 1}.`;
+      return;
+    }
+    throw new Error("Unsupported action.");
+  }
+
+  private resolveAgentPlace(entry: string): string {
+    const trimmed = entry.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+    const ws = this.core.workspaceById(trimmed);
+    if (ws) return path.resolve(ws.path);
+    return path.resolve(expandHome(trimmed));
+  }
+
+  private async carryOutAgent(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    if (!this.library) throw new Error("That agent no longer exists.");
+    const action = normalizeAgentAction(step.action, Boolean(step.target));
+    if (!action) throw new Error("Unsupported action.");
+    if (action === "create") {
+      const places = (step.places ?? []).map((p) => this.resolveAgentPlace(p)).filter(Boolean);
+      const skills = (step.skills ?? []).filter((id) => !id.startsWith(PLANNED_PREFIX));
+      const opts = parseOptions(step.options);
+      const allowRoutines = opts.bool("allowRoutines") ?? opts.bool("routines") ?? true;
+      const goodAt = (step.description?.trim() || opts.str("goodAt") || "").trim();
+      const tier = parseAgentTier(opts.str("tier")) ?? "";
+      const saved = this.library.saveAgent({
+        name: (step.name ?? "").trim(),
+        engine: step.engineId,
+        brief: step.prompt.trim(),
+        places,
+        skills,
+        allowRoutines,
+        goodAt,
+        tier,
+      });
+      step.target = saved.id;
+      step.result = `Created agent ${saved.name}.`;
+      substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
+      return;
+    }
+    if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+    if (action === "delete") {
+      const deleted = await this.library.deleteAgent(step.target);
+      step.undo = deleted.undo;
+      step.result = "Deleted agent.";
+      return;
+    }
+    if (action === "memory-clear") {
+      this.library.writeMemory(step.target, MEMORY_STARTER);
+      step.result = "Cleared memory.md.";
+      return;
+    }
+    if (action === "memory-set") {
+      const text = step.prompt.trim();
+      if (!text) throw new Error("Type something to send.");
+      this.library.writeMemory(step.target, `${text}\n`);
+      step.result = "Updated memory.md.";
+      return;
+    }
+    if (action === "memory-append") {
+      const addition = step.prompt.trim();
+      if (!addition) throw new Error("Type something to send.");
+      const prev = this.library.readMemory(step.target);
+      const next = prev.trimEnd() ? `${prev.trimEnd()}\n\n${addition}\n` : `${addition}\n`;
+      this.library.writeMemory(step.target, next);
+      step.result = "Appended to memory.md.";
+      return;
+    }
+    const existing = this.library.getAgent(step.target);
+    if (!existing) throw new Error("That agent no longer exists.");
+    if (action === "add-folder") {
+      const added = (step.places ?? []).map((p) => this.resolveAgentPlace(p)).filter(Boolean);
+      const places = [...new Set([...existing.places, ...added])];
+      this.library.saveAgent({ ...existing, places });
+      step.result = `Added folder to ${existing.name}.`;
+      return;
+    }
+    if (action === "remove-folder") {
+      const drop = new Set((step.places ?? []).map((p) => this.resolveAgentPlace(p)));
+      const places = existing.places.filter((p) => !drop.has(path.resolve(p)));
+      if (!places.length) throw new Error("Add at least one allowed folder.");
+      this.library.saveAgent({ ...existing, places });
+      step.result = `Removed folder from ${existing.name}.`;
+      return;
+    }
+    if (action === "add-skill") {
+      const toAdd = (step.skills ?? []).filter((id) => !id.startsWith(PLANNED_PREFIX));
+      const skills = [...new Set([...existing.skills, ...toAdd])];
+      this.library.saveAgent({ ...existing, skills });
+      step.result = `Added skill to ${existing.name}.`;
+      return;
+    }
+    if (action === "remove-skill") {
+      const drop = new Set(step.skills ?? []);
+      const skills = existing.skills.filter((id) => !drop.has(id));
+      this.library.saveAgent({ ...existing, skills });
+      step.result = `Removed skill from ${existing.name}.`;
+      return;
+    }
+    // edit
+    const opts = parseOptions(step.options);
+    const places = step.places?.length ? step.places.map((p) => this.resolveAgentPlace(p)).filter(Boolean) : existing.places;
+    const skills = step.skills?.length ? step.skills.filter((id) => !id.startsWith(PLANNED_PREFIX)) : isClearWord(opts.str("skills")) ? [] : existing.skills;
+    const allowRoutines = opts.bool("allowRoutines") ?? opts.bool("routines") ?? existing.allowRoutines;
+    const goodAt =
+      step.description !== undefined
+        ? isClearWord(step.description)
+          ? ""
+          : step.description.trim()
+        : opts.has("goodAt")
+          ? isClearWord(opts.str("goodAt"))
+            ? ""
+            : opts.str("goodAt")
+          : existing.goodAt;
+    const tier = opts.has("tier") ? (parseAgentTier(opts.str("tier")) ?? existing.tier) : existing.tier;
+    const saved = this.library.saveAgent({
+      id: existing.id,
+      name: step.name?.trim() || existing.name,
+      engine: step.engineId || existing.engine,
+      brief: step.prompt.trim() || existing.brief,
+      places,
+      skills,
+      allowRoutines,
+      goodAt,
+      tier,
+    });
+    step.result = `Updated agent ${saved.name}.`;
+  }
+
+  private async carryOutSkill(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    if (!this.library) throw new Error("That skill no longer exists.");
+    const action = normalizeSkillAction(step.action, Boolean(step.target));
+    if (!action) throw new Error("Unsupported action.");
+    if (action === "create") {
+      const saved = this.library.saveSkill({
+        name: (step.name ?? "").trim(),
+        description: step.description ?? "",
+        body: step.prompt,
+      });
+      if (step.agents?.length) {
+        this.library.setSkillAgents(
+          saved.id,
+          step.agents.filter((id) => !id.startsWith(PLANNED_PREFIX)),
+        );
+      }
+      step.target = saved.id;
+      step.result = `Created skill ${saved.name}.`;
+      substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
+      return;
+    }
+    if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+    if (action === "delete") {
+      const deleted = this.library.deleteSkill(step.target);
+      step.undo = deleted.undo;
+      step.result = "Deleted skill.";
+      return;
+    }
+    const existing = this.core.store.getSkill(step.target);
+    if (!existing) throw new Error("That skill no longer exists.");
+    if (action === "edit") {
+      const saved = this.library.saveSkill({
+        id: existing.id,
+        name: step.name?.trim() || existing.name,
+        description: step.description !== undefined ? step.description : existing.description,
+        body: step.prompt.trim() ? step.prompt : existing.body,
+      });
+      if (step.agents?.length) {
+        this.library.setSkillAgents(
+          saved.id,
+          step.agents.filter((id) => !id.startsWith(PLANNED_PREFIX)),
+        );
+      }
+      step.result = `Updated skill ${saved.name}.`;
+      return;
+    }
+    if (action === "attach") {
+      const current = this.library.listAgents().filter((a) => a.skills.includes(existing.id)).map((a) => a.id);
+      const next = [...new Set([...current, ...(step.agents ?? []).filter((id) => !id.startsWith(PLANNED_PREFIX))])];
+      this.library.setSkillAgents(existing.id, next);
+      step.result = `Attached ${existing.name}.`;
+      return;
+    }
+    if (action === "detach") {
+      const drop = new Set(step.agents ?? []);
+      const next = this.library.listAgents().filter((a) => a.skills.includes(existing.id) && !drop.has(a.id)).map((a) => a.id);
+      this.library.setSkillAgents(existing.id, next);
+      step.result = `Detached ${existing.name}.`;
+      return;
+    }
+    // set-agents
+    const opts = parseOptions(step.options);
+    const next = isClearWord(opts.str("agents")) ? [] : (step.agents ?? []).filter((id) => !id.startsWith(PLANNED_PREFIX));
+    this.library.setSkillAgents(existing.id, next);
+    step.result = next.length ? `Updated agents for ${existing.name}.` : `Cleared agents from ${existing.name}.`;
+  }
+
+  private async carryOutRoutine(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    if (!this.routines) throw new Error("That routine no longer exists.");
+    const hasCreateFields = Boolean(step.schedule?.trim() || step.name?.trim() || step.agentId || step.taskId);
+    const action = normalizeRoutineStepAction(step.action, step.prompt, Boolean(step.target), hasCreateFields);
+    if (!action) throw new Error("Unsupported action.");
+
+    if (action === "create") {
+      if (step.taskId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const task = step.taskId ? this.core.store.getTask(step.taskId) : null;
+      if (step.taskId && !task) throw new Error("That task no longer exists.");
+      const agentId = step.agentId || task?.agentId || "";
+      if (!agentId || agentId.startsWith(PLANNED_PREFIX)) throw new Error("Pick an agent for the routine.");
+      const schedule = parseRoutineSchedule(step.schedule);
+      if (!schedule) throw new Error("The schedule is not valid.");
+      const name = (step.name || task?.title || "").trim();
+      const extra = step.prompt.trim();
+      const prompt = task ? (extra ? `${taskPrompt(task.title, task.body)}\n\n${extra}` : taskPrompt(task.title, task.body)) : extra;
+      const opts = parseOptions(step.options);
+      const saved = this.routines.saveRoutine({
+        name,
+        agentId,
+        schedule,
+        prompt,
+        enabled: opts.bool("enabled") ?? true,
+        notify: opts.bool("notify") ?? true,
+        shareCheckout: opts.bool("shareCheckout") ?? false,
+      });
+      step.target = saved.id;
+      step.result = `Created routine ${saved.name} (${formatScheduleBrief(saved.schedule)}).`;
+      substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
+      return;
+    }
+
+    if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+    if (action === "edit") {
+      const existing = this.core.store.getRoutine(step.target);
+      if (!existing) throw new Error("That routine no longer exists.");
+      if (step.taskId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const task = step.taskId ? this.core.store.getTask(step.taskId) : null;
+      if (step.taskId && !task) throw new Error("That task no longer exists.");
+      if (step.agentId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const schedule = step.schedule?.trim() ? parseRoutineSchedule(step.schedule) : existing.schedule;
+      if (!schedule) throw new Error("The schedule is not valid.");
+      const opts = parseOptions(step.options);
+      const extra = step.prompt.trim();
+      const prompt = task
+        ? extra
+          ? `${taskPrompt(task.title, task.body)}\n\n${extra}`
+          : taskPrompt(task.title, task.body)
+        : extra || existing.prompt;
+      const saved = this.routines.saveRoutine({
+        id: existing.id,
+        name: step.name?.trim() || existing.name,
+        agentId: step.agentId || task?.agentId || existing.agentId,
+        schedule,
+        prompt,
+        enabled: opts.bool("enabled") ?? existing.enabled,
+        notify: opts.bool("notify") ?? existing.notify,
+        shareCheckout: opts.bool("shareCheckout") ?? existing.shareCheckout,
+      });
+      step.result = `Updated routine ${saved.name}.`;
+      return;
+    }
+    if (action === "delete") {
+      const deleted = this.routines.deleteRoutine(step.target);
+      step.undo = deleted.undo;
+      step.result = "Deleted routine.";
+      return;
+    }
+    if (action === "enable" || action === "disable") {
+      this.routines.setRoutineEnabled(step.target, action === "enable");
+      step.result = action === "enable" ? "Enabled routine." : "Paused routine.";
+      return;
+    }
+    if (action === "cancel-wait") {
+      this.routines.cancelWait(step.target);
+      step.result = "Cancelled routine wait.";
+      return;
+    }
+    // run or run-now
+    const launched = await this.routines.runRoutineNow(step.target, START_SIZE, action === "run-now");
+    if ("ptyId" in launched) {
+      step.ptyId = launched.ptyId;
+      step.runId = launched.runId;
+    } else step.result = waitsTurn(launched.behind);
+  }
+
+  private async carryOutTask(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    if (!this.tasks) throw new Error("That task no longer exists.");
+    const action = normalizeTaskStepAction(step.action, Boolean(step.target), Boolean(step.workspaceId || step.agentId || step.name || step.prompt));
+    if (!action) throw new Error("Unsupported action.");
+
+    if (action === "handoff") {
+      if (!step.agentId || step.agentId.startsWith(PLANNED_PREFIX)) throw new Error("Assign an agent first.");
+      const created = this.tasks.handOff(step.target, step.agentId);
+      step.target = created.id;
+      step.result = `Handed off as task "${created.title}".`;
+      substitutePlannedId(turn.steps, plannedId(step.id), created.id);
+      return;
+    }
+    if (action === "create" || action === "create-run") {
+      if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+      if (step.agentId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const workspace = step.workspaceId ? this.core.workspaceById(step.workspaceId) : null;
+      const opts = parseOptions(step.options);
+      const explicitIsolated = opts.bool("isolated");
+      // In its own copy where the board would make one: a git workspace with a commit to copy.
+      const isolated =
+        explicitIsolated !== null
+          ? explicitIsolated
+          : Boolean(workspace) && (await isGitRepo(workspace?.path ?? "").catch(() => false)) && (await hasCommit(workspace?.path ?? ""));
+      const shareCheckout = opts.bool("shareCheckout") ?? false;
+      const saved = this.tasks.saveTask({
+        title: step.name?.trim() || branchFromPrompt(step.prompt),
+        body: step.prompt,
+        agentId: step.agentId || null,
+        workspaceId: step.workspaceId || null,
+        isolated,
+        shareCheckout,
+      });
+      step.target = saved.id;
+      substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
+      if (action === "create") {
+        step.result = `Added task "${saved.title}".`;
+        return;
+      }
+      const launched = await this.tasks.executeTask(saved.id, START_SIZE);
+      if ("ptyId" in launched) {
+        step.ptyId = launched.ptyId;
+        step.runId = launched.runId;
+        this.messages.adoptStarted(saved.id, launched.ptyId);
+      } else step.result = waitsTurn(launched.behind);
+      return;
+    }
+
+    if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+    if (action === "edit") {
+      const existing = this.core.store.getTask(step.target);
+      if (!existing) throw new Error("That task no longer exists.");
+      if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+      if (step.agentId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const opts = parseOptions(step.options);
+      const clearAgent = isClearWord(opts.str("agent"));
+      const clearWorkspace = isClearWord(opts.str("workspace"));
+      const saved = this.tasks.saveTask({
+        id: existing.id,
+        title: step.name?.trim() || existing.title,
+        body: step.prompt.trim() ? step.prompt : existing.body,
+        agentId: clearAgent ? null : step.agentId ? step.agentId : existing.agentId,
+        workspaceId: clearWorkspace ? null : step.workspaceId ? step.workspaceId : existing.workspaceId,
+        isolated: opts.bool("isolated") ?? existing.isolated,
+        shareCheckout: opts.bool("shareCheckout") ?? existing.shareCheckout,
+      });
+      if (step.status?.trim()) {
+        const nextStatus = parseTaskStatus(step.status);
+        if (nextStatus && nextStatus !== saved.status) this.tasks.setTaskStatus(existing.id, nextStatus);
+      }
+      step.result = `Updated task "${saved.title}".`;
+      return;
+    }
+    if (action === "delete") {
+      const deleted = await this.tasks.deleteTask(step.target);
+      step.undo = deleted.undo;
+      step.result = "Deleted task.";
+      return;
+    }
+    if (action === "continue") {
+      const launched = await this.tasks.continueTask(step.target, START_SIZE, step.prompt.trim() || null);
+      step.ptyId = launched.ptyId;
+      step.runId = launched.runId;
+      return;
+    }
+    if (action === "stop") {
+      await this.tasks.stopTask(step.target);
+      step.result = "Stopped task.";
+      return;
+    }
+    if (action === "status") {
+      const nextStatus = parseTaskStatus(step.status || step.prompt);
+      if (!nextStatus) throw new Error("Choose todo, review, or done.");
+      this.tasks.setTaskStatus(step.target, nextStatus);
+      step.result = `Moved task to ${nextStatus}.`;
+      return;
+    }
+    if (action === "cancel-wait") {
+      this.tasks.cancelWait(step.target);
+      step.result = "Cancelled task wait.";
+      return;
+    }
+    if (action === "apply") {
+      const result = await this.tasks.applyCopy(step.target);
+      step.result = result.conflicts.length
+        ? `Applied with conflicts in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}.`
+        : "Applied task changes and marked done.";
+      return;
+    }
+    if (action === "discard") {
+      await this.tasks.discardCopy(step.target);
+      step.result = "Discarded task copy.";
+      return;
+    }
+    // run or run-now
+    const launched = await this.tasks.executeTask(step.target, START_SIZE, false, action === "run-now");
+    if ("ptyId" in launched) {
+      step.ptyId = launched.ptyId;
+      step.runId = launched.runId;
+      this.messages.adoptStarted(step.target, launched.ptyId);
+    } else step.result = waitsTurn(launched.behind);
+  }
+
+  private async carryOutChat(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+    if (!this.chats) throw new Error("That chat no longer exists.");
+    const action = normalizeChatAction(step.action, Boolean(step.target), Boolean(step.prompt.trim()));
+    if (!action) throw new Error("Unsupported action.");
+
+    if (action === "create") {
+      if (step.agentId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      const created = this.chats.createChat({
+        ...(step.agentId ? { agentId: step.agentId } : { engine: step.engineId }),
+        ...(step.prompt.trim() ? { prompt: step.prompt.trim() } : {}),
+      });
+      if (step.name?.trim()) this.chats.renameChat(created.id, step.name.trim());
+      step.target = created.id;
+      substitutePlannedId(turn.steps, plannedId(step.id), created.id);
+      if (step.prompt.trim()) {
+        const sent = await this.chats.sendChat(created.id, step.prompt.trim(), START_SIZE);
+        step.ptyId = sent.ptyId;
+        step.runId = sent.runId;
+        if (!sent.started) this.messages.onHumanInput(sent.ptyId, step.prompt.trim());
+      } else {
+        step.result = `Created chat "${step.name?.trim() || created.title}".`;
+      }
+      return;
+    }
+
+    if (action === "send") {
+      if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      if (step.agentId?.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+      let chatId = step.target;
+      if (!chatId && step.agentId) {
+        const existing = this.chats.listChats({ agentId: step.agentId })[0];
+        chatId = existing ? existing.id : this.chats.createChat({ agentId: step.agentId }).id;
+        step.target = chatId;
+      }
+      if (!chatId) throw new Error("That chat no longer exists.");
+      const sent = await this.chats.sendChat(chatId, step.prompt.trim(), START_SIZE);
+      step.ptyId = sent.ptyId;
+      step.runId = sent.runId;
+      if (!sent.started) this.messages.onHumanInput(sent.ptyId, step.prompt.trim());
+      if (sent.note) step.result = sent.note;
+      return;
+    }
+
+    if (step.target.startsWith(PLANNED_PREFIX)) throw new Error("That earlier step did not finish creating what this step needs.");
+    if (action === "continue") {
+      const sent = await this.chats.continueChat(step.target, START_SIZE);
+      step.ptyId = sent.ptyId;
+      step.runId = sent.runId;
+      return;
+    }
+    if (action === "stop") {
+      await this.chats.stopChat(step.target);
+      step.result = "Stopped chat.";
+      return;
+    }
+    if (action === "rename") {
+      const nextTitle = (step.name || step.prompt || "").trim();
+      if (!nextTitle) throw new Error("Give the chat a title.");
+      this.chats.renameChat(step.target, nextTitle);
+      step.result = `Renamed chat to "${nextTitle}".`;
+      return;
+    }
+    if (action === "set-engine") {
+      this.chats.setChatEngine(step.target, step.engineId);
+      step.result = `Switched chat CLI to ${step.engineId}.`;
+      return;
+    }
+    if (action === "delete") {
+      const deleted = await this.chats.deleteChat(step.target);
+      step.undo = deleted.undo;
+      step.result = "Deleted chat.";
+      return;
+    }
+    throw new Error("Unsupported action.");
+  }
+
+  private async carryOutRun(step: OrchestratorStep): Promise<void> {
+    const action = normalizeRunAction(step.action);
+    if (!action) throw new Error("Unsupported action.");
+    if (action === "mark-all-reviewed") {
+      this.runs?.markAllOpened();
+      step.result = "Marked all runs reviewed.";
+      return;
+    }
+    if (action === "tidy") {
+      if (!this.runs) throw new Error("That run no longer exists.");
+      const upkeep = await this.runs.maintainRuns();
+      const mb = (upkeep.freed / 1_000_000).toFixed(1);
+      step.result = `Compressed ${upkeep.compressed}, removed ${upkeep.removed}, freed ${mb} MB.`;
+      return;
+    }
+    if (action === "continue") {
+      if (!this.runs) throw new Error("That run no longer exists.");
+      const launched = await this.runs.continueRun(step.target, START_SIZE, step.prompt.trim() || null);
+      step.ptyId = launched.ptyId;
+      step.runId = launched.runId;
+      return;
+    }
+    if (action === "stop") {
+      await this.core.stopRun(step.target);
+      step.result = "Stopped run.";
+      return;
+    }
+    if (action === "mark-reviewed" || action === "mark-unreviewed") {
+      this.runs?.markRunOpened(step.target, action === "mark-reviewed");
+      step.result = action === "mark-reviewed" ? "Marked run reviewed." : "Marked run unreviewed.";
+      return;
+    }
+    if (action === "handoff") {
+      if (!this.tasks) throw new Error("That task no longer exists.");
+      if (!step.agentId || step.agentId.startsWith(PLANNED_PREFIX)) throw new Error("Assign an agent first.");
+      const created = this.tasks.handOff(step.target, step.agentId);
+      step.result = `Handed off as task "${created.title}".`;
+      return;
+    }
+  }
+
+  private async carryOutTalk(step: OrchestratorStep): Promise<void> {
+    const action = normalizeTalkAction(step.action);
+    if (!action) throw new Error("Unsupported action.");
+    if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
+    if (action === "review") {
+      const reviewer = step.agents?.[0];
+      if (!reviewer || !this.core.isLive(reviewer)) throw new Error("That CLI isn't running any more.");
+      const res = await this.messages.startReview(step.target, reviewer);
+      step.result = res.changes ? "Started review." : "Review will start once the author makes changes.";
+      return;
+    }
+    if (action === "send-draft") {
+      const toPty = step.agents?.[0];
+      if (!toPty || !this.core.isLive(toPty)) throw new Error("That CLI isn't running any more.");
+      const what = step.prompt === "changes" ? "changes" : "reply";
+      const res = await this.messages.sendDraft({ fromPty: step.target, toPty, what });
+      step.result = res.sent ? `Placed ${what} draft in target terminal.` : `Nothing to send (${what} was empty).`;
+      return;
+    }
+    if (action === "stop") {
+      this.messages.stop(step.target);
+      step.result = "Paused agent-to-agent messages for that terminal.";
+      return;
+    }
+    if (action === "start-tasks") {
+      const taskIds = step.places?.length ? step.places : null;
+      const res = await this.messages.startHeld(step.target, taskIds);
+      const detail = res.failed.join("; ");
+      if (res.failed.length && !res.started) throw new Error(detail);
+      step.result = res.failed.length ? `Started ${res.started}; ${res.failed.length} failed (${res.failed[0]}).` : `Started ${res.started} held task(s).`;
+      return;
+    }
   }
 
   private watchFirstPrompt(ptyId: string): void {
@@ -1319,6 +1991,13 @@ export class OrchestratorDesk {
     if (action.op === "mark-reviewed") {
       this.runs?.markAllOpened();
       step.result = "Marked all runs reviewed.";
+      return;
+    }
+    if (action.op === "undo") {
+      const token = action.token || this.core.latestUndoToken();
+      if (!token) throw new Error("Nothing left to undo.");
+      this.core.undoDelete(token);
+      step.result = "Restored what was just deleted.";
       return;
     }
     if (action.op === "mkdir") {
@@ -1389,6 +2068,8 @@ export class OrchestratorDesk {
         effort: step.effort,
         folder: step.folder,
         branch: step.branch,
+        name: step.name,
+        options: step.options,
       },
       context,
     );
@@ -1438,6 +2119,12 @@ export class OrchestratorDesk {
       return;
     }
 
+    if (action.op === "voice-stop-download") {
+      this.core.options.host.voiceStopDownload?.();
+      step.result = "Stopped voice download.";
+      return;
+    }
+
     if (action.op === "voice-speaker") {
       const currentVoice = this.core.getSettings().voice;
       const nextSpeaker = action.speaker
@@ -1457,6 +2144,50 @@ export class OrchestratorDesk {
       const currentVoice = this.core.getSettings().voice;
       this.core.saveSettings({ voice: { ...currentVoice, ...action.patch } });
       step.result = `Updated ${action.summary}.`;
+      return;
+    }
+
+    if (action.op === "rail") {
+      const currentRail = this.core.getSettings().rail;
+      let order = [...currentRail.order];
+      let hidden = [...currentRail.hidden];
+      if (action.mode === "hide") {
+        hidden = [...new Set([...hidden, ...action.views.filter((v) => v !== "code")])];
+      } else if (action.mode === "show") {
+        const showSet = new Set(action.views);
+        hidden = hidden.filter((v) => !showSet.has(v));
+      } else {
+        const mentioned = new Set(action.views);
+        order = [...action.views, ...order.filter((v) => !mentioned.has(v))];
+      }
+      this.core.saveSettings({ rail: { order, hidden } });
+      step.result = `Updated ${action.summary}.`;
+      return;
+    }
+
+    if (action.op === "engines-recheck") {
+      const engines = this.core.listEngines();
+      this.core.emit("engines", "agents", "routines", "tasks");
+      const available = engines.filter((e) => e.available).map((e) => e.label);
+      step.result = `Checked coding CLIs: ${available.length} available (${available.join(", ") || "none"}).`;
+      return;
+    }
+
+    if (action.op === "engine-save") {
+      const rows = this.core.store.readEngineRows();
+      const idx = rows.findIndex((r) => r.id === action.row.id);
+      const next = idx >= 0 ? rows.map((r, i) => (i === idx ? action.row : r)) : [...rows, action.row];
+      this.core.saveEngines(next);
+      step.result = `Saved coding CLI ${action.row.label} (${action.row.id}).`;
+      return;
+    }
+
+    if (action.op === "engine-remove") {
+      const rows = this.core.store.readEngineRows();
+      const next = rows.filter((r) => r.id !== action.id);
+      if (next.length === rows.length) throw new Error(`There is no engine called "${action.id}".`);
+      this.core.saveEngines(next);
+      step.result = `Removed coding CLI ${action.id}.`;
       return;
     }
 
@@ -1484,13 +2215,30 @@ export class OrchestratorDesk {
   }
 
   /**
-   * Read-only inspection of quotas/usage, settings/voice, a copy's diff, a running CLI's screen and
-   * latest reply, or a workspace's git state and files, so Viby can diagnose, review and brainstorm with real facts.
+   * Read-only inspection of quotas/usage, settings/voice, storage, saved entities (agents, skills,
+   * routines, tasks, chats, runs), a copy's diff, a running CLI's screen and latest reply, or a
+   * workspace's git state, branches and files, so Viby can diagnose, review and brainstorm with real facts.
    */
   async inspect(step: OrchestratorStep): Promise<{ summary: string; details: string }> {
     if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target)) {
       const details = (await this.core.options.host.quotas?.()) ?? "Plan limits and token usage are not enabled in Settings.";
       return { summary: oneLine(details, 140), details };
+    }
+    if (inspectsStorage(step.prompt) || inspectsStorage(step.target) || step.action === "storage") {
+      const summary = this.runs?.storageSummary();
+      if (!summary) return { summary: "Storage summary unavailable.", details: "Runs desk is not configured." };
+      const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+      const details = [
+        `VibeForge data root: ${tildify(summary.dataRoot)}`,
+        `- Runs (${summary.runCount}): ${mb(summary.runs)}`,
+        `- Voice models & voices: ${mb(summary.voice)}`,
+        `- Logs: ${mb(summary.logs)}`,
+        `- Scratch chats: ${mb(summary.scratch)}`,
+      ].join("\n");
+      return {
+        summary: `${summary.runCount} runs (${mb(summary.runs)}) · voice ${mb(summary.voice)} · scratch ${mb(summary.scratch)}`,
+        details,
+      };
     }
     if (inspectsSettings(step.prompt) || inspectsSettings(step.target)) {
       const query = `${step.prompt} ${step.target}`;
@@ -1512,6 +2260,12 @@ export class OrchestratorDesk {
         details: lines.join("\n"),
       };
     }
+
+    if (step.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(step.action)) {
+      const inspected = await this.inspectEntity(step.action as "agent" | "skill" | "routine" | "task" | "chat" | "run", step.target);
+      if (inspected) return inspected;
+    }
+
     const copy = step.target ? this.copies.list().find((item) => item.id === step.target) : undefined;
     if (copy) {
       const diff = await this.copies.diff(copy.id).catch(() => "");
@@ -1539,6 +2293,12 @@ export class OrchestratorDesk {
       const summary = waiting ? `Waiting on prompt: ${waiting}` : answer.reply ? oneLine(answer.reply, 120) : oneLine(tailScreen || "Idle.", 120);
       return { summary, details: parts.join("\n\n") };
     }
+    if (step.target) {
+      for (const kind of ["agent", "skill", "routine", "task", "chat", "run"] as const) {
+        const inspected = await this.inspectEntity(kind, step.target);
+        if (inspected) return inspected;
+      }
+    }
     const ws = step.workspaceId ? this.core.workspaceById(step.workspaceId) : null;
     if (ws && isDirectory(ws.path)) {
       const [branchOut, statusOut, logOut, statOut] = await Promise.all([
@@ -1549,6 +2309,17 @@ export class OrchestratorDesk {
       ]);
       const parts: string[] = [`Workspace "${ws.name}" (${tildify(ws.path)})`];
       if (branchOut.code === 0 && branchOut.stdout.trim()) parts.push(`Branch: ${branchOut.stdout.trim()}`);
+      if (/\bbranch(?:es)?\b/i.test(step.prompt)) {
+        const list = await this.workspaces.listBranches(ws.id).catch(() => null);
+        if (list?.branches.length) {
+          parts.push(
+            `Local branches:\n${list.branches
+              .slice(0, 40)
+              .map((b) => `- ${b.name}${b.current ? " (current)" : ""}${b.checkout ? ` [checked out: ${tildify(b.checkout)}]` : ""} (${b.commit})`)
+              .join("\n")}`,
+          );
+        }
+      }
       if (statusOut.code === 0) parts.push(`Git status:\n${statusOut.stdout.trim() || "(clean)"}`);
       if (statOut.code === 0 && statOut.stdout.trim()) parts.push(`Uncommitted diff stat:\n${statOut.stdout.trim()}`);
       if (/\bdiff\b/i.test(step.prompt)) {
@@ -1562,7 +2333,7 @@ export class OrchestratorDesk {
         .catch(() => [] as string[]);
       if (entries.length) parts.push(`Top-level files: ${entries.join(", ")}`);
 
-      const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
+      const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
       if (wantedFile) {
         const candidate = path.resolve(ws.path, wantedFile);
         if (isInside(ws.path, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
@@ -1573,7 +2344,116 @@ export class OrchestratorDesk {
       const cleanStatus = statusOut.code === 0 && statusOut.stdout.trim() ? `${statusOut.stdout.trim().split("\n").length} modified/untracked` : "clean";
       return { summary: `${ws.name}: ${branchOut.stdout.trim() || "folder"} (${cleanStatus})`, details: parts.join("\n\n") };
     }
-    return { summary: "Nothing found to inspect.", details: "No matching workspace, running CLI, or copy was found." };
+    return { summary: "Nothing found to inspect.", details: "No matching workspace, running CLI, entity, or copy was found." };
+  }
+
+  private async inspectEntity(
+    kind: "agent" | "skill" | "routine" | "task" | "chat" | "run",
+    id: string,
+  ): Promise<{ summary: string; details: string } | null> {
+    if (!id) return null;
+    if (kind === "agent") {
+      const agent = this.core.store.getAgent(id);
+      if (!agent) return null;
+      const memory = this.library?.readMemory(agent.id) ?? this.core.store.readMemory(agent.id);
+      const parts = [
+        `Agent "${agent.name}" (id: ${agent.id})`,
+        `Engine: ${agent.engine} · allowRoutines: ${agent.allowRoutines ? "yes" : "no"}${agent.tier ? ` · tier: ${agent.tier}` : ""}`,
+        ...(agent.goodAt ? [`Good at: ${agent.goodAt}`] : []),
+        `Allowed folders:\n${agent.places.map((p) => `- ${tildify(p)}`).join("\n") || "(none)"}`,
+        `Skills: ${agent.skills.join(", ") || "(none)"}`,
+        `Brief:\n${agent.brief.slice(0, 4000)}`,
+        `Memory (memory.md):\n${memory.slice(0, 4000) || "(empty)"}`,
+      ];
+      return {
+        summary: `Agent ${agent.name} (${agent.engine}, ${agent.places.length} folder${agent.places.length === 1 ? "" : "s"}, ${agent.skills.length} skill${agent.skills.length === 1 ? "" : "s"})`,
+        details: parts.join("\n\n"),
+      };
+    }
+    if (kind === "skill") {
+      const skill = this.core.store.getSkill(id);
+      if (!skill) return null;
+      const agents = this.core.store.listAgents().filter((a) => a.skills.includes(skill.id)).map((a) => `${a.name} (${a.id})`);
+      const parts = [
+        `Skill "${skill.name}" (id: ${skill.id})`,
+        ...(skill.description ? [`Description: ${skill.description}`] : []),
+        `Attached agents: ${agents.join(", ") || "(none)"}`,
+        `Body (SKILL.md):\n${skill.body.slice(0, 6000) || "(empty)"}`,
+      ];
+      return {
+        summary: `Skill ${skill.name}${skill.description ? `: ${oneLine(skill.description, 80)}` : ""}`,
+        details: parts.join("\n\n"),
+      };
+    }
+    if (kind === "routine") {
+      const view = this.routines?.listRoutines().find((r) => r.id === id);
+      const routine = view ?? this.core.store.getRoutine(id);
+      if (!routine) return null;
+      const sched = view ? view.description : formatScheduleBrief(routine.schedule);
+      const parts = [
+        `Routine "${routine.name}" (id: ${routine.id})`,
+        `Agent: ${view?.agentName ?? routine.agentId} · Schedule: ${sched} · ${routine.enabled ? "enabled" : "paused"} · notify: ${routine.notify ? "on" : "off"} · shareCheckout: ${routine.shareCheckout ? "yes" : "no"}`,
+        ...(view?.nextFires.length ? [`Next runs: ${view.nextFires.join(", ")}`] : []),
+        ...(view?.issues.length ? [`Issues: ${view.issues.join("; ")}`] : []),
+        ...(view?.failStreak ? [`Fail streak: ${view.failStreak}`] : []),
+        ...(view?.lastRun ? [`Last run: ${view.lastRun.status} (${view.lastRun.startedAt})${view.lastRun.changes ? ` — ${view.lastRun.changes}` : ""}`] : []),
+        `Prompt:\n${routine.prompt.slice(0, 4000)}`,
+      ];
+      return {
+        summary: `Routine ${routine.name} (${sched}, ${routine.enabled ? "enabled" : "paused"})`,
+        details: parts.join("\n\n"),
+      };
+    }
+    if (kind === "task") {
+      const view = this.tasks?.listTasks().find((t) => t.id === id);
+      const task = view ?? this.core.store.getTask(id);
+      if (!task) return null;
+      const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
+      const ws = task.workspaceId ? this.core.workspaceById(task.workspaceId) : null;
+      const parts = [
+        `Task "${task.title}" (id: ${task.id})`,
+        `Status: ${task.status} · Agent: ${agent?.name ?? task.agentId ?? "none"} · Workspace: ${ws?.name ?? task.workspaceId ?? "none"} · isolated: ${task.isolated ? "yes" : "no"}${task.copy ? ` · copy branch: ${task.copy.branch}` : ""}`,
+        ...(view?.blocker ? [`Blocker: ${view.blocker}`] : []),
+        ...(view?.waiting ? ["Waiting for workspace folder to clear."] : []),
+        ...(view?.lastRun ? [`Last run: ${view.lastRun.status} (${view.lastRun.startedAt})${view.lastRun.changes ? ` — ${view.lastRun.changes}` : ""}`] : []),
+        `Instructions:\n${task.body.slice(0, 4000) || "(empty)"}`,
+      ];
+      return {
+        summary: `Task "${task.title}" (${task.status}${agent ? `, ${agent.name}` : ""}${ws ? `, ${ws.name}` : ""})`,
+        details: parts.join("\n\n"),
+      };
+    }
+    if (kind === "chat") {
+      const view = this.chats?.listChats().find((c) => c.id === id);
+      const chat = view ?? this.core.store.getChat(id);
+      if (!chat) return null;
+      const agent = chat.agentId ? this.core.store.getAgent(chat.agentId) : null;
+      const parts = [
+        `Chat "${chat.title}" (id: ${chat.id})`,
+        `Type: ${agent ? `Agent chat (${agent.name})` : `Plain chat (${chat.engine})`} · Folder: ${tildify(chat.cwd)} · Live: ${view?.live ? "yes" : "no"} · Runs: ${chat.runIds.length}`,
+        ...(view?.lastRun ? [`Last run: ${view.lastRun.status} (${view.lastRun.startedAt})${view.lastRun.changes ? ` — ${view.lastRun.changes}` : ""}`] : []),
+      ];
+      return {
+        summary: `Chat "${chat.title}" (${agent ? agent.name : chat.engine}${view?.live ? ", live" : ""})`,
+        details: parts.join("\n\n"),
+      };
+    }
+    // run
+    const bundle = this.runs ? await this.runs.loadRun(id).catch(() => null) : null;
+    if (!bundle) return null;
+    const { run, files } = bundle;
+    const parts = [
+      `Run "${run.title}" (id: ${run.id})`,
+      `Status: ${run.status} · Origin: ${run.origin} · Engine: ${run.engine} · Folder: ${tildify(run.cwd)} · Reviewed: ${run.openedAt ? "yes" : "no"}${run.changes ? ` · Changes: ${run.changes}` : ""}`,
+      ...(run.error ? [`Error: ${run.error}`] : []),
+      ...(run.prompt ? [`Prompt:\n${run.prompt.slice(0, 2000)}`] : []),
+      ...(files.git ? [`Git summary:\n${files.git.slice(0, 2000)}`] : []),
+      ...(files.transcript ? [`Transcript tail:\n${files.transcript.slice(-4000)}`] : []),
+    ];
+    return {
+      summary: `Run "${run.title}" (${run.status}${run.changes ? `, ${run.changes}` : ""})`,
+      details: parts.join("\n\n"),
+    };
   }
 
   /**
@@ -1923,4 +2803,75 @@ export function agyModels(text: string): string[] {
 
 function lastLines(text: string): string {
   return text.trim().split("\n").filter(Boolean).slice(-4).join("\n").slice(0, 600);
+}
+
+/** Replace a planned placeholder id (`new:<stepId>`) across all later steps in the same turn. */
+function substitutePlannedId(
+  steps: OrchestratorStep[] | undefined,
+  placeholder: string,
+  realId: string,
+  extraPath?: string,
+): void {
+  if (!steps) return;
+  for (const later of steps) {
+    if (later.workspaceId === placeholder) later.workspaceId = realId;
+    if (later.target === placeholder) later.target = realId;
+    if (later.agentId === placeholder) later.agentId = realId;
+    if (later.taskId === placeholder) later.taskId = realId;
+    if (later.places?.includes(placeholder)) {
+      later.places = later.places.map((p) => (p === placeholder ? (extraPath ?? realId) : p));
+    }
+    if (later.skills?.includes(placeholder)) {
+      later.skills = later.skills.map((s) => (s === placeholder ? realId : s));
+    }
+    if (later.agents?.includes(placeholder)) {
+      later.agents = later.agents.map((a) => (a === placeholder ? realId : a));
+    }
+    if (later.route) {
+      let changed = false;
+      const nextRoute: Record<string, string> = {};
+      for (const [key, val] of Object.entries(later.route)) {
+        if (val === placeholder) {
+          nextRoute[key] = realId;
+          changed = true;
+        } else {
+          nextRoute[key] = val;
+        }
+      }
+      if (changed) later.route = nextRoute;
+    }
+  }
+}
+
+/** Compact fingerprint of saved library items so a resumed planner notices changes between turns. */
+function libraryFingerprint(context: PlanContext): string {
+  return JSON.stringify([
+    (context.agents ?? []).map((a) => `${a.id}:${a.name}:${a.engine}:${(a.places ?? []).length}:${(a.skills ?? []).join(",")}:${a.allowRoutines ?? true}`),
+    (context.skills ?? []).map((s) => `${s.id}:${s.name}:${(s.agents ?? []).join(",")}`),
+    (context.routines ?? []).map((r) => `${r.id}:${r.name}:${r.schedule}:${r.enabled}:${r.agentId ?? ""}`),
+    (context.tasks ?? []).map((t) => `${t.id}:${t.title}:${t.status}:${t.agentId ?? ""}:${t.workspaceId ?? ""}:${t.hasCopy ?? false}`),
+    (context.chats ?? []).map((c) => `${c.id}:${c.title}:${c.engine}:${c.agentId ?? ""}`),
+  ]);
+}
+
+function formatLibraryUpdate(context: PlanContext): string {
+  const lines: string[] = [];
+  lines.push(
+    context.agents?.length
+      ? `- Agents: ${context.agents.map((a) => `${a.id} ("${a.name}", ${a.engine})`).join(", ")}`
+      : "- Agents: none",
+  );
+  if (context.skills?.length) {
+    lines.push(`- Skills: ${context.skills.map((s) => `${s.id} ("${s.name}")`).join(", ")}`);
+  }
+  if (context.routines?.length) {
+    lines.push(`- Routines: ${context.routines.map((r) => `${r.id} ("${r.name}", ${r.schedule}, ${r.enabled ? "on" : "paused"})`).join(", ")}`);
+  }
+  if (context.tasks?.length) {
+    lines.push(`- Tasks: ${context.tasks.map((t) => `${t.id} ("${t.title}", ${t.status})`).join(", ")}`);
+  }
+  if (context.chats?.length) {
+    lines.push(`- Chats: ${context.chats.map((c) => `${c.id} ("${c.title}")`).join(", ")}`);
+  }
+  return `(Updated library state:\n${lines.join("\n")})`;
 }

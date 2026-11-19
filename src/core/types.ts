@@ -23,8 +23,6 @@ export interface Agent {
   places: string[];
   skills: string[];
   allowRoutines: boolean;
-  /** The Piper voice (.onnx) this agent's answers are read in; empty uses the one in Settings. */
-  voice: string;
   /** One line for a lead deciding whom to hand work to: "small, well-defined edits", "icons and images". */
   goodAt: string;
   tier: AgentTier;
@@ -241,9 +239,9 @@ export interface VoiceSettings {
   model: string;
   /** "auto" lets whisper tell; otherwise a code such as "de". English-only models always hear English. */
   language: string;
-  /** Read the first paragraph of an answer to a message that was sent by voice. */
+  /** Speak Viby's replies aloud on a call. Turning this off silences Viby. */
   talkBack: boolean;
-  /** The Piper voice (.onnx) answers are read in unless the agent has its own; empty picks one. */
+  /** The Piper voice (.onnx) Viby speaks in; empty picks one in the app's language. */
   speaker: string;
   /** Who Super+Alt+V talks to. Empty: the agent you last dictated to. */
   agent: string;

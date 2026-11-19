@@ -58,14 +58,12 @@ function setUp() {
       ended.push([ptyId, code, signal]);
     },
   } as never;
-  const exited: string[] = [];
   const life = new HostLifecycle(ctx, {
     voice: { controlSocket: "/run/vf.sock" },
-    talk: { exited: async (ptyId: string) => void exited.push(ptyId) },
   });
   life.wire();
   const lines = () => log.tail(50).map((line) => line.replace(/^\S+ /, ""));
-  return { supervisor, ctx, life, sent, ended, exited, lines };
+  return { supervisor, ctx, life, sent, ended, lines };
 }
 
 describe("counting terminal host crashes", () => {
@@ -102,8 +100,8 @@ describe("the terminal host's lifecycle", () => {
     expect(life.error).toBeNull();
   });
 
-  it("logs a terminal's end and tells the page, the core and the spoken-answer wait", async () => {
-    const { supervisor, sent, ended, exited, lines } = setUp();
+  it("logs a terminal's end and tells the page and the core", async () => {
+    const { supervisor, sent, ended, lines } = setUp();
     for (const handler of supervisor.onExit) handler({ ptyId: "p1", exitCode: 0, signal: null });
     for (const handler of supervisor.onExit) handler({ ptyId: "p2", exitCode: null, signal: 9 });
     await new Promise((resolve) => setImmediate(resolve));
@@ -113,7 +111,6 @@ describe("the terminal host's lifecycle", () => {
       ["p1", 0, null],
       ["p2", null, 9],
     ]);
-    expect(exited).toEqual(["p1", "p2"]);
   });
 
   it("records every terminal as ended when the host crashes, then brings it back a second later", async () => {
@@ -137,14 +134,6 @@ describe("the terminal host's lifecycle", () => {
     expect(supervisor.starts).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1000);
     expect(supervisor.starts).toHaveLength(1);
-  });
-
-  it("ends a spoken-answer wait on a terminal that died with the host, as on any exit", async () => {
-    vi.useFakeTimers();
-    const { supervisor, exited } = setUp();
-    supervisor.crash("The terminal host stopped (SIGKILL).");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(exited).toEqual(["p1", "p2"]);
   });
 
   it("leaves the host down once a quit has begun, even one that starts within that second", async () => {

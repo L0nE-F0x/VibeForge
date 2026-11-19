@@ -9,15 +9,28 @@
 import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
-import { cleanModel, effortLevels } from "../shared/launch-options.js";
+import { agyModelEffort, cleanModel, effortLevels } from "../shared/launch-options.js";
 import {
   brainKind,
   formatSettingsRules,
   inspectsQuotas,
   inspectsSettings,
+  inspectsStorage,
+  isDestructiveStepAction,
   isSafeShellCommand,
   keySequenceFor,
   NEEDS_GO,
+  normalizeAgentAction,
+  normalizeChatAction,
+  normalizeRoutineStepAction,
+  normalizeRunAction,
+  normalizeSkillAction,
+  normalizeTalkAction,
+  normalizeTaskStepAction,
+  normalizeWorkspaceAction,
+  parseOptions,
+  parseRoutineSchedule,
+  parseTaskStatus,
   parseWorkbenchAction,
   plannedId,
   resolveSettingsStep,
@@ -30,7 +43,31 @@ import {
 
 export * from "../shared/orchestrator.js";
 
-const STEP_FIELDS = ["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace", "after"] as const;
+const STEP_FIELDS = [
+  "kind",
+  "engine",
+  "workspace",
+  "branch",
+  "prompt",
+  "target",
+  "folder",
+  "git",
+  "model",
+  "effort",
+  "inPlace",
+  "after",
+  "action",
+  "name",
+  "description",
+  "schedule",
+  "agent",
+  "task",
+  "status",
+  "places",
+  "skills",
+  "agents",
+  "options",
+] as const;
 
 export const PLAN_SCHEMA = {
   type: "object",
@@ -56,6 +93,17 @@ export const PLAN_SCHEMA = {
           effort: { type: "string" },
           inPlace: { type: "boolean" },
           after: { type: "boolean" },
+          action: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          schedule: { type: "string" },
+          agent: { type: "string" },
+          task: { type: "string" },
+          status: { type: "string" },
+          places: { type: "array", items: { type: "string" } },
+          skills: { type: "array", items: { type: "string" } },
+          agents: { type: "array", items: { type: "string" } },
+          options: { type: "string" },
         },
         required: ["kind"],
       },
@@ -101,7 +149,8 @@ export interface BrainOptions {
  * - Codex 0.16x: `exec --json`, `--output-schema <file>`, a read-only sandbox, the rules as developer
  *   instructions; it names its own thread, which `exec resume <id>` picks up. Low reasoning effort by default.
  * - Antigravity CLI: `-p` with the rules in the message (it has no option for them), `--json-schema`,
- *   plan mode, `--conversation <id>` from its last answer. Low effort by default: a first turn at its default took 80 s.
+ *   plan mode, `--conversation <id>` from its last answer. Low effort by default (a first turn at its default
+ *   took 80 s), unless a model is named: its ids carry their own effort (agyModelEffort).
  */
 export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   const kind = brainKind(row);
@@ -177,6 +226,8 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
   }
   if (kind === "agy") {
     const resume = opts.resume && opts.sessionId;
+    // Its model ids carry their own effort, and it refuses an --effort that says otherwise.
+    const picked = agyModelEffort(model, effort, effort === requestedEffort);
     return [
       ...row.args,
       "-p",
@@ -187,9 +238,8 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       JSON.stringify(STRICT_PLAN_SCHEMA),
       "--mode",
       "plan",
-      "--effort",
-      effort,
-      ...(model ? ["--model", model] : []),
+      ...(picked.effort ? ["--effort", picked.effort] : []),
+      ...(picked.model ? ["--model", picked.model] : []),
       ...(resume ? ["--conversation", opts.sessionId] : []),
     ];
   }
@@ -231,55 +281,108 @@ export function orchestratorRules(context: PlanContext): string {
     : "- none";
   const copies = context.copies?.length ? context.copies.map((item) => `- ${item.id}: ${item.name} (branch ${item.branch}), from ${item.workspace}`).join("\n") : "- none";
   const agents = context.agents?.length
-    ? context.agents.map((item) => `- ${item.id}: ${item.name} (CLI: ${item.engine}${item.goodAt ? `; ${item.goodAt}` : ""}${item.places?.length ? `; folders: ${item.places.join(", ")}` : ""})`).join("\n")
+    ? context.agents
+        .map((item) => {
+          const bits = [
+            `CLI: ${item.engine}`,
+            ...(item.goodAt ? [item.goodAt] : []),
+            ...(item.places?.length ? [`folders: ${item.places.join(", ")}`] : []),
+            ...(item.skills?.length ? [`skills: ${item.skills.join(", ")}`] : []),
+            ...(item.allowRoutines === false ? ["routines: off"] : []),
+            ...(item.tier ? [`tier: ${item.tier}`] : []),
+          ];
+          return `- ${item.id}: ${item.name} (${bits.join("; ")})`;
+        })
+        .join("\n")
+    : "";
+  const skills = context.skills?.length
+    ? context.skills
+        .map((item) => {
+          const bits = [
+            ...(item.description ? [item.description] : []),
+            ...(item.agents?.length ? [`agents: ${item.agents.join(", ")}`] : []),
+          ];
+          return `- ${item.id}: ${item.name}${bits.length ? ` (${bits.join("; ")})` : ""}`;
+        })
+        .join("\n")
     : "";
   const tasks = context.tasks?.length
-    ? context.tasks.map((item) => `- ${item.id}: ${item.title} [${item.status}]${item.workspace ? ` in ${item.workspace}` : ""}${item.agent ? ` (${item.agent})` : ""}`).join("\n")
+    ? context.tasks
+        .map(
+          (item) =>
+            `- ${item.id}: ${item.title} [${item.status}]${item.workspace ? ` in ${item.workspace}` : ""}${item.agent ? ` (${item.agent})` : ""}${item.hasCopy ? " [has copy]" : ""}${item.waiting ? " [waiting]" : ""}`,
+        )
+        .join("\n")
     : "";
   const routines = context.routines?.length
-    ? context.routines.map((item) => `- ${item.id}: ${item.name} (${item.schedule}, ${item.enabled ? "enabled" : "paused"}${item.agent ? `, agent: ${item.agent}` : ""})`).join("\n")
+    ? context.routines
+        .map(
+          (item) =>
+            `- ${item.id}: ${item.name} (${item.schedule}, ${item.enabled ? "enabled" : "paused"}${item.agent ? `, agent: ${item.agent}` : ""}${item.notify === false ? ", notify: off" : ""}${item.waiting ? ", waiting" : ""}${item.running ? ", running" : ""})`,
+        )
+        .join("\n")
+    : "";
+  const chats = context.chats?.length
+    ? context.chats
+        .map((item) => `- ${item.id}: ${item.title} (${item.agent ? `agent: ${item.agent}` : `CLI: ${item.engine}`}${item.live ? ", live" : ""})`)
+        .join("\n")
+    : "";
+  const runs = context.runs?.length
+    ? context.runs
+        .map(
+          (item) =>
+            `- ${item.id}: ${item.title} [${item.status}${item.opened ? "" : ", unreviewed"}] (${item.origin}, ${item.engine}${item.agent ? `, ${item.agent}` : ""}${item.changes ? `, ${item.changes}` : ""})`,
+        )
+        .join("\n")
     : "";
   const projects = context.projectsFolder || "~/Projects";
   const defaultRule = context.defaultEngine
     ? `Never pick an engine the person didn't ask for unless they asked to start work without naming a CLI, in which case use their default CLI (${context.defaultEngine}).`
     : "Never pick an engine the person didn't ask for; if they didn't say which, ask.";
   return [
-    "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those, 'VIB', or 'I\\'ll be'), the person's conversational partner, personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, agents, tasks and routines at once.",
+    "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those, 'VIB', or 'I\\'ll be'), the person's conversational partner, personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, saved agents, skills, chats, tasks and scheduled routines at once.",
     "Whatever planning CLI runs you under the hood, you are always Viby. The person often talks to you in a live voice call, so expect dictation slips: misheard names ('Oh Marchy' = Omarchy, 'Hyperland' = Hyprland, homophones of workspace and agent names), missing punctuation, or spoken thoughts. Match names generously and infer intent smartly.",
+    "You can do ANYTHING in VibeForge that the person can do with mouse and keyboard: create/edit/delete saved agents (including briefs, allowed folders, skills, memory, tier), skills (and attach/detach agents), scheduled routines (including schedules, attaching agents or tasks, enabling/pausing, running, cancelling waits), tasks (create on board, create & run, edit, change status, execute, continue, stop, apply/discard copies, hand off runs, delete), workspaces (create, rename, reorder, remove), chats (create, send, continue, stop, rename, switch CLI, delete), runs & storage, live agent-to-agent talk, settings, rail & custom CLIs, and deep-link navigation.",
     "You are both a sharp, warm sounding board when the person wants to think or brainstorm out loud, and a decisive orchestrator when they want something done. You never write code, read files or use tools yourself; you turn actions into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
     "",
     "Steps:",
-    "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id or agent name below; leave empty only to use the default CLI when one is marked [default]), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI, written to it directly; it sees nothing else, so put in everything it needs from what the person said, and don't invent requirements; empty when they only want it opened), branch (short kebab-case such as fix-login-timeout; use the person's name for it if they gave one): by default each CLI works on a new branch in its own copy of the workspace (a git worktree), so its work comes back for review. inPlace: true when the person wants it in the workspace's own folder, with no copy, or only asks to open it there. model and effort: only when the person asks for them; effort must be one the CLI lists below.",
-    `- workspace: make a new workspace. Fields: workspace (its name, in the person's words), folder (only if they said where; otherwise leave it empty and it goes in ${projects}/<name>), git (true when they want it to be a git repository). An existing folder is only added, never changed.`,
-    "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (the session id, branch, folder name, or keywords to search for). VibeForge runs the lookup at once and hands you the findings.",
-    "- inspect: inspect a running CLI's terminal screen and latest reply, a copy's git diff, a workspace's git status/log/diff/files (or a specific file in `folder`), plan limits and token usage (`prompt: \"limits\"` or `\"usage\"`), or current Viby/VibeForge/voice settings and models (`prompt: \"settings\"`, `\"voice\"`, or `\"themes\"`). VibeForge runs `inspect` immediately and hands you the findings in the same turn so you can diagnose errors, review work, or answer configuration questions accurately. Fields: target (a running CLI id or copy id), workspace (workspace name), folder (optional relative file path inside workspace), prompt (what to inspect, e.g. \"screen\", \"diff\", \"status\", \"limits\", \"settings\", \"voice\", or a file path).",
-    "- tell: send a message to a CLI that is already running at its normal input prompt. Fields: target (its id below), prompt (the message).",
-    "- key: answer an interactive TUI prompt or send a keystroke directly to a running CLI (such as folder trust, y/n confirmation, numbered menu choice, Enter, Escape, or Ctrl+C). Fields: target (its id below), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
-    "- shell: open a shell terminal in a workspace, optionally running a command in it. Fields: workspace (workspace name), prompt (shell command to run, e.g. \"npm test\" or \"mkdir -p src/lib\"; leave empty to only open a shell).",
-    "- workbench: control VibeForge's workbench directly. Fields: workspace (workspace name when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"zoom\", \"close-pane\", \"diff\", or \"mark-reviewed\"), folder (path for mkdir), branch (branch name to open as its own workspace), target (URL such as \"http://localhost:5173\" for browser, or copy/run id for diff).",
-    "- settings: change VibeForge settings — including your own planning CLI, model, reasoning effort, plan/go mode, and voice/STT model or download — directly on the person's behalf. Fields: target (\"viby\", \"viby.engine\", \"viby.model\", \"viby.effort\", \"viby.mode\", \"viby.projectsFolder\", \"voice.model\", \"voice.download\", \"voice.speaker\", \"voice.language\", \"voice.talkBack\", \"voice.talkOver\", \"voice.mouseButton\", \"voice.sendButton\", \"voice.agent\", \"defaultEngine\", \"defaultShell\", \"theme\", \"language\", \"terminalFontSize\", \"terminalFontFamily\", \"notify\", \"sounds\", \"sounds.volume\", \"tray\", \"closeToTray\", \"autostart\", \"usage\", \"planLimits\", \"quotaAlerts\", \"activity\", \"checkUpdates\", \"agentTalk\", \"agentTalk.lead\", \"agentTalk.handOff\", \"companion\", \"sync\", \"sync.name\", \"keepRuns.days\", \"keepRuns.maxMb\"), prompt (new value, such as \"parakeet-tdt-0.6b-v3-int8\", \"claude\", \"sonnet\", \"medium\", \"go\", \"tokyo-night\", \"15\", \"on\", \"off\", or \"auto\"), plus optional engine, model, effort and folder when target is \"viby\". Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
-    "- stop: close a running CLI. Fields: target.",
-    "- show: bring something up on the person's screen. It changes nothing, so it never needs asking about. Fields: target (a running CLI's id below, to open its terminal), or workspace (a workspace's name below, to open it in Code), or target as one of home, agents, code, chat, tasks, routines, skills, runs, viby, settings (to open that view).",
-    "- read: read out verbatim to the person what a running CLI last answered (\"read me its whole answer\", \"read what Claude wrote word for word\"). Fields: target (its id below), prompt (\"all\" when they ask for all of it; otherwise empty).",
-    "- apply: bring a copy's changes into the workspace it came from. discard: throw a copy away. Fields: target (a copy's id below).",
-    "- task: run an existing task on the board, or create and start a new task for an agent. Fields: target (existing task id/title, or the agent's id/name for a new task), workspace (workspace name, for a new task), branch (short title for a new task), prompt (instructions for a new task).",
-    "- routine: run a scheduled routine now, or turn it on/off. Fields: target (a routine's id or name below), prompt (\"enable\", \"disable\", or empty to run now).",
-    "- Chaining (`after: true`): set `after: true` on any step that must wait for the immediately preceding step's CLI turn to finish first (for example: Step 1 starts Claude to fix a bug, Step 2 with `after: true` starts Grok to review it or runs `npm test` in a shell). Leave `after` false when steps should run in parallel.",
+    "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id, or agent name; leave empty only to use the default CLI when marked [default]), agent (optional explicit saved agent name/id, including one created earlier in this plan), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI; empty when only opening it), branch (short kebab-case; by default works on a new branch in its own review copy), inPlace (true to work directly in the workspace folder with no copy), model and effort (only when asked).",
+    `- workspace: make a new workspace. Also manages existing workspaces via action: "create" (default — fields: workspace/name, folder optional defaulting to ${projects}/<name>, git: true to git init), "rename" (target/workspace + name), "remove" (target/workspace — removes from VibeForge, keeps files on disk), or "move" (target/workspace + status/prompt as "top", "bottom", "up", "down", or position number).`,
+    "- agent: create, edit, delete, or manage saved VibeForge agents. action: \"create\" (fields: name, engine [CLI id; uses default if omitted], prompt [agent's brief/instructions], places [array of workspace names or folder paths; or workspace/folder], skills [optional array of skill names/ids], description [optional one-line goodAt], options [optional key=value: allowRoutines=true|false, tier=fast|everyday|strong]), \"edit\" (target + any fields to update), \"add-folder\" / \"remove-folder\" (target + places/workspace/folder), \"add-skill\" / \"remove-skill\" (target + skills), \"memory-append\" / \"memory-set\" (target + prompt), \"memory-clear\" (target), or \"delete\" (target). Newly created agents can be referenced by name in later steps of the same plan!",
+    "- skill: create, edit, delete skills or manage which agents have them. action: \"create\" (fields: name, description [short summary], prompt [SKILL.md markdown instructions], agents [optional array of agent names/ids to attach immediately]), \"edit\" (target + any of name/description/prompt/agents), \"attach\" / \"detach\" / \"set-agents\" (target + agents array; use options \"agents=none\" with set-agents to clear all), or \"delete\" (target). Newly created skills can be referenced by name in later steps of the same plan!",
+    "- routine: manage scheduled routines. action: \"create\" (fields: name, agent [saved agent name/id, or inherited from task], task [optional existing or planned task name/id to attach its prompt and agent], schedule [5-field cron like \"0 9 * * 1-5\", interval like \"every 30 minutes\" / \"every 2 hours\", or natural phrase like \"weekdays at 9am\" / \"daily at 6pm\" / \"every Monday at 10am\"], prompt [instructions, or inherited from attached task], options [optional: enabled=true|false, notify=true|false, shareCheckout=true|false]), \"edit\" (target + any fields to change, including schedule, agent, task, name, prompt, options), \"delete\" (target), \"run\" (target — waits turn if folder busy), \"run-now\" (target — force start past busy folder), \"enable\" / \"disable\" (target), or \"cancel-wait\" (target).",
+    "- task: manage tasks on the Kanban board. action: \"create\" (add to To Do board without starting yet; fields: name [title], prompt [body/instructions], agent [optional saved agent], workspace [optional workspace], options [optional: isolated=true|false, shareCheckout=true|false]), \"create-run\" (create AND execute immediately; needs workspace, agent, prompt), \"edit\" (target + any of name, prompt, agent, workspace, status, options [agent=none / workspace=none to clear]), \"run\" (target — execute task), \"run-now\" (target — execute past busy folder), \"continue\" (target + optional follow-up prompt), \"stop\" (target), \"status\" (target + status: \"todo\" | \"review\" | \"done\"), \"cancel-wait\" (target), \"apply\" (apply task copy changes to workspace), \"discard\" (discard task copy), \"handoff\" (target [finished run id] + agent [saved agent to hand off to]), or \"delete\" (target).",
+    "- chat: manage plain and agent chats. action: \"create\" (agent [for an agent chat] OR engine [CLI for a plain scratch chat], optional name [title], optional prompt [first message — creates and sends immediately!]), \"send\" (target [chat id/title] or agent [finds/creates agent chat] + prompt), \"continue\" (target), \"stop\" (target), \"rename\" (target + name), \"set-engine\" (target [plain chat] + engine), or \"delete\" (target).",
+    "- run: manage runs and run storage. action: \"continue\" (target [run id/title] + optional follow-up prompt), \"stop\" (target), \"mark-reviewed\" (target), \"mark-unreviewed\" (target), \"mark-all-reviewed\", \"handoff\" (target [run id] + agent [saved agent]), or \"tidy\" (compress/prune old runs per retention settings).",
+    "- talk: coordinate live coding CLIs in Code. action: \"review\" (target [author CLI id] + agents: [reviewer CLI id]), \"send-draft\" (target [from CLI id] + agents: [to CLI id] + prompt: \"reply\" | \"changes\"), \"stop\" (target [CLI id — pause agent-to-agent messages]), or \"start-tasks\" (target [CLI id] + optional places [task ids; empty starts all held tasks]).",
+    "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (keywords). VibeForge runs the lookup at once and hands you the findings.",
+    "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
+    "- tell: send a message to a CLI already running at its normal input prompt. Fields: target (ptyId), prompt (the message).",
+    "- key: answer an interactive TUI prompt or send a keystroke to a running CLI (folder trust, y/n, menu choice, Enter, Escape, Ctrl+C). Fields: target (ptyId), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
+    "- shell: open a shell terminal in a workspace, optionally running a command. Fields: workspace, prompt (shell command; empty to only open a shell).",
+    "- workbench: control VibeForge's workbench directly. Fields: workspace (when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"zoom\", \"close-pane\", \"diff\", \"mark-reviewed\", or \"undo\" to undo the last delete!), folder (for mkdir), branch (to open as its own workspace), target (URL for browser, copy/run id for diff, or optional undo token).",
+    "- settings: change VibeForge settings — including your own planner/model/effort/mode, voice/STT models & downloads (`voice.model`, `voice.download`, `voice.stopDownload`, `voice.speaker`, `voice.language`, `voice.talkBack`, `voice.talkOver`, `voice.mouseButton`, `voice.sendButton`, `voice.agent`), app settings (`defaultEngine`, `defaultShell`, `theme`, `language`, `terminalFontSize`, `terminalFontFamily`, `notify`, `sounds`, `sounds.volume`, `tray`, `closeToTray`, `autostart`, `usage`, `planLimits`, `quotaAlerts`, `activity`, `checkUpdates`, `agentTalk`, `agentTalk.lead`, `agentTalk.handOff`, `agentTalk.leadApplies`, `agentTalk.maxMessages`, `agentTalk.reviewRounds`, `agentTalk.maxWorking`, `agentTalk.maxHandOffs`, `companion`, `companion.nudges`, `sync`, `sync.name`, `keepRuns.days`, `keepRuns.maxMb`), left rail (`rail.hide`, `rail.show`, `rail.order`), and custom coding CLIs (`engines.recheck`, `engines.add`/`engines.edit` with engine=id, name=label, folder=binary, prompt=args, options=\"promptArgs=..., continueArgs=...\", `engines.remove` with engine=id). Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
+    "- stop: close a running CLI. Fields: target (ptyId).",
+    "- show: bring something up on screen (changes nothing). Fields: target (running CLI id, view name `home|agents|code|chat|tasks|routines|skills|runs|viby|settings` to open that view, OR a specific agent, task, routine, skill, chat, copy, or run name/id to deep-link straight to it!), workspace (to open a workspace in Code), options (optional `tab=chats|brief|memory|skills|folders|runs|settings` for an agent, or `section=appearance|engines|orchestrator|voice|sounds|tray|usage|agent-talk|phone|sync|storage|rail|updates` for settings).",
+    "- read: read out verbatim to the person what a running CLI last answered. Fields: target (ptyId), prompt (\"all\" for the whole answer; otherwise empty).",
+    "- apply: bring a copy's changes into its workspace. discard: throw a copy away. Fields: target (copyId).",
+    "- Chaining: multiple steps run in order. Earlier steps that create a workspace, agent, skill, task, routine, or chat can be referenced by name in later steps of the same plan (e.g. create an agent in Step 1, attach it to a new routine in Step 2). Set `after: true` on any step that must wait for the immediately preceding CLI terminal turn to finish first.",
     "",
     "Rules:",
     "- One start step per CLI the person asks for. Several are fine: they run at the same time.",
-    `- Use only the workspaces, engines, agents, tasks, routines, ids and copies listed below, or a workspace this plan makes. ${defaultRule}`,
+    `- Use only the workspaces, engines, agents, skills, tasks, routines, chats, runs, ids and copies listed below, or items an earlier step in this plan creates. ${defaultRule}`,
     "- When they ask for a workspace, session or branch that isn't listed below, use a `lookup` step first to search disk, branches and run history if they are asking you to find an existing one; make it with a `workspace` step if they asked for a new one or gave its folder.",
-    "- If the request is unclear, ask in `say` and give no steps. If they only ask a question (what's running, how it's going, what you can do) or want to brainstorm and talk through an idea before starting work, talk with them naturally in `say` with no steps.",
+    "- If the request is unclear or missing a critical detail you can't reasonably infer (like which workspace/folder for a brand-new agent when none is clear), ask in `say` and give no steps. If they only ask a question or want to brainstorm, talk naturally in `say` with no steps.",
+    "- When creating an agent, skill, task, or routine by voice, draft a clean, thorough brief/body/prompt from what the person described — don't make them dictate boilerplate markdown unless they want something specific.",
     "- When the person says they are done with the call, thanks you and says goodbye, or asks you to end/hang up the call (such as 'you can end the call now, thank you', 'talk to you later', 'that\\'s all, bye'), set top-level `hangup: true` (alongside any final steps they asked for) and give a brief warm sign-off in `say`. Otherwise leave `hangup` false or omitted.",
     "- If they change a plan you just gave, give the whole corrected plan again.",
     "- A request may begin with a line in parentheses saying what is in front of the person right now. \"This\", \"here\", \"this one\" and \"this workspace\" mean what that line names, and so does \"it\" when nothing else was just mentioned: \"tell it to run the tests\" is a tell to the terminal in front of them, \"start Claude here\" a start in that workspace.",
-    "- When they ask to switch to, open, go to or see a workspace, a running CLI or a view, that is a show step.",
+    "- When they ask to switch to, open, go to or see a workspace, running CLI, view, agent, task, routine, skill, chat, or run, that is a show step.",
     "- A tell's prompt is what the person said to pass on, word for word, without the part spoken to you (\"tell Claude to\", \"ask it to\"). Put right a name speech-to-text got wrong; don't shorten it, polish it or add to it.",
-    "- You don't see terminal screens, CLI replies, diffs or files until you ask: use an `inspect` step whenever the person asks why something failed, what a CLI is asking or answered, how a diff or workspace looks, or what their plan limits/tokens are, then summarise clearly in your own words. Use `read` when they specifically ask you to read a CLI's answer out loud verbatim. Never guess at unseen output.",
+    "- You don't see terminal screens, CLI replies, diffs, files, agent briefs/memories, skill bodies, or routine/task prompts until you ask: use an `inspect` step whenever the person asks about them, then summarise clearly in your own words. Use `read` when they specifically ask you to read a CLI's answer out loud verbatim. Never guess at unseen output.",
     "- After a tell or a start, VibeForge itself tells the person when that CLI has answered, with the start of its answer. Don't add a read step for an answer that isn't there yet, and don't tell them to ask for it.",
-    "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, or starting something when `steps` is empty — emit a `lookup` or `start` step instead.",
-    "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('On it — starting Claude on a branch.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name a CLI by what it is and where (\"Claude in Dune\").",
+    "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, creating, or starting something when `steps` is empty — emit the step instead.",
+    "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('On it — creating your Reviewer agent and scheduling the weekday audit.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name items by their human names.",
     "",
     "Workspaces:",
     workspaces,
@@ -287,6 +390,7 @@ export function orchestratorRules(context: PlanContext): string {
     "Coding CLIs on this machine:",
     engineList,
     ...(agents ? ["", "Agents (teammates):", agents] : []),
+    ...(skills ? ["", "Skills:", skills] : []),
     "",
     "Running now:",
     running,
@@ -295,6 +399,8 @@ export function orchestratorRules(context: PlanContext): string {
     copies,
     ...(tasks ? ["", "Tasks on the board:", tasks] : []),
     ...(routines ? ["", "Scheduled routines:", routines] : []),
+    ...(chats ? ["", "Chats:", chats] : []),
+    ...(runs ? ["", "Recent runs:", runs] : []),
     ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings)] : []),
   ].join("\n");
 }
@@ -312,6 +418,17 @@ export interface RawStep {
   effort?: string;
   inPlace?: boolean;
   after?: boolean;
+  action?: string;
+  name?: string;
+  description?: string;
+  schedule?: string;
+  agent?: string;
+  task?: string;
+  status?: string;
+  places?: string[];
+  skills?: string[];
+  agents?: string[];
+  options?: string;
 }
 
 export interface RawPlan {
@@ -351,6 +468,8 @@ export function readBrainOutput(stdout: string): BrainOutput {
     text = String(outer.text ?? outer.result ?? outer.response ?? "");
     sessionId = String(outer.sessionId ?? outer.session_id ?? outer.conversation_id ?? "");
     if (outer.is_error === true) error = text;
+    // Antigravity: {"status":"ERROR","error":"invalid model selection …"}.
+    else if (outer.status === "ERROR") error = String(outer.error ?? "") || text || "error";
     candidates.push(outer.structuredOutput, outer.structured_output);
   } else {
     // Codex: one event per line.
@@ -403,7 +522,25 @@ function asPlan(value: unknown): RawPlan | null {
       if (!item || typeof item !== "object") return [];
       const step = item as Record<string, unknown>;
       const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
+      const list = (key: string) =>
+        Array.isArray(step[key])
+          ? (step[key] as unknown[])
+              .filter((v): v is string => typeof v === "string")
+              .map((v) => v.trim())
+              .filter(Boolean)
+          : undefined;
       const flag = (key: string) => step[key] === true;
+      const action = field("action");
+      const name = field("name");
+      const description = field("description");
+      const schedule = field("schedule");
+      const agent = field("agent");
+      const task = field("task");
+      const status = field("status");
+      const places = list("places");
+      const skills = list("skills");
+      const agents = list("agents");
+      const options = field("options");
       return [
         {
           kind: field("kind") ?? "",
@@ -418,6 +555,17 @@ function asPlan(value: unknown): RawPlan | null {
           effort: field("effort"),
           inPlace: flag("inPlace"),
           after: flag("after"),
+          ...(action ? { action } : {}),
+          ...(name ? { name } : {}),
+          ...(description ? { description } : {}),
+          ...(schedule ? { schedule } : {}),
+          ...(agent ? { agent } : {}),
+          ...(task ? { task } : {}),
+          ...(status ? { status } : {}),
+          ...(places?.length ? { places } : {}),
+          ...(skills?.length ? { skills } : {}),
+          ...(agents?.length ? { agents } : {}),
+          ...(options ? { options } : {}),
         },
       ];
     }),
@@ -501,8 +649,80 @@ export function plannedFolder(name: string, folder: string | undefined, projects
 /** Turn a raw plan into steps with ids VibeForge knows, each flagged with what's missing. */
 export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorStep[] {
   const steps: OrchestratorStep[] = [];
-  // The workspaces this plan makes, under placeholder ids, for its later steps to name.
+  // Entities this plan makes, under placeholder ids, for its later steps to name.
   const planned: PlanContext["workspaces"] = [];
+  const plannedAgents: NonNullable<PlanContext["agents"]> = [];
+  const plannedSkills: NonNullable<PlanContext["skills"]> = [];
+  const plannedTasks: NonNullable<PlanContext["tasks"]> = [];
+  const plannedRoutines: NonNullable<PlanContext["routines"]> = [];
+  const plannedChats: NonNullable<PlanContext["chats"]> = [];
+  const aliases = new Map<string, string[]>();
+  const withAliases = (id: string, base: string[]) => {
+    const extra = aliases.get(id);
+    return extra ? [...base, ...extra] : base;
+  };
+  const noteRename = (id: string | undefined, nextName: string | undefined) => {
+    const clean = (nextName ?? "").trim();
+    if (!id || !clean) return;
+    const list = aliases.get(id) ?? [];
+    list.push(clean);
+    aliases.set(id, list);
+  };
+
+  const allWorkspaces = () => [...planned, ...context.workspaces];
+  const allAgents = () => [...plannedAgents, ...(context.agents ?? [])];
+  const allSkills = () => [...plannedSkills, ...(context.skills ?? [])];
+  const allTasks = () => [...plannedTasks, ...(context.tasks ?? [])];
+  const allRoutines = () => [...plannedRoutines, ...(context.routines ?? [])];
+  const allChats = () => [...plannedChats, ...(context.chats ?? [])];
+
+  const findWorkspace = (query: string | undefined) =>
+    matchName(query, planned, (entry) => withAliases(entry.id, [entry.id, entry.name])) ??
+    context.workspaces.find((entry) => entry.id === query) ??
+    matchName(query, context.workspaces, (entry) => withAliases(entry.id, [entry.id, entry.name, path.basename(entry.folder)]), true);
+
+  const findEngine = (query: string | undefined) =>
+    (query ? context.engines.find((entry) => entry.id === query) : undefined) ??
+    matchName(query, context.engines, (entry) => [entry.id, entry.label], true);
+
+  const findAgent = (query: string | undefined) => {
+    const pool = allAgents();
+    return (query ? pool.find((entry) => entry.id === query) : undefined) ?? matchName(query, pool, (entry) => withAliases(entry.id, [entry.id, entry.name]), true);
+  };
+
+  const findSkill = (query: string | undefined) => {
+    const pool = allSkills();
+    return (query ? pool.find((entry) => entry.id === query) : undefined) ?? matchName(query, pool, (entry) => withAliases(entry.id, [entry.id, entry.name]), true);
+  };
+
+  const findTask = (query: string | undefined) => {
+    const pool = allTasks();
+    return (query ? pool.find((entry) => entry.id === query) : undefined) ?? matchName(query, pool, (entry) => withAliases(entry.id, [entry.id, entry.title]), true);
+  };
+
+  const findRoutine = (query: string | undefined) => {
+    const pool = allRoutines();
+    return (query ? pool.find((entry) => entry.id === query) : undefined) ?? matchName(query, pool, (entry) => withAliases(entry.id, [entry.id, entry.name]), true);
+  };
+
+  const findChat = (query: string | undefined) => {
+    const pool = allChats();
+    return (query ? pool.find((entry) => entry.id === query) : undefined) ?? matchName(query, pool, (entry) => withAliases(entry.id, [entry.id, entry.title]), true);
+  };
+
+  const findRunning = (query: string | undefined) =>
+    (query ? context.running.find((entry) => entry.id === query) : undefined) ??
+    matchName(query, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`, entry.engine, entry.workspace]);
+
+  const resolvePlace = (entry: string): string => {
+    const trimmed = entry.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("/") || trimmed.startsWith("~/")) return trimmed;
+    const ws = findWorkspace(trimmed);
+    if (!ws) return trimmed;
+    return planned.some((p) => p.id === ws.id) ? ws.id : ws.folder;
+  };
+
   for (const item of raw.steps) {
     const kind = STEP_KINDS.find((value) => value === item.kind) ?? null;
     if (!kind) continue;
@@ -522,24 +742,143 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       ...(item.after === true ? { after: true } : {}),
     };
     if (kind === "workspace") {
-      const name = (item.workspace ?? "").trim();
-      const step: OrchestratorStep = { ...base, prompt: "", name, folder: plannedFolder(name, item.folder, context.projectsFolder ?? ""), git: Boolean(item.git), asked: name };
-      planned.push({ id: plannedId(step.id), name, folder: step.folder ?? "", git: false });
-      steps.push(step);
+      const action = normalizeWorkspaceAction(item.action);
+      if (!action || action === "create") {
+        const name = (item.name || item.workspace || "").trim();
+        const step: OrchestratorStep = {
+          ...base,
+          ...(item.action ? { action: action ?? item.action } : {}),
+          prompt: "",
+          name,
+          folder: plannedFolder(name, item.folder, context.projectsFolder ?? ""),
+          git: Boolean(item.git),
+          asked: name,
+        };
+        planned.push({ id: plannedId(step.id), name, folder: step.folder ?? "", git: false });
+        steps.push(step);
+      } else {
+        const ws = findWorkspace(item.target || item.workspace);
+        const nextName = (item.name || (action === "rename" ? item.prompt : "") || "").trim();
+        const pos = (item.status || (action === "move" ? item.prompt : "") || parseOptions(item.options).str("index") || "").trim();
+        const label =
+          action === "rename"
+            ? [ws?.name || item.target || item.workspace, nextName].filter(Boolean).join(" → ")
+            : action === "move"
+              ? [ws?.name || item.target || item.workspace, pos].filter(Boolean).join(" · ")
+              : ws?.name || item.target || item.workspace || "";
+        if (action === "rename") noteRename(ws?.id, nextName);
+        steps.push({
+          ...base,
+          action,
+          workspaceId: ws?.id ?? "",
+          target: ws?.id ?? "",
+          ...(nextName ? { name: nextName } : {}),
+          ...(pos ? { status: pos } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          prompt: "",
+          asked: label,
+        });
+      }
+    } else if (kind === "agent") {
+      const targetQuery = item.target || (item.action && normalizeAgentAction(item.action, true) !== "create" ? item.agent : undefined);
+      const existing = targetQuery ? findAgent(targetQuery) : null;
+      const action = normalizeAgentAction(item.action, Boolean(existing || (item.target && normalizeAgentAction(item.action, false) !== "create")));
+      const rawPlaces = [...(item.places ?? []), ...(item.workspace ? [item.workspace] : []), ...(item.folder ? [item.folder] : [])];
+      const resolvedPlaces = [...new Set(rawPlaces.map(resolvePlace).filter(Boolean))];
+      const rawSkillNames = [
+        ...(item.skills ?? []),
+        ...((action === "add-skill" || action === "remove-skill") && !(item.skills?.length) ? [item.prompt, item.name].filter((v): v is string => Boolean(v?.trim())) : []),
+      ];
+      const resolvedSkills = rawSkillNames.map((rawSkill) => findSkill(rawSkill)?.id ?? rawSkill);
+
+      if (action === "create") {
+        const name = (item.name || item.agent || "").trim();
+        const namedEngine = findEngine(item.engine);
+        const fallbackEngine = !item.engine?.trim() && context.defaultEngine ? findEngine(context.defaultEngine) : null;
+        const engineId = namedEngine?.id ?? fallbackEngine?.id ?? "";
+        const step: OrchestratorStep = {
+          ...base,
+          action: "create",
+          name,
+          engineId,
+          prompt: (item.prompt ?? "").trim(),
+          ...(item.description ? { description: item.description } : {}),
+          ...(resolvedPlaces.length ? { places: resolvedPlaces } : {}),
+          ...(resolvedSkills.length ? { skills: resolvedSkills } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          asked: [name || "New agent", namedEngine?.label || item.engine || fallbackEngine?.label].filter(Boolean).join(" · "),
+        };
+        plannedAgents.push({ id: plannedId(step.id), name, engine: engineId, places: resolvedPlaces, skills: resolvedSkills });
+        steps.push(step);
+      } else {
+        const namedEngine = item.engine?.trim() ? findEngine(item.engine) : null;
+        if (action === "edit") noteRename(existing?.id, item.name);
+        const step: OrchestratorStep = {
+          ...base,
+          action: action ?? item.action ?? "edit",
+          target: existing?.id ?? "",
+          ...(item.name ? { name: item.name } : {}),
+          ...(item.engine?.trim() ? { engineId: namedEngine?.id ?? item.engine.trim() } : {}),
+          ...(item.description ? { description: item.description } : {}),
+          ...(resolvedPlaces.length ? { places: resolvedPlaces } : {}),
+          ...(resolvedSkills.length ? { skills: resolvedSkills } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: existing?.name || targetQuery || item.name || "",
+        };
+        steps.push(step);
+      }
+    } else if (kind === "skill") {
+      const existing = item.target ? findSkill(item.target) : null;
+      const action = normalizeSkillAction(item.action, Boolean(existing || (item.target && normalizeSkillAction(item.action, false) !== "create")));
+      const rawAgents = [...(item.agents ?? []), ...(item.agent ? [item.agent] : [])];
+      const resolvedAgents = [...new Set(rawAgents.map((rawAgent) => findAgent(rawAgent)?.id ?? rawAgent))];
+
+      if (action === "create") {
+        const name = (item.name || "").trim();
+        const step: OrchestratorStep = {
+          ...base,
+          action: "create",
+          name,
+          ...(item.description ? { description: item.description } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          ...(resolvedAgents.length ? { agents: resolvedAgents } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          asked: name || "New skill",
+        };
+        plannedSkills.push({ id: plannedId(step.id), name, description: item.description ?? "" });
+        steps.push(step);
+      } else {
+        if (action === "edit") noteRename(existing?.id, item.name);
+        steps.push({
+          ...base,
+          action: action ?? item.action ?? "edit",
+          target: existing?.id ?? "",
+          ...(item.name ? { name: item.name } : {}),
+          ...(item.description ? { description: item.description } : {}),
+          ...(resolvedAgents.length ? { agents: resolvedAgents } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: existing?.name || item.target || item.name || "",
+        });
+      }
     } else if (kind === "start") {
       const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      // An agent named exactly comes first, so "Grok Reviewer" isn't taken for Grok Build; a CLI's
-      // own id still means that CLI.
+      // An explicit `agent` field or an agent named exactly comes first, so "Grok Reviewer" isn't
+      // taken for Grok Build; a CLI's own id still means that CLI.
+      const explicitAgent = item.agent ? findAgent(item.agent) : null;
       const said = squash(item.engine ?? "");
+      const agentPool = allAgents();
       const exactAgent =
-        said && !context.engines.some((entry) => squash(entry.id) === said) ? (context.agents ?? []).find((entry) => squash(entry.id) === said || squash(entry.name) === said) : undefined;
+        explicitAgent ??
+        (said && !context.engines.some((entry) => squash(entry.id) === said) ? agentPool.find((entry) => squash(entry.id) === said || squash(entry.name) === said) : undefined);
       const namedEngine = exactAgent ? null : matchName(item.engine, context.engines, (entry) => [entry.id, entry.label], true);
-      const agent = exactAgent ?? (!namedEngine ? matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true) : null);
+      const agent = exactAgent ?? (!namedEngine ? matchName(item.engine || item.target, agentPool, (entry) => [entry.id, entry.name], true) : null);
       const fallbackEngine = !item.engine?.trim() && !agent && context.defaultEngine ? (context.engines.find((entry) => entry.id === context.defaultEngine) ?? null) : null;
       const engineId = namedEngine?.id ?? (agent ? agent.engine : (fallbackEngine?.id ?? ""));
       const matchedWorkspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
       const agentWorkspace = !matchedWorkspace && !item.workspace?.trim() && agent?.places?.length
-        ? context.workspaces.find((entry) => agent.places?.some((place) => entry.folder === place || path.basename(entry.folder) === path.basename(place)))
+        ? allWorkspaces().find((entry) => agent.places?.some((place) => entry.id === place || entry.folder === place || path.basename(entry.folder) === path.basename(place)))
         : undefined;
       const workspace = matchedWorkspace ?? agentWorkspace ?? null;
       const prompt = item.prompt ?? "";
@@ -557,32 +896,104 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
         branch,
         model: cleanModel(item.model),
         effort,
-        asked: [agent?.name || item.engine, item.workspace || workspace?.name].filter(Boolean).join(" · "),
+        asked: [agent?.name || item.agent || item.engine, item.workspace || workspace?.name].filter(Boolean).join(" · "),
       });
     } else if (kind === "lookup") {
       const query = (item.prompt || item.target || item.workspace || item.folder || "").trim();
       steps.push({ ...base, prompt: query, asked: query });
     } else if (kind === "inspect") {
       const copies = context.copies ?? [];
-      const globalInspect = inspectsQuotas(item.target) || inspectsSettings(item.target);
-      const cli = item.target && !globalInspect
-        ? (context.running.find((entry) => entry.id === item.target) ??
-          matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]))
-        : null;
-      const copy = !cli && item.target && !globalInspect
-        ? (copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]))
-        : null;
-      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const ws = fresh ?? matchName(item.workspace || (!cli && !copy && !globalInspect ? item.target : ""), context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
-      const asked = cli ? `${cli.engine} · ${cli.workspace}` : copy ? `${copy.name} · ${copy.workspace}` : ws ? [ws.name, item.folder].filter(Boolean).join(" · ") : item.prompt || item.target || item.workspace || "";
-      steps.push({
-        ...base,
-        target: cli?.id ?? copy?.id ?? "",
-        workspaceId: ws?.id ?? "",
-        ...(item.folder ? { folder: item.folder.trim() } : {}),
-        prompt: (item.prompt || (globalInspect ? item.target : "") || "").trim(),
-        asked,
-      });
+      const globalInspect = inspectsQuotas(item.target) || inspectsSettings(item.target) || inspectsStorage(item.target) || item.action === "storage";
+      const explicitEntity = item.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(item.action) ? item.action : "";
+      if (explicitEntity) {
+        const query = item.target || item.agent || item.task || item.name || item.prompt || "";
+        const entity =
+          explicitEntity === "agent"
+            ? findAgent(query)
+            : explicitEntity === "skill"
+              ? findSkill(query)
+              : explicitEntity === "routine"
+                ? findRoutine(query)
+                : explicitEntity === "task"
+                  ? findTask(query)
+                  : explicitEntity === "chat"
+                    ? findChat(query)
+                    : ((context.runs ?? []).find((r) => r.id === query) ?? matchName(query, context.runs ?? [], (r) => [r.id, r.title], true));
+        const id = entity ? entity.id : explicitEntity === "run" ? query.trim() : "";
+        const label = entity
+          ? "name" in entity
+            ? entity.name
+            : entity.title
+          : query;
+        steps.push({
+          ...base,
+          action: explicitEntity,
+          target: id,
+          prompt: (item.prompt ?? "").trim(),
+          asked: label || explicitEntity,
+        });
+      } else {
+        const cli = item.target && !globalInspect ? findRunning(item.target) : null;
+        const copy = !cli && item.target && !globalInspect
+          ? (copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]))
+          : null;
+        const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+        const ws = fresh ?? matchName(item.workspace || (!cli && !copy && !globalInspect ? item.target : ""), context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+        let entityAction = "";
+        let entityId = "";
+        let entityLabel = "";
+        if (!cli && !copy && !ws && !globalInspect && item.target) {
+          const ag = findAgent(item.target);
+          const sk = !ag ? findSkill(item.target) : null;
+          const rt = !ag && !sk ? findRoutine(item.target) : null;
+          const tk = !ag && !sk && !rt ? findTask(item.target) : null;
+          const ch = !ag && !sk && !rt && !tk ? findChat(item.target) : null;
+          const rn = !ag && !sk && !rt && !tk && !ch ? ((context.runs ?? []).find((r) => r.id === item.target) ?? matchName(item.target, context.runs ?? [], (r) => [r.id, r.title], true)) : null;
+          if (ag) {
+            entityAction = "agent";
+            entityId = ag.id;
+            entityLabel = ag.name;
+          } else if (sk) {
+            entityAction = "skill";
+            entityId = sk.id;
+            entityLabel = sk.name;
+          } else if (rt) {
+            entityAction = "routine";
+            entityId = rt.id;
+            entityLabel = rt.name;
+          } else if (tk) {
+            entityAction = "task";
+            entityId = tk.id;
+            entityLabel = tk.title;
+          } else if (ch) {
+            entityAction = "chat";
+            entityId = ch.id;
+            entityLabel = ch.title;
+          } else if (rn) {
+            entityAction = "run";
+            entityId = rn.id;
+            entityLabel = rn.title;
+          }
+        }
+        const asked = cli
+          ? `${cli.engine} · ${cli.workspace}`
+          : copy
+            ? `${copy.name} · ${copy.workspace}`
+            : entityLabel
+              ? entityLabel
+              : ws
+                ? [ws.name, item.folder].filter(Boolean).join(" · ")
+                : item.prompt || item.target || item.workspace || "";
+        steps.push({
+          ...base,
+          ...(entityAction ? { action: entityAction } : item.action === "storage" ? { action: "storage" } : {}),
+          target: cli?.id ?? copy?.id ?? entityId,
+          workspaceId: ws?.id ?? "",
+          ...(item.folder ? { folder: item.folder.trim() } : {}),
+          prompt: (item.prompt || (globalInspect ? item.target : "") || "").trim(),
+          asked,
+        });
+      }
     } else if (kind === "settings") {
       const resolved = resolveSettingsStep(
         {
@@ -593,6 +1004,8 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
           effort: item.effort,
           folder: item.folder,
           branch: item.branch,
+          name: item.name,
+          options: item.options,
         },
         context,
       );
@@ -601,6 +1014,8 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
         target: (item.target ?? "").trim(),
         prompt: (item.prompt ?? "").trim(),
         engineId: (item.engine ?? "").trim(),
+        ...(item.name ? { name: item.name } : {}),
+        ...(item.options ? { options: item.options } : {}),
         ...(item.model ? { model: cleanModel(item.model) } : {}),
         ...(item.effort ? { effort: item.effort.trim().toLowerCase() } : {}),
         ...(item.folder ? { folder: item.folder.trim() } : {}),
@@ -614,54 +1029,263 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       const asked = target ? `${target.engine} · ${target.workspace}` : (item.target ?? "");
       steps.push({ ...base, target: target?.id ?? "", prompt: (item.prompt ?? "").trim(), asked });
     } else if (kind === "shell") {
-      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const ws = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
+      const ws = findWorkspace(item.workspace);
       steps.push({ ...base, workspaceId: ws?.id ?? "", prompt: (item.prompt ?? "").trim(), asked: ws?.name || item.workspace || "" });
     } else if (kind === "workbench") {
-      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-      const ws = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
-      const label = [ws?.name || item.workspace, item.branch || item.folder || item.target || item.prompt].filter(Boolean).join(" · ");
+      const ws = findWorkspace(item.workspace);
+      const label = [ws?.name || item.workspace, item.branch || item.folder || item.target || item.prompt || item.action].filter(Boolean).join(" · ");
       steps.push({
         ...base,
+        ...(item.action ? { action: item.action } : {}),
         workspaceId: ws?.id ?? "",
-        prompt: (item.prompt ?? "").trim(),
+        prompt: (item.prompt || item.action || "").trim(),
         target: (item.target ?? "").trim(),
         branch: (item.branch ?? "").trim(),
         ...(item.folder ? { folder: item.folder.trim() } : {}),
         asked: label,
       });
     } else if (kind === "routine") {
-      const routines = context.routines ?? [];
-      const routine = routines.find((entry) => entry.id === item.target) ?? matchName(item.target || item.workspace, routines, (entry) => [entry.id, entry.name], true);
-      const asked = routine ? routine.name : (item.target || item.workspace || "");
-      steps.push({ ...base, prompt: routineAction(item.prompt), target: routine?.id ?? "", asked });
-    } else if (kind === "task") {
-      const tasks = context.tasks ?? [];
-      const existing = item.target ? (tasks.find((entry) => entry.id === item.target) ?? matchName(item.target, tasks, (entry) => [entry.id, entry.title], true)) : null;
-      if (existing && !item.workspace && !item.prompt) {
-        steps.push({ ...base, prompt: "", target: existing.id, asked: existing.title });
-      } else {
-        const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
-        const workspace = fresh ?? matchName(item.workspace, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
-        const agent = matchName(item.engine || item.target, context.agents ?? [], (entry) => [entry.id, entry.name], true);
-        const title = (item.branch || "").trim() || branchFromPrompt(item.prompt ?? "").replace(/-/g, " ");
+      const existing = item.target ? findRoutine(item.target) : (!item.action && item.workspace ? findRoutine(item.workspace) : null);
+      const hasCreateFields = Boolean(item.schedule?.trim() || item.name?.trim() || item.agent?.trim() || item.task?.trim());
+      const action = normalizeRoutineStepAction(item.action, item.prompt, Boolean(existing), hasCreateFields);
+
+      if (!item.action && !hasCreateFields) {
+        // Legacy format: run (""), "enable", or "disable"
+        const asked = existing ? existing.name : (item.target || item.workspace || "");
+        steps.push({ ...base, prompt: routineAction(item.prompt), target: existing?.id ?? "", asked });
+      } else if (action === "create") {
+        const attachedTask = item.task ? findTask(item.task) : null;
+        const agentQuery = item.agent || item.engine || (!existing ? item.target : "") || attachedTask?.agentId || attachedTask?.agent;
+        const matchedAgent = agentQuery ? findAgent(agentQuery) : null;
+        const name = (item.name || attachedTask?.title || "").trim();
+        const schedule = (item.schedule ?? "").trim();
+        const parsedSchedule = parseRoutineSchedule(schedule);
+        const step: OrchestratorStep = {
+          ...base,
+          action: "create",
+          name,
+          ...(matchedAgent ? { agentId: matchedAgent.id } : {}),
+          ...(attachedTask ? { taskId: attachedTask.id } : item.task?.trim() ? { taskId: item.task.trim() } : {}),
+          schedule,
+          prompt: (item.prompt ?? "").trim(),
+          ...(item.options ? { options: item.options } : {}),
+          asked: [name || "New routine", matchedAgent?.name || item.agent || item.engine, parsedSchedule ? schedule : ""].filter(Boolean).join(" · "),
+        };
+        plannedRoutines.push({ id: plannedId(step.id), name, schedule, enabled: true, ...(matchedAgent ? { agent: matchedAgent.name, agentId: matchedAgent.id } : {}) });
+        steps.push(step);
+      } else if (action === "edit") {
+        noteRename(existing?.id, item.name);
+        const attachedTask = item.task ? findTask(item.task) : null;
+        const agentQuery = item.agent || item.engine;
+        const matchedAgent = agentQuery ? findAgent(agentQuery) : null;
         steps.push({
           ...base,
+          action: "edit",
+          target: existing?.id ?? "",
+          ...(item.name ? { name: item.name } : {}),
+          ...(agentQuery ? { agentId: matchedAgent?.id ?? agentQuery } : {}),
+          ...(item.task ? { taskId: attachedTask?.id ?? item.task } : {}),
+          ...(item.schedule ? { schedule: item.schedule } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: existing?.name || item.target || item.name || "",
+        });
+      } else {
+        const asked = existing ? existing.name : (item.target || item.workspace || "");
+        steps.push({
+          ...base,
+          ...(action ? { action } : item.action ? { action: item.action } : {}),
+          prompt: action === "enable" || action === "disable" ? action : "",
+          target: existing?.id ?? "",
+          asked,
+        });
+      }
+    } else if (kind === "task") {
+      const existing = item.target ? findTask(item.target) : null;
+      const hasCreatePayload = Boolean(item.workspace || item.prompt || item.name || item.branch);
+      const action = normalizeTaskStepAction(item.action, Boolean(existing), hasCreatePayload);
+
+      if (!item.action && existing && !item.workspace && !item.prompt) {
+        steps.push({ ...base, prompt: "", target: existing.id, asked: existing.title });
+      } else if (action === "handoff") {
+        const matchedRun = (context.runs ?? []).find((r) => r.id === item.target) ?? matchName(item.target, context.runs ?? [], (r) => [r.id, r.title], true);
+        const matchedAgent = findAgent(item.agent || item.engine);
+        steps.push({
+          ...base,
+          action: "handoff",
+          target: matchedRun?.id ?? (item.target ?? "").trim(),
+          ...(matchedAgent ? { agentId: matchedAgent.id, engineId: matchedAgent.engine } : {}),
+          prompt: "",
+          asked: [matchedRun?.title || item.target, matchedAgent?.name || item.agent || item.engine].filter(Boolean).join(" → "),
+        });
+      } else if (action === "create" || action === "create-run") {
+        const workspace = findWorkspace(item.workspace);
+        const agent = findAgent(item.agent || item.engine || (!existing ? item.target : ""));
+        const title = (item.name || item.branch || "").trim() || (item.prompt?.trim() ? branchFromPrompt(item.prompt).replace(/-/g, " ") : "");
+        const step: OrchestratorStep = {
+          ...base,
+          ...(item.action ? { action } : {}),
           workspaceId: workspace?.id ?? "",
           agentId: agent?.id ?? "",
           engineId: agent?.engine ?? "",
           name: title,
           prompt: item.prompt ?? "",
-          asked: [agent?.name || item.engine || item.target, workspace?.name || item.workspace].filter(Boolean).join(" · "),
+          ...(item.options ? { options: item.options } : {}),
+          asked: [agent?.name || item.agent || item.engine || (!existing ? item.target : ""), workspace?.name || item.workspace].filter(Boolean).join(" · ") || title,
+        };
+        plannedTasks.push({
+          id: plannedId(step.id),
+          title,
+          status: "todo",
+          ...(workspace ? { workspace: workspace.name, workspaceId: workspace.id } : {}),
+          ...(agent ? { agent: agent.name, agentId: agent.id } : {}),
+        });
+        steps.push(step);
+      } else if (action === "edit") {
+        noteRename(existing?.id, item.name);
+        const workspace = item.workspace ? findWorkspace(item.workspace) : null;
+        const agent = (item.agent || item.engine) ? findAgent(item.agent || item.engine) : null;
+        steps.push({
+          ...base,
+          action: "edit",
+          target: existing?.id ?? "",
+          ...(item.name ? { name: item.name } : {}),
+          ...(item.workspace ? { workspaceId: workspace?.id ?? item.workspace } : {}),
+          ...(item.agent || item.engine ? { agentId: agent?.id ?? (item.agent || item.engine) } : {}),
+          ...(item.status ? { status: parseTaskStatus(item.status) ?? item.status } : {}),
+          ...(item.options ? { options: item.options } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: existing?.title || item.target || item.name || "",
+        });
+      } else if (action === "status") {
+        const nextStatus = parseTaskStatus(item.status || item.prompt) ?? (item.status || item.prompt || "").trim();
+        steps.push({
+          ...base,
+          action: "status",
+          target: existing?.id ?? "",
+          status: nextStatus,
+          prompt: "",
+          asked: [existing?.title || item.target, nextStatus].filter(Boolean).join(" → "),
+        });
+      } else {
+        steps.push({
+          ...base,
+          action: action ?? item.action ?? "run",
+          target: existing?.id ?? "",
+          prompt: action === "continue" ? (item.prompt ?? "").trim() : "",
+          asked: existing?.title || item.target || "",
         });
       }
+    } else if (kind === "chat") {
+      const existing = item.target ? findChat(item.target) : null;
+      const explicitAgent = item.agent ? findAgent(item.agent) : null;
+      const engineAsAgent = !explicitAgent && item.engine && !findEngine(item.engine) ? findAgent(item.engine) : null;
+      const agent = explicitAgent ?? engineAsAgent;
+      const action = normalizeChatAction(item.action, Boolean(existing || (item.target && normalizeChatAction(item.action, false, false) !== "create")), Boolean(item.prompt?.trim()));
+      if (action === "create") {
+        const matchedEngine = agent ? null : (findEngine(item.engine) ?? (!item.engine?.trim() && context.defaultEngine ? findEngine(context.defaultEngine) : null));
+        const engineId = agent ? agent.engine : (matchedEngine?.id ?? "");
+        const step: OrchestratorStep = {
+          ...base,
+          action: "create",
+          engineId,
+          ...(agent ? { agentId: agent.id } : {}),
+          ...(item.name ? { name: item.name } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: [item.name || agent?.name || matchedEngine?.label || item.engine || "New chat"].filter(Boolean).join(" · "),
+        };
+        plannedChats.push({ id: plannedId(step.id), title: item.name || "New chat", engine: engineId, ...(agent ? { agent: agent.name, agentId: agent.id } : {}), live: Boolean(item.prompt?.trim()) });
+        steps.push(step);
+      } else if (action === "send") {
+        steps.push({
+          ...base,
+          action: "send",
+          target: existing?.id ?? "",
+          ...(agent ? { agentId: agent.id } : {}),
+          prompt: (item.prompt ?? "").trim(),
+          asked: existing?.title || agent?.name || item.target || item.agent || "",
+        });
+      } else if (action === "rename") {
+        const nextName = (item.name || item.prompt || "").trim();
+        noteRename(existing?.id, nextName);
+        steps.push({
+          ...base,
+          action: "rename",
+          target: existing?.id ?? "",
+          name: nextName,
+          prompt: "",
+          asked: [existing?.title || item.target, nextName].filter(Boolean).join(" → "),
+        });
+      } else if (action === "set-engine") {
+        const matchedEngine = findEngine(item.engine || item.prompt);
+        steps.push({
+          ...base,
+          action: "set-engine",
+          target: existing?.id ?? "",
+          engineId: matchedEngine?.id ?? "",
+          prompt: "",
+          asked: [existing?.title || item.target, matchedEngine?.label || item.engine || item.prompt].filter(Boolean).join(" → "),
+        });
+      } else {
+        steps.push({
+          ...base,
+          action: action ?? item.action ?? "continue",
+          target: existing?.id ?? "",
+          prompt: "",
+          asked: existing?.title || item.target || "",
+        });
+      }
+    } else if (kind === "run") {
+      const action = normalizeRunAction(item.action || item.prompt);
+      const matchedRun = item.target
+        ? ((context.runs ?? []).find((r) => r.id === item.target) ?? matchName(item.target, context.runs ?? [], (r) => [r.id, r.title], true))
+        : null;
+      const runTarget = matchedRun?.id ?? (item.target ?? "").trim();
+      const matchedAgent = action === "handoff" ? findAgent(item.agent || item.engine) : null;
+      steps.push({
+        ...base,
+        action: action ?? item.action ?? "",
+        target: runTarget,
+        ...(matchedAgent ? { agentId: matchedAgent.id, engineId: matchedAgent.engine } : {}),
+        prompt: action === "continue" ? (item.prompt ?? "").trim() : "",
+        asked:
+          action === "mark-all-reviewed"
+            ? "Mark all runs reviewed"
+            : action === "tidy"
+              ? "Tidy run storage"
+              : action === "handoff"
+                ? [matchedRun?.title || runTarget, matchedAgent?.name || item.agent || item.engine].filter(Boolean).join(" → ")
+                : matchedRun?.title || runTarget || action || "run",
+      });
+    } else if (kind === "talk") {
+      const action = normalizeTalkAction(item.action || item.prompt);
+      const primary = findRunning(item.target);
+      const opts = parseOptions(item.options);
+      const secondQuery = item.agents?.[0] || opts.str("to") || opts.str("reviewer") || item.agent || "";
+      const secondary = secondQuery ? findRunning(secondQuery) : null;
+      const draftWhat = action === "send-draft" ? (/changes|diff/i.test(item.prompt ?? "") ? "changes" : "reply") : "";
+      const taskIds = action === "start-tasks" && item.places?.length ? item.places : undefined;
+      steps.push({
+        ...base,
+        action: action ?? item.action ?? "",
+        target: primary?.id ?? "",
+        ...(secondary ? { agents: [secondary.id] } : {}),
+        ...(taskIds ? { places: taskIds } : {}),
+        prompt: draftWhat,
+        asked:
+          secondary && primary
+            ? `${primary.engine} · ${primary.workspace} → ${secondary.engine} · ${secondary.workspace}`
+            : primary
+              ? `${primary.engine} · ${primary.workspace}`
+              : item.target || action || "talk",
+      });
     } else if (kind === "apply" || kind === "discard") {
       const copies = context.copies ?? [];
       const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
       const asked = copy ? `${copy.name} · ${copy.workspace}` : (item.target ?? "");
       steps.push({ ...base, prompt: "", target: copy?.id ?? "", asked });
     } else if (kind === "show") {
-      steps.push({ ...base, prompt: "", ...showWhat(item, context) });
+      steps.push({ ...base, prompt: "", ...showWhat(item, { ...context, workspaces: allWorkspaces(), agents: allAgents(), skills: allSkills(), tasks: allTasks(), routines: allRoutines(), chats: allChats() }) });
     } else {
       const target = context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`]);
       const asked = target ? `${target.engine} · ${target.workspace}` : (item.target ?? "");
@@ -704,20 +1328,60 @@ export function showView(said: string | undefined): (typeof SHOW_VIEWS)[number] 
   return SHOW_VIEWS.find((view) => view === name) ?? VIEW_NAMES[name] ?? null;
 }
 
+const AGENT_TABS = new Set(["chats", "brief", "memory", "skills", "folders", "runs", "settings"]);
+
 /**
  * What a show step shows, in this order: a running CLI it named, a workspace called exactly that,
- * a view, then a workspace whose name comes close. So a workspace named "Tasks" beats the view,
- * and "settings" is the view even with a workspace called app-settings.
+ * a view (optionally deep-linked to a section/agent/task), a workspace whose name comes close,
+ * then a specific agent, task, routine, skill, chat, copy, or run to deep-link straight to.
  */
-export function showWhat(item: RawStep, context: PlanContext): Pick<OrchestratorStep, "target" | "workspaceId" | "asked"> & { view?: string } {
+export function showWhat(item: RawStep, context: PlanContext): Pick<OrchestratorStep, "target" | "workspaceId" | "asked"> & { view?: string; route?: Record<string, string> } {
   const running = item.target ? (context.running.find((entry) => entry.id === item.target) ?? matchName(item.target, context.running, (entry) => [entry.id, `${entry.engine} ${entry.workspace}`, `${entry.engine} in ${entry.workspace}`])) : null;
   if (running) return { target: running.id, workspaceId: "", asked: `${running.engine} · ${running.workspace}` };
-  const said = (item.workspace || item.target || "").trim();
+  const opts = parseOptions(item.options);
+  const rawTab = (opts.str("tab") || item.status || "").trim().toLowerCase();
+  const tab = AGENT_TABS.has(rawTab) ? rawTab : "";
+  const section = (opts.str("section") || (showView(item.target) === "settings" ? item.status || item.description : "") || "").trim().toLowerCase();
+  const said = (item.workspace || item.target || item.agent || item.task || "").trim();
   const exact = context.workspaces.filter((entry) => squash(entry.name) === squash(said));
   const view = exact.length === 1 ? null : (showView(item.target) ?? showView(item.workspace));
   const workspace = exact.length === 1 ? exact[0] : view ? null : matchName(said, context.workspaces, (entry) => [entry.name, path.basename(entry.folder)], true);
   if (workspace) return { target: "", workspaceId: workspace.id, asked: workspace.name };
-  if (view) return { target: "", workspaceId: "", view, asked: view === "orchestrator" ? "Viby" : `${view[0].toUpperCase()}${view.slice(1)}` };
+  if (view) {
+    if (view === "settings" && section) {
+      return { target: "", workspaceId: "", view, route: { view: "settings", section }, asked: `Settings · ${section}` };
+    }
+    if (view === "agents" && item.agent) {
+      const ag = (context.agents ?? []).find((a) => a.id === item.agent) ?? matchName(item.agent, context.agents ?? [], (a) => [a.id, a.name], true);
+      if (ag) return { target: "", workspaceId: "", view, route: { view: "agents", agentId: ag.id, ...(tab ? { tab } : {}) }, asked: tab ? `${ag.name} · ${tab}` : ag.name };
+    }
+    if (view === "tasks" && item.task) {
+      const tk = (context.tasks ?? []).find((t) => t.id === item.task) ?? matchName(item.task, context.tasks ?? [], (t) => [t.id, t.title], true);
+      if (tk) return { target: "", workspaceId: "", view, route: { view: "tasks", taskId: tk.id }, asked: tk.title };
+    }
+    return { target: "", workspaceId: "", view, asked: view === "orchestrator" ? "Viby" : `${view[0].toUpperCase()}${view.slice(1)}` };
+  }
+  const agentQuery = item.agent || said;
+  const ag = agentQuery ? ((context.agents ?? []).find((a) => a.id === agentQuery) ?? matchName(agentQuery, context.agents ?? [], (a) => [a.id, a.name], true)) : null;
+  if (ag) {
+    return { target: "", workspaceId: "", view: "agents", route: { view: "agents", agentId: ag.id, ...(tab ? { tab } : {}) }, asked: tab ? `${ag.name} · ${tab}` : ag.name };
+  }
+  const taskQuery = item.task || said;
+  const tk = taskQuery ? ((context.tasks ?? []).find((t) => t.id === taskQuery) ?? matchName(taskQuery, context.tasks ?? [], (t) => [t.id, t.title], true)) : null;
+  if (tk) return { target: "", workspaceId: "", view: "tasks", route: { view: "tasks", taskId: tk.id }, asked: tk.title };
+  const rt = said ? ((context.routines ?? []).find((r) => r.id === said) ?? matchName(said, context.routines ?? [], (r) => [r.id, r.name], true)) : null;
+  if (rt) return { target: "", workspaceId: "", view: "routines", route: { view: "routines", routineId: rt.id }, asked: rt.name };
+  const sk = said ? ((context.skills ?? []).find((s) => s.id === said) ?? matchName(said, context.skills ?? [], (s) => [s.id, s.name], true)) : null;
+  if (sk) return { target: "", workspaceId: "", view: "skills", route: { view: "skills", skillId: sk.id }, asked: sk.name };
+  const ch = said ? ((context.chats ?? []).find((c) => c.id === said) ?? matchName(said, context.chats ?? [], (c) => [c.id, c.title], true)) : null;
+  if (ch) {
+    const route: Record<string, string> = ch.agentId ? { view: "agents", agentId: ch.agentId, tab: "chats", chatId: ch.id } : { view: "chat", chatId: ch.id };
+    return { target: "", workspaceId: "", view: route.view, route, asked: ch.title };
+  }
+  const cp = said ? ((context.copies ?? []).find((c) => c.id === said) ?? matchName(said, context.copies ?? [], (c) => [c.id, c.name, c.branch])) : null;
+  if (cp) return { target: "", workspaceId: "", view: "orchestrator", route: { view: "orchestrator", copyId: cp.id }, asked: cp.name };
+  const rn = said ? ((context.runs ?? []).find((r) => r.id === said) ?? matchName(said, context.runs ?? [], (r) => [r.id, r.title], true)) : null;
+  if (rn) return { target: "", workspaceId: "", view: "runs", route: { view: "runs", runId: rn.id }, asked: rn.title };
   return { target: "", workspaceId: "", asked: said };
 }
 
@@ -794,12 +1458,13 @@ export function safeInCall(step: OrchestratorStep, context: PlanContext | null =
  */
 export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
   if (NEEDS_GO.includes(step.kind)) return true;
+  if (isDestructiveStepAction(step.kind, step.action)) return true;
   if (step.kind === "key") return Boolean(keySequenceFor(step.prompt)?.interrupts);
   if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
   if (step.kind === "settings") {
     const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
     if (!action) return false;
-    if (action.op === "voice-download") return true;
+    if (action.op === "voice-download" || action.op === "engine-save" || action.op === "engine-remove") return true;
     if (action.op === "voice-model" || action.op === "voice-speaker") return Boolean(action.downloadId);
     if (action.op === "viby") return action.mode === "go";
     if (action.op === "app-patch") {

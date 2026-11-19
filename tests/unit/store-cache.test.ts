@@ -24,7 +24,6 @@ function agent(id: string, name: string): Agent {
     places: [],
     skills: [],
     allowRoutines: true,
-    voice: "",
     goodAt: "",
     tier: "",
     createdAt: "2026-11-08T10:00:00.000Z",

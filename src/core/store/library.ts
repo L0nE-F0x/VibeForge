@@ -54,7 +54,6 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
     places: strList(record.places),
     skills: strList(record.skills),
     allowRoutines: bool(record.allowRoutines, true),
-    voice: str(record.voice).trim(),
     goodAt: oneLine(str(record.goodAt)),
     tier: agentTier(record.tier),
     createdAt: str(record.createdAt),

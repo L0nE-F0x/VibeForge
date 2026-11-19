@@ -22,7 +22,7 @@ describe("quitting", () => {
     const supervisorShutdown = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
     const service = { prepareShutdown: vi.fn(), whenIdle: async () => undefined, shutdown: vi.fn(), close: vi.fn() };
     const ctx = { log: { warn: vi.fn() }, supervisor: { shutdown: supervisorShutdown }, service, quitting: false } as never;
-    const quit = new Quit(ctx, { talk: { dispose: vi.fn() }, voice: { dispose: vi.fn() } });
+    const quit = new Quit(ctx, { voice: { dispose: vi.fn() } });
     quit.handleEvents();
     expect(willQuit().preventDefault).toHaveBeenCalled();
     await new Promise((resolve) => setImmediate(resolve));

@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (2.24.1, 2026-11-19, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (3.0.0, 2026-11-19, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -18,7 +18,7 @@ What's next. What shipped is in `CHANGELOG.md` (2.24.1, 2026-11-19, is the lates
 
 These work against fake CLIs, synthetic audio and the hidden test window. Nothing is known to be wrong:
 
-- Dictation and talk-back with a real microphone and speakers, including talk-back from a CLI typed into a Code terminal.
+- Dictation with a real microphone and Viby's voice on real speakers.
 - **A call with Viby**, beyond the founder's first one: whether the pause that ends a turn (0.9 s) feels right over a longer session, whether a real keyboard or the room sets the speech detector off (made-up typing, tones and hiss don't), and Viby speaking up about a real CLI's answer.
 - **Talking over Viby on other speakers.** The founder's call (2026-11-18) is the only one on real speakers: Viby stopped cleanly when talked over and didn't cut itself off. Laptop speakers beside their microphone, Bluetooth, a loud room, and whether whisper hears as well through the canceller as without it, are untried. The echo guard (Viby's own words dropped, talking over switched off for the call) has only run in tests.
 - The 0.8.0 sounds on real speakers.

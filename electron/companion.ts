@@ -168,6 +168,7 @@ function actionsFor(wire: CompanionWire): CompanionActions {
         orchestratorDictationWords({
           agents: service.listAgents().map((agent) => agent.name),
           routines: service.listRoutines().map((routine) => routine.name),
+          skills: service.listSkills().map((skill) => skill.name),
           engines: service.listEngines().map((engine) => engine.label),
           workspaces,
         }),
@@ -195,6 +196,11 @@ export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" 
         workspaces: service.listWorkspaces().workspaces,
         live: service.liveForView(),
         hear: hearing.can,
+        agents: service.listAgents().map((a) => ({ id: a.id, name: a.name, engine: a.engine, places: a.places, skills: a.skills })),
+        skills: service.listSkills().map((s) => ({ id: s.id, name: s.name, description: s.description })),
+        tasks: service.listTasks().map((t) => ({ id: t.id, title: t.title, status: t.status, agentId: t.agentId, workspaceId: t.workspaceId })),
+        routines: service.listRoutines().map((r) => ({ id: r.id, name: r.name, schedule: r.description, enabled: r.enabled, agentId: r.agentId })),
+        chats: service.listChats().map((c) => ({ id: c.id, title: c.title, engine: c.engine, agentId: c.agentId, live: c.live })),
       });
     },
     ask: (text) => {

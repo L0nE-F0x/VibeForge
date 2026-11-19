@@ -3,7 +3,6 @@ import { describeError } from "../src/core/log.js";
 import { stopCompanion } from "./companion.js";
 import { oneAtATime, settleWithin } from "./guards.js";
 import type { MainContext } from "./main-context.js";
-import type { Talk } from "./talk.js";
 import type { Voice } from "./voice.js";
 
 // Ways out: the question about running terminals, Quit in the tray, the shutdown every quit runs
@@ -23,7 +22,7 @@ export class Quit {
 
   constructor(
     private readonly ctx: MainContext,
-    private readonly parts: { talk: Pick<Talk, "dispose">; voice: Pick<Voice, "dispose">; sync?: { stop(): Promise<void> } },
+    private readonly parts: { voice: Pick<Voice, "dispose">; sync?: { stop(): Promise<void> } },
   ) {}
 
   /**
@@ -67,7 +66,6 @@ export class Quit {
       const ended = await settleWithin(this.parts.sync.stop(), SYNC_STOP_MS, (error) => log.warn(`Sync did not stop cleanly: ${describeError(error)}`));
       if (!ended) log.warn("Sync did not stop in time; quitting without waiting for it");
     }
-    this.parts.talk.dispose();
     this.parts.voice.dispose();
     if (!ctx.service) return;
     ctx.service.prepareShutdown();

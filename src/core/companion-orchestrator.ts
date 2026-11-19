@@ -64,6 +64,11 @@ export interface PhoneOrchestratorInput {
   workspaces: Array<{ id: string; name: string; path: string }>;
   live: readonly LiveSession[];
   hear: boolean;
+  agents?: Array<{ id: string; name: string; engine: string; places?: string[]; skills?: string[] }>;
+  skills?: Array<{ id: string; name: string; description?: string }>;
+  tasks?: Array<{ id: string; title: string; status: string; agentId?: string | null; workspaceId?: string | null }>;
+  routines?: Array<{ id: string; name: string; schedule: string; enabled: boolean; agentId?: string }>;
+  chats?: Array<{ id: string; title: string; engine: string; agentId?: string | null; live: boolean }>;
 }
 
 /** A live CLI's name, the way the desktop's Running list and plan card say it. */
@@ -80,6 +85,21 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
     engines: input.engines.map((item) => ({ id: item.id, label: item.label, available: item.available, bin: item.bin })),
     running: coding.map((item) => ({ id: item.ptyId, engine: cliName(item), workspace: (item.workspaceId && names.get(item.workspaceId)) || item.title, folder: item.cwd, working: Boolean(item.working), orchestrated: Boolean(item.orchestrated) })),
     copies: (input.view.copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
+    ...(input.agents ? { agents: input.agents } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
+    ...(input.tasks
+      ? {
+          tasks: input.tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            ...(t.agentId ? { agentId: t.agentId } : {}),
+            ...(t.workspaceId ? { workspaceId: t.workspaceId } : {}),
+          })),
+        }
+      : {}),
+    ...(input.routines ? { routines: input.routines } : {}),
+    ...(input.chats ? { chats: input.chats } : {}),
   };
   const turns = input.view.turns.slice(-PHONE_TURNS).map((turn): PhoneTurn => {
     if (!turn.steps) return turn as PhoneTurn;
@@ -130,6 +150,6 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
  * Names whisper is nudged toward when the phone dictates to the Orchestrator: the same list the
  * desktop's box gives it (src/ui/voice.tsx, then the Orchestrator's own words).
  */
-export function orchestratorDictationWords(input: { agents: string[]; routines: string[]; engines: string[]; workspaces: string[] }): string[] {
-  return ["VibeForge", ...input.agents, ...input.routines, ...input.engines, ...orchestratorVoiceWords(input.workspaces)];
+export function orchestratorDictationWords(input: { agents: string[]; routines: string[]; engines: string[]; workspaces: string[]; skills?: string[] }): string[] {
+  return ["VibeForge", ...input.agents, ...input.routines, ...(input.skills ?? []), ...input.engines, ...orchestratorVoiceWords(input.workspaces)];
 }

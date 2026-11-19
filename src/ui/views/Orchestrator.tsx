@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  Bot,
   Check,
   ChevronDown,
   CircleAlert,
@@ -10,9 +11,11 @@ import {
   FolderPlus,
   GitBranch,
   GitMerge,
+  History,
   Keyboard,
   ListTodo,
   MessageSquare,
+  MessagesSquare,
   Mic,
   MicOff,
   Pencil,
@@ -21,6 +24,7 @@ import {
   Play,
   RotateCcw,
   Search,
+  Sparkles,
   Square,
   SquareTerminal,
   Trash2,
@@ -56,7 +60,7 @@ import {
   withPlannedWorkspaces,
   type PlanContext,
 } from "../../shared/orchestrator.js";
-import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
+import { call, useAgents, useChats, useEngines, useLive, useOrchestrator, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
 import { CallButton, callMood, METER_CELLS, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { Composer } from "../components/Session.js";
@@ -68,7 +72,7 @@ import { useT, type Key, type Translator } from "../i18n/index.js";
 import { overlayOpen } from "../overlays.js";
 import { VIEWS } from "../rail.js";
 import { shortcutKeys } from "../shortcuts.js";
-import { useAction, useNav, useOverlay, useToast } from "../state.js";
+import { isRoute, useAction, useNav, useOverlay, useToast } from "../state.js";
 import { CopyList, CopySheet } from "./OrchestratorCopies.js";
 
 // Viby: a voice-call-first panel where the call is the whole panel, words land live as spoken,
@@ -94,6 +98,11 @@ function usePlanContext(): { context: PlanContext; ready: boolean } {
   const engines = useEngines().data;
   const live = useLive().data;
   const copies = useOrchestrator().data?.copies;
+  const agents = useAgents().data;
+  const skills = useSkills().data;
+  const tasks = useTasks().data;
+  const routines = useRoutines().data;
+  const chats = useChats(undefined).data;
   const ready = workspaces !== undefined && engines !== undefined && live !== undefined;
   const context = useMemo(() => {
     const names = new Map((workspaces ?? []).map((item) => [item.id, item.name]));
@@ -116,8 +125,23 @@ function usePlanContext(): { context: PlanContext; ready: boolean } {
         branch: item.branch,
         workspace: (item.workspaceId && names.get(item.workspaceId)) || item.workspaceId,
       })),
+      ...(agents ? { agents: agents.map((a) => ({ id: a.id, name: a.name, engine: a.engine, places: a.places, skills: a.skills })) } : {}),
+      ...(skills ? { skills: skills.map((s) => ({ id: s.id, name: s.name, description: s.description })) } : {}),
+      ...(tasks
+        ? {
+            tasks: tasks.map((item) => ({
+              id: item.id,
+              title: item.title,
+              status: item.status,
+              ...(item.agentId ? { agentId: item.agentId } : {}),
+              ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+            })),
+          }
+        : {}),
+      ...(routines ? { routines: routines.map((r) => ({ id: r.id, name: r.name, schedule: r.description, enabled: r.enabled, agentId: r.agentId })) } : {}),
+      ...(chats ? { chats: chats.map((c) => ({ id: c.id, title: c.title, engine: c.engine, agentId: c.agentId, live: c.live })) } : {}),
     };
-  }, [workspaces, engines, live, copies]);
+  }, [workspaces, engines, live, copies, agents, skills, tasks, routines, chats]);
   return { context, ready };
 }
 
@@ -130,27 +154,75 @@ const ISSUE_KEY: Record<StepIssue, Key> = {
   effort: "orch.issue.effort",
   folder: "orch.issue.folder",
   copy: "orch.issue.copy",
+  schedule: "orch.issue.schedule",
+  name: "orch.issue.name",
 };
 
 function issueKey(step: OrchestratorStep, issue: StepIssue): Key {
   if (step.kind === "routine" && issue === "target") return "orch.issue.routine";
+  if (step.kind === "routine" && issue === "engine") return "orch.issue.agent";
   if (step.kind === "task" && issue === "target") return "orch.issue.task";
   if (step.kind === "task" && issue === "engine") return "orch.issue.agent";
+  if (step.kind === "agent" && issue === "target") return "orch.issue.agent";
+  if (step.kind === "skill" && issue === "target") return "orch.issue.skill";
+  if (step.kind === "skill" && issue === "engine") return "orch.issue.agent";
+  if (step.kind === "chat" && issue === "target") return "orch.issue.chat";
+  if (step.kind === "run" && issue === "target") return "orch.issue.run";
+  if (step.kind === "run" && issue === "engine") return "orch.issue.agent";
   if (step.kind === "show" && issue === "workspace") return "orch.issue.show";
   return ISSUE_KEY[issue];
 }
 
-/** What a lookup, inspect, shell, key, workbench, settings, task or routine step will do. */
+/** What a non-start step will do. */
 function otherStepKey(step: OrchestratorStep): Key {
+  const act = (step.action || "").trim().toLowerCase();
   if (step.kind === "lookup") return "orch.lookup";
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
   if (step.kind === "settings") return "orch.settings";
-  if (step.kind === "task") return step.name ? "orch.taskNew" : "orch.taskRun";
-  const action = step.prompt.trim().toLowerCase();
-  return action === "enable" ? "orch.routineOn" : action === "disable" ? "orch.routineOff" : "orch.routineRun";
+  if (step.kind === "workspace") {
+    if (act === "rename") return "orch.workspaceRename";
+    if (act === "remove") return "orch.workspaceRemove";
+    if (act === "move") return "orch.workspaceMove";
+    return "orch.makeWorkspace";
+  }
+  if (step.kind === "agent") {
+    if (act === "create") return "orch.agentNew";
+    if (act === "delete") return "orch.agentDelete";
+    if (act.startsWith("memory-")) return "orch.agentMemory";
+    return "orch.agentEdit";
+  }
+  if (step.kind === "skill") {
+    if (act === "create") return "orch.skillNew";
+    if (act === "delete") return "orch.skillDelete";
+    return "orch.skillEdit";
+  }
+  if (step.kind === "chat") {
+    if (act === "create") return "orch.chatNew";
+    if (act === "send") return "orch.chatSend";
+    if (act === "delete") return "orch.chatDelete";
+    return "orch.chat";
+  }
+  if (step.kind === "run") return act === "tidy" ? "orch.runTidy" : "orch.run";
+  if (step.kind === "talk") return "orch.talk";
+  if (step.kind === "task") {
+    if (act === "edit") return "orch.taskEdit";
+    if (act === "delete") return "orch.taskDelete";
+    if (act === "status") return "orch.taskStatus";
+    if (act === "stop") return "orch.taskStop";
+    if (act === "continue") return "orch.taskContinue";
+    if (act === "handoff") return "orch.taskHandoff";
+    if (act === "apply") return "orch.applyStep";
+    if (act === "discard") return "orch.discard";
+    return act === "create" || act === "create-run" || (!act && Boolean(step.name)) ? "orch.taskNew" : "orch.taskRun";
+  }
+  if (act === "create") return "orch.routineNew";
+  if (act === "edit") return "orch.routineEdit";
+  if (act === "delete") return "orch.routineDelete";
+  const promptAct = step.prompt.trim().toLowerCase();
+  return act === "enable" || promptAct === "enable" ? "orch.routineOn" : act === "disable" || promptAct === "disable" ? "orch.routineOff" : "orch.routineRun";
 }
 
 function sessionLabel(session: LiveSession | undefined, workspaces: Workspace[]): string {
@@ -347,7 +419,6 @@ export function OrchestratorView() {
                 busy={view?.thinking}
                 disabled={!view}
                 autoFocus
-                quiet
                 sendLabel={t("common.send")}
                 voiceLabel={t("orch.title")}
                 voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
@@ -447,7 +518,6 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
             busy={view?.thinking}
             disabled={!view}
             autoFocus
-            quiet
             sendLabel={t("common.send")}
             voiceLabel={t("orch.title")}
             voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
@@ -1129,6 +1199,14 @@ function StepChip({ step }: { step: OrchestratorStep }) {
   }
 
   if (step.kind === "workspace") {
+    if (step.action === "remove") {
+      return (
+        <span className="viby-chip settled">
+          <Trash2 size={11} />
+          <span className="truncate">{step.result ? coreText(step.result) : step.asked}</span>
+        </span>
+      );
+    }
     return (
       <button
         type="button"
@@ -1211,7 +1289,7 @@ function StepChip({ step }: { step: OrchestratorStep }) {
   if (step.kind === "show") {
     const shownView = step.view || "";
     const viewLabel = shownView ? t(VIEWS.find((item) => item.view === shownView)?.label ?? "rail.settings") : "";
-    const label = sessionLabel(targetSession, workspaces) || viewLabel || workspace?.name || step.asked;
+    const label = step.route ? step.asked || viewLabel : sessionLabel(targetSession, workspaces) || viewLabel || workspace?.name || step.asked;
     return (
       <button
         type="button"
@@ -1219,6 +1297,7 @@ function StepChip({ step }: { step: OrchestratorStep }) {
         onClick={() => {
           leaveBar?.();
           if (targetSession) go({ view: "code", workspaceId: targetSession.workspaceId ?? undefined, ptyId: targetSession.ptyId });
+          else if (step.route && isRoute(step.route)) go(step.route);
           else if (shownView) go({ view: shownView as Parameters<typeof go>[0]["view"] });
           else if (step.workspaceId) go({ view: "code", workspaceId: step.workspaceId });
         }}
@@ -1229,8 +1308,34 @@ function StepChip({ step }: { step: OrchestratorStep }) {
     );
   }
 
-  if (step.kind === "task" || step.kind === "routine") {
-    const Icon = step.kind === "task" ? ListTodo : Clock;
+  if (step.kind === "agent" || step.kind === "skill" || step.kind === "task" || step.kind === "routine" || step.kind === "chat") {
+    const isDelete = step.action === "delete";
+    if (isDelete) {
+      return (
+        <>
+          <span className="viby-chip settled">
+            <Trash2 size={11} />
+            <span className="truncate">{step.result ? coreText(step.result) : step.asked}</span>
+          </span>
+          {step.undo && (
+            <button type="button" className="viby-chip" onClick={() => void undo()}>
+              <RotateCcw size={11} />
+              <span>{t("common.undo")}</span>
+            </button>
+          )}
+        </>
+      );
+    }
+    const Icon =
+      step.kind === "agent"
+        ? Bot
+        : step.kind === "skill"
+          ? Sparkles
+          : step.kind === "task"
+            ? ListTodo
+            : step.kind === "chat"
+              ? MessagesSquare
+              : Clock;
     const label = step.name || step.asked || step.prompt;
     return (
       <button
@@ -1238,11 +1343,34 @@ function StepChip({ step }: { step: OrchestratorStep }) {
         className="viby-chip action"
         onClick={() => {
           leaveBar?.();
-          if (step.kind === "task") go({ view: "tasks", ...(step.target ? { taskId: step.target } : {}) });
-          else go({ view: "routines" });
+          if (step.kind === "agent") go({ view: "agents", ...(step.target ? { agentId: step.target } : {}) });
+          else if (step.kind === "skill") go({ view: "skills", ...(step.target ? { skillId: step.target } : {}) });
+          else if (step.kind === "task") go({ view: "tasks", ...(step.target ? { taskId: step.target } : {}) });
+          else if (step.kind === "chat") {
+            if (step.agentId) go({ view: "agents", agentId: step.agentId, tab: "chats", ...(step.target ? { chatId: step.target } : {}) });
+            else go({ view: "chat", ...(step.target ? { chatId: step.target } : {}) });
+          } else go({ view: "routines", ...(step.target ? { routineId: step.target } : {}) });
         }}
       >
         <Icon size={11} />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "run") {
+    const label = step.result ? coreText(step.result) : step.asked || t("orch.run");
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        onClick={() => {
+          leaveBar?.();
+          const runId = step.runId || (step.action !== "tidy" && step.action !== "mark-all-reviewed" ? step.target : "");
+          go({ view: "runs", ...(runId ? { runId } : {}) });
+        }}
+      >
+        <History size={11} />
         <span className="truncate">{label}</span>
       </button>
     );
@@ -1438,9 +1566,19 @@ function PendingStepSummary({ step }: { step: OrchestratorStep }) {
   } else if (step.kind === "stop") {
     text = `${t("orch.close")} · ${sessionLabel(target, workspaces) || step.asked}`;
   } else if (step.kind === "workspace") {
-    text = `${t("orch.makeWorkspace")} · ${step.name ?? ""}`;
+    text = `${t(otherStepKey(step))} · ${step.name || step.asked || ""}`;
   } else if (step.kind === "tell") {
     text = `${t("orch.tell")} · ${sessionLabel(target, workspaces) || step.asked}`;
+  } else if (
+    step.kind === "agent" ||
+    step.kind === "skill" ||
+    step.kind === "routine" ||
+    step.kind === "task" ||
+    step.kind === "chat" ||
+    step.kind === "run" ||
+    step.kind === "talk"
+  ) {
+    text = [t(otherStepKey(step)), step.asked || step.name || step.prompt].filter(Boolean).join(" · ");
   } else {
     text = step.name || step.asked || step.prompt || step.kind;
   }
@@ -1482,7 +1620,7 @@ function EditableStepRow({
   const targetCopy = copies.find((item) => item.id === step.target);
 
   let controls: ReactNode;
-  if (step.kind === "workspace") {
+  if (step.kind === "workspace" && (!step.action || step.action === "create")) {
     controls = (
       <div className="orch-step-line">
         <strong>{t("orch.makeWorkspace")}</strong>
@@ -1524,12 +1662,27 @@ function EditableStepRow({
         <EffortPick engine={engine} value={step.effort ?? ""} onChange={(effort) => void edit({ effort })} />
       </div>
     );
-  } else if (step.kind === "lookup" || step.kind === "inspect" || step.kind === "shell" || step.kind === "key" || step.kind === "workbench" || step.kind === "settings" || step.kind === "task" || step.kind === "routine") {
+  } else if (
+    step.kind === "workspace" ||
+    step.kind === "lookup" ||
+    step.kind === "inspect" ||
+    step.kind === "shell" ||
+    step.kind === "key" ||
+    step.kind === "workbench" ||
+    step.kind === "settings" ||
+    step.kind === "task" ||
+    step.kind === "routine" ||
+    step.kind === "agent" ||
+    step.kind === "skill" ||
+    step.kind === "chat" ||
+    step.kind === "run" ||
+    step.kind === "talk"
+  ) {
     controls = (
       <div className="orch-step-line">
         <strong>{t(otherStepKey(step))}</strong>
         <span className="truncate">
-          {step.kind === "task" && step.name
+          {step.kind === "task" && step.name && step.action !== "edit"
             ? [step.name, step.asked].filter(Boolean).join(" · ")
             : step.kind === "key"
               ? // Which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
@@ -1547,11 +1700,21 @@ function EditableStepRow({
     );
   }
 
+  const showPromptBox =
+    step.kind === "start" ||
+    step.kind === "tell" ||
+    step.kind === "shell" ||
+    (step.kind === "task" && Boolean(step.name || step.action === "create" || step.action === "create-run" || step.action === "edit" || step.action === "continue")) ||
+    (step.kind === "routine" && (step.action === "create" || step.action === "edit")) ||
+    (step.kind === "agent" && (step.action === "create" || step.action === "edit" || step.action === "memory-set" || step.action === "memory-append")) ||
+    (step.kind === "skill" && (step.action === "create" || step.action === "edit")) ||
+    (step.kind === "chat" && (step.action === "create" || step.action === "send"));
+
   return (
     <div className={`orch-step${issue ? " has-issue" : ""}`}>
       <div className="vstack grow" style={{ gap: 6, minWidth: 0 }}>
         {controls}
-        {(step.kind === "start" || step.kind === "tell" || step.kind === "shell" || (step.kind === "task" && Boolean(step.name))) && (
+        {showPromptBox && (
           <PromptBox
             value={step.prompt}
             label={t("orch.prompt")}

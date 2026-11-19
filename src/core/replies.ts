@@ -1,6 +1,6 @@
 import path from "node:path";
 
-// Talking back: finding what an agent answered, and turning it into something worth hearing.
+// Reading a CLI's own session log, and turning Markdown into spoken words for Viby.
 // A CLI's own session log says it better than its screen does: Claude Code keeps one JSONL file
 // per session under ~/.claude/projects, Codex under ~/.codex/sessions, Grok Build under
 // ~/.grok/sessions and Kimi Code under ~/.kimi-code/sessions. Pure; electron/replies.ts watches

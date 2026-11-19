@@ -88,10 +88,6 @@
   }
 }
 
-.listening.answer .listening-text .faint {
-  max-width: 460px;
-}
-
 .btn.mic.live {
   color: var(--accent);
   border-color: var(--sel-line);

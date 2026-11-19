@@ -27,7 +27,6 @@ import { PtySupervisor } from "./supervisor.js";
 import { Sync } from "./sync.js";
 import { adoptShellPath, osDescription, settleWorkingDir } from "./system.js";
 import { Call } from "./call.js";
-import { Talk } from "./talk.js";
 import { Disposables, startSchedules } from "./timers.js";
 import { TrayController } from "./tray-controller.js";
 import { Updater } from "./updater.js";
@@ -117,7 +116,6 @@ const updater = new Updater({
 });
 
 const voice = makeVoice(ctx);
-const talk = new Talk({ voice, service: () => ctx.service, log, send: (event) => send("voice-talk", event) });
 const viby = new Call({
   voice,
   service: () => ctx.service,
@@ -168,7 +166,7 @@ function drawBrandIcon(): void {
 }
 
 const sync = new Sync(ctx, notify);
-const quit = new Quit(ctx, { talk, voice, sync });
+const quit = new Quit(ctx, { voice, sync });
 const tray = new TrayController(
   ctx,
   () => void quit.fromTray(),
@@ -183,7 +181,7 @@ const mainWindow = new MainWindow(ctx, {
   dock,
 });
 
-const hostLife = new HostLifecycle(ctx, { voice, talk });
+const hostLife = new HostLifecycle(ctx, { voice });
 hostLife.wire();
 
 // ------------------------------------------------------------------ lifecycle
@@ -222,6 +220,7 @@ if (!app.requestSingleInstanceLock()) {
       if (topics.includes("settings")) refreshPalette();
       if (topics.includes("settings")) syncCompanion(companionWire(ctx, stats, voice));
       if (topics.includes("settings")) tray.syncWords();
+      if (topics.includes("settings")) viby.syncSettings();
       // Sync starts and stops with its switch, and tells the paired machines what runs here.
       if (topics.includes("settings")) void sync.apply();
       if (topics.includes("live") || topics.includes("working") || topics.includes("workspaces")) sync.liveChanged();
@@ -229,7 +228,7 @@ if (!app.requestSingleInstanceLock()) {
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire(ctx, stats, voice));
     mainWindow.guardPermissions();
-    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, talk, call: viby, dock, sync, notify, refreshPalette });
+    registerIpc(ctx, { host: hostLife, stats, tray, updater, voice, call: viby, dock, sync, notify, refreshPalette });
     drawBrandIcon();
     tray.icon.recolor(ctx.palette.accent2, ctx.palette.darkerBackground, ctx.brandIcon, ctx.palette.accent);
     // Watching before the icon is made, so a bar that restarts right after (as Omarchy's does at

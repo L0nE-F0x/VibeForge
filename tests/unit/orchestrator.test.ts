@@ -64,7 +64,31 @@ describe("the Orchestrator's plans", () => {
     expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
     expect(asked).toContain("plan");
     expect(asked).not.toContain("--conversation");
-    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace", "after"]);
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual([
+      "kind",
+      "engine",
+      "workspace",
+      "branch",
+      "prompt",
+      "target",
+      "folder",
+      "git",
+      "model",
+      "effort",
+      "inPlace",
+      "after",
+      "action",
+      "name",
+      "description",
+      "schedule",
+      "agent",
+      "task",
+      "status",
+      "places",
+      "skills",
+      "agents",
+      "options",
+    ]);
     expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
     expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
     expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);
@@ -1875,6 +1899,35 @@ describe("Viby settings awareness and self-configuration", () => {
     expect(brainArgs(agyRow, { text: "hi", rules: "r", sessionId: "", resume: false, effort: "max" })).toEqual(
       expect.arrayContaining(["--effort", "max"]),
     );
+  });
+
+  it("never gives Antigravity an --effort that conflicts with the effort its model id carries", () => {
+    const agyRow = { id: "agy", label: "Antigravity", bin: "agy", args: [] };
+    const tail = (opts: { model?: string; effort?: string }) => {
+      const args = brainArgs(agyRow, { text: "hi", rules: "r", sessionId: "", resume: false, ...opts }) ?? [];
+      return args.slice(args.indexOf("plan") + 1);
+    };
+    // The default model plans at the quick low effort.
+    expect(tail({})).toEqual(["--effort", "low"]);
+    expect(tail({ effort: "xhigh" })).toEqual(["--effort", "xhigh"]);
+    // A model picked from the list, effort left at its default: the model's own level, no low beside it
+    // (agy: "--model gemini-4-neon-xhigh conflicts with --effort=low").
+    expect(tail({ model: "gemini-4-neon-xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    // A model with no levels of its own refuses any --effort.
+    expect(tail({ model: "gemini-pro-orchestrator" })).toEqual(["--model", "gemini-pro-orchestrator"]);
+    // Both picked and they agree: the model alone says it.
+    expect(tail({ model: "gemini-4-neon-xhigh", effort: "xhigh" })).toEqual(["--model", "gemini-4-neon-xhigh"]);
+    // Both picked and they differ: the chosen effort on the model's base name.
+    expect(tail({ model: "gemini-4-neon-high", effort: "xhigh" })).toEqual(["--effort", "xhigh", "--model", "gemini-4-neon"]);
+    expect(tail({ model: "claude-opus-5-5-low", effort: "high" })).toEqual(["--effort", "high", "--model", "claude-opus-5-5"]);
+  });
+
+  it("reads Antigravity's error answer as an error, with its own words", () => {
+    const out = readBrainOutput(
+      '{"conversation_id":"","status":"ERROR","response":"","error":"invalid model selection (--model \\"gemini-4-neon-high\\" --effort \\"xhigh\\"): --model gemini-4-neon-high conflicts with --effort=xhigh","finished_reason":"error"}',
+    );
+    expect(out.plan).toBeNull();
+    expect(out.error).toContain("conflicts with --effort=xhigh");
   });
 
   it("shows Viby its own settings & voice models, inspects settings live, and reconfigures itself, voice STT, and VibeForge settings", async () => {

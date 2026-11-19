@@ -4,6 +4,8 @@
 
 import type { EngineRow } from "../core/types.js";
 import { cleanModel, effortLevels } from "./launch-options.js";
+import { parseOptions } from "./orchestrator-actions.js";
+import { splitArgs } from "./text.js";
 import { MODEL_CATALOG, VOICE_CATALOG, type ModelChoice, type VoiceBackend, type VoiceChoice } from "./voice-catalog.js";
 
 export interface PlanSettingsContext {
@@ -138,7 +140,7 @@ export function formatSettingsRules(settings: PlanSettingsContext): string[] {
   return [
     `- Viby (you): planner=${viby.planner || "none"}${viby.pickedEngine ? "" : " (auto)"}, model=${viby.model || "default"}, effort=${viby.effort || "low (default)"}, mode=${viby.mode}, projectsFolder=${viby.projectsFolder || "~/Projects"}; available planners: ${planners || "none"}`,
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
-    `- Voice output & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
+    `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, 20).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
   ];
 }
@@ -336,6 +338,30 @@ export type SettingsAction =
       summary: string;
     }
   | {
+      op: "voice-stop-download";
+      summary: string;
+    }
+  | {
+      op: "rail";
+      mode: "hide" | "show" | "order";
+      views: string[];
+      summary: string;
+    }
+  | {
+      op: "engines-recheck";
+      summary: string;
+    }
+  | {
+      op: "engine-save";
+      row: EngineRow;
+      summary: string;
+    }
+  | {
+      op: "engine-remove";
+      id: string;
+      summary: string;
+    }
+  | {
       op: "app-patch";
       patch: Record<string, unknown>;
       autostart?: boolean;
@@ -353,6 +379,8 @@ export interface SettingsStepInput {
   effort?: string;
   folder?: string;
   branch?: string;
+  name?: string;
+  options?: string;
 }
 
 export interface SettingsValidationContext {
@@ -584,23 +612,23 @@ export function resolveSettingsStep(
     return { action: null, issue: "prompt", asked: wanted || "voice download" };
   }
 
-  if (/^(?:voicespeaker|voicevoice|speaker|ttsvoice|tts|pipervoice)$/.test(key)) {
+  if (/^(?:voicespeaker|voicevoice|vibyspeaker|speaker|ttsvoice|tts|pipervoice)$/.test(key) || (key === "vibyvoice" && parseBool(value) === null)) {
     const wanted = value || modelArg;
-    if (!wanted) return { action: null, issue: "prompt", asked: "speaker voice" };
+    if (!wanted) return { action: null, issue: "prompt", asked: "Viby voice" };
     if (isResetWord(wanted)) {
-      const summary = "Speaker voice · auto";
+      const summary = "Viby voice · auto";
       return { action: { op: "voice-speaker", speaker: "", summary }, issue: null, asked: summary };
     }
     const installed = context.settings?.voice.installedVoices ?? [];
     const direct = installed.find((item) => item.path === wanted || squash(item.name) === squash(wanted.replace(/\.onnx$/i, "")));
     if (direct) {
-      const summary = `Speaker voice · ${direct.name}`;
+      const summary = `Viby voice · ${direct.name}`;
       return { action: { op: "voice-speaker", speaker: direct.path, summary }, issue: null, asked: summary };
     }
     const choice = matchCatalogVoice(wanted);
     if (choice) {
       const onDisk = installed.find((item) => item.name === choice.id);
-      const summary = onDisk ? `Speaker voice · ${choice.id}` : `Speaker voice · ${choice.id} (download & select)`;
+      const summary = onDisk ? `Viby voice · ${choice.id}` : `Viby voice · ${choice.id} (download & select)`;
       return {
         action: { op: "voice-speaker", speaker: onDisk?.path ?? `${choice.id}.onnx`, ...(onDisk ? {} : { downloadId: choice.id }), summary },
         issue: null,
@@ -622,10 +650,10 @@ export function resolveSettingsStep(
     return { action: { op: "voice-patch", patch: { language: mapped }, summary }, issue: null, asked: summary };
   }
 
-  if (/^(?:voicetalkback|talkback|readaloud|readanswersaloud)$/.test(key)) {
+  if (/^(?:voicetalkback|vibytalkback|vibyvoice|talkback|readaloud|readanswersaloud)$/.test(key)) {
     const flag = parseBool(value);
     if (flag === null) return { action: null, issue: "prompt", asked: value || "talkBack" };
-    const summary = `Read answers aloud · ${flag ? "on" : "off"}`;
+    const summary = `Viby spoken replies · ${flag ? "on" : "off"}`;
     return { action: { op: "voice-patch", patch: { talkBack: flag }, summary }, issue: null, asked: summary };
   }
 
@@ -906,6 +934,101 @@ export function resolveSettingsStep(
     if (!Number.isFinite(num) || num < 0 || num > 1_000_000) return { action: null, issue: "prompt", asked: value || "keepRuns.maxMb" };
     const summary = `Run storage cap · ${num === 0 ? "unlimited" : `${num} MB`}`;
     return { action: { op: "app-patch", patch: { keepRuns: { maxMb: num } }, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:voicestopdownload|stopdownload|canceldownload)$/.test(key)) {
+    const summary = "Voice download · cancel";
+    return { action: { op: "voice-stop-download", summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:companionnudges|phonenudges|nudges)$/.test(key)) {
+    const nudges = value
+      .split(/[\n;|]+|,\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (!nudges.length && !isResetWord(value)) return { action: null, issue: "prompt", asked: value || "companion.nudges" };
+    const finalNudges = isResetWord(value) ? [] : nudges;
+    const summary = finalNudges.length ? `Phone nudges · ${finalNudges.length}` : "Phone nudges · cleared";
+    return { action: { op: "app-patch", patch: { companion: { nudges: finalNudges } }, summary }, issue: null, asked: summary };
+  }
+
+  const railViews = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "orchestrator"] as const;
+  const parseRailView = (raw: string): string | null => {
+    const k = squash(raw);
+    if (k === "viby" || k === "vibey" || k === "maestro") return "orchestrator";
+    return railViews.find((v) => v === k) ?? null;
+  };
+
+  if (/^(?:railhide|hiderail|hideview)$/.test(key)) {
+    const views = value
+      .split(/[\s,;]+/)
+      .map(parseRailView)
+      .filter((v): v is string => Boolean(v));
+    if (!views.length || views.includes("code")) return { action: null, issue: "prompt", asked: value || "rail.hide" };
+    const summary = `Hide rail · ${views.join(", ")}`;
+    return { action: { op: "rail", mode: "hide", views, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:railshow|showrail|showview)$/.test(key)) {
+    const views = value
+      .split(/[\s,;]+/)
+      .map(parseRailView)
+      .filter((v): v is string => Boolean(v));
+    if (!views.length) return { action: null, issue: "prompt", asked: value || "rail.show" };
+    const summary = `Show rail · ${views.join(", ")}`;
+    return { action: { op: "rail", mode: "show", views, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:railorder|orderrail|reorderrail)$/.test(key)) {
+    const views = [
+      ...new Set(
+        value
+          .split(/[\s,;]+/)
+          .map(parseRailView)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
+    if (!views.length) return { action: null, issue: "prompt", asked: value || "rail.order" };
+    const summary = `Rail order · ${views.join(", ")}`;
+    return { action: { op: "rail", mode: "order", views, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:enginesrecheck|recheckengines|recheckclis|refreshclis)$/.test(key)) {
+    const summary = "Coding CLIs · recheck PATH";
+    return { action: { op: "engines-recheck", summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:enginesadd|addengine|enginesedit|editengine|enginessave|saveengine|addcli|editcli)$/.test(key)) {
+    const opts = parseOptions(input.options);
+    const idRaw = (engineArg || opts.str("id") || input.name || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+    const bin = (folderArg || opts.str("bin") || opts.str("binary") || "").trim();
+    const label = (input.name || opts.str("label") || idRaw).trim();
+    const args = splitArgs(opts.str("args") ?? value);
+    const promptArgs = splitArgs(opts.str("promptArgs") ?? opts.str("prompt") ?? "");
+    const continueArgs = splitArgs(opts.str("continueArgs") ?? opts.str("continue") ?? "");
+    if (!idRaw || !bin || /\s/.test(bin)) return { action: null, issue: "prompt", asked: idRaw || bin || "engine" };
+    if (promptArgs.length > 0 && !promptArgs.some((arg) => arg.includes("{prompt}"))) {
+      return { action: null, issue: "prompt", asked: "promptArgs must include {prompt}" };
+    }
+    const row: EngineRow = {
+      id: idRaw,
+      label: label || idRaw,
+      bin,
+      args,
+      ...(promptArgs.length ? { promptArgs } : {}),
+      ...(continueArgs.length ? { continueArgs } : {}),
+    };
+    const summary = `CLI · ${row.label} (${row.bin})`;
+    return { action: { op: "engine-save", row, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:enginesremove|removeengine|enginesdelete|deleteengine|removecli|deletecli)$/.test(key)) {
+    const asked = engineArg || value || (input.name ?? "").trim();
+    const matched = matchEngine(asked, context.engines);
+    if (!matched) return { action: null, issue: "engine", asked: asked || "engine" };
+    const summary = `Remove CLI · ${matched.label}`;
+    return { action: { op: "engine-remove", id: matched.id, summary }, issue: null, asked: summary };
   }
 
   return { action: null, issue: "prompt", asked: rawTarget || value || "setting" };

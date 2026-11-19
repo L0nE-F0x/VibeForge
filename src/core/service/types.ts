@@ -41,10 +41,28 @@ export interface DeskHost {
   snapshotGit(cwd: string, startHead: string | null): Promise<string>;
   gitHead(cwd: string): Promise<string | null>;
   /**
-   * Take the window to a place in it (a view, a workspace or a terminal in Code), as a notification's
-   * click does. It is brought to the front too unless `raise` is false.
+   * Take the window to a place in it (a view, a workspace, a terminal in Code, or a specific
+   * agent/task/routine/skill/chat/run/settings section), as a notification's click does.
+   * It is brought to the front too unless `raise` is false.
    */
-  show?(route: { view: string; workspaceId?: string; ptyId?: string; copyId?: string; runId?: string }, raise?: boolean): void;
+  show?(
+    route: {
+      view: string;
+      workspaceId?: string;
+      ptyId?: string;
+      copyId?: string;
+      runId?: string;
+      agentId?: string;
+      tab?: string;
+      chatId?: string;
+      taskId?: string;
+      routineId?: string;
+      skillId?: string;
+      section?: string;
+      filter?: string;
+    },
+    raise?: boolean,
+  ): void;
   /** Drive the browser dock (reload, back, forward, stop). */
   dockCommand?(command: "back" | "forward" | "reload" | "stop"): void;
   /** Drive Code's side panel, browser preview URL, or pane layout. */
@@ -76,6 +94,8 @@ export interface DeskHost {
   };
   /** Start downloading a pinned STT model, Piper voice, or sherpa-onnx runtime from Viby's `settings` step. */
   voiceDownload?(kind: "model" | "voice" | "sherpa", id: string): void;
+  /** Cancel an active voice model/runtime download from Viby's `settings` step. */
+  voiceStopDownload?(): void;
   /** Login autostart state and setter, for Viby's `settings` step. */
   autostart?: { get(): boolean; set(on: boolean): boolean };
 }
@@ -98,8 +118,6 @@ export interface AgentInput {
   places: string[];
   skills?: string[];
   allowRoutines?: boolean;
-  /** A Piper voice file; empty uses the one in Settings. */
-  voice?: string;
   goodAt?: string;
   tier?: AgentTier;
 }
