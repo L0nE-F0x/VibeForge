@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-19
+
+**3.0: only Viby speaks, and Viby can do anything in VibeForge you can do with the mouse and keyboard.**
+
+### Added
+
+- **Viby runs the whole app.** Ask it to make, change or delete saved agents (brief, folders, skills, tier, memory), skills, routines, tasks, chats and workspaces, by voice or by typing. It can also continue, stop or hand off runs, mark them reviewed, start an agent-to-agent review, tidy run storage, change the rail and your custom CLIs, and stop a voice download. Routines take cron, *“every 2 hours”*, *“hourly”* or spoken times like *“weekdays at 9am”* and *“every Monday at 10am”*.
+- **One plan can build on itself.** A workspace, skill, agent, task or routine that an earlier step makes can be named by a later step, so *“make an Acme workspace, an agent for it, and a weekly task it runs”* is one plan.
+- **Viby opens exactly what you ask for.** *“Show me Atlas's memory”*, *“open the fix-login task”* or *“open Voice settings”* goes straight to that agent's tab, task, routine, skill, chat, copy, run or Settings section.
+- **Undo by voice.** *“Undo”* brings back the last thing deleted, as **Undo** on the toast does.
+- **Viby asks first.** Deleting, clearing an agent's memory, removing a workspace, adding or removing a custom CLI, stopping, applying, discarding and tidying runs wait for **Go**, in **Just go** and on a call too. The phone's Viby card shows the new steps the way the desktop does.
+
+### Removed
+
+- **Coding CLIs no longer talk back.** VibeForge used to read the first paragraph of a CLI's answer aloud, in that agent's voice. Now only Viby speaks. A CLI's answers stay in its terminal or chat, and *“what did Claude say?”* has Viby read one out.
+- **Agents no longer have their own voice.** The Voice picker is gone from an agent's Settings tab. A `voice:` line in an existing `agent.yaml` is ignored and dropped the next time the agent is saved.
+
+### Changed
+
+- **Settings → Voice → Viby's voice holds every spoken-voice control:** on or off, talking over Viby, the voice and its preview, and downloads. Turning it off during a call stops Viby mid-sentence and keeps it quiet, and a call no longer warns that Piper is missing when spoken replies are off.
+
 ### Fixed
 
 - **Viby plans with any Antigravity model you pick.** Antigravity's model names carry their own effort (“Gemini 4 Neon (XHigh)”), and it refused the `--effort` VibeForge always added beside one, so every model but the default failed. A model now keeps its own level; an effort you choose that differs goes on that model's base name, and if the model doesn't offer it, Viby shows Antigravity's own words saying which levels it has. Starting Antigravity as a step gets the same fix.
