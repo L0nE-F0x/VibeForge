@@ -64,7 +64,31 @@ describe("the Orchestrator's plans", () => {
     expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
     expect(asked).toContain("plan");
     expect(asked).not.toContain("--conversation");
-    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual(["kind", "engine", "workspace", "branch", "prompt", "target", "folder", "git", "model", "effort", "inPlace", "after"]);
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual([
+      "kind",
+      "engine",
+      "workspace",
+      "branch",
+      "prompt",
+      "target",
+      "folder",
+      "git",
+      "model",
+      "effort",
+      "inPlace",
+      "after",
+      "action",
+      "name",
+      "description",
+      "schedule",
+      "agent",
+      "task",
+      "status",
+      "places",
+      "skills",
+      "agents",
+      "options",
+    ]);
     expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
     expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
     expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);

@@ -199,7 +199,21 @@ async function readBody(req: http.IncomingMessage): Promise<unknown> {
 function stepPatch(value: unknown): StepPatch {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const patch: StepPatch = {};
-  for (const [key, max] of [["engineId", 80], ["workspaceId", 80], ["target", 80], ["branch", 120], ["model", 120], ["effort", 20], ["name", 120], ["folder", 500]] as const) {
+  for (const [key, max] of [
+    ["engineId", 80],
+    ["agentId", 80],
+    ["workspaceId", 80],
+    ["target", 80],
+    ["branch", 120],
+    ["model", 120],
+    ["effort", 20],
+    ["name", 120],
+    ["folder", 500],
+    ["description", 500],
+    ["schedule", 120],
+    ["status", 40],
+    ["options", 500],
+  ] as const) {
     if (typeof raw[key] === "string") patch[key] = (raw[key] as string).slice(0, max);
   }
   // A step's words are typed into the CLI it starts or tells: cleaned as everything else from the phone is.

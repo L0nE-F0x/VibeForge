@@ -121,7 +121,8 @@ export type WorkbenchAction =
   | { op: "side"; tab: "files" | "browser" | "close" }
   | { op: "pane"; action: "split-right" | "split-down" | "zoom" | "close" }
   | { op: "diff"; target: string }
-  | { op: "mark-reviewed" };
+  | { op: "mark-reviewed" }
+  | { op: "undo"; token?: string };
 
 export function normalizePreviewUrl(raw: string): string | null {
   const trimmed = raw.trim();
@@ -136,13 +137,16 @@ export function normalizePreviewUrl(raw: string): string | null {
 /**
  * Parse a `workbench` step into a concrete VibeForge UI/workspace operation, or null when unclear.
  */
-export function parseWorkbenchAction(input: { prompt?: string; target?: string; folder?: string; branch?: string }): WorkbenchAction | null {
-  const action = (input.prompt ?? "").trim();
+export function parseWorkbenchAction(input: { action?: string; prompt?: string; target?: string; folder?: string; branch?: string }): WorkbenchAction | null {
+  const action = (input.prompt || input.action || "").trim();
   const lower = action.toLowerCase().replace(/[.!]+$/g, "").trim();
   const target = (input.target ?? "").trim();
   const folder = (input.folder ?? "").trim();
   const branch = (input.branch ?? "").trim();
 
+  if (/^(?:undo|undo[- ]?delete|undo[- ]?last|restore[- ]?deleted)$/.test(lower)) {
+    return target ? { op: "undo", token: target } : { op: "undo" };
+  }
   if (/^(?:mark[- ]?reviewed|mark all reviewed|clear inbox|review all)$/.test(lower)) {
     return { op: "mark-reviewed" };
   }

@@ -4,22 +4,45 @@
 
 import type { EngineRow } from "../core/types.js";
 import { effortLevels } from "./launch-options.js";
+import {
+  inspectsStorage,
+  isClearWord,
+  normalizeAgentAction,
+  normalizeChatAction,
+  normalizeRoutineStepAction,
+  normalizeRunAction,
+  normalizeSkillAction,
+  normalizeTalkAction,
+  normalizeTaskStepAction,
+  normalizeWorkspaceAction,
+  parseOptions,
+  parseRoutineSchedule,
+  parseTaskStatus,
+} from "./orchestrator-actions.js";
 import { inspectsQuotas, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
 import { inspectsSettings, resolveSettingsStep, type PlanSettingsContext } from "./orchestrator-settings.js";
 
+export * from "./orchestrator-actions.js";
 export * from "./orchestrator-intel.js";
 export * from "./orchestrator-settings.js";
 
 /**
- * start, tell, stop: a CLI (or an agent). workspace: a new workspace (its folder made if it isn't there).
- * apply, discard: a copy waiting for review. show: a running CLI, workspace or view.
+ * start, tell, stop: a CLI (or an agent). workspace: make, rename, move, or remove a workspace.
+ * apply, discard: a copy waiting for review. show: a running CLI, workspace, view, or specific item.
  * read: what a running CLI last answered, shown on the card and read out in a call.
- * inspect: read a CLI's screen/reply, a copy's diff, a workspace's git status/files, quotas, or settings for Viby.
+ * inspect: read a CLI's screen/reply, a copy's diff, a workspace's git status/files/branches, quotas, settings, storage, or an agent/skill/routine/task/chat/run.
  * key: send a keystroke/answer (yes, no, enter, escape, option number) to an interactive TUI prompt.
  * shell: open a shell terminal or run a command in a workspace.
- * workbench: folders, git branches, browser dock, panes, diffs, or marking runs reviewed.
- * settings: change VibeForge settings, including Viby's own planner/model/effort and voice/STT models.
- * lookup: search runs, git branches and project folders on disk. task: run or create a task. routine: run or toggle a routine.
+ * workbench: folders, git branches, browser dock, panes, diffs, undo last delete, or marking runs reviewed.
+ * settings: change VibeForge settings, rail, custom CLIs, Viby's own planner/model/effort, and voice/STT models.
+ * lookup: search runs, git branches and project folders on disk.
+ * task: create, edit, delete, run, continue, stop, move status, apply/discard copy, or hand off tasks.
+ * routine: create, edit, delete, schedule, attach agent/task, run, pause/resume, or cancel wait on routines.
+ * agent: create, edit, delete, manage folders/skills, or read/write/clear memory of saved agents.
+ * skill: create, edit, delete skills and attach/detach agents.
+ * chat: create, send messages to, continue, stop, rename, switch CLI, or delete plain/agent chats.
+ * run: continue, stop, mark reviewed/unreviewed, hand off a run, or tidy run storage.
+ * talk: coordinate live CLIs (start review loop, send draft between panes, stop talk, start held handed-out tasks).
  */
 export type OrchestratorStepKind =
   | "start"
@@ -37,7 +60,12 @@ export type OrchestratorStepKind =
   | "settings"
   | "lookup"
   | "task"
-  | "routine";
+  | "routine"
+  | "agent"
+  | "skill"
+  | "chat"
+  | "run"
+  | "talk";
 
 /** Every kind of step, for checking what a planner wrote. */
 export const STEP_KINDS: readonly OrchestratorStepKind[] = [
@@ -57,6 +85,11 @@ export const STEP_KINDS: readonly OrchestratorStepKind[] = [
   "lookup",
   "task",
   "routine",
+  "agent",
+  "skill",
+  "chat",
+  "run",
+  "talk",
 ];
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
@@ -66,7 +99,7 @@ export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "disc
 export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read", "inspect"];
 
 /** Why a step can't run as it stands; the plan card asks the person to fix it. */
-export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt" | "effort" | "folder" | "copy";
+export type StepIssue = "workspace" | "engine" | "engineMissing" | "target" | "prompt" | "effort" | "folder" | "copy" | "schedule" | "name";
 
 /** A workspace a plan makes, until its step has run: later steps name it by this id. */
 export const PLANNED_PREFIX = "new:";
@@ -119,6 +152,26 @@ export interface OrchestratorStep {
   view?: string;
   /** Wait for the preceding step's terminal turn to finish before carrying this step out. */
   after?: boolean;
+  /** Sub-action for multi-operation step kinds (agent, routine, task, skill, workspace, chat, run, talk). */
+  action?: string;
+  /** Short description (skill description, agent goodAt). */
+  description?: string;
+  /** Routine schedule (5-field cron, interval like "every 30 minutes", or natural phrase). */
+  schedule?: string;
+  /** Task id attached to a routine step. */
+  taskId?: string;
+  /** Status, target index, or sub-mode (e.g. task status "todo" | "review" | "done"). */
+  status?: string;
+  /** Allowed folder paths or planned workspace ids (for agent steps). */
+  places?: string[];
+  /** Skill ids attached to an agent step. */
+  skills?: string[];
+  /** Agent ids attached to a skill step, or secondary target PTY id for a talk step. */
+  agents?: string[];
+  /** Raw options string ("notify=false, shareCheckout=true, isolated=true, tier=strong, voice=lessac"). */
+  options?: string;
+  /** Deep-link route extras for `show` steps (e.g. agentId, tab, taskId, routineId, skillId, chatId, runId, section). */
+  route?: Record<string, string>;
 }
 
 /** The views a show step can open: the window's own names for them. */
@@ -160,7 +213,9 @@ export interface MaestroCopy {
 }
 
 /** The fields a plan card can change on a step before Go. */
-export type StepPatch = Partial<Pick<OrchestratorStep, "engineId" | "workspaceId" | "branch" | "prompt" | "target" | "model" | "effort" | "name" | "folder" | "git">>;
+export type StepPatch = Partial<
+  Pick<OrchestratorStep, "engineId" | "agentId" | "workspaceId" | "branch" | "prompt" | "target" | "model" | "effort" | "name" | "folder" | "git" | "description" | "schedule" | "status" | "options">
+>;
 
 export type OrchestratorProblem = "noEngine" | "failed" | "unreadable" | "timeout" | "stopped" | "signIn";
 
@@ -310,11 +365,49 @@ export interface PlanContext {
   /** Copies waiting for review (Apply or Discard). */
   copies?: Array<{ id: string; name: string; branch: string; workspace: string }>;
   /** Saved VibeForge agents (teammates with their own brief, memory, skills and engine). */
-  agents?: Array<{ id: string; name: string; engine: string; goodAt?: string; places?: string[] }>;
+  agents?: Array<{
+    id: string;
+    name: string;
+    engine: string;
+    goodAt?: string;
+    places?: string[];
+    skills?: string[];
+    allowRoutines?: boolean;
+    tier?: string;
+    voice?: string;
+  }>;
+  /** Reusable skills (SKILL.md know-how attached to agents). */
+  skills?: Array<{ id: string; name: string; description?: string; agents?: string[] }>;
   /** Tasks on the board. */
-  tasks?: Array<{ id: string; title: string; status: string; workspace?: string; agent?: string }>;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    workspace?: string;
+    workspaceId?: string;
+    agent?: string;
+    agentId?: string;
+    isolated?: boolean;
+    hasCopy?: boolean;
+    waiting?: boolean;
+  }>;
   /** Scheduled routines. */
-  routines?: Array<{ id: string; name: string; schedule: string; enabled: boolean; agent?: string }>;
+  routines?: Array<{
+    id: string;
+    name: string;
+    schedule: string;
+    enabled: boolean;
+    agent?: string;
+    agentId?: string;
+    notify?: boolean;
+    shareCheckout?: boolean;
+    waiting?: boolean;
+    running?: boolean;
+  }>;
+  /** Plain and agent chats. */
+  chats?: Array<{ id: string; title: string; engine: string; agent?: string; agentId?: string | null; live: boolean }>;
+  /** Recent runs (for continuing, marking reviewed, inspecting, or handing off). */
+  runs?: Array<{ id: string; title: string; status: string; engine: string; origin: string; opened: boolean; changes?: string | null; agent?: string }>;
   /** Where a new workspace goes when the person doesn't say. */
   projectsFolder?: string;
   /** Viby's own settings, voice/STT models, and VibeForge configuration. */
@@ -322,13 +415,73 @@ export interface PlanContext {
 }
 
 /**
- * The context a plan's steps are checked against: what is here, plus the workspaces the plan's own
- * workspace steps will make while those steps can still run, under their placeholder ids.
+ * The context a plan's steps are checked against: what is here, plus any workspaces, agents, skills,
+ * tasks, routines, or chats that earlier steps in the same plan will create, under placeholder ids.
  */
 export function withPlannedWorkspaces(context: PlanContext, steps: readonly OrchestratorStep[]): PlanContext {
-  const planned = steps.filter((step) => step.kind === "workspace" && (step.state === "planned" || step.state === "running"));
-  if (!planned.length) return context;
-  return { ...context, workspaces: [...context.workspaces, ...planned.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", folder: step.folder ?? "", git: false }))] };
+  const active = steps.filter((step) => step.state === "planned" || step.state === "running");
+  const plannedWs = active.filter((step) => step.kind === "workspace" && (!step.action || step.action === "create"));
+  const plannedAgents = active.filter((step) => step.kind === "agent" && step.action === "create");
+  const plannedSkills = active.filter((step) => step.kind === "skill" && step.action === "create");
+  const plannedTasks = active.filter((step) => step.kind === "task" && (step.action === "create" || step.action === "create-run" || (!step.action && !step.target)));
+  const plannedRoutines = active.filter((step) => step.kind === "routine" && step.action === "create");
+  const plannedChats = active.filter((step) => step.kind === "chat" && step.action === "create");
+  if (!plannedWs.length && !plannedAgents.length && !plannedSkills.length && !plannedTasks.length && !plannedRoutines.length && !plannedChats.length) {
+    return context;
+  }
+  return {
+    ...context,
+    workspaces: [
+      ...context.workspaces,
+      ...plannedWs.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", folder: step.folder ?? "", git: false })),
+    ],
+    ...(plannedAgents.length
+      ? {
+          agents: [
+            ...(context.agents ?? []),
+            ...plannedAgents.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", engine: step.engineId, places: step.places ?? [] })),
+          ],
+        }
+      : {}),
+    ...(plannedSkills.length
+      ? {
+          skills: [
+            ...(context.skills ?? []),
+            ...plannedSkills.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", description: step.description ?? "" })),
+          ],
+        }
+      : {}),
+    ...(plannedTasks.length
+      ? {
+          tasks: [
+            ...(context.tasks ?? []),
+            ...plannedTasks.map((step) => ({
+              id: plannedId(step.id),
+              title: step.name ?? "",
+              status: "todo",
+              ...(step.agentId ? { agentId: step.agentId } : {}),
+              ...(step.workspaceId ? { workspaceId: step.workspaceId } : {}),
+            })),
+          ],
+        }
+      : {}),
+    ...(plannedRoutines.length
+      ? {
+          routines: [
+            ...(context.routines ?? []),
+            ...plannedRoutines.map((step) => ({ id: plannedId(step.id), name: step.name ?? "", schedule: step.schedule ?? "", enabled: true })),
+          ],
+        }
+      : {}),
+    ...(plannedChats.length
+      ? {
+          chats: [
+            ...(context.chats ?? []),
+            ...plannedChats.map((step) => ({ id: plannedId(step.id), title: step.name ?? "New chat", engine: step.engineId, live: false })),
+          ],
+        }
+      : {}),
+  };
 }
 
 /** A workspace's name as a folder's: something, and nothing that would put it somewhere else. */
@@ -337,19 +490,51 @@ export function folderNameOk(name: string): boolean {
   return clean.length > 0 && clean.length <= 120 && !/[\\/\0]/.test(clean) && clean !== "." && clean !== "..";
 }
 
+function folderPathOk(folder: string): boolean {
+  const trimmed = folder.trim();
+  const stripped = trimmed.replace(/\/+$/, "");
+  return Boolean(stripped && stripped !== "~" && (trimmed.startsWith("/") || trimmed.startsWith("~/")) && !trimmed.split("/").includes(".."));
+}
+
+function placeOk(place: string, context: PlanContext): boolean {
+  const trimmed = place.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith(PLANNED_PREFIX)) return context.workspaces.some((item) => item.id === trimmed);
+  return folderPathOk(trimmed);
+}
+
+function checkEngine(engineId: string, context: PlanContext): StepIssue | null {
+  const engine = context.engines.find((item) => item.id === engineId);
+  if (!engine) return "engine";
+  if (!engine.available) return "engineMissing";
+  return null;
+}
+
 /** What stands in a step's way, given what's here now. */
 export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIssue | null {
   if (step.kind === "workspace") {
-    const folder = (step.folder ?? "").trim();
-    const stripped = folder.replace(/\/+$/, "");
-    if (!folderNameOk(step.name ?? "") || !(folder.startsWith("/") || folder.startsWith("~/")) || !stripped || stripped === "~" || folder.split("/").includes("..")) return "folder";
+    const action = normalizeWorkspaceAction(step.action);
+    if (!action) return "prompt";
+    if (action === "create") {
+      if (!folderNameOk(step.name ?? "") || !folderPathOk(step.folder ?? "")) return "folder";
+      return null;
+    }
+    const wsId = step.workspaceId || step.target;
+    if (!wsId || !context.workspaces.some((item) => item.id === wsId)) return "workspace";
+    if (action === "rename") return folderNameOk(step.name ?? step.prompt ?? "") ? null : "name";
+    if (action === "move") {
+      const pos = (step.status || step.prompt || parseOptions(step.options).str("index") || "").trim().toLowerCase();
+      if (!pos) return "prompt";
+      if (/^(?:top|first|bottom|last|up|down|\d+)$/.test(pos)) return null;
+      return "prompt";
+    }
     return null;
   }
   if (step.kind === "start") {
     if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
-    const engine = context.engines.find((item) => item.id === step.engineId);
-    if (!engine) return "engine";
-    if (!engine.available) return "engineMissing";
+    const engineErr = checkEngine(step.engineId, context);
+    if (engineErr) return engineErr;
+    const engine = context.engines.find((item) => item.id === step.engineId)!;
     const effort = step.effort?.trim().toLowerCase();
     if (effort && engine.bin !== undefined && !effortLevels({ id: engine.id, bin: engine.bin }).includes(effort)) return "effort";
     return null;
@@ -361,11 +546,36 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     return step.prompt.trim() ? null : "prompt";
   }
   if (step.kind === "inspect") {
-    if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target) || inspectsSettings(step.prompt) || inspectsSettings(step.target)) return null;
+    if (
+      inspectsQuotas(step.prompt) ||
+      inspectsQuotas(step.target) ||
+      inspectsSettings(step.prompt) ||
+      inspectsSettings(step.target) ||
+      inspectsStorage(step.prompt) ||
+      inspectsStorage(step.target) ||
+      step.action === "storage"
+    ) {
+      return null;
+    }
+    if (step.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(step.action)) {
+      if (!step.target) return "target";
+      if (step.action === "agent" && context.agents && !context.agents.some((a) => a.id === step.target)) return "target";
+      if (step.action === "skill" && context.skills && !context.skills.some((s) => s.id === step.target)) return "target";
+      if (step.action === "routine" && context.routines && !context.routines.some((r) => r.id === step.target)) return "target";
+      if (step.action === "task" && context.tasks && !context.tasks.some((t) => t.id === step.target)) return "target";
+      if (step.action === "chat" && context.chats && !context.chats.some((c) => c.id === step.target)) return "target";
+      return null;
+    }
     if (step.target) {
       const hasCli = context.running.some((item) => item.id === step.target);
       const hasCopy = (context.copies ?? []).some((item) => item.id === step.target);
-      return hasCli || hasCopy ? null : "target";
+      const hasAgent = (context.agents ?? []).some((item) => item.id === step.target);
+      const hasSkill = (context.skills ?? []).some((item) => item.id === step.target);
+      const hasRoutine = (context.routines ?? []).some((item) => item.id === step.target);
+      const hasTask = (context.tasks ?? []).some((item) => item.id === step.target);
+      const hasChat = (context.chats ?? []).some((item) => item.id === step.target);
+      const hasRun = (context.runs ?? []).some((item) => item.id === step.target);
+      return hasCli || hasCopy || hasAgent || hasSkill || hasRoutine || hasTask || hasChat || hasRun ? null : "target";
     }
     if (step.workspaceId) return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
     return "workspace";
@@ -386,19 +596,163 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
     if ((action.op === "branch" || action.op === "browser-open") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
     return null;
   }
+  if (step.kind === "agent") {
+    const action = normalizeAgentAction(step.action, Boolean(step.target));
+    if (!action) return "prompt";
+    if (action === "create") {
+      if (!(step.name ?? "").trim()) return "name";
+      const engineErr = checkEngine(step.engineId, context);
+      if (engineErr) return engineErr;
+      if (!step.prompt.trim()) return "prompt";
+      const places = step.places ?? [];
+      if (!places.length || !places.every((p) => placeOk(p, context))) return "folder";
+      if (step.skills?.length && context.skills && !step.skills.every((id) => context.skills!.some((s) => s.id === id))) return "target";
+      return null;
+    }
+    if (!step.target || (context.agents && !context.agents.some((item) => item.id === step.target))) return "target";
+    if (action === "delete" || action === "memory-clear") return null;
+    if (action === "memory-set" || action === "memory-append") return step.prompt.trim() ? null : "prompt";
+    if (action === "add-folder" || action === "remove-folder") {
+      const places = step.places ?? [];
+      return places.length > 0 && places.every((p) => placeOk(p, context)) ? null : "folder";
+    }
+    if (action === "add-skill" || action === "remove-skill") {
+      const skills = step.skills ?? [];
+      if (!skills.length) return "target";
+      if (context.skills && !skills.every((id) => context.skills!.some((s) => s.id === id))) return "target";
+      return null;
+    }
+    // edit
+    if (step.engineId) {
+      const engineErr = checkEngine(step.engineId, context);
+      if (engineErr) return engineErr;
+    }
+    if (step.places?.length && !step.places.every((p) => placeOk(p, context))) return "folder";
+    if (step.skills?.length && context.skills && !step.skills.every((id) => context.skills!.some((s) => s.id === id))) return "target";
+    return null;
+  }
+  if (step.kind === "skill") {
+    const action = normalizeSkillAction(step.action, Boolean(step.target));
+    if (!action) return "prompt";
+    if (action === "create") {
+      if (!(step.name ?? "").trim()) return "name";
+      if (step.agents?.length && context.agents && !step.agents.every((id) => context.agents!.some((a) => a.id === id))) return "engine";
+      return null;
+    }
+    if (!step.target || (context.skills && !context.skills.some((item) => item.id === step.target))) return "target";
+    if (action === "delete" || action === "edit") return null;
+    if (action === "attach" || action === "detach") {
+      const agents = step.agents ?? [];
+      if (!agents.length) return "engine";
+      if (context.agents && !agents.every((id) => context.agents!.some((a) => a.id === id))) return "engine";
+      return null;
+    }
+    // set-agents
+    const opts = parseOptions(step.options);
+    const clearing = isClearWord(opts.str("agents"));
+    const agents = step.agents ?? [];
+    if (!agents.length && !clearing) return "engine";
+    if (context.agents && !agents.every((id) => context.agents!.some((a) => a.id === id))) return "engine";
+    return null;
+  }
   if (step.kind === "routine") {
+    const hasCreateFields = Boolean(step.schedule?.trim() || step.name?.trim() || step.agentId || step.taskId);
+    const action = normalizeRoutineStepAction(step.action, step.prompt, Boolean(step.target), hasCreateFields);
+    if (!action) return "prompt";
+    if (action === "create") {
+      const task = step.taskId ? (context.tasks ?? []).find((item) => item.id === step.taskId) : undefined;
+      if (step.taskId && context.tasks && !task) return "target";
+      if (!(step.name ?? "").trim() && !step.taskId) return "name";
+      const effectiveAgentId = step.agentId || task?.agentId || "";
+      const hasAgentViaTaskName = Boolean(!effectiveAgentId && task?.agent);
+      if (!effectiveAgentId && !hasAgentViaTaskName) return "engine";
+      if (effectiveAgentId && context.agents && !context.agents.some((item) => item.id === effectiveAgentId)) return "engine";
+      if (!parseRoutineSchedule(step.schedule)) return "schedule";
+      if (!step.prompt.trim() && !step.taskId) return "prompt";
+      return null;
+    }
     if (!step.target || (context.routines && !context.routines.some((item) => item.id === step.target))) return "target";
-    // Run it now (""), or turn it on or off: anything else would be guessed at.
-    return step.prompt === "" || step.prompt === "enable" || step.prompt === "disable" ? null : "prompt";
+    if (action === "edit") {
+      if (step.schedule?.trim() && !parseRoutineSchedule(step.schedule)) return "schedule";
+      if (step.agentId && context.agents && !context.agents.some((item) => item.id === step.agentId)) return "engine";
+      if (step.taskId && context.tasks && !context.tasks.some((item) => item.id === step.taskId)) return "target";
+      return null;
+    }
+    // Legacy prompt safety check when action was omitted
+    if (!step.action && step.prompt !== "" && step.prompt !== "enable" && step.prompt !== "disable") return "prompt";
+    return null;
   }
   if (step.kind === "task") {
-    if (step.target) return context.tasks && !context.tasks.some((item) => item.id === step.target) ? "target" : null;
-    if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
-    if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
-    return step.prompt.trim() ? null : "prompt";
+    const action = normalizeTaskStepAction(step.action, Boolean(step.target), Boolean(step.workspaceId || step.agentId || step.name || step.prompt));
+    if (!action) return "prompt";
+    if (action === "handoff") {
+      if (!step.target.trim()) return "target";
+      if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
+      return null;
+    }
+    if (action === "create") {
+      if (!(step.name ?? "").trim() && !step.prompt.trim()) return "name";
+      if (step.workspaceId && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+      if (step.agentId && context.agents && !context.agents.some((item) => item.id === step.agentId)) return "engine";
+      return null;
+    }
+    if (action === "create-run") {
+      if (!context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+      if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
+      return step.prompt.trim() ? null : "prompt";
+    }
+    if (!step.target || (context.tasks && !context.tasks.some((item) => item.id === step.target))) return "target";
+    if (action === "status") return parseTaskStatus(step.status || step.prompt) ? null : "prompt";
+    if (action === "edit") {
+      if (step.workspaceId && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+      if (step.agentId && context.agents && !context.agents.some((item) => item.id === step.agentId)) return "engine";
+      if (step.status?.trim() && !parseTaskStatus(step.status)) return "prompt";
+      return null;
+    }
+    return null;
+  }
+  if (step.kind === "chat") {
+    const action = normalizeChatAction(step.action, Boolean(step.target), Boolean(step.prompt.trim()));
+    if (!action) return "prompt";
+    if (action === "create") {
+      if (step.agentId) {
+        return context.agents && !context.agents.some((item) => item.id === step.agentId) ? "engine" : null;
+      }
+      return checkEngine(step.engineId, context);
+    }
+    if (action === "send") {
+      if (!step.prompt.trim()) return "prompt";
+      if (step.target) return context.chats && !context.chats.some((item) => item.id === step.target) ? "target" : null;
+      if (step.agentId) return context.agents && !context.agents.some((item) => item.id === step.agentId) ? "engine" : null;
+      return "target";
+    }
+    if (!step.target || (context.chats && !context.chats.some((item) => item.id === step.target))) return "target";
+    if (action === "rename") return (step.name ?? step.prompt ?? "").trim() ? null : "name";
+    if (action === "set-engine") return checkEngine(step.engineId, context);
+    return null;
+  }
+  if (step.kind === "run") {
+    const action = normalizeRunAction(step.action);
+    if (!action) return "prompt";
+    if (action === "mark-all-reviewed" || action === "tidy") return null;
+    if (!step.target.trim()) return "target";
+    if (action === "handoff") {
+      if (!step.agentId || (context.agents && !context.agents.some((item) => item.id === step.agentId))) return "engine";
+    }
+    return null;
+  }
+  if (step.kind === "talk") {
+    const action = normalizeTalkAction(step.action);
+    if (!action) return "prompt";
+    if (!context.running.some((item) => item.id === step.target)) return "target";
+    if (action === "review" || action === "send-draft") {
+      const other = step.agents?.[0] ?? "";
+      if (!other || other === step.target || !context.running.some((item) => item.id === other)) return "target";
+    }
+    return null;
   }
   if (step.kind === "show" && !step.target) {
-    // A view, or a workspace opened in Code; neither needs anything to be running.
+    // A view (optionally deep-linked), or a workspace opened in Code; neither needs anything to be running.
     if (step.view) return (SHOW_VIEWS as readonly string[]).includes(step.view) ? null : "workspace";
     return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
   }
