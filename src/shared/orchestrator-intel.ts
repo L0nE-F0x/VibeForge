@@ -84,18 +84,20 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
   return null;
 }
 
-/** A path argument that stays inside the folder: not absolute, not from home, never climbing out. */
-const LOCAL_PATH = String.raw`(?!/|~|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
+/** A path argument that stays inside the folder: not a flag, not absolute, not from home, never climbing out. */
+const LOCAL_PATH = String.raw`(?!/|~|-|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
 /**
  * The commands a `shell` step may run without a Go, each one whole: tests, builds and checks through
  * the project's own scripts, git that only reads, and listing, reading or making folders in this one.
  */
 const SAFE_SHELL = [
-  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|run\s+[\w:.-]+)(?:\s+--?[\w=.:-]+)*$/,
+  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|check|run\s+(?:test|build|lint|typecheck|check)(?::[\w.-]+)?)(?:\s+--?[\w=.:-]+)*$/,
   /^(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)(?:\s+\.\/\.\.\.)?|pytest|python3?\s+-m\s+pytest)(?:\s+--?[\w=.:-]+)*$/,
   /^git\s+(?:status|log|diff|show|rev-parse)(?:\s+(?!--output)[\w./~^@:=-]+)*$/,
   /^git\s+(?:remote\s+-v|branch(?:\s+(?:-a|-r|-v|-vv|--list|--show-current))*)$/,
-  new RegExp(String.raw`^(?:ls|tree|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
+  new RegExp(String.raw`^(?:ls|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
+  // tree -o / --output writes a file, so keep those flags off the auto-run list.
+  new RegExp(String.raw`^tree(?:\s+-(?:[a-np-zA-NP-Z0-9]+|-(?!output\b)[\w=-]+))*(?:\s+${LOCAL_PATH})*$`),
   new RegExp(String.raw`^mkdir(?:\s+-p)?(?:\s+${LOCAL_PATH})+$`),
   /^(?:pwd|git\s+--version|node\s+--version)$/,
 ];
@@ -103,14 +105,13 @@ const SAFE_SHELL = [
 /**
  * Whether a `shell` step can run without asking for Go (in a call, or in "Just go"): a blank shell,
  * or commands each on the list above joined by `&&`. Anything else waits for Go: deleting, moving,
- * installing, pushing, redirecting, piping, substituting, and every program not named here. A list
- * of what is safe, not of what is dangerous: `/bin/rm`, `\rm`, `find -delete` or `$(…)` can't slip past it.
+ * installing, pushing, redirecting, piping, substituting, quoting, and every program not named here.
  */
 export function isSafeShellCommand(command: string | undefined): boolean {
   const text = (command ?? "").trim();
   if (!text) return true;
   const parts = text.split("&&").map((part) => part.trim());
-  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
+  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
 }
 
 export type WorkbenchAction =

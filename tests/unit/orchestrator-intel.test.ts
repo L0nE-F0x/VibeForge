@@ -69,7 +69,25 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(isSafeShellCommand("git reset --hard HEAD~1")).toBe(false);
     expect(isSafeShellCommand("git push --force origin main")).toBe(false);
     // Only what is on the list goes without Go: nothing gets past it by spelling, quoting or nesting.
-    for (const command of ["git status", "git diff --stat", "git log --oneline -5", "git branch", "ls -la src", "mkdir docs/adr", "cargo test", "go test ./...", "pnpm build"]) {
+    for (const command of [
+      "git status",
+      "git diff --stat",
+      "git log --oneline -5",
+      "git branch",
+      "ls -la src",
+      "mkdir docs/adr",
+      "mkdir -p notes",
+      "cargo test",
+      "go test ./...",
+      "pnpm build",
+      "npm test",
+      "npm run test:unit",
+      "npm run build",
+      "pnpm run lint",
+      "yarn run typecheck",
+      "bun run check:types",
+      "tree -L 2 src",
+    ]) {
       expect(isSafeShellCommand(command), command).toBe(true);
     }
     for (const command of [
@@ -88,6 +106,20 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
       "git diff --output=patch",
       "npm publish",
       "npm install",
+      "npm run deploy",
+      "pnpm run db:reset",
+      "yarn run clean",
+      "bun run evil.ts",
+      "bun run test.ts",
+      "tree -o src/index.ts",
+      "tree -ao src/index.ts",
+      "tree --output src/index.ts",
+      "tree --output=src/index.ts",
+      "cat '../../.ssh/id_rsa'",
+      "cat '/home/u/.ssh/id_ed25519'",
+      "cat '..'/'..'/etc/passwd",
+      "mkdir -p '/abs/path'",
+      'ls "src"',
       "cat ../../.ssh/id_rsa",
       "cat /etc/passwd",
       "mkdir ../out",
