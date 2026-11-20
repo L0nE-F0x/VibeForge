@@ -76,7 +76,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     if (next !== currentId) setCurrentId(next);
   }, [route?.workspaceId, workspaces, file.data, currentId]);
 
-  const side = useCodeSide(workspaces);
+  const side = useCodeSide(workspaces, current?.id ?? null);
   const panes = useWorkspacePanes({ opened, current, route, workspaces, live, engines, defaultEngine: settings?.defaultEngine, fontSize: settings?.terminalFontSize ?? 13 });
   const { layouts, runtime, focus, zoomed, terminals } = panes;
 
@@ -103,14 +103,13 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         return;
       }
       if (event.kind === "side") {
-        if (event.workspaceId) {
-          const target = list.find((w) => w.id === event.workspaceId);
-          if (target) setCurrentId(target.id);
-        }
-        if (event.tab === "close") panel.setOpen(false);
+        const target = (event.workspaceId && list.find((w) => w.id === event.workspaceId)) || cur;
+        if (!target) return;
+        if (target.id !== cur?.id) setCurrentId(target.id);
+        if (event.tab === "close") panel.setOpen(false, target.id);
         else {
-          panel.setSide((prev) => ({ ...prev, open: true, tab: event.tab as "files" | "browser" }));
-          panel.setOpen(true);
+          panel.setTab(event.tab as "files" | "browser", target.id);
+          panel.setOpen(true, target.id);
         }
         return;
       }

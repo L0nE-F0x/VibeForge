@@ -23,6 +23,7 @@ import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
 import { setPtyInView } from "../attention.js";
+import { usePlace } from "../remember.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { useNarrowStage } from "./SidePanel.js";
 import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
@@ -41,6 +42,8 @@ export const ORIGIN_KEY: Record<RunView["origin"], Key> = {
 };
 
 type Tab = "session" | "changes" | "prompt" | "transcript" | "details";
+const TABS: readonly Tab[] = ["session", "changes", "prompt", "transcript", "details"];
+const isTab = (value: unknown): value is Tab => TABS.includes(value as Tab);
 
 /** A diff, one row per line up to 20,000. Memoised: a big one is slow to build and rarely changes. */
 export const DiffView = memo(function DiffView({ text }: { text: string }) {
@@ -180,13 +183,13 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
   });
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
-  const [tab, setTab] = useState<Tab>("session");
+  // Each run reopens on the tab it was last read on.
+  const [tab, setTab] = usePlace<Tab>("run.tab", runId, "session", isTab);
   // On a narrow tile the header's secondary buttons keep their icons and tooltips, so the title has room.
   const narrow = useNarrowStage();
   const run = bundle.data?.run;
   const files = bundle.data?.files;
 
-  useEffect(() => setTab("session"), [runId]);
   // Opening a finished run marks it reviewed, once per visit: "Put it back in Needs review" from
   // its menu then stays put instead of being marked again as the run reloads.
   const marked = useRef<string | null>(null);

@@ -238,8 +238,13 @@
   background: var(--red);
 }
 
+/*
+ * As wide as the popover: a long terminal name above widens it, and the plans stretch to match.
+ * Its own text never widens the popover (the containment); 330px is the least it takes.
+ */
 .usage-panel {
-  width: 330px;
+  min-width: 330px;
+  contain: inline-size;
   padding-bottom: 4px;
 }
 

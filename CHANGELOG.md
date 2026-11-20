@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.0.3] - 2026-11-20
+
+**3.0.3: every workspace, agent and run reopens where you left it, the plan limits fill the usage panel, and Viby's call bar moves to the top.**
+
+### Fixed
+
+- **Each workspace keeps its own files and browser panel.** Opening Files or the browser in one workspace no longer opens it in all of them: each workspace remembers whether its panel is open and on which tab, across restarts too. Its width stays the same everywhere. A workspace you haven't touched since updating starts as the panel was before.
+- **Each agent reopens on the tab you left it on.** Switching from an agent on Memory to one you left on Chats lands on Chats, in the chat you had open; going back to Chats from another tab finds that chat again too. Before, the tab you were on carried over to every agent.
+- **Each run reopens on the tab you were reading.** Changes, Prompt, Transcript or Details, instead of always the screen.
+- **Plan limits fill the usage panel.** When a long terminal name widens the panel, the plan cards and the token list widen with it instead of staying narrow on the left.
+- **Viby's call bar sits at the top.** The Listening / Mute / Hang up bar is now centred over the view's header strip, so it no longer covers a terminal's last lines and its prompt.
+
 ## [3.0.2] - 2026-11-20
 
 **3.0.2: plan limits drop subscriptions once their paid period ends, and read Kimi Code's newer quota windows.**

@@ -115,10 +115,24 @@
   min-height: 38px;
 }
 
-/* A call with Viby. Its bar sits above where a dictation's bar comes up, as both can be on at once. */
+/*
+ * A call with Viby. Its bar sits at the top of the work area, over the view's header strip, so it
+ * never covers a terminal's last lines or its prompt (and stays clear of a dictation's bar below).
+ */
 .listening.call {
-  bottom: 64px;
+  top: 5px;
+  bottom: auto;
+  left: calc(var(--rail) + (100vw - var(--rail)) / 2);
+  max-width: min(760px, calc(100vw - var(--rail) - 32px));
   border-color: var(--hover-line);
+  animation-name: call-bar-in;
+}
+
+@keyframes call-bar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
 }
 
 .listening.call .listening-text {
