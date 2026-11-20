@@ -1480,8 +1480,20 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
     if (action.op === "voice-model" || action.op === "voice-speaker") return Boolean(action.downloadId);
     if (action.op === "viby") return action.mode === "go";
     if (action.op === "app-patch") {
-      const agentTalk = action.patch.agentTalk as { handOff?: string } | undefined;
-      return Boolean(action.networkOn) || "defaultShell" in action.patch || agentTalk?.handOff === "go";
+      const agentTalk = action.patch.agentTalk as { handOff?: string; leadApplies?: boolean } | undefined;
+      const keepRuns = action.patch.keepRuns as { days?: number; maxMb?: number } | undefined;
+      const curKeep = context?.settings?.app.keepRuns;
+      // 0 means keep forever / unlimited, so moving from 0 or missing to any positive cap shrinks retention.
+      const shrinks = (next: number | undefined, prev: number | undefined) =>
+        typeof next === "number" && next > 0 && (prev === undefined || prev === 0 || next < prev);
+      return (
+        Boolean(action.networkOn) ||
+        "defaultShell" in action.patch ||
+        agentTalk?.handOff === "go" ||
+        agentTalk?.leadApplies === true ||
+        shrinks(keepRuns?.days, curKeep?.days) ||
+        shrinks(keepRuns?.maxMb, curKeep?.maxMb)
+      );
     }
   }
   return false;

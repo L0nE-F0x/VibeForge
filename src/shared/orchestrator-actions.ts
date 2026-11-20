@@ -522,12 +522,13 @@ export function inspectsStorage(text: string | undefined): boolean {
  */
 export function isDestructiveStepAction(kind: string, action: string | undefined): boolean {
   const act = (action ?? "").trim().toLowerCase();
-  if (kind === "agent") return act === "delete" || act === "memory-clear";
+  if (kind === "agent") return act === "delete" || act === "memory-clear" || act === "memory-set" || squash(act) === "memoryset";
   if (kind === "routine") return act === "delete";
   if (kind === "task") return act === "delete" || act === "stop" || act === "apply" || act === "discard";
   if (kind === "skill") return act === "delete";
   if (kind === "workspace") return act === "remove";
   if (kind === "chat") return act === "delete" || act === "stop";
   if (kind === "run") return act === "stop" || act === "tidy";
+  if (kind === "talk") return normalizeTalkAction(action) === "start-tasks";
   return false;
 }

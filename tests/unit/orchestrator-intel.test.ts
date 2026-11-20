@@ -271,6 +271,79 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(holdsForGo(step({ kind: "tell", prompt: "  !rm -rf build" }), ctxWith({}))).toBe(true);
     expect(holdsForGo(step({ kind: "tell", prompt: "Run the unit tests." }), ctxWith({}))).toBe(false);
   });
+
+  it("holds settings and talk steps that widen automation, shrink run retention, or replace agent memory", () => {
+    const mkStep = (partial: Partial<OrchestratorStep>): OrchestratorStep => ({
+      id: "s1",
+      kind: "settings",
+      engineId: "",
+      workspaceId: "",
+      branch: "",
+      prompt: "",
+      target: "",
+      asked: "",
+      state: "planned",
+      error: null,
+      ptyId: null,
+      openedWorkspaceId: null,
+      ...partial,
+    });
+    const baseSettings: NonNullable<PlanContext["settings"]> = {
+      viby: { planner: "claude", pickedEngine: "claude", mode: "plan", model: "", effort: "low", projectsFolder: "", availablePlanners: [] },
+      voice: { ready: false, activeModel: "", pickedModel: "", installedModels: [], runtimes: { whisperServer: false, whisperCli: false, sherpa: false, recorder: null, piper: false }, language: "auto", talkBack: false, talkOver: "auto", activeSpeaker: "", pickedSpeaker: "", installedVoices: [], mouseButton: "off", sendButton: "pointer", agent: "" },
+      app: {
+        defaultEngine: "claude",
+        defaultShell: "/bin/bash",
+        theme: "omarchy",
+        language: "system",
+        terminalFontSize: 13,
+        terminalFontFamily: "JetBrainsMono Nerd Font",
+        notify: true,
+        sounds: { on: true, volume: 0.6, voice: true, attention: true, finished: true, routines: false, inFront: false },
+        tray: true,
+        closeToTray: true,
+        usage: false,
+        planLimits: false,
+        quotaAlerts: false,
+        activity: "git",
+        checkUpdates: true,
+        companion: { enabled: false, port: 4318 },
+        sync: { enabled: false, name: "" },
+        agentTalk: { on: true, lead: "", handOff: "ask", reviewRounds: 1, maxMessages: 6, maxWorking: 3, maxHandOffs: 4, leadApplies: false },
+        keepRuns: { days: 30, maxMb: 1000 },
+      },
+    };
+    const ctxWithKeep = (days: number, maxMb: number): PlanContext => ({
+      workspaces: [],
+      engines: [{ id: "claude", label: "Claude Code", available: true }],
+      running: [],
+      settings: { ...baseSettings, app: { ...baseSettings.app, keepRuns: { days, maxMb } } },
+    });
+
+    // 1. Turning agentTalk.leadApplies on waits for Go; turning it off stays free.
+    expect(holdsForGo(mkStep({ target: "agentTalk.leadApplies", prompt: "on" }))).toBe(true);
+    expect(holdsForGo(mkStep({ target: "agentTalk.leadApplies", prompt: "off" }))).toBe(false);
+
+    // 2. Lowering keepRuns.days or keepRuns.maxMb (remembering 0 means forever/unlimited) holds for Go.
+    expect(holdsForGo(mkStep({ target: "keepRuns.days", prompt: "30" }), ctxWithKeep(0, 0))).toBe(true);
+    expect(holdsForGo(mkStep({ target: "keepRuns.days", prompt: "7" }), ctxWithKeep(30, 0))).toBe(true);
+    expect(holdsForGo(mkStep({ target: "keepRuns.days", prompt: "30" }), null)).toBe(true);
+    expect(holdsForGo(mkStep({ target: "keepRuns.days", prompt: "60" }), ctxWithKeep(30, 0))).toBe(false);
+    expect(holdsForGo(mkStep({ target: "keepRuns.days", prompt: "0" }), ctxWithKeep(30, 0))).toBe(false);
+
+    expect(holdsForGo(mkStep({ target: "keepRuns.maxMb", prompt: "500" }), ctxWithKeep(0, 0))).toBe(true);
+    expect(holdsForGo(mkStep({ target: "keepRuns.maxMb", prompt: "500" }), ctxWithKeep(0, 1000))).toBe(true);
+    expect(holdsForGo(mkStep({ target: "keepRuns.maxMb", prompt: "2000" }), ctxWithKeep(0, 1000))).toBe(false);
+    expect(holdsForGo(mkStep({ target: "keepRuns.maxMb", prompt: "0" }), ctxWithKeep(0, 1000))).toBe(false);
+
+    // 3. talk start-tasks bypasses Ask first on handed-out tasks.
+    expect(holdsForGo(mkStep({ kind: "talk", action: "start-tasks" }))).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "talk", action: "stop", target: "pty-1" }))).toBe(false);
+
+    // 4. agent memory-set replaces memory.md wholesale.
+    expect(holdsForGo(mkStep({ kind: "agent", action: "memory-set", target: "atlas", prompt: "New rules." }))).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "agent", action: "memory-append", target: "atlas", prompt: "Note." }))).toBe(false);
+  });
 });
 
 describe("Viby settings awareness and parsing", () => {
