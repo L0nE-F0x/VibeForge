@@ -367,7 +367,7 @@ describe("making a task's copy", () => {
   });
 
   it("reports exact filenames from diff-tree and quoted patch headers when names contain ' b/' or quotes", async () => {
-    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    const { copy, owner } = await repoWithCopy({ "a.txt": LINES });
     write(copy.path, "dir b/weird.txt", "from copy\n");
     write(copy.path, 'quote "name".txt', "quoted\n");
     const patch = await copyPatch(copy, owner);
