@@ -4,16 +4,33 @@ import type { Workspace } from "../../../shared/api.js";
 import { isDockUrl } from "../../../shared/dock-url.js";
 import { call } from "../../api.js";
 import { useNarrowStage } from "../../components/SidePanel.js";
+import { forget, recall, remember } from "../../remember.js";
 import { Button } from "../../components/ui.js";
 import { useT } from "../../i18n/index.js";
 import { useAction } from "../../state.js";
 import { DockPanel } from "./DockPanel.js";
 import { FilesPanel } from "./FilesPanel.js";
 
-interface SideState {
+type SideTab = "files" | "browser";
+
+/** Whether a workspace's side panel is open, and on which tab. Each workspace keeps its own. */
+interface SidePlace {
   open: boolean;
-  tab: "files" | "browser";
+  tab: SideTab;
+}
+
+/** The panel's width, the same for every workspace. Before 3.0.3 this also held one open/tab for all of them. */
+interface SideState {
   width: number;
+  open?: boolean;
+  tab?: SideTab;
+}
+
+const SIDE_SCOPE = "code.side";
+
+function isSidePlace(value: unknown): value is SidePlace {
+  const place = value as SidePlace | null;
+  return Boolean(place && typeof place.open === "boolean" && (place.tab === "files" || place.tab === "browser"));
 }
 
 function readLocal<T>(key: string, fallback: T): T {
@@ -35,28 +52,52 @@ function writeLocal(key: string, value: unknown): void {
 
 export type CodeSidePanel = ReturnType<typeof useCodeSide>;
 
-/** Code's right-hand panel: open or not, which tab, how wide, and the address each workspace's browser shows. */
-export function useCodeSide(workspaces: Workspace[]) {
+/**
+ * Code's right-hand panel: open or not and which tab (each workspace its own), how wide (one for
+ * all), and the address each workspace's browser shows.
+ */
+export function useCodeSide(workspaces: Workspace[], currentId: string | null) {
   const t = useT();
-  const [side, setSide] = useState(() => readLocal<SideState>("vf.code.side", { open: true, tab: "files", width: 320 }));
+  const [saved] = useState(() => readLocal<SideState>("vf.code.side", { width: 320 }));
+  const [width, setWidth] = useState(() => (typeof saved.width === "number" ? saved.width : 320));
+  // A workspace never seen since 3.0.3 starts as the one shared panel was left, so an update moves nothing.
+  const fallback: SidePlace = { open: saved.open ?? true, tab: saved.tab === "browser" ? "browser" : "files" };
+  const [, setVersion] = useState(0);
+  const placeOf = (workspaceId: string | null): SidePlace => (workspaceId ? (recall(SIDE_SCOPE, workspaceId, isSidePlace) ?? fallback) : fallback);
+  const setPlace = (workspaceId: string | null, patch: Partial<SidePlace>) => {
+    if (!workspaceId) return;
+    const prev = placeOf(workspaceId);
+    remember(SIDE_SCOPE, workspaceId, { ...prev, ...patch });
+    setVersion((version) => version + 1);
+  };
+  const place = placeOf(currentId);
   // The address a click or the bar just asked for, shown before the workspace file catches up.
   const [pendingDock, setPendingDock] = useState<{ id: string; url: string } | null>(null);
 
   // Saved once a drag of its edge ends, not on every step of it.
   const resizing = useRef(false);
+  const [dragsDone, setDragsDone] = useState(0);
   useEffect(() => {
-    if (!resizing.current) writeLocal("vf.code.side", side);
-  }, [side]);
+    if (!resizing.current) writeLocal("vf.code.side", { ...saved, width });
+  }, [saved, width, dragsDone]);
   // On a narrow tile the side panel steps aside without forgetting it was open; the button brings it back.
   const narrow = useNarrowStage();
   const [narrowSide, setNarrowSide] = useState(false);
   useEffect(() => {
     if (!narrow) setNarrowSide(false);
   }, [narrow]);
+  // Another workspace on a narrow tile starts with its panel tucked away again.
+  useEffect(() => setNarrowSide(false), [currentId]);
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
-  const open = narrow ? narrowSide : side.open;
-  const setOpen = (next: boolean) => (narrow ? setNarrowSide(next) : setSide((prev) => ({ ...prev, open: next })));
+  const open = narrow ? narrowSide : place.open;
+  /** Open or close the panel, for the workspace shown or the one named. */
+  const setOpen = (next: boolean, workspaceId: string | null = currentId) => {
+    if (narrow && workspaceId === currentId) setNarrowSide(next);
+    else setPlace(workspaceId, { open: next });
+  };
+  /** Switch its tab, for the workspace shown or the one named. */
+  const setTab = (tab: SideTab, workspaceId: string | null = currentId) => setPlace(workspaceId, { tab });
 
   useEffect(() => {
     if (!pendingDock) return;
@@ -83,14 +124,21 @@ export function useCodeSide(workspaces: Workspace[]) {
       return;
     }
     setPendingDock({ id: workspaceId, url });
-    setSide((prev) => (prev.open && prev.tab === "browser" ? prev : { ...prev, open: true, tab: "browser" }));
-    if (narrowRef.current) setNarrowSide(true);
+    setPlace(workspaceId, { open: true, tab: "browser" });
+    if (narrowRef.current && workspaceId === currentId) setNarrowSide(true);
     void setDockUrl(workspaceId, url);
   }
 
   return {
-    side,
-    setSide,
+    /** The shown workspace's tab, and the panel's width. */
+    side: { tab: place.tab, width },
+    setTab,
+    setWidth,
+    /** A drag of its edge ended: keep the width it ended on. */
+    endResize: () => {
+      resizing.current = false;
+      setDragsDone((count) => count + 1);
+    },
     /** True while its edge is being dragged: the width is saved once the drag ends. */
     resizing,
     narrow,
@@ -100,15 +148,18 @@ export function useCodeSide(workspaces: Workspace[]) {
     dockUrl: (workspace: Workspace) => (pendingDock?.id === workspace.id ? pendingDock.url : workspace.dockUrl),
     rememberDock,
     openInBrowser,
-    /** A removed workspace's address, if one was on its way. */
-    forgetDock: (workspaceId: string) => setPendingDock((prev) => (prev?.id === workspaceId ? null : prev)),
+    /** A removed workspace: drop its address, if one was on its way, and how its panel was left. */
+    forgetDock: (workspaceId: string) => {
+      setPendingDock((prev) => (prev?.id === workspaceId ? null : prev));
+      forget(SIDE_SCOPE, workspaceId);
+    },
   };
 }
 
 /** The panel itself, beside the panes: the workspace's files, or its browser. Drag its edge to resize. */
 export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSidePanel; workspace: Workspace; active: boolean; onInsert: (path: string) => void }) {
   const t = useT();
-  const { side, setSide, narrow } = panel;
+  const { side, setTab, setWidth, narrow } = panel;
 
   const startResize = (event: React.PointerEvent) => {
     event.preventDefault();
@@ -119,7 +170,7 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
     panel.resizing.current = true;
     const move = (moveEvent: PointerEvent) => {
       const width = Math.min(900, Math.max(220, startWidth - (moveEvent.clientX - startX)));
-      setSide((prev) => ({ ...prev, width }));
+      setWidth(width);
     };
     const up = () => {
       target.classList.remove("dragging");
@@ -127,8 +178,7 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       // Now the width is kept.
-      panel.resizing.current = false;
-      setSide((prev) => ({ ...prev }));
+      panel.endResize();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -139,10 +189,10 @@ export function CodeSide({ panel, workspace, active, onInsert }: { panel: CodeSi
     <aside className="side-panel" style={{ width: narrow ? Math.min(side.width, 280) : side.width }}>
       <div className="side-resize" onPointerDown={startResize} />
       <div className="side-tabs">
-        <Button size="sm" variant="ghost" icon={FolderTree} pressed={side.tab === "files"} onClick={() => setSide((prev) => ({ ...prev, tab: "files" }))}>
+        <Button size="sm" variant="ghost" icon={FolderTree} pressed={side.tab === "files"} onClick={() => setTab("files")}>
           {t("code.files")}
         </Button>
-        <Button size="sm" variant="ghost" icon={Globe} pressed={side.tab === "browser"} onClick={() => setSide((prev) => ({ ...prev, tab: "browser" }))}>
+        <Button size="sm" variant="ghost" icon={Globe} pressed={side.tab === "browser"} onClick={() => setTab("browser")}>
           {t("code.browser")}
         </Button>
         <span className="grow" />

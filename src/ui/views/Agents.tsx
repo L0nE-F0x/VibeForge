@@ -24,6 +24,7 @@ import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
+import { forget, recall, remember } from "../remember.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { useT } from "../i18n/index.js";
@@ -108,6 +109,28 @@ export function EngineSelect({ engines, value, onChange, allowMissing }: { engin
 
 // ------------------------------------------------------------------ view
 
+const AGENT_SCOPE = "agents.tab";
+const AGENT_TABS: readonly AgentTab[] = ["chats", "brief", "memory", "skills", "folders", "runs", "settings"];
+
+function isAgentPlace(value: unknown): value is { tab: AgentTab; chatId?: string } {
+  const place = value as { tab?: unknown; chatId?: unknown } | null;
+  return Boolean(place && AGENT_TABS.includes(place.tab as AgentTab) && (place.chatId === undefined || typeof place.chatId === "string"));
+}
+
+/**
+ * Where an agent was left: its tab, and the chat last open on its Chats tab (kept while on another
+ * tab, so going back to Chats finds it). A new one starts on Chats.
+ */
+function agentPlace(agentId: string): { agentId: string; tab: AgentTab; chatId?: string } {
+  const place = recall(AGENT_SCOPE, agentId, isAgentPlace);
+  return { agentId, tab: place?.tab ?? "chats", chatId: place?.tab === "chats" ? place.chatId : undefined };
+}
+
+/** The chat last open on an agent's Chats tab. */
+function lastChat(agentId: string): string | undefined {
+  return recall(AGENT_SCOPE, agentId, isAgentPlace)?.chatId;
+}
+
 export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }> }) {
   const t = useT();
   const { go, replace } = useNav();
@@ -123,8 +146,14 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const wants = (agentId: string) => [...chatAttention.values()].some((mark) => mark.agentId === agentId && mark.attention === "waiting");
 
   useEffect(() => {
-    if (!route.agentId && list.length > 0) replace({ view: "agents", agentId: list[0].id, tab: "chats" });
+    if (!route.agentId && list.length > 0) replace({ view: "agents", ...agentPlace(list[0].id) });
   }, [route.agentId, list, replace]);
+  // Each agent keeps the tab (and chat) it was left on; a link that names no tab lands there too.
+  const tab = route.tab ?? (route.agentId ? agentPlace(route.agentId).tab : "chats");
+  const chatId = route.tab ? route.chatId : route.agentId ? agentPlace(route.agentId).chatId : undefined;
+  useEffect(() => {
+    if (route.agentId && selected) remember(AGENT_SCOPE, route.agentId, { tab, chatId: tab === "chats" ? chatId : lastChat(route.agentId) });
+  }, [route.agentId, selected, tab, chatId]);
 
   return (
     <div className="view split-list">
@@ -146,7 +175,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                 key={agent.id}
                 label={agent.name}
                 selected={agent.id === selected?.id}
-                onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
+                onClick={() => go({ view: "agents", ...agentPlace(agent.id) })}
                 badge={wants(agent.id) ? <span className="ws-state waiting in-strip" /> : chats.some((chat) => chat.agentId === agent.id && chat.live) ? <span className="strip-live" /> : undefined}
               >
                 <Avatar name={agent.name} />
@@ -167,7 +196,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                 type="button"
                 className={`row${wants(agent.id) ? " needs-you" : ""}`}
                 aria-current={agent.id === selected?.id || undefined}
-                onClick={() => go({ view: "agents", agentId: agent.id, tab: route.tab ?? "chats" })}
+                onClick={() => go({ view: "agents", ...agentPlace(agent.id) })}
               >
                 <Avatar name={agent.name} />
                 <span className="vstack grow" style={{ gap: 0 }}>
@@ -189,7 +218,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
         </div>
       </SidePanel>
       {selected ? (
-        <AgentDetail key={selected.id} agent={selected} tab={route.tab ?? "chats"} chatId={route.chatId} />
+        <AgentDetail key={selected.id} agent={selected} tab={tab} chatId={chatId} />
       ) : (
         <Empty
           icon={Bot}
@@ -331,7 +360,7 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
   const engine = engines.find((item) => item.id === agent.engine);
   const chats = useChats(agent.id).data ?? [];
   const runs = useQuery(`runs:agent:${agent.id}`, ["runs"], () => call("runs.list", { agentId: agent.id, limit: AGENT_RUNS }));
-  const setTab = (next: AgentTab) => go({ view: "agents", agentId: agent.id, tab: next, chatId: next === "chats" ? chatId : undefined });
+  const setTab = (next: AgentTab) => go({ view: "agents", agentId: agent.id, tab: next, chatId: next === "chats" ? (chatId ?? lastChat(agent.id)) : undefined });
 
   return (
     <div className="main">
@@ -614,7 +643,8 @@ function SettingsTab({ agent }: { agent: Agent }) {
     cancelAutosave();
     const result = await call("agents.delete", agent.id);
     // Straight to one that is left: the list hasn't reloaded yet, so "the first one" would be this one.
-    go(others[0] ? { view: "agents", agentId: others[0].id, tab: "chats" } : { view: "agents" });
+    go(others[0] ? { view: "agents", ...agentPlace(others[0].id) } : { view: "agents" });
+    forget(AGENT_SCOPE, agent.id);
     deleted(t("common.deletedNamed", { name: agent.name }), result);
   }, t("agents.deleteFailed"));
 
