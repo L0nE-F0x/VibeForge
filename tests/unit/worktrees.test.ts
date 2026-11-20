@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, lockCopy, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, lockCopy, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -227,6 +227,21 @@ describe("applying a task's copy", () => {
     const { copy } = await repoWithCopy({ "a.txt": LINES });
     const patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n-nothing like this\n+at all\n the end\n";
     await expect(applyToWorkspace(copy, patch)).rejects.toThrow(/^The changes don't apply to the workspace/);
+  });
+
+  it("reads a copy's patch through a throwaway index without staging files in the live copy", async () => {
+    const { copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("one", "ONE"));
+    write(copy.path, "scratch.tmp", "untracked\n");
+
+    const patch = await copyPatch(copy, owner);
+    expect(patch).toContain("+ONE");
+    expect(patch).toContain("b/scratch.tmp");
+    expect(git(copy.path, "diff", "--cached", "--name-only").trim()).toBe("");
+    expect(git(copy.path, "status", "--porcelain")).toBe(" M a.txt\n?? scratch.tmp\n");
+    expect(hasStagedTree(copy.path)).toBe(true);
+    await removeCopy(copy, owner);
+    expect(hasStagedTree(copy.path)).toBe(false);
   });
 
   it("brings text in other encodings across byte for byte", async () => {

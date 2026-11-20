@@ -314,17 +314,34 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
   // `git add -A` in a folder that isn't the task's copy would stage someone's real work.
   if (!ownedCopyPath(owner, copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
   return withRepoLock(copy.repo, async () => {
-    // Staging in the copy is the copy's own business; it makes new files part of the diff.
-    const staged = await git(["add", "-A"], copy.path);
-    if (staged.code !== 0) throw stagingFailure(staged);
-    // The staged tree is what Apply merges: the patch below is text, and text in some other
-    // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
-    const tree = await git(["write-tree"], copy.path);
-    if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
-    const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path);
-    if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
-    stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
-    return diff.stdout;
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-patch-"));
+    const tempIndex = path.join(scratch, "index");
+    try {
+      // Stage into a throwaway index copied from the worktree's index so we never touch the live
+      // copy's staging area or contend on index.lock while its CLI is running.
+      try {
+        const realIndex = path.resolve(copy.path, (await git(["rev-parse", "--git-path", "index"], copy.path)).stdout.trim());
+        fs.copyFileSync(realIndex, tempIndex);
+        const { atime, mtime } = fs.statSync(realIndex);
+        fs.utimesSync(tempIndex, atime, mtime);
+      } catch {
+        const readTree = await git(["read-tree", "HEAD"], copy.path, { env: { GIT_INDEX_FILE: tempIndex } });
+        if (readTree.code !== 0) throw failure("Could not read the copy's changes", readTree);
+      }
+      const env = { GIT_INDEX_FILE: tempIndex };
+      const staged = await git(["add", "-A"], copy.path, { env });
+      if (staged.code !== 0) throw stagingFailure(staged);
+      // The staged tree is what Apply merges: the patch below is text, and text in some other
+      // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
+      const tree = await git(["write-tree"], copy.path, { env });
+      if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
+      const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path, { env });
+      if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
+      stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
+      return diff.stdout;
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 }
 
@@ -333,6 +350,10 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
  * side from it, byte for byte, when it is handed that same patch.
  */
 const stagedTrees = new Map<string, { patch: string; tree: string }>();
+
+export function hasStagedTree(copyPath: string): boolean {
+  return stagedTrees.has(path.resolve(copyPath));
+}
 
 /**
  * Why `git add -A` in a copy failed, in words. A git repository inside the copy that has no
@@ -622,6 +643,8 @@ function removeFile(repo: string, target: string): boolean {
 export async function removeCopy(copy: WorkingCopy, owner: CopyOwner, repoTrusted = true): Promise<void> {
   const owned = ownedCopyPath(owner, copy.path);
   if (!owned) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+  stagedTrees.delete(path.resolve(copy.path));
+  if (owned.real) stagedTrees.delete(path.resolve(owned.real));
   if (!repoTrusted) {
     if (owned.real) fs.rmSync(owned.real, { recursive: true, force: true });
     return;
