@@ -755,4 +755,39 @@ describe("end-to-end Viby full-app control via TeamService", () => {
     expect(contPty).toBeTruthy();
     if (contPty) await ctx.exit(contPty, 0);
   });
+
+  it("defaults Viby-made tasks to an isolated copy only in git repositories with a commit", async () => {
+    const withCommit = gitRepo("iso-commit");
+    const plainDir = tempDir();
+    const emptyRepo = path.join(tempDir(), "iso-empty");
+    fs.mkdirSync(emptyRepo, { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: emptyRepo });
+
+    const ctx = withPlanner([
+      {
+        say: "Creating tasks across three workspaces.",
+        steps: [
+          { kind: "task", action: "create", name: "Committed Create", prompt: "Work in copy.", agent: "Builder", workspace: "iso-commit" },
+          { kind: "task", action: "create-run", name: "Committed Run", prompt: "Run in copy.", agent: "Builder", workspace: "iso-commit" },
+          { kind: "task", action: "create", name: "Plain Folder Task", prompt: "Work in place.", agent: "Builder", workspace: path.basename(plainDir) },
+          { kind: "task", action: "create", name: "Empty Repo Task", prompt: "No commit yet.", agent: "Builder", workspace: "iso-empty" },
+        ],
+      },
+    ]);
+    ctx.svc.addWorkspace(withCommit);
+    ctx.svc.addWorkspace(plainDir);
+    ctx.svc.addWorkspace(emptyRepo);
+    ctx.svc.saveAgent({ name: "Builder", brief: "Write code.", engine: "argy", places: [withCommit, plainDir, emptyRepo] });
+
+    const turn = await askAndRun(ctx, "Create tasks with default isolation");
+    expect(turn?.steps?.every((s) => s.state === "done")).toBe(true);
+    const byTitle = (title: string) => ctx.svc.listTasks().find((t) => t.title === title);
+    expect(byTitle("Committed Create")?.isolated).toBe(true);
+    expect(byTitle("Committed Run")).toMatchObject({ isolated: true, status: "running" });
+    expect(byTitle("Committed Run")?.copy).toBeTruthy();
+    expect(byTitle("Plain Folder Task")?.isolated).toBe(false);
+    expect(byTitle("Empty Repo Task")?.isolated).toBe(false);
+    for (const live of ctx.svc.listLive()) await ctx.exit(live.ptyId, 0);
+    await ctx.svc.close();
+  });
 });

@@ -1701,9 +1701,9 @@ export class OrchestratorDesk {
       const workspace = step.workspaceId ? this.core.workspaceById(step.workspaceId) : null;
       const opts = parseOptions(step.options);
       const explicitIsolated = opts.bool("isolated");
-      // In its own copy where the board would make one: a git workspace with a commit to copy.
+      // parseOptions().bool() returns undefined when omitted, so check undefined to match the board default.
       const isolated =
-        explicitIsolated !== null
+        explicitIsolated !== undefined
           ? explicitIsolated
           : Boolean(workspace) && (await isGitRepo(workspace?.path ?? "").catch(() => false)) && (await hasCommit(workspace?.path ?? ""));
       const shareCheckout = opts.bool("shareCheckout") ?? false;
