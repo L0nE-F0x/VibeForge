@@ -83,6 +83,9 @@ async function machine(name: string, base: string): Promise<Machine> {
     onEvent: (event) => desk.onEvent(event),
     onExit: (why) => void (made.logs as string[]).push(why),
   });
+  // Its interface is a socket file only this user can reach, not a port anyone on the machine can.
+  expect(fs.statSync(path.join(desk.engineHome, "gui.sock")).isSocket()).toBe(true);
+  expect(fs.statSync(desk.engineHome).mode & 0o777).toBe(0o700);
   await desk.attach(engine);
   return Object.assign(made, { desk, engine }) as Machine;
 }

@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { lockDown } from "../src/core/sync/protocol.js";
@@ -9,8 +10,9 @@ import type { EngineDevice, EngineEvent, EngineFolder, EngineFolderStatus, SyncE
 // VibeForge's private Syncthing: the binary a copy of VibeForge carries (vendor/syncthing), with
 // its own home under VibeForge's data folder, started with VibeForge and stopped with it. Its
 // settings are locked down before every start (src/core/sync/protocol.ts): it talks to paired
-// machines directly and to nothing else. Its web interface answers on loopback only, on a port
-// and with a key made fresh each start, and only this file uses it.
+// machines directly and to nothing else. Its web interface answers on a socket file in its private
+// home (a loopback port only when that path is too long for a socket), with a key made fresh each
+// start, and only this file uses it.
 
 export interface SyncthingOptions {
   binary: string;
@@ -52,6 +54,28 @@ function freePort(): Promise<number> {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Where Syncthing's interface answers: a socket file in its private home, so no other user on this
+ * computer can reach it (a loopback port answers anyone on the machine, and Syncthing hands any
+ * caller of its page a token for it). Unix sockets take paths of at most 107 bytes; a data folder
+ * deeper than that falls back to a loopback port.
+ */
+type Gui = { socketPath: string } | { host: string; port: number };
+
+/** One request to Syncthing's REST interface, over its socket or port. */
+function guiRequest(gui: Gui, method: string, route: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ ...gui, method, path: route, headers: { ...headers, Host: "localhost" }, signal }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }));
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
 
 function alive(pid: number): boolean {
   try {
@@ -108,7 +132,7 @@ export class Syncthing implements SyncEngine {
 
   private constructor(
     private readonly child: ChildProcess,
-    private readonly base: string,
+    private readonly gui: Gui,
     private readonly key: string,
     id: string,
     private readonly options: SyncthingOptions,
@@ -130,9 +154,15 @@ export class Syncthing implements SyncEngine {
     // Before every start, so nothing in the file can make it reach outside.
     fs.writeFileSync(config, lockDown(fs.readFileSync(config, "utf8"), { listen: options.listen, discovery: options.discovery, discoveryPort: options.discoveryPort }), { mode: 0o600 });
 
-    const port = await freePort();
+    // Its home holds its keys: only this user, whatever the folder was made with.
+    fs.chmodSync(options.home, 0o700);
+    const socketPath = path.join(options.home, "gui.sock");
+    const gui: Gui = Buffer.byteLength(socketPath) <= 107 ? { socketPath } : { host: "127.0.0.1", port: await freePort() };
+    // A socket left by a Syncthing that crashed would stop the new one listening there.
+    fs.rmSync(socketPath, { force: true });
+    const address = "socketPath" in gui ? `unix://${gui.socketPath}` : `http://127.0.0.1:${gui.port}`;
     const key = randomBytes(24).toString("hex");
-    const child = spawn(options.binary, ["serve", `--home=${options.home}`, "--no-browser", "--no-upgrade", "--no-restart", "--no-port-probing", `--gui-address=http://127.0.0.1:${port}`], {
+    const child = spawn(options.binary, ["serve", `--home=${options.home}`, "--no-browser", "--no-upgrade", "--no-restart", "--no-port-probing", `--gui-address=${address}`], {
       // The key goes in the environment, not on the command line, where `ps` would show it.
       env: { ...env, STGUIAPIKEY: key },
       stdio: ["ignore", "pipe", "pipe"],
@@ -154,7 +184,6 @@ export class Syncthing implements SyncEngine {
     child.once("exit", (code, signal) => (exited = `Syncthing stopped (${signal ?? `code ${code}`}): ${tail.replace(/^\S+ \S+ /, "").slice(0, 200)}`));
     if (child.pid) fs.writeFileSync(path.join(options.home, "vibeforge.pid"), `${child.pid}\n`);
 
-    const base = `http://127.0.0.1:${port}`;
     const started = Date.now();
     let id = "";
     while (!id) {
@@ -173,14 +202,14 @@ export class Syncthing implements SyncEngine {
         throw new Error("Syncthing did not start in time.");
       }
       try {
-        const response = await fetch(`${base}/rest/system/status`, { headers: { "X-API-Key": key }, signal: AbortSignal.timeout(2000) });
-        if (response.ok) id = String(((await response.json()) as { myID?: string }).myID ?? "");
+        const response = await guiRequest(gui, "GET", "/rest/system/status", { "X-API-Key": key }, undefined, AbortSignal.timeout(2000));
+        if (response.status === 200) id = String((JSON.parse(response.text) as { myID?: string }).myID ?? "");
       } catch {
         /* not up yet */
       }
       if (!id) await sleep(150);
     }
-    const engine = new Syncthing(child, base, key, id, options);
+    const engine = new Syncthing(child, gui, key, id, options);
     child.once("exit", (code, signal) => {
       fs.rmSync(path.join(options.home, "vibeforge.pid"), { force: true });
       if (!engine.stopping) options.onExit(`Syncthing stopped (${signal ?? `code ${code}`}).`);
@@ -217,14 +246,16 @@ export class Syncthing implements SyncEngine {
   // ------------------------------------------------------------------ REST
 
   private async call<T = unknown>(method: string, route: string, body?: unknown, timeoutMs = 15_000): Promise<T> {
-    const response = await fetch(`${this.base}${route}`, {
+    const response = await guiRequest(
+      this.gui,
       method,
-      headers: { "X-API-Key": this.key, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`Syncthing answered ${response.status} to ${method} ${route.split("?")[0]}: ${text.trim().slice(0, 200)}`);
+      route,
+      { "X-API-Key": this.key, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body === undefined ? undefined : JSON.stringify(body),
+      AbortSignal.timeout(timeoutMs),
+    );
+    const text = response.text;
+    if (response.status < 200 || response.status > 299) throw new Error(`Syncthing answered ${response.status} to ${method} ${route.split("?")[0]}: ${text.trim().slice(0, 200)}`);
     return (text.trim() ? JSON.parse(text) : null) as T;
   }
 
@@ -233,9 +264,9 @@ export class Syncthing implements SyncEngine {
     let since = 0;
     while (!this.stopping) {
       try {
-        const response = await fetch(`${this.base}/rest/events?since=${since}&timeout=30&events=${EVENTS.join(",")}`, { headers: { "X-API-Key": this.key }, signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(45_000)]) });
-        if (!response.ok) throw new Error(String(response.status));
-        const events = ((await response.json()) ?? []) as Array<{ id: number; type: string; data: Record<string, unknown> | null }>;
+        const response = await guiRequest(this.gui, "GET", `/rest/events?since=${since}&timeout=30&events=${EVENTS.join(",")}`, { "X-API-Key": this.key }, undefined, AbortSignal.any([this.abort.signal, AbortSignal.timeout(45_000)]));
+        if (response.status !== 200) throw new Error(String(response.status));
+        const events = (JSON.parse(response.text || "null") ?? []) as Array<{ id: number; type: string; data: Record<string, unknown> | null }>;
         for (const event of events) {
           since = Math.max(since, event.id);
           const mapped = mapEvent(event.type, event.data ?? {});
