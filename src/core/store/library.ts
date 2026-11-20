@@ -145,9 +145,10 @@ export class Library {
 
   // ---------------------------------------------------------------- agents
 
-  uniqueId(dir: string, base: string, extension: string): string {
+  /** A free id for `base` in `dir`: not a file there, and not one `inUse` still answers for. */
+  uniqueId(dir: string, base: string, extension: string, inUse: (id: string) => boolean = () => false): string {
     const root = slugify(base);
-    const taken = (id: string) => fs.existsSync(path.join(dir, `${id}${extension}`));
+    const taken = (id: string) => fs.existsSync(path.join(dir, `${id}${extension}`)) || inUse(id);
     if (!taken(root)) return root;
     let count = 2;
     while (taken(`${root}-${count}`)) count += 1;

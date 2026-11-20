@@ -14,7 +14,17 @@ export interface Bin {
  * Emptying everything at start means a delete just before a crash stays deleted, as it was meant.
  */
 export class Trash {
+  /** The bins still waiting for their Undo, so a new thing doesn't take a deleted one's place. */
+  private readonly open = new Map<string, Bin>();
+
   constructor(private readonly root: string) {}
+
+  /** Whether `file` was moved into a bin that can still be undone. */
+  holds(file: string): boolean {
+    const wanted = path.resolve(file);
+    for (const bin of this.open.values()) if (bin.moved.some((item) => path.resolve(item.from) === wanted)) return true;
+    return false;
+  }
 
   /** Remove every bin and return any settle notes left behind by crashed deletes. */
   empty(): unknown[] {
@@ -31,6 +41,7 @@ export class Trash {
       /* trash empty */
     }
     fs.rmSync(this.root, { recursive: true, force: true });
+    this.open.clear();
     return settled;
   }
 
@@ -57,7 +68,9 @@ export class Trash {
       fs.rmSync(dir, { recursive: true, force: true });
       throw error;
     }
-    return { token, moved };
+    const bin = { token, moved };
+    this.open.set(token, bin);
+    return bin;
   }
 
   /** Put a bin's files back where they were, and say which went back. A path taken again in the meantime is left alone. */
@@ -69,6 +82,7 @@ export class Trash {
 
   /** Delete a bin for good. */
   drop(bin: Bin): void {
+    this.open.delete(bin.token);
     fs.rmSync(path.join(this.root, bin.token), { recursive: true, force: true });
   }
 }

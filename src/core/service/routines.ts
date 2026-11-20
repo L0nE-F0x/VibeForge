@@ -61,7 +61,7 @@ export class RoutineDesk {
     if (!input.prompt?.trim()) throw new Error("Write the routine's prompt.");
     const existing = input.id ? this.core.store.getRoutine(input.id) : null;
     const routine: Routine = {
-      id: existing?.id ?? this.core.store.uniqueId(path.join(this.core.options.configRoot, "routines"), name, ".yaml"),
+      id: existing?.id ?? this.core.freeId("routines", name, ".yaml", (id) => this.core.store.queryRuns({ routineId: id, limit: 1 }).length > 0),
       name,
       agentId: input.agentId,
       enabled: typeof input.enabled === "boolean" ? input.enabled : (existing?.enabled ?? true),

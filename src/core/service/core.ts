@@ -280,6 +280,17 @@ export class ServiceCore {
     await this.options.host.kill(ptyId);
   }
 
+  /**
+   * A new id for an agent, skill or routine named `name` in its config folder. One whose deleted
+   * namesake is still waiting for Undo is taken, so Undo can put that one back; so is one old runs
+   * still point to (`hasRuns`), so a new routine or agent doesn't take over the old one's history
+   * (its last run, a failing streak). It gets a number instead: `helper-2`.
+   */
+  freeId(folder: "agents" | "skills" | "routines", name: string, extension: string, hasRuns: (id: string) => boolean = () => false): string {
+    const dir = path.join(this.options.configRoot, folder);
+    return this.store.uniqueId(dir, name, extension, (id) => this.trash.holds(path.join(dir, `${id}${extension}`)) || hasRuns(id));
+  }
+
   isLive(ptyId: string): boolean {
     return this.live.has(ptyId);
   }

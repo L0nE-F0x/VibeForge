@@ -232,17 +232,43 @@ describe("undo", () => {
     expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
     expect(routinesOf(agent.id)).toEqual([routine.id]);
 
-    // Deleted again, and a new agent takes the name (and so the id) while the Undo is still up.
+    // Deleted again, and a new agent of that name is made while the Undo is still up: it gets an id
+    // of its own, so Undo still puts the old one back, beside it, with nothing of the old one's.
     const again = await ctx.svc.deleteAgent(agent.id);
     const fresh = await agentIn(ctx);
-    expect(fresh.id).toBe(agent.id);
+    expect(fresh.id).toBe(`${agent.id}-2`);
     expect(routinesOf(fresh.id)).toEqual([]);
     expect(ctx.svc.readMemory(fresh.id)).not.toContain("written by hand");
-    // Undo can't put the old one back over it, and its routines don't join the new one.
     ctx.svc.undoDelete(again.undo);
+    expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
+    expect(routinesOf(agent.id)).toEqual([routine.id]);
     expect(ctx.svc.getAgent(fresh.id)?.createdAt).toBe(fresh.createdAt);
     expect(routinesOf(fresh.id)).toEqual([]);
     ctx.svc.close();
+  });
+
+  it("gives a new agent or routine its own id when old runs still name a deleted one", async () => {
+    const ctx = setup();
+    const notes = (c: ReturnType<typeof setup>) => c.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [c.place], allowRoutines: true });
+    const agent = await notes(ctx);
+    const routine = ctx.svc.saveRoutine({ name: "Nightly", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Draft." });
+    const fired = started(await ctx.svc.runRoutineNow(routine.id));
+    await ctx.exit(fired.ptyId);
+    await ctx.svc.deleteAgent(agent.id);
+    ctx.svc.close();
+    // A later session: the deletes are past their Undo, but the runs are still there.
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    const fresh = await notes(next);
+    expect(fresh.id).toBe(`${agent.id}-2`);
+    const freshRoutine = next.svc.saveRoutine({ name: "Nightly", agentId: fresh.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    expect(freshRoutine.id).toBe(`${routine.id}-2`);
+    // A skill has no runs: its name is free again once it's gone for good.
+    const skill = next.svc.saveSkill({ name: "Review" });
+    next.svc.deleteSkill(skill.id);
+    next.svc.close();
+    const third = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    expect(third.svc.saveSkill({ name: "Review" }).id).toBe(skill.id);
+    third.svc.close();
   });
 
   it("keeps a delete from an earlier session deleted", async () => {
