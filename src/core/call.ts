@@ -369,9 +369,10 @@ export function answerTo(turns: readonly OrchestratorTurn[]): OrchestratorTurn |
   );
 }
 
-/** The plan that a spoken "go" or "cancel" answers: the one still waiting. */
+/** The plan that a spoken "go" or "cancel" answers: only when no newer non-note turn came after it. */
 export function waitingPlan(turns: readonly OrchestratorTurn[]): OrchestratorTurn | null {
-  return turns.findLast((turn) => turn.plan === "waiting") ?? null;
+  const latest = turns.findLast((turn) => !turn.note);
+  return latest?.plan === "waiting" ? latest : null;
 }
 
 /** An answer as it is said out loud: its words, and how to answer a plan that waits for Go. */
