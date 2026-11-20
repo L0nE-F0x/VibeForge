@@ -2335,9 +2335,9 @@ export class OrchestratorDesk {
 
       const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
       if (wantedFile) {
-        const candidate = path.resolve(ws.path, wantedFile);
-        if (isInside(ws.path, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-          const content = fs.readFileSync(candidate, "utf8").slice(0, 8000);
+        const safeFile = realInside(ws.path, path.resolve(ws.path, wantedFile));
+        if (safeFile && fs.statSync(safeFile).isFile()) {
+          const content = fs.readFileSync(safeFile, "utf8").slice(0, 8000);
           parts.push(`File ${wantedFile}:\n${content}`);
         }
       }
@@ -2754,6 +2754,17 @@ function expandHome(folder: string): string {
 function isInside(parent: string, child: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/** Resolve symlinks on both paths so a symlink inside `parent` cannot escape outside it. */
+function realInside(parent: string, child: string): string | null {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realChild = fs.realpathSync(child);
+    return isInside(realParent, realChild) ? realChild : null;
+  } catch {
+    return null;
+  }
 }
 
 function oneLine(text: string, max: number): string {

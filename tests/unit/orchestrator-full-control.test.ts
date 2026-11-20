@@ -790,4 +790,36 @@ describe("end-to-end Viby full-app control via TeamService", () => {
     for (const live of ctx.svc.listLive()) await ctx.exit(live.ptyId, 0);
     await ctx.svc.close();
   });
+
+  it("refuses to read outside files through symlinks during inspect", async () => {
+    const outsideDir = tempDir();
+    const secretFile = path.join(outsideDir, "secret.txt");
+    fs.writeFileSync(secretFile, "TOP-SECRET-KEY-123\n");
+
+    const wsDir = gitRepo("sym-repo");
+    fs.writeFileSync(path.join(wsDir, "notes.txt"), "safe local notes\n");
+    fs.symlinkSync(secretFile, path.join(wsDir, "leak.txt"));
+    fs.symlinkSync(outsideDir, path.join(wsDir, "out"));
+
+    const ctx = withPlanner([
+      {
+        say: "",
+        steps: [
+          { kind: "inspect", workspace: "sym-repo", folder: "leak.txt" },
+          { kind: "inspect", workspace: "sym-repo", folder: "out/secret.txt" },
+          { kind: "inspect", workspace: "sym-repo", folder: "notes.txt" },
+        ],
+      },
+      { say: "Checked.", steps: [] },
+    ]);
+    ctx.svc.addWorkspace(wsDir);
+
+    await ctx.svc.orchestratorAsk("check leak.txt, out/secret.txt and notes.txt");
+    const turn = ctx.svc.orchestratorView().turns.at(-1);
+    expect(turn?.checks).toHaveLength(3);
+    expect(turn?.checks?.[0].details).not.toContain("TOP-SECRET-KEY-123");
+    expect(turn?.checks?.[1].details).not.toContain("TOP-SECRET-KEY-123");
+    expect(turn?.checks?.[2].details).toContain("safe local notes");
+    await ctx.svc.close();
+  });
 });
