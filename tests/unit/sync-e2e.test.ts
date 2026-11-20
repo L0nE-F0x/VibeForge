@@ -241,6 +241,18 @@ describe.skipIf(!have)("workspace sync between two machines, with the real Synct
     expect(copies(onB)).toEqual([]);
   }, 180_000);
 
+  it("keeps top-level git lock files out of the other machine", async () => {
+    await until("settled before lock check", async () => (await a.desk.view()).shares[0]?.state === "synced" && (await b.desk.view()).shares[0]?.state === "synced");
+    fs.writeFileSync(path.join(onA, ".git", "index.lock"), "locked\n");
+    fs.writeFileSync(path.join(onA, "after-lock.txt"), "ok\n");
+    await until("marker arrived on Lap", () => fs.existsSync(path.join(onB, "after-lock.txt")));
+    await sleep(500);
+    expect(fs.existsSync(path.join(onB, ".git", "index.lock"))).toBe(false);
+    fs.rmSync(path.join(onA, ".git", "index.lock"), { force: true });
+    fs.rmSync(path.join(onA, "after-lock.txt"), { force: true });
+    await until("marker gone on Lap", () => !fs.existsSync(path.join(onB, "after-lock.txt")));
+  }, 60_000);
+
   it("follows a change of mode, and a stop, on the other machine", async () => {
     await a.desk.updateShare(folderId, { mode: "send", filesOnly: false });
     await until("Lap receiving only", async () => (await b.desk.view()).shares[0]?.mode === "receive");

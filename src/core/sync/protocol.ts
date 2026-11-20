@@ -158,6 +158,7 @@ export function ignoreLines(options: { filesOnly: boolean }): string[] {
           // A task's copy is registered here with this machine's own paths.
           ".git/worktrees",
           // Git's locks are held for moments; synced, they would stop git on the other machine.
+          ".git/*.lock",
           ".git/**/*.lock",
           ".git/gc.pid",
         ]),
@@ -198,11 +199,14 @@ export interface ConflictName {
 
 const CONFLICT = /^(.*)\.sync-conflict-(\d{8}-\d{6})-([A-Z2-7]{7})(\.[^./]*)?$/;
 
-/** Reads `notes.sync-conflict-20261117-204452-MTOM47S.md` as a copy of `notes.md`; null for any other name. */
+/** Reads `notes.sync-conflict-20261117-204452-MTOM47S.md` (or `.sync-conflict-...env` for dotfiles) as a copy of the original; null otherwise. */
 export function conflictName(name: string): ConflictName | null {
   const found = CONFLICT.exec(name);
-  if (!found || !found[1]) return null;
-  return { original: `${found[1]}${found[4] ?? ""}`, stamp: found[2], winner: found[3] };
+  if (!found) return null;
+  // Syncthing names dotfiles `.sync-conflict-<stamp>-<id>.<dotname>`, leaving group 1 empty.
+  const original = `${found[1]}${found[4] ?? ""}`;
+  if (!original || original === ".") return null;
+  return { original, stamp: found[2], winner: found[3] };
 }
 
 // ------------------------------------------------------------------ the private Syncthing's settings
