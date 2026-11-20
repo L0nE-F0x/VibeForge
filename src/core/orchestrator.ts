@@ -511,65 +511,73 @@ function jsonIn(text: string): unknown {
   }
 }
 
+/** Maximum steps allowed in a single planner answer so a runaway plan stays bounded. */
+export const MAX_PLAN_STEPS = 20;
+
 function asPlan(value: unknown): RawPlan | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (typeof record.say !== "string" && !Array.isArray(record.steps)) return null;
-  const steps = Array.isArray(record.steps) ? record.steps : [];
+  const rawSteps = Array.isArray(record.steps) ? record.steps : [];
+  const mapped = rawSteps.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const step = item as Record<string, unknown>;
+    const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
+    const list = (key: string) =>
+      Array.isArray(step[key])
+        ? (step[key] as unknown[])
+            .filter((v): v is string => typeof v === "string")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : undefined;
+    const flag = (key: string) => step[key] === true;
+    const action = field("action");
+    const name = field("name");
+    const description = field("description");
+    const schedule = field("schedule");
+    const agent = field("agent");
+    const task = field("task");
+    const status = field("status");
+    const places = list("places");
+    const skills = list("skills");
+    const agents = list("agents");
+    const options = field("options");
+    return [
+      {
+        kind: field("kind") ?? "",
+        engine: field("engine"),
+        workspace: field("workspace"),
+        branch: field("branch"),
+        prompt: field("prompt"),
+        target: field("target"),
+        folder: field("folder"),
+        git: flag("git"),
+        model: field("model"),
+        effort: field("effort"),
+        inPlace: flag("inPlace"),
+        after: flag("after"),
+        ...(action ? { action } : {}),
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
+        ...(schedule ? { schedule } : {}),
+        ...(agent ? { agent } : {}),
+        ...(task ? { task } : {}),
+        ...(status ? { status } : {}),
+        ...(places?.length ? { places } : {}),
+        ...(skills?.length ? { skills } : {}),
+        ...(agents?.length ? { agents } : {}),
+        ...(options ? { options } : {}),
+      },
+    ];
+  });
+  const trimmed = mapped.length > MAX_PLAN_STEPS;
+  const steps = trimmed ? mapped.slice(0, MAX_PLAN_STEPS) : mapped;
+  const baseSay = typeof record.say === "string" ? record.say.trim() : "";
+  const trimNote = `Trimmed to the first ${MAX_PLAN_STEPS} steps.`;
   return {
-    say: typeof record.say === "string" ? record.say.trim() : "",
+    say: trimmed ? (baseSay ? `${baseSay} (${trimNote})` : trimNote) : baseSay,
     ...(record.hangup === true ? { hangup: true } : {}),
-    steps: steps.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const step = item as Record<string, unknown>;
-      const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
-      const list = (key: string) =>
-        Array.isArray(step[key])
-          ? (step[key] as unknown[])
-              .filter((v): v is string => typeof v === "string")
-              .map((v) => v.trim())
-              .filter(Boolean)
-          : undefined;
-      const flag = (key: string) => step[key] === true;
-      const action = field("action");
-      const name = field("name");
-      const description = field("description");
-      const schedule = field("schedule");
-      const agent = field("agent");
-      const task = field("task");
-      const status = field("status");
-      const places = list("places");
-      const skills = list("skills");
-      const agents = list("agents");
-      const options = field("options");
-      return [
-        {
-          kind: field("kind") ?? "",
-          engine: field("engine"),
-          workspace: field("workspace"),
-          branch: field("branch"),
-          prompt: field("prompt"),
-          target: field("target"),
-          folder: field("folder"),
-          git: flag("git"),
-          model: field("model"),
-          effort: field("effort"),
-          inPlace: flag("inPlace"),
-          after: flag("after"),
-          ...(action ? { action } : {}),
-          ...(name ? { name } : {}),
-          ...(description ? { description } : {}),
-          ...(schedule ? { schedule } : {}),
-          ...(agent ? { agent } : {}),
-          ...(task ? { task } : {}),
-          ...(status ? { status } : {}),
-          ...(places?.length ? { places } : {}),
-          ...(skills?.length ? { skills } : {}),
-          ...(agents?.length ? { agents } : {}),
-          ...(options ? { options } : {}),
-        },
-      ];
-    }),
+    steps,
   };
 }
 

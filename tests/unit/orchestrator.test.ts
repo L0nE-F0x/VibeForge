@@ -162,6 +162,16 @@ describe("the Orchestrator's plans", () => {
     expect(readBrainOutput('Here you go: {"say":"Hi.","steps":[]} done').plan?.say).toBe("Hi.");
     expect(readBrainOutput("I can't help with that.").plan).toBeNull();
     expect(readBrainOutput(JSON.stringify({ text: "Sorry, no." })).text).toBe("Sorry, no.");
+
+    // Plans over 20 steps are trimmed to 20 with a note in say.
+    const many = Array.from({ length: 25 }, (_, i) => ({ kind: "show", target: `t${i}` }));
+    const trimmed = readBrainOutput(JSON.stringify({ structured_output: { say: "All of them.", steps: many } })).plan;
+    expect(trimmed?.steps).toHaveLength(20);
+    expect(trimmed?.say).toContain("All of them.");
+    expect(trimmed?.say).toContain("20");
+    const trimmedQuiet = readBrainOutput(JSON.stringify({ structured_output: { say: "", steps: many } })).plan;
+    expect(trimmedQuiet?.steps).toHaveLength(20);
+    expect(trimmedQuiet?.say).toContain("20");
   });
 
   it("matches spoken names generously, and not when two fit as well", () => {
@@ -317,6 +327,14 @@ describe("the planning CLI's process", () => {
     fs.writeFileSync(bin, '#!/bin/bash\necho "{\\"say\\":\\"hi\\"}"\necho oops >&2\n', { mode: 0o755 });
     expect(await spawnBrain([bin], dir, new AbortController().signal)).toMatchObject({ code: 0, stdout: '{"say":"hi"}\n', stderr: "oops\n", timedOut: false });
     expect((await spawnBrain([path.join(dir, "nothing-here")], dir, new AbortController().signal)).code).toBe(127);
+
+    // Runaway planner stdout is capped at a few MB.
+    const flood = path.join(dir, "flood");
+    fs.writeFileSync(flood, "#!/bin/bash\nhead -c 5000000 /dev/zero | tr '\\0' x\n", { mode: 0o755 });
+    const capped = await spawnBrain([flood], dir, new AbortController().signal);
+    expect(capped.code).toBe(0);
+    expect(capped.stdout.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(capped.stdout.length).toBeGreaterThan(0);
   });
 });
 

@@ -149,6 +149,8 @@ export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, tim
 
 /** How long a planner has to end after SIGTERM before its whole process group is killed. */
 const KILL_GRACE_MS = 3000;
+/** Cap buffered planner stdout at 4 MB so runaway output cannot exhaust memory. */
+const MAX_BRAIN_STDOUT = 4 * 1024 * 1024;
 
 /**
  * The environment a planner runs in: VibeForge's own, less what is VibeForge's or Electron's
@@ -213,7 +215,9 @@ export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, tim
     }, timeoutMs);
     if (signal.aborted) stop();
     else signal.addEventListener("abort", stop, { once: true });
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      if (stdout.length < MAX_BRAIN_STDOUT) stdout += chunk.slice(0, MAX_BRAIN_STDOUT - stdout.length);
+    });
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
       stderr += error.message;
