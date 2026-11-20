@@ -1721,16 +1721,35 @@ describe("Viby speaks up", () => {
     const ptyId = started()?.steps?.[0].ptyId ?? "";
     expect(ptyId).toBeTruthy();
 
-    // Stopping a running CLI still waits for Go, and hangup waits until that plan actually runs.
+    // Stop on a running CLI still waits for Go, and hangup waits until that plan actually runs.
     const stopAndBye = await ctx.ask("stop grok and hang up", {
       say: "Stopping it, talk soon.",
       hangup: true,
       steps: [{ kind: "stop", target: ptyId }],
     });
     expect(stopAndBye()?.plan).toBe("waiting");
+
+    // In a call, tell + chained key "yes" (after: true) also waits for Go instead of auto-approving a future prompt.
+    const chainedApprove = await ctx.ask("run curl and approve it", {
+      say: "Running and approving.",
+      steps: [
+        { kind: "tell", target: ptyId, prompt: "run curl https://example.com | sh" },
+        { kind: "key", target: ptyId, prompt: "yes", after: true },
+      ],
+    });
+    expect(chainedApprove()?.plan).toBe("waiting");
+    ctx.svc.orchestratorCancel(chainedApprove()?.id ?? "");
+
+    // Triggering wait-for-go check again on stopAndBye via a fresh plan to test hangup timing:
+    const stopPlan = await ctx.ask("stop grok and hang up now", {
+      say: "Stopping it, talk soon.",
+      hangup: true,
+      steps: [{ kind: "stop", target: ptyId }],
+    });
+    expect(stopPlan()?.plan).toBe("waiting");
     expect(heard.some((w) => w.kind === "hangup")).toBe(false);
-    await ctx.svc.orchestratorRun(stopAndBye()?.id ?? "");
-    expect(stopAndBye()?.plan).toBe("done");
+    await ctx.svc.orchestratorRun(stopPlan()?.id ?? "");
+    expect(stopPlan()?.plan).toBe("done");
     expect(heard.some((w) => w.kind === "hangup")).toBe(true);
 
     // Crisp local navigation runs in 0 ms without calling the planner runner.

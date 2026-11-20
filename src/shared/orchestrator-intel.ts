@@ -47,6 +47,23 @@ function cleanPromptLine(line: string): string {
   return cleaned.length > 140 ? `${cleaned.slice(0, 139).trimEnd()}…` : cleaned;
 }
 
+const FREE_PROMPTS = [
+  /do you trust\b/i,
+  /\btrust (?:the files in )?this (?:folder|directory|workspace|project)\b/i,
+  /(?:please )?(?:run \/login|sign in|log in)\b/i,
+];
+
+/** Whether a detected waiting prompt or screen asks to approve a tool, command or edit (not folder trust or sign-in). */
+export function isApprovalPrompt(waitingOrScreen: string): boolean {
+  const text = waitingOrScreen.trim();
+  if (!text) return false;
+  const prompt = detectWaitingPrompt(text) ?? text;
+  if (FREE_PROMPTS.some((pattern) => pattern.test(prompt))) return false;
+  return /do you want to |allow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|(?:^|\n)\s*(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\?$/i.test(
+    prompt,
+  );
+}
+
 export interface KeyAction {
   data: string;
   label: string;

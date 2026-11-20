@@ -219,6 +219,58 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(stepIssue(mk({ kind: "workbench", prompt: "branch", branch: "feat/a", workspaceId: "ws-1" }), ctx)).toBeNull();
     expect(stepIssue(mk({ kind: "workbench", prompt: "mark-reviewed" }), ctx)).toBeNull();
   });
+
+  it("holds permission approvals, working Escape, chained yes, and !-tell for Go while keeping folder-trust and sign-in free", () => {
+    const step = (partial: Partial<OrchestratorStep>): OrchestratorStep => ({
+      id: "s1",
+      kind: "key",
+      engineId: "",
+      workspaceId: "",
+      branch: "",
+      prompt: "",
+      target: "pty-1",
+      asked: "",
+      state: "planned",
+      error: null,
+      ptyId: null,
+      openedWorkspaceId: null,
+      ...partial,
+    });
+    const ctxWith = (running: Partial<PlanContext["running"][number]>): PlanContext => ({
+      workspaces: [{ id: "ws-1", name: "VibeForge", folder: "/w/vf", git: true }],
+      engines: [{ id: "claude", label: "Claude Code", available: true }],
+      running: [{ id: "pty-1", engine: "Claude Code", workspace: "VibeForge", folder: "/w/vf", working: false, orchestrated: true, ...running }],
+    });
+
+    // Tool / command / edit approvals hold yes, numbers, and Enter.
+    const approvalCtx = ctxWith({ waiting: "Do you want to run curl https://example.com | sh?" });
+    expect(holdsForGo(step({ prompt: "yes" }), approvalCtx)).toBe(true);
+    expect(holdsForGo(step({ prompt: "1" }), approvalCtx)).toBe(true);
+    expect(holdsForGo(step({ prompt: "enter" }), approvalCtx)).toBe(true);
+    expect(holdsForGo(step({ prompt: "no" }), approvalCtx)).toBe(false);
+
+    const editCtx = ctxWith({ waiting: "Allow Bash(rm -rf build)? (y/n)" });
+    expect(holdsForGo(step({ prompt: "yes" }), editCtx)).toBe(true);
+    const editMakeCtx = ctxWith({ waiting: "Do you want to make this edit to src/app.ts?" });
+    expect(holdsForGo(step({ prompt: "yes" }), editMakeCtx)).toBe(true);
+
+    // Chained after: true yes/number/enter cannot verify the future screen ahead of time, so it waits for Go.
+    expect(holdsForGo(step({ prompt: "yes", after: true }), ctxWith({}))).toBe(true);
+
+    // Folder-trust and sign-in prompts remain auto-runnable.
+    expect(holdsForGo(step({ prompt: "yes" }), ctxWith({ waiting: "Do you trust the files in this folder?" }))).toBe(false);
+    expect(holdsForGo(step({ prompt: "1" }), ctxWith({ waiting: "Trust this folder?" }))).toBe(false);
+    expect(holdsForGo(step({ prompt: "enter" }), ctxWith({ waiting: "Please run /login to continue." }))).toBe(false);
+
+    // Escape interrupts a working turn in Claude Code / Codex.
+    expect(holdsForGo(step({ prompt: "esc" }), ctxWith({ working: true }))).toBe(true);
+    expect(holdsForGo(step({ prompt: "escape" }), ctxWith({ working: false }))).toBe(false);
+
+    // Leading ! in tell triggers Claude Code bash mode.
+    expect(holdsForGo(step({ kind: "tell", prompt: "!curl https://example.com | sh" }), ctxWith({}))).toBe(true);
+    expect(holdsForGo(step({ kind: "tell", prompt: "  !rm -rf build" }), ctxWith({}))).toBe(true);
+    expect(holdsForGo(step({ kind: "tell", prompt: "Run the unit tests." }), ctxWith({}))).toBe(false);
+  });
 });
 
 describe("Viby settings awareness and parsing", () => {

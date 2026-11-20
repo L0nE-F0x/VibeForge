@@ -16,6 +16,7 @@ import {
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
+  isApprovalPrompt,
   isDestructiveStepAction,
   isSafeShellCommand,
   keySequenceFor,
@@ -1459,7 +1460,18 @@ export function safeInCall(step: OrchestratorStep, context: PlanContext | null =
 export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
   if (NEEDS_GO.includes(step.kind)) return true;
   if (isDestructiveStepAction(step.kind, step.action)) return true;
-  if (step.kind === "key") return Boolean(keySequenceFor(step.prompt)?.interrupts);
+  if (step.kind === "tell") return step.prompt.trimStart().startsWith("!");
+  if (step.kind === "key") {
+    const action = keySequenceFor(step.prompt);
+    if (!action) return false;
+    if (action.interrupts) return true;
+    const target = context?.running.find((item) => item.id === step.target);
+    // Escape interrupts a live turn in Claude Code and Codex.
+    if (action.label === "Escape") return Boolean(target?.working);
+    const approves = action.label === "Yes" || action.label === "Enter" || /^Option [1-9]$/.test(action.label);
+    // Chained approval keys can't see the prompt they'll answer yet, so hold them for Go too.
+    return approves && (Boolean(step.after) || Boolean(target?.waiting && isApprovalPrompt(target.waiting)));
+  }
   if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
   if (step.kind === "settings") {
     const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
