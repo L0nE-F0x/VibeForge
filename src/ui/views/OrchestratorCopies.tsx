@@ -1,10 +1,10 @@
 import { FileDiff, FileText, GitBranch, GitMerge, RotateCcw, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MaestroCopy, Workspace } from "../../shared/api.js";
-import { call, useEngines, useWorkspaces } from "../api.js";
+import { call, useAppInfo, useEngines, useWorkspaces } from "../api.js";
 import { DiffView } from "../components/RunDetail.js";
 import { Button, Notice, Sheet } from "../components/ui.js";
-import { applyConflictNote } from "../apply-note.js";
+import { applyConflictNote, applyLeftNote } from "../apply-note.js";
 import { diffFiles } from "../diff-files.js";
 import { useT } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
@@ -22,12 +22,14 @@ function useCopyActions(copy: MaestroCopy) {
   const from = useWorkspaces().data?.workspaces.find((item) => item.id === copy.workspaceId);
   // Its workspace goes with it, so the browser dock it may have had goes too.
   const release = () => copy.openedWorkspaceId && void call("dock.release", copy.openedWorkspaceId).catch(() => undefined);
+  const home = useAppInfo().data?.home ?? "";
   const [apply, applying] = useAction(async () => {
     const result = await call("orchestrator.applyCopy", copy.id);
-    if (!result.files.length) push("info", t("tasks.applyNothing"));
+    if (!result.files.length && !result.left) push("info", t("tasks.applyNothing"));
     else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
+    else if (result.left) push("info", t("tasks.appliedLeft", { workspace: from?.name ?? "" }), applyLeftNote(t, result.left, home));
     else push("success", t("tasks.applied", { workspace: from?.name ?? "" }), t.count("tasks.appliedBody", result.files.length));
-    if (!result.conflicts.length) release();
+    if (!result.conflicts.length && !result.left) release();
   }, t("tasks.applyFailed"));
   const [discard, discarding] = useAction(async () => {
     const result = await call("orchestrator.discardCopy", copy.id);

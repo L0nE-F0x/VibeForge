@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, leftInCopy, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -57,6 +57,19 @@ function indexState(repo: string): string {
 }
 
 describe("applying a task's copy", () => {
+  it("names the files git ignores that the agent left in its copy, but not what builds and CLIs make", async () => {
+    const { copy } = await repoWithCopy({ ".gitignore": "notes/\n*.local\nnode_modules/\ndist/\n.claude/\n*.log\n", "a.txt": "a\n" });
+    expect(await leftInCopy(copy)).toEqual([]);
+    write(copy.path, "a.txt", "changed\n");
+    write(copy.path, "notes/plan.md", "the plan\n");
+    write(copy.path, "config.local", "secret=1\n");
+    write(copy.path, "node_modules/x/index.js", "x\n");
+    write(copy.path, "dist/app.js", "built\n");
+    write(copy.path, ".claude/settings.local.json", "{}\n");
+    write(copy.path, "debug.log", "noise\n");
+    expect((await leftInCopy(copy)).sort()).toEqual(["config.local", "notes/"]);
+  });
+
   it("merges into files with uncommitted edits, and leaves the index as it was", async () => {
     const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES, "s.txt": "staged\n" });
     // The agent changes a line, committing it.

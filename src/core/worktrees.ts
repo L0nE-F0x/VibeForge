@@ -34,6 +34,11 @@ export interface ApplyResult {
    * copy's version is still in the copy.
    */
   kept?: string[];
+  /**
+   * Files git ignores that the agent left in its copy (see leftInCopy): not brought in, so the copy
+   * stays with them until it is discarded.
+   */
+  left?: { folder: string; files: string[] };
 }
 
 interface GitRun {
@@ -254,6 +259,34 @@ function samePlace(a: string, b: string): boolean {
   if (path.resolve(a) === path.resolve(b)) return true;
   const real = realTail(path.resolve(a));
   return real !== null && real === realTail(path.resolve(b));
+}
+
+/**
+ * What builds, installs and the CLIs' own settings make in a folder: never the agent's work, so
+ * never a reason to keep a copy around.
+ */
+const MADE_FOLDERS = new Set([
+  "node_modules", "vendor", "dist", "dist-electron", "build", "out", "target", "coverage", ".venv", "venv", "__pycache__",
+  ".next", ".nuxt", ".svelte-kit", ".turbo", ".vite", ".cache", ".parcel-cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  ".gradle", ".tox", ".claude", ".codex", ".gemini", ".grok", ".cursor", ".agy", ".antigravity", ".opencode", ".crush", ".kimi",
+  ".muse", ".pi", ".hermes", ".copilot",
+]);
+const MADE_FILES = /(?:\.log|\.pyc|\.tsbuildinfo|(?:^|\/)\.DS_Store)$/;
+
+/**
+ * Files the agent left in its copy that git ignores (notes, a `config.local`), leaving out what
+ * builds, installs and the CLIs make. A new copy holds tracked files only, so each of these was
+ * made in it later, and only lives there: removing the copy would lose them without a word. A
+ * folder with nothing but such files in it is named once, as `notes/`.
+ */
+export async function leftInCopy(copy: WorkingCopy): Promise<string[]> {
+  const run = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"], copy.path);
+  if (run.code !== 0) return [];
+  return run.stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((entry) => !entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) && !MADE_FILES.test(entry))
+    .slice(0, 200);
 }
 
 /** A commit id, never something git could read as an option. */

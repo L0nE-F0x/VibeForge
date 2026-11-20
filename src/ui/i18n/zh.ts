@@ -846,6 +846,8 @@ export const zh: Catalog = {
   "tasks.applyConflicts": "已应用，但有冲突需要解决",
   "tasks.applyConflictsBody": "{files} 在工作区中也被修改过，现已包含冲突标记；在你丢弃副本前它会一直保留。丢弃副本不会移除这些标记。",
   "tasks.applyKeptBody": "{files} 无法逐行合并（二进制文件，或一方已删除的文件），因此保留了工作区中的版本。副本中的版本会一直保留在副本里，直到你丢弃它。",
+  "tasks.appliedLeft": "已应用到 {workspace}；副本保留",
+  "tasks.appliedLeftBody": "Git 会忽略 {files}，所以它们没有被带回来，只在副本中（{folder}）。取出需要的内容后，再丢弃副本。",
   "tasks.applyNothing": "副本没有改动，已将其删除",
   "tasks.applyFailed": "无法应用改动",
   "tasks.discardCopy": "丢弃副本",

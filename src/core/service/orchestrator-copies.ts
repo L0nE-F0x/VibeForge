@@ -7,7 +7,7 @@ import { isPathInside } from "../places.js";
 import { isSafeId } from "../slug.js";
 import type { Workspace } from "../types.js";
 import { removeWorkspaceRecord } from "../workspaces.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, expectedCopyPath, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
 import type { Deleted } from "./types.js";
 import type { WorkspaceDesk } from "./workspaces.js";
@@ -143,6 +143,9 @@ export class MaestroCopies {
       await this.endIn(copy);
       const result = await applyToWorkspace(copy, await copyPatch(copy, this.owner(copy.id)));
       if (result.conflicts.length) return result;
+      // Files git ignores that only live in the copy keep it, with its workspace, until it is discarded.
+      const left = await leftInCopy(copy);
+      if (left.length) return { ...result, left: { folder: copy.path, files: left } };
       await removeCopy(copy, this.owner(copy.id));
       this.forget(copy);
       if (copy.openedWorkspaceId && this.core.workspaceById(copy.openedWorkspaceId)) await this.workspaces.removeWorkspace(copy.openedWorkspaceId);

@@ -865,6 +865,26 @@ describe("runs", () => {
     expect(fs.existsSync(idleCopy.path)).toBe(false);
     expect(ctx.svc.listTasks().find((item) => item.id === idleTask.id)!).toMatchObject({ status: "done", copy: null });
 
+    // The agent left notes git ignores: its changes go in, and the copy stays with the notes, named.
+    git(repo, "checkout", "--", "a.txt");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "notes/\n");
+    git(repo, "add", ".gitignore");
+    git(repo, "commit", "-qm", "ignore notes");
+    const notesTask = ctx.svc.saveTask({ title: "Notes", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const noting = started(await ctx.svc.executeTask(notesTask.id));
+    const notesCopy = ctx.svc.listTasks().find((item) => item.id === notesTask.id)!.copy!;
+    fs.writeFileSync(path.join(notesCopy.path, "a.txt"), "one\nwith notes\n");
+    fs.mkdirSync(path.join(notesCopy.path, "notes"));
+    fs.writeFileSync(path.join(notesCopy.path, "notes", "plan.md"), "the plan\n");
+    await ctx.exit(noting.ptyId);
+    const leftBehind = await ctx.svc.applyTaskCopy(notesTask.id);
+    expect(leftBehind).toMatchObject({ files: ["a.txt"], conflicts: [], left: { folder: notesCopy.path, files: ["notes/"] } });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nwith notes\n");
+    expect(fs.readFileSync(path.join(notesCopy.path, "notes", "plan.md"), "utf8")).toBe("the plan\n");
+    expect(ctx.svc.listTasks().find((item) => item.id === notesTask.id)!.copy).not.toBeNull();
+    await ctx.svc.discardTaskCopy(notesTask.id);
+    expect(fs.existsSync(notesCopy.path)).toBe(false);
+
     // A folder that isn't a repository can't have a copy.
     const plain = tempDir();
     const plainAgent = await ctx.svc.saveAgent({ name: "Plain", brief: "b", engine: "argy", places: [plain] });

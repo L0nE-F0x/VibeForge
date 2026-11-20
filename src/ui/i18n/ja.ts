@@ -846,6 +846,8 @@ export const ja: Catalog = {
   "tasks.applyConflicts": "適用しました。解決が必要な競合があります",
   "tasks.applyConflictsBody": "{files} はワークスペース側でも変更されていたため、競合マーカーが入りました。コピーは破棄するまで残ります。破棄してもマーカーは消えません。",
   "tasks.applyKeptBody": "{files} は行ごとにマージできなかったため（バイナリファイル、または片方で削除されたファイル）、ワークスペース側の版をそのまま残しました。コピー側の版は、コピーを破棄するまでコピーに残ります。",
+  "tasks.appliedLeft": "{workspace} に適用しました。コピーは残ります",
+  "tasks.appliedLeftBody": "Git は {files} を無視するため、取り込まれず、コピー（{folder}）にだけあります。必要なものを取り出してから、コピーを破棄してください。",
   "tasks.applyNothing": "コピーに変更がなかったので、コピーを削除しました",
   "tasks.applyFailed": "変更を適用できませんでした",
   "tasks.discardCopy": "コピーを破棄",

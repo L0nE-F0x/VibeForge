@@ -845,6 +845,8 @@ export const es: Catalog = {
   "tasks.applyConflicts": "Aplicado, con conflictos por resolver",
   "tasks.applyConflictsBody": "{files} también cambió en el espacio de trabajo. Ahora tiene marcas de conflicto; la copia se queda hasta que la descartes. Descartarla no quita las marcas.",
   "tasks.applyKeptBody": "{files} no se pudo combinar línea a línea (un archivo binario, o uno que un lado borró), así que se mantuvo la versión del espacio de trabajo. La versión de la copia sigue en la copia hasta que la descartes.",
+  "tasks.appliedLeft": "Aplicado a {workspace}; la copia se queda",
+  "tasks.appliedLeftBody": "Git ignora {files}, así que no se trajeron y solo están en la copia ({folder}). Copia lo que necesites y luego descarta la copia.",
   "tasks.applyNothing": "La copia no tenía cambios y se eliminó",
   "tasks.applyFailed": "No se pudieron aplicar los cambios",
   "tasks.discardCopy": "Descartar copia",

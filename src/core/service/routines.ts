@@ -1,4 +1,3 @@
-import path from "node:path";
 import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, firedAtOrAfter, isScheduleValid, mostRecentSlot, nextFireTimes, ROUTINE_FAILING, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, RunMeta, Schedule } from "../types.js";

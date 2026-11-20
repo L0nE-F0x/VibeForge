@@ -9,7 +9,7 @@ import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace } from "../types.js";
 import { isSafeId } from "../slug.js";
 import type { Bin } from "../trash.js";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, lockCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -324,7 +324,10 @@ export class TaskDesk {
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
     const patch = await copyPatch(task.copy, this.owner(id));
     const result = await applyToWorkspace(task.copy, patch);
-    if (!result.conflicts.length) {
+    // Files git ignores that only live in the copy keep it, as conflicts do, until it is discarded.
+    const left = result.conflicts.length ? [] : await leftInCopy(task.copy);
+    if (left.length) result.left = { folder: task.copy.path, files: left };
+    if (!result.conflicts.length && !left.length) {
       await removeCopy(task.copy, this.owner(id));
       const current = this.core.store.getTask(id) ?? task;
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });

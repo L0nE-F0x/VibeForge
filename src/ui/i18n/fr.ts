@@ -846,6 +846,8 @@ export const fr: Catalog = {
   "tasks.applyConflicts": "Appliqué, avec des conflits à résoudre",
   "tasks.applyConflictsBody": "{files} a aussi changé dans l'espace de travail. Des marqueurs de conflit y sont maintenant ; la copie reste jusqu'à ce que vous l'abandonniez. L'abandonner ne retire pas les marqueurs.",
   "tasks.applyKeptBody": "{files} n'a pas pu être fusionné ligne par ligne (un fichier binaire, ou un fichier supprimé d'un côté), donc la version de l'espace de travail a été gardée. La version de la copie reste dans la copie jusqu'à ce que vous l'abandonniez.",
+  "tasks.appliedLeft": "Appliqué à {workspace} ; la copie reste",
+  "tasks.appliedLeftBody": "Git ignore {files} : ils n'ont pas été rapportés et ne sont que dans la copie ({folder}). Récupérez ce dont vous avez besoin, puis jetez la copie.",
   "tasks.applyNothing": "La copie n'avait aucun changement, elle a été supprimée",
   "tasks.applyFailed": "Impossible d'appliquer les changements",
   "tasks.discardCopy": "Abandonner la copie",

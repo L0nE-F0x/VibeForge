@@ -322,7 +322,9 @@ export class HandedTasks {
         conflicts: result.conflicts,
         note: result.conflicts.length
           ? `Some changes conflict with this folder (${result.conflicts.join(", ")}); the rest are in. The task's copy stays until a person sorts it out.`
-          : `Applied as uncommitted changes, and the task is done.`,
+          : result.left
+            ? `Applied as uncommitted changes. Files git ignores were left only in the task's copy (${result.left.files.join(", ")}), so it stays at ${result.left.folder} until a person discards it.`
+            : `Applied as uncommitted changes, and the task is done.`,
       };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
