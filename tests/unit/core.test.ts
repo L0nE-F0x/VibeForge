@@ -178,6 +178,13 @@ describe("engines", () => {
     ]);
     const plan = planLaunch(claude, "/bin/claude", { continueSession: true, resumeArgs: ["--resume", "abc12345"] });
     expect(plan.argv).toEqual(["/bin/claude", "--resume", "abc12345"]);
+    // Ignore mid-sentence prose, markdown bullets, and output buried older than the last ~15 lines.
+    expect(resumeArgsFromTranscript(claude, "Wait, do not run claude --resume e6ea7991-1d65-4897-a691-d1edeedb9275 yet")).toBeNull();
+    expect(resumeArgsFromTranscript(claude, "- `claude --resume e6ea7991-1d65-4897-a691-d1edeedb9275`")).toBeNull();
+    const buried = `claude --resume e6ea7991-1d65-4897-a691-d1edeedb9275\n${Array.from({ length: 20 }, (_, i) => `tail ${i}`).join("\n")}`;
+    expect(resumeArgsFromTranscript(claude, buried)).toBeNull();
+    const nearEnd = `claude --resume e6ea7991-1d65-4897-a691-d1edeedb9275\n${Array.from({ length: 10 }, (_, i) => `tail ${i}`).join("\n")}`;
+    expect(resumeArgsFromTranscript(claude, nearEnd)).toEqual(["--resume", "e6ea7991-1d65-4897-a691-d1edeedb9275"]);
   });
 
   it("normalises hand-edited engines.json rows", () => {
@@ -460,6 +467,11 @@ describe("git snapshot", () => {
     expect(own).toContain("+cli");
     expect(own).toContain("diff --git a/packages/web/new.ts b/packages/web/new.ts");
     expect(own).not.toContain("root.txt");
+    expect(normalizeRun({ id: "r-bad", gitStart: "--output=/tmp/pwn" })?.gitStart).toBeNull();
+    expect(normalizeRun({ id: "r-ref", gitStart: "HEAD~1" })?.gitStart).toBeNull();
+    expect(normalizeRun({ id: "r-ok", gitStart: start })?.gitStart).toBe(start);
+    expect(await diffSince(sub, "--output=/tmp/pwn")).toContain("app.ts");
+    expect(await snapshotGit(sub, 5000, "--output=/tmp/pwn")).toContain("git status");
   });
 });
 

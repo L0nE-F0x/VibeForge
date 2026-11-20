@@ -120,6 +120,16 @@ function nextSlot(slot: number, minutes: number): number {
   return fromWall(wall);
 }
 
+function sameWallMinute(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate() &&
+    a.getHours() === b.getHours() &&
+    a.getMinutes() === b.getMinutes()
+  );
+}
+
 export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
   if (!isScheduleValid(schedule)) return null;
   if (schedule.kind === "every") return new Date(intervalSlot(now.getTime(), schedule.minutes));
@@ -130,6 +140,15 @@ export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
       .next()
       .toDate();
     const candidates = [prev, onTheDot].filter((date) => date.getTime() <= now.getTime());
+    // When spring-forward skipped the scheduled hour, prev() jumps back past today: walk forward from 3h ago to pick up the shifted fire (matches nextFireTimes).
+    if (prev.getTime() < now.getTime() - 2 * 3600_000) {
+      const probe = CronExpressionParser.parse(schedule.expr, { currentDate: new Date(Math.max(prev.getTime(), now.getTime() - 3 * 3600_000)) });
+      for (let i = 0; i < 4; i += 1) {
+        const next = probe.next().toDate();
+        if (next.getTime() > now.getTime()) break;
+        candidates.push(next);
+      }
+    }
     candidates.sort((a, b) => b.getTime() - a.getTime());
     return candidates[0] ?? null;
   } catch {
@@ -188,6 +207,12 @@ export function decideRoutineTick(input: RoutineTickInput): TickDecision {
   if (input.engineAvailable === false) return { action: "skip", reason: "engine-missing" };
   const slot = mostRecentSlot(input.schedule, input.now);
   if (!slot || firedAtOrAfter(input.lastFiredAt, slot)) return { action: "skip", reason: "not-due" };
+  if (input.schedule.kind === "cron" && input.lastFiredAt) {
+    const last = new Date(input.lastFiredAt);
+    const lastSlot = Number.isNaN(last.getTime()) ? null : mostRecentSlot(input.schedule, last);
+    // Autumn fallback repeats the same local wall-clock hour: fire at most once for that wall-clock slot.
+    if (lastSlot && sameWallMinute(lastSlot, slot)) return { action: "skip", reason: "not-due" };
+  }
   const scheduledAt = slot.toISOString();
   if (slot.getTime() < input.appStartedAt.getTime() || input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
     return { action: "miss", scheduledAt };

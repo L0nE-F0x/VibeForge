@@ -113,7 +113,7 @@ export class TaskDesk {
     const locked = copy && owned?.real && trusted ? await lockCopy(copy, this.owner(id)).catch(() => false) : false;
     let bin: Bin;
     try {
-      bin = this.core.trash.stash(owned?.real ? [file, owned.real] : [file]);
+      bin = this.core.trash.stash(owned?.real ? [file, owned.real] : [file], copy && owned && trusted ? { kind: "copy", taskId: id, copy } : undefined);
     } catch (error) {
       if (copy && locked) await unlockCopy(copy, this.owner(id)).catch(() => undefined);
       throw error;

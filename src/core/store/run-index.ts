@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDirectory } from "../fsx.js";
 import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta } from "../runs.js";
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../../shared/text.js";
 import type { RunMeta, RunOrigin, RunStatus } from "../types.js";
@@ -152,11 +153,18 @@ export class RunIndex {
     this.reindex();
   }
 
-  /** Pick up run folders the index does not know about (a crash, or a copied data dir). */
+  /** Pick up run folders the index does not know about, and drop rows whose folders disappeared on disk. */
   reindex(): number {
     const known = new Set((this.db.prepare("SELECT id FROM runs").all() as Array<{ id: string }>).map((row) => row.id));
+    const dirs = listRunDirs(this.dataRoot);
+    const onDisk = new Set(dirs.map((dir) => path.basename(dir)));
+    for (const id of known) {
+      if (onDisk.has(id)) continue;
+      this.db.prepare("DELETE FROM runs WHERE id = ?").run(id);
+      this.db.prepare("DELETE FROM run_text WHERE id = ?").run(id);
+    }
     let added = 0;
-    for (const dir of listRunDirs(this.dataRoot)) {
+    for (const dir of dirs) {
       if (known.has(path.basename(dir))) continue;
       const meta = readRunMeta(dir);
       // A run's folder is named for its id; one that isn't (copied by hand) would be found in the wrong place.
@@ -183,6 +191,7 @@ export class RunIndex {
   saveRun(meta: RunMeta): RunMeta {
     const normalized = this.located(meta);
     if (!normalized) throw new Error("Run is not valid");
+    if (!isDirectory(normalized.dir)) return normalized;
     writeRunMeta(normalized);
     this.indexRun(normalized);
     return normalized;

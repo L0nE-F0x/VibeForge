@@ -258,6 +258,37 @@ describe("undo", () => {
     expect(() => next.svc.undoDelete(undo)).toThrow(/too late/);
     next.svc.close();
   });
+
+  it("tidies a deleted task copy's branch and worktree lock at startup after a crash during Undo", async () => {
+    const repo = tempDir();
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" }).toString().trim();
+    git("init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Worker", brief: "b", engine: "argy", places: [repo] });
+    const ws = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Crash undo", body: "Edit.", agentId: agent.id, workspaceId: ws.id, isolated: true });
+    const run = started(await ctx.svc.executeTask(task.id));
+    await ctx.exit(run.ptyId);
+
+    const copyPath = ctx.svc.listTasks()[0].copy!.path;
+    await ctx.svc.deleteTask(task.id);
+    expect(git("branch", "--list", `vibeforge/${task.id}`)).toContain(task.id);
+
+    // Simulate process exit without running close(): clear the timer so Undo settle never ran, then close SQLite.
+    const undoable = (ctx.svc as unknown as { undoable: Map<string, { timer: ReturnType<typeof setTimeout> }> }).undoable;
+    for (const entry of undoable.values()) clearTimeout(entry.timer);
+    undoable.clear();
+    ctx.svc.store.close();
+
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await next.svc.whenSettled();
+    expect(git("branch", "--list", `vibeforge/${task.id}`)).toBe("");
+    expect(git("worktree", "list", "--porcelain")).not.toContain(copyPath);
+    next.svc.close();
+  });
 });
 
 describe("routines", () => {

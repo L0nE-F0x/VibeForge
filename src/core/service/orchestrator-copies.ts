@@ -163,7 +163,7 @@ export class MaestroCopies {
       const owned = ownedCopyPath(this.owner(copy.id), copy.path);
       const trusted = owned ? await this.trusted(copy) : false;
       if (owned) await lockCopy(copy, this.owner(copy.id)).catch(() => false);
-      const bin = this.core.trash.stash(owned?.real ? [owned.real] : []);
+      const bin = this.core.trash.stash(owned?.real ? [owned.real] : [], owned && trusted ? { kind: "copy", taskId: copy.id, copy } : undefined);
       const workspaces = this.core.store.readWorkspaces();
       const index = workspaces.workspaces.findIndex((item) => item.id === copy.openedWorkspaceId);
       const workspace = index >= 0 ? workspaces.workspaces[index] : null;

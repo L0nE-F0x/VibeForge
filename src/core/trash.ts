@@ -16,13 +16,26 @@ export interface Bin {
 export class Trash {
   constructor(private readonly root: string) {}
 
-  /** Remove every bin. Called at start and when the app closes. */
-  empty(): void {
+  /** Remove every bin and return any settle notes left behind by crashed deletes. */
+  empty(): unknown[] {
+    const settled: unknown[] = [];
+    try {
+      for (const name of fs.readdirSync(this.root)) {
+        try {
+          settled.push(JSON.parse(fs.readFileSync(path.join(this.root, name, "settle.json"), "utf8")) as unknown);
+        } catch {
+          /* no settle note for this bin */
+        }
+      }
+    } catch {
+      /* trash empty */
+    }
     fs.rmSync(this.root, { recursive: true, force: true });
+    return settled;
   }
 
   /** Move each existing path into a new bin. Paths that don't exist are skipped. */
-  stash(paths: string[]): Bin {
+  stash(paths: string[], settle?: unknown): Bin {
     const token = randomUUID();
     const dir = path.join(this.root, token);
     const moved: Bin["moved"] = [];
@@ -34,6 +47,10 @@ export class Trash {
         move(from, to);
         moved.push({ from, to });
       });
+      if (settle !== undefined) {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "settle.json"), `${JSON.stringify(settle)}\n`);
+      }
     } catch (error) {
       // Half a delete is worse than none: put back what moved, then report it.
       restoreMoves(moved);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, lockCopy, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -364,6 +364,23 @@ describe("making a task's copy", () => {
     await createCopy(repo, path.join(dataRoot, "worktrees", "task-3"), copyBranch("task-3"));
     expect(worktrees(repo)).not.toContain(copy.path);
     expect(worktrees(repo)).toContain("locked mine, hands off");
+  });
+
+  it("reports exact filenames from diff-tree and quoted patch headers when names contain ' b/' or quotes", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "dir b/weird.txt", "from copy\n");
+    write(copy.path, 'quote "name".txt', "quoted\n");
+    const patch = await copyPatch(copy, owner);
+    const applied = await applyToWorkspace(copy, patch);
+    expect(applied.conflicts).toEqual([]);
+    expect(applied.files).toEqual(["dir b/weird.txt", 'quote "name".txt']);
+    const quotedPatch = [
+      'diff --git "a/dir b/file \\"one\\".txt" "b/dir b/file \\"one\\".txt"',
+      "--- a/x",
+      "+++ b/y",
+      "diff --git a/plain b/keep.txt b/plain b/keep.txt",
+    ].join("\n");
+    expect(patchFiles(quotedPatch)).toEqual(['dir b/file "one".txt', "plain b/keep.txt"]);
   });
 });
 

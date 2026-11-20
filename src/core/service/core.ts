@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
-import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
+import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
@@ -12,6 +12,7 @@ import { Trash, type Bin } from "../trash.js";
 import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, Workspace } from "../types.js";
+import { removeCopy, type WorkingCopy } from "../worktrees.js";
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
@@ -57,12 +58,12 @@ export class ServiceCore {
   constructor(options: DeskOptions) {
     this.options = options;
     this.store = new Store(options.configRoot, options.dataRoot);
-    // Anything left in the trash was deleted in an earlier session, past its undo.
+    // Anything left in the trash was deleted in an earlier session, past its undo; settle any copy branches that didn't finish clearing.
     this.trash = new Trash(path.join(options.dataRoot, "trash"));
-    this.trash.empty();
+    const trashed = this.trash.empty();
     // Anything still "running" in the index belongs to a process that died with the last app session.
     const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
-    this.settled = this.settleOrphans(orphans);
+    this.settled = Promise.all([this.settleOrphans(orphans), this.settleTrash(trashed)]).then(() => undefined);
   }
 
   whenSettled(): Promise<void> {
@@ -593,6 +594,18 @@ export class ServiceCore {
       }
     }
     if (orphans.length) this.emit("runs", "tasks");
+  }
+
+  private async settleTrash(trashed: unknown[]): Promise<void> {
+    if (!trashed.length) return;
+    const copies = readJson<{ copies?: Array<{ id?: string }> } | null>(path.join(this.options.dataRoot, "orchestrator", "copies.json"), null)?.copies ?? [];
+    for (const item of trashed) {
+      if (!item || typeof item !== "object") continue;
+      const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
+      if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
+      if (this.store.getTask(note.taskId) || copies.some((entry) => entry?.id === note.taskId)) continue;
+      await removeCopy(note.copy, { dataRoot: this.options.dataRoot, taskId: note.taskId }, true).catch(() => undefined);
+    }
   }
 
   /** Make an ended run findable by what it said. Search is a nicety: a failure here is ignored. */

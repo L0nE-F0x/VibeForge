@@ -81,6 +81,22 @@ describe("the run index", () => {
     expect(store.latestWorkspaceRuns()).toEqual({ "ws-1": "2026-11-01T09:15:00.000Z" });
     store.close();
   });
+
+  it("prunes rows whose run folders disappeared on disk and never recreates a deleted run folder in saveRun", () => {
+    const store = storeWithRuns(["Notes one", "Notes two"]);
+    const [second, first] = store.allRuns();
+    fs.rmSync(first.dir, { recursive: true, force: true });
+    store.reindex();
+    expect(store.getRun(first.id)).toBeNull();
+    expect(store.searchRuns("Notes").map((hit) => hit.run.id)).toEqual([second.id]);
+
+    // Deleting a run removes its folder; a late saveRun must not bring the folder or row back.
+    store.deleteRun(second);
+    store.saveRun({ ...second, status: "exited" });
+    expect(fs.existsSync(second.dir)).toBe(false);
+    expect(store.getRun(second.id)).toBeNull();
+    store.close();
+  });
 });
 
 /** A store with one finished run per title, a minute apart, the first title oldest. */

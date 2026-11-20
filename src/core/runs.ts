@@ -4,6 +4,7 @@ import { readJson, readText, writeJson } from "./fsx.js";
 import { hasRunFile, readRunText } from "./run-storage.js";
 import { isSafeId } from "./slug.js";
 import type { RunMeta, RunOrigin, RunStatus } from "./types.js";
+import { isCommitId } from "./worktrees.js";
 
 /** What a run directory holds. The PTY host writes the terminal files, the service writes the rest. */
 export const RUN_FILES = {
@@ -104,7 +105,10 @@ export function normalizeRun(value: unknown): RunMeta | null {
     dir: str(record.dir),
     error: strOrNull(record.error),
     changes: strOrNull(record.changes),
-    gitStart: strOrNull(record.gitStart),
+    gitStart: (() => {
+      const sha = strOrNull(record.gitStart);
+      return sha && isCommitId(sha) ? sha : null;
+    })(),
     continuedFrom: strOrNull(record.continuedFrom),
   };
 }
