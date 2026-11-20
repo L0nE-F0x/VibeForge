@@ -693,3 +693,10 @@
   background: var(--sel-fill);
   border-color: var(--sel-line);
 }
+
+/* Picked while Runs' Select is on. */
+.run-row[aria-pressed="true"],
+.list-compact .run-row[aria-pressed="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}

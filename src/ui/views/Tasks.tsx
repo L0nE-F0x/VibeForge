@@ -1,12 +1,14 @@
-import { CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { ArrowRightLeft, CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
+import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
+import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
 import { Rich } from "../i18n/Rich.js";
-import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
+import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { writerNames } from "../components/Occupancy.js";
 import { useSaveShortcut } from "./Agents.js";
 import { RunRow } from "./Home.js";
@@ -25,16 +27,89 @@ const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
 
 const blockerKey = (blocker: NonNullable<TaskView["blocker"]>): Key => `tasks.blocker.${blocker}`;
 
+type TaskFilter = "blocked" | "waiting" | "copy" | "failed" | "asked";
+type TaskSort = "updated" | "created" | "name" | "agent";
+const TASK_LIST: ListSpec<TaskFilter, TaskSort> = {
+  key: "tasks",
+  filters: ["blocked", "waiting", "copy", "failed", "asked"],
+  sorts: ["updated", "created", "name", "agent"],
+  defaultSort: "updated",
+};
+
 export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> }) {
   const t = useT();
   const { go } = useNav();
   const { fail } = useToast();
+  const confirm = useConfirm();
+  const deleted = useDeleted();
+  const deletedMany = useDeletedMany();
   const tasks = useTasks();
   const agents = useAgents().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const [creating, setCreating] = useState(false);
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const list = tasks.data ?? [];
+
+  // ------------------------------------------------ search, filter, sort, select
+  const agentName = (task: TaskView) => agents.find((item) => item.id === task.agentId)?.name ?? "";
+  const workspaceName = (task: TaskView) => workspaces.find((item) => item.id === task.workspaceId)?.name ?? "";
+  const collator = nameOrder(t.language);
+  const rules: ListRules<TaskView, TaskFilter, TaskSort> = {
+    test: (filter, task) => {
+      if (filter === "blocked") return task.status === "todo" && Boolean(task.blocker);
+      if (filter === "waiting") return Boolean(task.waiting);
+      if (filter === "copy") return task.isolated;
+      if (filter === "failed") return Boolean(task.lastRun && !task.lastRun.live && runWentWrong(task.lastRun));
+      return Boolean(task.askedBy);
+    },
+    search: (query, task) => matchesQuery(query, task.title, task.body, agentName(task), workspaceName(task), task.askedBy),
+    compare: (sort, a, b) => {
+      if (sort === "created") return timeOf(b.createdAt) - timeOf(a.createdAt);
+      if (sort === "name") return collator.compare(a.title, b.title);
+      if (sort === "agent") return collator.compare(agentName(a), agentName(b)) || timeOf(b.updatedAt) - timeOf(a.updatedAt);
+      return timeOf(b.updatedAt) - timeOf(a.updatedAt);
+    },
+  };
+  const view = useList(TASK_LIST, list, rules, (task) => task.id);
+  const { selection } = view;
+  const picked = selection.picked;
+  const labels: ListLabels<TaskFilter, TaskSort> = {
+    filters: {
+      blocked: t("tasks.filter.blocked"),
+      waiting: t("tasks.filter.waiting"),
+      copy: t("tasks.copyChip"),
+      failed: t("list.filter.failed"),
+      asked: t("tasks.filter.asked"),
+    },
+    sorts: { updated: t("tasks.sort.updated"), created: t("list.sort.newest"), name: t("list.sort.name"), agent: t("list.sort.agent") },
+    sortChips: { created: t("list.sortShort.newest"), name: t("list.sortShort.name"), agent: t("list.sortShort.agent") },
+  };
+  // A running task stays where it is: it is stopped first, from its sheet.
+  const movable = picked.filter((task) => task.status !== "running");
+  const [movePicked, moving] = useAction(async (status: TaskStatus) => {
+    for (const task of movable) if (task.status !== status) await call("tasks.setStatus", task.id, status);
+    selection.setSelecting(false);
+  }, t("tasks.moveFailed"));
+  const [deletePicked, deleting] = useAction(async () => {
+    if (!picked.length) return;
+    // Deleting is undone from the toast. A running task asks first: stopping it can't be undone.
+    const running = picked.filter((task) => task.status === "running").length;
+    if (running) {
+      const one = picked.length === 1;
+      const ok = await confirm({
+        title: one ? t("common.deleteNamed", { name: picked[0].title }) : t.count("tasks.deleteManyTitle", picked.length),
+        body: one ? t("tasks.deleteRunningBody") : t.count("list.deleteLiveBody", running),
+        confirm: t("common.stopAndDelete"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const { gone, deleted: undo, error } = await deleteEach(picked, (task) => call("tasks.delete", task.id));
+    if (gone.length === 1) deleted(t("common.deletedNamed", { name: gone[0].title }), undo[0]);
+    else deletedMany(t.count("tasks.deletedMany", gone.length), undo);
+    if (error) throw error;
+    selection.setSelecting(false);
+  }, t("tasks.deleteFailed"));
   // "new" (from Ctrl+K) opens a blank task, like the New task button.
   const open = route.taskId && route.taskId !== "new" ? list.find((task) => task.id === route.taskId) ?? null : null;
   const drafting = creating || route.taskId === "new";
@@ -64,9 +139,38 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
           {t("tasks.new")}
         </Button>
       </div>
-      <div className="board">
+      {toolsWanted(list.length, view.narrowed, view.changed, selection.selecting) && (
+        <div className="board-tools">
+          <ListBar
+            list={view}
+            labels={labels}
+            placeholder={t("tasks.search")}
+            selectTip={t("tasks.selectTip")}
+            page
+            actions={
+              <>
+                <MenuButton
+                  size="sm"
+                  icon={ArrowRightLeft}
+                  busy={moving}
+                  disabled={!movable.length}
+                  tip={movable.length < picked.length ? t("tasks.moveRunningTip") : undefined}
+                  items={COLUMNS.filter((column) => column.status !== "running").map((column) => ({ label: t(column.label), onSelect: () => void movePicked(column.status) }))}
+                >
+                  {t("tasks.moveTo")}
+                </MenuButton>
+                <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+                  {t("common.delete")}
+                </Button>
+              </>
+            }
+          />
+          {view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
+        </div>
+      )}
+      <div className={`board${selection.selecting ? " picking" : ""}`} onKeyDown={selection.onKeyDown}>
         {COLUMNS.map((column) => {
-          const items = list.filter((task) => task.status === column.status);
+          const items = view.shown.filter((task) => task.status === column.status);
           return (
             <section
               key={column.status}
@@ -88,25 +192,35 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
               <div className="column-body">
                 {items.length === 0 && (
                   <div className="faint" style={{ padding: "8px 4px", fontSize: "var(--fs-sm)" }}>
-                    {column.status === "todo" ? t("tasks.empty.todo") : column.status === "running" ? t("tasks.empty.running") : column.status === "review" ? t("tasks.empty.review") : "—"}
+                    {/* Narrowed, an empty column only means nothing here matches. */}
+                    {view.narrowed ? "—" : column.status === "todo" ? t("tasks.empty.todo") : column.status === "running" ? t("tasks.empty.running") : column.status === "review" ? t("tasks.empty.review") : "—"}
                   </div>
                 )}
                 {items.map((task) => {
                   const agent = agents.find((item) => item.id === task.agentId);
                   const workspace = workspaces.find((item) => item.id === task.workspaceId);
+                  const isPicked = selection.isPicked(task.id);
                   return (
                     <button
                       key={task.id}
                       type="button"
                       className={`task-card${task.lastRun?.live ? " live" : ""}`}
-                      draggable={task.status !== "running"}
+                      aria-pressed={selection.selecting ? isPicked : undefined}
+                      draggable={!selection.selecting && task.status !== "running"}
                       onDragStart={(event) => {
                         event.dataTransfer.setData("application/x-vibeforge-task", task.id);
                         event.dataTransfer.effectAllowed = "move";
                       }}
-                      onClick={() => go({ view: "tasks", taskId: task.id })}
+                      onClick={() => (selection.selecting ? selection.toggle(task.id) : go({ view: "tasks", taskId: task.id }))}
                     >
-                      <span className="title">{task.title}</span>
+                      {selection.selecting ? (
+                        <span className="task-pick">
+                          <PickMark picked={isPicked} />
+                          <span className="title">{task.title}</span>
+                        </span>
+                      ) : (
+                        <span className="title">{task.title}</span>
+                      )}
                       <span className="hstack wrap" style={{ gap: 5 }}>
                         {/* A missing agent or workspace is said once, by the line under the chips. */}
                         {(agent || task.blocker !== "missing-agent") && <Chip>{agent?.name ?? t("tasks.noAgent")}</Chip>}

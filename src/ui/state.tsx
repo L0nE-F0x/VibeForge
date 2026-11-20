@@ -302,6 +302,55 @@ export function useDeleted(): (title: string, deleted: Deleted) => void {
   );
 }
 
+/**
+ * After deleting several at once (Select in a list): one toast for them all, whose Undo (and
+ * Ctrl+Z) puts every one back, the last deleted first.
+ */
+export function useDeletedMany(): (title: string, deleted: readonly Deleted[]) => void {
+  const t = useT();
+  const { push, fail } = useToast();
+  return useCallback(
+    (title: string, deleted: readonly Deleted[]) => {
+      if (!deleted.length) return;
+      push("info", title, deleted.some((one) => one.copyLeft) ? t("core.copyUntrusted") : undefined, {
+        label: t("common.undo"),
+        run: () =>
+          void (async () => {
+            let failed: unknown = null;
+            // One that is too late to undo doesn't keep the others from coming back.
+            for (const one of [...deleted].reverse()) {
+              try {
+                await call("undo.delete", one.undo);
+              } catch (error) {
+                failed ??= error;
+              }
+            }
+            if (failed) fail(failed, t("common.undoFailed"));
+          })(),
+      });
+    },
+    [push, fail, t],
+  );
+}
+
+/**
+ * Deletes each of `items` in turn. Stops at the first that fails, and hands back the ones already
+ * gone (so their Undo can still be offered) with that failure.
+ */
+export async function deleteEach<T>(items: readonly T[], remove: (item: T) => Promise<Deleted>): Promise<{ gone: T[]; deleted: Deleted[]; error: unknown }> {
+  const gone: T[] = [];
+  const deleted: Deleted[] = [];
+  for (const item of items) {
+    try {
+      deleted.push(await remove(item));
+      gone.push(item);
+    } catch (error) {
+      return { gone, deleted, error };
+    }
+  }
+  return { gone, deleted, error: null };
+}
+
 /** Run an async action, report failure as a toast, and track whether it is running. */
 export function useAction<A extends unknown[], R>(
   action: (...args: A) => Promise<R>,

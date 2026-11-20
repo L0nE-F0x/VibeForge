@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
+import { PickMark } from "../components/ListTools.js";
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
 import { ORIGIN_KEY } from "../components/RunDetail.js";
@@ -23,15 +24,31 @@ const DAYS = 14;
 /** Waiting rows painted on Home before "and N more"; eight is the point, this is a backstop. */
 const WAITING_ROWS = 24;
 
-export function RunRow({ run, selected, onClick, compact, snippet }: { run: RunView; selected?: boolean; onClick: () => void; compact?: boolean; snippet?: string }) {
+export function RunRow({
+  run,
+  selected,
+  onClick,
+  compact,
+  snippet,
+  picked,
+}: {
+  run: RunView;
+  selected?: boolean;
+  onClick: () => void;
+  compact?: boolean;
+  snippet?: string;
+  /** While a list's Select is on: whether this one is picked (its box shows in place of the dot). */
+  picked?: boolean;
+}) {
   const t = useT();
   const engines = useEngines().data ?? [];
   const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
   // The dot says how it went; a chip only for what didn't simply finish.
   const clean = run.status === "exited" && !run.exitCode;
+  const picking = picked !== undefined;
   return (
-    <button type="button" className="run-row" aria-current={selected || undefined} onClick={onClick}>
-      <span className={`dot ${run.status}`} />
+    <button type="button" className="run-row" aria-current={(!picking && selected) || undefined} aria-pressed={picking ? picked : undefined} onClick={onClick}>
+      {picking ? <PickMark picked={picked} /> : <span className={`dot ${run.status}`} />}
       <span className="vstack grow" style={{ gap: 1 }}>
         {compact ? (
           // A narrow list: the time stays on the first line, so the second can shrink first.

@@ -1,11 +1,13 @@
-import { AlertTriangle, CalendarClock, History, Hourglass, Pencil, Play, Plus, Save, Trash2, X } from "lucide-react";
+import { AlertTriangle, CalendarClock, History, Hourglass, Pause, Pencil, Play, Plus, Power, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { RoutineView, Schedule, SchedulePreview } from "../../shared/api.js";
 import { fireTime } from "../../shared/text.js";
 import { call, useAgents, useRoutines } from "../api.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Chip, Empty, Field, Input, Notice, PageSub, SecretNote, Segmented, Select, Sheet, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
-import { useAction, useDeleted, useNav, useToast, type Route } from "../state.js";
+import { activeFilterLabels, ListBar, NoMatch, PickMark, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
+import { matchesQuery, nameOrder, timeOf, type ListSpec } from "../list-view.js";
+import { deleteEach, useAction, useDeleted, useDeletedMany, useNav, useToast, type Route } from "../state.js";
 import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
@@ -21,11 +23,21 @@ const CRON_PRESETS: Array<{ label: Key; expr: string }> = [
   { label: "routines.preset.mondays", expr: "0 10 * * 1" },
 ];
 
+type RoutineFilter = "on" | "paused" | "running" | "failing" | "problem";
+type RoutineSort = "name" | "next" | "last" | "agent";
+const ROUTINE_LIST: ListSpec<RoutineFilter, RoutineSort> = {
+  key: "routines",
+  filters: ["on", "paused", "running", "failing", "problem"],
+  sorts: ["name", "next", "last", "agent"],
+  defaultSort: "name",
+};
+
 export function RoutinesView({ route }: { route: Extract<Route, { view: "routines" }> }) {
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
   const deleted = useDeleted();
+  const deletedMany = useDeletedMany();
   const routines = useRoutines();
   const agents = useAgents().data ?? [];
   const [editing, setEditing] = useState<RoutineView | "new" | null>(null);
@@ -46,6 +58,48 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   const [toggle] = useAction(async (routine: RoutineView, enabled: boolean) => call("routines.setEnabled", routine.id, enabled), t("routines.changeFailed"));
   const [remove] = useAction(async (routine: RoutineView) => {
     deleted(t("routines.deleted", { name: routine.name }), await call("routines.delete", routine.id));
+  }, t("routines.deleteFailed"));
+
+  // ------------------------------------------------ search, filter, sort, select
+  const collator = nameOrder(t.language);
+  // Paused ones, and ones with nothing due, go after the ones that will run.
+  const nextAt = (routine: RoutineView) => (routine.enabled && routine.nextFires[0] ? timeOf(routine.nextFires[0]) : Number.POSITIVE_INFINITY);
+  const rules: ListRules<RoutineView, RoutineFilter, RoutineSort> = {
+    test: (filter, routine) => {
+      if (filter === "on") return routine.enabled;
+      if (filter === "paused") return !routine.enabled;
+      if (filter === "running") return routine.stillRunning;
+      if (filter === "failing") return routine.failing;
+      return routine.issues.length > 0 || Boolean(routine.lastMissedAt);
+    },
+    search: (query, routine) => matchesQuery(query, routine.name, routine.agentName, routine.prompt, scheduleText(routine.schedule, t, routine.description)),
+    compare: (sort, a, b) => {
+      if (sort === "next") return nextAt(a) - nextAt(b) || collator.compare(a.name, b.name);
+      if (sort === "last") return timeOf(b.lastRun?.startedAt) - timeOf(a.lastRun?.startedAt) || collator.compare(a.name, b.name);
+      if (sort === "agent") return collator.compare(a.agentName ?? "", b.agentName ?? "") || collator.compare(a.name, b.name);
+      return collator.compare(a.name, b.name);
+    },
+  };
+  const view = useList(ROUTINE_LIST, list, rules, (routine) => routine.id);
+  const { selection } = view;
+  const picked = selection.picked;
+  const labels: ListLabels<RoutineFilter, RoutineSort> = {
+    filters: { on: t("routines.filter.on"), paused: t("routines.paused"), running: t("routines.running"), failing: t("routines.filter.failing"), problem: t("routines.filter.problem") },
+    sorts: { name: t("list.sort.name"), next: t("routines.sort.next"), last: t("routines.sort.last"), agent: t("list.sort.agent") },
+    sortChips: { name: t("list.sortShort.name"), next: t("routines.sortShort.next"), last: t("routines.sortShort.last"), agent: t("list.sortShort.agent") },
+  };
+  const [setPicked, switching] = useAction(async (enabled: boolean) => {
+    for (const routine of picked) if (routine.enabled !== enabled) await call("routines.setEnabled", routine.id, enabled);
+    selection.setSelecting(false);
+  }, t("routines.changeFailed"));
+  // Deleting is undone from the toast, so nothing asks first.
+  const [deletePicked, deleting] = useAction(async () => {
+    if (!picked.length) return;
+    const { gone, deleted: undo, error } = await deleteEach(picked, (routine) => call("routines.delete", routine.id));
+    if (gone.length === 1) deleted(t("routines.deleted", { name: gone[0].name }), undo[0]);
+    else deletedMany(t.count("routines.deletedMany", gone.length), undo);
+    if (error) throw error;
+    selection.setSelecting(false);
   }, t("routines.deleteFailed"));
 
   return (
@@ -81,10 +135,52 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
               {t("routines.empty.body")}
             </Empty>
           )}
-          {list.map((routine) => (
-            <div key={routine.id} id={`routine-${routine.id}`} className={`card${routine.failing ? " needs-you" : ""}`} style={route.routineId === routine.id ? { borderColor: "var(--sel-line)" } : undefined}>
+          {list.length > 0 && (
+            <ListBar
+              list={view}
+              labels={labels}
+              placeholder={t("routines.search")}
+              selectTip={t("routines.selectTip")}
+              page
+              actions={
+                <>
+                  <Button size="sm" icon={Power} busy={switching} disabled={!picked.some((routine) => !routine.enabled)} onClick={() => void setPicked(true)}>
+                    {t("routines.turnOn")}
+                  </Button>
+                  <Button size="sm" icon={Pause} busy={switching} disabled={!picked.some((routine) => routine.enabled)} onClick={() => void setPicked(false)}>
+                    {t("routines.pause")}
+                  </Button>
+                  <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+                    {t("common.delete")}
+                  </Button>
+                </>
+              }
+            />
+          )}
+          {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
+          <div className="vstack" style={{ gap: 10 }} onKeyDown={selection.onKeyDown}>
+          {view.shown.map((routine) => {
+            const isPicked = selection.isPicked(routine.id);
+            return (
+            <div
+              key={routine.id}
+              id={`routine-${routine.id}`}
+              className={`card${routine.failing ? " needs-you" : ""}${selection.selecting ? " pickable" : ""}`}
+              style={!selection.selecting && route.routineId === routine.id ? { borderColor: "var(--sel-line)" } : undefined}
+              // While Select is on, the whole card picks it; its own buttons are put away until Done.
+              role={selection.selecting ? "button" : undefined}
+              tabIndex={selection.selecting ? 0 : undefined}
+              aria-pressed={selection.selecting ? isPicked : undefined}
+              onClick={selection.selecting ? () => selection.toggle(routine.id) : undefined}
+              onKeyDown={(event) => {
+                if (selection.selecting && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  selection.toggle(routine.id);
+                }
+              }}
+            >
               <div className="hstack">
-                <CalendarClock size={16} className={routine.enabled ? "accent-text" : "faint"} />
+                {selection.selecting ? <PickMark picked={isPicked} /> : <CalendarClock size={16} className={routine.enabled ? "accent-text" : "faint"} />}
                 <div className="vstack grow" style={{ gap: 1 }}>
                   <div className="hstack">
                     <h3 className="truncate">{routine.name}</h3>
@@ -96,9 +192,9 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                     {routine.enabled && routine.nextFires[0] ? ` · ${t("routines.nextAt", { time: fireTime(routine.nextFires[0], t.language) })}` : ""}
                   </span>
                 </div>
-                <Toggle checked={routine.enabled} onChange={(on) => void toggle(routine, on)} />
+                {!selection.selecting && <Toggle checked={routine.enabled} onChange={(on) => void toggle(routine, on)} />}
               </div>
-              {routine.waiting && (
+              {routine.waiting && !selection.selecting && (
                 <div style={{ marginTop: 10 }}>
                   <Notice tone="accent" icon={Hourglass}>
                     <div className="hstack wrap">
@@ -137,6 +233,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                   )}
                 </div>
               )}
+              {!selection.selecting && (
               <div className="hstack wrap" style={{ marginTop: 12 }}>
                 <Button size="sm" icon={Play} disabled={routine.stillRunning || Boolean(routine.waiting)} onClick={() => void runNow(routine)}>
                   {t("routines.runNow")}
@@ -159,8 +256,11 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                 <span className="grow" />
                 <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void remove(routine)} title={t("routines.delete")} />
               </div>
+              )}
             </div>
-          ))}
+            );
+          })}
+          </div>
         </div>
       </div>
       {editing && <RoutineEditor routine={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}

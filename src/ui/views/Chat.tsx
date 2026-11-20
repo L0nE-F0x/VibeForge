@@ -1,15 +1,16 @@
 import { FolderOpen, MessageSquarePlus, MessagesSquare, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { dayHeading, dayKey, tildify } from "../../shared/text.js";
-import { useChatAttention } from "../attention.js";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { dayHeading, tildify } from "../../shared/text.js";
 import type { ChatView as Chat } from "../../shared/api.js";
 import { call, useAppInfo, useChats, useEngines, useSettings } from "../api.js";
+import { activeFilterLabels, NoMatch, PickMark } from "../components/ListTools.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Button, Chip, Input, ShortAgo, Skeleton } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, type Route } from "../state.js";
 import { EngineSelect } from "./Agents.js";
+import { CHAT_LIST, useChatList } from "./chat-list.js";
 import { useT } from "../i18n/index.js";
 
 export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> }) {
@@ -18,12 +19,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const confirm = useConfirm();
   const deleted = useDeleted();
   const chatList = useChats(null);
-  // Live chats first, then the rest by when they were last used.
-  const chats = useMemo(
-    () => [...(chatList.data ?? [])].sort((a, b) => Number(b.live) - Number(a.live) || b.updatedAt.localeCompare(a.updatedAt)),
-    [chatList.data],
-  );
-  const group = (item: Chat) => (item.live ? "live" : dayKey(item.updatedAt));
+  const all = chatList.data ?? [];
   const engines = useEngines().data ?? [];
   const settings = useSettings().data;
   const home = useAppInfo().data?.home ?? "";
@@ -31,9 +27,13 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
   const skipBlurRef = useRef(false);
-  const chat = chats.find((item) => item.id === route.chatId) ?? null;
+  const chat = all.find((item) => item.id === route.chatId) ?? null;
   useDropMissing(chatList.loaded, Boolean(route.chatId) && !chat, { view: "chat" });
-  const chatAttention = useChatAttention();
+  const { list, labels, bar, waiting, headingOf } = useChatList(CHAT_LIST, all, (gone) => {
+    if (gone.some((item) => item.id === route.chatId)) go({ view: "chat" });
+  });
+  const { selection } = list;
+  const chats = list.shown;
 
   useEffect(() => {
     if (engine) return;
@@ -90,41 +90,56 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
             <StripItem label={t("agents.newChat")} selected={!chat} onClick={() => go({ view: "chat" })}>
               <MessageSquarePlus size={16} />
             </StripItem>
-            {chats.slice(0, 14).map((item) => (
-              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "chat", chatId: item.id })} badge={chatAttention.get(item.id)?.attention === "waiting" ? <span className="ws-state waiting in-strip" /> : undefined}>
+            {list.ordered.slice(0, 14).map((item) => (
+              <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "chat", chatId: item.id })} badge={waiting(item.id) ? <span className="ws-state waiting in-strip" /> : undefined}>
                 <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               </StripItem>
             ))}
           </>
         }
       >
-        <div className="list-scroll">
+        {bar}
+        <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           {!chatList.loaded && <Skeleton rows={5} />}
-          {chatList.loaded && chats.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
-          {chats.map((item, index) => (
+          {chatList.loaded && all.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
+          {all.length > 0 && chats.length === 0 && <NoMatch hasQuery={list.hasQuery} filters={activeFilterLabels(list, labels)} onClear={list.clear} />}
+          {chats.map((item, index) => {
+            const heading = headingOf(item);
+            const picked = selection.isPicked(item.id);
+            const open = () => (selection.selecting ? selection.toggle(item.id) : go({ view: "chat", chatId: item.id }));
+            return (
             <Fragment key={item.id}>
-            {(index === 0 || group(chats[index - 1]) !== group(item)) && <div className="list-day">{item.live ? t("session.live") : dayHeading(item.updatedAt, t.language)}</div>}
+            {heading !== null && (index === 0 || headingOf(chats[index - 1]) !== heading) && <div className="list-day">{heading === "live" ? t("session.live") : dayHeading(item.updatedAt, t.language)}</div>}
             <div
-              className={`row${chatAttention.get(item.id)?.attention === "waiting" ? " needs-you" : ""}`}
+              className={`row${waiting(item.id) ? " needs-you" : ""}`}
               role="button"
               tabIndex={0}
-              aria-current={item.id === chat?.id || undefined}
-              onClick={() => go({ view: "chat", chatId: item.id })}
-              onKeyDown={(event) => event.key === "Enter" && go({ view: "chat", chatId: item.id })}
+              aria-current={(!selection.selecting && item.id === chat?.id) || undefined}
+              aria-pressed={selection.selecting ? picked : undefined}
+              onClick={open}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || (selection.selecting && event.key === " ")) {
+                  event.preventDefault();
+                  open();
+                }
+              }}
             >
-              <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
+              {selection.selecting ? <PickMark picked={picked} /> : <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />}
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{item.title}</span>
                 <span className="row-sub truncate">
                   {engineLabel(item.engine)} · <ShortAgo iso={item.updatedAt} />
                 </span>
               </span>
-              <span className="row-actions">
-                <Button size="sm" variant="ghost" icon={Trash2} title={t("common.delete")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
-              </span>
+              {!selection.selecting && (
+                <span className="row-actions">
+                  <Button size="sm" variant="ghost" icon={Trash2} title={t("common.delete")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
+                </span>
+              )}
             </div>
             </Fragment>
-          ))}
+            );
+          })}
         </div>
       </SidePanel>
       <div className="main">

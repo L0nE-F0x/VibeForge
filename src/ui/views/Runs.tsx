@@ -1,16 +1,22 @@
-import { CheckCheck, History, Search } from "lucide-react";
+import { CheckCheck, Eye, EyeOff, History, Square } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { RunView } from "../../shared/api.js";
 import { dayHeading, dayKey } from "../../shared/text.js";
-import { call, useDebounced, useInbox, useQuery } from "../api.js";
-import { RunDetail } from "../components/RunDetail.js";
+import { call, useDebounced, useEngines, useInbox, useQuery } from "../api.js";
+import { activeFilterLabels, ListBar, NoMatch, useListOver, useListView, type ListLabels, type ListRules } from "../components/ListTools.js";
+import { ORIGIN_KEY, RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { Button, Empty, Input, Segmented, Skeleton } from "../components/ui.js";
-import { useAction, useNav, type Route, type RunFilter } from "../state.js";
+import { Button, Empty, Segmented, Skeleton } from "../components/ui.js";
+import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
+import { useAction, useConfirm, useNav, type Route, type RunFilter } from "../state.js";
 import { markKeyboardNavigation } from "../overlays.js";
 import { isShortcut } from "../shortcuts.js";
-import { RunRow } from "./Home.js";
+import { RunRow, runLabel } from "./Home.js";
 import { useT } from "../i18n/index.js";
+
+type RunFacet = "unread" | "changes" | "failed";
+type RunSort = "newest" | "oldest" | "name";
+const RUN_LIST: ListSpec<RunFacet, RunSort> = { key: "runs", filters: ["unread", "changes", "failed"], sorts: ["newest", "oldest", "name"], defaultSort: "newest" };
 
 /** How many runs All lists; older ones are found by searching. */
 const ALL_RUNS = 300;
@@ -18,10 +24,13 @@ const ALL_RUNS = 300;
 export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> }) {
   const t = useT();
   const { go, replace } = useNav();
+  const confirm = useConfirm();
+  const engines = useEngines().data ?? [];
   const [filter, setFilter] = useState<RunFilter>(route.filter ?? (route.runId ? "all" : "review"));
-  const [search, setSearch] = useState("");
+  const listView = useListView(RUN_LIST);
   const inbox = useInbox();
-  const typed = useDebounced(search.trim(), 160);
+  // All asks the core, which searches what runs said too; Review and Live are searched here.
+  const typed = useDebounced(filter === "all" ? listView.query.trim() : "", 160);
   const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: ALL_RUNS }));
   // One entry per text typed: not kept once the search moves on.
   const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false });
@@ -54,6 +63,52 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const snippets = new Map(searching ? (found.data ?? []).map((hit) => [hit.id, hit.snippet]) : []);
   const loaded = filter === "review" ? inbox.loaded : searching ? found.loaded : all.loaded;
 
+  // ------------------------------------------------ search, filter, sort, select
+  const collator = nameOrder(t.language);
+  const titleOf = (run: RunView) => runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
+  const rules: ListRules<RunView, RunFacet, RunSort> = {
+    test: (facet, run) => (facet === "unread" ? !run.openedAt && !run.live : facet === "changes" ? Boolean(run.changes && run.changes !== "No changes") : runWentWrong(run)),
+    // The core's search already chose these; a local one reads the title, the CLI or origin, the prompt and the folder.
+    search: (query, run) => searching || matchesQuery(query, titleOf(run).title, titleOf(run).kind, t(ORIGIN_KEY[run.origin]), run.prompt, run.cwd),
+    compare: (sort, a, b) => {
+      if (sort === "oldest") return timeOf(a.startedAt) - timeOf(b.startedAt) || a.id.localeCompare(b.id);
+      if (sort === "name") return collator.compare(titleOf(a).title, titleOf(b).title);
+      // Search results come best first.
+      return searching ? 0 : timeOf(b.startedAt) - timeOf(a.startedAt) || b.id.localeCompare(a.id);
+    },
+  };
+  const view = useListOver(listView, runs, rules, (run) => run.id);
+  const { selection } = view;
+  const picked = selection.picked;
+  const shownRuns = view.shown;
+  const labels: ListLabels<RunFacet, RunSort> = {
+    filters: { unread: t("runs.filter.unread"), changes: t("runs.filter.changes"), failed: t("runs.filter.failed") },
+    sorts: { newest: t("list.sort.newest"), oldest: t("list.sort.oldest"), name: t("list.sort.name") },
+    sortChips: { oldest: t("list.sortShort.oldest"), name: t("list.sortShort.name") },
+  };
+  // Only a finished run can be marked reviewed.
+  const toReview = picked.filter((run) => !run.openedAt && !run.live);
+  const reviewedPicked = picked.filter((run) => run.openedAt);
+  const livePicked = picked.filter((run) => run.live);
+  const [markPicked, markingPicked] = useAction(async (opened: boolean) => {
+    for (const run of opened ? toReview : reviewedPicked) {
+      await call("runs.markOpened", run.id, opened);
+      // Marked here, so Review lets it go now rather than when the inbox catches up.
+      if (opened) {
+        dropped.current.add(run.id);
+        reviewed.current.delete(run.id);
+      } else dropped.current.delete(run.id);
+    }
+    selection.setSelecting(false);
+  }, t("runs.markFailed"));
+  const [stopPicked, stopping] = useAction(async () => {
+    if (!livePicked.length) return;
+    const ok = await confirm({ title: t.count("runs.stopManyTitle", livePicked.length), body: t("runs.stopManyBody"), confirm: t("runs.stopPicked"), danger: true });
+    if (!ok) return;
+    for (const run of livePicked) await call("runs.stop", run.id);
+    selection.setSelecting(false);
+  }, t("run.stopFailed"));
+
   // Not reading them one by one: every run waiting is marked reviewed and the list clears.
   const here = useRef({ filter, selected, mounted: true });
   here.current = { filter, selected, mounted: true };
@@ -75,21 +130,22 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   }, t("runs.markAllFailed"));
 
   // Coming to review: the first run waiting is already open.
-  const first = filter === "review" && loaded && !selected ? runs[0]?.id : undefined;
+  const first = filter === "review" && loaded && !selected ? shownRuns[0]?.id : undefined;
   useEffect(() => {
     if (first) replace({ view: "runs", runId: first, filter: "review" });
   }, [first, replace]);
 
   // The run after this one in the list, or before it at the end of the list.
-  const at = runs.findIndex((run) => run.id === selected);
+  const at = shownRuns.findIndex((run) => run.id === selected);
   const step = (by: number) => {
-    const next = runs[at + by] ?? (at < 0 ? runs[0] : undefined);
+    const next = shownRuns[at + by] ?? (at < 0 ? shownRuns[0] : undefined);
     if (next) go({ view: "runs", runId: next.id, filter });
   };
   const stepRef = useRef(step);
   stepRef.current = step;
   // While reviewing, the next one waiting: below this one, else the first one above it.
-  const nextWaiting = filter === "review" ? (runs.slice(at + 1).find((run) => !run.openedAt) ?? runs.slice(0, Math.max(0, at)).find((run) => !run.openedAt)) : undefined;
+  const nextWaiting =
+    filter === "review" ? (shownRuns.slice(at + 1).find((run) => !run.openedAt) ?? shownRuns.slice(0, Math.max(0, at)).find((run) => !run.openedAt)) : undefined;
 
   // J and K step through the list from anywhere in the view, except while typing or in a terminal.
   useEffect(() => {
@@ -129,7 +185,7 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
         }
         strip={
           <>
-            {runs.slice(0, 14).map((run) => (
+            {view.ordered.slice(0, 14).map((run) => (
               <StripItem key={run.id} label={run.title} selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })}>
                 <span className={`dot ${run.status}`} />
               </StripItem>
@@ -137,40 +193,63 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
           </>
         }
       >
-        {filter === "all" && (
-          <div style={{ padding: "8px 8px 0" }}>
-            <div className="hstack" style={{ position: "relative" }}>
-              <Search size={13} className="faint" style={{ position: "absolute", left: 9 }} />
-              <Input placeholder={t("runs.searchPlaceholder")} aria-label={t("runs.searchPlaceholder")} value={search} onChange={(event) => setSearch(event.target.value)} style={{ paddingLeft: 28 }} />
-            </div>
-          </div>
-        )}
-        {filter === "review" && runs.some((run) => !run.openedAt) && (
+        <ListBar
+          list={view}
+          labels={labels}
+          placeholder={filter === "all" ? t("runs.searchPlaceholder") : t("runs.searchHere")}
+          selectTip={t("runs.selectTip")}
+          // All searches every run kept, not only the ones it lists.
+          always={filter === "all" && all.loaded && (all.data?.length ?? 0) > 0}
+          total={filter === "all" && searching ? all.data?.length : undefined}
+          actions={
+            <>
+              <Button size="sm" icon={Eye} busy={markingPicked} disabled={!toReview.length} onClick={() => void markPicked(true)} tip={t("runs.markReviewedTip")}>
+                {t("runs.markReviewed")}
+              </Button>
+              <Button size="sm" variant="ghost" icon={EyeOff} busy={markingPicked} disabled={!reviewedPicked.length} onClick={() => void markPicked(false)} tip={t("runs.markUnreviewedTip")} />
+              {livePicked.length > 0 && (
+                <Button size="sm" variant="danger" icon={Square} busy={stopping} onClick={() => void stopPicked()}>
+                  {t("runs.stopPicked")}
+                </Button>
+              )}
+            </>
+          }
+        />
+        {filter === "review" && !selection.selecting && runs.some((run) => !run.openedAt) && (
           <div className="hstack" style={{ padding: "8px 8px 0" }}>
             <Button size="sm" variant="ghost" icon={CheckCheck} busy={marking} onClick={() => void markAll()} tip={t("runs.markAllTip")}>
               {t("home.review.markAll")}
             </Button>
           </div>
         )}
-        <div className="list-scroll list-compact">
+        <div className="list-scroll list-compact" onKeyDown={selection.onKeyDown}>
           {!loaded && <Skeleton rows={6} />}
           {loaded && runs.length === 0 && (
             <div className="faint" style={{ padding: "14px 10px" }}>
               {searching ? t("runs.noMatch") : filter === "review" ? t("runs.waitingNone") : filter === "live" ? t("runs.runningNone") : t("runs.none")}
             </div>
           )}
-          {runs.map((run, index) => {
+          {loaded && runs.length > 0 && shownRuns.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
+          {shownRuns.map((run, index) => {
             const day = dayKey(run.startedAt);
-            // Search results come best first, so they aren't grouped by day.
-            const heading = !searching && (index === 0 || dayKey(runs[index - 1].startedAt) !== day);
+            // Search results come best first, and a list by name has no days, so neither is grouped by day.
+            const byTime = view.view.sort !== "name" && !(searching && view.view.sort === "newest");
+            const heading = byTime && (index === 0 || dayKey(shownRuns[index - 1].startedAt) !== day);
             return (
               <Fragment key={run.id}>
                 {heading && <div className="list-day">{dayHeading(run.startedAt, t.language)}</div>}
-                <RunRow run={run} compact snippet={snippets.get(run.id)} selected={run.id === selected} onClick={() => go({ view: "runs", runId: run.id, filter })} />
+                <RunRow
+                  run={run}
+                  compact
+                  snippet={snippets.get(run.id)}
+                  selected={run.id === selected}
+                  picked={selection.selecting ? selection.isPicked(run.id) : undefined}
+                  onClick={() => (selection.selecting ? selection.toggle(run.id) : go({ view: "runs", runId: run.id, filter }))}
+                />
               </Fragment>
             );
           })}
-          {filter === "all" && !searching && runs.length >= ALL_RUNS && <div className="list-cut faint">{t("runs.cutSearch", { count: ALL_RUNS })}</div>}
+          {filter === "all" && !searching && !view.narrowed && runs.length >= ALL_RUNS && <div className="list-cut faint">{t("runs.cutSearch", { count: ALL_RUNS })}</div>}
         </div>
       </SidePanel>
       {selected ? (

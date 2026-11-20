@@ -2,10 +2,12 @@ import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
 import { useEffect } from "react";
 import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
+import { activeFilterLabels, ListBar, NoMatch, PickMark, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
-import { useAction, useDeleted, useDropMissing, useNav, useToast, type Route } from "../state.js";
+import { matchesQuery, nameOrder, type ListSpec } from "../list-view.js";
+import { deleteEach, useAction, useDeleted, useDeletedMany, useDropMissing, useNav, useToast, type Route } from "../state.js";
 import { SaveState, useAutosave, useSaveShortcut } from "./Agents.js";
 import { shortcutKeys } from "../shortcuts.js";
 import { useT } from "../i18n/index.js";
@@ -23,10 +25,17 @@ Use this when …
 - Anything that pushes, publishes, deletes, spends or sends.
 `;
 
+type SkillFilter = "used" | "unused" | "undescribed";
+type SkillSort = "name" | "agents";
+const SKILL_LIST: ListSpec<SkillFilter, SkillSort> = { key: "skills", filters: ["used", "unused", "undescribed"], sorts: ["name", "agents"], defaultSort: "name" };
+
 export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }> }) {
   const t = useT();
   const { go, replace } = useNav();
+  const deleted = useDeleted();
+  const deletedMany = useDeletedMany();
   const skills = useSkills();
+  const agents = useAgents().data ?? [];
   const list = skills.data ?? [];
   const creating = route.skillId === "new";
   const selected = list.find((skill) => skill.id === route.skillId) ?? null;
@@ -35,6 +44,36 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
   useEffect(() => {
     if (!route.skillId && list.length) replace({ view: "skills", skillId: list[0].id });
   }, [route.skillId, list, replace]);
+
+  // ------------------------------------------------ search, filter, sort, select
+  const usedBy = (skill: Skill) => agents.filter((agent) => agent.skills.includes(skill.id)).length;
+  const collator = nameOrder(t.language);
+  const rules: ListRules<Skill, SkillFilter, SkillSort> = {
+    test: (filter, skill) => (filter === "used" ? usedBy(skill) > 0 : filter === "unused" ? usedBy(skill) === 0 : !skill.description.trim()),
+    search: (query, skill) => matchesQuery(query, skill.name, skill.description),
+    compare: (sort, a, b) => (sort === "agents" ? usedBy(b) - usedBy(a) : 0) || collator.compare(a.name, b.name),
+  };
+  const view = useList(SKILL_LIST, list, rules, (skill) => skill.id);
+  const { selection } = view;
+  const labels: ListLabels<SkillFilter, SkillSort> = {
+    filters: { used: t("skills.filter.used"), unused: t("skills.filter.unused"), undescribed: t("common.noDescription") },
+    sorts: { name: t("list.sort.name"), agents: t("skills.sort.agents") },
+    sortChips: { name: t("list.sortShort.name"), agents: t("skills.sortShort.agents") },
+  };
+  // Deleting is undone from the toast, so nothing asks first.
+  const [deletePicked, deleting] = useAction(async () => {
+    const picked = selection.picked;
+    if (!picked.length) return;
+    const { gone, deleted: undo, error } = await deleteEach(picked, (skill) => call("skills.delete", skill.id));
+    if (selected && gone.includes(selected)) {
+      const left = view.shown.find((skill) => !gone.includes(skill)) ?? list.find((skill) => !gone.includes(skill));
+      go(left ? { view: "skills", skillId: left.id } : { view: "skills" });
+    }
+    if (gone.length === 1) deleted(t("skills.deleted", { name: gone[0].name }), undo[0]);
+    else deletedMany(t.count("skills.deletedMany", gone.length), undo);
+    if (error) throw error;
+    selection.setSelecting(false);
+  }, t("skills.deleteFailed"));
 
   return (
     <div className="view split-list">
@@ -53,7 +92,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
             <StripItem label={t("skills.new")} onClick={() => go({ view: "skills", skillId: "new" })}>
               <Plus size={16} />
             </StripItem>
-            {list.map((skill) => (
+            {view.ordered.map((skill) => (
               <StripItem key={skill.id} label={skill.name} selected={skill.id === selected?.id} onClick={() => go({ view: "skills", skillId: skill.id })}>
                 <Sparkles size={15} />
               </StripItem>
@@ -61,11 +100,30 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
           </>
         }
       >
-        <div className="list-scroll">
+        <ListBar
+          list={view}
+          labels={labels}
+          placeholder={t("skills.search")}
+          selectTip={t("list.selectDeleteTip")}
+          actions={
+            <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+              {t("common.delete")}
+            </Button>
+          }
+        />
+        <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
-          {list.map((skill) => (
-            <button key={skill.id} type="button" className="row" aria-current={skill.id === selected?.id || undefined} onClick={() => go({ view: "skills", skillId: skill.id })}>
-              <Sparkles size={14} className="accent-text" style={{ flex: "none" }} />
+          {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
+          {view.shown.map((skill) => (
+            <button
+              key={skill.id}
+              type="button"
+              className="row"
+              aria-current={(!selection.selecting && skill.id === selected?.id) || undefined}
+              aria-pressed={selection.selecting ? selection.isPicked(skill.id) : undefined}
+              onClick={() => (selection.selecting ? selection.toggle(skill.id) : go({ view: "skills", skillId: skill.id }))}
+            >
+              {selection.selecting ? <PickMark picked={selection.isPicked(skill.id)} /> : <Sparkles size={14} className="accent-text" style={{ flex: "none" }} />}
               <span className="vstack grow" style={{ gap: 0 }}>
                 <span className="row-title truncate">{skill.name}</span>
                 <span className="row-sub truncate">{skill.description || t("common.noDescription")}</span>

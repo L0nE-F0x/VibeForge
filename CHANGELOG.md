@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-20
+
+**3.1.0: every list in VibeForge searches, filters, sorts and acts on several at once, the way Code's workspace list does.**
+
+### Added
+
+- **Every list searches, filters, sorts and selects like Code's workspace list.** Agents, an agent's Chats tab, Chat, Skills, Routines, Tasks and Runs each get the same search box (with how many match and a clear button), one **Filter and sort** menu whose filters can be on together and show what each would leave, pills for what is on, and **Reset view**. Each list remembers its filters and sort.
+- **Select to act on several at once.** **Select** in any of those lists picks rows, **All shown** picks everything the list is showing, and then:
+  - Agents, chats and skills: **Delete**. Routines: **Turn on**, **Pause** or **Delete**. Tasks: **Move to** To do, Review or Done, or **Delete**. Runs: **Mark as reviewed**, mark not reviewed, or **Stop** the live ones.
+  - A delete of several is one toast whose **Undo** (or Ctrl+Z) brings them all back. Only deleting something still running asks first, since stopping it can't be undone.
+- **Runs searches on every tab.** Review and Live search titles, prompts and folders; All still searches what runs said.
+
 ## [3.0.3] - 2026-11-20
 
 **3.0.3: every workspace, agent and run reopens where you left it, the plan limits fill the usage panel, and Viby's call bar moves to the top.**

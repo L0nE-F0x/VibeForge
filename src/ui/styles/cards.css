@@ -119,6 +119,29 @@
   color: var(--fg);
 }
 
+/* Picked while a list's Select is on (components/ListTools.tsx). */
+.row[aria-pressed="true"],
+.card[aria-pressed="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+  color: var(--fg);
+}
+
+/* A card (a routine) while Select is on: the whole card picks it. */
+.card.pickable {
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.card.pickable:hover {
+  border-color: var(--hover-line);
+}
+
+.card.pickable:focus-visible {
+  outline: none;
+  border-color: var(--focus-line);
+}
+
 .row:disabled:hover {
   background: transparent;
   border-color: transparent;
@@ -463,4 +486,108 @@
   flex: none;
   width: 176px;
   height: 176px;
+}
+
+/* ------------------------------------------------------------------ list tools */
+
+/* Search, Filter and sort, and Select over a list (components/ListTools.tsx). */
+.list-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Across a page (Routines, Tasks): no rule under it, and a search that doesn't fill the width. */
+.list-tools.page {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.list-tools.page .list-search {
+  flex: 0 1 360px;
+}
+
+/* Across a wide page, what acts on the picked ones stays beside how many are picked. */
+.list-tools.page .list-picking > .grow {
+  flex: none;
+  margin-right: 8px;
+}
+
+.list-tools-bar {
+  gap: 4px;
+  min-width: 0;
+}
+
+.list-search {
+  position: relative;
+  min-width: 0;
+}
+
+.list-search-tail {
+  position: absolute;
+  right: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.list-search-clear {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.list-search-clear:hover,
+.list-search-clear:focus-visible {
+  color: var(--fg);
+}
+
+.list-active-view {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.list-chip {
+  height: 19px;
+  padding: 0 6px;
+  gap: 4px;
+  max-width: 100%;
+  background: var(--fill);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.list-chip:hover {
+  color: var(--accent);
+  border-color: var(--hover-line);
+  background: var(--hover-fill);
+}
+
+.list-chip:focus-visible {
+  outline: none;
+  color: var(--accent-2);
+  border-color: var(--focus-line);
+}
+
+.list-picking {
+  gap: 4px;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+.list-no-match {
+  padding: 12px 10px;
+  gap: 8px;
+  align-items: flex-start;
 }
