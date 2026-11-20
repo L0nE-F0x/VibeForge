@@ -267,4 +267,19 @@ describe("sync: a repository on two machines", () => {
     // The other machine's commit is where it was made.
     expect(git(root, "show", "main:notes.md")).toBe("alpha\nfrom the other machine");
   });
+
+  it("keeps a branch copy untouched when the winning ref points at a commit object that has not arrived yet", async () => {
+    const root = repo();
+    const mine = git(root, "rev-parse", "HEAD");
+    const missing = "a".repeat(40);
+    const mainRef = path.join(root, ".git", "refs", "heads", "main");
+    const conflictRef = path.join(root, ".git", "refs", "heads", `main.${STAMP}`);
+    fs.writeFileSync(mainRef, `${missing}\n`);
+    fs.writeFileSync(conflictRef, `${mine}\n`);
+
+    const rescue = await rescueRepo(root, "desk");
+    expect(rescue).toMatchObject({ branches: [], removed: 0 });
+    expect(fs.readFileSync(mainRef, "utf8").trim()).toBe(missing);
+    expect(fs.existsSync(conflictRef)).toBe(true);
+  });
 });

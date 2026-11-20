@@ -152,6 +152,19 @@ async function resolveRef(root: string, ref: string): Promise<string | null> {
   return run.code === 0 ? run.stdout.trim() : null;
 }
 
+type RefState = { kind: "missing" } | { kind: "commit"; sha: string } | { kind: "unready" };
+
+/** Distinguishes a ref whose object has not synced yet from one genuinely absent. */
+async function refState(root: string, ref: string): Promise<RefState> {
+  const commit = await resolveRef(root, ref);
+  if (commit) return { kind: "commit", sha: commit };
+  const raw = await git(["rev-parse", "--verify", "--quiet", ref], root);
+  if (raw.code === 0 || (ref.startsWith("refs/") && fs.existsSync(path.join(root, ".git", ref)))) {
+    return { kind: "unready" };
+  }
+  return { kind: "missing" };
+}
+
 async function isAncestor(root: string, older: string, newer: string): Promise<boolean> {
   return (await git(["merge-base", "--is-ancestor", older, newer], root)).code === 0;
 }
@@ -161,8 +174,8 @@ async function freeBranch(root: string, wanted: string, sha: string): Promise<st
   for (let n = 1; n <= 50; n += 1) {
     const name = n === 1 ? wanted : `${wanted}-${n}`;
     if ((await git(["check-ref-format", "--branch", name], root)).code !== 0) return null;
-    const at = await resolveRef(root, `refs/heads/${name}`);
-    if (!at || at === sha) return name;
+    const state = await refState(root, `refs/heads/${name}`);
+    if (state.kind === "missing" || (state.kind === "commit" && state.sha === sha)) return name;
   }
   return null;
 }
@@ -203,13 +216,16 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
   const keep = async (ref: string, sha: string): Promise<boolean> => {
     // Not a commit this repository has: nothing to keep.
     if (!(await isCommit(root, sha))) return true;
-    const current = await resolveRef(root, ref);
-    if (!current) {
+    const state = await refState(root, ref);
+    // The ref file already points at an object still transferring: leave it and keep the copy for retry.
+    if (state.kind === "unready") return false;
+    if (state.kind === "missing") {
       // The branch exists only here: put it back under its own name.
       if ((await git(["update-ref", ref, sha], root)).code !== 0) return false;
       candidates.add(sha);
       return true;
     }
+    const current = state.sha;
     if (current === sha || (await isAncestor(root, sha, current))) return true;
     // A machine name that makes no branch name still gets its commits kept.
     const saved = (await freeBranch(root, `${branchBase(ref)}-from-${machine}`, sha)) ?? (await freeBranch(root, `${branchBase(ref)}-from-other-machine`, sha));

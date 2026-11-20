@@ -64,6 +64,8 @@ export class SyncDesk {
   /** Shares the other machine has taken up. */
   private readonly accepted = new Set<string>();
   private readonly dirs = new Map<string, Set<string>>();
+  /** Folders whose `.git` saw updates and wait for Syncthing idle + need=0 before rescue. */
+  private readonly gitPending = new Set<string>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly told = new Set<string>();
   private live: Record<string, string[]> = {};
@@ -135,6 +137,7 @@ export class SyncDesk {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.dirs.clear();
+    this.gitPending.clear();
     this.offers.clear();
     this.peerLive.clear();
     this.accepted.clear();
@@ -285,10 +288,14 @@ export class SyncDesk {
       const share = state.shares.find((item) => item.folderId === event.folder);
       if (!share) return;
       const set = this.dirs.get(share.folderId) ?? new Set<string>();
-      if (!event.item.startsWith(".git/") && event.item !== ".git") set.add(path.dirname(path.join(share.path, event.item)));
+      if (event.item === ".git" || event.item.startsWith(".git/")) this.gitPending.add(share.folderId);
+      else set.add(path.dirname(path.join(share.path, event.item)));
       this.dirs.set(share.folderId, set);
       this.later(`sweep:${share.folderId}`, SWEEP_MS, () => this.sweep(share.folderId));
       return;
+    }
+    if ((event.type === "folder-state" && event.state === "idle") || event.type === "folder-summary") {
+      if (this.gitPending.has(event.folder)) this.later(`sweep:${event.folder}`, SWEEP_MS, () => this.sweep(event.folder));
     }
     if (event.type === "connected") this.later("links", 200, () => this.readLinks());
     if (event.type === "pending-devices") this.later("requests", 200, () => this.tellRequests());
@@ -347,7 +354,13 @@ export class SyncDesk {
   private async handleCopies(share: ShareRecord, copies: FoundCopy[]): Promise<void> {
     let fresh: ConflictRecord | null = null;
     const repo = !share.filesOnly && repoKind(share.path) === "repo";
-    if (repo) {
+    let gitSettled = true;
+    if (repo && this.engine) {
+      const status = await this.engine.folderStatus(share.folderId).catch(() => null);
+      gitSettled = status?.state === "idle" && status.need === 0;
+    }
+    if (repo && gitSettled) {
+      this.gitPending.delete(share.folderId);
       try {
         const rescue = await rescueRepo(share.path, slugify(this.host.machineName(), 24));
         for (const branch of rescue?.branches ?? []) fresh = this.conflicts.noteCommits(share.folderId, share.path, branch.branch, branch.saved, shortId(share.machineId));
@@ -355,6 +368,8 @@ export class SyncDesk {
       } catch (error) {
         this.host.log(`Sync: could not sort out ${share.name}'s git history: ${error instanceof Error ? error.message : String(error)}`);
       }
+    } else if (repo) {
+      this.gitPending.add(share.folderId);
     }
     for (const copy of copies) {
       if (!fs.existsSync(copy.file)) continue;

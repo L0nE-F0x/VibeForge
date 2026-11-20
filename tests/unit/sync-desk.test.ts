@@ -407,4 +407,34 @@ describe("sync desk", () => {
     expect(fs.existsSync(path.join(suggestedPath, ".stignore"))).toBe(false);
     expect(await a.desk.view()).toEqual({ machines: [], requests: [], offers: [], shares: [], conflicts: [] });
   });
+
+  it("waits to run git rescue until Syncthing reports the folder idle with nothing needed", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { a, b } = await paired();
+    const site = workspace(a, "Site");
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: site.path, stdio: "pipe" }).toString().trim();
+    git("init", "-q", "-b", "main");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    const mine = git("rev-parse", "HEAD");
+    git("commit", "-qm", "theirs", "--allow-empty");
+    const conflict = path.join(site.path, ".git", "refs", "heads", `main.sync-conflict-20261117-204452-${shortId(B)}`);
+    fs.writeFileSync(conflict, `${mine}\n`);
+
+    await a.desk.share(site.id, B, { mode: "two", filesOnly: false });
+    await carry(a, b);
+    const folderId = (await a.desk.view()).shares[0].folderId;
+
+    a.engine.status[folderId] = { state: "syncing", need: 4, errors: 0, localChanges: 0 };
+    a.desk.onEvent({ type: "item-finished", folder: folderId, item: ".git/refs/heads/main", action: "update", error: null });
+    await sleep(1700);
+    await a.desk.settled();
+    expect(fs.existsSync(conflict)).toBe(true);
+
+    a.engine.status[folderId] = { state: "idle", need: 0, errors: 0, localChanges: 0 };
+    a.desk.onEvent({ type: "folder-state", folder: folderId, state: "idle" });
+    await sleep(1700);
+    await a.desk.settled();
+    expect(fs.existsSync(conflict)).toBe(false);
+  });
 });
