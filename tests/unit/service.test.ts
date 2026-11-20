@@ -1190,6 +1190,52 @@ describe("runs", () => {
     expect(run).toMatchObject({ status: "failed", error: "ENOENT" });
     ctx.svc.close();
   });
+
+  it("picks up a full-screen CLI's exact session id from scrollback tail when transcript kept the alt screen", async () => {
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    const { Terminal } = require("@xterm/headless") as {
+      Terminal: new (opts: { cols: number; rows: number; scrollback: number; allowProposedApi: boolean }) => { loadAddon(addon: object): void };
+    };
+    const { SerializeAddon } = require("@xterm/addon-serialize") as { SerializeAddon: new () => object };
+    const capture = require(path.resolve("electron/terminal-capture.cjs")) as {
+      attachCapture(sink: object): void;
+      captureWrite(sink: object, data: string): void;
+      captureFinish(sink: object): Promise<{ ansi: string; transcript: string }>;
+    };
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    await ctx.exit(first.ptyId);
+
+    // Simulate a full-screen TUI session whose final exit line printed the session id after leaving alt screen.
+    const mirror = new Terminal({ cols: 60, rows: 12, scrollback: 100, allowProposedApi: true });
+    const serializer = new SerializeAddon();
+    mirror.loadAddon(serializer);
+    const sink = { mirror, serializer };
+    capture.attachCapture(sink);
+    const fullScreen = `\x1b[?1049h\x1b[H${"Full screen conversation frame line\r\n".repeat(10)}`;
+    const farewell = "\x1b[?1049l\x1b[2J\x1b[32margy --resume 0199a1b2-c3d4-7e5f\x1b[0m\r\n";
+    capture.captureWrite(sink, fullScreen);
+    capture.captureWrite(sink, farewell);
+    const done = await capture.captureFinish(sink);
+    expect(done.transcript).not.toContain("0199a1b2-c3d4-7e5f");
+
+    const runDir = ctx.svc.getRun(first.runId).run.dir;
+    fs.writeFileSync(path.join(runDir, "transcript.txt"), done.transcript);
+    fs.writeFileSync(path.join(runDir, "scrollback.txt"), `${"noise line\r\n".repeat(2000)}${farewell}`);
+    await ctx.svc.continueRun(first.runId);
+    expect(ctx.spawns[1].argv).toEqual(["/usr/bin/argy", "--flag", "--resume", "0199a1b2-c3d4-7e5f"]);
+
+    // Also works when compressRun compressed scrollback.txt into scrollback.txt.gz.
+    const { compressRun } = await import("../../src/core/run-storage.js");
+    await compressRun(runDir);
+    expect(fs.existsSync(path.join(runDir, "scrollback.txt.gz"))).toBe(true);
+    await ctx.exit("pty-2");
+    await ctx.svc.continueRun(first.runId);
+    expect(ctx.spawns[2].argv).toEqual(["/usr/bin/argy", "--flag", "--resume", "0199a1b2-c3d4-7e5f"]);
+    ctx.svc.close();
+  });
 });
 
 describe("change events", () => {

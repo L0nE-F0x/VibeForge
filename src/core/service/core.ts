@@ -6,7 +6,7 @@ import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
-import { hasRunFile } from "../run-storage.js";
+import { hasRunFile, readRunTail } from "../run-storage.js";
 import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
 import { failStreak, ROUTINE_FAILING } from "../routines.js";
@@ -16,6 +16,15 @@ import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type Ru
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
 type Settle = () => unknown;
+
+/** Strip terminal escape sequences so post-exit resume commands in raw scrollback read cleanly. */
+function stripTerminalCodes(raw: string): string {
+  return raw
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/\r\n?/g, "\n");
+}
 
 /**
  * The state every part of the service shares, and the lifecycle of a run: launching it, its exit,
@@ -228,8 +237,11 @@ export class ServiceCore {
     // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
     if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
     if (previous.dir) {
-      const resumeArgs = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-      if (resumeArgs) return { native: true, resumeArgs };
+      const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
+      if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
+      // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
+      const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
+      if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
     }
     return { native: Boolean(row.continueArgs?.length), resumeArgs: null };
   }
