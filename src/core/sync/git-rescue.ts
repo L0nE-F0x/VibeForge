@@ -147,6 +147,46 @@ async function isCommit(root: string, sha: string): Promise<boolean> {
   return SHA.test(sha) && (await git(["cat-file", "-t", sha], root)).stdout.trim() === "commit";
 }
 
+async function reflogTargets(file: string): Promise<Set<string>> {
+  const seen = new Set<string>();
+  try {
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      const sha = line.split(" ")[1] ?? "";
+      if (SHA.test(sha)) seen.add(sha);
+    }
+  } catch {
+    /* missing reflog */
+  }
+  return seen;
+}
+
+/**
+ * Re-stores lost stash entries from a conflicting `logs/refs/stash` copy before removing it.
+ * Returns false if a referenced commit isn't local yet so the copy stays for a later retry.
+ */
+async function rescueStashLog(root: string, gitDir: string, file: string, machine: string): Promise<boolean> {
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return true;
+  }
+  const existing = await reflogTargets(path.join(gitDir, "logs", "refs", "stash"));
+  const top = await resolveRef(root, "refs/stash");
+  if (top) existing.add(top);
+  for (const line of text.split("\n")) {
+    const match = /^[0-9a-f]{40,64} ([0-9a-f]{40,64}) [^\t]*(?:\t(.*))?$/.exec(line);
+    if (!match) continue;
+    const sha = match[1];
+    if (existing.has(sha)) continue;
+    if (!(await isCommit(root, sha))) return false;
+    const message = match[2]?.trim() || `stash from ${machine || "other machine"}`;
+    if ((await git(["stash", "store", "-m", message, sha], root)).code !== 0) return false;
+    existing.add(sha);
+  }
+  return true;
+}
+
 async function resolveRef(root: string, ref: string): Promise<string | null> {
   const run = await git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], root);
   return run.code === 0 ? run.stdout.trim() : null;
@@ -257,6 +297,8 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
         const found = /^([0-9a-f]{40,64}) (refs\/\S+)$/.exec(line);
         if (found && !(await keep(found[2], found[1]))) stay.add(copy.file);
       }
+    } else if (copy.of === "logs/refs/stash") {
+      if (!(await rescueStashLog(root, gitDir, copy.file, machine))) stay.add(copy.file);
     }
   }
 

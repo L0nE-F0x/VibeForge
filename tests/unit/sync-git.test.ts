@@ -282,4 +282,39 @@ describe("sync: a repository on two machines", () => {
     expect(fs.readFileSync(mainRef, "utf8").trim()).toBe(missing);
     expect(fs.existsSync(conflictRef)).toBe(true);
   });
+
+  it("preserves older local stashes from a conflict copy of logs/refs/stash", async () => {
+    const root = repo();
+    write(root, "one.txt", "stash-1\n");
+    git(root, "add", "one.txt");
+    git(root, "stash", "push", "-m", "older local stash");
+    const olderSha = git(root, "rev-parse", "stash@{0}");
+
+    write(root, "two.txt", "stash-2\n");
+    git(root, "add", "two.txt");
+    git(root, "stash", "push", "-m", "newer local stash");
+    const newerSha = git(root, "rev-parse", "stash@{0}");
+
+    const dotGit = path.join(root, ".git");
+    fs.copyFileSync(path.join(dotGit, "refs", "stash"), path.join(dotGit, "refs", `stash.${STAMP}`));
+    fs.copyFileSync(path.join(dotGit, "logs", "refs", "stash"), path.join(dotGit, "logs", "refs", `stash.${STAMP}`));
+    git(root, "stash", "clear");
+    write(root, "remote.txt", "remote\n");
+    git(root, "add", "remote.txt");
+    git(root, "stash", "push", "-m", "remote stash");
+    const remoteSha = git(root, "rev-parse", "stash@{0}");
+
+    const rescue = await rescueRepo(root, "desk");
+    expect(rescue?.removed).toBe(2);
+    const shas = git(root, "stash", "list", "--format=%H").split("\n");
+    expect(shas).toContain(olderSha);
+    expect(shas).toContain(newerSha);
+    expect(shas).toContain(remoteSha);
+
+    // If a lost stash reflog entry's commit object has not arrived yet, keep the copy for retry.
+    const unreadyLog = path.join(dotGit, "logs", "refs", `stash.${STAMP}`);
+    fs.writeFileSync(unreadyLog, `${"0".repeat(40)} ${"b".repeat(40)} Test <t@example.com> 1700000000 +0000\tstash\n`);
+    expect(await rescueRepo(root, "desk")).toMatchObject({ removed: 0 });
+    expect(fs.existsSync(unreadyLog)).toBe(true);
+  });
 });
