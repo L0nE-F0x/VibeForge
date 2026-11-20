@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectWaitingPrompt,
   inspectsQuotas,
+  isLoopbackUrl,
   isSafeShellCommand,
   keySequenceFor,
   normalizePreviewUrl,
@@ -161,6 +162,31 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
     expect(parseWorkbenchAction({ prompt: "diff", target: "copy-1" })).toEqual({ op: "diff", target: "copy-1" });
     expect(parseWorkbenchAction({ prompt: "diff" })).toBeNull();
     expect(parseWorkbenchAction({ prompt: "something unknown" })).toBeNull();
+  });
+
+  it("opens pages on this computer at once and holds any other site's for Go", () => {
+    for (const url of ["http://localhost:5173/", "http://127.0.0.1:8080/x", "http://[::1]:3000", "http://0.0.0.0:4000", "http://app.localhost:3000"]) expect(isLoopbackUrl(url), url).toBe(true);
+    for (const url of ["https://example.com/?q=secret", "http://localhost.example.com", "http://user@example.com", "http://127.0.0.1.nip.io", "not a url"]) expect(isLoopbackUrl(url), url).toBe(false);
+    const open = (target: string): OrchestratorStep => ({
+      id: "s1",
+      kind: "workbench",
+      engineId: "",
+      workspaceId: "ws-1",
+      branch: "",
+      prompt: "browser",
+      target,
+      asked: "",
+      state: "planned",
+      error: null,
+      ptyId: null,
+      openedWorkspaceId: null,
+    });
+    expect(holdsForGo(open("localhost:5173"))).toBe(false);
+    expect(holdsForGo(open("https://example.com/collect?k=abc"))).toBe(true);
+    expect(safeInCall(open("https://example.com"))).toBe(false);
+    expect(safeInCall(open(":3000"))).toBe(true);
+    // Other workbench steps are as they were.
+    expect(holdsForGo({ ...open(""), prompt: "reload" })).toBe(false);
   });
 
   it("recognizes quota inspection queries and trims stiff AI prefixes from teammate summaries", () => {

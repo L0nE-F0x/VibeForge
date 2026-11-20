@@ -142,6 +142,20 @@ export type WorkbenchAction =
   | { op: "mark-reviewed" }
   | { op: "undo"; token?: string };
 
+/**
+ * Whether a page is on this computer (a dev server, say): localhost, 127.x, ::1 or 0.0.0.0, read
+ * from the parsed address so `localhost.example.com` or `user@example.com` doesn't pass.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "0.0.0.0" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
 export function normalizePreviewUrl(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;

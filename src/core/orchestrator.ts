@@ -17,6 +17,7 @@ import {
   inspectsSettings,
   inspectsStorage,
   isApprovalPrompt,
+  isLoopbackUrl,
   isDestructiveStepAction,
   isSafeShellCommand,
   keySequenceFor,
@@ -1481,6 +1482,12 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
     return approves && (Boolean(step.after) || Boolean(target?.waiting && isApprovalPrompt(target.waiting)));
   }
   if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
+  if (step.kind === "workbench") {
+    const action = parseWorkbenchAction(step);
+    // A page on another site could carry what the planner was shown in its address; one on this
+    // computer (a dev server) opens at once.
+    return action?.op === "browser-open" && !isLoopbackUrl(action.url);
+  }
   if (step.kind === "settings") {
     const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
     if (!action) return false;
