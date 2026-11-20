@@ -3,6 +3,8 @@ import cronstrue from "cronstrue";
 import type { RunMeta, Schedule } from "./types.js";
 
 export const TICK_MS = 30_000;
+/** Slots older than this (e.g. while asleep) count as missed rather than running late. */
+export const MAX_SLOT_LATENESS_MS = 2 * 60_000;
 export const MIN_INTERVAL_MINUTES = 5;
 /** Failed runs in a row before a routine glows on Routines and Home, and its notification says so. */
 export const ROUTINE_FAILING = 3;
@@ -187,7 +189,9 @@ export function decideRoutineTick(input: RoutineTickInput): TickDecision {
   const slot = mostRecentSlot(input.schedule, input.now);
   if (!slot || firedAtOrAfter(input.lastFiredAt, slot)) return { action: "skip", reason: "not-due" };
   const scheduledAt = slot.toISOString();
-  if (slot.getTime() < input.appStartedAt.getTime()) return { action: "miss", scheduledAt };
+  if (slot.getTime() < input.appStartedAt.getTime() || input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
+    return { action: "miss", scheduledAt };
+  }
   if (input.previousStillRunning) return { action: "skip", reason: "still-running" };
   return { action: "fire", scheduledAt };
 }

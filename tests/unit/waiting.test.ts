@@ -120,4 +120,130 @@ describe("waiting for a folder across a restart", () => {
     expect(broken.svc.listTasks()).toEqual([]);
     broken.svc.close();
   });
+
+  it("cancels a waiting routine on pause and re-checks enabled, allowRoutines, and stillRunning under the folder lock", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now, appStartedAt: new Date(time.now().getTime() - INTERVAL) });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+
+    // 1. Pausing cancels a slot already queued for a busy folder.
+    const queued = ctx.svc.saveRoutine({ name: "Queued", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "p" });
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(queued.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * INTERVAL).toISOString() });
+    await ctx.svc.tick(time.now());
+    expect(ctx.svc.listRoutines().find((r) => r.id === queued.id)?.waiting).not.toBeNull();
+    ctx.svc.setRoutineEnabled(queued.id, false);
+    expect(ctx.svc.listRoutines().find((r) => r.id === queued.id)?.waiting).toBeNull();
+    await ctx.exit(busy.ptyId);
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(1);
+
+    // 2. Under the folder lock in fire(), if disabled, disallowed, or already running changed meanwhile, skip starting.
+    const { allocateRunDir } = await import("../../src/core/runs.js");
+    const turns = (ctx.svc as unknown as { turns: { withFolderLock: (folder: string, job: () => Promise<unknown>) => Promise<unknown> } }).turns;
+    const live = (ctx.svc as unknown as { live: Map<string, Record<string, unknown>> }).live;
+    for (const mutate of [
+      (id: string) => ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(id)!, enabled: false }),
+      () => ctx.svc.store.writeAgent({ ...ctx.svc.store.getAgent(agent.id)!, allowRoutines: false }),
+      (id: string) => {
+        const started = time.now();
+        const { id: runId, dir } = allocateRunDir(ctx.dataRoot, started, "Running");
+        ctx.svc.store.saveRun({
+          id: runId,
+          origin: "routine",
+          title: "Running",
+          agentId: agent.id,
+          routineId: id,
+          taskId: null,
+          chatId: null,
+          workspaceId: workspace.id,
+          engine: "argy",
+          argv: ["argy"],
+          cwd: ctx.place,
+          prompt: "p",
+          startedAt: started.toISOString(),
+          endedAt: null,
+          status: "running",
+          exitCode: null,
+          signal: null,
+          stopRequested: false,
+          openedAt: null,
+          notifiedAt: null,
+          dir,
+          error: null,
+          changes: null,
+          gitStart: null,
+          continuedFrom: null,
+        });
+        live.set("pty-running", {
+          ptyId: "pty-running",
+          runId,
+          kind: "run",
+          title: "Running",
+          cwd: ctx.place,
+          pid: 99999,
+          startedAt: started.toISOString(),
+          origin: "routine",
+          agentId: agent.id,
+          chatId: null,
+          taskId: null,
+          workspaceId: workspace.id,
+        });
+        return runId;
+      },
+    ]) {
+      time.pass(INTERVAL);
+      const r = ctx.svc.saveRoutine({ name: "Race", agentId: agent.id, schedule: { kind: "every", minutes: 5 }, prompt: "p" });
+      ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(r.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * INTERVAL).toISOString() });
+      let releaseLock: () => void = () => undefined;
+      const lockGate = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      });
+      const held = turns.withFolderLock(ctx.place, () => lockGate);
+      // Let held acquire the lock before tick() calls fire(), so mutate() runs while fire() waits on the lock.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const beforeSpawns = ctx.spawns.length;
+      const tickRun = ctx.svc.tick(time.now());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const activeRunId = mutate(r.id);
+      releaseLock();
+      await Promise.all([held, tickRun]);
+      expect(ctx.spawns).toHaveLength(beforeSpawns);
+      live.delete("pty-running");
+      if (typeof activeRunId === "string") {
+        const run = ctx.svc.store.getRun(activeRunId);
+        if (run) ctx.svc.store.saveRun({ ...run, status: "exited", endedAt: time.now().toISOString() });
+      }
+      ctx.svc.setRoutineEnabled(r.id, false);
+      ctx.svc.store.writeAgent({ ...ctx.svc.store.getAgent(agent.id)!, allowRoutines: true });
+    }
+    ctx.svc.close();
+  });
+
+  it("keeps a routine already waiting for a busy folder alive past the lateness limit", async () => {
+    const time = clock();
+    const ctx = setup({ now: time.now, appStartedAt: new Date(time.now().getTime() - INTERVAL) });
+    const agent = await agentIn(ctx);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const busy = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    ctx.svc.onPtyActivity(busy.ptyId, true);
+
+    const r = ctx.svc.saveRoutine({ name: "Hourly", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "p" });
+    ctx.svc.store.writeRoutine({ ...ctx.svc.store.getRoutine(r.id)!, lastFiredAt: new Date(time.now().getTime() - 2 * 60 * 60_000).toISOString() });
+    await ctx.svc.tick(time.now());
+    expect(ctx.svc.listRoutines()[0].waiting).not.toBeNull();
+
+    // Busy for 10 minutes while ticks arrive: the queued wait is NOT marked missed.
+    time.pass(10 * 60_000);
+    await ctx.svc.tick(time.now());
+    expect(ctx.svc.listRoutines()[0].lastMissedAt).toBeNull();
+    expect(ctx.svc.listRoutines()[0].waiting).not.toBeNull();
+
+    await ctx.exit(busy.ptyId);
+    await ctx.svc.checkWaiting();
+    expect(ctx.spawns).toHaveLength(2);
+    ctx.svc.close();
+  });
 });

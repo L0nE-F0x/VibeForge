@@ -31,4 +31,18 @@ describe("interval routines across summer time", () => {
     expect(iso(nextFireTimes(hourly, new Date("2026-03-29T00:30:00Z"), 3))).toEqual(["2026-03-29T01:00:00.000Z", "2026-03-29T02:00:00.000Z", "2026-03-29T03:00:00.000Z"]);
     expect(iso(nextFireTimes({ kind: "every", minutes: 720 }, new Date("2026-03-28T13:00:00Z"), 2))).toEqual(["2026-03-28T23:00:00.000Z", "2026-03-29T10:00:00.000Z"]);
   });
+
+  it("marks a slot missed instead of running hours late after sleep", () => {
+    const decision = decideRoutineTick({
+      now: new Date("2026-10-25T10:30:00Z"),
+      appStartedAt: new Date("2026-10-25T07:00:00Z"),
+      enabled: true,
+      allowRoutines: true,
+      engineAvailable: true,
+      schedule: { kind: "cron", expr: "0 9 * * *" },
+      lastFiredAt: null,
+      previousStillRunning: false,
+    });
+    expect(decision).toEqual({ action: "miss", scheduledAt: "2026-10-25T08:00:00.000Z" });
+  });
 });
