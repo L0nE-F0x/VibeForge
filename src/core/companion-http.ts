@@ -356,6 +356,12 @@ function stillServing(served: Served): void {
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
   if (!hostAllowed(req.headers.host)) throw new CompanionHttpError("phone.error.host", 403);
+  // Funnel puts the page on the internet. Tailscale marks each request it carries (and drops a copy
+  // a client sends), so those are refused outright, the page included; Settings → Phone still says so.
+  if (req.headers["tailscale-funnel-request"] !== undefined) {
+    served.unsigned();
+    throw new CompanionHttpError("phone.error.funnel", 403);
+  }
   // Tailscale Serve names the person on the tailnet who asked; Funnel, which answers anyone on the
   // internet, doesn't. Not refused (a tagged device has no person either), but Settings → Phone says so.
   if (tailnetHost(req.headers.host) && !req.headers["tailscale-user-login"]) served.unsigned();

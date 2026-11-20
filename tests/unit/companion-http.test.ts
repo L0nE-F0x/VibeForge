@@ -489,6 +489,21 @@ describe("what the phone page sends over a slow link", () => {
     }
   });
 
+  it("refuses everything Tailscale marks as coming through Funnel, the page itself included", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({ port: 0, token, root: path.join(import.meta.dirname, "../../companion"), icon: null, actions: actions() });
+    try {
+      const funnel = { host: "studio.tail1234.ts.net", headers: { "Tailscale-Funnel-Request": "?1" } };
+      expect((await request(server.port, "/", funnel)).status).toBe(403);
+      expect((await request(server.port, "/api/desk", { ...funnel, headers: { ...funnel.headers, Authorization: `Bearer ${token}` } })).status).toBe(403);
+      expect(server.unsigned()).toBe(2);
+      // The same machine through Serve, from the tailnet, is still answered.
+      expect((await request(server.port, "/", { host: "studio.tail1234.ts.net", headers: { "Tailscale-User-Login": "me@example.com" } })).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("tries the port again while the page is on and something else holds it", async () => {
     const port = await freePort();
     const holder = net.createServer();

@@ -1349,6 +1349,7 @@ export const fr: Catalog = {
   "phone.error.choose": "Choisissez un espace de travail et qui lancer.",
   "phone.error.failed": "Une erreur s'est produite.",
   "phone.error.host": "Ouvrez la page du téléphone à l'adresse https affichée par Tailscale Serve, ou à 127.0.0.1 sur cet ordinateur.",
+  "phone.error.funnel": "Cette page ne répond pas via Tailscale Funnel, qui la met sur internet. Partagez-la plutôt avec tailscale serve.",
   "phone.installTitle": "Installe ceci comme une app sur le téléphone",
   "phone.installBody": "Elle occupe alors tout l'écran.",
   "phone.install": "Installer",

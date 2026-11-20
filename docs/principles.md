@@ -22,7 +22,7 @@ Anything that goes over the network stays off until you turn it on:
 
 - **Plan limits** (Settings → Usage and activity) ask Anthropic, xAI, Google, Moonshot, OpenAI and Meta, at most every 3 minutes.
 - **The GitHub graph** (Settings → Usage and activity → GitHub) asks GitHub through your `gh`, at most every 30 minutes, and keeps no token.
-- **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it, and you turn that on yourself. Settings only asks this computer's own `tailscale` where things stand. A phone that shows two of your computers asks each one directly, with that computer's own code; a computer answers a page from another machine on the same tailnet, and no other.
+- **The phone page** (Settings → Phone) listens on `127.0.0.1:4737` only, behind a pairing code; Tailscale Serve is how a phone reaches it, and you turn that on yourself. Settings only asks this computer's own `tailscale` where things stand. A phone that shows two of your computers asks each one directly, with that computer's own code; a computer answers a page from another machine on the same tailnet and, opened on this computer itself, a page from another local port (where the phone page is tried out), and no other. Every request still needs the pairing code. Requests that come through Tailscale Funnel, which would put the page on the internet, are refused.
 - **Sync** (Settings → Sync) starts a private Syncthing that listens on port 22737 and announces itself on the local network only. It talks to the machines you paired and to nothing else: no discovery servers, relays, usage or crash reports, or upgrades. Only workspaces you pick are synced.
 - Speech models and Piper voices download from Hugging Face, and sherpa-onnx (which runs Parakeet, Canary and Moonshine) from its GitHub release, only when you press Download or say go to a download Viby planned.
 
@@ -51,4 +51,4 @@ An agent has one engine. VibeForge doesn't route work between models, pick a che
 
 ## Honest limits
 
-Allowed folders are a policy, not a sandbox: runs start inside them and the prompt tells the CLI to stay there, but a coding CLI has a shell. VibeForge is built for Omarchy (Arch + Hyprland) and has no Windows or macOS builds.
+Allowed folders are a policy, not a sandbox: runs start inside them and the prompt tells the CLI to stay there, but a coding CLI has a shell. A first prompt handed to a CLI on its command line (`promptArgs`) can be read by any other user account on the same computer, through `ps` or `/proc`, for as long as that CLI runs: VibeForge assumes a desktop with one person on it. It is built for Omarchy (Arch + Hyprland) and has no Windows or macOS builds.

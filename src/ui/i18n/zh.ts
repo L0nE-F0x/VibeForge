@@ -1349,6 +1349,7 @@ export const zh: Catalog = {
   "phone.error.choose": "请选择工作区和要启动的对象。",
   "phone.error.failed": "出了点问题。",
   "phone.error.host": "请在 Tailscale Serve 打印的 https 地址打开手机页面，或在这台电脑上打开 127.0.0.1。",
+  "phone.error.funnel": "此页面不会通过 Tailscale Funnel 响应，因为 Funnel 会把它放到互联网上。请改用 tailscale serve 共享。",
   "phone.installTitle": "把这个页面装到手机上",
   "phone.installBody": "装上之后会占满整个屏幕。",
   "phone.install": "安装",

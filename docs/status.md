@@ -30,6 +30,7 @@ Every change runs `npm test` (909 tests at 3.1.0, including the real PTY host dr
 
 - Claude Code asks you to trust each new folder once, so a new chat's first message waits for that answer in its terminal.
 - Allowed folders are a policy in the prompt, not a sandbox.
+- A first prompt passed on a CLI's command line can be read by other user accounts on the same computer (`ps`, `/proc`) while that CLI runs.
 - No token counts from Cursor Agent or Crush: neither keeps per-call counts that can be added up.
 - Turning the tray off applies from the next start. Electron names every tray item `chrome_status_icon_1`, so a pin can also catch another Electron app's icon.
 - Which terminal handed out which task lives in memory: after a restart a lead CLI can't `vibeforge apply` tasks it handed out before (Apply on the task still works). Tasks and routines waiting for their folder are kept in `waiting.json` and survive a restart.
