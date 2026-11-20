@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-11-20
+
+**3.0.2: plan limits drop subscriptions once their paid period ends, and read Kimi Code's newer quota windows.**
+
+### Fixed
+
+- **Plan limits drop a cancelled subscription once your paid access ends.** While your paid period is still running, the plan stays on the list as usual; once the provider reports no active subscription (Muse, Kimi, Claude, Codex, Grok or Gemini) or you sign out of the CLI, VibeForge removes its card, clears its saved numbers from disk, and keeps old session logs or later token expirations from bringing it back. Re-subscribing brings it straight back.
+- **Kimi Code's newer quota windows.** Plan limits also read Kimi CLI's ratio-based 5-hour, weekly and monthly `usages` windows, and no longer treat a zero-limit answer as 0% used.
+
 ## [3.0.1] - 2026-11-19
 
 **3.0.1: the tour, the help and the website catch up with 3.0.**
