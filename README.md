@@ -125,7 +125,7 @@ React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (sy
                   routines, runs, scheduler      terminal → your CLIs
 ```
 
-- **The PTY host** owns every terminal. It mirrors each screen in a headless xterm, so a view that reattaches redraws exactly; it pastes prompts only once a CLI has gone quiet; and when a run ends it writes the final screen, a plain-text transcript and a capped raw scrollback. Stopping hangs up the process group (SIGHUP → SIGTERM → SIGKILL), like closing a terminal window.
+- **The PTY host** owns every terminal. It mirrors each screen in a headless xterm, so a view that reattaches redraws exactly; it pastes prompts only once a CLI has gone quiet; and when a run ends it writes the final screen, a plain-text transcript and a capped raw scrollback. Stopping hangs up the terminal like closing its window (SIGHUP), then ends whatever is still running in it, a background job that ignores the hang-up included (SIGTERM, then SIGKILL); only a program that left with `setsid` is left alone.
 - **One writer for run state**: `meta.json` in each run folder plus a SQLite index, with change events pushed to the UI.
 - **Login-shell PATH**: VibeForge asks your login shell for `PATH` at start, so CLIs installed with mise or into `~/.local/bin` are found however it was launched.
 - **Allowed folders are a policy, not a sandbox.** Runs start inside them and the prompt tells the CLI to stay there, but a coding CLI has a shell.

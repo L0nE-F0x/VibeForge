@@ -21,6 +21,9 @@ const PASTE_FIRST_OUTPUT_MS = 3000;
 const PASTE_MAX_WAIT_MS = 20000;
 const ENTER_AFTER_PASTE_MS = 150;
 const EXIT_SETTLE_MS = 120;
+// Stop hangs up at once, then asks (SIGTERM) and insists (SIGKILL) after these.
+const STOP_TERM_MS = 1500;
+const STOP_KILL_MS = 4000;
 const PROGRAM_POLL_MS = 1000;
 // A terminal is "working" while the text on its screen keeps changing, and quiet once it has
 // held still for a few seconds: a coding CLI's spinner ticks while it thinks and stops when it
@@ -75,6 +78,7 @@ const PAUSED_LOOK_MS = 15;
  *   flushTimer: NodeJS.Timeout | undefined,
  *   exited: boolean,
  *   killTimers: NodeJS.Timeout[],
+ *   stopAt?: number,
  *   paste: Paste | null,
  *   rec: Sink | null,
  *   recSeq?: number,
@@ -97,6 +101,9 @@ const PAUSED_LOOK_MS = 15;
 
 /** @type {Map<string, Session>} */
 const sessions = new Map();
+/** Stopped terminals whose leader has exited, while what they left behind is still being stopped. */
+/** @type {Set<Promise<void>>} */
+const draining = new Set();
 
 /**
  * @param {PtyLine} message
@@ -630,7 +637,15 @@ function finish(session, exitCode, signal) {
   session.exited = true;
   session.gone = true;
   release(session);
-  for (const timer of session.killTimers) clearTimeout(timer);
+  // A stopped terminal's leader is gone, but what it left in its session still gets the rest of
+  // the steps until nothing is left. A terminal that ended on its own leaves its leftovers be, as
+  // a closed terminal window does.
+  if (!session.stopAt) for (const timer of session.killTimers) clearTimeout(timer);
+  else {
+    const left = waitForEmpty(session);
+    draining.add(left);
+    void left.then(() => draining.delete(left));
+  }
   if (session.paste) clearPasteTimers(session.paste);
   flush(session);
   // A recording in progress is written before the exit is reported, so its run finds its files.
@@ -647,11 +662,86 @@ function finish(session, exitCode, signal) {
 
 /** @param {Session} session */
 function killSession(session) {
-  if (session.exited || session.killTimers.length) return;
-  // What closing a terminal window does: hang up, then ask, then insist.
+  if (session.exited || session.stopAt) return;
+  session.stopAt = Date.now();
+  // What closing a terminal window does: hang up, then ask, then insist. The asking and insisting
+  // reach every process still in the terminal, so one that ignores the hang-up (a nohup'd server,
+  // a background job in a group of its own) doesn't outlive Stop.
   signalGroup(session.pid, "SIGHUP");
-  session.killTimers.push(setTimeout(() => signalGroup(session.pid, "SIGTERM"), 1500));
-  session.killTimers.push(setTimeout(() => signalGroup(session.pid, "SIGKILL"), 4000));
+  session.killTimers.push(setTimeout(() => signalSession(session, "SIGTERM"), STOP_TERM_MS));
+  session.killTimers.push(setTimeout(() => signalSession(session, "SIGKILL"), STOP_KILL_MS));
+}
+
+/**
+ * The processes still in a terminal's session, zombies aside. node-pty starts each terminal as a
+ * session of its own, so this is everything started in it, background jobs included, but not a
+ * program that left with setsid on purpose. Linux only (/proc); empty elsewhere.
+ * @param {number} sid
+ * @returns {number[]}
+ */
+function sessionMembers(sid) {
+  /** @type {number[]} */
+  const members = [];
+  let names;
+  try {
+    names = fs.readdirSync("/proc");
+  } catch {
+    return members;
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = fs.readFileSync(`/proc/${name}/stat`, "utf8");
+      // Fields after the command name: state ppid pgrp session ...
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (fields[0] !== "Z" && Number(fields[3]) === sid) members.push(Number(name));
+    } catch {
+      /* gone already */
+    }
+  }
+  return members;
+}
+
+/**
+ * Signal everything left in a terminal. Once its leader has exited only processes found in its
+ * session are signalled, never the leader's pid on its own, which may belong to someone else by then.
+ * @param {Session} session
+ * @param {NodeJS.Signals} signal
+ */
+function signalSession(session, signal) {
+  const members = sessionMembers(session.pid);
+  if (members.length === 0) {
+    if (!session.exited) signalGroup(session.pid, signal);
+    return;
+  }
+  for (const pid of members) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * Resolves once a stopped terminal has nothing left in it, or once its last step has had time to
+ * land; the steps that are still to come are then dropped.
+ * @param {Session} session
+ * @returns {Promise<void>}
+ */
+function waitForEmpty(session) {
+  return new Promise((resolve) => {
+    const look = () => {
+      const over = !session.stopAt || Date.now() > session.stopAt + STOP_KILL_MS + 500;
+      if (over || sessionMembers(session.pid).length === 0) {
+        for (const timer of session.killTimers) clearTimeout(timer);
+        resolve();
+        return;
+      }
+      setTimeout(look, 100);
+    };
+    look();
+  });
 }
 
 /**
@@ -932,7 +1022,8 @@ function shutdown() {
   if (shuttingDown) return shuttingDown;
   const live = [...sessions.values()];
   for (const session of live) killSession(session);
-  shuttingDown = Promise.all(live.map((session) => waitForExit(session, 6000)));
+  // Quitting waits for what each terminal left behind too: the host's timers end with it.
+  shuttingDown = Promise.all([...live.map((session) => waitForExit(session, 6000).then(() => waitForEmpty(session))), ...draining]);
   return shuttingDown;
 }
 

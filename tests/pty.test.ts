@@ -123,6 +123,20 @@ function tempDir(): string {
 
 const BASH = ["/bin/bash", "--norc", "--noprofile", "-i"];
 
+/** Whether a process is still there, zombies included as gone. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    return !/^State:\s+Z/m.test(fs.readFileSync(`/proc/${pid}/status`, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 describe("pty host", () => {
   it("keeps two terminals in their own folders and their input apart", async () => {
     const host = await startHost();
@@ -196,6 +210,28 @@ describe("pty host", () => {
     expect((await host.request({ op: "snapshot", ptyId: pty })).alive).toBe(false);
     await expect(host.request({ op: "write", ptyId: pty, data: "x" })).resolves.toMatchObject({ ok: false, error: "That session has ended." });
   });
+
+  it("stops what ignores the hang-up too, once the shell has gone", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH, runDir: null })).ptyId);
+    // A background job in a group of its own that ignores SIGHUP, as a nohup'd server does.
+    await host.request({ op: "write", ptyId: pty, data: "(trap '' HUP; exec sleep 300) & echo STUBBORN=$!\r" });
+    await host.until(async () => /STUBBORN=\d+/.test(await host.screen(pty)));
+    const stubborn = Number((await host.screen(pty)).match(/STUBBORN=(\d+)/)![1]);
+    await host.request({ op: "kill", ptyId: pty });
+    await host.until(() => Boolean(host.exitOf(pty)));
+    await host.until(() => !alive(stubborn), 6000);
+  }, 15000);
+
+  it("stops what a terminal left behind before the host quits", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH, runDir: null })).ptyId);
+    await host.request({ op: "write", ptyId: pty, data: "(trap '' HUP; exec sleep 300) & echo STUBBORN=$!\r" });
+    await host.until(async () => /STUBBORN=\d+/.test(await host.screen(pty)));
+    const stubborn = Number((await host.screen(pty)).match(/STUBBORN=(\d+)/)![1]);
+    await host.request({ op: "shutdown" });
+    expect(alive(stubborn)).toBe(false);
+  }, 15000);
 
   it("records part of a shell into a run folder, and writes a recording still open when it exits", async () => {
     const host = await startHost();

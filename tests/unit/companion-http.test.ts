@@ -473,7 +473,7 @@ describe("what the phone page sends over a slow link", () => {
     const createSpy = vi.spyOn(http, "createServer");
     const server = await startCompanionHttp({ port: 0, token, root: path.join(import.meta.dirname, "../../companion"), icon: null, actions: actions() });
     const rawServer = createSpy.mock.results.at(-1)?.value as http.Server | undefined;
-    expect(rawServer?.requestTimeout).toBe(30_000);
+    expect(rawServer?.requestTimeout).toBe(120_000);
     expect(rawServer?.headersTimeout).toBe(15_000);
     expect(rawServer?.maxConnections).toBe(64);
     createSpy.mockRestore();

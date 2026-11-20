@@ -606,8 +606,9 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
       if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });
   });
-  // Bound slow or idle connections before pairing.
-  server.requestTimeout = 30_000;
+  // Bound slow or idle connections before pairing. The longest request is a phone recording
+  // (HEAR_READ_MAX, about 6 MB): two minutes lets it through on a slow mobile link (~400 kbit/s).
+  server.requestTimeout = 120_000;
   server.headersTimeout = 15_000;
   server.maxConnections = 64;
   const host = opts.host ?? "127.0.0.1";
