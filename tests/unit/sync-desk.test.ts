@@ -437,4 +437,41 @@ describe("sync desk", () => {
     await a.desk.settled();
     expect(fs.existsSync(conflict)).toBe(false);
   });
+
+  it("ignores removeMachine for invalid or unknown ids, and drops dot-directory offer hints", async () => {
+    const { a } = await paired();
+    const marker = path.join(a.dataRoot, "keep-me.txt");
+    fs.writeFileSync(marker, "keep");
+    await a.desk.removeMachine("../..");
+    await a.desk.removeMachine("AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA-AAAAAAA");
+    expect(fs.existsSync(marker)).toBe(true);
+    expect(fs.existsSync(path.join(a.dataRoot, "sync", "link", shortId(B)))).toBe(true);
+
+    const { readLink, homeHint } = await import("../../src/core/sync/link.js");
+    expect(homeHint(path.join(a.home, ".ssh"), a.home)).toBe("");
+    const linkFile = path.join(a.dataRoot, "sync", "link", shortId(B), `${B}.json`);
+    fs.mkdirSync(path.dirname(linkFile), { recursive: true });
+    fs.writeFileSync(
+      linkFile,
+      JSON.stringify({
+        v: 1,
+        id: B,
+        name: "Lap",
+        shares: {
+          "vf-ws-111111": { name: "Keys", mode: "two", filesOnly: false, hint: ".ssh/authorized", rev: 1 },
+          "vf-ws-222222": { name: "Nested", mode: "two", filesOnly: false, hint: "Projects/.config", rev: 1 },
+        },
+        stopped: [],
+        live: {},
+      }),
+    );
+    const parsed = readLink(linkFile, B);
+    expect(parsed?.shares["vf-ws-111111"].hint).toBe("");
+    expect(parsed?.shares["vf-ws-222222"].hint).toBe("");
+    a.desk.onEvent({ type: "item-finished", folder: linkFolderId(A, B), item: `${B}.json`, action: "update", error: null });
+    await sleep(300);
+    await a.desk.settled();
+    const view = await a.desk.view();
+    expect(view.offers.find((item) => item.folderId === "vf-ws-111111")?.suggestedPath).toBe(path.join(a.home, "Projects", "Keys"));
+  });
 });

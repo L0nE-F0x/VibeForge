@@ -36,11 +36,17 @@ export interface LinkFile {
 const FOLDER_ID = /^vf-ws-[0-9a-f]{6,32}$/;
 const text = (value: unknown, max: number): string => (typeof value === "string" ? value.trim().slice(0, max) : "");
 
+/** Only allow relative folder hints under home that never enter dot-directories (e.g. `.ssh`, `.config`). */
+export function safeHint(hint: string): string {
+  if (!hint || path.isAbsolute(hint)) return "";
+  return hint.split("/").some((part) => !part || part.startsWith(".")) ? "" : hint;
+}
+
 /** A path under home as a hint for the other machine: "Projects/site". "" when it isn't under home. */
 export function homeHint(folder: string, home: string): string {
   const relative = path.relative(home, folder);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return "";
-  return relative.split(path.sep).join("/");
+  return safeHint(relative.split(path.sep).join("/"));
 }
 
 /** What this machine tells `machineId`. */
@@ -71,8 +77,8 @@ export function readLink(file: string, expectedId: string): LinkFile | null {
       name: text(row.name, 120) || "Workspace",
       mode: row.mode,
       filesOnly: row.filesOnly === true,
-      // Only ever a suggestion under home: nothing that climbs out of it.
-      hint: hint && !path.isAbsolute(hint) && !hint.split("/").includes("..") ? hint : "",
+      // Only ever a suggestion under home: nothing that climbs out of it or lands in a dot-directory.
+      hint: safeHint(hint),
       rev: typeof row.rev === "number" && Number.isFinite(row.rev) && row.rev >= 1 ? Math.floor(row.rev) : 1,
     };
   }

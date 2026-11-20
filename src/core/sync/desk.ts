@@ -5,8 +5,8 @@ import { slugify } from "../slug.js";
 import type { LiveSession, Workspace } from "../types.js";
 import { ConflictStore, copiesIn, walkCopies, type ConflictRecord, type FoundCopy } from "./conflicts.js";
 import { inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo, type MergeResult } from "./git-rescue.js";
-import { buildLink, readLink, settleWithLink, writeLink, type LinkOffer } from "./link.js";
-import { dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
+import { buildLink, readLink, safeHint, settleWithLink, writeLink, type LinkOffer } from "./link.js";
+import { deviceId, dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
 import { SyncStateFile, type MachineRecord, type ShareRecord, type SyncState } from "./state.js";
 import type { EngineEvent, EngineFolder, ShareState, SyncConflict, SyncEngine, SyncMachine, SyncOffer, SyncRequest, SyncShare } from "./types.js";
 
@@ -471,28 +471,32 @@ export class SyncDesk {
   /** Unpairs a machine. Everything synced with it stops; the files stay on both. The other machine is told, when it can be. */
   removeMachine(id: string): Promise<void> {
     return this.run(async () => {
+      const valid = deviceId(id);
+      if (!valid) return;
       const engine = this.engine;
       const state = this.stateFile.read();
-      const machine = state.machines.find((item) => item.id === id);
-      if (engine && machine) {
+      const machine = state.machines.find((item) => item.id === valid);
+      if (!machine) return;
+      if (engine) {
         // A last note, so the other machine unpairs too instead of waiting for one that never comes back.
         try {
-          const last = { ...buildLink({ id: engine.id, name: this.host.machineName() }, { ...state, shares: [] }, id, {}, this.host.home), stopped: state.shares.filter((share) => share.machineId === id).map((share) => share.folderId), gone: true };
-          writeLink(path.join(this.linkDir(id), `${engine.id}.json`), last);
-          const connected = (await engine.connections().catch(() => ({}) as Awaited<ReturnType<SyncEngine["connections"]>>))[id]?.connected;
+          const last = { ...buildLink({ id: engine.id, name: this.host.machineName() }, { ...state, shares: [] }, valid, {}, this.host.home), stopped: state.shares.filter((share) => share.machineId === valid).map((share) => share.folderId), gone: true };
+          writeLink(path.join(this.linkDir(valid), `${engine.id}.json`), last);
+          const connected = (await engine.connections().catch(() => ({}) as Awaited<ReturnType<SyncEngine["connections"]>>))[valid]?.connected;
           if (connected && this.unpairWaitMs > 0) await new Promise((resolve) => setTimeout(resolve, this.unpairWaitMs));
         } catch (error) {
           this.host.log(`Sync: could not tell ${machine.name} about unpairing: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      this.quiet.set(id, Date.now() + UNPAIR_QUIET_MS);
-      await this.forget(id);
+      this.quiet.set(valid, Date.now() + UNPAIR_QUIET_MS);
+      await this.forget(valid);
       this.host.changed();
     });
   }
 
   /** Drops a machine and everything shared with it. */
   private async forget(id: string): Promise<void> {
+    if (!deviceId(id)) return;
     for (const share of this.stateFile.read().shares.filter((item) => item.machineId === id)) {
       this.conflicts.forgetFolder(share.folderId);
       this.peerLive.delete(share.folderId);
@@ -700,7 +704,8 @@ export class SyncDesk {
     }
     const taken = new Set(state.shares.map((share) => share.path));
     const offers: SyncOffer[] = [...this.offers.values()].map(({ machineId, offer }) => {
-      let suggested = offer.hint ? path.join(this.host.home, ...offer.hint.split("/")) : path.join(this.host.home, "Projects", offer.name.replace(/[/\\]/g, "-"));
+      const hint = safeHint(offer.hint);
+      let suggested = hint ? path.join(this.host.home, ...hint.split("/")) : path.join(this.host.home, "Projects", offer.name.replace(/[/\\]/g, "-"));
       if (taken.has(suggested)) suggested = `${suggested}-${shortId(machineId).toLowerCase()}`;
       let hasFiles = false;
       try {

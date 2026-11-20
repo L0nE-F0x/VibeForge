@@ -21,8 +21,8 @@ interface GitRun {
 
 function git(args: readonly string[], cwd: string, input?: string): Promise<GitRun> {
   return new Promise((resolve) => {
-    // No hooks: this runs on its own, between two machines, where a hook's author never expected it.
-    const child = spawn("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
+    // No hooks, fsmonitor, or pathspec globbing: this runs on repo data from another machine.
+    const child = spawn("git", ["--no-pager", "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
       cwd,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -375,7 +375,7 @@ async function settle(root: string, commit: string): Promise<string[]> {
   }
   const work = new Map<string, string>();
   if (present.length) {
-    const hashed = await git(["hash-object", "--stdin-paths"], root, `${present.join("\n")}\n`);
+    const hashed = await git(["hash-object", "--no-filters", "--stdin-paths"], root, `${present.join("\n")}\n`);
     const ids = hashed.stdout.trim().split("\n");
     if (hashed.code === 0 && ids.length === present.length) {
       for (const [index, file] of present.entries()) work.set(file, ids[index]);
@@ -405,7 +405,7 @@ async function settle(root: string, commit: string): Promise<string[]> {
  */
 export async function inHistory(root: string, file: string, relative: string): Promise<boolean> {
   if (repoKind(root) !== "repo") return false;
-  const hashed = await git(["hash-object", "--", file], root);
+  const hashed = await git(["hash-object", "--no-filters", "--", file], root);
   const blob = hashed.stdout.trim();
   if (hashed.code !== 0 || !SHA.test(blob)) return false;
   const found = await git(["log", "--all", "-1", "--format=%H", `--find-object=${blob}`, "--", relative], root);

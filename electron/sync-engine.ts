@@ -160,7 +160,16 @@ export class Syncthing implements SyncEngine {
     while (!id) {
       if (exited) throw new Error(exited);
       if (Date.now() - started > START_MS) {
-        child.kill("SIGKILL");
+        // Kill the detached process group so the child worker doesn't outlive the monitor.
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
+            child.kill("SIGKILL");
+          }
+        } else {
+          child.kill("SIGKILL");
+        }
         throw new Error("Syncthing did not start in time.");
       }
       try {

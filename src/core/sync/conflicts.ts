@@ -147,7 +147,7 @@ export class ConflictStore {
   /**
    * Takes a conflict copy out of the workspace and keeps it. A copy identical to the file it is a
    * copy of says nothing and is just removed (null). A second copy of a file that already waits
-   * replaces the saved version: it is this machine's newer one.
+   * moves the earlier unanswered version into `.answered/` first so it stays for 30 days.
    */
   keepFile(folderId: string, root: string, copy: FoundCopy): ConflictRecord | null {
     const original = path.join(path.dirname(copy.file), copy.name.original);
@@ -157,9 +157,11 @@ export class ConflictStore {
     }
     const relative = path.relative(root, original).split(path.sep).join("/");
     const waiting = this.list().find((record) => record.kind === "file" && record.folderId === folderId && record.path === relative);
-    const record: ConflictRecord = waiting ?? { id: this.newId(), folderId, root, kind: "file", path: relative, savedBranch: null, winner: copy.name.winner, at: this.now().toISOString() };
+    // Keep any earlier unanswered conflict in .answered/ instead of overwriting it.
+    if (waiting) this.archive(waiting.id);
+    const record: ConflictRecord = { id: this.newId(), folderId, root, kind: "file", path: relative, savedBranch: null, winner: copy.name.winner, at: this.now().toISOString() };
     moveFile(copy.file, path.join(this.folder(record.id), SAVED));
-    writeJson(path.join(this.folder(record.id), "meta.json"), { ...record, winner: copy.name.winner, at: this.now().toISOString() });
+    writeJson(path.join(this.folder(record.id), "meta.json"), record);
     return this.get(record.id);
   }
 
@@ -190,6 +192,22 @@ export class ConflictStore {
       // Inside the workspace only: the record names a path, and a path can be written wrong.
       const inside = path.relative(record.root, target);
       if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) throw new Error("That file is not inside the workspace.");
+      // Refuse symlinks at the target or any parent segment inside the workspace so restoring never writes outside it.
+      if (fs.lstatSync(record.root).isSymbolicLink()) throw new Error("Refusing to write through a symbolic link.");
+      let cursor = record.root;
+      const parts = inside.split(path.sep);
+      for (let i = 0; i < parts.length; i += 1) {
+        cursor = path.join(cursor, parts[i]);
+        try {
+          const stat = fs.lstatSync(cursor);
+          if (stat.isSymbolicLink() || (i === parts.length - 1 && !stat.isFile())) {
+            throw new Error("Refusing to write through a symbolic link.");
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          break;
+        }
+      }
       fs.mkdirSync(path.dirname(target), { recursive: true });
       // What is there now is kept as the answered record's other side, so this choice can be taken back by hand too.
       if (fs.existsSync(target)) fs.copyFileSync(target, path.join(this.folder(id), "theirs"));

@@ -317,4 +317,28 @@ describe("sync: a repository on two machines", () => {
     expect(await rescueRepo(root, "desk")).toMatchObject({ removed: 0 });
     expect(fs.existsSync(unreadyLog)).toBe(true);
   });
+
+  it("never executes repo fsmonitor or clean/smudge filters during rescue or inHistory", async () => {
+    const root = repo();
+    const { inHistory } = await import("../../src/core/sync/git-rescue.js");
+    const marker = path.join(path.dirname(root), "pwned");
+    const hook = path.join(path.dirname(root), "run-hook.sh");
+    fs.writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\ncat\n`, { mode: 0o755 });
+    git(root, "config", "core.fsmonitor", hook);
+    git(root, "config", "filter.evil.clean", hook);
+    git(root, "config", "filter.evil.smudge", hook);
+    write(root, ".gitattributes", "*.txt filter=evil\n");
+    write(root, "notes.txt", "clean\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "with filter config");
+
+    const base = git(root, "rev-parse", "HEAD~1");
+    git(root, "checkout", "-q", base);
+    fs.writeFileSync(path.join(root, ".git", "refs", "heads", `main.${STAMP}`), `${base}\n`);
+    write(root, `notes.sync-conflict-${STAMP.replace(/^sync-conflict-/, "")}.txt`, "clean\n");
+    fs.rmSync(marker, { force: true });
+    await rescueRepo(root, "desk");
+    await inHistory(root, path.join(root, "notes.txt"), "notes.txt");
+    expect(fs.existsSync(marker)).toBe(false);
+  });
 });

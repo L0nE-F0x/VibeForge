@@ -137,31 +137,39 @@ export async function fetchSyncthing(options = {}) {
   return "fetched";
 }
 
+/**
+ * Verifies a clearsigned checksum list against `expectedKey` with gpg and returns only the signed body.
+ * @param {Buffer} sums @param {Buffer} keyText @param {string} [expectedKey] @returns {string}
+ */
+export function verifiedSums(sums, keyText, expectedKey = RELEASE_KEY) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-gpg-"));
+  try {
+    fs.chmodSync(home, 0o700);
+    const keyFile = path.join(home, "key.txt");
+    const sumsFile = path.join(home, "sums.asc");
+    const verifiedFile = path.join(home, "verified.txt");
+    fs.writeFileSync(keyFile, keyText);
+    fs.writeFileSync(sumsFile, sums);
+    execFileSync("gpg", ["--homedir", home, "--batch", "--quiet", "--import", keyFile], { stdio: "pipe" });
+    const status = execFileSync("gpg", ["--homedir", home, "--batch", "--status-fd", "1", "--output", verifiedFile, "--decrypt", sumsFile], { stdio: ["ignore", "pipe", "pipe"] }).toString();
+    if (!status.includes(`VALIDSIG ${expectedKey}`) && !new RegExp(`VALIDSIG \\S+ .* ${expectedKey}\\b`).test(status)) {
+      throw new Error("The checksum list is not signed by Syncthing's release key.");
+    }
+    return fs.readFileSync(verifiedFile, "utf8");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 /** Moves the pin to another release, from its signed checksum list. @param {string} version */
 async function bump(version) {
   if (!/^v\d+\.\d+\.\d+$/.test(version)) throw new Error("Name a Syncthing release tag, such as v2.1.8.");
   const sums = await download(`${RELEASES}/${version}/sha256sum.txt.asc`);
-  let checked = false;
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-gpg-"));
-  try {
-    fs.chmodSync(home, 0o700);
-    fs.writeFileSync(path.join(home, "key.txt"), await download("https://syncthing.net/release-key.txt"));
-    fs.writeFileSync(path.join(home, "sums.asc"), sums);
-    execFileSync("gpg", ["--homedir", home, "--batch", "--quiet", "--import", path.join(home, "key.txt")], { stdio: "pipe" });
-    const status = execFileSync("gpg", ["--homedir", home, "--batch", "--status-fd", "1", "--verify", path.join(home, "sums.asc")], { stdio: ["ignore", "pipe", "pipe"] }).toString();
-    if (!status.includes(`VALIDSIG ${RELEASE_KEY}`) && !new RegExp(`VALIDSIG \\S+ .* ${RELEASE_KEY}\\b`).test(status)) throw new Error("The checksum list is not signed by Syncthing's release key.");
-    checked = true;
-  } catch (error) {
-    const missing = /** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT";
-    if (!missing) throw error;
-    console.log("  gpg is not installed, so the checksum list's signature was not checked.");
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
-  }
+  const verifiedBody = verifiedSums(sums, await download("https://syncthing.net/release-key.txt"));
   /** @type {Pin} */
-  const pin = { version, license: "MPL-2.0", source: `https://github.com/syncthing/syncthing/tree/${version}`, builds: parseSums(sums.toString("utf8"), version) };
+  const pin = { version, license: "MPL-2.0", source: `https://github.com/syncthing/syncthing/tree/${version}`, builds: parseSums(verifiedBody, version) };
   fs.writeFileSync(PIN_FILE, `${JSON.stringify(pin, null, 2)}\n`);
-  console.log(`✓ scripts/syncthing.json now pins Syncthing ${version}${checked ? " (signature checked)" : ""}.`);
+  console.log(`✓ scripts/syncthing.json now pins Syncthing ${version} (signature checked).`);
   console.log("  Next: node scripts/fetch-syncthing.mjs && npm test, then commit scripts/syncthing.json.");
 }
 
