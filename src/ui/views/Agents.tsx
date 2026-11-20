@@ -23,10 +23,13 @@ import { forgetDraft, useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
-import { useAction, useConfirm, useDeleted, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
+import { ListBar, NoMatch, PickMark, activeFilterLabels, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
+import { matchesQuery, nameOrder, timeOf, type ListSpec } from "../list-view.js";
+import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useDropMissing, useNav, useToast, type AgentTab, type Route } from "../state.js";
 import { forget, recall, remember } from "../remember.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
+import { AGENT_CHAT_LIST, useChatList } from "./chat-list.js";
 import { useT } from "../i18n/index.js";
 
 /** Save on Ctrl+S while a form is on screen. */
@@ -131,13 +134,21 @@ function lastChat(agentId: string): string | undefined {
   return recall(AGENT_SCOPE, agentId, isAgentPlace)?.chatId;
 }
 
+type AgentFilter = "live" | "waiting" | "review" | "missing";
+type AgentSort = "name" | "recent" | "engine";
+const AGENT_LIST: ListSpec<AgentFilter, AgentSort> = { key: "agents", filters: ["live", "waiting", "review", "missing"], sorts: ["name", "recent", "engine"], defaultSort: "name" };
+
 export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }> }) {
   const t = useT();
   const { go, replace } = useNav();
+  const confirm = useConfirm();
+  const deleted = useDeleted();
+  const deletedMany = useDeletedMany();
   const agents = useAgents();
   const chats = useChats(undefined).data ?? [];
   const inbox = useInbox().data ?? [];
   const engines = useEngines().data ?? [];
+  const sessions = useLive().data ?? [];
   const [creating, setCreating] = useState(false);
   const list = agents.data ?? [];
   const selected = list.find((agent) => agent.id === route.agentId) ?? null;
@@ -155,6 +166,63 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
     if (route.agentId && selected) remember(AGENT_SCOPE, route.agentId, { tab, chatId: tab === "chats" ? chatId : lastChat(route.agentId) });
   }, [route.agentId, selected, tab, chatId]);
 
+  // ------------------------------------------------ search, filter, sort, select
+  const engineOf = (agent: Agent) => engines.find((item) => item.id === agent.engine);
+  const chatLive = (agentId: string) => chats.some((chat) => chat.agentId === agentId && chat.live);
+  const unreadOf = (agentId: string) => inbox.filter((run) => run.agentId === agentId).length;
+  // Its latest chat, else when it was last changed.
+  const activeAt = (agent: Agent) => Math.max(timeOf(agent.updatedAt), ...chats.filter((chat) => chat.agentId === agent.id).map((chat) => timeOf(chat.updatedAt)));
+  const collator = nameOrder(t.language);
+  const rules: ListRules<Agent, AgentFilter, AgentSort> = {
+    test: (filter, agent) => {
+      if (filter === "live") return chatLive(agent.id);
+      if (filter === "waiting") return wants(agent.id);
+      if (filter === "review") return unreadOf(agent.id) > 0;
+      const engine = engineOf(agent);
+      return Boolean(engine && !engine.available);
+    },
+    search: (query, agent) => matchesQuery(query, agent.name, engineOf(agent)?.label ?? agent.engine, agent.goodAt),
+    compare: (sort, a, b) => {
+      if (sort === "recent") return Number(chatLive(b.id)) - Number(chatLive(a.id)) || activeAt(b) - activeAt(a);
+      if (sort === "engine") return collator.compare(engineOf(a)?.label ?? a.engine, engineOf(b)?.label ?? b.engine) || collator.compare(a.name, b.name);
+      return collator.compare(a.name, b.name);
+    },
+  };
+  const view = useList(AGENT_LIST, list, rules, (agent) => agent.id);
+  const { selection } = view;
+  const labels: ListLabels<AgentFilter, AgentSort> = {
+    filters: { live: t("agents.filter.live"), waiting: t("list.filter.waiting"), review: t("agents.filter.review"), missing: t("agents.filter.missing") },
+    sorts: { name: t("list.sort.name"), recent: t("list.sort.recent"), engine: t("list.sort.engine") },
+    sortChips: { name: t("list.sortShort.name"), recent: t("list.sortShort.recent"), engine: t("list.sortShort.engine") },
+  };
+  const [deletePicked, deleting] = useAction(async () => {
+    const picked = selection.picked;
+    if (!picked.length) return;
+    // Deleting is undone from the toast. Only a running session asks first: stopping it can't be undone.
+    const running = picked.filter((agent) => sessions.some((session) => session.agentId === agent.id && session.runId)).length;
+    if (running) {
+      const one = picked.length === 1;
+      const ok = await confirm({
+        title: one ? t("common.deleteNamed", { name: picked[0].name }) : t.count("agents.deleteManyTitle", picked.length),
+        body: one ? t("agents.deleteRunningBody") : t.count("list.deleteLiveBody", running),
+        confirm: t("common.stopAndDelete"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    const { gone, deleted: undo, error } = await deleteEach(picked, (agent) => call("agents.delete", agent.id));
+    for (const agent of gone) forget(AGENT_SCOPE, agent.id);
+    if (selected && gone.includes(selected)) {
+      // Straight to one that is left: the list hasn't reloaded yet.
+      const left = view.shown.find((agent) => !gone.includes(agent)) ?? list.find((agent) => !gone.includes(agent));
+      go(left ? { view: "agents", ...agentPlace(left.id) } : { view: "agents" });
+    }
+    if (gone.length === 1) deleted(t("common.deletedNamed", { name: gone[0].name }), undo[0]);
+    else deletedMany(t.count("agents.deletedMany", gone.length), undo);
+    if (error) throw error;
+    selection.setSelecting(false);
+  }, t("agents.deleteFailed"));
+
   return (
     <div className="view split-list">
       <SidePanel
@@ -170,7 +238,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
             <StripItem label={t("agents.empty.action")} onClick={() => setCreating(true)}>
               <Plus size={16} />
             </StripItem>
-            {list.map((agent) => (
+            {view.ordered.map((agent) => (
               <StripItem
                 key={agent.id}
                 label={agent.name}
@@ -184,21 +252,34 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
           </>
         }
       >
-        <div className="list-scroll">
+        <ListBar
+          list={view}
+          labels={labels}
+          placeholder={t("agents.search")}
+          selectTip={t("list.selectDeleteTip")}
+          actions={
+            <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+              {t("common.delete")}
+            </Button>
+          }
+        />
+        <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           {agents.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
-          {list.map((agent) => {
-            const live = chats.some((chat) => chat.agentId === agent.id && chat.live);
-            const unread = inbox.filter((run) => run.agentId === agent.id).length;
-            const engine = engines.find((item) => item.id === agent.engine);
+          {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
+          {view.shown.map((agent) => {
+            const live = chatLive(agent.id);
+            const unread = unreadOf(agent.id);
+            const engine = engineOf(agent);
             return (
               <button
                 key={agent.id}
                 type="button"
                 className={`row${wants(agent.id) ? " needs-you" : ""}`}
-                aria-current={agent.id === selected?.id || undefined}
-                onClick={() => go({ view: "agents", ...agentPlace(agent.id) })}
+                aria-current={(!selection.selecting && agent.id === selected?.id) || undefined}
+                aria-pressed={selection.selecting ? selection.isPicked(agent.id) : undefined}
+                onClick={() => (selection.selecting ? selection.toggle(agent.id) : go({ view: "agents", ...agentPlace(agent.id) }))}
               >
-                <Avatar name={agent.name} />
+                {selection.selecting ? <PickMark picked={selection.isPicked(agent.id)} /> : <Avatar name={agent.name} />}
                 <span className="vstack grow" style={{ gap: 0 }}>
                   <span className="row-title truncate">{agent.name}</span>
                   <span className="row-sub truncate" style={engine && !engine.available ? { color: "var(--red)" } : undefined}>
@@ -419,8 +500,10 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
   const { go } = useNav();
   const confirm = useConfirm();
   const chat = chats.find((item) => item.id === chatId) ?? null;
-  const chatAttention = useChatAttention();
-  const chatWants = (id: string) => chatAttention.get(id)?.attention === "waiting";
+  const { list, labels, bar, waiting: chatWants } = useChatList(AGENT_CHAT_LIST, chats, (gone) => {
+    if (gone.some((item) => item.id === chatId)) go({ view: "agents", agentId: agent.id, tab: "chats" });
+  });
+  const { selection } = list;
   const deleted = useDeleted();
   const [remove] = useAction(async (target: ChatView) => {
     // Deleting is undone from the toast. Only a live session asks first: stopping it can't be undone.
@@ -453,7 +536,7 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
             <StripItem label={t("agents.newChat")} selected={!chat} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
               <MessageSquarePlus size={16} />
             </StripItem>
-            {chats.slice(0, 12).map((item) => (
+            {list.ordered.slice(0, 12).map((item) => (
               <StripItem key={item.id} label={item.title} selected={item.id === chat?.id} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} badge={chatWants(item.id) ? <span className="ws-state waiting in-strip" /> : undefined}>
                 <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
               </StripItem>
@@ -461,26 +544,50 @@ function ChatsTab({ agent, chats, chatId }: { agent: Agent; chats: ChatView[]; c
           </>
         }
       >
-        <div className="list-scroll">
-          <button type="button" className="row" aria-current={!chat || undefined} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
-            <MessageSquarePlus size={15} className="accent-text" />
-            <span className="row-title">{t("agents.newChat")}</span>
-          </button>
+        {bar}
+        <div className="list-scroll" onKeyDown={selection.onKeyDown}>
+          {!selection.selecting && (
+            <button type="button" className="row" aria-current={!chat || undefined} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats" })}>
+              <MessageSquarePlus size={15} className="accent-text" />
+              <span className="row-title">{t("agents.newChat")}</span>
+            </button>
+          )}
           {chats.length > 0 && <div className="list-label">{t("agents.recent")}</div>}
-          {chats.map((item) => (
-            <div key={item.id} className={`row${chatWants(item.id) ? " needs-you" : ""}`} aria-current={item.id === chat?.id || undefined} role="button" tabIndex={0} onClick={() => go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })} onKeyDown={(event) => event.key === "Enter" && go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id })}>
-              <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />
-              <span className="vstack grow" style={{ gap: 0 }}>
-                <span className="row-title truncate">{item.title}</span>
-                <span className="row-sub">
-                  <TimeAgo iso={item.updatedAt} />
-                </span>
-              </span>
-              <span className="row-actions">
-                <Button size="sm" variant="ghost" icon={Trash2} title={t("agents.deleteChat")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
-              </span>
-            </div>
-          ))}
+          {chats.length > 0 && list.shown.length === 0 && <NoMatch hasQuery={list.hasQuery} filters={activeFilterLabels(list, labels)} onClear={list.clear} />}
+          {list.shown.map((item) => {
+            const picked = selection.isPicked(item.id);
+            const open = () => (selection.selecting ? selection.toggle(item.id) : go({ view: "agents", agentId: agent.id, tab: "chats", chatId: item.id }));
+            return (
+                <div
+                  key={item.id}
+                  className={`row${chatWants(item.id) ? " needs-you" : ""}`}
+                  aria-current={(!selection.selecting && item.id === chat?.id) || undefined}
+                  aria-pressed={selection.selecting ? picked : undefined}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || (selection.selecting && event.key === " ")) {
+                      event.preventDefault();
+                      open();
+                    }
+                  }}
+                >
+                  {selection.selecting ? <PickMark picked={picked} /> : <span className={`dot ${item.live ? "running" : item.lastRun?.status ?? ""}`} />}
+                  <span className="vstack grow" style={{ gap: 0 }}>
+                    <span className="row-title truncate">{item.title}</span>
+                    <span className="row-sub">
+                      <TimeAgo iso={item.updatedAt} />
+                    </span>
+                  </span>
+                  {!selection.selecting && (
+                    <span className="row-actions">
+                      <Button size="sm" variant="ghost" icon={Trash2} title={t("agents.deleteChat")} onClick={(event) => { event.stopPropagation(); void remove(item); }} />
+                    </span>
+                  )}
+                </div>
+            );
+          })}
         </div>
       </SidePanel>
       <SessionPane

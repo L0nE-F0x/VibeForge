@@ -83,6 +83,29 @@
   border-color: var(--sel-line);
 }
 
+/* Picked while the board's Select is on. */
+.task-card[aria-pressed="true"] {
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+/* The board's search, Filter and sort, and Select, over its columns. */
+.board-tools {
+  flex: none;
+  padding: 12px 16px 0;
+}
+
+/* Select is on: a card is picked, not opened, and drags nowhere. */
+.board.picking .task-card {
+  cursor: default;
+}
+
+.task-card .task-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .task-card .title {
   font-weight: 600;
   color: var(--fg);
