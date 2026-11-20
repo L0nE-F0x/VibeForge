@@ -10,7 +10,9 @@ import type { UsageLimit } from "./usage.js";
 // already saved here. That sign-in is read fresh for each call and never refreshed, rewritten or
 // kept, so VibeForge can't race a CLI over a rotating refresh token. Muse's answer arrives from the
 // same sign-in check Meta uses, and the extra key in that answer is thrown away. When a sign-in has
-// expired, the last numbers stay up, marked with their age, until the CLI renews it.
+// expired, the last numbers stay up, marked with their age, until the CLI renews it. When a provider
+// answers that a sign-in has no active plan (such as a cancelled subscription once its paid period
+// ends), that plan is taken off the list and cleared from disk.
 
 export type PlanId = "claude" | "codex" | "grok" | "agy" | "kimi" | "muse";
 
@@ -245,15 +247,20 @@ function kimiLabel(row: Record<string, unknown>, detail: Record<string, unknown>
 function kimiWindow(label: string, value: unknown): PlanWindow | null {
   const row = record(value);
   if (!row) return null;
-  let percent = usedPercent(row.used, row.limit, row.remaining) ?? num(row.utilization, row.percent, row.usage_percent);
-  if (percent === null && num(row.used) === 0) percent = 0;
+  const cap = num(row.limit);
+  if (cap !== null && cap <= 0) return null;
+  const ratio = num(row.used_ratio, row.usedRatio);
+  let percent = usedPercent(row.used, row.limit, row.remaining) ?? (ratio !== null ? ratio * 100 : null) ?? num(row.utilization, row.percent, row.usage_percent);
+  if (percent === null && row.limit === undefined && num(row.used) === 0) percent = 0;
   if (percent === null) return null;
   const name = typeof row.name === "string" && row.name ? row.name : typeof row.title === "string" && row.title ? row.title : label;
   return { name, percent: clamp(percent), resetsAt: isoTime(row.resetTime ?? row.reset_time ?? row.reset_at ?? row.resetAt ?? row.resets_at ?? row.resetsAt) };
 }
 
-/** Kimi Code's usages: the weekly allowance and shorter windows under `limits`. */
+/** Kimi Code's usages: the weekly allowance and shorter windows under `limits` or `usages`. */
 export function parseKimi(data: Record<string, unknown>): Reading | null {
+  const membership = record(record(data.user)?.membership) ?? record(data.membership);
+  if (membership && (membership.level === "LEVEL_NONE" || membership.active === false)) return null;
   const windows: PlanWindow[] = [];
   addWindow(windows, kimiWindow("Weekly", data.usage));
   for (const item of Array.isArray(data.limits) ? data.limits : []) {
@@ -261,6 +268,12 @@ export function parseKimi(data: Record<string, unknown>): Reading | null {
     if (!row) continue;
     const detail = record(row.detail) ?? row;
     addWindow(windows, kimiWindow(kimiLabel(row, detail), detail));
+  }
+  const usages = record(data.usages);
+  if (usages) {
+    addWindow(windows, kimiWindow("5-hour", usages.limit_5h ?? usages.limit5h));
+    addWindow(windows, kimiWindow("Weekly", usages.limit_7d ?? usages.limit7d));
+    addWindow(windows, kimiWindow("Monthly", usages.limit_month_total ?? usages.monthTotal));
   }
   if (!windows.length) addWindow(windows, kimiWindow("Usage", data));
   return fromWindows(windows, (name) => name.toLowerCase().includes("hour"));
@@ -602,10 +615,57 @@ function stamp(value: string | null | undefined): number | null {
   return Number.isNaN(time) ? null : time;
 }
 
+const NO_PLAN_TEXT =
+  /\b(no[_ -]?active[_ -]?(subscriptions?|plans?|memberships?)|not[_ -]?subscribed|unable to verify your membership|memberships?\b.*\b(inactive|expired|benefits?|required)|subscriptions?\b.*\b(inactive|expired|required|ended|does not have access)|requires? a (subscription|payment method)|subscribe at\b|try kimi for coding|no_payg)\b/i;
+
+function errorText(data: Record<string, unknown> | null): string {
+  if (!data) return "";
+  const err = record(data.error);
+  const parts = [
+    data.error_description,
+    data.message,
+    data.detail,
+    data.title,
+    typeof data.error === "string" ? data.error : null,
+    err?.message,
+    err?.error_description,
+    err?.detail,
+    err?.code,
+    err?.type,
+  ];
+  return parts.filter((part): part is string => typeof part === "string" && part.length > 0).join(" ");
+}
+
+/** Whether a 2xx answer with no windows says this sign-in has no active plan, rather than an unknown format. */
+function hasNoPlan(id: PlanId, data: Record<string, unknown>): boolean {
+  if (NO_PLAN_TEXT.test(errorText(data))) return true;
+  if (id === "muse") return data.is_subs_active === false || (data.require_payment === true && data.is_subs_active !== true);
+  if (id === "kimi") {
+    const membership = record(record(data.user)?.membership) ?? record(data.membership);
+    const status = typeof membership?.status === "string" ? membership.status.toUpperCase() : "";
+    if (membership && (membership.level === "LEVEL_NONE" || membership.level === "LEVEL_FREE" || membership.level === 0 || membership.active === false || status === "EXPIRED" || status === "INACTIVE" || status === "NONE")) return true;
+    const usage = record(data.usage);
+    if (usage && num(usage.limit) !== null && (num(usage.limit) ?? 0) <= 0) return true;
+    if (Array.isArray(data.limits) && data.limits.length === 0) return true;
+    if (record(data.usages) !== null) return true;
+    return false;
+  }
+  if (id === "codex") return data.plan_type === "free" || data.plan_type === "none" || ("rate_limit" in data && data.rate_limit === null);
+  if (id === "claude") return ("five_hour" in data && data.five_hour === null) || (Array.isArray(data.limits) && data.limits.length === 0);
+  if (id === "grok") {
+    const inner = record(data.config) ?? data;
+    return inner.currentPeriod === null || inner.current_period === null || inner.active === false || inner.hasSubscription === false;
+  }
+  const inner = record(record(data.command)?.data) ?? data;
+  return Array.isArray(inner.groups) && inner.groups.length === 0;
+}
+
 interface Kept {
   reading: Reading | null;
   readAt: string | null;
   problem: PlanProblem | null;
+  /** When the provider confirmed this login has no active plan; cleared once a plan answers. */
+  noPlanAt: number | null;
   /** When the provider was last asked, answer or not. */
   askedAt: number;
 }
@@ -613,6 +673,8 @@ interface Kept {
 interface Saved {
   last: Partial<Record<PlanId, { reading: Reading; readAt: string }>>;
   history: Partial<Record<PlanId, PlanPoint[]>>;
+  /** When each signed-in CLI was last told it has no active plan, as ISO. */
+  noPlan?: Partial<Record<PlanId, string>>;
 }
 
 export interface PlanWatcherOptions {
@@ -641,7 +703,11 @@ export class PlanWatcher {
     this.providers = providers(options.home, options.env ?? process.env, options.agent ?? "VibeForge");
     const saved = readJson(this.file) as Partial<Saved> | null;
     for (const [id, last] of Object.entries(saved?.last ?? {})) {
-      if (last?.reading && last.readAt) this.kept.set(id as PlanId, { reading: last.reading, readAt: last.readAt, problem: null, askedAt: 0 });
+      if (last?.reading && last.readAt) this.kept.set(id as PlanId, { reading: last.reading, readAt: last.readAt, problem: null, noPlanAt: null, askedAt: 0 });
+    }
+    for (const [id, at] of Object.entries(saved?.noPlan ?? {})) {
+      const when = stamp(at);
+      if (when !== null && PLAN_ORDER.includes(id as PlanId)) this.kept.set(id as PlanId, { reading: null, readAt: null, problem: null, noPlanAt: when, askedAt: 0 });
     }
     this.history = saved?.history ?? {};
   }
@@ -663,6 +729,7 @@ export class PlanWatcher {
     const now = this.now();
     const shown: PlanId[] = [];
     const hidden = new Set<PlanId>();
+    const signedIn = new Set<PlanId>();
     let dirty = false;
     const include = (id: PlanId) => {
       if (!shown.includes(id)) shown.push(id);
@@ -671,42 +738,71 @@ export class PlanWatcher {
     if (network) {
       const asks = this.providers.map(async (provider) => {
         const signIn = await provider.signIn(now);
-        if (!signIn) return;
         const kept = this.kept.get(provider.id);
+        if (!signIn) {
+          if (kept || this.history[provider.id]?.length) {
+            this.kept.delete(provider.id);
+            delete this.history[provider.id];
+            dirty = true;
+          }
+          return;
+        }
+        signedIn.add(provider.id);
         if (signIn.expired) {
-          this.kept.set(provider.id, { reading: kept?.reading ?? null, readAt: kept?.readAt ?? null, problem: "signin", askedAt: kept?.askedAt ?? 0 });
+          if (kept?.noPlanAt != null) {
+            hidden.add(provider.id);
+            return;
+          }
+          this.kept.set(provider.id, { reading: kept?.reading ?? null, readAt: kept?.readAt ?? null, problem: "signin", noPlanAt: null, askedAt: kept?.askedAt ?? 0 });
           include(provider.id);
           return;
         }
-        include(provider.id);
         const age = now - (kept?.askedAt ?? 0);
-        if (age < (fresh ? FORCE_MS : FRESH_MS)) return;
-        const next = await this.ask(signIn);
-        if (provider.hideWithoutPlan && !next.reading && !kept?.reading) {
+        if (age < (fresh ? FORCE_MS : FRESH_MS)) {
+          if (kept?.noPlanAt != null || (provider.hideWithoutPlan && !kept?.reading)) hidden.add(provider.id);
+          else include(provider.id);
+          return;
+        }
+        const next = await this.ask(signIn, provider.id);
+        if (next.noPlan) {
+          const hadSaved = Boolean(kept?.reading || this.history[provider.id]?.length || kept?.noPlanAt == null);
+          this.kept.set(provider.id, { reading: null, readAt: null, problem: null, noPlanAt: kept?.noPlanAt ?? now, askedAt: now });
+          delete this.history[provider.id];
+          if (hadSaved) dirty = true;
           hidden.add(provider.id);
           return;
         }
+        if (!next.reading && (kept?.noPlanAt != null || (provider.hideWithoutPlan && !kept?.reading))) {
+          this.kept.set(provider.id, { reading: null, readAt: null, problem: null, noPlanAt: kept?.noPlanAt ?? null, askedAt: now });
+          hidden.add(provider.id);
+          return;
+        }
+        include(provider.id);
         const reading = next.reading ?? kept?.reading ?? null;
-        this.kept.set(provider.id, { reading, readAt: next.reading ? new Date(now).toISOString() : (kept?.readAt ?? null), problem: next.problem, askedAt: now });
-        if (next.reading) dirty = this.remember(provider.id, next.reading.percent, now, next.reading.limiter) || dirty;
+        const clearedNoPlan = kept?.noPlanAt != null;
+        this.kept.set(provider.id, { reading, readAt: next.reading ? new Date(now).toISOString() : (kept?.readAt ?? null), problem: next.problem, noPlanAt: null, askedAt: now });
+        if (next.reading) dirty = this.remember(provider.id, next.reading.percent, now, next.reading.limiter) || clearedNoPlan || dirty;
       });
       await Promise.all(asks);
     }
 
     // A log fills in a plan this pass did not already hear, when the log is the newer of the two.
-    // An older session line must not replace an online reading, or label itself as read just now.
+    // An older session line must not replace an online reading, or bring back a logged-out or ended plan.
     for (const entry of local) {
       if (!PLAN_ORDER.includes(entry.id as PlanId)) continue;
       const id = entry.id as PlanId;
+      if (network && !signedIn.has(id)) continue;
       const reading = codexReading(entry.limits);
       if (!reading) continue;
       const kept = this.kept.get(id);
       const logAt = stamp(entry.at);
+      if (kept?.noPlanAt != null && (logAt === null || logAt <= kept.noPlanAt)) continue;
       const keptAt = stamp(kept?.readAt);
       if (kept?.reading && (logAt === null || (keptAt !== null && logAt <= keptAt))) continue;
       const when = logAt ?? now;
-      this.kept.set(id, { reading, readAt: new Date(when).toISOString(), problem: null, askedAt: kept?.askedAt ?? 0 });
-      dirty = this.remember(id, reading.percent, when, reading.limiter) || dirty;
+      const clearedNoPlan = kept?.noPlanAt != null;
+      this.kept.set(id, { reading, readAt: new Date(when).toISOString(), problem: null, noPlanAt: null, askedAt: kept?.askedAt ?? 0 });
+      dirty = this.remember(id, reading.percent, when, reading.limiter) || clearedNoPlan || dirty;
       hidden.delete(id);
       include(id);
     }
@@ -718,17 +814,31 @@ export class PlanWatcher {
     };
   }
 
-  private async ask(signIn: SignIn): Promise<{ reading: Reading | null; problem: PlanProblem | null }> {
+  private async ask(signIn: SignIn, id: PlanId): Promise<{ reading: Reading | null; problem: PlanProblem | null; noPlan?: boolean }> {
     if (signIn.expired) return { reading: null, problem: "signin" };
     const { ask } = signIn;
     try {
       const response = await this.fetch(ask.url, { method: ask.method, headers: ask.headers, body: ask.body, signal: AbortSignal.timeout(ask.timeoutMs) });
-      if (response.status === 401 || response.status === 403) return { reading: null, problem: "signin" };
+      if (response.status === 402 || (response.status === 404 && id === "kimi")) return { reading: null, problem: null, noPlan: true };
+      if (response.status === 401) return { reading: null, problem: "signin" };
       if (response.status === 429) return { reading: null, problem: "limited" };
+      const text = await response.text().catch(() => "");
+      if (response.status === 403 || response.status === 400) {
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = record(JSON.parse(text));
+        } catch {
+          /* plain-text error */
+        }
+        if (NO_PLAN_TEXT.test(text) || (parsed && hasNoPlan(id, parsed))) return { reading: null, problem: null, noPlan: true };
+        return { reading: null, problem: response.status === 403 ? "signin" : "offline" };
+      }
       if (response.status < 200 || response.status >= 300) return { reading: null, problem: "offline" };
-      const data = record(JSON.parse(await response.text()));
+      const data = record(JSON.parse(text));
       const reading = data ? ask.parse(data) : null;
-      return reading ? { reading, problem: null } : { reading: null, problem: "unreadable" };
+      if (reading) return { reading, problem: null };
+      if (data && hasNoPlan(id, data)) return { reading: null, problem: null, noPlan: true };
+      return { reading: null, problem: "unreadable" };
     } catch (error) {
       return { reading: null, problem: error instanceof SyntaxError ? "unreadable" : "offline" };
     }
@@ -782,13 +892,16 @@ export class PlanWatcher {
 
   private save(): void {
     const last: Saved["last"] = {};
+    const noPlan: NonNullable<Saved["noPlan"]> = {};
     for (const [id, kept] of this.kept) {
       if (kept.reading && kept.readAt) last[id] = { reading: kept.reading, readAt: kept.readAt };
+      else if (kept.noPlanAt !== null) noPlan[id] = new Date(kept.noPlanAt).toISOString();
     }
+    const payload: Saved = Object.keys(noPlan).length ? { last, history: this.history, noPlan } : { last, history: this.history };
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const temp = `${this.file}.tmp`;
-      fs.writeFileSync(temp, JSON.stringify({ last, history: this.history } satisfies Saved), { mode: 0o600 });
+      fs.writeFileSync(temp, JSON.stringify(payload), { mode: 0o600 });
       fs.renameSync(temp, this.file);
     } catch {
       /* the numbers come back on the next answer */

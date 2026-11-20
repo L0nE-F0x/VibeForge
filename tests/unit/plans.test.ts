@@ -344,6 +344,138 @@ describe("plan limits", () => {
     expect(fullAt(points.map((point) => ({ ...point, percent: 50 })), 50, NOW)).toBeNull();
   });
 
+  it("removes a plan once its paid period ends or the CLI signs out, and brings it back if renewed", async () => {
+    // Kimi's managed `usages` ratios, and zero-quota / ended-membership answers.
+    const ratioKimi = parseKimi({ usages: { limit_5h: { used_ratio: 0.25, reset_time: inHours(3) }, limit_7d: { used_ratio: 0.6, reset_time: inHours(80) } } });
+    expect(ratioKimi?.windows.map((window) => [window.name, window.percent])).toEqual([
+      ["5-hour", 25],
+      ["Weekly", 60],
+    ]);
+    expect(parseKimi({ usage: { limit: "0", used: "0", remaining: "0" }, limits: [] })).toBeNull();
+    expect(parseKimi({ user: { membership: { level: "LEVEL_NONE" } }, usage: { limit: "100", used: "10" } })).toBeNull();
+
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    const museAuth = path.join(home, ".config", "muse", "auth.json");
+    const kimiCreds = path.join(home, ".kimi-code", "credentials", "kimi-code.json");
+    const codexAuth = path.join(home, ".codex", "auth.json");
+    write(museAuth, { providers: { meta: { access_token: `dca:${TOKEN}` } } });
+    write(kimiCreds, { access_token: jwt(NOW / 1000 + 2 * 3600), refresh_token: "r" });
+    write(codexAuth, { auth_mode: "chatgpt", tokens: { access_token: jwt(NOW / 1000 + 8 * 3600), account_id: "acct-1" } });
+
+    let now = NOW;
+    let museStatus = 200;
+    let museBody: Record<string, unknown> = {
+      is_subs_active: true,
+      subs_usage: { window: { used_percent: 20, window_duration_mins: 300, resets_at: NOW / 1000 + 3600 }, weekly: { used_percent: 35, resets_at: NOW / 1000 + 5 * 86_400 } },
+    };
+    let kimiStatus = 200;
+    let kimiBody: Record<string, unknown> = ANSWERS["api.kimi.com"] as Record<string, unknown>;
+    let codexStatus = 200;
+    let codexBody: Record<string, unknown> = {
+      rate_limit: { primary_window: { used_percent: 15, limit_window_seconds: 18_000, reset_at: NOW / 1000 + 3600 } },
+    };
+    let offline = false;
+
+    const fetch = async (url: string) => {
+      if (offline) throw new Error("network down");
+      const host = new URL(url).host;
+      if (host === "api.meta.ai") return { status: museStatus, text: async () => JSON.stringify(museBody) };
+      if (host === "api.kimi.com") return { status: kimiStatus, text: async () => JSON.stringify(kimiBody) };
+      return { status: codexStatus, text: async () => JSON.stringify(codexBody) };
+    };
+
+    const file = path.join(home, "plans.json");
+    const watcher = new PlanWatcher({ home, file, now: () => now, fetch, env: {} });
+    // Cancelled today, still inside the paid period: all three show and save to disk.
+    const museLocal = [{ id: "muse", limits: [{ windowMinutes: 10_080, usedPercent: 35, resetsAt: inHours(120) }], at: new Date(NOW - 600_000).toISOString() }];
+    const active = await watcher.summary({ network: true, local: museLocal });
+    expect(active.providers.map((p) => [p.id, p.percent])).toEqual([
+      ["codex", 15],
+      ["kimi", 100],
+      ["muse", 35],
+    ]);
+
+    // Muse's billing period ends: Meta flips is_subs_active to false while auth.json and the weekly session log remain.
+    now = NOW + 30 * 60_000;
+    museBody = { is_subs_active: false };
+    const afterMuse = await watcher.summary({ network: true, local: museLocal });
+    expect(afterMuse.providers.map((p) => p.id)).toEqual(["codex", "kimi"]);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).last.muse).toBeUndefined();
+
+    // Inside the 3-minute cache window, Muse stays hidden.
+    now += 30_000;
+    expect((await watcher.summary({ network: true, local: museLocal })).providers.map((p) => p.id)).toEqual(["codex", "kimi"]);
+
+    // Kimi's yearly plan ends: Kimi answers with a membership-expired 403 (or 404/402/LEVEL_NONE).
+    now += 10 * 60_000;
+    kimiStatus = 403;
+    kimiBody = { error: { message: "We're unable to verify your membership benefits at this time. Please ensure your membership is active." } };
+    const afterKimi = await watcher.summary({ network: true, local: museLocal });
+    expect(afterKimi.providers.map((p) => p.id)).toEqual(["codex"]);
+    expect(JSON.parse(fs.readFileSync(file, "utf8")).last.kimi).toBeUndefined();
+
+    // Three hours later Kimi's short-lived JWT has expired and the network blips; neither ended plan resurfaces.
+    now = NOW + 4 * 3600_000;
+    offline = true;
+    expect((await watcher.summary({ network: true, local: museLocal })).providers.map((p) => p.id)).toEqual(["codex"]);
+    offline = false;
+
+    // A restart reads plans.json and still keeps ended plans off the list, including Kimi's 404 / empty-usages answers.
+    write(kimiCreds, { access_token: jwt(now / 1000 + 3600), refresh_token: "r" });
+    kimiStatus = 404;
+    kimiBody = { message: "Usage endpoint not available. Try Kimi For Coding." };
+    const reopened = new PlanWatcher({ home, file, now: () => now, fetch, env: {} });
+    expect((await reopened.summary({ network: true, local: museLocal })).providers.map((p) => p.id)).toEqual(["codex"]);
+
+    // Signing out of Codex clears it even when an old session log still has an unexpired window.
+    fs.rmSync(codexAuth);
+    now += 5 * 60_000;
+    const codexLocal = [{ id: "codex", limits: [{ windowMinutes: 300, usedPercent: 15, resetsAt: inHours(6) }], at: new Date(NOW).toISOString() }];
+    expect((await reopened.summary({ network: true, local: codexLocal })).providers).toEqual([]);
+
+    // Re-subscribing to Kimi brings its card straight back; a zero-quota or empty-usages 200 hides it again,
+    // while an unexpected shape (`{}`) is flagged as unreadable rather than mistaken for an ended plan.
+    now += 5 * 60_000;
+    kimiStatus = 200;
+    kimiBody = { usages: { limit_5h: { used_ratio: 0.1, reset_time: inHours(10) } } };
+    const renewed = await reopened.summary({ network: true });
+    expect(renewed.providers.map((p) => [p.id, p.percent])).toEqual([["kimi", 10]]);
+
+    now += 5 * 60_000;
+    kimiBody = {};
+    expect((await reopened.summary({ network: true })).providers.find((p) => p.id === "kimi")).toMatchObject({ percent: 10, problem: "unreadable" });
+
+    now += 5 * 60_000;
+    kimiBody = { usages: {} };
+    expect((await reopened.summary({ network: true })).providers).toEqual([]);
+  });
+
+  it("hides every provider when its 200 or 402 answer reports no active subscription", async () => {
+    const home = signedInHome();
+    write(path.join(home, ".codex", "auth.json"), { auth_mode: "chatgpt", tokens: { access_token: jwt(NOW / 1000 + 3600) } });
+    write(path.join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), { access_token: TOKEN, expiry: inHours(2) });
+    write(path.join(home, ".config", "muse", "auth.json"), { providers: { meta: { access_token: `dca:${TOKEN}` } } });
+    const bodies: Record<string, { status: number; body: Record<string, unknown> }> = {
+      "api.anthropic.com": { status: 200, body: { five_hour: null, seven_day: null } },
+      "cli-chat-proxy.grok.com": { status: 200, body: { config: { currentPeriod: null } } },
+      "daily-cloudcode-pa.googleapis.com": { status: 200, body: { groups: [] } },
+      "api.kimi.com": { status: 200, body: { usage: { limit: "0", used: "0" }, limits: [] } },
+      "chatgpt.com": { status: 200, body: { plan_type: "free", rate_limit: null } },
+      "api.meta.ai": { status: 402, body: { require_payment: true } },
+    };
+    const watcher = new PlanWatcher({
+      home,
+      file: path.join(home, "plans.json"),
+      now: () => NOW,
+      fetch: async (url) => {
+        const entry = bodies[new URL(url).host];
+        return { status: entry.status, text: async () => JSON.stringify(entry.body) };
+      },
+      env: {},
+    });
+    expect((await watcher.summary({ network: true })).providers).toEqual([]);
+  });
+
   it("doesn't say a window fills after it resets, or read one window's climb as another's", () => {
     const climb = [0, 1, 2, 3].map((step) => ({ t: new Date(NOW - (3 - step) * 3600_000).toISOString(), percent: 25 + step * 5, w: "5h" }));
     // 40% now, 5% an hour: twelve hours to go, but the window resets in one.
