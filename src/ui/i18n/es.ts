@@ -813,6 +813,7 @@ export const es: Catalog = {
   "storage.scratch": "Carpetas de chats",
   "storage.keepFor": "Conservar las ejecuciones terminadas",
   "storage.keepHint": "Las ejecuciones más antiguas se quitan unas cuantas veces al día. La bandeja de revisión y la última ejecución de cada chat y tarea se conservan siempre.",
+  "storage.bigRuns": "Las ejecuciones ocupan {size} y se guardan para siempre. Guardarlas un año, o ponerles un límite abajo, libera espacio empezando por las más antiguas; la bandeja de revisión y la última ejecución de cada chat y tarea se quedan.",
   "storage.keep.forever": "Siempre",
   "storage.keep.year": "1 año",
   "storage.keep.days": "{count} días",

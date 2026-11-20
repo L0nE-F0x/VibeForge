@@ -1,11 +1,16 @@
-import { FolderOpen, Sparkles } from "lucide-react";
+import { FolderOpen, HardDrive, Sparkles } from "lucide-react";
 import { call, useQuery, useSettings } from "../api.js";
 import { useT, type Translator } from "../i18n/index.js";
 import { useAction, useToast } from "../state.js";
-import { Button, Field, Segmented, Select } from "./ui.js";
+import { Button, Field, Notice, Segmented, Select } from "./ui.js";
 
 const KEEP_DAYS = ["0", "365", "90", "30"] as const;
 const CAPS_MB = [0, 500, 1024, 5 * 1024, 10 * 1024];
+/**
+ * Runs are kept forever unless you choose otherwise, and a new default would quietly delete old
+ * runs on update. So past this much, with no limit chosen, the card says so instead.
+ */
+const BIG_RUNS = 5 * 1024 * 1024 * 1024;
 
 /** Bytes as kB, MB or GB, in the reader's language. */
 export function sizeText(bytes: number, language: string): string {
@@ -48,6 +53,11 @@ export function StorageCard() {
   return (
     <div className="card vstack" style={{ gap: 14 }}>
       <p className="faint" style={{ margin: 0 }}>{t("storage.hint")}</p>
+      {data && data.runs > BIG_RUNS && keep.days === 0 && keep.maxMb === 0 && (
+        <Notice tone="accent" icon={HardDrive}>
+          {t("storage.bigRuns", { size: sizeText(data.runs, t.language) })}
+        </Notice>
+      )}
       {data && (
         <div className="storage-bars" role="list">
           {rows.map(([label, bytes, detail]) => (

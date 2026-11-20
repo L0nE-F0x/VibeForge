@@ -813,6 +813,7 @@ export const pt: Catalog = {
   "storage.scratch": "Pastas dos chats",
   "storage.keepFor": "Manter execuções terminadas",
   "storage.keepHint": "Execuções mais antigas são removidas algumas vezes por dia. A caixa de revisão e a última execução de cada chat e tarefa são sempre mantidas.",
+  "storage.bigRuns": "As execuções ocupam {size} e são guardadas para sempre. Guardá-las por um ano, ou limitá-las abaixo, libera espaço a partir das mais antigas; a caixa de revisão e a última execução de cada chat e tarefa ficam.",
   "storage.keep.forever": "Para sempre",
   "storage.keep.year": "1 ano",
   "storage.keep.days": "{count} dias",

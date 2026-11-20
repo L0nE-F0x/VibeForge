@@ -814,6 +814,7 @@ export const fr: Catalog = {
   "storage.scratch": "Dossiers des chats",
   "storage.keepFor": "Garder les exécutions terminées",
   "storage.keepHint": "Les exécutions plus anciennes sont retirées quelques fois par jour. La boîte de relecture et la dernière exécution de chaque chat et tâche sont toujours gardées.",
+  "storage.bigRuns": "Les exécutions occupent {size} et sont gardées pour toujours. Les garder un an, ou les plafonner ci-dessous, libère de la place en commençant par les plus anciennes ; la boîte de relecture et la dernière exécution de chaque chat et tâche restent.",
   "storage.keep.forever": "Toujours",
   "storage.keep.year": "1 an",
   "storage.keep.days": "{count} jours",

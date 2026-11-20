@@ -814,6 +814,7 @@ export const zh: Catalog = {
   "storage.scratch": "聊天文件夹",
   "storage.keepFor": "保留已结束的运行",
   "storage.keepHint": "较旧的运行每天会清理几次。待审查收件箱，以及每个聊天和任务的最新一次运行始终保留。",
+  "storage.bigRuns": "运行记录占用 {size}，并且永久保留。改为保留一年，或在下方设上限，会从最旧的开始腾出空间；审阅收件箱以及每个聊天和任务的最新运行会保留。",
   "storage.keep.forever": "永久",
   "storage.keep.year": "1 年",
   "storage.keep.days": "{count} 天",

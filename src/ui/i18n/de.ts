@@ -813,6 +813,7 @@ export const de: Catalog = {
   "storage.scratch": "Chat-Ordner",
   "storage.keepFor": "Beendete Läufe behalten",
   "storage.keepHint": "Ältere Läufe werden ein paar Mal am Tag entfernt. Der Prüfeingang und der letzte Lauf jedes Chats und jeder Aufgabe bleiben immer.",
+  "storage.bigRuns": "Läufe belegen {size} und werden für immer behalten. Behältst du sie ein Jahr oder begrenzt sie unten, wird bei den ältesten Platz frei; der Prüfeingang und der letzte Lauf jedes Chats und jeder Aufgabe bleiben.",
   "storage.keep.forever": "Für immer",
   "storage.keep.year": "1 Jahr",
   "storage.keep.days": "{count} Tage",

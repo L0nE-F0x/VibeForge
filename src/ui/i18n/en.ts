@@ -826,6 +826,7 @@ export const en = {
   "storage.scratch": "Chat folders",
   "storage.keepFor": "Keep finished runs",
   "storage.keepHint": "Older runs are removed a few times a day. The review inbox and the latest run of each chat and task are always kept.",
+  "storage.bigRuns": "Runs take {size} and are kept forever. Keeping them for a year, or capping them below, frees space from the oldest; the review inbox and the latest run of each chat and task stay.",
   "storage.keep.forever": "Forever",
   "storage.keep.year": "1 year",
   "storage.keep.days": "{count} days",

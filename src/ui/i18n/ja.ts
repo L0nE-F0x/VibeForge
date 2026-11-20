@@ -814,6 +814,7 @@ export const ja: Catalog = {
   "storage.scratch": "チャットのフォルダー",
   "storage.keepFor": "終了した実行の保存期間",
   "storage.keepHint": "古い実行は 1 日に数回削除されます。レビューの受信箱と、各チャット・各タスクの最新の実行は常に残ります。",
+  "storage.bigRuns": "実行は {size} を使っており、ずっと保存されます。1 年だけ保存するか、下で上限を決めると、古いものから空きができます。レビューの受信箱と、各チャット・各タスクの最新の実行は残ります。",
   "storage.keep.forever": "無期限",
   "storage.keep.year": "1 年",
   "storage.keep.days": "{count} 日",
