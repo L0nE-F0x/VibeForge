@@ -27,10 +27,11 @@ const INTERNAL = [
   /^X: X$/,
   /^whisper-cli /,
   /^sherpa-onnx(?:-offline| worker| model|:)/,
-  // Syncthing's own trouble, said as it happened, and two checks nobody should ever trip.
+  // Syncthing's own trouble, said as it happened, and checks nobody should ever trip.
   /^Syncthing/,
   /^No free port for Syncthing/,
   /^That file is not inside the workspace\.$/,
+  /^Refusing to write through a symbolic link\.$/,
 ];
 
 function sources(dir: string): string[] {
