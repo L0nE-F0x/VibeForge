@@ -18,6 +18,7 @@ type PhoneKey = Extract<keyof typeof en, `phone.${string}`>;
 export const COMPANION_PROMPT_MAX = 8000;
 
 const BODY_MAX = 64_000;
+const PAIR_MAX = 1024;
 
 /** Speech from the phone: 16 kHz mono s16le, as long as a recording on the computer may be. */
 export const HEAR_MAX = MAX_SECONDS * BYTES_PER_SECOND;
@@ -185,8 +186,8 @@ async function readRaw(req: http.IncomingMessage, max: number, keep = max): Prom
   return Buffer.concat(chunks);
 }
 
-async function readBody(req: http.IncomingMessage): Promise<unknown> {
-  const raw = await readRaw(req, BODY_MAX);
+async function readBody(req: http.IncomingMessage, max = BODY_MAX): Promise<unknown> {
+  const raw = await readRaw(req, max);
   if (raw.length === 0) return {};
   try {
     return JSON.parse(raw.toString("utf8")) as unknown;
@@ -345,13 +346,6 @@ export function connectSources(host: string | undefined): string {
   return LOOPBACK.test((host ?? "").trim().toLowerCase()) ? "'self' http://127.0.0.1:* http://localhost:*" : "'self'";
 }
 
-/** The page, told which version of the app it came from: it loads itself again when the computer runs another. */
-function withVersion(html: Buffer, version: string | undefined): Buffer {
-  const safe = (version ?? "").replace(/[^0-9A-Za-z.+-]/g, "");
-  if (!safe) return html;
-  return Buffer.from(html.toString("utf8").replace("<head>", `<head>\n    <meta name="vibeforge-version" content="${safe}" />`));
-}
-
 /** Thrown once the server is stopping: the request gets no answer, its connection is cut. */
 class Stopping extends Error {}
 
@@ -362,6 +356,12 @@ function stillServing(served: Served): void {
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: CompanionHttpOptions, served: Served): Promise<void> {
   if (!hostAllowed(req.headers.host)) throw new CompanionHttpError("phone.error.host", 403);
+  // Funnel puts the page on the internet. Tailscale marks each request it carries (and drops a copy
+  // a client sends), so those are refused outright, the page included; Settings → Phone still says so.
+  if (req.headers["tailscale-funnel-request"] !== undefined) {
+    served.unsigned();
+    throw new CompanionHttpError("phone.error.funnel", 403);
+  }
   // Tailscale Serve names the person on the tailnet who asked; Funnel, which answers anyone on the
   // internet, doesn't. Not refused (a tagged device has no person either), but Settings → Phone says so.
   if (tailnetHost(req.headers.host) && !req.headers["tailscale-user-login"]) served.unsigned();
@@ -403,8 +403,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (page) {
     const file = pagePath(opts.root, page.name);
     if (!file) throw new CompanionHttpError("phone.error.notFound", 404);
-    const read = fs.readFileSync(file);
-    const body = page.name === "index.html" ? withVersion(read, opts.version) : read;
+    const body = fs.readFileSync(file);
     res.writeHead(200, {
       "Content-Type": page.type,
       "Content-Length": body.length,
@@ -426,7 +425,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
   if (method === "POST" && url.pathname === "/api/pair") {
-    const body = (await readBody(req)) as { token?: unknown };
+    const body = (await readBody(req, PAIR_MAX)) as { token?: unknown };
     stillServing(served);
     if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
     sendJson(res, 200, { ok: true, computer: opts.computer?.() ?? "" });
@@ -613,6 +612,11 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
       if (!res.headersSent) sendJson(res, status, { error: text, ...extra });
     });
   });
+  // Bound slow or idle connections before pairing. The longest request is a phone recording
+  // (HEAR_READ_MAX, about 6 MB): two minutes lets it through on a slow mobile link (~400 kbit/s).
+  server.requestTimeout = 120_000;
+  server.headersTimeout = 15_000;
+  server.maxConnections = 64;
   const host = opts.host ?? "127.0.0.1";
   return new Promise((resolve, reject) => {
     server.once("error", reject);

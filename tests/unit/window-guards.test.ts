@@ -1,6 +1,19 @@
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isAppPage, relaunchArgs, settleWithin } from "../../electron/guards.js";
+
+const registered = new Map<string, (...args: unknown[]) => unknown>();
+vi.mock("electron", () => ({
+  app: { getVersion: () => "0.0.0" },
+  clipboard: {},
+  dialog: {},
+  ipcMain: {
+    handle: (channel: string, fn: (...args: unknown[]) => unknown) => {
+      registered.set(channel, fn);
+    },
+  },
+  shell: {},
+}));
 
 describe("the window's own page", () => {
   const file = "/opt/Vibe Forge/dist/index.html";
@@ -62,6 +75,25 @@ describe("quitting", () => {
     const started = Date.now();
     expect(await settleWithin(new Promise(() => undefined), 50)).toBe(false);
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+describe("IPC method lookup", () => {
+  it("rejects Object.prototype property names like constructor and toString", async () => {
+    const { registerIpc } = await import("../../electron/ipc.js");
+    const file = "/opt/Vibe Forge/dist/index.html";
+    const webContents = { id: 1 };
+    const ctx = {
+      win: { webContents },
+      page: { file },
+      log: { warn: () => undefined },
+    } as unknown as Parameters<typeof registerIpc>[0];
+    registerIpc(ctx, {} as Parameters<typeof registerIpc>[1]);
+    const handler = registered.get("vf:call")!;
+    const event = { sender: webContents, senderFrame: { url: pathToFileURL(file).href } };
+    for (const method of ["constructor", "toString", "__proto__"]) {
+      await expect(handler(event, method), method).rejects.toThrow(`Unknown call ${method}`);
+    }
   });
 });
 

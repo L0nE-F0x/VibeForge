@@ -24,7 +24,7 @@ export function SyncNotices({ view }: { view: SyncView | undefined }) {
         <div key={request.id} className="sync-notice">
           <Laptop size={14} className="accent-text" />
           <span className="grow">
-            <Rich text={t("sync.request", { name: request.name || request.id.slice(0, 7) })} />
+            <Rich text={t("sync.request", { name: request.name || request.id.slice(0, 7), id: request.id.slice(0, 7) })} />
           </span>
           <Button size="sm" variant="primary" busy={accepting} onClick={() => void accept(request.id)}>
             {t("sync.accept")}

@@ -159,6 +159,7 @@ export async function summarizeFolderGit(cwd: string, timeoutMs = 2500): Promise
  */
 export async function snapshotGit(cwd: string, timeoutMs = 5000, startHead: string | null = null): Promise<string> {
   if (!cwd) return `${NOT_A_REPO}\n`;
+  const baseHead = startHead && /^[0-9a-f]{7,64}$/.test(startHead) ? startHead : null;
   const started = Date.now();
   const budget = () => Math.max(1, timeoutMs - (Date.now() - started));
   const status = await execGit(["status", "--short"], cwd, budget());
@@ -169,15 +170,15 @@ export async function snapshotGit(cwd: string, timeoutMs = 5000, startHead: stri
   if (status.code !== 0) return `git status --short\n${status.stderr.trim() || "git status failed"}\n`;
   const sections = [`git status --short\n${status.stdout.trimEnd()}`];
   let diff = await execGit(["diff", "--stat"], cwd, budget());
-  if (!diff.timedOut && !diff.stdout.trim() && startHead) {
-    const sinceStart = await execGit(["diff", "--stat", startHead], cwd, budget());
+  if (!diff.timedOut && !diff.stdout.trim() && baseHead) {
+    const sinceStart = await execGit(["diff", "--stat", baseHead], cwd, budget());
     if (sinceStart.timedOut) return `${sections.join("\n\n")}\n\ngit timed out\n`;
     if (sinceStart.code === 0) diff = sinceStart;
   }
   if (diff.timedOut) return `${sections.join("\n\n")}\n\ngit timed out\n`;
   sections.push(`git diff --stat\n${diff.stdout.trimEnd()}`);
-  if (startHead) {
-    const log = await execGit(["log", "--oneline", "--no-decorate", `${startHead}..HEAD`], cwd, budget());
+  if (baseHead) {
+    const log = await execGit(["log", "--oneline", "--no-decorate", `${baseHead}..HEAD`], cwd, budget());
     if (!log.timedOut && log.code === 0 && log.stdout.trim()) {
       sections.push(`commits since the run started\n${log.stdout.trimEnd()}`);
     }
@@ -197,10 +198,11 @@ const MAX_NEW_FILES = 200;
  */
 export async function diffSince(cwd: string, startHead: string | null, timeoutMs = 8000): Promise<string> {
   if (!cwd || !(await isGitRepo(cwd, Math.min(3000, Math.max(1, timeoutMs))))) return "";
+  const baseHead = startHead && /^[0-9a-f]{7,64}$/.test(startHead) ? startHead : null;
   const started = Date.now();
   const budget = () => Math.max(1, timeoutMs - (Date.now() - started));
   const root = (await topLevel(cwd, budget())) ?? cwd;
-  const tracked = await trackedDiff(root, startHead, budget);
+  const tracked = await trackedDiff(root, baseHead, budget);
   if (tracked.includes("# saved diff truncated") || tracked.length >= MAX_PATCH) return capPatch(tracked);
   const created = await newFileDiffs(root, budget, MAX_PATCH - tracked.length);
   return capPatch(joinBlocks(tracked, created));

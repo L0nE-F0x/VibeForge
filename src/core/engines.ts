@@ -244,11 +244,19 @@ export function resumeArgsFromTranscript(row: EngineRow, transcript: string): st
   const name = path.basename(row.bin).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   // "claude --resume <id>", "codex resume <id>", "copilot --resume=<id>",
   // "crush --session <id>", "agy --conversation <id>".
-  const pattern = new RegExp(`\\b${name}\\s+(--resume|resume|--session|--conversation)(?:\\s+|=)([0-9A-Za-z][\\w-]{7,})`, "g");
-  const matches = [...transcript.slice(-20_000).matchAll(pattern)];
-  const last = matches[matches.length - 1];
-  if (!last) return null;
-  return last[0].includes(`${last[1]}=`) ? [`${last[1]}=${last[2]}`] : [last[1], last[2]];
+  // Match only near the end (exit banner), anchored at the start of a line so quoted prose isn't treated as a session id.
+  const lines = transcript
+    .slice(-20_000)
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .slice(-15);
+  const pattern = new RegExp(`^\\s*(?:(?:[Tt]o continue(?: this session)?,?\\s+run|[Rr]esume(?: this session)?\\s+with:?)\\s+)?${name}\\s+(--resume|resume|--session|--conversation)(?:\\s+|=)([0-9A-Za-z][\\w-]{7,})(?:\\s|$)`);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const match = pattern.exec(lines[i]);
+    if (!match) continue;
+    return match[0].includes(`${match[1]}=`) ? [`${match[1]}=${match[2]}`] : [match[1], match[2]];
+  }
+  return null;
 }
 
 /** Codex's own config.toml, if it sets `developer_instructions` (which `-c` would replace). */

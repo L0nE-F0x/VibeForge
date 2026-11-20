@@ -21,8 +21,8 @@ interface GitRun {
 
 function git(args: readonly string[], cwd: string, input?: string): Promise<GitRun> {
   return new Promise((resolve) => {
-    // No hooks: this runs on its own, between two machines, where a hook's author never expected it.
-    const child = spawn("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
+    // No hooks, fsmonitor, or pathspec globbing: this runs on repo data from another machine.
+    const child = spawn("git", ["--no-pager", "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
       cwd,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -147,9 +147,62 @@ async function isCommit(root: string, sha: string): Promise<boolean> {
   return SHA.test(sha) && (await git(["cat-file", "-t", sha], root)).stdout.trim() === "commit";
 }
 
+async function reflogTargets(file: string): Promise<Set<string>> {
+  const seen = new Set<string>();
+  try {
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      const sha = line.split(" ")[1] ?? "";
+      if (SHA.test(sha)) seen.add(sha);
+    }
+  } catch {
+    /* missing reflog */
+  }
+  return seen;
+}
+
+/**
+ * Re-stores lost stash entries from a conflicting `logs/refs/stash` copy before removing it.
+ * Returns false if a referenced commit isn't local yet so the copy stays for a later retry.
+ */
+async function rescueStashLog(root: string, gitDir: string, file: string, machine: string): Promise<boolean> {
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return true;
+  }
+  const existing = await reflogTargets(path.join(gitDir, "logs", "refs", "stash"));
+  const top = await resolveRef(root, "refs/stash");
+  if (top) existing.add(top);
+  for (const line of text.split("\n")) {
+    const match = /^[0-9a-f]{40,64} ([0-9a-f]{40,64}) [^\t]*(?:\t(.*))?$/.exec(line);
+    if (!match) continue;
+    const sha = match[1];
+    if (existing.has(sha)) continue;
+    if (!(await isCommit(root, sha))) return false;
+    const message = match[2]?.trim() || `stash from ${machine || "other machine"}`;
+    if ((await git(["stash", "store", "-m", message, sha], root)).code !== 0) return false;
+    existing.add(sha);
+  }
+  return true;
+}
+
 async function resolveRef(root: string, ref: string): Promise<string | null> {
   const run = await git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], root);
   return run.code === 0 ? run.stdout.trim() : null;
+}
+
+type RefState = { kind: "missing" } | { kind: "commit"; sha: string } | { kind: "unready" };
+
+/** Distinguishes a ref whose object has not synced yet from one genuinely absent. */
+async function refState(root: string, ref: string): Promise<RefState> {
+  const commit = await resolveRef(root, ref);
+  if (commit) return { kind: "commit", sha: commit };
+  const raw = await git(["rev-parse", "--verify", "--quiet", ref], root);
+  if (raw.code === 0 || (ref.startsWith("refs/") && fs.existsSync(path.join(root, ".git", ref)))) {
+    return { kind: "unready" };
+  }
+  return { kind: "missing" };
 }
 
 async function isAncestor(root: string, older: string, newer: string): Promise<boolean> {
@@ -161,8 +214,8 @@ async function freeBranch(root: string, wanted: string, sha: string): Promise<st
   for (let n = 1; n <= 50; n += 1) {
     const name = n === 1 ? wanted : `${wanted}-${n}`;
     if ((await git(["check-ref-format", "--branch", name], root)).code !== 0) return null;
-    const at = await resolveRef(root, `refs/heads/${name}`);
-    if (!at || at === sha) return name;
+    const state = await refState(root, `refs/heads/${name}`);
+    if (state.kind === "missing" || (state.kind === "commit" && state.sha === sha)) return name;
   }
   return null;
 }
@@ -203,13 +256,16 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
   const keep = async (ref: string, sha: string): Promise<boolean> => {
     // Not a commit this repository has: nothing to keep.
     if (!(await isCommit(root, sha))) return true;
-    const current = await resolveRef(root, ref);
-    if (!current) {
+    const state = await refState(root, ref);
+    // The ref file already points at an object still transferring: leave it and keep the copy for retry.
+    if (state.kind === "unready") return false;
+    if (state.kind === "missing") {
       // The branch exists only here: put it back under its own name.
       if ((await git(["update-ref", ref, sha], root)).code !== 0) return false;
       candidates.add(sha);
       return true;
     }
+    const current = state.sha;
     if (current === sha || (await isAncestor(root, sha, current))) return true;
     // A machine name that makes no branch name still gets its commits kept.
     const saved = (await freeBranch(root, `${branchBase(ref)}-from-${machine}`, sha)) ?? (await freeBranch(root, `${branchBase(ref)}-from-other-machine`, sha));
@@ -241,6 +297,8 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
         const found = /^([0-9a-f]{40,64}) (refs\/\S+)$/.exec(line);
         if (found && !(await keep(found[2], found[1]))) stay.add(copy.file);
       }
+    } else if (copy.of === "logs/refs/stash") {
+      if (!(await rescueStashLog(root, gitDir, copy.file, machine))) stay.add(copy.file);
     }
   }
 
@@ -317,7 +375,7 @@ async function settle(root: string, commit: string): Promise<string[]> {
   }
   const work = new Map<string, string>();
   if (present.length) {
-    const hashed = await git(["hash-object", "--stdin-paths"], root, `${present.join("\n")}\n`);
+    const hashed = await git(["hash-object", "--no-filters", "--stdin-paths"], root, `${present.join("\n")}\n`);
     const ids = hashed.stdout.trim().split("\n");
     if (hashed.code === 0 && ids.length === present.length) {
       for (const [index, file] of present.entries()) work.set(file, ids[index]);
@@ -347,7 +405,7 @@ async function settle(root: string, commit: string): Promise<string[]> {
  */
 export async function inHistory(root: string, file: string, relative: string): Promise<boolean> {
   if (repoKind(root) !== "repo") return false;
-  const hashed = await git(["hash-object", "--", file], root);
+  const hashed = await git(["hash-object", "--no-filters", "--", file], root);
   const blob = hashed.stdout.trim();
   if (hashed.code !== 0 || !SHA.test(blob)) return false;
   const found = await git(["log", "--all", "-1", "--format=%H", `--find-object=${blob}`, "--", relative], root);

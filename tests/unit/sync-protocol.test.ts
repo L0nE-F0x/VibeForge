@@ -113,7 +113,7 @@ describe("sync: folders", () => {
 
   it("keeps heavy folders, conflict copies and this machine's git bookkeeping out", () => {
     const full = ignoreLines({ filesOnly: false });
-    expect(full).toEqual(["(?d)node_modules", "(?d)target", "(?d).venv", "*.sync-conflict-*", ".git/worktrees", ".git/**/*.lock", ".git/gc.pid"]);
+    expect(full).toEqual(["(?d)node_modules", "(?d)target", "(?d).venv", "*.sync-conflict-*", ".git/worktrees", ".git/*.lock", ".git/**/*.lock", ".git/gc.pid"]);
     const files = ignoreLines({ filesOnly: true });
     expect(files).toContain("(?d).git");
     expect(files).not.toContain(".git/worktrees");
@@ -141,7 +141,10 @@ describe("sync: folders", () => {
     expect(conflictName("index.sync-conflict-20261117-204240-MTOM47S")).toEqual({ original: "index", stamp: "20261117-204240", winner: "MTOM47S" });
     expect(conflictName("a.b.sync-conflict-20261117-204240-MTOM47S.tar")?.original).toBe("a.b.tar");
     expect(conflictName(".env.sync-conflict-20261117-204240-MTOM47S")?.original).toBe(".env");
-    for (const other of ["notes.md", "notes.sync-conflict.md", ".sync-conflict-20261117-204240-MTOM47S", "x.sync-conflict-2026-204240-MTOM47S.md", "x.sync-conflict-20261117-204240-mtom47s.md"]) expect(conflictName(other), other).toBeNull();
+    expect(conflictName(".sync-conflict-20261117-204452-MTOM47S.env")).toEqual({ original: ".env", stamp: "20261117-204452", winner: "MTOM47S" });
+    expect(conflictName(".sync-conflict-20261117-204452-MTOM47S.gitignore")?.original).toBe(".gitignore");
+    expect(conflictName(".sync-conflict-20261117-204452-MTOM47S.envrc")?.original).toBe(".envrc");
+    for (const other of ["notes.md", "notes.sync-conflict.md", ".sync-conflict-20261117-204240-MTOM47S", ".sync-conflict-20261117-204240-MTOM47S.", "x.sync-conflict-2026-204240-MTOM47S.md", "x.sync-conflict-20261117-204240-mtom47s.md"]) expect(conflictName(other), other).toBeNull();
   });
 });
 

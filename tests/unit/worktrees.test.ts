@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, lockCopy, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, leftInCopy, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -57,6 +57,19 @@ function indexState(repo: string): string {
 }
 
 describe("applying a task's copy", () => {
+  it("names the files git ignores that the agent left in its copy, but not what builds and CLIs make", async () => {
+    const { copy } = await repoWithCopy({ ".gitignore": "notes/\n*.local\nnode_modules/\ndist/\n.claude/\n*.log\n", "a.txt": "a\n" });
+    expect(await leftInCopy(copy)).toEqual([]);
+    write(copy.path, "a.txt", "changed\n");
+    write(copy.path, "notes/plan.md", "the plan\n");
+    write(copy.path, "config.local", "secret=1\n");
+    write(copy.path, "node_modules/x/index.js", "x\n");
+    write(copy.path, "dist/app.js", "built\n");
+    write(copy.path, ".claude/settings.local.json", "{}\n");
+    write(copy.path, "debug.log", "noise\n");
+    expect((await leftInCopy(copy)).sort()).toEqual(["config.local", "notes/"]);
+  });
+
   it("merges into files with uncommitted edits, and leaves the index as it was", async () => {
     const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES, "s.txt": "staged\n" });
     // The agent changes a line, committing it.
@@ -229,6 +242,21 @@ describe("applying a task's copy", () => {
     await expect(applyToWorkspace(copy, patch)).rejects.toThrow(/^The changes don't apply to the workspace/);
   });
 
+  it("reads a copy's patch through a throwaway index without staging files in the live copy", async () => {
+    const { copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("one", "ONE"));
+    write(copy.path, "scratch.tmp", "untracked\n");
+
+    const patch = await copyPatch(copy, owner);
+    expect(patch).toContain("+ONE");
+    expect(patch).toContain("b/scratch.tmp");
+    expect(git(copy.path, "diff", "--cached", "--name-only").trim()).toBe("");
+    expect(git(copy.path, "status", "--porcelain")).toBe(" M a.txt\n?? scratch.tmp\n");
+    expect(hasStagedTree(copy.path)).toBe(true);
+    await removeCopy(copy, owner);
+    expect(hasStagedTree(copy.path)).toBe(false);
+  });
+
   it("brings text in other encodings across byte for byte", async () => {
     const latin1 = (text: string) => Buffer.from(text, "latin1");
     const { repo, copy, owner } = await repoWithCopy({ "fr.properties": latin1("titre=Café\nfin=oui\n") });
@@ -349,6 +377,23 @@ describe("making a task's copy", () => {
     await createCopy(repo, path.join(dataRoot, "worktrees", "task-3"), copyBranch("task-3"));
     expect(worktrees(repo)).not.toContain(copy.path);
     expect(worktrees(repo)).toContain("locked mine, hands off");
+  });
+
+  it("reports exact filenames from diff-tree and quoted patch headers when names contain ' b/' or quotes", async () => {
+    const { copy, owner } = await repoWithCopy({ "a.txt": LINES });
+    write(copy.path, "dir b/weird.txt", "from copy\n");
+    write(copy.path, 'quote "name".txt', "quoted\n");
+    const patch = await copyPatch(copy, owner);
+    const applied = await applyToWorkspace(copy, patch);
+    expect(applied.conflicts).toEqual([]);
+    expect(applied.files).toEqual(["dir b/weird.txt", 'quote "name".txt']);
+    const quotedPatch = [
+      'diff --git "a/dir b/file \\"one\\".txt" "b/dir b/file \\"one\\".txt"',
+      "--- a/x",
+      "+++ b/y",
+      "diff --git a/plain b/keep.txt b/plain b/keep.txt",
+    ].join("\n");
+    expect(patchFiles(quotedPatch)).toEqual(['dir b/file "one".txt', "plain b/keep.txt"]);
   });
 });
 

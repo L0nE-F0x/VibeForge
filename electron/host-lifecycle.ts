@@ -46,6 +46,7 @@ export function deskHost(
     send: (ptyId, text, enter) => supervisor.send(ptyId, text, enter),
     write: (ptyId, data) => supervisor.write(ptyId, data),
     screen: (ptyId) => supervisor.screen(ptyId),
+    foreground: (ptyId) => supervisor.foreground(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),

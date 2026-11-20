@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, Menu, nativeImage } from "electron";
+import { app, Menu, nativeImage, powerMonitor } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
@@ -251,11 +251,13 @@ if (!app.requestSingleInstanceLock()) {
     ctx.win?.on("focus", () => tray.refreshHost());
     const timers = new Disposables();
     startSchedules(ctx, timers);
+    const onResume = () => void ctx.service?.tick().catch(() => undefined);
+    powerMonitor.on("resume", onResume);
     updater.start();
     // Only when Settings have it on; until then nothing is started and nothing listens.
     void sync.apply();
     // Stopped in this order at quit.
-    timers.add(() => updater.stop(), stopThemeWatch, stopConfigWatch, stopControl, stopTrayWatch);
+    timers.add(() => powerMonitor.removeListener("resume", onResume), () => updater.stop(), stopThemeWatch, stopConfigWatch, stopControl, stopTrayWatch);
     app.once("will-quit", () => timers.dispose());
   }).catch((error: unknown) => quit.startFailed(error));
 

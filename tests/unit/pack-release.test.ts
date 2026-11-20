@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchSyncthing, mark, parseSums, pinned, present, RELEASE_KEY, sourceNote } from "../../scripts/fetch-syncthing.mjs";
+import { fetchSyncthing, mark, parseSums, pinned, present, RELEASE_KEY, sourceNote, verifiedSums } from "../../scripts/fetch-syncthing.mjs";
 import { APP_FILES, ENTRIES, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
 
 // scripts/pack-release.mjs packs a list of files, not the whole checkout. These keep the list in
@@ -137,6 +137,39 @@ describe("the Syncthing a copy of VibeForge carries", () => {
     expect(present(dir, { ...pin, version: "v0.0.1" }, "x64")).toBe(false);
     expect(await fetchSyncthing({ dir, arch: "x64" })).toBe("present");
     await expect(fetchSyncthing({ dir, arch: "riscv64" })).rejects.toThrow(/not pinned for riscv64/);
+  });
+
+  it("extracts only the gpg-verified body from a clearsigned checksum file and rejects wrong keys", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const os = await import("node:os");
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-gpg-test-"));
+    fs.chmodSync(home, 0o700);
+    const batch = path.join(home, "gen.batch");
+    fs.writeFileSync(batch, "%no-protection\nKey-Type: eddsa\nKey-Curve: ed25519\nName-Real: Test Signer\nName-Email: test@example.com\n%commit\n");
+    execFileSync("gpg", ["--homedir", home, "--batch", "--gen-key", batch], { stdio: "pipe" });
+    const fpr = execFileSync("gpg", ["--homedir", home, "--batch", "--with-colons", "--list-keys"], { stdio: "pipe" })
+      .toString("utf8")
+      .split("\n")
+      .find((line) => line.startsWith("fpr:"))!
+      .split(":")[9];
+    const pubKey = execFileSync("gpg", ["--homedir", home, "--batch", "--armor", "--export"], { stdio: "pipe" });
+    const realBody = `${"a".repeat(64)}  syncthing-linux-amd64-v9.9.9.tar.gz\n${"b".repeat(64)}  syncthing-linux-arm64-v9.9.9.tar.gz\n`;
+    const bodyFile = path.join(home, "body.txt");
+    fs.writeFileSync(bodyFile, realBody);
+    const signed = execFileSync("gpg", ["--homedir", home, "--batch", "--clearsign", "--output", "-", bodyFile], { stdio: "pipe" }).toString("utf8");
+    const smuggled = [
+      `${"f".repeat(64)}  syncthing-linux-amd64-v9.9.9.tar.gz`,
+      signed,
+      `${"e".repeat(64)}  syncthing-linux-arm64-v9.9.9.tar.gz`,
+    ].join("\n");
+
+    const verified = verifiedSums(Buffer.from(smuggled, "utf8"), pubKey, fpr);
+    expect(parseSums(verified, "v9.9.9")).toEqual({
+      x64: { file: "syncthing-linux-amd64-v9.9.9.tar.gz", sha256: "a".repeat(64) },
+      arm64: { file: "syncthing-linux-arm64-v9.9.9.tar.gz", sha256: "b".repeat(64) },
+    });
+    expect(() => verifiedSums(Buffer.from(smuggled, "utf8"), pubKey, RELEASE_KEY)).toThrow(/not signed/);
+    fs.rmSync(home, { recursive: true, force: true });
   });
 });
 

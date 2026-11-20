@@ -122,8 +122,8 @@ export class Store {
 
   // ---------------------------------------------------------------- agents, skills, routines & tasks (store/library.ts)
 
-  uniqueId(dir: string, base: string, extension: string): string {
-    return this.library.uniqueId(dir, base, extension);
+  uniqueId(dir: string, base: string, extension: string, inUse?: (id: string) => boolean): string {
+    return this.library.uniqueId(dir, base, extension, inUse);
   }
 
   listAgents(): Agent[] {

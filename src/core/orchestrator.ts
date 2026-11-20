@@ -16,6 +16,8 @@ import {
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
+  isApprovalPrompt,
+  isLoopbackUrl,
   isDestructiveStepAction,
   isSafeShellCommand,
   keySequenceFor,
@@ -510,65 +512,73 @@ function jsonIn(text: string): unknown {
   }
 }
 
+/** Maximum steps allowed in a single planner answer so a runaway plan stays bounded. */
+export const MAX_PLAN_STEPS = 20;
+
 function asPlan(value: unknown): RawPlan | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (typeof record.say !== "string" && !Array.isArray(record.steps)) return null;
-  const steps = Array.isArray(record.steps) ? record.steps : [];
+  const rawSteps = Array.isArray(record.steps) ? record.steps : [];
+  const mapped = rawSteps.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const step = item as Record<string, unknown>;
+    const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
+    const list = (key: string) =>
+      Array.isArray(step[key])
+        ? (step[key] as unknown[])
+            .filter((v): v is string => typeof v === "string")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : undefined;
+    const flag = (key: string) => step[key] === true;
+    const action = field("action");
+    const name = field("name");
+    const description = field("description");
+    const schedule = field("schedule");
+    const agent = field("agent");
+    const task = field("task");
+    const status = field("status");
+    const places = list("places");
+    const skills = list("skills");
+    const agents = list("agents");
+    const options = field("options");
+    return [
+      {
+        kind: field("kind") ?? "",
+        engine: field("engine"),
+        workspace: field("workspace"),
+        branch: field("branch"),
+        prompt: field("prompt"),
+        target: field("target"),
+        folder: field("folder"),
+        git: flag("git"),
+        model: field("model"),
+        effort: field("effort"),
+        inPlace: flag("inPlace"),
+        after: flag("after"),
+        ...(action ? { action } : {}),
+        ...(name ? { name } : {}),
+        ...(description ? { description } : {}),
+        ...(schedule ? { schedule } : {}),
+        ...(agent ? { agent } : {}),
+        ...(task ? { task } : {}),
+        ...(status ? { status } : {}),
+        ...(places?.length ? { places } : {}),
+        ...(skills?.length ? { skills } : {}),
+        ...(agents?.length ? { agents } : {}),
+        ...(options ? { options } : {}),
+      },
+    ];
+  });
+  const trimmed = mapped.length > MAX_PLAN_STEPS;
+  const steps = trimmed ? mapped.slice(0, MAX_PLAN_STEPS) : mapped;
+  const baseSay = typeof record.say === "string" ? record.say.trim() : "";
+  const trimNote = `Trimmed to the first ${MAX_PLAN_STEPS} steps.`;
   return {
-    say: typeof record.say === "string" ? record.say.trim() : "",
+    say: trimmed ? (baseSay ? `${baseSay} (${trimNote})` : trimNote) : baseSay,
     ...(record.hangup === true ? { hangup: true } : {}),
-    steps: steps.flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const step = item as Record<string, unknown>;
-      const field = (key: string) => (typeof step[key] === "string" ? (step[key] as string).trim() : undefined);
-      const list = (key: string) =>
-        Array.isArray(step[key])
-          ? (step[key] as unknown[])
-              .filter((v): v is string => typeof v === "string")
-              .map((v) => v.trim())
-              .filter(Boolean)
-          : undefined;
-      const flag = (key: string) => step[key] === true;
-      const action = field("action");
-      const name = field("name");
-      const description = field("description");
-      const schedule = field("schedule");
-      const agent = field("agent");
-      const task = field("task");
-      const status = field("status");
-      const places = list("places");
-      const skills = list("skills");
-      const agents = list("agents");
-      const options = field("options");
-      return [
-        {
-          kind: field("kind") ?? "",
-          engine: field("engine"),
-          workspace: field("workspace"),
-          branch: field("branch"),
-          prompt: field("prompt"),
-          target: field("target"),
-          folder: field("folder"),
-          git: flag("git"),
-          model: field("model"),
-          effort: field("effort"),
-          inPlace: flag("inPlace"),
-          after: flag("after"),
-          ...(action ? { action } : {}),
-          ...(name ? { name } : {}),
-          ...(description ? { description } : {}),
-          ...(schedule ? { schedule } : {}),
-          ...(agent ? { agent } : {}),
-          ...(task ? { task } : {}),
-          ...(status ? { status } : {}),
-          ...(places?.length ? { places } : {}),
-          ...(skills?.length ? { skills } : {}),
-          ...(agents?.length ? { agents } : {}),
-          ...(options ? { options } : {}),
-        },
-      ];
-    }),
+    steps,
   };
 }
 
@@ -1459,8 +1469,25 @@ export function safeInCall(step: OrchestratorStep, context: PlanContext | null =
 export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
   if (NEEDS_GO.includes(step.kind)) return true;
   if (isDestructiveStepAction(step.kind, step.action)) return true;
-  if (step.kind === "key") return Boolean(keySequenceFor(step.prompt)?.interrupts);
+  if (step.kind === "tell") return step.prompt.trimStart().startsWith("!");
+  if (step.kind === "key") {
+    const action = keySequenceFor(step.prompt);
+    if (!action) return false;
+    if (action.interrupts) return true;
+    const target = context?.running.find((item) => item.id === step.target);
+    // Escape interrupts a live turn in Claude Code and Codex.
+    if (action.label === "Escape") return Boolean(target?.working);
+    const approves = action.label === "Yes" || action.label === "Enter" || /^Option [1-9]$/.test(action.label);
+    // Chained approval keys can't see the prompt they'll answer yet, so hold them for Go too.
+    return approves && (Boolean(step.after) || Boolean(target?.waiting && isApprovalPrompt(target.waiting)));
+  }
   if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
+  if (step.kind === "workbench") {
+    const action = parseWorkbenchAction(step);
+    // A page on another site could carry what the planner was shown in its address; one on this
+    // computer (a dev server) opens at once.
+    return action?.op === "browser-open" && !isLoopbackUrl(action.url);
+  }
   if (step.kind === "settings") {
     const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
     if (!action) return false;
@@ -1468,8 +1495,20 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
     if (action.op === "voice-model" || action.op === "voice-speaker") return Boolean(action.downloadId);
     if (action.op === "viby") return action.mode === "go";
     if (action.op === "app-patch") {
-      const agentTalk = action.patch.agentTalk as { handOff?: string } | undefined;
-      return Boolean(action.networkOn) || "defaultShell" in action.patch || agentTalk?.handOff === "go";
+      const agentTalk = action.patch.agentTalk as { handOff?: string; leadApplies?: boolean } | undefined;
+      const keepRuns = action.patch.keepRuns as { days?: number; maxMb?: number } | undefined;
+      const curKeep = context?.settings?.app.keepRuns;
+      // 0 means keep forever / unlimited, so moving from 0 or missing to any positive cap shrinks retention.
+      const shrinks = (next: number | undefined, prev: number | undefined) =>
+        typeof next === "number" && next > 0 && (prev === undefined || prev === 0 || next < prev);
+      return (
+        Boolean(action.networkOn) ||
+        "defaultShell" in action.patch ||
+        agentTalk?.handOff === "go" ||
+        agentTalk?.leadApplies === true ||
+        shrinks(keepRuns?.days, curKeep?.days) ||
+        shrinks(keepRuns?.maxMb, curKeep?.maxMb)
+      );
     }
   }
   return false;

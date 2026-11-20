@@ -149,6 +149,8 @@ export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, tim
 
 /** How long a planner has to end after SIGTERM before its whole process group is killed. */
 const KILL_GRACE_MS = 3000;
+/** Cap buffered planner stdout at 4 MB so runaway output cannot exhaust memory. */
+const MAX_BRAIN_STDOUT = 4 * 1024 * 1024;
 
 /**
  * The environment a planner runs in: VibeForge's own, less what is VibeForge's or Electron's
@@ -213,7 +215,9 @@ export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, tim
     }, timeoutMs);
     if (signal.aborted) stop();
     else signal.addEventListener("abort", stop, { once: true });
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      if (stdout.length < MAX_BRAIN_STDOUT) stdout += chunk.slice(0, MAX_BRAIN_STDOUT - stdout.length);
+    });
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
       stderr += error.message;
@@ -1259,7 +1263,7 @@ export class OrchestratorDesk {
       return;
     }
     if (step.kind === "key") {
-      if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
+      if (!this.core.isLive(step.target) || !(await this.core.refreshShellForeground(step.target))) throw new Error("That CLI isn't running any more.");
       const session = this.core.live.get(step.target);
       const screen = this.core.options.host.screen ? await this.core.options.host.screen(step.target).catch(() => "") : "";
       const action = keySequenceFor(step.prompt, screen);
@@ -1331,8 +1335,9 @@ export class OrchestratorDesk {
     }
     if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "tell") {
-      // Looked at again now: a pane whose CLI has quit since the plan was made is a bare shell,
-      // and the message would run there as a command.
+      // Looked at again now: a pane whose CLI has quit since the plan or last 1 s poll is a bare
+      // shell, and the message would run there as a command.
+      if (!(await this.core.refreshShellForeground(step.target))) throw new Error("That CLI isn't running any more.");
       const session = this.core.live.get(step.target);
       const to = session && isCodingCli(session) ? this.messages.list().find((item) => item.ptyId === step.target) : undefined;
       if (!to) throw new Error("That CLI isn't running any more.");
@@ -1701,9 +1706,9 @@ export class OrchestratorDesk {
       const workspace = step.workspaceId ? this.core.workspaceById(step.workspaceId) : null;
       const opts = parseOptions(step.options);
       const explicitIsolated = opts.bool("isolated");
-      // In its own copy where the board would make one: a git workspace with a commit to copy.
+      // parseOptions().bool() returns undefined when omitted, so check undefined to match the board default.
       const isolated =
-        explicitIsolated !== null
+        explicitIsolated !== undefined
           ? explicitIsolated
           : Boolean(workspace) && (await isGitRepo(workspace?.path ?? "").catch(() => false)) && (await hasCommit(workspace?.path ?? ""));
       const shareCheckout = opts.bool("shareCheckout") ?? false;
@@ -2335,9 +2340,9 @@ export class OrchestratorDesk {
 
       const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
       if (wantedFile) {
-        const candidate = path.resolve(ws.path, wantedFile);
-        if (isInside(ws.path, candidate) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-          const content = fs.readFileSync(candidate, "utf8").slice(0, 8000);
+        const safeFile = realInside(ws.path, path.resolve(ws.path, wantedFile));
+        if (safeFile && fs.statSync(safeFile).isFile()) {
+          const content = fs.readFileSync(safeFile, "utf8").slice(0, 8000);
           parts.push(`File ${wantedFile}:\n${content}`);
         }
       }
@@ -2754,6 +2759,17 @@ function expandHome(folder: string): string {
 function isInside(parent: string, child: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/** Resolve symlinks on both paths so a symlink inside `parent` cannot escape outside it. */
+function realInside(parent: string, child: string): string | null {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realChild = fs.realpathSync(child);
+    return isInside(realParent, realChild) ? realChild : null;
+  } catch {
+    return null;
+  }
 }
 
 function oneLine(text: string, max: number): string {

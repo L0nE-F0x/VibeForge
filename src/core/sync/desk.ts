@@ -5,8 +5,8 @@ import { slugify } from "../slug.js";
 import type { LiveSession, Workspace } from "../types.js";
 import { ConflictStore, copiesIn, walkCopies, type ConflictRecord, type FoundCopy } from "./conflicts.js";
 import { inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo, type MergeResult } from "./git-rescue.js";
-import { buildLink, readLink, settleWithLink, writeLink, type LinkOffer } from "./link.js";
-import { dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
+import { buildLink, readLink, safeHint, settleWithLink, writeLink, type LinkOffer } from "./link.js";
+import { deviceId, dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
 import { SyncStateFile, type MachineRecord, type ShareRecord, type SyncState } from "./state.js";
 import type { EngineEvent, EngineFolder, ShareState, SyncConflict, SyncEngine, SyncMachine, SyncOffer, SyncRequest, SyncShare } from "./types.js";
 
@@ -64,6 +64,8 @@ export class SyncDesk {
   /** Shares the other machine has taken up. */
   private readonly accepted = new Set<string>();
   private readonly dirs = new Map<string, Set<string>>();
+  /** Folders whose `.git` saw updates and wait for Syncthing idle + need=0 before rescue. */
+  private readonly gitPending = new Set<string>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly told = new Set<string>();
   private live: Record<string, string[]> = {};
@@ -135,6 +137,7 @@ export class SyncDesk {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.dirs.clear();
+    this.gitPending.clear();
     this.offers.clear();
     this.peerLive.clear();
     this.accepted.clear();
@@ -285,10 +288,14 @@ export class SyncDesk {
       const share = state.shares.find((item) => item.folderId === event.folder);
       if (!share) return;
       const set = this.dirs.get(share.folderId) ?? new Set<string>();
-      if (!event.item.startsWith(".git/") && event.item !== ".git") set.add(path.dirname(path.join(share.path, event.item)));
+      if (event.item === ".git" || event.item.startsWith(".git/")) this.gitPending.add(share.folderId);
+      else set.add(path.dirname(path.join(share.path, event.item)));
       this.dirs.set(share.folderId, set);
       this.later(`sweep:${share.folderId}`, SWEEP_MS, () => this.sweep(share.folderId));
       return;
+    }
+    if ((event.type === "folder-state" && event.state === "idle") || event.type === "folder-summary") {
+      if (this.gitPending.has(event.folder)) this.later(`sweep:${event.folder}`, SWEEP_MS, () => this.sweep(event.folder));
     }
     if (event.type === "connected") this.later("links", 200, () => this.readLinks());
     if (event.type === "pending-devices") this.later("requests", 200, () => this.tellRequests());
@@ -347,7 +354,13 @@ export class SyncDesk {
   private async handleCopies(share: ShareRecord, copies: FoundCopy[]): Promise<void> {
     let fresh: ConflictRecord | null = null;
     const repo = !share.filesOnly && repoKind(share.path) === "repo";
-    if (repo) {
+    let gitSettled = true;
+    if (repo && this.engine) {
+      const status = await this.engine.folderStatus(share.folderId).catch(() => null);
+      gitSettled = status?.state === "idle" && status.need === 0;
+    }
+    if (repo && gitSettled) {
+      this.gitPending.delete(share.folderId);
       try {
         const rescue = await rescueRepo(share.path, slugify(this.host.machineName(), 24));
         for (const branch of rescue?.branches ?? []) fresh = this.conflicts.noteCommits(share.folderId, share.path, branch.branch, branch.saved, shortId(share.machineId));
@@ -355,6 +368,8 @@ export class SyncDesk {
       } catch (error) {
         this.host.log(`Sync: could not sort out ${share.name}'s git history: ${error instanceof Error ? error.message : String(error)}`);
       }
+    } else if (repo) {
+      this.gitPending.add(share.folderId);
     }
     for (const copy of copies) {
       if (!fs.existsSync(copy.file)) continue;
@@ -456,28 +471,32 @@ export class SyncDesk {
   /** Unpairs a machine. Everything synced with it stops; the files stay on both. The other machine is told, when it can be. */
   removeMachine(id: string): Promise<void> {
     return this.run(async () => {
+      const valid = deviceId(id);
+      if (!valid) return;
       const engine = this.engine;
       const state = this.stateFile.read();
-      const machine = state.machines.find((item) => item.id === id);
-      if (engine && machine) {
+      const machine = state.machines.find((item) => item.id === valid);
+      if (!machine) return;
+      if (engine) {
         // A last note, so the other machine unpairs too instead of waiting for one that never comes back.
         try {
-          const last = { ...buildLink({ id: engine.id, name: this.host.machineName() }, { ...state, shares: [] }, id, {}, this.host.home), stopped: state.shares.filter((share) => share.machineId === id).map((share) => share.folderId), gone: true };
-          writeLink(path.join(this.linkDir(id), `${engine.id}.json`), last);
-          const connected = (await engine.connections().catch(() => ({}) as Awaited<ReturnType<SyncEngine["connections"]>>))[id]?.connected;
+          const last = { ...buildLink({ id: engine.id, name: this.host.machineName() }, { ...state, shares: [] }, valid, {}, this.host.home), stopped: state.shares.filter((share) => share.machineId === valid).map((share) => share.folderId), gone: true };
+          writeLink(path.join(this.linkDir(valid), `${engine.id}.json`), last);
+          const connected = (await engine.connections().catch(() => ({}) as Awaited<ReturnType<SyncEngine["connections"]>>))[valid]?.connected;
           if (connected && this.unpairWaitMs > 0) await new Promise((resolve) => setTimeout(resolve, this.unpairWaitMs));
         } catch (error) {
           this.host.log(`Sync: could not tell ${machine.name} about unpairing: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
-      this.quiet.set(id, Date.now() + UNPAIR_QUIET_MS);
-      await this.forget(id);
+      this.quiet.set(valid, Date.now() + UNPAIR_QUIET_MS);
+      await this.forget(valid);
       this.host.changed();
     });
   }
 
   /** Drops a machine and everything shared with it. */
   private async forget(id: string): Promise<void> {
+    if (!deviceId(id)) return;
     for (const share of this.stateFile.read().shares.filter((item) => item.machineId === id)) {
       this.conflicts.forgetFolder(share.folderId);
       this.peerLive.delete(share.folderId);
@@ -685,7 +704,8 @@ export class SyncDesk {
     }
     const taken = new Set(state.shares.map((share) => share.path));
     const offers: SyncOffer[] = [...this.offers.values()].map(({ machineId, offer }) => {
-      let suggested = offer.hint ? path.join(this.host.home, ...offer.hint.split("/")) : path.join(this.host.home, "Projects", offer.name.replace(/[/\\]/g, "-"));
+      const hint = safeHint(offer.hint);
+      let suggested = hint ? path.join(this.host.home, ...hint.split("/")) : path.join(this.host.home, "Projects", offer.name.replace(/[/\\]/g, "-"));
       if (taken.has(suggested)) suggested = `${suggested}-${shortId(machineId).toLowerCase()}`;
       let hasFiles = false;
       try {

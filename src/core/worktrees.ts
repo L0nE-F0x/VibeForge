@@ -34,6 +34,11 @@ export interface ApplyResult {
    * copy's version is still in the copy.
    */
   kept?: string[];
+  /**
+   * Files git ignores that the agent left in its copy (see leftInCopy): not brought in, so the copy
+   * stays with them until it is discarded.
+   */
+  left?: { folder: string; files: string[] };
 }
 
 interface GitRun {
@@ -256,8 +261,36 @@ function samePlace(a: string, b: string): boolean {
   return real !== null && real === realTail(path.resolve(b));
 }
 
+/**
+ * What builds, installs and the CLIs' own settings make in a folder: never the agent's work, so
+ * never a reason to keep a copy around.
+ */
+const MADE_FOLDERS = new Set([
+  "node_modules", "vendor", "dist", "dist-electron", "build", "out", "target", "coverage", ".venv", "venv", "__pycache__",
+  ".next", ".nuxt", ".svelte-kit", ".turbo", ".vite", ".cache", ".parcel-cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+  ".gradle", ".tox", ".claude", ".codex", ".gemini", ".grok", ".cursor", ".agy", ".antigravity", ".opencode", ".crush", ".kimi",
+  ".muse", ".pi", ".hermes", ".copilot",
+]);
+const MADE_FILES = /(?:\.log|\.pyc|\.tsbuildinfo|(?:^|\/)\.DS_Store)$/;
+
+/**
+ * Files the agent left in its copy that git ignores (notes, a `config.local`), leaving out what
+ * builds, installs and the CLIs make. A new copy holds tracked files only, so each of these was
+ * made in it later, and only lives there: removing the copy would lose them without a word. A
+ * folder with nothing but such files in it is named once, as `notes/`.
+ */
+export async function leftInCopy(copy: WorkingCopy): Promise<string[]> {
+  const run = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"], copy.path);
+  if (run.code !== 0) return [];
+  return run.stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((entry) => !entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) && !MADE_FILES.test(entry))
+    .slice(0, 200);
+}
+
 /** A commit id, never something git could read as an option. */
-function isCommitId(value: string): boolean {
+export function isCommitId(value: string): boolean {
   return /^[0-9a-f]{7,64}$/.test(value);
 }
 
@@ -314,17 +347,34 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
   // `git add -A` in a folder that isn't the task's copy would stage someone's real work.
   if (!ownedCopyPath(owner, copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
   return withRepoLock(copy.repo, async () => {
-    // Staging in the copy is the copy's own business; it makes new files part of the diff.
-    const staged = await git(["add", "-A"], copy.path);
-    if (staged.code !== 0) throw stagingFailure(staged);
-    // The staged tree is what Apply merges: the patch below is text, and text in some other
-    // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
-    const tree = await git(["write-tree"], copy.path);
-    if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
-    const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path);
-    if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
-    stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
-    return diff.stdout;
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-patch-"));
+    const tempIndex = path.join(scratch, "index");
+    try {
+      // Stage into a throwaway index copied from the worktree's index so we never touch the live
+      // copy's staging area or contend on index.lock while its CLI is running.
+      try {
+        const realIndex = path.resolve(copy.path, (await git(["rev-parse", "--git-path", "index"], copy.path)).stdout.trim());
+        fs.copyFileSync(realIndex, tempIndex);
+        const { atime, mtime } = fs.statSync(realIndex);
+        fs.utimesSync(tempIndex, atime, mtime);
+      } catch {
+        const readTree = await git(["read-tree", "HEAD"], copy.path, { env: { GIT_INDEX_FILE: tempIndex } });
+        if (readTree.code !== 0) throw failure("Could not read the copy's changes", readTree);
+      }
+      const env = { GIT_INDEX_FILE: tempIndex };
+      const staged = await git(["add", "-A"], copy.path, { env });
+      if (staged.code !== 0) throw stagingFailure(staged);
+      // The staged tree is what Apply merges: the patch below is text, and text in some other
+      // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
+      const tree = await git(["write-tree"], copy.path, { env });
+      if (tree.code !== 0) throw failure("Could not read the copy's changes", tree);
+      const diff = await git(["diff", "--cached", "--binary", "--no-color", "--no-ext-diff", "--no-textconv", copy.base], copy.path, { env });
+      if (diff.code !== 0) throw failure("Could not read the copy's changes", diff);
+      stagedTrees.set(path.resolve(copy.path), { patch: diff.stdout, tree: tree.stdout.trim() });
+      return diff.stdout;
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 }
 
@@ -333,6 +383,10 @@ export async function copyPatch(copy: WorkingCopy, owner: CopyOwner): Promise<st
  * side from it, byte for byte, when it is handed that same patch.
  */
 const stagedTrees = new Map<string, { patch: string; tree: string }>();
+
+export function hasStagedTree(copyPath: string): boolean {
+  return stagedTrees.has(path.resolve(copyPath));
+}
 
 /**
  * Why `git add -A` in a copy failed, in words. A git repository inside the copy that has no
@@ -348,10 +402,68 @@ function stagingFailure(run: GitRun): Error {
   return failure("Could not read the copy's changes", run);
 }
 
-/** The files a patch touches, from its `diff --git` headers. */
+function unquoteGitPath(raw: string): string {
+  if (!raw.startsWith('"') || !raw.endsWith('"')) return raw;
+  const inner = raw.slice(1, -1);
+  const bytes: number[] = [];
+  const escaped: Record<string, string> = { t: "\t", n: "\n", r: "\r", '"': '"', "\\": "\\" };
+  for (let i = 0; i < inner.length; i += 1) {
+    if (inner[i] !== "\\" || i + 1 >= inner.length) {
+      bytes.push(...Buffer.from(inner[i], "utf8"));
+      continue;
+    }
+    const oct = /^[0-7]{3}/.exec(inner.slice(i + 1, i + 4));
+    if (oct) {
+      bytes.push(Number.parseInt(oct[0], 8));
+      i += 3;
+      continue;
+    }
+    i += 1;
+    bytes.push(...Buffer.from(escaped[inner[i]] ?? inner[i], "utf8"));
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+function diffHeaderTarget(line: string): string | null {
+  if (!line.startsWith("diff --git ")) return null;
+  const rest = line.slice("diff --git ".length);
+  if (rest.startsWith('"')) {
+    const tokens: string[] = [];
+    for (let i = 0; i < rest.length && tokens.length < 2; ) {
+      if (rest[i] === " ") {
+        i += 1;
+        continue;
+      }
+      if (rest[i] === '"') {
+        let j = i + 1;
+        while (j < rest.length && rest[j] !== '"') j += rest[j] === "\\" ? 2 : 1;
+        tokens.push(unquoteGitPath(rest.slice(i, j + 1)));
+        i = j + 1;
+      } else {
+        const end = rest.indexOf(" ", i);
+        tokens.push(rest.slice(i, end < 0 ? rest.length : end));
+        i = end < 0 ? rest.length : end;
+      }
+    }
+    return tokens.length === 2 && tokens[1].startsWith("b/") ? tokens[1].slice(2) : null;
+  }
+  let pos = rest.indexOf(" b/");
+  let fallback: string | null = null;
+  while (pos >= 0 && rest.startsWith("a/")) {
+    if (rest.slice(2, pos) === rest.slice(pos + 3)) return rest.slice(pos + 3);
+    fallback = rest.slice(pos + 3);
+    pos = rest.indexOf(" b/", pos + 1);
+  }
+  return fallback;
+}
+
+/** The files a patch touches, from its `diff --git` headers (handling `" b/"` and C-quoted names). */
 export function patchFiles(patch: string): string[] {
   const files = new Set<string>();
-  for (const match of patch.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) files.add(match[2]);
+  for (const line of patch.split("\n")) {
+    const file = diffHeaderTarget(line);
+    if (file) files.add(file);
+  }
   return [...files];
 }
 
@@ -387,7 +499,6 @@ const MERGE_AUTHOR = {
 async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string | null): Promise<ApplyResult> {
   if (!patch.trim()) return { files: [], conflicts: [], kept: [] };
   if (!isCommitId(copy.base)) throw new Error("The changes don't apply to the workspace");
-  const files = patchFiles(patch);
   const repo = copy.repo;
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-apply-"));
   try {
@@ -406,6 +517,16 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
       theirs = (await step(["write-tree"], theirsIndex)).trim();
     }
     const touched = (await step(["diff-tree", "-r", "-z", "--no-renames", "--name-only", copy.base, theirs])).split("\0").filter(Boolean);
+    const statusParts = (await step(["diff-tree", "-r", "-z", "-M", "--name-status", copy.base, theirs])).split("\0");
+    const files: string[] = [];
+    for (let i = 0; i + 1 < statusParts.length && statusParts[i]; i += 2) {
+      if (/^[RC]/.test(statusParts[i]) && i + 2 < statusParts.length) {
+        files.push(statusParts[i + 2]);
+        i += 1;
+      } else {
+        files.push(statusParts[i + 1]);
+      }
+    }
     // The workspace's side: git's index copied, then brought up to what is on disk now.
     const oursIndex = path.join(scratch, "ours");
     try {
@@ -622,6 +743,8 @@ function removeFile(repo: string, target: string): boolean {
 export async function removeCopy(copy: WorkingCopy, owner: CopyOwner, repoTrusted = true): Promise<void> {
   const owned = ownedCopyPath(owner, copy.path);
   if (!owned) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+  stagedTrees.delete(path.resolve(copy.path));
+  if (owned.real) stagedTrees.delete(path.resolve(owned.real));
   if (!repoTrusted) {
     if (owned.real) fs.rmSync(owned.real, { recursive: true, force: true });
     return;

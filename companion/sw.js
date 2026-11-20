@@ -47,7 +47,8 @@ async function pageFile(request) {
   } finally {
     clearTimeout(limit);
   }
-  if (page) copyUntil = Date.now() + WHOLE_MS;
+  // Once any file falls back to cache, serve the rest of the load from cache too so mixed versions never run together.
+  copyUntil = Date.now() + WHOLE_MS;
   return kept;
 }
 

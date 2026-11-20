@@ -76,7 +76,7 @@ export function SyncCard() {
           <Field label={t("sync.name")} hint={t("sync.nameHint")}>
             <Input value={name} placeholder={view.me.name} maxLength={40} onChange={(event) => setName(event.target.value)} onBlur={() => name.trim() !== current.name && patch({ name: name.trim() })} />
           </Field>
-          <Field label={t("sync.code")} hint={t("sync.codeHint")}>
+          <Field label={t("sync.code")} hint={t("sync.codeHint", { id: view.me.id.slice(0, 7) })}>
             <div className="hstack">
               <code className="mono grow truncate selectable">{view.me.code}</code>
               <Button size="sm" icon={Copy} onClick={() => copy(view.me?.code ?? "")}>

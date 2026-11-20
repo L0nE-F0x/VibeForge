@@ -2,7 +2,7 @@ import { ArrowRightLeft, CheckCircle2, FolderPlus, GitBranch, GitMerge, Hourglas
 import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
-import { call, useAgents, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
+import { call, useAgents, useAppInfo, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
@@ -15,7 +15,7 @@ import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
 import { changesFor } from "../changes-text.js";
-import { applyConflictNote } from "../apply-note.js";
+import { applyConflictNote, applyLeftNote } from "../apply-note.js";
 import { shortcutKeys } from "../shortcuts.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
@@ -349,11 +349,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const [cont, continuing] = useAction(async () => task && call("tasks.continue", task.id, termSize()), t("tasks.continueFailed"));
   const [stop, stopping] = useAction(async () => task && call("tasks.stop", task.id), t("tasks.stopFailed"));
   const [setStatus] = useAction(async (status: TaskStatus) => task && call("tasks.setStatus", task.id, status), t("tasks.moveFailed"));
+  const home = useAppInfo().data?.home ?? "";
   const [applyCopy, applying] = useAction(async () => {
     if (!task || !workspace) return;
     const result = await call("tasks.applyCopy", task.id);
-    if (!result.files.length) push("info", t("tasks.applyNothing"));
+    if (!result.files.length && !result.left) push("info", t("tasks.applyNothing"));
     else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
+    else if (result.left) push("info", t("tasks.appliedLeft", { workspace: workspace.name }), applyLeftNote(t, result.left, home));
     else push("success", t("tasks.applied", { workspace: workspace.name }), t.count("tasks.appliedBody", result.files.length));
   }, t("tasks.applyFailed"));
   const [discardCopy, discarding] = useAction(async () => {

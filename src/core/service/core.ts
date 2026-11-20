@@ -1,21 +1,31 @@
 import fs from "node:fs";
 import path from "node:path";
-import { newCompanionToken, normalizeCompanion } from "../companion.js";
+import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
-import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
+import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
-import { hasRunFile } from "../run-storage.js";
+import { hasRunFile, readRunTail } from "../run-storage.js";
 import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
 import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, Workspace } from "../types.js";
+import { removeCopy, type WorkingCopy } from "../worktrees.js";
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
 type Settle = () => unknown;
+
+/** Strip terminal escape sequences so post-exit resume commands in raw scrollback read cleanly. */
+function stripTerminalCodes(raw: string): string {
+  return raw
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/\r\n?/g, "\n");
+}
 
 /**
  * The state every part of the service shares, and the lifecycle of a run: launching it, its exit,
@@ -48,12 +58,12 @@ export class ServiceCore {
   constructor(options: DeskOptions) {
     this.options = options;
     this.store = new Store(options.configRoot, options.dataRoot);
-    // Anything left in the trash was deleted in an earlier session, past its undo.
+    // Anything left in the trash was deleted in an earlier session, past its undo; settle any copy branches that didn't finish clearing.
     this.trash = new Trash(path.join(options.dataRoot, "trash"));
-    this.trash.empty();
+    const trashed = this.trash.empty();
     // Anything still "running" in the index belongs to a process that died with the last app session.
     const orphans = this.store.queryRuns({ status: "running", limit: 2000 });
-    this.settled = this.settleOrphans(orphans);
+    this.settled = Promise.all([this.settleOrphans(orphans), this.settleTrash(trashed)]).then(() => undefined);
   }
 
   whenSettled(): Promise<void> {
@@ -228,8 +238,11 @@ export class ServiceCore {
     // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
     if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
     if (previous.dir) {
-      const resumeArgs = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-      if (resumeArgs) return { native: true, resumeArgs };
+      const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
+      if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
+      // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
+      const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
+      if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
     }
     return { native: Boolean(row.continueArgs?.length), resumeArgs: null };
   }
@@ -267,8 +280,33 @@ export class ServiceCore {
     await this.options.host.kill(ptyId);
   }
 
+  /**
+   * A new id for an agent, skill or routine named `name` in its config folder. One whose deleted
+   * namesake is still waiting for Undo is taken, so Undo can put that one back; so is one old runs
+   * still point to (`hasRuns`), so a new routine or agent doesn't take over the old one's history
+   * (its last run, a failing streak). It gets a number instead: `helper-2`.
+   */
+  freeId(folder: "agents" | "skills" | "routines", name: string, extension: string, hasRuns: (id: string) => boolean = () => false): string {
+    const dir = path.join(this.options.configRoot, folder);
+    return this.store.uniqueId(dir, name, extension, (id) => this.trash.holds(path.join(dir, `${id}${extension}`)) || hasRuns(id));
+  }
+
   isLive(ptyId: string): boolean {
     return this.live.has(ptyId);
+  }
+
+  onPtyProgram(_ptyId: string, _argv: string[] | null, _cwd: string | null = null): void {}
+
+  /** Re-reads a shell pane's foreground right now so stale 1 s poll state never lets keys or text hit bare bash. */
+  async refreshShellForeground(ptyId: string): Promise<boolean> {
+    const session = this.live.get(ptyId);
+    if (!session) return false;
+    if (session.kind !== "shell" || !this.options.host.foreground) return true;
+    const seen = await this.options.host.foreground(ptyId).catch(() => ({ known: false, argv: null, cwd: null }));
+    if (!seen.known) return false;
+    if (shellForegroundEngine(seen, this.store.readEngineRows()) === "cli") return true;
+    this.onPtyProgram(ptyId, seen.argv, seen.cwd);
+    return false;
   }
 
   /** Resolves once the PTY has exited and its run is finished, or after the timeout. */
@@ -567,6 +605,18 @@ export class ServiceCore {
       }
     }
     if (orphans.length) this.emit("runs", "tasks");
+  }
+
+  private async settleTrash(trashed: unknown[]): Promise<void> {
+    if (!trashed.length) return;
+    const copies = readJson<{ copies?: Array<{ id?: string }> } | null>(path.join(this.options.dataRoot, "orchestrator", "copies.json"), null)?.copies ?? [];
+    for (const item of trashed) {
+      if (!item || typeof item !== "object") continue;
+      const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
+      if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
+      if (this.store.getTask(note.taskId) || copies.some((entry) => entry?.id === note.taskId)) continue;
+      await removeCopy(note.copy, { dataRoot: this.options.dataRoot, taskId: note.taskId }, true).catch(() => undefined);
+    }
   }
 
   /** Make an ended run findable by what it said. Search is a nicety: a failure here is ignored. */

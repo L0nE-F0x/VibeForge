@@ -1,4 +1,3 @@
-import path from "node:path";
 import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, firedAtOrAfter, isScheduleValid, mostRecentSlot, nextFireTimes, ROUTINE_FAILING, type TickDecision } from "../routines.js";
 import { allocateRunDir } from "../runs.js";
 import type { Agent, Routine, RunMeta, Schedule } from "../types.js";
@@ -61,7 +60,7 @@ export class RoutineDesk {
     if (!input.prompt?.trim()) throw new Error("Write the routine's prompt.");
     const existing = input.id ? this.core.store.getRoutine(input.id) : null;
     const routine: Routine = {
-      id: existing?.id ?? this.core.store.uniqueId(path.join(this.core.options.configRoot, "routines"), name, ".yaml"),
+      id: existing?.id ?? this.core.freeId("routines", name, ".yaml", (id) => this.core.store.queryRuns({ routineId: id, limit: 1 }).length > 0),
       name,
       agentId: input.agentId,
       enabled: typeof input.enabled === "boolean" ? input.enabled : (existing?.enabled ?? true),
@@ -95,7 +94,8 @@ export class RoutineDesk {
   setRoutineEnabled(id: string, enabled: boolean): Routine {
     const routine = this.core.store.getRoutine(id);
     if (!routine) throw new Error("That routine no longer exists.");
-    // Resuming does not replay the slots that passed while it was paused.
+    // Resuming does not replay the slots that passed while it was paused; pausing cancels any wait.
+    if (!enabled) this.turns.cancel("routine", id);
     const next = { ...routine, enabled, ...(enabled && !routine.enabled ? { lastFiredAt: this.core.now().toISOString() } : {}) };
     this.core.store.writeRoutine(next);
     this.core.emit("routines");
@@ -151,8 +151,19 @@ export class RoutineDesk {
     const cwd = this.core.firstPlace(agent.places);
     if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
     return this.turns.withFolderLock(cwd, async () => {
-      const routine = this.core.store.getRoutine(id) ?? found;
-      if (scheduledAt && firedAtOrAfter(routine.lastFiredAt, new Date(scheduledAt))) return { queued: true, behind: [] };
+      const routine = this.core.store.getRoutine(id);
+      const currentAgent = routine ? this.core.store.getAgent(routine.agentId) : null;
+      if (!routine || !currentAgent) return { queued: true, behind: [] };
+      if (
+        scheduledAt &&
+        (!routine.enabled ||
+          !currentAgent.allowRoutines ||
+          this.routineStillRunning(id) ||
+          firedAtOrAfter(routine.lastFiredAt, new Date(scheduledAt)))
+      ) {
+        this.turns.cancel("routine", id);
+        return { queued: true, behind: [] };
+      }
       const busy = now || routine.shareCheckout ? [] : await this.turns.busyIn(cwd);
       if (busy.length) {
         const first = !this.turns.waiting("routine", id);
@@ -162,7 +173,7 @@ export class RoutineDesk {
           folder: cwd,
           slot: scheduledAt,
           start: () => this.fire(id, scheduledAt && this.slotAfterWait(id, scheduledAt), size),
-          failed: (message) => this.failedStart(routine, agent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
+          failed: (message) => this.failedStart(routine, currentAgent, message, scheduledAt && this.slotAfterWait(id, scheduledAt)),
         });
         // A due slot is nobody's click: say once that it is waiting, and for whom.
         if (first && scheduledAt) this.tell(routine, `waiting for ${busy.map((writer) => writer.label).join(", ")} to finish`);
@@ -172,7 +183,7 @@ export class RoutineDesk {
       this.turns.cancel("routine", id);
       // Use up the slot first so a failed start never hot-loops on every tick.
       if (scheduledAt) this.core.store.writeRoutine({ ...routine, lastFiredAt: scheduledAt });
-      return this.launchRoutine(routine, agent, size);
+      return this.launchRoutine(routine, currentAgent, size);
     });
   }
 
@@ -227,6 +238,8 @@ export class RoutineDesk {
       });
       results.push({ routineId: routine.id, decision });
       if (decision.action === "miss") {
+        // Already queued behind a busy CLI: keep its wait instead of marking it missed while waiting.
+        if (this.turns.waiting("routine", routine.id)) continue;
         if (routine.lastMissedAt !== decision.scheduledAt) {
           this.core.store.writeRoutine({ ...routine, lastMissedAt: decision.scheduledAt, lastFiredAt: decision.scheduledAt });
           this.core.emit("routines");

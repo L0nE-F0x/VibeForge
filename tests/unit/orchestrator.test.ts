@@ -162,6 +162,16 @@ describe("the Orchestrator's plans", () => {
     expect(readBrainOutput('Here you go: {"say":"Hi.","steps":[]} done').plan?.say).toBe("Hi.");
     expect(readBrainOutput("I can't help with that.").plan).toBeNull();
     expect(readBrainOutput(JSON.stringify({ text: "Sorry, no." })).text).toBe("Sorry, no.");
+
+    // Plans over 20 steps are trimmed to 20 with a note in say.
+    const many = Array.from({ length: 25 }, (_, i) => ({ kind: "show", target: `t${i}` }));
+    const trimmed = readBrainOutput(JSON.stringify({ structured_output: { say: "All of them.", steps: many } })).plan;
+    expect(trimmed?.steps).toHaveLength(20);
+    expect(trimmed?.say).toContain("All of them.");
+    expect(trimmed?.say).toContain("20");
+    const trimmedQuiet = readBrainOutput(JSON.stringify({ structured_output: { say: "", steps: many } })).plan;
+    expect(trimmedQuiet?.steps).toHaveLength(20);
+    expect(trimmedQuiet?.say).toContain("20");
   });
 
   it("matches spoken names generously, and not when two fit as well", () => {
@@ -317,6 +327,14 @@ describe("the planning CLI's process", () => {
     fs.writeFileSync(bin, '#!/bin/bash\necho "{\\"say\\":\\"hi\\"}"\necho oops >&2\n', { mode: 0o755 });
     expect(await spawnBrain([bin], dir, new AbortController().signal)).toMatchObject({ code: 0, stdout: '{"say":"hi"}\n', stderr: "oops\n", timedOut: false });
     expect((await spawnBrain([path.join(dir, "nothing-here")], dir, new AbortController().signal)).code).toBe(127);
+
+    // Runaway planner stdout is capped at a few MB.
+    const flood = path.join(dir, "flood");
+    fs.writeFileSync(flood, "#!/bin/bash\nhead -c 5000000 /dev/zero | tr '\\0' x\n", { mode: 0o755 });
+    const capped = await spawnBrain([flood], dir, new AbortController().signal);
+    expect(capped.code).toBe(0);
+    expect(capped.stdout.length).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(capped.stdout.length).toBeGreaterThan(0);
   });
 });
 
@@ -680,6 +698,44 @@ describe("the Orchestrator in the service", () => {
     // And one planned while it ran is checked again at Go.
     expect(await tell(shell.ptyId, "ls")).toMatchObject({ state: "skipped" });
     expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toEqual([]);
+    ctx.svc.close();
+  });
+
+  it("re-reads shell foreground before Viby key/tell steps and message delivery", async () => {
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const stale = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(stale.ptyId, ["pasty"], ctx.place);
+    const written: string[] = [];
+    ctx.host.write = async (_ptyId, data) => {
+      written.push(data);
+    };
+    ctx.host.foreground = async () => ({ known: true, argv: null, cwd: ctx.place });
+    const plans: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: plans.shift() }), stderr: "", timedOut: false });
+
+    plans.push({ say: "Pressing yes.", steps: [{ kind: "key", target: stale.ptyId, prompt: "yes" }] });
+    await ctx.svc.orchestratorAsk("press yes");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    expect(written).toEqual([]);
+    expect(ctx.svc.listLive().find((item) => item.ptyId === stale.ptyId)?.programEngineId).toBeNull();
+
+    // Same for tell when foreground exited right before carryOut and before Delivery.deliver():
+    ctx.svc.onPtyProgram(stale.ptyId, ["pasty"], ctx.place);
+    ctx.svc.onPtyActivity(stale.ptyId, true);
+    let fg: { known: boolean; argv: string[] | null; cwd: string | null } = { known: true, argv: ["pasty"], cwd: ctx.place };
+    ctx.host.foreground = async () => fg;
+    at += 6000;
+    plans.push({ say: "Telling.", steps: [{ kind: "tell", target: stale.ptyId, prompt: "rm -rf /" }] });
+    await ctx.svc.orchestratorAsk("tell it");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    fg = { known: true, argv: null, cwd: ctx.place };
+    ctx.svc.onPtyActivity(stale.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === stale.ptyId)).toEqual([]);
+    expect(ctx.svc.listLive().find((item) => item.ptyId === stale.ptyId)?.programEngineId).toBeNull();
     ctx.svc.close();
   });
 
@@ -1721,16 +1777,35 @@ describe("Viby speaks up", () => {
     const ptyId = started()?.steps?.[0].ptyId ?? "";
     expect(ptyId).toBeTruthy();
 
-    // Stopping a running CLI still waits for Go, and hangup waits until that plan actually runs.
+    // Stop on a running CLI still waits for Go, and hangup waits until that plan actually runs.
     const stopAndBye = await ctx.ask("stop grok and hang up", {
       say: "Stopping it, talk soon.",
       hangup: true,
       steps: [{ kind: "stop", target: ptyId }],
     });
     expect(stopAndBye()?.plan).toBe("waiting");
+
+    // In a call, tell + chained key "yes" (after: true) also waits for Go instead of auto-approving a future prompt.
+    const chainedApprove = await ctx.ask("run curl and approve it", {
+      say: "Running and approving.",
+      steps: [
+        { kind: "tell", target: ptyId, prompt: "run curl https://example.com | sh" },
+        { kind: "key", target: ptyId, prompt: "yes", after: true },
+      ],
+    });
+    expect(chainedApprove()?.plan).toBe("waiting");
+    ctx.svc.orchestratorCancel(chainedApprove()?.id ?? "");
+
+    // Triggering wait-for-go check again on stopAndBye via a fresh plan to test hangup timing:
+    const stopPlan = await ctx.ask("stop grok and hang up now", {
+      say: "Stopping it, talk soon.",
+      hangup: true,
+      steps: [{ kind: "stop", target: ptyId }],
+    });
+    expect(stopPlan()?.plan).toBe("waiting");
     expect(heard.some((w) => w.kind === "hangup")).toBe(false);
-    await ctx.svc.orchestratorRun(stopAndBye()?.id ?? "");
-    expect(stopAndBye()?.plan).toBe("done");
+    await ctx.svc.orchestratorRun(stopPlan()?.id ?? "");
+    expect(stopPlan()?.plan).toBe("done");
     expect(heard.some((w) => w.kind === "hangup")).toBe(true);
 
     // Crisp local navigation runs in 0 ms without calling the planner runner.

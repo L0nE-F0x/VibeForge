@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { compressRun, hasRunFile, planCleanup, readRunText, type CleanupCandidate } from "../../src/core/run-storage.js";
+import { compressRun, hasRunFile, planCleanup, readRunTail, readRunText, type CleanupCandidate } from "../../src/core/run-storage.js";
 import { normalizeRun, readRunFiles } from "../../src/core/runs.js";
 import type { RunMeta } from "../../src/core/types.js";
 
@@ -34,12 +34,21 @@ describe("run storage", () => {
     // Small files are left alone.
     expect(fs.existsSync(path.join(dir, "transcript.txt"))).toBe(true);
     expect(readRunText(dir, "scrollback.txt")).toBe(scrollback);
+    expect(readRunTail(dir, "scrollback.txt", 128)).toBe(scrollback.slice(-128));
     expect(readRunText(dir, "diff.patch")).toBe(patch);
     expect(hasRunFile(dir, "diff.patch")).toBe(true);
     expect(readRunFiles(dir)).toMatchObject({ scrollback, patchSaved: true });
     // Again is a no-op.
     expect(await compressRun(dir)).toBe(0);
     expect(await compressRun(path.join(dir, "gone"))).toBe(0);
+  });
+
+  it("reads the tail of plain, compressed, and missing run files", () => {
+    const dir = tempDir();
+    fs.writeFileSync(path.join(dir, "scrollback.txt"), "0123456789abcdefghijklmnopqrstuvwxyz");
+    expect(readRunTail(dir, "scrollback.txt", 10)).toBe("qrstuvwxyz");
+    expect(readRunTail(dir, "missing.txt", 10)).toBe("");
+    expect(readRunTail("", "scrollback.txt", 10)).toBe("");
   });
 
   it("keeps everything by default", () => {

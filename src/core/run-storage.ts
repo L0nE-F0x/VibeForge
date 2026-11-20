@@ -36,6 +36,31 @@ export function readRunText(dir: string, name: string): string {
   }
 }
 
+/** Last `maxBytes` of `name` (or `name.gz` when compressed). Empty when neither is there. */
+export function readRunTail(dir: string, name: string, maxBytes = 8192): string {
+  if (!dir) return "";
+  const file = path.join(dir, name);
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(len);
+      fs.readSync(fd, buffer, 0, len, size - len);
+      return buffer.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    /* compressed, or missing */
+  }
+  try {
+    return gunzipSync(fs.readFileSync(`${file}.gz`)).subarray(-maxBytes).toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
 /** Whether a run file exists, compressed or not. */
 export function hasRunFile(dir: string, name: string): boolean {
   return fs.existsSync(path.join(dir, name)) || fs.existsSync(path.join(dir, `${name}.gz`));

@@ -232,17 +232,43 @@ describe("undo", () => {
     expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
     expect(routinesOf(agent.id)).toEqual([routine.id]);
 
-    // Deleted again, and a new agent takes the name (and so the id) while the Undo is still up.
+    // Deleted again, and a new agent of that name is made while the Undo is still up: it gets an id
+    // of its own, so Undo still puts the old one back, beside it, with nothing of the old one's.
     const again = await ctx.svc.deleteAgent(agent.id);
     const fresh = await agentIn(ctx);
-    expect(fresh.id).toBe(agent.id);
+    expect(fresh.id).toBe(`${agent.id}-2`);
     expect(routinesOf(fresh.id)).toEqual([]);
     expect(ctx.svc.readMemory(fresh.id)).not.toContain("written by hand");
-    // Undo can't put the old one back over it, and its routines don't join the new one.
     ctx.svc.undoDelete(again.undo);
+    expect(ctx.svc.readMemory(agent.id)).toBe("- written by hand\n");
+    expect(routinesOf(agent.id)).toEqual([routine.id]);
     expect(ctx.svc.getAgent(fresh.id)?.createdAt).toBe(fresh.createdAt);
     expect(routinesOf(fresh.id)).toEqual([]);
     ctx.svc.close();
+  });
+
+  it("gives a new agent or routine its own id when old runs still name a deleted one", async () => {
+    const ctx = setup();
+    const notes = (c: ReturnType<typeof setup>) => c.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [c.place], allowRoutines: true });
+    const agent = await notes(ctx);
+    const routine = ctx.svc.saveRoutine({ name: "Nightly", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Draft." });
+    const fired = started(await ctx.svc.runRoutineNow(routine.id));
+    await ctx.exit(fired.ptyId);
+    await ctx.svc.deleteAgent(agent.id);
+    ctx.svc.close();
+    // A later session: the deletes are past their Undo, but the runs are still there.
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    const fresh = await notes(next);
+    expect(fresh.id).toBe(`${agent.id}-2`);
+    const freshRoutine = next.svc.saveRoutine({ name: "Nightly", agentId: fresh.id, schedule: { kind: "every", minutes: 5 }, prompt: "Draft." });
+    expect(freshRoutine.id).toBe(`${routine.id}-2`);
+    // A skill has no runs: its name is free again once it's gone for good.
+    const skill = next.svc.saveSkill({ name: "Review" });
+    next.svc.deleteSkill(skill.id);
+    next.svc.close();
+    const third = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    expect(third.svc.saveSkill({ name: "Review" }).id).toBe(skill.id);
+    third.svc.close();
   });
 
   it("keeps a delete from an earlier session deleted", async () => {
@@ -256,6 +282,37 @@ describe("undo", () => {
     expect(fs.existsSync(path.join(ctx.dataRoot, "trash"))).toBe(false);
     expect(next.svc.store.getSkill(skill.id)).toBeNull();
     expect(() => next.svc.undoDelete(undo)).toThrow(/too late/);
+    next.svc.close();
+  });
+
+  it("tidies a deleted task copy's branch and worktree lock at startup after a crash during Undo", async () => {
+    const repo = tempDir();
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" }).toString().trim();
+    git("init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Worker", brief: "b", engine: "argy", places: [repo] });
+    const ws = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Crash undo", body: "Edit.", agentId: agent.id, workspaceId: ws.id, isolated: true });
+    const run = started(await ctx.svc.executeTask(task.id));
+    await ctx.exit(run.ptyId);
+
+    const copyPath = ctx.svc.listTasks()[0].copy!.path;
+    await ctx.svc.deleteTask(task.id);
+    expect(git("branch", "--list", `vibeforge/${task.id}`)).toContain(task.id);
+
+    // Simulate process exit without running close(): clear the timer so Undo settle never ran, then close SQLite.
+    const undoable = (ctx.svc as unknown as { undoable: Map<string, { timer: ReturnType<typeof setTimeout> }> }).undoable;
+    for (const entry of undoable.values()) clearTimeout(entry.timer);
+    undoable.clear();
+    ctx.svc.store.close();
+
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await next.svc.whenSettled();
+    expect(git("branch", "--list", `vibeforge/${task.id}`)).toBe("");
+    expect(git("worktree", "list", "--porcelain")).not.toContain(copyPath);
     next.svc.close();
   });
 });
@@ -808,6 +865,26 @@ describe("runs", () => {
     expect(fs.existsSync(idleCopy.path)).toBe(false);
     expect(ctx.svc.listTasks().find((item) => item.id === idleTask.id)!).toMatchObject({ status: "done", copy: null });
 
+    // The agent left notes git ignores: its changes go in, and the copy stays with the notes, named.
+    git(repo, "checkout", "--", "a.txt");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "notes/\n");
+    git(repo, "add", ".gitignore");
+    git(repo, "commit", "-qm", "ignore notes");
+    const notesTask = ctx.svc.saveTask({ title: "Notes", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    const noting = started(await ctx.svc.executeTask(notesTask.id));
+    const notesCopy = ctx.svc.listTasks().find((item) => item.id === notesTask.id)!.copy!;
+    fs.writeFileSync(path.join(notesCopy.path, "a.txt"), "one\nwith notes\n");
+    fs.mkdirSync(path.join(notesCopy.path, "notes"));
+    fs.writeFileSync(path.join(notesCopy.path, "notes", "plan.md"), "the plan\n");
+    await ctx.exit(noting.ptyId);
+    const leftBehind = await ctx.svc.applyTaskCopy(notesTask.id);
+    expect(leftBehind).toMatchObject({ files: ["a.txt"], conflicts: [], left: { folder: notesCopy.path, files: ["notes/"] } });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nwith notes\n");
+    expect(fs.readFileSync(path.join(notesCopy.path, "notes", "plan.md"), "utf8")).toBe("the plan\n");
+    expect(ctx.svc.listTasks().find((item) => item.id === notesTask.id)!.copy).not.toBeNull();
+    await ctx.svc.discardTaskCopy(notesTask.id);
+    expect(fs.existsSync(notesCopy.path)).toBe(false);
+
     // A folder that isn't a repository can't have a copy.
     const plain = tempDir();
     const plainAgent = await ctx.svc.saveAgent({ name: "Plain", brief: "b", engine: "argy", places: [plain] });
@@ -1188,6 +1265,52 @@ describe("runs", () => {
     await expect(ctx.svc.sendChat(chat.id, "hi")).rejects.toThrow(/Could not start Pasty: ENOENT/);
     const [run] = ctx.svc.listRuns();
     expect(run).toMatchObject({ status: "failed", error: "ENOENT" });
+    ctx.svc.close();
+  });
+
+  it("picks up a full-screen CLI's exact session id from scrollback tail when transcript kept the alt screen", async () => {
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    const { Terminal } = require("@xterm/headless") as {
+      Terminal: new (opts: { cols: number; rows: number; scrollback: number; allowProposedApi: boolean }) => { loadAddon(addon: object): void };
+    };
+    const { SerializeAddon } = require("@xterm/addon-serialize") as { SerializeAddon: new () => object };
+    const capture = require(path.resolve("electron/terminal-capture.cjs")) as {
+      attachCapture(sink: object): void;
+      captureWrite(sink: object, data: string): void;
+      captureFinish(sink: object): Promise<{ ansi: string; transcript: string }>;
+    };
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    await ctx.exit(first.ptyId);
+
+    // Simulate a full-screen TUI session whose final exit line printed the session id after leaving alt screen.
+    const mirror = new Terminal({ cols: 60, rows: 12, scrollback: 100, allowProposedApi: true });
+    const serializer = new SerializeAddon();
+    mirror.loadAddon(serializer);
+    const sink = { mirror, serializer };
+    capture.attachCapture(sink);
+    const fullScreen = `\x1b[?1049h\x1b[H${"Full screen conversation frame line\r\n".repeat(10)}`;
+    const farewell = "\x1b[?1049l\x1b[2J\x1b[32margy --resume 0199a1b2-c3d4-7e5f\x1b[0m\r\n";
+    capture.captureWrite(sink, fullScreen);
+    capture.captureWrite(sink, farewell);
+    const done = await capture.captureFinish(sink);
+    expect(done.transcript).not.toContain("0199a1b2-c3d4-7e5f");
+
+    const runDir = ctx.svc.getRun(first.runId).run.dir;
+    fs.writeFileSync(path.join(runDir, "transcript.txt"), done.transcript);
+    fs.writeFileSync(path.join(runDir, "scrollback.txt"), `${"noise line\r\n".repeat(2000)}${farewell}`);
+    await ctx.svc.continueRun(first.runId);
+    expect(ctx.spawns[1].argv).toEqual(["/usr/bin/argy", "--flag", "--resume", "0199a1b2-c3d4-7e5f"]);
+
+    // Also works when compressRun compressed scrollback.txt into scrollback.txt.gz.
+    const { compressRun } = await import("../../src/core/run-storage.js");
+    await compressRun(runDir);
+    expect(fs.existsSync(path.join(runDir, "scrollback.txt.gz"))).toBe(true);
+    await ctx.exit("pty-2");
+    await ctx.svc.continueRun(first.runId);
+    expect(ctx.spawns[2].argv).toEqual(["/usr/bin/argy", "--flag", "--resume", "0199a1b2-c3d4-7e5f"]);
     ctx.svc.close();
   });
 });

@@ -47,6 +47,23 @@ function cleanPromptLine(line: string): string {
   return cleaned.length > 140 ? `${cleaned.slice(0, 139).trimEnd()}…` : cleaned;
 }
 
+const FREE_PROMPTS = [
+  /do you trust\b/i,
+  /\btrust (?:the files in )?this (?:folder|directory|workspace|project)\b/i,
+  /(?:please )?(?:run \/login|sign in|log in)\b/i,
+];
+
+/** Whether a detected waiting prompt or screen asks to approve a tool, command or edit (not folder trust or sign-in). */
+export function isApprovalPrompt(waitingOrScreen: string): boolean {
+  const text = waitingOrScreen.trim();
+  if (!text) return false;
+  const prompt = detectWaitingPrompt(text) ?? text;
+  if (FREE_PROMPTS.some((pattern) => pattern.test(prompt))) return false;
+  return /do you want to |allow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|(?:^|\n)\s*(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\?$/i.test(
+    prompt,
+  );
+}
+
 export interface KeyAction {
   data: string;
   label: string;
@@ -84,18 +101,20 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
   return null;
 }
 
-/** A path argument that stays inside the folder: not absolute, not from home, never climbing out. */
-const LOCAL_PATH = String.raw`(?!/|~|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
+/** A path argument that stays inside the folder: not a flag, not absolute, not from home, never climbing out. */
+const LOCAL_PATH = String.raw`(?!/|~|-|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
 /**
  * The commands a `shell` step may run without a Go, each one whole: tests, builds and checks through
  * the project's own scripts, git that only reads, and listing, reading or making folders in this one.
  */
 const SAFE_SHELL = [
-  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|run\s+[\w:.-]+)(?:\s+--?[\w=.:-]+)*$/,
+  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|check|run\s+(?:test|build|lint|typecheck|check)(?::[\w.-]+)?)(?:\s+--?[\w=.:-]+)*$/,
   /^(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)(?:\s+\.\/\.\.\.)?|pytest|python3?\s+-m\s+pytest)(?:\s+--?[\w=.:-]+)*$/,
   /^git\s+(?:status|log|diff|show|rev-parse)(?:\s+(?!--output)[\w./~^@:=-]+)*$/,
   /^git\s+(?:remote\s+-v|branch(?:\s+(?:-a|-r|-v|-vv|--list|--show-current))*)$/,
-  new RegExp(String.raw`^(?:ls|tree|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
+  new RegExp(String.raw`^(?:ls|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
+  // tree -o / --output writes a file, so keep those flags off the auto-run list.
+  new RegExp(String.raw`^tree(?:\s+-(?:[a-np-zA-NP-Z0-9]+|-(?!output\b)[\w=-]+))*(?:\s+${LOCAL_PATH})*$`),
   new RegExp(String.raw`^mkdir(?:\s+-p)?(?:\s+${LOCAL_PATH})+$`),
   /^(?:pwd|git\s+--version|node\s+--version)$/,
 ];
@@ -103,14 +122,13 @@ const SAFE_SHELL = [
 /**
  * Whether a `shell` step can run without asking for Go (in a call, or in "Just go"): a blank shell,
  * or commands each on the list above joined by `&&`. Anything else waits for Go: deleting, moving,
- * installing, pushing, redirecting, piping, substituting, and every program not named here. A list
- * of what is safe, not of what is dangerous: `/bin/rm`, `\rm`, `find -delete` or `$(…)` can't slip past it.
+ * installing, pushing, redirecting, piping, substituting, quoting, and every program not named here.
  */
 export function isSafeShellCommand(command: string | undefined): boolean {
   const text = (command ?? "").trim();
   if (!text) return true;
   const parts = text.split("&&").map((part) => part.trim());
-  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
+  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
 }
 
 export type WorkbenchAction =
@@ -123,6 +141,20 @@ export type WorkbenchAction =
   | { op: "diff"; target: string }
   | { op: "mark-reviewed" }
   | { op: "undo"; token?: string };
+
+/**
+ * Whether a page is on this computer (a dev server, say): localhost, 127.x, ::1 or 0.0.0.0, read
+ * from the parsed address so `localhost.example.com` or `user@example.com` doesn't pass.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "0.0.0.0" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
 
 export function normalizePreviewUrl(raw: string): string | null {
   const trimmed = raw.trim();

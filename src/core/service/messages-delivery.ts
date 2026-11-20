@@ -171,6 +171,10 @@ export class Delivery {
       }
       busy.add(item.toPty);
       this.pending.splice(this.pending.indexOf(item), 1);
+      if (!(await this.core.refreshShellForeground(item.toPty))) {
+        item.dropped("That CLI isn't running any more.");
+        continue;
+      }
       // The limit is checked again now: messages queued while the CLI was busy all passed it then.
       const enter = item.enter && !(item.counts && this.atLimit(item.fromPty, item.toPty));
       try {

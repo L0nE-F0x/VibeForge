@@ -33,7 +33,8 @@ describe("sync: files both machines changed", () => {
   it("takes a copy out of the workspace and keeps it until it is answered", async () => {
     const root = workspace();
     let now = new Date("2026-11-17T12:00:00Z");
-    const store = new ConflictStore(path.join(temp(), "conflicts"), () => now);
+    const storeDir = path.join(temp(), "conflicts");
+    const store = new ConflictStore(storeDir, () => now);
     expect(store.list()).toEqual([]);
     const [copy] = copiesIn(root);
     const record = store.keepFile("vf-ws-000000000000", root, copy);
@@ -49,19 +50,20 @@ describe("sync: files both machines changed", () => {
     expect(diff).toContain("+mine");
     expect(await store.diff("nope")).toBe("");
 
-    // The same file loses again: one record, holding this machine's newest version.
+    // The same file loses again: the earlier unanswered copy moves to .answered/ so it isn't lost, and a fresh record takes the new one.
     fs.writeFileSync(path.join(root, COPY), "mine, newer\n");
     now = new Date("2026-11-17T13:00:00Z");
     const again = store.keepFile("vf-ws-000000000000", root, copiesIn(root)[0]);
-    expect(again?.id).toBe(record!.id);
+    expect(again?.id).not.toBe(record!.id);
     expect(store.list()).toHaveLength(1);
-    expect(fs.readFileSync(store.savedFile(record!.id), "utf8")).toBe("mine, newer\n");
+    expect(fs.readFileSync(store.savedFile(again!.id), "utf8")).toBe("mine, newer\n");
+    expect(fs.existsSync(path.join(storeDir, ".answered", record!.id, "mine"))).toBe(true);
 
     // "Put mine back": the file gets this machine's version, and the record is answered.
-    expect(store.resolve(record!.id, "mine")?.path).toBe("notes.txt");
+    expect(store.resolve(again!.id, "mine")?.path).toBe("notes.txt");
     expect(fs.readFileSync(path.join(root, "notes.txt"), "utf8")).toBe("mine, newer\n");
     expect(store.list()).toEqual([]);
-    expect(store.resolve(record!.id, "mine")).toBeNull();
+    expect(store.resolve(again!.id, "mine")).toBeNull();
   });
 
   it("drops a copy that says nothing new, and restores a file the other machine deleted", () => {
@@ -84,7 +86,8 @@ describe("sync: files both machines changed", () => {
   it("keeps the other machine's version when asked, notes kept commits, and tidies up after a month", () => {
     const root = workspace();
     let now = new Date("2026-11-17T12:00:00Z");
-    const store = new ConflictStore(path.join(temp(), "conflicts"), () => now);
+    const storeDir = path.join(temp(), "conflicts");
+    const store = new ConflictStore(storeDir, () => now);
     const file = store.keepFile("vf-ws-000000000000", root, copiesIn(root)[0]);
     const commits = store.noteCommits("vf-ws-000000000000", root, "main", "main-from-desk", "MTOM47S");
     expect(store.noteCommits("vf-ws-000000000000", root, "main", "main-from-desk", "MTOM47S").id).toBe(commits.id);
@@ -113,5 +116,29 @@ describe("sync: files both machines changed", () => {
     fs.writeFileSync(meta, JSON.stringify({ ...record, path: "../../escaped.txt" }));
     expect(() => store.resolve(record!.id, "mine")).toThrow(/not inside the workspace/);
     expect(fs.existsSync(path.join(path.dirname(root), "escaped.txt"))).toBe(false);
+  });
+
+  it("refuses to overwrite a symlink target or walk through a symlinked directory when restoring mine", () => {
+    const outside = temp();
+    const secretFile = path.join(outside, "secret.txt");
+    fs.writeFileSync(secretFile, "untouched\n");
+    const outsideDir = path.join(outside, "dir");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "nested.txt"), "untouched-dir\n");
+
+    const root = workspace();
+    const store = new ConflictStore(path.join(temp(), "conflicts"));
+    fs.rmSync(path.join(root, "notes.txt"));
+    fs.symlinkSync(secretFile, path.join(root, "notes.txt"));
+    const direct = store.keepFile("vf-ws-000000000000", root, copiesIn(root)[0]);
+    expect(() => store.resolve(direct!.id, "mine")).toThrow(/symbolic link/i);
+    expect(fs.readFileSync(secretFile, "utf8")).toBe("untouched\n");
+
+    fs.symlinkSync(outsideDir, path.join(root, "linked"));
+    const nestedCopy = path.join(root, "linked", "nested.sync-conflict-20261117-204452-MTOM47S.txt");
+    fs.writeFileSync(nestedCopy, "evil\n");
+    const nested = store.keepFile("vf-ws-000000000000", root, copiesIn(path.join(root, "linked"))[0]);
+    expect(() => store.resolve(nested!.id, "mine")).toThrow(/symbolic link/i);
+    expect(fs.readFileSync(path.join(outsideDir, "nested.txt"), "utf8")).toBe("untouched-dir\n");
   });
 });

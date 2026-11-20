@@ -320,7 +320,7 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
   ipcMain.handle("vf:call", async (event, method: string, ...args: unknown[]) => {
     // The window's own page only: should anything else ever load in it, it gets no bridge.
     if (!ctx.win || event.sender !== ctx.win.webContents || !isAppPage(event.senderFrame?.url ?? "", ctx.page)) throw new Error("Not allowed.");
-    const handler = table[method];
+    const handler = Object.hasOwn(table, method) ? table[method] : undefined;
     if (!handler) throw new Error(`Unknown call ${method}`);
     try {
       return await handler(...args);

@@ -212,6 +212,9 @@ describe("what Viby says in a call", () => {
     const waiting = turn({ text: "Plan.", plan: "waiting", steps: [] });
     expect(waitingPlan([turn({ plan: "done", steps: [] }), waiting, turn({ note })])).toBe(waiting);
     expect(waitingPlan([turn({ plan: "replaced", steps: [] })])).toBe(null);
+    // An unrelated answer (or a new question) after a waiting plan leaves Go unable to fire the old one.
+    expect(waitingPlan([waiting, turn({ from: "you", text: "What's running?" }), turn({ text: "Two." })])).toBe(null);
+    expect(waitingPlan([waiting, turn({ text: "Two." }), turn({ note })])).toBe(null);
   });
 
   const wordLines = {
@@ -450,6 +453,22 @@ describe("a call with Viby", () => {
     expect(desk.ran).toEqual([plan.id]);
     expect(desk.asked).toEqual(["start claude in api"]);
     expect(desk.spoken.at(-1)).toBe("Going.");
+  });
+
+  it("does not run an older waiting plan on a bare go after an unrelated answer", async () => {
+    const oldPlan = turn({ text: "I'll start Claude in api.", plan: "waiting", steps: [] });
+    const desk = call({
+      hears: ["start claude in api", "what's running?", "Go."],
+      answer: (text, turns) => void turns.push(text.includes("start") ? oldPlan : turn({ text: "Two are running." })),
+    });
+    desk.instance.start();
+    await desk.say();
+    expect(desk.states.at(-1)?.waiting).toBe(true);
+    await desk.say();
+    expect(desk.states.at(-1)?.waiting).toBe(false);
+    await desk.say();
+    expect(desk.ran).toEqual([]);
+    expect(desk.asked).toEqual(["start claude in api", "what's running?", "Go."]);
   });
 
   it("cancels a waiting plan on a spoken cancel, and passes the word on when nothing waits", async () => {

@@ -35,7 +35,7 @@ export class LibraryDesk {
     }
     const now = this.core.now().toISOString();
     const agent: Agent = {
-      id: existing?.id ?? this.core.store.uniqueId(path.join(this.core.options.configRoot, "agents"), name, ""),
+      id: existing?.id ?? this.core.freeId("agents", name, "", (id) => this.core.store.queryRuns({ agentId: id, limit: 1 }).length > 0),
       name,
       engine: engineId,
       brief: input.brief.trimEnd(),
@@ -100,7 +100,7 @@ export class LibraryDesk {
     if (!name) throw new Error("Give the skill a name.");
     const existing = input.id ? this.core.store.getSkill(input.id) : null;
     const skill: Skill = {
-      id: existing?.id ?? this.core.store.uniqueId(path.join(this.core.options.configRoot, "skills"), name, ""),
+      id: existing?.id ?? this.core.freeId("skills", name, ""),
       name,
       description: (input.description ?? existing?.description ?? "").trim(),
       body: input.body ?? existing?.body ?? "",

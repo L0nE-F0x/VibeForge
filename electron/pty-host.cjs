@@ -21,6 +21,9 @@ const PASTE_FIRST_OUTPUT_MS = 3000;
 const PASTE_MAX_WAIT_MS = 20000;
 const ENTER_AFTER_PASTE_MS = 150;
 const EXIT_SETTLE_MS = 120;
+// Stop hangs up at once, then asks (SIGTERM) and insists (SIGKILL) after these.
+const STOP_TERM_MS = 1500;
+const STOP_KILL_MS = 4000;
 const PROGRAM_POLL_MS = 1000;
 // A terminal is "working" while the text on its screen keeps changing, and quiet once it has
 // held still for a few seconds: a coding CLI's spinner ticks while it thinks and stops when it
@@ -33,7 +36,7 @@ const QUIET_TICKS = 3;
 // most about this much per terminal instead of all of it.
 const PENDING_HIGH = 8 * 1024 * 1024;
 const PENDING_LOW = 2 * 1024 * 1024;
-const PAUSED_LOOK_MS = 50;
+const PAUSED_LOOK_MS = 15;
 
 // The messages are typed in pty-protocol.ts, which the window's side (supervisor.ts) uses too.
 /** @import { PtyAnswer, PtyLine, PtyOp, PtyRequest } from "./pty-protocol.js" */
@@ -75,6 +78,7 @@ const PAUSED_LOOK_MS = 50;
  *   flushTimer: NodeJS.Timeout | undefined,
  *   exited: boolean,
  *   killTimers: NodeJS.Timeout[],
+ *   stopAt?: number,
  *   paste: Paste | null,
  *   rec: Sink | null,
  *   recSeq?: number,
@@ -89,6 +93,7 @@ const PAUSED_LOOK_MS = 50;
  *   holds?: number,
  *   pauseTimer: NodeJS.Timeout | undefined,
  *   gone: boolean,
+ *   onData?: (data: string) => void,
  *   exitWaiters?: Array<() => void>,
  *   programKey?: string,
  * }} Session
@@ -96,6 +101,9 @@ const PAUSED_LOOK_MS = 50;
 
 /** @type {Map<string, Session>} */
 const sessions = new Map();
+/** Stopped terminals whose leader has exited, while what they left behind is still being stopped. */
+/** @type {Set<Promise<void>>} */
+const draining = new Set();
 
 /**
  * @param {PtyLine} message
@@ -331,15 +339,19 @@ function pasteSafe(text) {
  * Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first).
  * @param {Session} session
  * @param {string} text
+ * @param {boolean} [enter]
+ * @param {boolean} [fromSpawn]
  */
-function sendText(session, text, enter = true) {
+function sendText(session, text, enter = true, fromSpawn = false) {
   if (session.exited) return;
   const clean = pasteSafe(text);
   if (session.mirror.modes.bracketedPasteMode) {
     writeInput(session, `\x1b[200~${clean}\x1b[201~`);
     if (enter) setTimeout(() => writeInput(session, "\r"), ENTER_AFTER_PASTE_MS);
   } else {
-    writeInput(session, enter ? `${clean.replace(/\n/g, "\r")}\r` : clean.replace(/\n/g, "\r"));
+    // Without bracketed paste, a multi-line send becomes several Enters; collapse newlines to spaces so an early line can't exit a CLI into bash.
+    const flat = fromSpawn ? clean.replace(/\n/g, "\r") : clean.replace(/\s*\n+\s*/g, " ");
+    writeInput(session, enter ? `${flat}\r` : flat);
   }
 }
 
@@ -359,7 +371,7 @@ function armPaste(session, text) {
     paste.done = true;
     clearPasteTimers(paste);
     session.paste = null;
-    session.mirror.write("", () => sendText(session, paste.text));
+    session.mirror.write("", () => sendText(session, paste.text, true, true));
   };
   /** @type {Paste} */
   const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, deliver };
@@ -413,16 +425,55 @@ function alive(pid) {
   }
 }
 
+/**
+ * Synchronously drain any unread bytes from a paused pty master fd once the process exits,
+ * before node-pty's 200 ms destroy timer closes the socket underneath a stalled event loop.
+ * @param {Session} session
+ */
+function drainClosingPty(session) {
+  if (!session.paused || session.holds || session.exited || !session.onData) return;
+  const internal = /** @type {{ _fd?: number, _socket?: { _readableState?: { decoder?: { write(chunk: Buffer): string, end(): string } } } }} */ (
+    /** @type {unknown} */ (session.term)
+  );
+  const fd = typeof internal._fd === "number" ? internal._fd : -1;
+  if (fd < 0) return;
+  const decoder = internal._socket?._readableState?.decoder;
+  const buf = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let read = 0;
+    try {
+      read = fs.readSync(fd, buf, 0, buf.length, null);
+    } catch (error) {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+      if (code === "EIO" && decoder) {
+        const tail = decoder.end();
+        if (tail) session.onData(tail);
+      }
+      break;
+    }
+    if (read <= 0) break;
+    const slice = buf.subarray(0, read);
+    const text = decoder ? decoder.write(slice) : slice.toString("utf8");
+    if (text) session.onData(text);
+  }
+}
+
 /** @param {Session} session */
 function throttle(session) {
   if (session.paused || session.gone || pendingOf(session) <= PENDING_HIGH) return;
+  const internal = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (session.term));
+  if (internal._boundClose || !alive(session.pid)) {
+    session.gone = true;
+    return;
+  }
   session.paused = true;
   session.term.pause();
   // node-pty drops what is still unread 200 ms after the program exits, so a paused pane keeps
-  // looking for that and lets the rest through.
+  // looking for that (plus the _boundClose setter in spawnSession) and drains/resumes immediately.
   session.pauseTimer = setInterval(() => {
-    if (alive(session.pid)) return;
+    if (!internal._boundClose && alive(session.pid)) return;
     session.gone = true;
+    drainClosingPty(session);
     release(session);
   }, PAUSED_LOOK_MS);
 }
@@ -530,7 +581,8 @@ function spawnSession(msg) {
   openScrollback(session);
   sessions.set(id, session);
 
-  term.onData((data) => {
+  /** @param {string} data */
+  const onData = (data) => {
     session.seq += 1;
     if (session.batchFirst === null) session.batchFirst = session.seq;
     session.batch.push(data);
@@ -545,7 +597,26 @@ function spawnSession(msg) {
     session.dirty = true;
     if (!session.flushTimer) session.flushTimer = setTimeout(() => flush(session), FLUSH_MS);
     throttle(session);
+  };
+  session.onData = onData;
+
+  const internalTerm = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (term));
+  let boundClose = Boolean(internalTerm._boundClose);
+  Object.defineProperty(term, "_boundClose", {
+    configurable: true,
+    enumerable: true,
+    get: () => boundClose,
+    set: (value) => {
+      boundClose = Boolean(value);
+      if (boundClose) {
+        session.gone = true;
+        drainClosingPty(session);
+        release(session);
+      }
+    },
   });
+
+  term.onData(onData);
 
   term.onExit(({ exitCode, signal }) => {
     // node-pty can report the exit before the last bytes are read; give them a moment.
@@ -566,7 +637,15 @@ function finish(session, exitCode, signal) {
   session.exited = true;
   session.gone = true;
   release(session);
-  for (const timer of session.killTimers) clearTimeout(timer);
+  // A stopped terminal's leader is gone, but what it left in its session still gets the rest of
+  // the steps until nothing is left. A terminal that ended on its own leaves its leftovers be, as
+  // a closed terminal window does.
+  if (!session.stopAt) for (const timer of session.killTimers) clearTimeout(timer);
+  else {
+    const left = waitForEmpty(session);
+    draining.add(left);
+    void left.then(() => draining.delete(left));
+  }
   if (session.paste) clearPasteTimers(session.paste);
   flush(session);
   // A recording in progress is written before the exit is reported, so its run finds its files.
@@ -583,11 +662,86 @@ function finish(session, exitCode, signal) {
 
 /** @param {Session} session */
 function killSession(session) {
-  if (session.exited || session.killTimers.length) return;
-  // What closing a terminal window does: hang up, then ask, then insist.
+  if (session.exited || session.stopAt) return;
+  session.stopAt = Date.now();
+  // What closing a terminal window does: hang up, then ask, then insist. The asking and insisting
+  // reach every process still in the terminal, so one that ignores the hang-up (a nohup'd server,
+  // a background job in a group of its own) doesn't outlive Stop.
   signalGroup(session.pid, "SIGHUP");
-  session.killTimers.push(setTimeout(() => signalGroup(session.pid, "SIGTERM"), 1500));
-  session.killTimers.push(setTimeout(() => signalGroup(session.pid, "SIGKILL"), 4000));
+  session.killTimers.push(setTimeout(() => signalSession(session, "SIGTERM"), STOP_TERM_MS));
+  session.killTimers.push(setTimeout(() => signalSession(session, "SIGKILL"), STOP_KILL_MS));
+}
+
+/**
+ * The processes still in a terminal's session, zombies aside. node-pty starts each terminal as a
+ * session of its own, so this is everything started in it, background jobs included, but not a
+ * program that left with setsid on purpose. Linux only (/proc); empty elsewhere.
+ * @param {number} sid
+ * @returns {number[]}
+ */
+function sessionMembers(sid) {
+  /** @type {number[]} */
+  const members = [];
+  let names;
+  try {
+    names = fs.readdirSync("/proc");
+  } catch {
+    return members;
+  }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = fs.readFileSync(`/proc/${name}/stat`, "utf8");
+      // Fields after the command name: state ppid pgrp session ...
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (fields[0] !== "Z" && Number(fields[3]) === sid) members.push(Number(name));
+    } catch {
+      /* gone already */
+    }
+  }
+  return members;
+}
+
+/**
+ * Signal everything left in a terminal. Once its leader has exited only processes found in its
+ * session are signalled, never the leader's pid on its own, which may belong to someone else by then.
+ * @param {Session} session
+ * @param {NodeJS.Signals} signal
+ */
+function signalSession(session, signal) {
+  const members = sessionMembers(session.pid);
+  if (members.length === 0) {
+    if (!session.exited) signalGroup(session.pid, signal);
+    return;
+  }
+  for (const pid of members) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * Resolves once a stopped terminal has nothing left in it, or once its last step has had time to
+ * land; the steps that are still to come are then dropped.
+ * @param {Session} session
+ * @returns {Promise<void>}
+ */
+function waitForEmpty(session) {
+  return new Promise((resolve) => {
+    const look = () => {
+      const over = !session.stopAt || Date.now() > session.stopAt + STOP_KILL_MS + 500;
+      if (over || sessionMembers(session.pid).length === 0) {
+        for (const timer of session.killTimers) clearTimeout(timer);
+        resolve();
+        return;
+      }
+      setTimeout(look, 100);
+    };
+    look();
+  });
 }
 
 /**
@@ -868,7 +1022,8 @@ function shutdown() {
   if (shuttingDown) return shuttingDown;
   const live = [...sessions.values()];
   for (const session of live) killSession(session);
-  shuttingDown = Promise.all(live.map((session) => waitForExit(session, 6000)));
+  // Quitting waits for what each terminal left behind too: the host's timers end with it.
+  shuttingDown = Promise.all([...live.map((session) => waitForExit(session, 6000).then(() => waitForEmpty(session))), ...draining]);
   return shuttingDown;
 }
 
