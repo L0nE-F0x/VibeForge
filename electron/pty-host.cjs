@@ -33,7 +33,7 @@ const QUIET_TICKS = 3;
 // most about this much per terminal instead of all of it.
 const PENDING_HIGH = 8 * 1024 * 1024;
 const PENDING_LOW = 2 * 1024 * 1024;
-const PAUSED_LOOK_MS = 50;
+const PAUSED_LOOK_MS = 15;
 
 // The messages are typed in pty-protocol.ts, which the window's side (supervisor.ts) uses too.
 /** @import { PtyAnswer, PtyLine, PtyOp, PtyRequest } from "./pty-protocol.js" */
@@ -89,6 +89,7 @@ const PAUSED_LOOK_MS = 50;
  *   holds?: number,
  *   pauseTimer: NodeJS.Timeout | undefined,
  *   gone: boolean,
+ *   onData?: (data: string) => void,
  *   exitWaiters?: Array<() => void>,
  *   programKey?: string,
  * }} Session
@@ -417,16 +418,55 @@ function alive(pid) {
   }
 }
 
+/**
+ * Synchronously drain any unread bytes from a paused pty master fd once the process exits,
+ * before node-pty's 200 ms destroy timer closes the socket underneath a stalled event loop.
+ * @param {Session} session
+ */
+function drainClosingPty(session) {
+  if (!session.paused || session.holds || session.exited || !session.onData) return;
+  const internal = /** @type {{ _fd?: number, _socket?: { _readableState?: { decoder?: { write(chunk: Buffer): string, end(): string } } } }} */ (
+    /** @type {unknown} */ (session.term)
+  );
+  const fd = typeof internal._fd === "number" ? internal._fd : -1;
+  if (fd < 0) return;
+  const decoder = internal._socket?._readableState?.decoder;
+  const buf = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let read = 0;
+    try {
+      read = fs.readSync(fd, buf, 0, buf.length, null);
+    } catch (error) {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+      if (code === "EIO" && decoder) {
+        const tail = decoder.end();
+        if (tail) session.onData(tail);
+      }
+      break;
+    }
+    if (read <= 0) break;
+    const slice = buf.subarray(0, read);
+    const text = decoder ? decoder.write(slice) : slice.toString("utf8");
+    if (text) session.onData(text);
+  }
+}
+
 /** @param {Session} session */
 function throttle(session) {
   if (session.paused || session.gone || pendingOf(session) <= PENDING_HIGH) return;
+  const internal = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (session.term));
+  if (internal._boundClose || !alive(session.pid)) {
+    session.gone = true;
+    return;
+  }
   session.paused = true;
   session.term.pause();
   // node-pty drops what is still unread 200 ms after the program exits, so a paused pane keeps
-  // looking for that and lets the rest through.
+  // looking for that (plus the _boundClose setter in spawnSession) and drains/resumes immediately.
   session.pauseTimer = setInterval(() => {
-    if (alive(session.pid)) return;
+    if (!internal._boundClose && alive(session.pid)) return;
     session.gone = true;
+    drainClosingPty(session);
     release(session);
   }, PAUSED_LOOK_MS);
 }
@@ -534,7 +574,8 @@ function spawnSession(msg) {
   openScrollback(session);
   sessions.set(id, session);
 
-  term.onData((data) => {
+  /** @param {string} data */
+  const onData = (data) => {
     session.seq += 1;
     if (session.batchFirst === null) session.batchFirst = session.seq;
     session.batch.push(data);
@@ -549,7 +590,26 @@ function spawnSession(msg) {
     session.dirty = true;
     if (!session.flushTimer) session.flushTimer = setTimeout(() => flush(session), FLUSH_MS);
     throttle(session);
+  };
+  session.onData = onData;
+
+  const internalTerm = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (term));
+  let boundClose = Boolean(internalTerm._boundClose);
+  Object.defineProperty(term, "_boundClose", {
+    configurable: true,
+    enumerable: true,
+    get: () => boundClose,
+    set: (value) => {
+      boundClose = Boolean(value);
+      if (boundClose) {
+        session.gone = true;
+        drainClosingPty(session);
+        release(session);
+      }
+    },
   });
+
+  term.onData(onData);
 
   term.onExit(({ exitCode, signal }) => {
     // node-pty can report the exit before the last bytes are read; give them a moment.
