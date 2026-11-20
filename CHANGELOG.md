@@ -6,6 +6,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-11-20
+
+**3.1.1: the fixes from a full audit of 3.0.3. Viby waits for Go on more of what's risky, Sync keeps every commit, and nothing a task's agent wrote is lost on Apply.**
+
+### Changed
+
+- **Viby waits for Go on more of what's risky,** in Just go and on a call alike:
+  - a yes, a number or Enter that answers a CLI asking to run a command or make an edit
+  - Escape while a CLI is working, and a message to Claude Code that starts with `!`
+  - replacing an agent's memory, and starting tasks a CLI handed out
+  - a setting that lets a lead CLI apply its helpers' changes, or keeps runs for less time
+  - opening a page from another site in the browser. Pages on this computer, such as your dev server, still open at once.
+  - Its safe shell commands are now tests, builds, lint, typecheck and check scripts only, with no quotes. `npm run deploy` or `bun run <file>` waits for Go.
+- **On a call, "go" only answers the plan Viby just showed you,** not an older one still waiting.
+- **Stop ends everything left in a terminal.** A background job that ignores the hang-up, such as a `nohup`'d dev server, no longer keeps running, its port with it, after the pane closes or VibeForge quits. A program started with `setsid` is left alone.
+- **Apply keeps a task's copy when the agent left files there that git ignores,** such as notes or a `config.local`, and names them, so you can take what you need before you discard it. Build and dependency folders don't count.
+- **The phone page refuses Tailscale Funnel,** which would put it on the internet, instead of only warning in Settings.
+- **A new agent, routine or skill named like one you deleted gets its own id** (`helper-2`) while that one's Undo is up or its old runs still name it, so it doesn't take over the old one's history, and Undo still brings the old one back.
+- **Settings → Storage says when runs you keep forever pass 5 GB,** and points at the two ways to keep fewer.
+
+### Fixed
+
+- **Tasks Viby makes work in their own copy again,** as tasks from the board do. They had been running in your folder unless the plan said otherwise.
+- **Sync:**
+  - It no longer resets a branch whose commits are still arriving from the other machine: it waits for the folder to finish syncing before it sorts out git history.
+  - Git's top-level lock files (`.git/index.lock` and the like) no longer sync, so a stale lock can't block git on both machines.
+  - When `.env` or another dotfile changed on both machines, it is now listed under **Changed on both machines**.
+  - A stash conflict keeps every stash entry, not only the newest.
+  - A second conflict on the same file keeps the first saved version too.
+- **Pausing a routine cancels a slot that was waiting for its folder.** A routine whose slot passed while the computer slept now shows it as missed instead of starting hours late. A daily cron time in the hour that repeats when the clocks go back fires once.
+- **Continue picks up the exact session of a full-screen CLI** that prints its resume line on the way out, instead of the latest session in the folder.
+- **A terminal that printed a flood of output no longer loses its last lines** (and with them its final screen) when the program ends while it is held back.
+- **Reading a task's changes while its CLI still runs** no longer stages files in that CLI's copy.
+- **Long dictations from the phone** get two minutes to upload on a slow connection.
+
+### Security
+
+- **The private Syncthing's control interface is now a socket file in its own private folder,** so another user account on the computer can't reach it.
+- **A pairing request shows the other machine's device ID,** and Settings → Sync shows this one's, to check before accepting.
+- **More hardening:**
+  - Viby reads a file only after following its symlinks, and only inside the workspace.
+  - Sync's git repair no longer runs a synced repository's fsmonitor or filters.
+  - **Put mine back** refuses to write through a symbolic link.
+  - The phone page caps its pairing request and times out slow connections.
+  - Planner output and plan length are capped.
+
 ## [3.1.0] - 2026-11-20
 
 **3.1.0: every list in VibeForge searches, filters, sorts and acts on several at once, the way Code's workspace list does.**
