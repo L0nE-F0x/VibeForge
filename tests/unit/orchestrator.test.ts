@@ -701,6 +701,44 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("re-reads shell foreground before Viby key/tell steps and message delivery", async () => {
+    let at = Date.now();
+    const ctx = withPlanner([], { now: () => new Date(at) });
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const stale = await ctx.svc.startShell({ workspaceId: workspace.id });
+    ctx.svc.onPtyProgram(stale.ptyId, ["pasty"], ctx.place);
+    const written: string[] = [];
+    ctx.host.write = async (_ptyId, data) => {
+      written.push(data);
+    };
+    ctx.host.foreground = async () => ({ known: true, argv: null, cwd: ctx.place });
+    const plans: Array<Record<string, unknown>> = [];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: plans.shift() }), stderr: "", timedOut: false });
+
+    plans.push({ say: "Pressing yes.", steps: [{ kind: "key", target: stale.ptyId, prompt: "yes" }] });
+    await ctx.svc.orchestratorAsk("press yes");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    expect(written).toEqual([]);
+    expect(ctx.svc.listLive().find((item) => item.ptyId === stale.ptyId)?.programEngineId).toBeNull();
+
+    // Same for tell when foreground exited right before carryOut and before Delivery.deliver():
+    ctx.svc.onPtyProgram(stale.ptyId, ["pasty"], ctx.place);
+    ctx.svc.onPtyActivity(stale.ptyId, true);
+    let fg: { known: boolean; argv: string[] | null; cwd: string | null } = { known: true, argv: ["pasty"], cwd: ctx.place };
+    ctx.host.foreground = async () => fg;
+    at += 6000;
+    plans.push({ say: "Telling.", steps: [{ kind: "tell", target: stale.ptyId, prompt: "rm -rf /" }] });
+    await ctx.svc.orchestratorAsk("tell it");
+    await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)?.id ?? "");
+    fg = { known: true, argv: null, cwd: ctx.place };
+    ctx.svc.onPtyActivity(stale.ptyId, false);
+    at += 4000;
+    await ctx.svc.pumpMessages();
+    expect(ctx.sent.filter((item) => item.ptyId === stale.ptyId)).toEqual([]);
+    expect(ctx.svc.listLive().find((item) => item.ptyId === stale.ptyId)?.programEngineId).toBeNull();
+    ctx.svc.close();
+  });
+
   it("resumes the session a planner names itself, says when it isn't signed in, and lists models", async () => {
     const ctx = setup();
     const file = path.join(ctx.configRoot, "engines.json");

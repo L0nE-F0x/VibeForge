@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { newCompanionToken, normalizeCompanion } from "../companion.js";
+import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { isDirectory, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
@@ -281,6 +281,20 @@ export class ServiceCore {
 
   isLive(ptyId: string): boolean {
     return this.live.has(ptyId);
+  }
+
+  onPtyProgram(_ptyId: string, _argv: string[] | null, _cwd: string | null = null): void {}
+
+  /** Re-reads a shell pane's foreground right now so stale 1 s poll state never lets keys or text hit bare bash. */
+  async refreshShellForeground(ptyId: string): Promise<boolean> {
+    const session = this.live.get(ptyId);
+    if (!session) return false;
+    if (session.kind !== "shell" || !this.options.host.foreground) return true;
+    const seen = await this.options.host.foreground(ptyId).catch(() => ({ known: false, argv: null, cwd: null }));
+    if (!seen.known) return false;
+    if (shellForegroundEngine(seen, this.store.readEngineRows()) === "cli") return true;
+    this.onPtyProgram(ptyId, seen.argv, seen.cwd);
+    return false;
   }
 
   /** Resolves once the PTY has exited and its run is finished, or after the timeout. */

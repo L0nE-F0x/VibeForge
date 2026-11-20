@@ -331,15 +331,19 @@ function pasteSafe(text) {
  * Paste text the way a person would, then press Enter, unless `enter` is false (a draft to read first).
  * @param {Session} session
  * @param {string} text
+ * @param {boolean} [enter]
+ * @param {boolean} [fromSpawn]
  */
-function sendText(session, text, enter = true) {
+function sendText(session, text, enter = true, fromSpawn = false) {
   if (session.exited) return;
   const clean = pasteSafe(text);
   if (session.mirror.modes.bracketedPasteMode) {
     writeInput(session, `\x1b[200~${clean}\x1b[201~`);
     if (enter) setTimeout(() => writeInput(session, "\r"), ENTER_AFTER_PASTE_MS);
   } else {
-    writeInput(session, enter ? `${clean.replace(/\n/g, "\r")}\r` : clean.replace(/\n/g, "\r"));
+    // Without bracketed paste, a multi-line send becomes several Enters; collapse newlines to spaces so an early line can't exit a CLI into bash.
+    const flat = fromSpawn ? clean.replace(/\n/g, "\r") : clean.replace(/\s*\n+\s*/g, " ");
+    writeInput(session, enter ? `${flat}\r` : flat);
   }
 }
 
@@ -359,7 +363,7 @@ function armPaste(session, text) {
     paste.done = true;
     clearPasteTimers(paste);
     session.paste = null;
-    session.mirror.write("", () => sendText(session, paste.text));
+    session.mirror.write("", () => sendText(session, paste.text, true, true));
   };
   /** @type {Paste} */
   const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, deliver };

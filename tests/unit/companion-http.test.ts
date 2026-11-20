@@ -311,7 +311,14 @@ describe("a phone that shows more than one computer", () => {
       const page = await request(server.port, "/", { host: desktop, headers: { Origin: laptop } });
       expect(page.headers["access-control-allow-origin"]).toBeUndefined();
       expect(page.headers["content-security-policy"]).toContain("connect-src 'self' https://*.tail1234.ts.net:*;");
-      expect(page.raw.toString("utf8")).toContain('<meta name="vibeforge-version" content="2.21.0" />');
+      expect(page.raw.toString("utf8")).not.toContain("vibeforge-version");
+      const tooBigPair = await request(server.port, "/api/pair", {
+        method: "POST",
+        host: desktop,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: "x".repeat(1200) }),
+      });
+      expect(tooBigPair.status).toBe(413);
       const local = await request(server.port, "/");
       expect(local.headers["content-security-policy"]).toContain("connect-src 'self' http://127.0.0.1:* http://localhost:*;");
       const script = await request(server.port, "/app.js", { host: desktop });
@@ -463,7 +470,13 @@ describe("what the phone page sends over a slow link", () => {
 
   it("counts what reached it through a tailnet name without Tailscale's sign-in header (Funnel), and refuses none of it", async () => {
     const token = newCompanionToken();
+    const createSpy = vi.spyOn(http, "createServer");
     const server = await startCompanionHttp({ port: 0, token, root: path.join(import.meta.dirname, "../../companion"), icon: null, actions: actions() });
+    const rawServer = createSpy.mock.results.at(-1)?.value as http.Server | undefined;
+    expect(rawServer?.requestTimeout).toBe(30_000);
+    expect(rawServer?.headersTimeout).toBe(15_000);
+    expect(rawServer?.maxConnections).toBe(64);
+    createSpy.mockRestore();
     try {
       expect((await request(server.port, "/", { host: "studio.tail1234.ts.net", headers: { "Tailscale-User-Login": "me@example.com" } })).status).toBe(200);
       expect((await request(server.port, "/", { host: `127.0.0.1:${server.port}` })).status).toBe(200);
@@ -507,5 +520,55 @@ describe("what the phone page sends over a slow link", () => {
       holder.close();
       await stopCompanion();
     }
+  });
+
+  it("switches the whole module set to the cached copy as soon as any module falls back", async () => {
+    const vm = await import("node:vm");
+    const sw = fs.readFileSync(path.join(import.meta.dirname, "../../companion/sw.js"), "utf8");
+    const store = new Map<string, { ok: boolean; status: number; body: string; clone(): unknown }>([
+      ["https://studio.ts.net/js/api.js", { ok: true, status: 200, body: "cached api", clone() { return this; } }],
+      ["https://studio.ts.net/js/desk.js", { ok: true, status: 200, body: "cached desk", clone() { return this; } }],
+    ]);
+    const handlers: Record<string, (e: unknown) => void> = {};
+    const fetched: string[] = [];
+    const fetchMock = async (req: { url: string }) => {
+      fetched.push(req.url);
+      if (req.url.endsWith("/js/api.js")) return { ok: false, status: 503 };
+      return { ok: true, status: 200, body: `live ${req.url}`, clone() { return this; } };
+    };
+    const context = {
+      URL,
+      AbortController,
+      Date,
+      setTimeout,
+      clearTimeout,
+      fetch: fetchMock,
+      caches: {
+        open: async () => ({
+          match: async (req: { url: string }) => store.get(req.url),
+          put: async (req: { url: string }, res: { ok: boolean; status: number; body: string; clone(): unknown }) => { store.set(req.url, res); },
+        }),
+      },
+      self: {
+        location: { origin: "https://studio.ts.net" },
+        skipWaiting: () => Promise.resolve(),
+        clients: { claim: () => Promise.resolve(), matchAll: async () => [], openWindow: async () => null },
+        addEventListener: (name: string, fn: (e: unknown) => void) => { handlers[name] = fn; },
+      },
+    };
+    vm.runInNewContext(sw, context);
+    const ask = (url: string, mode = "cors") =>
+      new Promise<{ body: string }>((resolve) => {
+        handlers.fetch({
+          request: { method: "GET", mode, url },
+          respondWith: (p: Promise<{ body: string }>) => p.then(resolve),
+        });
+      });
+
+    expect((await ask("https://studio.ts.net/", "navigate")).body).toContain("live ");
+    // api.js hits 503 and falls back to the cached copy; desk.js next must stay on cached without hitting network.
+    expect((await ask("https://studio.ts.net/js/api.js")).body).toBe("cached api");
+    expect((await ask("https://studio.ts.net/js/desk.js")).body).toBe("cached desk");
+    expect(fetched).toEqual(["https://studio.ts.net/", "https://studio.ts.net/js/api.js"]);
   });
 });

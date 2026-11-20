@@ -355,6 +355,19 @@ describe("pty host", () => {
     expect((await host.request({ op: "screen", ptyId: "nope" })).alive).toBe(false);
   });
 
+  it("collapses multi-line send prompts to a single line when bracketed paste mode is off", async () => {
+    const host = await startHost();
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
+    await host.request({ op: "write", ptyId: pty, data: "bind 'set enable-bracketed-paste off'; echo READY\r" });
+    await host.until(async () => (await host.screen(pty)).includes("READY"));
+    await host.request({ op: "write", ptyId: pty, data: "read -r line; printf 'GOT:%s\\n' \"$line\"\r" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await host.request({ op: "send", ptyId: pty, text: "alpha\necho INJECTED_CMD", enter: true });
+    await host.until(async () => (await host.screen(pty)).includes("GOT:alpha echo INJECTED_CMD"));
+    const screen = await host.screen(pty);
+    expect(screen).toContain("GOT:alpha echo INJECTED_CMD");
+  });
+
   it("ends its terminals properly on SIGHUP, as when the terminal VibeForge started from closes", async () => {
     const host = await startHost();
     const dir = tempDir();

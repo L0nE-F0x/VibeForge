@@ -45,11 +45,12 @@ export function readReach(status: string | null, serve: string | null, port: num
   // Only this computer's own name counts: Serve keeps the entries of a name the machine had before
   // (a laptop renamed from "apexforge" to "apexforgelaptop"), and that old name no longer resolves,
   // so a phone sent there gets nothing. The address on 443 first: it is the one without a port to type.
-  const shared = Object.keys(web)
+  const allShared = Object.keys(web)
     .filter((host) => host.toLowerCase().replace(/:\d+$/, "") === name && servesPort(web[host]?.Handlers, port))
-    .sort((a, b) => Number(b.endsWith(":443")) - Number(a.endsWith(":443")))[0];
+    .sort((a, b) => Number(b.endsWith(":443")) - Number(a.endsWith(":443")));
+  const shared = allShared[0];
   if (!shared) return { tailscale: "on", name, url: null, funnel: false };
-  return { tailscale: "on", name, url: `https://${shared.replace(/:443$/, "")}`, funnel: funnels[shared] === true };
+  return { tailscale: "on", name, url: `https://${shared.replace(/:443$/, "")}`, funnel: allShared.some((host) => funnels[host] === true) };
 }
 
 function ask(args: string[], env: NodeJS.ProcessEnv): Promise<{ out: string; missing: boolean }> {

@@ -27,6 +27,8 @@ export interface DeskHost {
   write?(ptyId: string, data: string): Promise<void>;
   /** What a live terminal shows now, as plain text, with its scrollback. */
   screen?(ptyId: string): Promise<string>;
+  /** The foreground process in a shell pane right now (not the 1s poll). */
+  foreground?(ptyId: string): Promise<{ known: boolean; argv: string[] | null; cwd: string | null }>;
   /** The answer to a prompt sent at or after `since`, from the CLI's own session log; null on abort or timeout. */
   watchReply?(opts: { kind: ReplyLog; cwd: string; since: number; words: string; signal: AbortSignal }): Promise<string | null>;
   /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */

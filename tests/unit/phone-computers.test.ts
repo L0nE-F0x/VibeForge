@@ -141,6 +141,15 @@ describe("where a phone can open the page, as Tailscale tells it", () => {
     expect(readReach(status("Running"), serve("desktop.tail1234.ts.net:443", "http://127.0.0.1:47370"), 4737).url).toBeNull();
     expect(readReach(status("Running"), serve("desktop.tail1234.ts.net:8443", "http://localhost:4737"), 4737).url).toBe("https://desktop.tail1234.ts.net:8443");
     expect(readReach(status("Running"), serve("desktop.tail1234.ts.net:443", "http://127.0.0.1:4737", true), 4737)).toMatchObject({ url: "https://desktop.tail1234.ts.net", funnel: true });
+    // Funnel enabled only on a second port sharing the same page still sets the warning.
+    const multiPort = JSON.stringify({
+      Web: {
+        "desktop.tail1234.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4737" } } },
+        "desktop.tail1234.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:4737" } } },
+      },
+      AllowFunnel: { "desktop.tail1234.ts.net:8443": true },
+    });
+    expect(readReach(status("Running"), multiPort, 4737)).toMatchObject({ url: "https://desktop.tail1234.ts.net", funnel: true });
     // A page shared under a path of its own would not load: the page asks for its files from the top.
     const under = JSON.stringify({ Web: { "desktop.tail1234.ts.net:443": { Handlers: { "/phone": { Proxy: "http://127.0.0.1:4737" } } } } });
     expect(readReach(status("Running"), under, 4737).url).toBeNull();

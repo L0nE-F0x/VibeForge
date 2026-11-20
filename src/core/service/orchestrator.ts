@@ -1263,7 +1263,7 @@ export class OrchestratorDesk {
       return;
     }
     if (step.kind === "key") {
-      if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
+      if (!this.core.isLive(step.target) || !(await this.core.refreshShellForeground(step.target))) throw new Error("That CLI isn't running any more.");
       const session = this.core.live.get(step.target);
       const screen = this.core.options.host.screen ? await this.core.options.host.screen(step.target).catch(() => "") : "";
       const action = keySequenceFor(step.prompt, screen);
@@ -1335,8 +1335,9 @@ export class OrchestratorDesk {
     }
     if (!this.core.isLive(step.target)) throw new Error("That CLI isn't running any more.");
     if (step.kind === "tell") {
-      // Looked at again now: a pane whose CLI has quit since the plan was made is a bare shell,
-      // and the message would run there as a command.
+      // Looked at again now: a pane whose CLI has quit since the plan or last 1 s poll is a bare
+      // shell, and the message would run there as a command.
+      if (!(await this.core.refreshShellForeground(step.target))) throw new Error("That CLI isn't running any more.");
       const session = this.core.live.get(step.target);
       const to = session && isCodingCli(session) ? this.messages.list().find((item) => item.ptyId === step.target) : undefined;
       if (!to) throw new Error("That CLI isn't running any more.");

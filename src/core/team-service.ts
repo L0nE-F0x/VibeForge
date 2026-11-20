@@ -495,7 +495,7 @@ export class TeamService extends ServiceCore {
 
   // ---------------------------------------------------------------- shell runs
 
-  onPtyProgram(ptyId: string, argv: string[] | null, cwd: string | null = null): void {
+  override onPtyProgram(ptyId: string, argv: string[] | null, cwd: string | null = null): void {
     this.shellRuns.onPtyProgram(ptyId, argv, cwd);
   }
 
