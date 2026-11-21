@@ -65,7 +65,7 @@ export function SyncSwitch({ kind, id }: { kind: "agent" | "skill"; id: string }
       </Field>
       {item?.from && (
         <span className="faint hstack" style={{ alignItems: "center", fontSize: "var(--fs-sm)" }}>
-          <Laptop size={12} /> {t("library.from", { machine: item.from })}
+          <Laptop size={12} /> {t("library.cameFrom", { machine: item.from })}
         </span>
       )}
     </div>

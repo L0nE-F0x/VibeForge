@@ -1836,7 +1836,7 @@ export const de: Catalog = {
   "library.needSync": "Schalte zuerst die Synchronisierung in den Einstellungen ein.",
   "library.needMachine": "Kopple zuerst einen Rechner in den Einstellungen, unter Synchronisierung.",
   "library.openSettings": "Einstellungen öffnen",
-  "library.from": "Kam von {machine}.",
+  "library.cameFrom": "Kam von {machine}.",
   "library.setFailed": "Die Synchronisierung ließ sich nicht ändern",
   "library.syncs": "Wird mit deinen anderen Rechnern synchronisiert",
   "library.syncsWaiting": "Wird synchronisiert und wartet auf diesem Rechner auf einen Ordner oder seine CLI",
