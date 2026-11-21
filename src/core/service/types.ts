@@ -34,6 +34,8 @@ export interface DeskHost {
   /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */
   lastReply?(opts: { kind: ReplyLog; cwd: string; since: number }): Promise<string | null>;
   kill(ptyId: string): Promise<void>;
+  /** Turns syncing a saved agent or skill with the paired machines on or off (Settings → Sync). */
+  syncLibrary?(kind: "agent" | "skill", id: string, on: boolean): Promise<void>;
   /** Record a shell's terminal into a run folder from now on, or (null) stop and write its files. */
   record(ptyId: string, runDir: string | null): Promise<void>;
   resolveBin(bin: string): string | null;

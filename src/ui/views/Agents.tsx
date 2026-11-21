@@ -8,6 +8,7 @@ import {
   MessageSquarePlus,
   MessagesSquare,
   Plus,
+  RefreshCw,
   Settings2,
   Sparkles,
   Trash2,
@@ -30,6 +31,7 @@ import { forget, recall, remember } from "../remember.js";
 import { isShortcut } from "../shortcuts.js";
 import { RunRow } from "./Home.js";
 import { AGENT_CHAT_LIST, useChatList } from "./chat-list.js";
+import { EngineStandIn, LibraryConflicts, SyncMark, SyncSwitch, WaitingFolders, useLibrary, useSyncReady } from "../components/LibrarySync.js";
 import { useT } from "../i18n/index.js";
 
 /** Save on Ctrl+S while a form is on screen. */
@@ -150,6 +152,8 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const engines = useEngines().data ?? [];
   const sessions = useLive().data ?? [];
   const [creating, setCreating] = useState(false);
+  const library = useLibrary().data;
+  const syncReady = useSyncReady().ready;
   const list = agents.data ?? [];
   const selected = list.find((agent) => agent.id === route.agentId) ?? null;
   useDropMissing(agents.loaded, Boolean(route.agentId) && !selected, { view: "agents" });
@@ -222,6 +226,11 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
     if (error) throw error;
     selection.setSelecting(false);
   }, t("agents.deleteFailed"));
+  // All of them syncing already: the button stops them; otherwise it starts the rest.
+  const pickedSync = selection.picked.length > 0 && selection.picked.every((agent) => library?.agents[agent.id]?.on);
+  const [syncPicked, syncing] = useAction(async () => {
+    for (const agent of selection.picked) if (Boolean(library?.agents[agent.id]?.on) === pickedSync) await call("sync.setAgent", agent.id, !pickedSync);
+  }, t("library.setFailed"));
 
   return (
     <div className="view split-list">
@@ -258,9 +267,16 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
           placeholder={t("agents.search")}
           selectTip={t("list.selectDeleteTip")}
           actions={
-            <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
-              {t("common.delete")}
-            </Button>
+            <>
+              {syncReady && (
+                <Button size="sm" icon={RefreshCw} busy={syncing} disabled={!selection.picked.length} onClick={() => void syncPicked()} tip={t(pickedSync ? "library.stopPickedTip" : "library.syncPickedTip")}>
+                  {t(pickedSync ? "library.stopPicked" : "library.syncPicked")}
+                </Button>
+              )}
+              <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+                {t("common.delete")}
+              </Button>
+            </>
           }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
@@ -287,6 +303,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                     {engine && !engine.available ? ` · ${t("common.missing")}` : ""}
                   </span>
                 </span>
+                <SyncMark item={library?.agents[agent.id]} />
                 {unread > 0 && (
                   <Chip tone="accent" title={t.count("home.status.review", unread).replaceAll("**", "")}>
                     {unread}
@@ -632,6 +649,7 @@ function BriefTab({ agent }: { agent: Agent }) {
   return (
     <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.briefSavedBody")}`}>
       <Notice icon={BookOpen}>{t("agents.briefNote")}</Notice>
+      <LibraryConflicts kind="agent" id={agent.id} />
       <TextArea value={brief} placeholder={t("agents.briefPlaceholder")} style={{ minHeight: 320 }} onChange={(event) => setBrief(event.target.value)} />
       <SecretNote />
     </EditorShell>
@@ -652,6 +670,7 @@ function MemoryTab({ agent }: { agent: Agent }) {
   return (
     <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.memoryStored")}`}>
       <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>
+      <LibraryConflicts kind="agent" id={agent.id} />
       <TextArea code value={text} style={{ minHeight: 320 }} onChange={(event) => setText(event.target.value)} />
       <SecretNote />
     </EditorShell>
@@ -704,7 +723,9 @@ function FoldersTab({ agent }: { agent: Agent }) {
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 12 }}>
         <Notice icon={FolderOpen}>{t("agents.foldersNote")}</Notice>
+        {agent.places.length === 0 && <Notice tone="warn">{t("library.noFolderHere")}</Notice>}
         <FolderList places={agent.places} home={home} onRemove={agent.places.length > 1 ? (place) => void remove(place) : undefined} />
+        <WaitingFolders agent={agent} />
         <div>
           <Button icon={FolderPlus} onClick={() => void add()}>
             {t("agents.addFolder")}
@@ -758,6 +779,8 @@ function SettingsTab({ agent }: { agent: Agent }) {
   return (
     <div className="page-body">
       <div className="vstack page-narrow" style={{ gap: 16 }}>
+        <SyncSwitch kind="agent" id={agent.id} />
+        <LibraryConflicts kind="agent" id={agent.id} />
         <div className="form-grid">
           <Field label={t("common.name")}>
             <Input value={name} onChange={(event) => setName(event.target.value)} />
@@ -769,6 +792,7 @@ function SettingsTab({ agent }: { agent: Agent }) {
         {engine !== agent.engine && (
           <Notice tone="accent">{t("agents.switching", { engine: engineRow?.label ?? engine })}</Notice>
         )}
+        {engine === agent.engine && <EngineStandIn agentId={agent.id} />}
         <Toggle checked={allow} onChange={setAllow} label={t("agents.allowRoutines")} />
         <div className="form-grid">
           <Field label={t("agents.goodAt")} hint={t("agents.goodAtHint")}>

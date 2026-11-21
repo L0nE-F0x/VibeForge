@@ -74,6 +74,7 @@ What you want, and where to do it. The welcome tour shows the same list, and so 
 | Look back at a session, then Continue it or Hand it off to an agent | **Runs** |
 | Start and steer CLIs from the couch, on your phone | **Settings → Phone** ([how](#phone)) |
 | The same workspace on your other machine | **Settings → Sync** ([how](#sync)) |
+| The same agent, with its memory and skills, on your other machine | **Sync with my other machines** on the agent's **Settings** tab ([how](#agents-and-skills-on-both-machines)) |
 | Dictate to an agent from any app: hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | **Settings → Voice**, which adds the key to Hyprland |
 
 ## What's inside
@@ -218,6 +219,14 @@ Files go straight from one machine to the other, encrypted, over your local netw
 
 When both machines changed the same file before they met, the later change is used and the other is not left in the folder as a copy: VibeForge keeps it, and the workspace's sync lists it under **Changed on both machines** with **Compare**, **Keep the other's** and **Put mine back**. When both committed on the same branch while apart, the later machine's commits are on the branch and this machine's are kept on `<branch>-from-<machine>`, with **Merge now**. A synced workspace is one checkout on two machines, so it suits one machine at a time: the row shows when a CLI is working in it over there.
 
+### Agents and skills on both machines
+
+Once two machines are paired, a saved agent can sync too: turn on **Sync with my other machines** on its **Settings** tab (or select several in Agents and press **Sync**). It turns up on the other machine by itself, and from then on its name, brief, memory, skills, allowed folders and CLI stay the same on both. The skills it carries come with it. A skill can also sync on its own, from its page in Skills. **Off** on either machine stops it on both, and each keeps its copy. Nothing you didn't turn on leaves its machine. An agent that has the same name and brief as one that's already on the other machine is joined with it, not doubled.
+
+Allowed folders go by workspace, not by path. A folder in a synced workspace is found by that workspace, and any other folder by a workspace of the same name, then by the same place under home. A folder the other machine doesn't have yet is listed on the agent's **Folders** tab as waiting, with **Pick a folder**, and is added by itself once a workspace of that name turns up there, for instance when you take up its sync offer. If the agent's CLI isn't installed on the other machine, that machine's default CLI runs it there, and the agent's page says so. The machine it came from keeps its own CLI, and the stand-in steps aside once the agent's own CLI is installed.
+
+Edits made on both machines while apart are merged part by part, so a brief changed on one machine and memory changed on the other just combine. When both changed the same text, memory keeps both machines' lines. A brief or a skill keeps the later change, and the other machine's version is listed on that page under **Changed on both machines**, with **Compare** and **Put mine back**. A delete reaches the other machine once its Undo has run out, unless the agent was changed there in the meantime, in which case the agent stays on both. Viby can turn syncing on or off too (`sync=on|off` on an agent or skill step).
+
 Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, unmodified, at one pinned version (MPL 2.0; its license and a note of where its source is sit beside it in `vendor/syncthing/`), and runs privately while sync is on: its own keys and settings, port 22737, a control interface that is only a socket file in its own private folder, and no global discovery, relays, NAT traversal, usage or crash reports, or self-upgrades. A Syncthing you run yourself is neither used nor touched. A git checkout, or a copy built from source, downloads the same pinned release once from Settings → Sync, checked against its SHA-256. `node scripts/fetch-syncthing.mjs --bump vX.Y.Z` moves the pin.
 
 ## Your files
@@ -238,7 +247,8 @@ Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, un
   scratch/<chat>/               Chat mode working folders
   models/  voices/              speech models and Piper voices downloaded in Settings → Voice
   sync/                         paired machines and synced workspaces (state.json), the private Syncthing's keys and index,
-                                and versions of files both machines changed, kept until answered and 30 days after
+                                synced agents and skills (library/, the last version both machines agreed on),
+                                and versions of files and texts both machines changed, kept until answered and 30 days after
 ~/.config/VibeForge/            the window's browser profile: the browser pane's sign-ins and cookies, caches
 ~/.cache/vibeforge/             the launcher's build log (a git checkout that builds itself)
 ```

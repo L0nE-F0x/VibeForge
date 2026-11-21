@@ -5,6 +5,7 @@ import { slugify } from "../slug.js";
 import type { LiveSession, Workspace } from "../types.js";
 import { ConflictStore, copiesIn, walkCopies, type ConflictRecord, type FoundCopy } from "./conflicts.js";
 import { inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo, type MergeResult } from "./git-rescue.js";
+import { DELETE_GRACE_MS, LibrarySync, type ItemKind, type LibraryHost, type LibraryView, type Peer } from "./library.js";
 import { buildLink, readLink, safeHint, settleWithLink, writeLink, type LinkOffer } from "./link.js";
 import { deviceId, dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
 import { SyncStateFile, type MachineRecord, type ShareRecord, type SyncState } from "./state.js";
@@ -30,6 +31,8 @@ export interface SyncDeskHost {
   /** Something the window shows about sync changed. */
   changed(): void;
   log(line: string): void;
+  /** Saved agents and skills, for syncing the ones a person turns on. Without it, only workspaces sync. */
+  library?: LibraryHost;
 }
 
 export interface SyncDeskView {
@@ -56,6 +59,8 @@ const inside = (parent: string, child: string): boolean => {
 export class SyncDesk {
   private readonly stateFile: SyncStateFile;
   readonly conflicts: ConflictStore;
+  /** Synced agents and skills (./library.ts); null when the app gave no library. */
+  private readonly library: LibrarySync | null;
   private engine: SyncEngine | null = null;
   /** One change at a time: two clicks, or a click and something arriving, never interleave. */
   private chain: Promise<unknown> = Promise.resolve();
@@ -85,6 +90,7 @@ export class SyncDesk {
   ) {
     this.stateFile = new SyncStateFile(path.join(dataRoot, "sync", "state.json"));
     this.conflicts = new ConflictStore(path.join(dataRoot, "sync", "conflicts"), now);
+    this.library = host.library ? new LibrarySync(dataRoot, host.library, this.conflicts, now) : null;
   }
 
   /** Where the private Syncthing keeps its keys, settings and index. */
@@ -124,6 +130,8 @@ export class SyncDesk {
       this.conflicts.tidy();
       await this.reconcile();
       await this.readLinks();
+      this.library?.setMe(shortId(engine.id));
+      await this.libraryPass(true);
       for (const share of this.stateFile.read().shares) {
         if (isDirectory(share.path)) await this.handleCopies(share, walkCopies(share.path));
       }
@@ -134,6 +142,7 @@ export class SyncDesk {
   /** The engine is gone (sync turned off, or VibeForge quitting). What is saved stays. */
   detach(): void {
     this.engine = null;
+    this.library?.setMe("");
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.dirs.clear();
@@ -282,7 +291,8 @@ export class SyncDesk {
     if (event.type === "item-finished") {
       const state = this.stateFile.read();
       if (state.machines.some((machine) => linkFolderId(engine.id, machine.id) === event.folder)) {
-        this.later("links", 200, () => this.readLinks());
+        if (event.item.startsWith("library/") || event.item === "library") this.later("library", 300, () => this.libraryPass(true));
+        else this.later("links", 200, () => this.readLinks());
         return;
       }
       const share = state.shares.find((item) => item.folderId === event.folder);
@@ -605,6 +615,7 @@ export class SyncDesk {
       this.host.addWorkspace(target, found.offer.name);
       await this.reconcile();
       this.setLive();
+      this.libraryChanged();
       this.host.changed();
     });
   }
@@ -628,13 +639,21 @@ export class SyncDesk {
 
   /** What putting this machine's version back would change. */
   conflictDiff(id: string): Promise<string> {
+    const record = this.conflicts.get(id);
+    if (record && (record.kind === "agent" || record.kind === "skill")) return this.conflicts.diff(id, this.library?.current(record) ?? "");
     return this.conflicts.diff(id);
   }
 
   /** Answers a conflict: "mine" puts this machine's version back; "theirs" keeps what is there. */
   resolveConflict(id: string, keep: "mine" | "theirs"): Promise<void> {
     return this.run(async () => {
+      const waiting = this.conflicts.get(id);
+      if (waiting && (waiting.kind === "agent" || waiting.kind === "skill") && keep === "mine") {
+        if (!this.library) throw new Error("Sync is not running. Turn it on in Settings.");
+        this.library.restore(waiting, this.conflicts.savedText(id));
+      }
       const record = this.conflicts.resolve(id, keep);
+      if (record && (record.kind === "agent" || record.kind === "skill") && keep === "mine") await this.libraryPass(false);
       // Syncthing notices by itself within seconds; asking makes it now.
       if (record?.kind === "file" && keep === "mine") await this.engine?.scan(record.folderId, record.path).catch(() => undefined);
       this.host.changed();
@@ -654,6 +673,65 @@ export class SyncDesk {
     });
   }
 
+  // ------------------------------------------------------------------ agents and skills
+
+  private peers(): Peer[] {
+    return this.stateFile.read().machines.map((machine) => ({ id: machine.id, name: machine.name, dir: this.linkDir(machine.id) }));
+  }
+
+  /**
+   * One look at the synced agents and skills: what the other machines say (`remote`), then what
+   * changed here, then this machine's files for them written out. A delete here waiting for its
+   * Undo to run out is looked at again then.
+   */
+  private async libraryPass(remote: boolean): Promise<void> {
+    const library = this.library;
+    const engine = this.engine;
+    if (!library || !engine) return;
+    const state = this.stateFile.read();
+    library.setPlaces({ home: this.host.home, workspaces: this.host.workspaces(), shares: state.shares.map((share) => ({ folderId: share.folderId, path: share.path })) });
+    if (remote) await library.receive(this.peers());
+    const { recheck } = library.scan();
+    library.publish(engine.id, this.peers());
+    if (recheck) this.later("library-local", DELETE_GRACE_MS, () => this.libraryPass(false));
+  }
+
+  /** Agents, skills, workspaces or CLIs changed here: the synced ones are looked at again shortly. */
+  libraryChanged(): void {
+    if (this.engine && this.library) this.later("library-local", 800, () => this.libraryPass(false));
+  }
+
+  /** Turns syncing an agent or a skill on or off. The other machines follow. */
+  setLibrarySync(kind: ItemKind, localId: string, on: boolean): Promise<void> {
+    return this.run(async () => {
+      this.need();
+      const library = this.library;
+      if (!library) throw new Error("Agents and skills can't sync in this copy.");
+      const state = this.stateFile.read();
+      if (on && !state.machines.length) throw new Error("Pair a machine first, in Settings, under Sync.");
+      library.setPlaces({ home: this.host.home, workspaces: this.host.workspaces(), shares: state.shares.map((share) => ({ folderId: share.folderId, path: share.path })) });
+      library.setOn(kind, localId, on);
+      await this.libraryPass(false);
+      this.host.changed();
+    });
+  }
+
+  /** Uses `folder` on this machine for one of a synced agent's folders that wasn't found here. */
+  placeAgentFolder(agentId: string, key: string, folder: string): Promise<void> {
+    return this.run(async () => {
+      this.need();
+      if (!path.isAbsolute(folder) || !isDirectory(folder)) throw new Error("Choose a folder that exists.");
+      this.library?.placeAt(agentId, key, folder);
+      await this.libraryPass(false);
+      this.host.changed();
+    });
+  }
+
+  /** Which agents and skills sync, and what each is waiting for here. */
+  libraryView(): LibraryView {
+    return this.library?.view() ?? { agents: {}, skills: {} };
+  }
+
   // ------------------------------------------------------------------ for the window
 
   async view(): Promise<SyncDeskView> {
@@ -669,6 +747,8 @@ export class SyncDesk {
       workspaceId: workspaceFor(record.root),
       kind: record.kind,
       path: record.path,
+      section: record.section ?? null,
+      itemId: record.itemId ?? null,
       savedBranch: record.savedBranch,
       machineName: state.machines.find((machine) => shortId(machine.id) === record.winner)?.name ?? "the other machine",
       at: record.at,

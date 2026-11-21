@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Syncthing } from "../../electron/sync-engine.js";
+import { Store } from "../../src/core/store.js";
 import { SyncDesk, type SyncDeskHost } from "../../src/core/sync/desk.js";
 import type { LiveSession, Workspace } from "../../src/core/types.js";
 
@@ -54,6 +55,7 @@ interface Machine {
   live: LiveSession[];
   notes: string[];
   logs: string[];
+  store: Store;
 }
 
 async function machine(name: string, base: string): Promise<Machine> {
@@ -61,7 +63,8 @@ async function machine(name: string, base: string): Promise<Machine> {
   const dataRoot = path.join(base, name, "data");
   fs.mkdirSync(home, { recursive: true });
   const port = await freePort();
-  const made: Partial<Machine> = { name, home, workspaces: [], live: [], notes: [], logs: [] };
+  const store = new Store(path.join(base, name, "config"), path.join(base, name, "store"));
+  const made: Partial<Machine> = { name, home, workspaces: [], live: [], notes: [], logs: [], store };
   const host: SyncDeskHost = {
     home,
     machineName: () => name,
@@ -72,6 +75,24 @@ async function machine(name: string, base: string): Promise<Machine> {
     notify: (note) => void (made.notes as string[]).push(note.body),
     changed: () => undefined,
     log: (line) => void (made.logs as string[]).push(line),
+    // Saved agents and skills, in a config folder of its own.
+    library: {
+      agents: () => store.listAgents(),
+      getAgent: (id) => store.getAgent(id),
+      saveAgent: (agent) => store.writeAgent(agent),
+      readMemory: (id) => store.readMemory(id),
+      writeMemory: (id, text) => store.writeMemory(id, text),
+      skills: () => store.listSkills(),
+      getSkill: (id) => store.getSkill(id),
+      saveSkill: (skill) => store.writeSkill(skill),
+      newId: (kind, label) => store.uniqueId(path.join(store.configRoot, kind === "agent" ? "agents" : "skills"), label, ""),
+      remove: async (kind, id) => fs.rmSync(path.join(store.configRoot, kind === "agent" ? "agents" : "skills", id), { recursive: true, force: true }),
+      engines: () => [{ id: "claude", label: "Claude Code", bin: "claude", available: true }, ...(name === "Desk" ? [{ id: "grok", label: "Grok Build", bin: "grok", available: true }] : [])],
+      defaultEngine: () => "claude",
+      arrived: (kind, label, from) => void (made.notes as string[]).push(`${from} shared the ${kind} ${label}`),
+      changed: () => undefined,
+      log: (line) => void (made.logs as string[]).push(line),
+    },
   };
   const desk = new SyncDesk(dataRoot, host, () => new Date(), 1);
   const engine = await Syncthing.start({
@@ -278,6 +299,42 @@ describe.skipIf(!have)("workspace sync between two machines, with the real Synct
     expect((await b.desk.view()).offers).toEqual([]);
     expect((await a.desk.view()).offers).toEqual([]);
   }, 120_000);
+
+  it("syncs an agent turned on, with its skill, memory and folder, and joins memories written while apart", async () => {
+    a.store.writeSkill({ id: "tests", name: "Tests", description: "", body: "Run npm test." });
+    const now = new Date().toISOString();
+    a.store.writeAgent({ id: "reviewer", name: "Reviewer", engine: "grok", brief: "Review the change.", memoryFile: "memory.md", places: [onA], skills: ["tests"], allowRoutines: true, goodAt: "", tier: "", createdAt: now, updatedAt: now });
+    a.store.writeMemory("reviewer", "- one\n");
+    await a.desk.setLibrarySync("agent", "reviewer", true);
+    // Lap has Site as a workspace (taken up from Desk earlier) and no Grok.
+    const got = await until("the agent on Lap", () => b.store.getAgent("reviewer")?.places.length && b.store.getAgent("reviewer"));
+    expect(got).toMatchObject({ name: "Reviewer", brief: "Review the change.", places: [onB], skills: ["tests"], engine: "claude" });
+    expect(b.store.getSkill("tests")?.body).toBe("Run npm test.");
+    expect(b.store.readMemory("reviewer")).toBe("- one\n");
+    expect(b.desk.libraryView().agents.reviewer).toMatchObject({ on: true, from: "Desk", engine: { wanted: "Grok Build", using: "Claude Code" } });
+    expect(b.notes).toContain("Desk shared the agent Reviewer");
+
+    // Apart, each learns something.
+    await a.engine.setPaused(b.engine.id, true);
+    a.store.writeMemory("reviewer", "- one\n- learned on Desk\n");
+    a.desk.libraryChanged();
+    b.store.writeMemory("reviewer", "- one\n- learned on Lap\n");
+    b.desk.libraryChanged();
+    await sleep(2000);
+    await Promise.all([a.desk.settled(), b.desk.settled()]);
+    await a.engine.setPaused(b.engine.id, false);
+    const joined = (text: string) => text.includes("- learned on Desk") && text.includes("- learned on Lap");
+    await until("memories joined on both", () => joined(a.store.readMemory("reviewer")) && joined(b.store.readMemory("reviewer")) && a.store.readMemory("reviewer") === b.store.readMemory("reviewer"), 90_000);
+    // Desk keeps asking for Grok.
+    expect(a.store.getAgent("reviewer")?.engine).toBe("grok");
+    expect((await a.desk.view()).conflicts).toEqual([]);
+
+    // Off on Lap: off on Desk too, and both keep their copy.
+    await b.desk.setLibrarySync("agent", "reviewer", false);
+    await until("off on Desk", () => a.desk.libraryView().agents.reviewer?.on === false);
+    expect(b.store.getAgent("reviewer")).not.toBeNull();
+    expect(a.store.getAgent("reviewer")).not.toBeNull();
+  }, 180_000);
 
   it("unpairs", async () => {
     await a.desk.removeMachine(b.engine.id);

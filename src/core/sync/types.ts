@@ -132,10 +132,13 @@ export interface SyncConflict {
   id: string;
   folderId: string;
   workspaceId: string | null;
-  /** "file": a file both machines changed. "commits": both machines committed on one branch. */
-  kind: "file" | "commits";
-  /** The file, relative to the workspace; for commits, the branch. */
+  /** "file": a file both machines changed. "commits": both machines committed on one branch. "agent" / "skill": a synced agent's or skill's text changed on both. */
+  kind: "file" | "commits" | "agent" | "skill";
+  /** The file, relative to the workspace; for commits, the branch; for an agent or skill, its name. */
   path: string;
+  /** For an agent or skill: which text changed on both ("memory", "brief" or "body"), and its id here. */
+  section: "memory" | "brief" | "body" | null;
+  itemId: string | null;
   /** For commits: the branch this machine's commits were kept on. */
   savedBranch: string | null;
   /** The machine whose version is in the workspace now. */

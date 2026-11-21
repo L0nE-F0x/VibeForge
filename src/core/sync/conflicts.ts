@@ -19,9 +19,13 @@ export interface ConflictRecord {
   folderId: string;
   /** The workspace's folder. */
   root: string;
-  kind: "file" | "commits";
-  /** The file, relative to the workspace (always with "/"); for commits, the branch. */
+  /** "agent" and "skill": a synced agent's or skill's text changed on both machines (folderId is its sync id, root is ""). */
+  kind: "file" | "commits" | "agent" | "skill";
+  /** The file, relative to the workspace (always with "/"); for commits, the branch; for an agent or skill, its name. */
   path: string;
+  /** For an agent or skill: which text ("memory", "brief" or "body") and its id on this machine. */
+  section?: "memory" | "brief" | "body";
+  itemId?: string;
   /** For commits: the branch this machine's commits were kept on. */
   savedBranch: string | null;
   /** The start of the id of the machine whose version is in the workspace now. */
@@ -174,6 +178,29 @@ export class ConflictStore {
     return record;
   }
 
+  /**
+   * Keeps this machine's version of a synced agent's or skill's text that the other machine's
+   * change replaced. A second one for the same text moves the earlier one to the answered ones.
+   */
+  keepText(item: { kind: "agent" | "skill"; syncId: string; itemId: string; name: string; section: "memory" | "brief" | "body" }, text: string, winner: string): ConflictRecord {
+    const waiting = this.list().find((record) => record.kind === item.kind && record.folderId === item.syncId && record.section === item.section);
+    if (waiting) this.archive(waiting.id);
+    const record: ConflictRecord = { id: this.newId(), folderId: item.syncId, root: "", kind: item.kind, path: item.name, section: item.section, itemId: item.itemId, savedBranch: null, winner, at: this.now().toISOString() };
+    fs.mkdirSync(this.folder(record.id), { recursive: true });
+    fs.writeFileSync(path.join(this.folder(record.id), SAVED), text);
+    writeJson(path.join(this.folder(record.id), "meta.json"), record);
+    return record;
+  }
+
+  /** This machine's saved text, for an agent or skill conflict. */
+  savedText(id: string): string {
+    try {
+      return fs.readFileSync(this.savedFile(id), "utf8");
+    } catch {
+      return "";
+    }
+  }
+
   /** The saved version's file, for a file conflict. */
   savedFile(id: string): string {
     return path.join(this.folder(id), SAVED);
@@ -187,6 +214,7 @@ export class ConflictStore {
   resolve(id: string, keep: "mine" | "theirs"): ConflictRecord | null {
     const record = this.get(id);
     if (!record) return null;
+    // An agent's or skill's text is put back by the sync desk, which knows where it lives.
     if (record.kind === "file" && keep === "mine") {
       const target = path.join(record.root, ...record.path.split("/"));
       // Inside the workspace only: the record names a path, and a path can be written wrong.
@@ -259,12 +287,19 @@ export class ConflictStore {
    * What putting this machine's version back would change, as a unified diff: from the file as it
    * is now (the other machine's) to the saved one. "" when git isn't there to make it.
    */
-  diff(id: string): Promise<string> {
+  diff(id: string, currentText?: string): Promise<string> {
     const record = this.get(id);
-    if (!record || record.kind !== "file") return Promise.resolve("");
-    const current = path.join(record.root, ...record.path.split("/"));
+    if (!record) return Promise.resolve("");
+    let current: string;
+    if (record.kind === "file") current = path.join(record.root, ...record.path.split("/"));
+    else if ((record.kind === "agent" || record.kind === "skill") && currentText !== undefined) {
+      // What is in the agent or skill now, beside the saved one, so git can compare the two files.
+      current = path.join(this.folder(id), "now");
+      fs.writeFileSync(current, currentText);
+    } else return Promise.resolve("");
     const from = fs.existsSync(current) ? current : "/dev/null";
     const saved = this.savedFile(id);
+    const label = record.kind === "file" ? record.path : `${record.path} (${record.section ?? "text"})`;
     return new Promise((resolve) => {
       execFile(
         "git",
@@ -274,7 +309,7 @@ export class ConflictStore {
           // 1 only means "they differ".
           const code = (error as { code?: unknown } | null)?.code;
           if (error && code !== 1) return resolve("");
-          resolve(relabel(stdout ?? "", from, saved, record.path));
+          resolve(relabel(stdout ?? "", from, saved, label));
         },
       );
     });

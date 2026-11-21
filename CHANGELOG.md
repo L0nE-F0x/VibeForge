@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-21
+
+**3.2.0: your saved agents and skills sync between your machines, with their memory, folders and CLI.**
+
+### Added
+
+- **Sync an agent with your other machines.** Turn on **Sync with my other machines** on an agent's Settings tab, or select several in Agents and press **Sync**. It turns up on your paired machine by itself, with its brief, memory, skills, allowed folders and CLI, and stays the same on both from then on. **Off** on either machine stops it on both, and each keeps its copy. Nothing you didn't turn on leaves its machine.
+- **Skills come with the agent.** A synced agent's skills sync with it. A skill can also sync on its own, from its page in Skills.
+- **Folders are found by workspace.** A folder in a synced workspace is found by that workspace, and any other folder by a workspace of the same name, then by the same place under home. A folder the other machine doesn't have yet waits on the agent's Folders tab, with **Pick a folder**, and is added by itself once a workspace of that name turns up there.
+- **A missing CLI gets a stand-in.** When the agent's CLI isn't installed on the other machine, that machine's default CLI runs it there, and the agent's page says so. The machine it came from keeps its own CLI, and the stand-in steps aside once the agent's CLI is installed.
+- **Edits made apart are merged.** A brief changed on one machine and memory on the other just combine. Memory written on both keeps both machines' lines. When both changed the same lines of a brief or a skill, the later change is used and the other version waits on that page under **Changed on both machines**, with **Compare** and **Put mine back**. A delete reaches the other machine once its Undo has run out, unless the agent was changed there meanwhile.
+- **Viby can turn it on or off,** with `sync=on|off` on an agent or skill step.
+
 ## [3.1.1] - 2026-11-20
 
 **3.1.1: the fixes from a full audit of 3.0.3. Viby waits for Go on more of what's risky, Sync keeps every commit, and nothing a task's agent wrote is lost on Apply.**

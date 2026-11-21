@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describeError } from "../src/core/log.js";
 import { SyncDesk } from "../src/core/sync/desk.js";
+import type { ItemKind, LibraryHost, LibraryView } from "../src/core/sync/library.js";
 import type { MergeResult } from "../src/core/sync/git-rescue.js";
 import { firewallCommand, machineAddresses, SYNC_PORT, type SyncMode } from "../src/core/sync/protocol.js";
 import { EMPTY_SYNC_VIEW, type SyncView } from "../src/core/sync/types.js";
@@ -61,6 +62,40 @@ export class Sync {
     }
   }
 
+  /** The saved agents and skills, as the desk syncs the ones a person turned on. */
+  private libraryHost(): LibraryHost {
+    const { ctx } = this;
+    const service = () => {
+      if (!ctx.service) throw new Error("VibeForge is still starting.");
+      return ctx.service;
+    };
+    return {
+      agents: () => service().listAgents(),
+      getAgent: (id) => service().store.getAgent(id),
+      saveAgent: (agent) => service().store.writeAgent(agent),
+      readMemory: (id) => service().store.readMemory(id),
+      writeMemory: (id, text) => service().store.writeMemory(id, text),
+      skills: () => service().listSkills(),
+      getSkill: (id) => service().store.getSkill(id),
+      saveSkill: (skill) => service().store.writeSkill(skill),
+      newId: (kind, name) => service().freeId(kind === "agent" ? "agents" : "skills", name, ""),
+      // As a delete here: anything running as the agent stops, and it goes to the trash.
+      remove: async (kind, id) => {
+        if (kind === "agent") await service().deleteAgent(id);
+        else service().deleteSkill(id);
+      },
+      engines: () => service().listEngines().map((engine) => ({ id: engine.id, label: engine.label, bin: engine.bin, available: engine.available })),
+      defaultEngine: () => service().getSettings().defaultEngine,
+      arrived: (kind, name, machine) => {
+        if (!ctx.service?.getSettings().notify) return;
+        const body = kind === "agent" ? `${machine} shared the agent ${name}. It is in Agents now.` : `${machine} shared the skill ${name}. It is in Skills now.`;
+        this.notify({ title: "VibeForge", body: ctx.words.coreText(body) });
+      },
+      changed: (kinds) => ctx.service?.emit(...(kinds.includes("agent") ? (["agents", "routines", "tasks"] as const) : []), ...(kinds.includes("skill") ? (["skills", "agents"] as const) : []), "sync"),
+      log: (line) => ctx.log.info(line),
+    };
+  }
+
   private makeDesk(): SyncDesk {
     const { ctx } = this;
     this.desk ??= new SyncDesk(ctx.roots.dataRoot, {
@@ -75,6 +110,7 @@ export class Sync {
       },
       changed: () => ctx.service?.emit("sync"),
       log: (line) => ctx.log.info(line),
+      library: this.libraryHost(),
     });
     return this.desk;
   }
@@ -162,6 +198,11 @@ export class Sync {
     return this.enqueue(() => this.halt());
   }
 
+  /** Agents, skills, workspaces or CLIs changed: the synced agents and skills are looked at again. */
+  libraryChanged(): void {
+    if (this.engine) this.desk?.libraryChanged();
+  }
+
   /** What runs in the workspaces changed: the paired machines are told. */
   liveChanged(): void {
     if (this.engine) this.desk?.setLive();
@@ -218,4 +259,7 @@ export class Sync {
   conflictDiff = (id: string): Promise<string> => this.makeDesk().conflictDiff(id);
   resolveConflict = (id: string, keep: "mine" | "theirs"): Promise<void> => this.makeDesk().resolveConflict(id, keep);
   mergeConflict = (id: string): Promise<MergeResult> => this.makeDesk().mergeConflict(id);
+  library = (): LibraryView => this.makeDesk().libraryView();
+  setLibrarySync = (kind: ItemKind, id: string, on: boolean): Promise<void> => this.makeDesk().setLibrarySync(kind, id, on);
+  placeAgentFolder = (agentId: string, key: string, folder: string): Promise<void> => this.makeDesk().placeAgentFolder(agentId, key, folder);
 }

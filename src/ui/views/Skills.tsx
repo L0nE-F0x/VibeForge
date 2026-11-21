@@ -1,4 +1,5 @@
-import { Plus, Save, Sparkles, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Save, Sparkles, Trash2 } from "lucide-react";
+import { LibraryConflicts, SyncMark, SyncSwitch, useLibrary, useSyncReady } from "../components/LibrarySync.js";
 import { useEffect } from "react";
 import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
@@ -36,6 +37,8 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
   const deletedMany = useDeletedMany();
   const skills = useSkills();
   const agents = useAgents().data ?? [];
+  const library = useLibrary().data;
+  const syncReady = useSyncReady().ready;
   const list = skills.data ?? [];
   const creating = route.skillId === "new";
   const selected = list.find((skill) => skill.id === route.skillId) ?? null;
@@ -74,6 +77,10 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
     if (error) throw error;
     selection.setSelecting(false);
   }, t("skills.deleteFailed"));
+  const pickedSync = selection.picked.length > 0 && selection.picked.every((skill) => library?.skills[skill.id]?.on);
+  const [syncPicked, syncing] = useAction(async () => {
+    for (const skill of selection.picked) if (Boolean(library?.skills[skill.id]?.on) === pickedSync) await call("sync.setSkill", skill.id, !pickedSync);
+  }, t("library.setFailed"));
 
   return (
     <div className="view split-list">
@@ -106,9 +113,16 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
           placeholder={t("skills.search")}
           selectTip={t("list.selectDeleteTip")}
           actions={
-            <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
-              {t("common.delete")}
-            </Button>
+            <>
+              {syncReady && (
+                <Button size="sm" icon={RefreshCw} busy={syncing} disabled={!selection.picked.length} onClick={() => void syncPicked()} tip={t(pickedSync ? "library.stopPickedTip" : "library.syncPickedTip")}>
+                  {t(pickedSync ? "library.stopPicked" : "library.syncPicked")}
+                </Button>
+              )}
+              <Button size="sm" variant="danger" icon={Trash2} busy={deleting} disabled={!selection.picked.length} onClick={() => void deletePicked()} tip={t("list.deleteSelectedTip")}>
+                {t("common.delete")}
+              </Button>
+            </>
           }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
@@ -128,6 +142,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
                 <span className="row-title truncate">{skill.name}</span>
                 <span className="row-sub truncate">{skill.description || t("common.noDescription")}</span>
               </span>
+              <SyncMark item={library?.skills[skill.id]} />
             </button>
           ))}
         </div>
@@ -226,6 +241,8 @@ function SkillEditor({ skill }: { skill: Skill | null }) {
           <SecretNote />
           {skill && (
             <>
+              <SyncSwitch kind="skill" id={skill.id} />
+              <LibraryConflicts kind="skill" id={skill.id} />
               <div className="section-title">{t("skills.installedOn")}</div>
               {agents.length === 0 && <Notice>{t("agents.none")}</Notice>}
               <div className="vstack" style={{ gap: 6 }}>
