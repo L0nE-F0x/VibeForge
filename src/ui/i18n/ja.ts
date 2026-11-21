@@ -1837,7 +1837,7 @@ export const ja: Catalog = {
   "library.needSync": "先に設定で同期をオンにしてください。",
   "library.needMachine": "先に設定の「同期」でコンピュータをペアリングしてください。",
   "library.openSettings": "設定を開く",
-  "library.from": "{machine} から届きました。",
+  "library.cameFrom": "{machine} から届きました。",
   "library.setFailed": "同期を切り替えられませんでした",
   "library.syncs": "ほかのコンピュータと同期しています",
   "library.syncsWaiting": "同期していて、このコンピュータでフォルダーか CLI を待っています",

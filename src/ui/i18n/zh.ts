@@ -1837,7 +1837,7 @@ export const zh: Catalog = {
   "library.needSync": "请先在设置中开启同步。",
   "library.needMachine": "请先在设置的“同步”下配对一台电脑。",
   "library.openSettings": "打开设置",
-  "library.from": "来自 {machine}。",
+  "library.cameFrom": "来自 {machine}。",
   "library.setFailed": "无法更改同步",
   "library.syncs": "与你的其他电脑同步",
   "library.syncsWaiting": "正在同步，并在这台电脑上等待一个文件夹或它的 CLI",

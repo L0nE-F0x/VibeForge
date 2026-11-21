@@ -1836,7 +1836,7 @@ export const pt: Catalog = {
   "library.needSync": "Ligue a Sincronização em Ajustes primeiro.",
   "library.needMachine": "Pareie um computador em Ajustes, em Sincronização, primeiro.",
   "library.openSettings": "Abrir Ajustes",
-  "library.from": "Veio de {machine}.",
+  "library.cameFrom": "Veio de {machine}.",
   "library.setFailed": "Não foi possível mudar a sincronização",
   "library.syncs": "Sincroniza com seus outros computadores",
   "library.syncsWaiting": "Sincroniza, e espera uma pasta ou sua CLI neste computador",

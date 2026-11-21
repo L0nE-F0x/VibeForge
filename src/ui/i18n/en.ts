@@ -1849,7 +1849,7 @@ export const en = {
   "library.needSync": "Turn on Sync in Settings first.",
   "library.needMachine": "Pair a machine in Settings, under Sync, first.",
   "library.openSettings": "Open Settings",
-  "library.from": "Came from {machine}.",
+  "library.cameFrom": "Came from {machine}.",
   "library.setFailed": "Could not change syncing",
   "library.syncs": "Syncs with your other machines",
   "library.syncsWaiting": "Syncs, and waits for a folder or its CLI on this machine",

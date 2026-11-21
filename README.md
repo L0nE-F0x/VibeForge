@@ -74,7 +74,6 @@ What you want, and where to do it. The welcome tour shows the same list, and so 
 | Look back at a session, then Continue it or Hand it off to an agent | **Runs** |
 | Start and steer CLIs from the couch, on your phone | **Settings → Phone** ([how](#phone)) |
 | The same workspace on your other machine | **Settings → Sync** ([how](#sync)) |
-| The same agent, with its memory and skills, on your other machine | **Sync with my other machines** on the agent's **Settings** tab ([how](#agents-and-skills-on-both-machines)) |
 | Dictate to an agent from any app: hold <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> | **Settings → Voice**, which adds the key to Hyprland |
 
 ## What's inside

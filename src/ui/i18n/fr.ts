@@ -1837,7 +1837,7 @@ export const fr: Catalog = {
   "library.needSync": "Activez d'abord la synchronisation dans Réglages.",
   "library.needMachine": "Appairez d'abord un ordinateur dans Réglages, sous Synchronisation.",
   "library.openSettings": "Ouvrir Réglages",
-  "library.from": "Provient de {machine}.",
+  "library.cameFrom": "Provient de {machine}.",
   "library.setFailed": "Impossible de modifier la synchronisation",
   "library.syncs": "Se synchronise avec vos autres ordinateurs",
   "library.syncsWaiting": "Se synchronise, et attend un dossier ou sa CLI sur cet ordinateur",
