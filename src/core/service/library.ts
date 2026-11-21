@@ -28,7 +28,8 @@ export class LibraryDesk {
     if (input.id && !existing) throw new Error("That agent no longer exists.");
     if (!existing || existing.engine !== engineId) this.core.requireEngine(engineId);
     const places = normalizePlaces(input.places ?? []);
-    if (places.length === 0) throw new Error("Add at least one allowed folder.");
+    // A synced agent can arrive with none of its folders on this machine; it may be saved like that until one is.
+    if (places.length === 0 && !(existing && existing.places.length === 0)) throw new Error("Add at least one allowed folder.");
     for (const place of places) {
       if (existing?.places.includes(place)) continue;
       if (!isDirectory(place)) throw new Error(`This folder does not exist: ${place}`);

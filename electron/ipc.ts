@@ -268,6 +268,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "sync.conflictDiff": (id) => sync.conflictDiff(String(id ?? "")),
     "sync.resolveConflict": (id, keep) => sync.resolveConflict(String(id ?? ""), keep === "mine" ? "mine" : "theirs"),
     "sync.mergeConflict": (id) => sync.mergeConflict(String(id ?? "")),
+    "sync.library": () => sync.library(),
+    "sync.setAgent": (agentId, on) => sync.setLibrarySync("agent", String(agentId ?? ""), on === true),
+    "sync.setSkill": (skillId, on) => sync.setLibrarySync("skill", String(skillId ?? ""), on === true),
+    "sync.placeFolder": (agentId, key, folder) => sync.placeAgentFolder(String(agentId ?? ""), String(key ?? "").slice(0, 2000), String(folder ?? "")),
 
     "voice.status": () => voice.status(),
     "voice.start": () => voice.start(),

@@ -104,8 +104,8 @@ export function SyncDialog({ workspace, machineId, view, onClose }: { workspace:
   );
 }
 
-/** A file both machines changed, or commits both made on one branch, with the choices for it. */
-function ConflictRow({ conflict }: { conflict: SyncConflict }) {
+/** A file both machines changed, commits both made on one branch, or a synced agent's or skill's text, with the choices for it. */
+export function ConflictRow({ conflict }: { conflict: SyncConflict }) {
   const t = useT();
   const { push } = useToast();
   const [diff, setDiff] = useState<string | null>(null);
@@ -138,10 +138,17 @@ function ConflictRow({ conflict }: { conflict: SyncConflict }) {
       </div>
     );
   }
+  // Memory keeps both machines' lines, so "theirs" is the joined one now in use.
+  const text = conflict.kind === "agent" || conflict.kind === "skill";
+  const line = !text
+    ? t("sync.conflictFile", { path: conflict.path, machine: conflict.machineName })
+    : conflict.section === "memory"
+      ? t("library.conflictMemory", { name: conflict.path })
+      : t(conflict.kind === "skill" ? "library.conflictSkill" : "library.conflictBrief", { name: conflict.path, machine: conflict.machineName });
   return (
     <div className="sync-conflict">
       <span>
-        <Rich text={t("sync.conflictFile", { path: conflict.path, machine: conflict.machineName })} />
+        <Rich text={line} />
       </span>
       <div className="hstack">
         <Button size="sm" pressed={diff !== null} busy={comparing} onClick={() => void compare()}>
@@ -149,7 +156,7 @@ function ConflictRow({ conflict }: { conflict: SyncConflict }) {
         </Button>
         <span className="grow" />
         <Button size="sm" busy={resolving} onClick={() => void resolve("theirs")}>
-          {t("sync.keepTheirs", { machine: conflict.machineName })}
+          {conflict.section === "memory" ? t("library.keepJoined") : t("sync.keepTheirs", { machine: conflict.machineName })}
         </Button>
         <Button size="sm" variant="primary" busy={resolving} onClick={() => void resolve("mine")}>
           {t("sync.keepMine")}

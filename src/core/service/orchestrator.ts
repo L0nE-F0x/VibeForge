@@ -1440,7 +1440,7 @@ export class OrchestratorDesk {
         tier,
       });
       step.target = saved.id;
-      step.result = `Created agent ${saved.name}.`;
+      step.result = `Created agent ${saved.name}.${await this.syncOption("agent", saved.id, opts)}`;
       substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
       return;
     }
@@ -1530,7 +1530,16 @@ export class OrchestratorDesk {
       goodAt,
       tier,
     });
-    step.result = `Updated agent ${saved.name}.`;
+    step.result = `Updated agent ${saved.name}.${await this.syncOption("agent", saved.id, opts)}`;
+  }
+
+  /** `sync=on|off` on an agent or skill step: syncing it with the paired machines. "" when the step doesn't say. */
+  private async syncOption(kind: "agent" | "skill", id: string, opts: ReturnType<typeof parseOptions>): Promise<string> {
+    const on = opts.bool("sync");
+    if (on === undefined) return "";
+    if (!this.core.options.host.syncLibrary) throw new Error("Sync is not running. Turn it on in Settings.");
+    await this.core.options.host.syncLibrary(kind, id, on);
+    return on ? " It syncs with your other machines now." : " It no longer syncs with your other machines.";
   }
 
   private async carryOutSkill(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
@@ -1550,7 +1559,7 @@ export class OrchestratorDesk {
         );
       }
       step.target = saved.id;
-      step.result = `Created skill ${saved.name}.`;
+      step.result = `Created skill ${saved.name}.${await this.syncOption("skill", saved.id, parseOptions(step.options))}`;
       substitutePlannedId(turn.steps, plannedId(step.id), saved.id);
       return;
     }
@@ -1576,7 +1585,7 @@ export class OrchestratorDesk {
           step.agents.filter((id) => !id.startsWith(PLANNED_PREFIX)),
         );
       }
-      step.result = `Updated skill ${saved.name}.`;
+      step.result = `Updated skill ${saved.name}.${await this.syncOption("skill", saved.id, parseOptions(step.options))}`;
       return;
     }
     if (action === "attach") {

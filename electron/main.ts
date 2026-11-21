@@ -84,7 +84,7 @@ const ctx = new MainContext({
 const { send, focusWindow, install } = ctx;
 const notify = desktopNotifier(ctx);
 
-const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats, voice: () => voice, tray: () => tray });
+const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats, voice: () => voice, tray: () => tray, sync: () => sync });
 const dock = new Dock(
   () => ctx.win,
   (state) => send("dock", state),
@@ -224,6 +224,8 @@ if (!app.requestSingleInstanceLock()) {
       // Sync starts and stops with its switch, and tells the paired machines what runs here.
       if (topics.includes("settings")) void sync.apply();
       if (topics.includes("live") || topics.includes("working") || topics.includes("workspaces")) sync.liveChanged();
+      // A synced agent or skill changed here (or what its folders and CLI are found by): the other machines hear.
+      if (topics.includes("agents") || topics.includes("skills") || topics.includes("engines") || topics.includes("workspaces")) sync.libraryChanged();
     });
     ctx.palette = resolvePalette(ctx.service.getSettings().theme);
     syncCompanion(companionWire(ctx, stats, voice));

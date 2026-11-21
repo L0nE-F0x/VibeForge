@@ -27,6 +27,7 @@ export function deskHost(
     stats?: () => Stats;
     voice?: () => Voice;
     tray?: () => { readonly autostart: boolean; setAutostart(on: boolean): void; sync(): void };
+    sync?: () => { setLibrarySync(kind: "agent" | "skill", id: string, on: boolean): Promise<void> };
   },
 ): DeskHost {
   const { supervisor, log, words, send } = ctx;
@@ -50,6 +51,11 @@ export function deskHost(
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),
+    syncLibrary: async (kind, id, on) => {
+      const sync = extras?.sync?.();
+      if (!sync) throw new Error("Sync is not running. Turn it on in Settings.");
+      await sync.setLibrarySync(kind, id, on);
+    },
     record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
     resolveBin: (bin) => whichBin(bin),
     // The core speaks English; its notes are put in the window's language here.

@@ -68,8 +68,9 @@ import type {
 import type { MergeResult } from "../core/sync/git-rescue.js";
 import type { SyncMode } from "../core/sync/protocol.js";
 import type { SyncConflict, SyncMachine, SyncOffer, SyncRequest, SyncShare, SyncView } from "../core/sync/types.js";
+import type { LibraryItemView, LibraryView } from "../core/sync/library.js";
 
-export type { MergeResult, SyncConflict, SyncMachine, SyncMode, SyncOffer, SyncRequest, SyncShare, SyncView };
+export type { LibraryItemView, LibraryView, MergeResult, SyncConflict, SyncMachine, SyncMode, SyncOffer, SyncRequest, SyncShare, SyncView };
 export type {
   MaestroCopy,
   MaestroNote,
@@ -510,6 +511,13 @@ export interface DeskMethods {
   "sync.resolveConflict": (id: string, keep: "mine" | "theirs") => void;
   /** Merges the branch this machine's commits were kept on. */
   "sync.mergeConflict": (id: string) => MergeResult;
+  /** Which saved agents and skills sync with the paired machines, and what each waits for here. */
+  "sync.library": () => LibraryView;
+  /** Turns syncing an agent (with its skills and memory) on or off, on every paired machine. */
+  "sync.setAgent": (agentId: string, on: boolean) => void;
+  "sync.setSkill": (skillId: string, on: boolean) => void;
+  /** Uses `folder` here for one of a synced agent's folders that wasn't found on this machine. */
+  "sync.placeFolder": (agentId: string, key: string, folder: string) => void;
 
   "voice.status": () => VoiceStatus;
   "voice.start": () => void;
