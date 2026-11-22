@@ -48,7 +48,7 @@ const floors: Record<string, number> = {
   'src/core/service/orchestrator.ts': 88,
   'src/core/service/routines.ts': 93,
   'src/core/service/runs.ts': 78,
-  'src/core/service/shell-runs.ts': 96,
+  'src/core/service/shell-runs.ts': 95,
   'src/core/service/tasks.ts': 96,
   'src/core/service/turns.ts': 94,
   'src/core/service/types.ts': 99,

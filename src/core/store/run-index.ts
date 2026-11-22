@@ -111,6 +111,7 @@ function setIndexAside(file: string): void {
 export class RunIndex {
   private readonly dataRoot: string;
   private readonly db: DatabaseSync;
+  private closed = false;
 
   constructor(dataRoot: string) {
     this.dataRoot = dataRoot;
@@ -154,6 +155,8 @@ export class RunIndex {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     try {
       this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch {
