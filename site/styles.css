@@ -2246,6 +2246,68 @@ h2 {
   border-top: 1px solid var(--line);
 }
 
+/* Viby sees, remembers and checks: a pasted screenshot, its memory and a verify step (3.4) */
+
+.or-mem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: 9.5px;
+}
+
+.or-mem svg,
+.or-ok svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.or-shot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 54px;
+  margin-bottom: 7px;
+  padding: 6px 5px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.or-shot i {
+  display: block;
+  height: 4px;
+  background: var(--line);
+}
+
+.or-shot i:nth-child(2) {
+  width: 70%;
+}
+
+/* The button that overflows the phone's edge, which is what the screenshot is about. */
+.or-shot i.hot {
+  width: 130%;
+  height: 7px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.or-say.or-ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--fg);
+}
+
+.or-ok svg {
+  margin-top: 2px;
+  color: var(--green);
+}
+
 /* a call with Viby: the same bar, as a conversation said out loud (src/ui/call.tsx) */
 
 .art-call .or-say {

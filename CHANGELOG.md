@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-11-23
+
+**3.4.1: the README, the website and the welcome tour catch up with 3.3 and 3.4's Viby, and dependencies move forward.**
+
+### Added
+
+- **A tour step for what Viby learned in 3.4.** *Viby sees, remembers and checks* comes after Viby's own step: paste a screenshot, say *remember…*, have it run the tests when a CLI is done, **New** and **History**, and `/` and `@` in its box. The Agents step mentions **Start from a template**. In all seven languages.
+
+### Changed
+
+- **README:** Viby's screenshots, memory, checks, look-before-planning and quick commands are explained in plain words; 3.3's Find in terminal, pane stepping, the passthrough setting, starter templates, Viby's copies on Home, Runs' **Previous**, ARM64 builds, `--purge-app` and the installer's hints for other distributions are in; `vibeforge tell --wait` reads Copilot CLI's and OpenCode's logs; Keys lists the new shortcuts.
+- **Website:** a card for Viby seeing, remembering and checking its work, retaken screenshots of 3.4 (a pasted screenshot, Viby's memory and a passing check in Viby's tab; the 3.4.0 tag and Find in terminal in Code; a Viby copy to review on Home), the new keys, ARM64 and `--purge-app` under Install, and Viby in the opening paragraph.
+- **Principles:** Viby's memory is a plain file like the rest, replacing or clearing it waits for **Go**, and a failing check goes back only to the CLI in that copy.
+- **Dependencies:** Electron 45.3.2, Vite 8.3.8, @vitejs/plugin-react 6.3.0, lucide-react 1.73.0, cronstrue 3.39.0, cron-parser 5.10.6 and Biome 2.6.7.
+
 ## [3.4.0] - 2026-11-23
 
 **3.4.0: a major Viby upgrade — screenshot and image pasting on desktop and phone, persistent memory (`viby.md`) and conversation history, isolated `verify` auto-fix loops, deep multi-round inspection, 0 ms local reflexes, sentence-streamed voice, and Copilot & OpenCode reply watching.**

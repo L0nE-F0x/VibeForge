@@ -7,6 +7,7 @@ import {
   FolderPlus,
   History,
   House,
+  ImagePlus,
   KanbanSquare,
   LifeBuoy,
   MessagesSquare,
@@ -164,6 +165,15 @@ const STEPS: Step[] = [
     side: "left",
     icon: Workflow,
     keys: [[shortcutKeys("app.orchestrator"), "shortcuts.orchestrator"]],
+  },
+  {
+    id: "vibyBox",
+    title: "tour.vibyBox.title",
+    body: "tour.vibyBox.body",
+    route: { view: "orchestrator" },
+    target: [".viby-composer-wrap", ".viby-view"],
+    side: "top",
+    icon: ImagePlus,
   },
   {
     id: "call",
