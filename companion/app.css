@@ -1034,7 +1034,7 @@ html.keyboard .credit { display: none; }
 
 .orch-turn { display: flex; align-items: flex-start; gap: 10px; }
 
-.orch-turn.from-you { justify-content: flex-end; }
+.orch-turn.from-you { flex-direction: column; justify-content: flex-end; align-items: flex-end; gap: 6px; }
 
 .orch-turn.from-you .orch-said {
   max-width: 86%;
@@ -1204,6 +1204,30 @@ html.keyboard .credit { display: none; }
 
 /* The mic: tap to talk and tap again, or hold. It glows while it listens. */
 .orch-composer .actions { flex-wrap: nowrap; }
+.orch-checks { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.orch-check-detail { border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; background: color-mix(in srgb, var(--bg-deep) 55%, transparent); }
+.orch-check-detail summary { cursor: pointer; font-size: 12px; color: var(--fg); }
+.orch-check-pre { margin: 6px 0 0; max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.orch-memory-area { width: 100%; min-height: 200px; font-family: var(--mono); padding: 10px; }
+.orch-thread-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.orch-thread-row.active .orch-thread-title { color: var(--accent); font-weight: 600; }
+.orch-thread-open { flex: 1; text-align: left; display: flex; flex-direction: column; gap: 2px; background: transparent; border: 0; color: inherit; padding: 4px; }
+
+.orch-image-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.orch-image-thumb { position: relative; width: 58px; height: 58px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+
+.orch-image-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.orch-image-remove { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--fg); display: grid; place-items: center; padding: 0; font-size: 12px; }
+
+.orch-turn-images { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 86%; }
+
+.orch-turn-img-btn { padding: 0; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 6px; overflow: hidden; background: var(--card); max-width: 160px; max-height: 120px; }
+
+.orch-turn-img-btn img { display: block; max-width: 160px; max-height: 120px; object-fit: cover; }
+
+.orch-lightbox-img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 6px; }
 
 .mic {
   flex: none;

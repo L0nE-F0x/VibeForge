@@ -87,7 +87,9 @@ function PendingStepSummary({ step }: { step: OrchestratorStep }) {
     step.kind === "task" ||
     step.kind === "chat" ||
     step.kind === "run" ||
-    step.kind === "talk"
+    step.kind === "talk" ||
+    step.kind === "verify" ||
+    step.kind === "memory"
   ) {
     text = [t(otherStepKey(step)), step.asked || step.name || step.prompt].filter(Boolean).join(" · ");
   } else {
@@ -173,6 +175,25 @@ function EditableStepRow({
         <EffortPick engine={engine} value={step.effort ?? ""} onChange={(effort) => void edit({ effort })} />
       </div>
     );
+  } else if (step.kind === "verify") {
+    controls = (
+      <div className="orch-step-line">
+        <strong>{t("orch.verify")}</strong>
+        <Select value={step.workspaceId} aria-label={t("orch.workspace")} onChange={(event) => void edit({ workspaceId: event.target.value })}>
+          {!workspace && !plannedWorkspace && <option value="">{t("orch.pickWorkspace")}</option>}
+          {planned.map((item) => (
+            <option key={item.id} value={plannedId(item.id)}>
+              {t("orch.planned", { name: item.name ?? "" })}
+            </option>
+          ))}
+          {workspaces.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+    );
   } else if (
     step.kind === "workspace" ||
     step.kind === "lookup" ||
@@ -187,7 +208,8 @@ function EditableStepRow({
     step.kind === "skill" ||
     step.kind === "chat" ||
     step.kind === "run" ||
-    step.kind === "talk"
+    step.kind === "talk" ||
+    step.kind === "memory"
   ) {
     controls = (
       <div className="orch-step-line">
@@ -215,6 +237,8 @@ function EditableStepRow({
     step.kind === "start" ||
     step.kind === "tell" ||
     step.kind === "shell" ||
+    step.kind === "verify" ||
+    (step.kind === "memory" && step.action !== "clear") ||
     (step.kind === "task" && Boolean(step.name || step.action === "create" || step.action === "create-run" || step.action === "edit" || step.action === "continue")) ||
     (step.kind === "routine" && (step.action === "create" || step.action === "edit")) ||
     (step.kind === "agent" && (step.action === "create" || step.action === "edit" || step.action === "memory-set" || step.action === "memory-append")) ||

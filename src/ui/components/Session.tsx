@@ -36,11 +36,15 @@ export function Composer({
   keepKey,
   onEscape,
   voiceWords,
+  canSendEmpty,
+  onDropFiles,
 }: {
   placeholder: string;
   onSend: (text: string) => Promise<boolean | undefined>;
   busy?: boolean;
   disabled?: boolean;
+  canSendEmpty?: boolean;
+  onDropFiles?: (files: File[]) => boolean | undefined;
   hint?: ReactNode;
   leading?: ReactNode;
   autoFocus?: boolean;
@@ -113,7 +117,7 @@ export function Composer({
 
   async function submit() {
     const value = textRef.current.trim();
-    if (!value || busy || disabled) return;
+    if ((!value && !canSendEmpty) || busy || disabled) return;
     const sentFrom = keepKey;
     const ok = await onSend(value);
     if (ok === false) return;
@@ -148,7 +152,12 @@ export function Composer({
     },
     onDrop(event: DragEvent) {
       setDragging(false);
-      const paths = [event.dataTransfer.getData(PATH_MIME), ...Array.from(event.dataTransfer.files).map(pathForFile)].filter(Boolean);
+      const files = Array.from(event.dataTransfer.files);
+      if (onDropFiles && files.length && onDropFiles(files) === true) {
+        event.preventDefault();
+        return;
+      }
+      const paths = [event.dataTransfer.getData(PATH_MIME), ...files.map(pathForFile)].filter(Boolean);
       if (!paths.length) return;
       event.preventDefault();
       insert(`${paths.map(shellQuote).join(" ")} `);
@@ -186,7 +195,7 @@ export function Composer({
           }}
         />
         <MicButton target={dictation.target} disabled={disabled} />
-        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || !text.trim()} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel ?? t("common.send") })}>
+        <Button variant="primary" icon={ArrowUp} busy={busy} disabled={disabled || (!text.trim() && !canSendEmpty)} onClick={() => void submit()} title={t("common.sendEnter", { label: sendLabel ?? t("common.send") })}>
           {sendLabel ?? t("common.send")}
         </Button>
       </div>

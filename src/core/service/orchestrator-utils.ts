@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -170,6 +171,32 @@ export function formatLibraryUpdate(context: PlanContext): string {
   return `(Updated library state:\n${lines.join("\n")})`;
 }
 
+export function memoryFingerprint(memory: string): string {
+  return createHash("sha256").update(memory).digest("hex").slice(0, 12);
+}
+
+export function formatMemoryUpdate(memory: string): string {
+  return `(Updated Viby memory (~/.config/vibeforge/viby.md):\n${memory.trim() || "(empty)"})`;
+}
+
+/** Parse optional `:start[-end]` or `#Lstart[-Lend]` line-range suffix from an inspect file path. */
+export function parseFileAndRange(raw: string): { file: string; range?: { start: number; end: number } } {
+  const trimmed = raw.trim();
+  const hashMatch = /^(.+?)#L(\d+)(?:-L?(\d+))?$/i.exec(trimmed);
+  if (hashMatch) {
+    const start = Math.max(1, Number(hashMatch[2]));
+    const end = Math.max(start, Number(hashMatch[3] ?? hashMatch[2]));
+    return { file: hashMatch[1].trim(), range: { start, end: Math.min(end, start + 240) } };
+  }
+  const colonMatch = /^(.+?):(\d+)(?:-(\d+))?$/.exec(trimmed);
+  if (colonMatch) {
+    const start = Math.max(1, Number(colonMatch[2]));
+    const end = Math.max(start, Number(colonMatch[3] ?? colonMatch[2]));
+    return { file: colonMatch[1].trim(), range: { start, end: Math.min(end, start + 240) } };
+  }
+  return { file: trimmed };
+}
+
 const SENSITIVE_INSPECT_DIRS = new Set([".ssh", ".gnupg", ".aws", ".kube", ".docker"]);
 const SAFE_ENV_SAMPLES = /^\.env\.(?:example|sample|template)$/i;
 
@@ -184,7 +211,7 @@ export function isSensitiveInspectPath(rel: string): boolean {
   return /^(?:id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?|authorized_keys|known_hosts|credentials(?:\.json)?)$/.test(base);
 }
 
-export function readBoundedInspectText(fullPath: string): { text: string } | { reason: string } | null {
+export function readBoundedInspectText(fullPath: string, range?: { start: number; end: number }): { text: string } | { reason: string } | null {
   let fd: number;
   try {
     fd = fs.openSync(fullPath, fs.constants.O_RDONLY);
@@ -194,7 +221,7 @@ export function readBoundedInspectText(fullPath: string): { text: string } | { r
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) return null;
-    const cap = Math.min(stat.size, 16 * 1024);
+    const cap = Math.min(stat.size, range ? 128 * 1024 : 16 * 1024);
     const buf = Buffer.allocUnsafe(cap);
     let offset = 0;
     while (offset < cap) {
@@ -204,7 +231,17 @@ export function readBoundedInspectText(fullPath: string): { text: string } | { r
     }
     const slice = buf.subarray(0, offset);
     if (slice.includes(0)) return { reason: "binary file" };
-    return { text: slice.toString("utf8").slice(0, 8000) };
+    const text = slice.toString("utf8");
+    if (!range) return { text: text.slice(0, 8000) };
+    const lines = text.split(/\r?\n/);
+    const start = Math.max(1, range.start);
+    const end = Math.min(lines.length, range.end);
+    if (start > lines.length) return { text: `(File has ${lines.length} lines; requested line ${start}.)` };
+    const numbered = lines
+      .slice(start - 1, end)
+      .map((line, i) => `L${start + i}: ${line}`)
+      .join("\n");
+    return { text: numbered.slice(0, 8000) };
   } catch {
     return null;
   } finally {

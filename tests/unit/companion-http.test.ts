@@ -617,4 +617,52 @@ describe("what the phone page sends over a slow link", () => {
       await server.close();
     }
   });
+
+  it("accepts image attachments on /api/orchestrator/ask and serves /api/orchestrator/image", async () => {
+    const TINY_PNG = "data:image/png;base64," + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
+    const asked: Array<{ text: string; images?: string[] }> = [];
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root: tempDir(),
+      icon: null,
+      actions: actions({
+        orchestrator: {
+          ask: (words, images) => {
+            asked.push({ text: words, images });
+          },
+          imageData: (name) => (name === "img-1.png" ? TINY_PNG : null),
+        } as CompanionActions["orchestrator"],
+      }),
+    });
+    try {
+      const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+      const base = `http://127.0.0.1:${server.port}`;
+
+      const okRes = await fetch(`${base}/api/orchestrator/ask`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: "", images: [TINY_PNG] }),
+      });
+      expect(okRes.status).toBe(200);
+      expect(asked).toEqual([{ text: "", images: [TINY_PNG] }]);
+
+      const badRes = await fetch(`${base}/api/orchestrator/ask`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: "hi", images: ["not-an-image"] }),
+      });
+      expect(badRes.status).toBe(400);
+
+      const imgRes = await fetch(`${base}/api/orchestrator/image?name=img-1.png`, { headers });
+      expect(imgRes.status).toBe(200);
+      expect(await imgRes.json()).toEqual({ dataUrl: TINY_PNG });
+
+      const missRes = await fetch(`${base}/api/orchestrator/image?name=../secret.png`, { headers });
+      expect(missRes.status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
 });

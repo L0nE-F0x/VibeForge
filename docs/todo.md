@@ -1,13 +1,13 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (3.3.1, 2026-11-22, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (3.4.0, 2026-11-23, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
-- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0–2.23.0: the call itself, Mute/Unmute, barge-in while speaking or thinking, natural spoken hang-up, immediate safe execution in calls, warm Piper TTS, 0 ms local navigation, two-pass `inspect` (screens, replies, diffs, files, quotas), `after: true` step chaining, core "waiting for you" prompt notes, `key` TUI answers, `shell`, and `workbench` actions. 2.23.0 makes the Vibe tab the call (a pixel V, live words, and tappable chips), adds faster on-device speech models, and lets Viby read and change settings. 3.0.0 lets Viby do anything in the app you can click and makes it the only voice. Still to do:
+- [ ] **Viby across the app, by voice** (founder, 2026-11-18). Shipped in 2.20.0–2.23.0: the call itself, Mute/Unmute, barge-in while speaking or thinking, natural spoken hang-up, immediate safe execution in calls, warm Piper TTS, 0 ms local navigation, two-pass `inspect` (screens, replies, diffs, files, quotas), `after: true` step chaining, core "waiting for you" prompt notes, `key` TUI answers, `shell`, and `workbench` actions. 2.23.0 makes the Vibe tab the call (a pixel V, live words, and tappable chips), adds faster on-device speech models, and lets Viby read and change settings. 3.0.0 lets Viby do anything in the app you can click and makes it the only voice. 3.4.0 adds screenshot pasting, viby.md memory, thread history, multi-round inspect, wave verify loops, 0 ms local reflexes, sentence-streamed Piper TTS, and Copilot/OpenCode reply watching. Still to do:
   - **Hearing better, the rest.** Talking over Viby has met one desk's speakers (see below): if PipeWire's canceller lets too much through on other setups, the default should become **Never**. Dictation's own start and stop still go by loudness. Silero v6 is published in the same format; v5.1.2 is the one checked.
-  - **Speaking up, the rest.** A CLI whose log VibeForge can't read (Cursor Agent, OpenCode, Copilot, Antigravity and the others) gets a completion word only after 20 s of work, without its log answer (though `inspect` can read its terminal screen when asked). Two of the same CLI in one folder share that folder's logs: the newest answer there is the one read.
-  - **Quicker answers.** Keeping the planner running persistently between turns might save ~1.5 s of CLI startup; not tried yet.
+  - **Speaking up, the rest.** Session-log reply watching covers Claude Code, Codex, Grok Build, Kimi Code, Copilot CLI, and OpenCode, preferring prompt-matched sessions when several run in the same folder. Other CLIs (Cursor Agent, Antigravity, etc.) get a completion word after 20 s of work or via `inspect` reading their screen.
+  - **Quicker answers.** Keeping the planner running persistently between turns might save ~1.5 s of CLI startup; not tried yet (deterministic `/go`, `/new`, `/remember`, and view jumps run at 0 ms via local reflexes).
 - [ ] **Muse as a planner**, later (founder, 2026-11-07).
 - [ ] **Maybe later:** the desktop voice key (Super+Alt+V) straight to Viby, and a per-workspace strip in Code (the Running list in Viby covers Stop all for now).
 

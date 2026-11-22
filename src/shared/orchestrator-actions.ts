@@ -369,6 +369,28 @@ export type WorkspaceAction = "create" | "rename" | "remove" | "move";
 export type ChatAction = "create" | "send" | "continue" | "stop" | "rename" | "set-engine" | "delete";
 export type RunAction = "continue" | "stop" | "mark-reviewed" | "mark-unreviewed" | "mark-all-reviewed" | "handoff" | "tidy";
 export type TalkAction = "review" | "send-draft" | "stop" | "start-tasks";
+export type MemoryStepAction = "append" | "set" | "clear";
+
+export function normalizeMemoryAction(rawAction: string | undefined, hasPrompt: boolean): MemoryStepAction | null {
+  const key = squash(rawAction ?? "");
+  if (!key) return hasPrompt ? "append" : null;
+  if (/^(?:append|add|remember|note|save|memoryappend|appendmemory)$/.test(key)) return hasPrompt ? "append" : null;
+  if (/^(?:set|write|replace|overwrite|memoryset|setmemory)$/.test(key)) return "set";
+  if (/^(?:clear|wipe|forget|reset|empty|memoryclear|clearmemory)$/.test(key)) return "clear";
+  return null;
+}
+
+/**
+ * Parses `verify` step options (`retries=0..3`, `timeout=10..300` seconds).
+ */
+export function parseVerifyOptions(options: string | undefined): { retries: number; timeoutMs: number } {
+  const opts = parseOptions(options);
+  const rawRetries = opts.num("retries") ?? opts.num("retry");
+  const retries = rawRetries !== undefined ? Math.max(0, Math.min(3, Math.round(rawRetries))) : 2;
+  const rawTimeout = opts.num("timeout") ?? opts.num("timeoutSec") ?? opts.num("seconds");
+  const timeoutSec = rawTimeout !== undefined ? Math.max(10, Math.min(300, Math.round(rawTimeout))) : 180;
+  return { retries, timeoutMs: timeoutSec * 1000 };
+}
 
 export function normalizeAgentAction(rawAction: string | undefined, hasTarget: boolean): AgentAction | null {
   const key = squash(rawAction ?? "");
@@ -516,6 +538,13 @@ export function inspectsStorage(text: string | undefined): boolean {
   return words.every((w) => /^(?:storage|disk|space|size|usage|runs?|summary|my|the|how|much|used|vibe|vibeforge)$/.test(w));
 }
 
+/** Whether an `inspect` step asks for app/workspace problems, failures, or attention prompts. */
+export function inspectsProblems(text: string | undefined): boolean {
+  const clean = (text ?? "").trim().toLowerCase().replace(/[?!.]+$/g, "");
+  if (!clean) return false;
+  return /^(?:problems?|diagnostics?|issues?|failures?|errors?|attention|stuck|waiting|what(?:'s| is) (?:wrong|failing|broken|stuck|waiting)|any (?:problems|issues|failures))\b/.test(clean);
+}
+
 /**
  * Whether an action on one of the entity/app step kinds is destructive or irreversible enough to
  * require explicit Go confirmation (even in "Just go" mode and live voice calls).
@@ -530,5 +559,6 @@ export function isDestructiveStepAction(kind: string, action: string | undefined
   if (kind === "chat") return act === "delete" || act === "stop";
   if (kind === "run") return act === "stop" || act === "tidy";
   if (kind === "talk") return normalizeTalkAction(action) === "start-tasks";
+  if (kind === "memory") return act === "set" || act === "clear" || squash(act) === "set" || squash(act) === "clear";
   return false;
 }

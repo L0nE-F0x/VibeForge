@@ -48,6 +48,8 @@ function otherStepKey(step) {
   if (step.kind === "lookup") return "orch.lookup";
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
+  if (step.kind === "verify") return "orch.verify";
+  if (step.kind === "memory") return act === "clear" ? "orch.memoryClear" : act === "set" ? "orch.memorySet" : "orch.memoryAppend";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
   if (step.kind === "settings") return "orch.settings";
@@ -189,6 +191,8 @@ function stepNode(turn, step, editable) {
   } else if (step.kind === "apply" || step.kind === "discard") {
     const copy = orch.copies?.find((item) => item.id === step.target);
     main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t(KIND_KEYS[step.kind])), el("span", { class: "orch-target" }, copy?.name || step.asked || t("orch.copyGone"))));
+  } else if (step.kind === "verify") {
+    main.append(el("div", { class: "orch-step-line" }, el("strong", {}, t("orch.verify")), editable ? workspacePick(turn, step, value("workspaceId")) : el("span", { class: "orch-target" }, workspaceName(turn, step))));
   } else if (
     step.kind === "workspace" ||
     step.kind === "lookup" ||
@@ -203,7 +207,8 @@ function stepNode(turn, step, editable) {
     step.kind === "skill" ||
     step.kind === "chat" ||
     step.kind === "run" ||
-    step.kind === "talk"
+    step.kind === "talk" ||
+    step.kind === "memory"
   ) {
     // A key step says which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
     const what =
@@ -223,6 +228,8 @@ function stepNode(turn, step, editable) {
     step.kind === "start" ||
     step.kind === "tell" ||
     step.kind === "shell" ||
+    step.kind === "verify" ||
+    (step.kind === "memory" && step.action !== "clear") ||
     (step.kind === "task" && Boolean(step.name || step.action === "create" || step.action === "create-run" || step.action === "edit" || step.action === "continue")) ||
     (step.kind === "routine" && (step.action === "create" || step.action === "edit")) ||
     (step.kind === "agent" && (step.action === "create" || step.action === "edit" || step.action === "memory-set" || step.action === "memory-append")) ||

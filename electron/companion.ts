@@ -203,17 +203,48 @@ export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" 
         chats: service.listChats().map((c) => ({ id: c.id, title: c.title, engine: c.engine, agentId: c.agentId, live: c.live })),
       });
     },
-    ask: (text) => {
+    ask: (text, images) => {
       // The answer takes a while (one turn of the planning CLI). It arrives as a turn the page polls for.
       if (service.orchestratorView().thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
-      void service.orchestratorAsk(text).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
+      const trimmed = text.trim();
+      if (!images?.length) {
+        if (trimmed === "/new" || trimmed === "/clear") {
+          service.orchestratorClear();
+          return;
+        }
+        if (trimmed === "/go" || trimmed === "/cancel") {
+          const waiting = [...service.orchestratorView().turns].reverse().find((turn) => turn.plan === "waiting");
+          if (waiting) {
+            if (trimmed === "/go") {
+              void service.orchestratorRun(waiting.id).catch((error: unknown) => wire.log(`Orchestrator, run from phone: ${describeError(error).split("\n")[0]}`));
+            } else {
+              service.orchestratorCancel(waiting.id);
+            }
+            return;
+          }
+        }
+        if (trimmed.startsWith("/")) {
+          void service.orchestratorQuickAct(text).then((acted) => {
+            if (!acted.handled) return service.orchestratorAsk(text);
+          }).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
+          return;
+        }
+      }
+      void service.orchestratorAsk(text, undefined, images).catch((error: unknown) => wire.log(`Orchestrator, asked from the phone: ${describeError(error).split("\n")[0]}`));
     },
+    imageData: (name) => service.orchestratorImageData(name),
     stopThinking: () => service.orchestratorStopThinking(),
     clear: () => service.orchestratorClear(),
     run: (turnId) => service.orchestratorRun(turnId),
     cancel: (turnId) => service.orchestratorCancel(turnId),
     editStep: (turnId, stepId, patch) => service.orchestratorEditStep(turnId, stepId, patch),
     removeStep: (turnId, stepId) => service.orchestratorRemoveStep(turnId, stepId),
+    selectThread: (threadId) => service.orchestratorSelectThread(threadId),
+    deleteThread: (threadId) => {
+      service.orchestratorDeleteThread(threadId);
+    },
+    readMemory: () => service.orchestratorReadMemory(),
+    writeMemory: (text) => service.orchestratorWriteMemory(text),
     settings: (patch) => {
       const current = service.getSettings().orchestrator;
       let next = current;

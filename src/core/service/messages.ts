@@ -49,6 +49,7 @@ export class MessageDesk {
   private readonly stopTidying: () => void;
   private running: Promise<void> | null = null;
   private again = false;
+  private readonly lastPromptWords = new Map<string, string>();
 
   constructor(
     private readonly core: ServiceCore,
@@ -115,6 +116,8 @@ export class MessageDesk {
     if (this.delivery.isStopped(to.ptyId) || (from && this.delivery.isStopped(from.ptyId))) {
       return Promise.resolve({ ok: false, error: `A person stopped the conversation with ${from && this.delivery.isStopped(from.ptyId) ? "you" : to.label}. It starts again once they type in that terminal.` });
     }
+    const firstWordLine = text.split("\n").map((line) => line.trim()).find(Boolean) ?? text.slice(0, 80);
+    this.lastPromptWords.set(to.ptyId, firstWordLine);
     const atLimit = !person && this.delivery.atLimit(from?.ptyId ?? null, to.ptyId);
     const answer: Answer = input.wait ? "wait" : from ? "tell" : "none";
     const body = person ? text : messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.files.saveIfLong("messages", text) });
@@ -209,7 +212,9 @@ export class MessageDesk {
     const kind = engine ? replyLogFor(engine.id, engine.bin) : null;
     if (!kind || !this.core.options.host.lastReply || !session) return "";
     const since = Date.parse(session.cliSince ?? session.startedAt) - 5000;
-    const reply = await this.core.options.host.lastReply({ kind, cwd: from.cwd, since }).catch(() => null);
+    const rawWords = this.lastPromptWords.get(from.ptyId) ?? (session.runId ? this.core.store.getRun(session.runId)?.prompt : undefined);
+    const words = rawWords ? cleanText(rawWords).split("\n")[0]?.trim() : undefined;
+    const reply = await this.core.options.host.lastReply({ kind, cwd: from.cwd, since, ...(words ? { words } : {}) }).catch(() => null);
     return reply?.trim() ? cleanText(reply) : "";
   }
 

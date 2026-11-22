@@ -32,7 +32,7 @@ export interface DeskHost {
   /** The answer to a prompt sent at or after `since`, from the CLI's own session log; null on abort or timeout. */
   watchReply?(opts: { kind: ReplyLog; cwd: string; since: number; words: string; signal: AbortSignal }): Promise<string | null>;
   /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */
-  lastReply?(opts: { kind: ReplyLog; cwd: string; since: number }): Promise<string | null>;
+  lastReply?(opts: { kind: ReplyLog; cwd: string; since: number; words?: string }): Promise<string | null>;
   kill(ptyId: string): Promise<void>;
   /** Turns syncing a saved agent or skill with the paired machines on or off (Settings → Sync). */
   syncLibrary?(kind: "agent" | "skill", id: string, on: boolean): Promise<void>;

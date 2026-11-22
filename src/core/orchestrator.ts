@@ -14,6 +14,7 @@ import { isFreeWaitingPrompt } from "../shared/orchestrator-intel.js";
 import {
   brainKind,
   formatSettingsRules,
+  inspectsProblems,
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
@@ -24,6 +25,7 @@ import {
   NEEDS_GO,
   normalizeAgentAction,
   normalizeChatAction,
+  normalizeMemoryAction,
   normalizeRoutineStepAction,
   normalizeRunAction,
   normalizeSkillAction,
@@ -139,6 +141,8 @@ export interface BrainOptions {
   effort?: string;
   /** Codex reads the schema from a file. */
   schemaFile?: string;
+  /** Absolute paths to attached image files for multimodal planners. */
+  images?: string[];
 }
 
 /**
@@ -185,6 +189,30 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
     ];
   }
   if (kind === "claude") {
+    if (opts.images?.length) {
+      return [
+        ...row.args,
+        "--tools",
+        "",
+        "--print",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        JSON.stringify(PLAN_SCHEMA),
+        "--append-system-prompt",
+        opts.rules,
+        // Planning is light work, and needs none of the person's MCP servers (each one is started first).
+        "--effort",
+        effort,
+        "--strict-mcp-config",
+        ...(model ? ["--model", model] : []),
+        opts.resume ? "--resume" : "--session-id",
+        opts.sessionId,
+      ];
+    }
     return [
       ...row.args,
       "--tools",
@@ -214,6 +242,7 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
       "--skip-git-repo-check",
       "--output-schema",
       opts.schemaFile,
+      ...(opts.images?.flatMap((file) => ["--image", file]) ?? []),
       "-c",
       'sandbox_mode="read-only"',
       "-c",
@@ -246,6 +275,21 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
     ];
   }
   return null;
+}
+
+export interface ClaudeInlineImage {
+  mediaType: string;
+  base64: string;
+}
+
+/** One NDJSON user message for Claude Code `--input-format stream-json`, pairing images with prompt text. */
+export function claudeImageStdin(text: string, images: ReadonlyArray<ClaudeInlineImage>): string {
+  const content: Array<Record<string, unknown>> = images.map((img) => ({
+    type: "image",
+    source: { type: "base64", media_type: img.mediaType, data: img.base64 },
+  }));
+  content.push({ type: "text", text });
+  return `${JSON.stringify({ type: "user", message: { role: "user", content } })}\n`;
 }
 
 /** Whether a planner's error means it isn't signed in, so the card can say so plainly. */
@@ -358,7 +402,9 @@ export function orchestratorRules(context: PlanContext): string {
     "- run: manage runs and run storage. action: \"continue\" (target [run id/title] + optional follow-up prompt), \"stop\" (target), \"mark-reviewed\" (target), \"mark-unreviewed\" (target), \"mark-all-reviewed\", \"handoff\" (target [run id] + agent [saved agent]), or \"tidy\" (compress/prune old runs per retention settings).",
     "- talk: coordinate live coding CLIs in Code. action: \"review\" (target [author CLI id] + agents: [reviewer CLI id]), \"send-draft\" (target [from CLI id] + agents: [to CLI id] + prompt: \"reply\" | \"changes\"), \"stop\" (target [CLI id — pause agent-to-agent messages]), or \"start-tasks\" (target [CLI id] + optional places [task ids; empty starts all held tasks]).",
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (keywords). VibeForge runs the lookup at once and hands you the findings.",
-    "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
+    "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path with optional line range like `src/app.ts:10-80`, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), code search inside a workspace (`action: \"search\"`, `workspace`, `prompt`: query), workspace file tree (`action: \"tree\"`, `workspace`, optional `folder`), cross-copy conflict overlap (`action: \"compare\"`), app/run/routine diagnostics (`action: \"problems\"`), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
+    "- verify: run a test, build, typecheck, or lint command in a workspace (or in the isolated copy started earlier in this plan) with `after: true`. Fields: workspace (optional when verifying the preceding `start` step's copy), prompt (command like \"npm test\" or \"npm run typecheck && npm test\"), options (optional `retries=2, timeout=180`). If the check fails while an isolated copy's live CLI is attached, Viby sends the failure output back to that CLI and re-verifies automatically up to `retries` times.",
+    "- memory: read/save Viby's own durable plain-text memory (~/.config/vibeforge/viby.md) for cross-session preferences, workspace notes, or conventions. action: \"append\" (add `prompt` note), \"set\" (replace whole memory; waits for Go), or \"clear\" (wipe memory; waits for Go).",
     "- tell: send a message to a CLI already running at its normal input prompt. Fields: target (ptyId), prompt (the message).",
     "- key: answer an interactive TUI prompt or send a keystroke to a running CLI (folder trust, y/n, menu choice, Enter, Escape, Ctrl+C). Fields: target (ptyId), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
     "- shell: open a shell terminal in a workspace, optionally running a command. Fields: workspace, prompt (shell command; empty to only open a shell).",
@@ -368,7 +414,7 @@ export function orchestratorRules(context: PlanContext): string {
     "- show: bring something up on screen (changes nothing). Fields: target (running CLI id, view name `home|agents|code|chat|tasks|routines|skills|runs|viby|settings` to open that view, OR a specific agent, task, routine, skill, chat, copy, or run name/id to deep-link straight to it!), workspace (to open a workspace in Code), options (optional `tab=chats|brief|memory|skills|folders|runs|settings` for an agent, or `section=appearance|engines|orchestrator|voice|sounds|tray|usage|agent-talk|phone|sync|storage|rail|updates` for settings).",
     "- read: read out verbatim to the person what a running CLI last answered. Fields: target (ptyId), prompt (\"all\" for the whole answer; otherwise empty).",
     "- apply: bring a copy's changes into its workspace. discard: throw a copy away. Fields: target (copyId).",
-    "- Chaining: multiple steps run in order. Earlier steps that create a workspace, agent, skill, task, routine, or chat can be referenced by name in later steps of the same plan (e.g. create an agent in Step 1, attach it to a new routine in Step 2). Set `after: true` on any step that must wait for the immediately preceding CLI terminal turn to finish first.",
+    "- Chaining: multiple steps run in order. Earlier steps that create a workspace, agent, skill, task, routine, or chat can be referenced by name in later steps of the same plan (e.g. create an agent in Step 1, attach it to a new routine in Step 2). Set `after: true` on any step that must wait for all preceding CLI terminal turns in the current wave to finish first.",
     "",
     "Rules:",
     "- One start step per CLI the person asks for. Several are fine: they run at the same time.",
@@ -383,6 +429,7 @@ export function orchestratorRules(context: PlanContext): string {
     "- A tell's prompt is what the person said to pass on, word for word, without the part spoken to you (\"tell Claude to\", \"ask it to\"). Put right a name speech-to-text got wrong; don't shorten it, polish it or add to it.",
     "- You don't see terminal screens, CLI replies, diffs, files, agent briefs/memories, skill bodies, or routine/task prompts until you ask: use an `inspect` step whenever the person asks about them, then summarise clearly in your own words. Use `read` when they specifically ask you to read a CLI's answer out loud verbatim. Never guess at unseen output.",
     "- After a tell or a start, VibeForge itself tells the person when that CLI has answered, with the start of its answer. Don't add a read step for an answer that isn't there yet, and don't tell them to ask for it.",
+    "- When the person attaches screenshots or images (their paths on disk are listed in parentheses in their message), inspect the visual details directly from those images and, if you start or tell a coding CLI to act on them, include those file paths in the step prompt so the worker CLI can view them too.",
     "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, creating, or starting something when `steps` is empty — emit the step instead.",
     "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('On it — creating your Reviewer agent and scheduling the weekday audit.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name items by their human names.",
     "",
@@ -403,6 +450,7 @@ export function orchestratorRules(context: PlanContext): string {
     ...(routines ? ["", "Scheduled routines:", routines] : []),
     ...(chats ? ["", "Chats:", chats] : []),
     ...(runs ? ["", "Recent runs:", runs] : []),
+    ...(context.memory?.trim() ? ["", "Your saved memory (~/.config/vibeforge/viby.md):", context.memory.trim()] : []),
     ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings, { slim: true })] : []),
   ].join("\n");
 }
@@ -487,6 +535,14 @@ export function readBrainOutput(stdout: string): BrainOutput {
       else if (event.type === "item.completed" && item.type === "agent_message" && typeof item.text === "string") text = item.text;
       else if (event.type === "turn.failed") error = String((event.error as { message?: unknown } | undefined)?.message ?? "");
       else if (event.type === "error" && typeof event.message === "string") error = event.message;
+      else if (event.type === "result") {
+        if (typeof event.session_id === "string") sessionId = event.session_id;
+        if (typeof event.result === "string") text = event.result;
+        if (event.is_error === true) error = text || String((Array.isArray(event.errors) ? event.errors[0] : "") ?? "");
+        if (event.structured_output !== undefined) candidates.push(event.structured_output);
+      } else if (typeof event.session_id === "string" && !sessionId) {
+        sessionId = event.session_id;
+      }
     }
     if (!text && !sessionId && !error) text = stdout.trim();
   }
@@ -941,7 +997,16 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
       steps.push({ ...base, prompt: query, asked: query });
     } else if (kind === "inspect") {
       const copies = context.copies ?? [];
-      const globalInspect = inspectsQuotas(item.target) || inspectsSettings(item.target) || inspectsStorage(item.target) || item.action === "storage";
+      const inspectAct = (item.action ?? "").trim().toLowerCase();
+      const globalInspect =
+        inspectsQuotas(item.target) ||
+        inspectsSettings(item.target) ||
+        inspectsStorage(item.target) ||
+        inspectsProblems(item.target) ||
+        inspectAct === "storage" ||
+        inspectAct === "problems" ||
+        inspectAct === "diagnostics" ||
+        inspectAct === "compare";
       const explicitEntity = item.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(item.action) ? item.action : "";
       if (explicitEntity) {
         const query = item.target || item.agent || item.task || item.name || item.prompt || "";
@@ -969,6 +1034,18 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
           target: id,
           prompt: (item.prompt ?? "").trim(),
           asked: label || explicitEntity,
+        });
+      } else if (inspectAct === "search" || inspectAct === "tree") {
+        const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+        const ws = fresh ?? findWorkspace(item.workspace || item.target);
+        const queryPrompt = (item.prompt ?? "").trim();
+        steps.push({
+          ...base,
+          action: inspectAct,
+          workspaceId: ws?.id ?? "",
+          ...(item.folder ? { folder: item.folder.trim() } : {}),
+          prompt: queryPrompt,
+          asked: [ws?.name || item.workspace, queryPrompt || item.folder || inspectAct].filter(Boolean).join(" · "),
         });
       } else {
         const cli = item.target && !globalInspect ? findRunning(item.target) : null;
@@ -1021,10 +1098,10 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
               ? entityLabel
               : ws
                 ? [ws.name, item.folder].filter(Boolean).join(" · ")
-                : item.prompt || item.target || item.workspace || "";
+                : item.prompt || item.target || item.workspace || inspectAct || "";
         steps.push({
           ...base,
-          ...(entityAction ? { action: entityAction } : item.action === "storage" ? { action: "storage" } : {}),
+          ...(entityAction ? { action: entityAction } : inspectAct ? { action: inspectAct } : {}),
           target: cli?.id ?? copy?.id ?? entityId,
           workspaceId: ws?.id ?? "",
           ...(item.folder ? { folder: item.folder.trim() } : {}),
@@ -1317,6 +1394,31 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
               ? `${primary.engine} · ${primary.workspace}`
               : item.target || action || "talk",
       });
+    } else if (kind === "verify") {
+      const priorStart = [...steps].reverse().find((s) => s.kind === "start");
+      const fresh = matchName(item.workspace, planned, (entry) => [entry.name]);
+      const ws = fresh ?? findWorkspace(item.workspace) ?? (priorStart?.workspaceId ? allWorkspaces().find((w) => w.id === priorStart.workspaceId) : null);
+      const runningCli = item.target ? findRunning(item.target) : null;
+      const hasPriorCli = steps.some((s) => s.kind === "start" || s.kind === "tell");
+      const cmd = (item.prompt ?? "").trim();
+      steps.push({
+        ...base,
+        workspaceId: ws?.id ?? "",
+        target: runningCli?.id ?? "",
+        prompt: cmd,
+        ...(item.options ? { options: item.options } : {}),
+        ...(item.after !== false && (item.after === true || hasPriorCli) ? { after: true } : {}),
+        asked: [ws?.name || item.workspace || runningCli?.workspace, cmd].filter(Boolean).join(" · "),
+      });
+    } else if (kind === "memory") {
+      const prompt = (item.prompt ?? "").trim();
+      const action = normalizeMemoryAction(item.action, Boolean(prompt));
+      steps.push({
+        ...base,
+        action: action ?? item.action ?? "append",
+        prompt,
+        asked: action === "clear" ? "Clear Viby memory" : "Viby memory",
+      });
     } else if (kind === "apply" || kind === "discard") {
       const copies = context.copies ?? [];
       const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
@@ -1482,6 +1584,7 @@ export function emptyPromise(say: string): boolean {
 export function safeInCall(step: OrchestratorStep, context: PlanContext | null = null): boolean {
   if (holdsForGo(step, context)) return false;
   if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return false;
+  if (step.kind === "verify" && !step.branch && Boolean(step.dirty)) return false;
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     return !(action?.op === "pane" && action.action === "close");
@@ -1511,7 +1614,7 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
     if (approves) return !(!step.after && target && !target.working && isFreeWaitingPrompt(target.waiting));
     return false;
   }
-  if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
+  if (step.kind === "shell" || step.kind === "verify") return !isSafeShellCommand(step.prompt);
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     if (action?.op === "pane" && action.action === "close") return true;
