@@ -50,6 +50,7 @@ import {
   canOrchestrate,
   KNOWN_MODELS,
   plannerFor,
+  STEP_KINDS,
   STRICT_PLAN_SCHEMA,
   signedOut,
   orchestratorRules,
@@ -71,6 +72,7 @@ import { taskPrompt } from "../preamble.js";
 import { speakable } from "../replies.js";
 import { findSherpa } from "../sherpa.js";
 import { MEMORY_STARTER } from "../store/library.js";
+import { repoKind } from "../sync/git-rescue.js";
 import { listThemes } from "../theme.js";
 import { isGitRepo, summarizeSnapshot } from "../vcs.js";
 import {
@@ -779,12 +781,15 @@ export class OrchestratorDesk {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
     }
-    let steps = resolvePlan(plan, context);
+    let currentContext = context;
+    let steps = resolvePlan(plan, currentContext);
+    const droppedKinds = (rawSteps: NonNullable<typeof plan>["steps"]) => rawSteps.map((s) => s.kind).filter((k) => k && !(STEP_KINDS as readonly string[]).includes(k));
+    let unknownKinds = droppedKinds(plan.steps);
     let checks: OrchestratorCheck[] = [];
     // A plan whose steps are only lookups or inspections: VibeForge gathers the findings at once
     // and hands them back so Viby can answer or give the concrete steps in the same turn.
-    if (!signal.aborted && steps.length > 0 && steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, context))) {
-      this.setActivity({ kind: steps[0].kind, label: this.stepActivityLabel(steps[0], context) });
+    if (!signal.aborted && !unknownKinds.length && steps.length > 0 && steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, currentContext))) {
+      this.setActivity({ kind: steps[0].kind, label: this.stepActivityLabel(steps[0], currentContext) });
       const results = await Promise.all(steps.map((step) => (step.kind === "lookup" ? this.lookup(step.prompt) : this.inspect(step))));
       this.setActivity(null);
       if (signal.aborted) return;
@@ -794,7 +799,7 @@ export class OrchestratorDesk {
         return {
           id: step.id,
           kind: step.kind as "lookup" | "inspect",
-          label: this.stepActivityLabel(step, context),
+          label: this.stepActivityLabel(step, currentContext),
           summary: results[idx].summary,
           details: results[idx].details.slice(0, 6000),
           ...(session ? { ptyId: session.ptyId, workspaceId: session.workspaceId } : step.workspaceId ? { workspaceId: step.workspaceId } : {}),
@@ -818,13 +823,23 @@ export class OrchestratorDesk {
         if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
         if (nextOut.plan) {
           plan = nextOut.plan;
-          steps = resolvePlan(plan, context);
+          currentContext = await this.context();
+          if (signal.aborted) return;
+          steps = resolvePlan(plan, currentContext);
+          unknownKinds = droppedKinds(plan.steps);
           followed = true;
         }
       }
       if (signal.aborted) return;
       // No answer to the findings: they are the answer (on its checks), not a plan to inspect it all again.
-      if (!followed) steps = [];
+      if (!followed) {
+        steps = [];
+        unknownKinds = [];
+      }
+    }
+    if (unknownKinds.length) {
+      const note = `Skipped unsupported step: ${[...new Set(unknownKinds)].join(", ")}.`;
+      plan = { ...plan, say: plan.say ? `${plan.say} (${note})` : note };
     }
     if (!steps.length) {
       this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
@@ -839,10 +854,10 @@ export class OrchestratorDesk {
     // Just go: at once, unless a step needs fixing, or would stop, apply or throw away someone's work.
     // Showing something or reading an answer out changes nothing, so a plan of only those goes at once either way.
     // In a voice call, safe steps (isolated branch copies, workspaces, tells, tasks, routines) also go at once.
-    const checked = withPlannedWorkspaces(context, steps);
+    const checked = withPlannedWorkspaces(currentContext, steps);
     const ready = steps.every((step) => !stepIssue(step, checked));
     const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
-    if (ready && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))) {
+    if (ready && !unknownKinds.length && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))) {
       void this.run(answered.id);
     }
   }
@@ -866,7 +881,7 @@ export class OrchestratorDesk {
     await Promise.all(
       steps.map(async (step) => {
         if (step.kind !== "start") return;
-        const workspace = step.branch ? this.core.workspaceById(step.workspaceId) : null;
+        const workspace = this.core.workspaceById(step.workspaceId);
         const dirty = workspace ? await uncommitted(workspace.path) : 0;
         if (dirty > 0) step.dirty = dirty;
         else delete step.dirty;
@@ -993,7 +1008,7 @@ export class OrchestratorDesk {
       if (typeof clean.workspaceId === "string" && !current.workspaceId && !current.branch && !("branch" in clean)) {
         const nextPrompt = (clean.prompt ?? current.prompt).trim();
         const ws = this.core.workspaceById(clean.workspaceId);
-        if (nextPrompt && ws && fs.existsSync(path.join(ws.path, ".git"))) {
+        if (nextPrompt && ws && repoKind(ws.path) !== "none") {
           clean.branch = branchFromPrompt(nextPrompt);
         }
       }
@@ -1309,7 +1324,8 @@ export class OrchestratorDesk {
     }
     if (step.kind === "apply") {
       const result = await this.copies.apply(step.target);
-      if (result.conflicts.length) step.result = `Applied with conflicts to sort out in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}. The copy stays until they are.`;
+      const note = formatApplyResult(result, "");
+      if (note) step.result = note;
       return;
     }
     if (step.kind === "discard") {
@@ -1800,9 +1816,7 @@ export class OrchestratorDesk {
     }
     if (action === "apply") {
       const result = await this.tasks.applyCopy(step.target);
-      step.result = result.conflicts.length
-        ? `Applied with conflicts in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}.`
-        : "Applied task changes and marked done.";
+      step.result = formatApplyResult(result, "Applied task changes and marked done.");
       return;
     }
     if (action === "discard") {
@@ -2349,10 +2363,14 @@ export class OrchestratorDesk {
 
       const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
       if (wantedFile) {
-        const safeFile = realInside(ws.path, path.resolve(ws.path, wantedFile));
-        if (safeFile && fs.statSync(safeFile).isFile()) {
-          const content = fs.readFileSync(safeFile, "utf8").slice(0, 8000);
-          parts.push(`File ${wantedFile}:\n${content}`);
+        const rel = wantedFile.replace(/\\/g, "/");
+        if (isSensitiveInspectPath(rel)) {
+          parts.push(`File ${wantedFile}: [skipped sensitive credential/env file]`);
+        } else {
+          const safeFile = realInside(ws.path, path.resolve(ws.path, wantedFile));
+          const read = safeFile ? readBoundedInspectText(safeFile) : null;
+          if (read && "text" in read) parts.push(`File ${wantedFile}:\n${read.text}`);
+          else if (read) parts.push(`File ${wantedFile}: [skipped ${read.reason}]`);
         }
       }
       const cleanStatus = statusOut.code === 0 && statusOut.stdout.trim() ? `${statusOut.stdout.trim().split("\n").length} modified/untracked` : "clean";
@@ -2585,7 +2603,7 @@ export class OrchestratorDesk {
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "build" || entry.name === "target") continue;
         const full = path.join(dir, entry.name);
-        const line = () => `- Folder on disk: ${tildify(full)}${fs.existsSync(path.join(full, ".git")) ? " (git repository)" : ""}`;
+        const line = () => `- Folder on disk: ${tildify(full)}${repoKind(full) !== "none" ? " (git repository)" : ""}`;
         if (matches(entry.name) || (byPath && matches(tildify(full)))) strong.push(line());
         else if (weak.length < LOOKUP_FOLDERS && anyToken(entry.name)) weak.push(line());
         if (strong.length >= LOOKUP_FOLDERS) return;
@@ -2899,4 +2917,56 @@ function formatLibraryUpdate(context: PlanContext): string {
     lines.push(`- Chats: ${context.chats.map((c) => `${c.id} ("${c.title}")`).join(", ")}`);
   }
   return `(Updated library state:\n${lines.join("\n")})`;
+}
+
+const SENSITIVE_INSPECT_DIRS = new Set([".ssh", ".gnupg", ".aws", ".kube", ".docker"]);
+const SAFE_ENV_SAMPLES = /^\.env\.(?:example|sample|template)$/i;
+
+function isSensitiveInspectPath(rel: string): boolean {
+  const parts = rel.split("/").filter(Boolean);
+  if (parts.some((part) => SENSITIVE_INSPECT_DIRS.has(part))) return true;
+  const base = (parts.at(-1) ?? "").toLowerCase();
+  if (!base) return false;
+  if (/^\.env(?:\..+)?$/.test(base) && !SAFE_ENV_SAMPLES.test(base)) return true;
+  if (/^\.(?:npmrc|netrc|pypirc|git-credentials|dockercfg)$/.test(base)) return true;
+  if (/\.(?:pem|key|p12|pfx|keystore|jks|kdbx)$/.test(base)) return true;
+  return /^(?:id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?|authorized_keys|known_hosts|credentials(?:\.json)?)$/.test(base);
+}
+
+function readBoundedInspectText(fullPath: string): { text: string } | { reason: string } | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(fullPath, fs.constants.O_RDONLY);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return null;
+    const cap = Math.min(stat.size, 16 * 1024);
+    const buf = Buffer.allocUnsafe(cap);
+    let offset = 0;
+    while (offset < cap) {
+      const read = fs.readSync(fd, buf, offset, cap - offset, offset);
+      if (read <= 0) break;
+      offset += read;
+    }
+    const slice = buf.subarray(0, offset);
+    if (slice.includes(0)) return { reason: "binary file" };
+    return { text: slice.toString("utf8").slice(0, 8000) };
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function formatApplyResult(result: ApplyResult, cleanLabel: string): string {
+  if (result.conflicts.length) {
+    return `Applied with conflicts to sort out in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}. The copy stays until they are.`;
+  }
+  if (result.left) {
+    return `Applied as uncommitted changes. Ignored files stay in the copy (${result.left.files.slice(0, 5).join(", ")}${result.left.files.length > 5 ? "…" : ""}) at ${result.left.folder} until discarded.`;
+  }
+  return cleanLabel;
 }

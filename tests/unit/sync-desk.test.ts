@@ -474,4 +474,15 @@ describe("sync desk", () => {
     const view = await a.desk.view();
     expect(view.offers.find((item) => item.folderId === "vf-ws-111111")?.suggestedPath).toBe(path.join(a.home, "Projects", "Keys"));
   });
+
+  it("refuses hidden dot-directories inside the home folder", async () => {
+    const { a } = await paired();
+    const ssh = path.join(a.home, ".ssh");
+    const nvim = path.join(a.home, ".config", "nvim");
+    fs.mkdirSync(ssh, { recursive: true });
+    fs.mkdirSync(nvim, { recursive: true });
+    a.workspaces.push({ id: "ssh", name: "SSH", path: ssh, dockUrl: "" }, { id: "nvim", name: "Nvim", path: nvim, dockUrl: "" });
+    await expect(a.desk.share("ssh", B, { mode: "two", filesOnly: false })).rejects.toThrow(/hidden folder/i);
+    await expect(a.desk.share("nvim", B, { mode: "two", filesOnly: false })).rejects.toThrow(/hidden folder/i);
+  });
 });

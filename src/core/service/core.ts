@@ -37,6 +37,7 @@ export class ServiceCore {
   readonly store: Store;
   readonly live = new Map<string, LiveSession>();
   readonly ptyByRun = new Map<string, string>();
+  readonly ptyTokens = new Map<string, string>();
   private readonly listeners = new Set<(topics: Topic[]) => void>();
   private readonly exitWaiters = new Map<string, Array<() => void>>();
   private readonly finishing = new Set<Promise<void>>();
@@ -250,11 +251,12 @@ export class ServiceCore {
   transcriptPath(run: RunMeta): string | null {
     if (!run.dir) return null;
     for (const file of [RUN_FILES.transcript, RUN_FILES.scrollback]) {
-      const full = path.join(run.dir, file);
-      try {
-        if (fs.statSync(full).size > 0) return full;
-      } catch {
-        /* try the next file */
+      for (const candidate of [path.join(run.dir, file), `${path.join(run.dir, file)}.gz`]) {
+        try {
+          if (fs.statSync(candidate).size > 0) return candidate;
+        } catch {
+          /* try the next file */
+        }
       }
     }
     return null;
@@ -431,7 +433,7 @@ export class ServiceCore {
       continuedFrom: input.continuedFrom ?? null,
     };
     this.store.saveRun(meta);
-    let spawned: { ptyId: string; pid: number };
+    let spawned: { ptyId: string; pid: number; ptyToken?: string };
     try {
       spawned = await this.options.host.spawn({
         cwd: input.cwd,
@@ -448,6 +450,7 @@ export class ServiceCore {
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
     }
+    if (spawned.ptyToken) this.ptyTokens.set(spawned.ptyId, spawned.ptyToken);
     this.ptyByRun.set(id, spawned.ptyId);
     this.live.set(spawned.ptyId, {
       ptyId: spawned.ptyId,
@@ -480,6 +483,7 @@ export class ServiceCore {
   async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
+    this.ptyTokens.delete(ptyId);
     this.shellArgv.delete(ptyId);
     this.hostWorking.delete(ptyId);
     try {

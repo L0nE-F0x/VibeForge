@@ -30,14 +30,19 @@ export function listenControl(
       if (!answered) gone.abort();
     });
     socket.setEncoding("utf8");
+    socket.setTimeout(15_000, () => {
+      if (!answering) socket.destroy();
+    });
     const handle = (line: string) => {
       if (!line.trim().startsWith("{")) {
         const action = parseControl(line);
         if (action) onVoice(action);
+        if (!socket.destroyed) socket.end();
         return;
       }
       if (answering) return;
       answering = true;
+      socket.setTimeout(0);
       const request = parseTalkRequest(line);
       const reply = request ? onTalk(request, gone.signal).catch((error: unknown) => ({ ok: false, error: describeError(error) })) : Promise.resolve({ ok: false, error: "That request isn't one VibeForge knows." });
       void reply.then((answer) => {
@@ -46,12 +51,13 @@ export function listenControl(
       });
     };
     socket.on("data", (chunk: string) => {
-      buffer += chunk;
-      if (buffer.length > (buffer.trimStart().startsWith("{") ? TALK_REQUEST_MAX + 4096 : VOICE_LINE_MAX)) {
+      const limit = (buffer || chunk).trimStart().startsWith("{") ? TALK_REQUEST_MAX + 4096 : VOICE_LINE_MAX;
+      if (buffer.length + chunk.length > limit) {
         buffer = "";
         socket.destroy();
         return;
       }
+      buffer += chunk;
       for (let newline = buffer.indexOf("\n"); newline >= 0; newline = buffer.indexOf("\n")) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);

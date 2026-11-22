@@ -305,7 +305,7 @@ export class SyncDesk {
       return;
     }
     if ((event.type === "folder-state" && event.state === "idle") || event.type === "folder-summary") {
-      if (this.gitPending.has(event.folder)) this.later(`sweep:${event.folder}`, SWEEP_MS, () => this.sweep(event.folder));
+      if (this.gitPending.has(event.folder)) this.later(`sweep:${event.folder}`, 50, () => this.sweep(event.folder));
     }
     if (event.type === "connected") this.later("links", 200, () => this.readLinks());
     if (event.type === "pending-devices") this.later("requests", 200, () => this.tellRequests());
@@ -371,6 +371,7 @@ export class SyncDesk {
     }
     if (repo && gitSettled) {
       this.gitPending.delete(share.folderId);
+      await prepareRepo(share.path);
       try {
         const rescue = await rescueRepo(share.path, slugify(this.host.machineName(), 24));
         for (const branch of rescue?.branches ?? []) fresh = this.conflicts.noteCommits(share.folderId, share.path, branch.branch, branch.saved, shortId(share.machineId));
@@ -528,6 +529,10 @@ export class SyncDesk {
   private checkFolder(state: SyncState, folder: string, except?: string): void {
     const resolved = path.resolve(folder);
     if (resolved === path.parse(resolved).root || inside(resolved, this.host.home)) throw new Error("Choose a project's own folder, not your home folder or one that holds it.");
+    const fromHome = path.relative(this.host.home, resolved);
+    if (fromHome && !fromHome.startsWith("..") && !path.isAbsolute(fromHome) && fromHome.split(path.sep)[0].startsWith(".")) {
+      throw new Error("Choose a project folder, not a hidden folder in your home directory.");
+    }
     for (const share of state.shares) {
       if (share.folderId === except) continue;
       if (share.path === resolved) throw new Error("This folder already syncs with a machine.");

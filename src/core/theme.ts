@@ -416,7 +416,9 @@ export function watchOmarchyTheme(onChange: () => void, home = os.homedir()): ()
     const parent = path.dirname(dir);
     for (const target of [parent, dir]) {
       try {
-        watchers.push(fs.watch(target, { persistent: false }, fire));
+        const watcher = fs.watch(target, { persistent: false }, fire);
+        watcher.on("error", () => undefined);
+        watchers.push(watcher);
       } catch {
         /* not on this machine */
       }

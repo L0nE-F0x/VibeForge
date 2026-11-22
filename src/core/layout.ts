@@ -19,10 +19,12 @@ export function defaultRoots(env: NodeJS.ProcessEnv = process.env): Roots {
 
 /** Create every directory the app owns. Seed files are written by the store on first read. */
 export function ensureLayout(configRoot: string, dataRoot: string): void {
+  fs.mkdirSync(configRoot, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   for (const dir of ["agents", "skills", "routines", "tasks", "layouts"]) {
-    fs.mkdirSync(path.join(configRoot, dir), { recursive: true });
+    fs.mkdirSync(path.join(configRoot, dir), { recursive: true, mode: 0o700 });
   }
   for (const dir of ["runs", "scratch"]) {
-    fs.mkdirSync(path.join(dataRoot, dir), { recursive: true });
+    fs.mkdirSync(path.join(dataRoot, dir), { recursive: true, mode: 0o700 });
   }
 }

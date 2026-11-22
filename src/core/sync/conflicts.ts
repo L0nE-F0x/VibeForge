@@ -74,6 +74,7 @@ export function walkCopies(root: string, maxDirs = 20_000): FoundCopy[] {
       continue;
     }
     for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (entry.name === ".git" || entry.name === ".stfolder" || (DEFAULT_IGNORES as readonly string[]).includes(entry.name)) continue;
         queue.push(path.join(dir, entry.name));
@@ -86,10 +87,41 @@ export function walkCopies(root: string, maxDirs = 20_000): FoundCopy[] {
   return found;
 }
 
+/** Resolves `target` under `root` and refuses any symlink along the root or segment chain. */
+function safeWorkspaceFile(root: string, target: string, allowMissing: boolean): string {
+  const inside = path.relative(root, target);
+  if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) throw new Error("That file is not inside the workspace.");
+  if (fs.lstatSync(root).isSymbolicLink()) throw new Error("Refusing to access a file through a symbolic link.");
+  let cursor = root;
+  const parts = inside.split(path.sep);
+  for (let i = 0; i < parts.length; i += 1) {
+    cursor = path.join(cursor, parts[i]);
+    try {
+      const stat = fs.lstatSync(cursor);
+      if (stat.isSymbolicLink() || (i === parts.length - 1 && !stat.isFile())) {
+        throw new Error("Refusing to access a file through a symbolic link.");
+      }
+    } catch (error) {
+      if (allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") break;
+      throw error;
+    }
+  }
+  return target;
+}
+
+function isSafeWorkspaceFile(root: string, target: string): boolean {
+  try {
+    safeWorkspaceFile(root, target, false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sameBytes(a: string, b: string): boolean {
   try {
-    const first = fs.statSync(a);
-    const second = fs.statSync(b);
+    const first = fs.lstatSync(a);
+    const second = fs.lstatSync(b);
     if (!first.isFile() || !second.isFile() || first.size !== second.size) return false;
     return fs.readFileSync(a).equals(fs.readFileSync(b));
   } catch {
@@ -155,7 +187,7 @@ export class ConflictStore {
    */
   keepFile(folderId: string, root: string, copy: FoundCopy): ConflictRecord | null {
     const original = path.join(path.dirname(copy.file), copy.name.original);
-    if (sameBytes(copy.file, original)) {
+    if (isSafeWorkspaceFile(root, original) && sameBytes(copy.file, original)) {
       fs.rmSync(copy.file, { force: true });
       return null;
     }
@@ -216,26 +248,7 @@ export class ConflictStore {
     if (!record) return null;
     // An agent's or skill's text is put back by the sync desk, which knows where it lives.
     if (record.kind === "file" && keep === "mine") {
-      const target = path.join(record.root, ...record.path.split("/"));
-      // Inside the workspace only: the record names a path, and a path can be written wrong.
-      const inside = path.relative(record.root, target);
-      if (!inside || inside.startsWith("..") || path.isAbsolute(inside)) throw new Error("That file is not inside the workspace.");
-      // Refuse symlinks at the target or any parent segment inside the workspace so restoring never writes outside it.
-      if (fs.lstatSync(record.root).isSymbolicLink()) throw new Error("Refusing to write through a symbolic link.");
-      let cursor = record.root;
-      const parts = inside.split(path.sep);
-      for (let i = 0; i < parts.length; i += 1) {
-        cursor = path.join(cursor, parts[i]);
-        try {
-          const stat = fs.lstatSync(cursor);
-          if (stat.isSymbolicLink() || (i === parts.length - 1 && !stat.isFile())) {
-            throw new Error("Refusing to write through a symbolic link.");
-          }
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          break;
-        }
-      }
+      const target = safeWorkspaceFile(record.root, path.join(record.root, ...record.path.split("/")), true);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       // What is there now is kept as the answered record's other side, so this choice can be taken back by hand too.
       if (fs.existsSync(target)) fs.copyFileSync(target, path.join(this.folder(id), "theirs"));
@@ -287,16 +300,16 @@ export class ConflictStore {
    * What putting this machine's version back would change, as a unified diff: from the file as it
    * is now (the other machine's) to the saved one. "" when git isn't there to make it.
    */
-  diff(id: string, currentText?: string): Promise<string> {
+  async diff(id: string, currentText?: string): Promise<string> {
     const record = this.get(id);
-    if (!record) return Promise.resolve("");
+    if (!record) return "";
     let current: string;
-    if (record.kind === "file") current = path.join(record.root, ...record.path.split("/"));
+    if (record.kind === "file") current = safeWorkspaceFile(record.root, path.join(record.root, ...record.path.split("/")), true);
     else if ((record.kind === "agent" || record.kind === "skill") && currentText !== undefined) {
       // What is in the agent or skill now, beside the saved one, so git can compare the two files.
       current = path.join(this.folder(id), "now");
       fs.writeFileSync(current, currentText);
-    } else return Promise.resolve("");
+    } else return "";
     const from = fs.existsSync(current) ? current : "/dev/null";
     const saved = this.savedFile(id);
     const label = record.kind === "file" ? record.path : `${record.path} (${record.section ?? "text"})`;

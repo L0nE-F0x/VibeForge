@@ -2,6 +2,9 @@ import { WebContentsView, type BrowserWindow, type WebContents, type WebContents
 import type { DockBounds, DockState } from "../src/shared/api.js";
 import { isDockUrl } from "../src/shared/dock-url.js";
 
+/** Sessions already armed with a `will-download` blocker so one session never gets duplicate listeners. */
+const downloadGuarded = new WeakSet<object>();
+
 /** Wait before writing an in-page move, so a run of them stores the last address. */
 const SAVE_MS = 400;
 
@@ -80,14 +83,18 @@ export class Dock {
     }
     const win = this.window();
     if (!win || win.isDestroyed()) return null;
-    // No partition: the view uses the default session, so the window's permission rule applies
-    // and a sign-in in one workspace is there in the others.
+    // Isolated persistent partition so previewed localhost/web pages never share cookies or storage with the main app.
     const view = this.makeView({
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, partition: "persist:dock" },
     });
     view.setBackgroundColor("#00000000");
     const slot: Slot = { view, current: "", lastShow: "", error: null, epoch: 0, loadingEpoch: 0, committed: false, dead: false, quiet: false };
     const contents = view.webContents;
+    const session = (contents as { session?: { on?: (event: string, listener: (e: { preventDefault(): void }) => void) => void } }).session;
+    if (session && typeof session.on === "function" && !downloadGuarded.has(session)) {
+      downloadGuarded.add(session);
+      session.on("will-download", (event) => event.preventDefault());
+    }
     contents.setWindowOpenHandler(({ url }) => {
       // A cleared page stays cleared. Otherwise a link that asks for a new window stays here.
       if (!slot.quiet && isDockUrl(url)) this.navigate(slot, workspaceId, url, false);
@@ -229,7 +236,12 @@ export class Dock {
       this.saves.delete(workspaceId);
     }
     const slot = this.slots.get(workspaceId);
-    if (slot) slot.quiet = true;
+    if (!slot) return;
+    slot.quiet = true;
+    slot.current = "";
+    slot.lastShow = "";
+    slot.epoch += 1;
+    contentsOf(slot)?.loadURL("about:blank").catch(() => undefined);
   }
 
   /** Remember the latest address for a workspace, and write it once the moves settle. */
@@ -259,6 +271,7 @@ export class Dock {
 
   show(bounds: DockBounds, url: string, workspaceId: string): void {
     if (!workspaceId) return;
+    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return;
     if (this.activeId && this.activeId !== workspaceId) this.flush(this.activeId);
     this.activeId = workspaceId;
     this.lastShow = { bounds, url, workspaceId };

@@ -10,13 +10,13 @@ import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
 import { agyModelEffort, cleanModel, effortLevels } from "../shared/launch-options.js";
+import { isFreeWaitingPrompt } from "../shared/orchestrator-intel.js";
 import {
   brainKind,
   formatSettingsRules,
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
-  isApprovalPrompt,
   isLoopbackUrl,
   isDestructiveStepAction,
   isSafeShellCommand,
@@ -491,8 +491,7 @@ export function readBrainOutput(stdout: string): BrainOutput {
     if (!text && !sessionId && !error) text = stdout.trim();
   }
   for (const source of [text, outer ? stdout : ""]) {
-    const json = jsonIn(source);
-    if (json !== undefined) candidates.push(json);
+    candidates.push(...jsonObjectsIn(source));
   }
   for (const candidate of candidates) {
     const plan = asPlan(candidate);
@@ -501,24 +500,53 @@ export function readBrainOutput(stdout: string): BrainOutput {
   return { plan: null, text, sessionId, error };
 }
 
-function jsonIn(text: string): unknown {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return undefined;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return undefined;
+/** Extract balanced top-level JSON objects from prose/markdown output, ignoring stray braces inside strings or earlier prose. */
+function jsonObjectsIn(text: string): unknown[] {
+  const found: unknown[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let closedAt = -1;
+    for (let j = i; j < text.length; j += 1) {
+      const ch = text[j];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          closedAt = j;
+          break;
+        }
+      }
+    }
+    if (closedAt < 0) continue;
+    try {
+      found.push(JSON.parse(text.slice(i, closedAt + 1)));
+      i = closedAt;
+    } catch {
+      /* stray '{' before real JSON later in the text: advance by one char */
+    }
   }
+  return found;
 }
 
 /** Maximum steps allowed in a single planner answer so a runaway plan stays bounded. */
 export const MAX_PLAN_STEPS = 20;
 
 function asPlan(value: unknown): RawPlan | null {
-  if (!value || typeof value !== "object") return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (typeof record.say !== "string" && !Array.isArray(record.steps)) return null;
+  if (record.say !== undefined && typeof record.say !== "string") return null;
+  if (record.steps !== undefined && !Array.isArray(record.steps)) return null;
   const rawSteps = Array.isArray(record.steps) ? record.steps : [];
   const mapped = rawSteps.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
@@ -1469,6 +1497,7 @@ export function safeInCall(step: OrchestratorStep, context: PlanContext | null =
 export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
   if (NEEDS_GO.includes(step.kind)) return true;
   if (isDestructiveStepAction(step.kind, step.action)) return true;
+  if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return true;
   if (step.kind === "tell") return step.prompt.trimStart().startsWith("!");
   if (step.kind === "key") {
     const action = keySequenceFor(step.prompt);
@@ -1478,12 +1507,14 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
     // Escape interrupts a live turn in Claude Code and Codex.
     if (action.label === "Escape") return Boolean(target?.working);
     const approves = action.label === "Yes" || action.label === "Enter" || /^Option [1-9]$/.test(action.label);
-    // Chained approval keys can't see the prompt they'll answer yet, so hold them for Go too.
-    return approves && (Boolean(step.after) || Boolean(target?.waiting && isApprovalPrompt(target.waiting)));
+    // Fail closed for approval keys: only bypass Go when the live CLI is idle on an explicit folder-trust or sign-in prompt.
+    if (approves) return !(!step.after && target && !target.working && isFreeWaitingPrompt(target.waiting));
+    return false;
   }
   if (step.kind === "shell") return !isSafeShellCommand(step.prompt);
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
+    if (action?.op === "pane" && action.action === "close") return true;
     // A page on another site could carry what the planner was shown in its address; one on this
     // computer (a dev server) opens at once.
     return action?.op === "browser-open" && !isLoopbackUrl(action.url);

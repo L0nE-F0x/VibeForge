@@ -263,6 +263,9 @@ describe("the Orchestrator's plans", () => {
 
     expect(orchestratorRules(rich)).toContain("Existing Task");
     expect(readBrainOutput("Sorry {not: valid json}").plan).toBeNull();
+    expect(readBrainOutput('I noted {foo} in prose first.\n```json\n{"say":"Hello {world}!","steps":[]}\n```').plan).toEqual({ say: "Hello {world}!", steps: [] });
+    expect(readBrainOutput('{"say":123,"steps":[]}').plan).toBeNull();
+    expect(readBrainOutput('{"say":"ok","steps":"bad"}').plan).toBeNull();
   });
 });
 

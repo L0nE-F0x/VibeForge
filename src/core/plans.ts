@@ -401,6 +401,8 @@ interface Provider {
    * by itself is not a subscription.
    */
   hideWithoutPlan?: boolean;
+  /** How long before asking this provider again (defaults to FRESH_MS). */
+  freshMs?: number;
   /** Null when this machine isn't signed in to it. */
   signIn: (now: number) => SignIn | null | Promise<SignIn | null>;
 }
@@ -534,6 +536,7 @@ function providers(home: string, env: NodeJS.ProcessEnv, agent: string): Provide
     {
       id: "muse",
       hideWithoutPlan: true,
+      freshMs: 30 * 60_000,
       signIn: () => {
         const auth = readJson(path.join(configHome, "muse", "auth.json"));
         const meta = record(record(auth?.providers)?.meta) ?? record(auth?.meta) ?? auth;
@@ -647,7 +650,9 @@ function hasNoPlan(id: PlanId, data: Record<string, unknown>): boolean {
     const usage = record(data.usage);
     if (usage && num(usage.limit) !== null && (num(usage.limit) ?? 0) <= 0) return true;
     if (Array.isArray(data.limits) && data.limits.length === 0) return true;
-    if (record(data.usages) !== null) return true;
+    if (Array.isArray(data.usages) && data.usages.length === 0) return true;
+    const usages = record(data.usages);
+    if (usages && Object.keys(usages).length === 0) return true;
     return false;
   }
   if (id === "codex") return data.plan_type === "free" || data.plan_type === "none" || ("rate_limit" in data && data.rate_limit === null);
@@ -695,6 +700,7 @@ export class PlanWatcher {
   private readonly kept = new Map<PlanId, Kept>();
   private history: Partial<Record<PlanId, PlanPoint[]>> = {};
   private pass: Promise<PlanSummary> | null = null;
+  private passOpts: { network: boolean; fresh?: boolean } | null = null;
 
   constructor(options: PlanWatcherOptions) {
     this.file = options.file;
@@ -719,8 +725,16 @@ export class PlanWatcher {
    * wins, by the log's own time. Only one pass runs at a time.
    */
   summary(options: { network: boolean; local?: readonly LocalLimits[]; fresh?: boolean }): Promise<PlanSummary> {
-    this.pass ??= this.summaryNow(options).finally(() => {
+    if (this.pass) {
+      if ((options.network && !this.passOpts?.network) || (options.fresh && !this.passOpts?.fresh)) {
+        return this.pass.then(() => this.summary(options));
+      }
+      return this.pass;
+    }
+    this.passOpts = { network: options.network, fresh: options.fresh };
+    this.pass = this.summaryNow(options).finally(() => {
       this.pass = null;
+      this.passOpts = null;
     });
     return this.pass;
   }
@@ -758,7 +772,7 @@ export class PlanWatcher {
           return;
         }
         const age = now - (kept?.askedAt ?? 0);
-        if (age < (fresh ? FORCE_MS : FRESH_MS)) {
+        if (age < (fresh ? FORCE_MS : (provider.freshMs ?? FRESH_MS))) {
           if (kept?.noPlanAt != null || (provider.hideWithoutPlan && !kept?.reading)) hidden.add(provider.id);
           else include(provider.id);
           return;

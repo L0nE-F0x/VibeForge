@@ -44,7 +44,7 @@ type Done = Record<never, never>;
 
 /** What each request answers with when it worked, besides `ok: true`. */
 export interface PtyAnswers {
-  spawn: { ptyId: string; pid: number };
+  spawn: { ptyId: string; pid: number; ptyToken?: string };
   write: Done;
   send: Done;
   resize: Done;

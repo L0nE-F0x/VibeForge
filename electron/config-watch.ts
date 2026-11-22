@@ -36,6 +36,7 @@ export function watchConfig(configRoot: string, changed: (topics: Topic[]) => vo
         changed(topics);
       }, 250);
     });
+    watcher.on("error", () => undefined);
   } catch {
     watcher = null;
   }

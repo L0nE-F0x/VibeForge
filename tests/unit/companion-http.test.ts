@@ -586,4 +586,31 @@ describe("what the phone page sends over a slow link", () => {
     expect((await ask("https://studio.ts.net/js/desk.js")).body).toBe("cached desk");
     expect(fetched).toEqual(["https://studio.ts.net/", "https://studio.ts.net/js/api.js"]);
   });
+
+  it("rejects origins with credentials/paths in peerOrigin and rate-limits repeated failed /api/pair attempts", async () => {
+    const { peerOrigin } = await import("../../src/core/companion-http.js");
+    expect(peerOrigin("http://evil@127.0.0.1:4318", "127.0.0.1:4318")).toBeNull();
+    expect(peerOrigin("http://127.0.0.1:9999/path", "127.0.0.1:4318")).toBeNull();
+    expect(peerOrigin("http://127.0.0.1:9999", "127.0.0.1:4318")).toBe("http://127.0.0.1:9999");
+
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root: fs.mkdtempSync(path.join(os.tmpdir(), "vf-comp-")),
+      icon: null,
+      actions: actions({ hear: async () => ({ text: "", empty: "nothing" }) }),
+    });
+    try {
+      const base = `http://127.0.0.1:${server.port}`;
+      for (let i = 0; i < 12; i++) {
+        const res = await fetch(`${base}/api/pair`, { method: "POST", body: JSON.stringify({ token: "wrong" }) });
+        expect(res.status).toBe(401);
+      }
+      const blocked = await fetch(`${base}/api/pair`, { method: "POST", body: JSON.stringify({ token: "wrong" }) });
+      expect(blocked.status).toBe(429);
+    } finally {
+      await server.close();
+    }
+  });
 });

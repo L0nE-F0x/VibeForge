@@ -485,4 +485,27 @@ describe("plan limits", () => {
     const switched = [...climb, { t: new Date(NOW).toISOString(), percent: 41, w: "week" }];
     expect(fullAt(switched, 41, NOW, { limiter: "week", resetsAt: inHours(100) })).toBeNull();
   });
+
+  it("treats non-empty Kimi usages or coalesced network summary requests accurately", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-plans-"));
+    fs.mkdirSync(path.join(home, ".kimi-code", "credentials"), { recursive: true });
+    write(path.join(home, ".kimi-code", "credentials", "kimi-code.json"), { access_token: jwt(NOW / 1000 + 900), refresh_token: "r", expires_at: 0 });
+    fs.writeFileSync(path.join(home, ".kimi-code", "device_id"), "device-1\n");
+    let netCalls = 0;
+    const watcher = new PlanWatcher({
+      home,
+      file: path.join(home, "plans.json"),
+      now: () => NOW,
+      fetch: async () => {
+        netCalls += 1;
+        return { status: 200, text: async () => JSON.stringify({ usages: { detail: "unknown-format" } }) };
+      },
+      env: {},
+    });
+    // Local-only summary followed concurrently by network:true runs the network pass rather than dropping it.
+    const [first, second] = await Promise.all([watcher.summary({ network: false }), watcher.summary({ network: true })]);
+    expect(first.providers).toEqual([]);
+    expect(netCalls).toBe(1);
+    expect(second.providers.find((p) => p.id === "kimi")?.problem).toBe("unreadable");
+  });
 });

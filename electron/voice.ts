@@ -682,12 +682,17 @@ export class Voice {
   private ensureServer(bin: string, model: string, language: string): Promise<void> {
     this.touchServer();
     const current = this.server;
-    if (current && current.model === model && current.language === language && current.child.exitCode === null) return current.ready;
+    if (current && current.model === model && current.language === language && (!current.child || current.child.exitCode === null)) return current.ready;
     this.stopServer();
     const server = { child: null as unknown as ChildProcess, port: 0, model, language, ready: Promise.resolve() };
     server.ready = (async () => {
       server.port = await freePort();
+      if (this.server !== server) throw new Error("whisper-server start cancelled.");
       const child = spawn(bin, serverArgs({ model, language, port: server.port, threads: whisperThreads(os.cpus().length) }), { stdio: ["ignore", "ignore", "pipe"] });
+      if (this.server !== server) {
+        child.kill("SIGTERM");
+        throw new Error("whisper-server start cancelled.");
+      }
       server.child = child;
       let stderr = "";
       child.stderr?.on("data", (data: Buffer) => {

@@ -275,6 +275,14 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
     return true;
   };
 
+  const keepDetached = async (sha: string): Promise<boolean> => {
+    if (!SHA.test(sha) || !(await isCommit(root, sha))) return true;
+    const held = await git(["for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)"], root);
+    if (held.code !== 0) return false;
+    if (held.stdout.trim()) return true;
+    return keep("refs/heads/detached-head", sha);
+  };
+
   /** Copies that still hold the only pointer to a commit. */
   const stay = new Set<string>();
   for (const copy of copies) {
@@ -286,6 +294,17 @@ async function rescue(root: string, machine: string): Promise<Rescue | null> {
         /* unreadable: nothing to keep */
       }
       if (!(await keep(copy.of, sha))) stay.add(copy.file);
+    } else if (copy.of === "HEAD") {
+      let raw = "";
+      try {
+        raw = fs.readFileSync(copy.file, "utf8").trim();
+      } catch {
+        /* unreadable: nothing to keep */
+      }
+      if (SHA.test(raw) && !(await keepDetached(raw))) stay.add(copy.file);
+    } else if (copy.of === "logs/HEAD") {
+      const sha = lastLogged(copy.file);
+      if (sha && !(await keepDetached(sha))) stay.add(copy.file);
     } else if (copy.of === "packed-refs") {
       let text = "";
       try {
@@ -388,7 +407,12 @@ async function settle(root: string, commit: string): Promise<string[]> {
     if (!inWork) continue;
     const inTheirs = theirs.get(file) ?? "none";
     const inOurs = ours.get(file) ?? "none";
-    if (inWork !== inTheirs || inWork === inOurs) continue;
+    let matchesTheirs = inWork === inTheirs && inWork !== inOurs;
+    if (!matchesTheirs && inWork !== "none" && inTheirs !== "none") {
+      const norm = await normalizedHash(root, path.join(root, file));
+      if (norm && norm === inTheirs && norm !== inOurs) matchesTheirs = true;
+    }
+    if (!matchesTheirs) continue;
     if (inOurs === "none") {
       fs.rmSync(path.join(root, file), { force: true });
       settled.push(file);
@@ -397,6 +421,24 @@ async function settle(root: string, commit: string): Promise<string[]> {
     }
   }
   return settled;
+}
+
+const MAX_NORMALIZE_BYTES = 16 * 1024 * 1024;
+
+/** LF-normalized blob SHA computed in-memory via `--no-filters` so repo clean/smudge filters never run. */
+async function normalizedHash(root: string, file: string): Promise<string | null> {
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.size > MAX_NORMALIZE_BYTES) return null;
+    const raw = fs.readFileSync(file);
+    if (raw.includes(0) || !raw.includes("\r\n")) return null;
+    const text = raw.toString("utf8").replace(/\r\n/g, "\n");
+    const hashed = await git(["hash-object", "--no-filters", "--stdin"], root, text);
+    const blob = hashed.stdout.trim();
+    return hashed.code === 0 && SHA.test(blob) ? blob : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -409,7 +451,11 @@ export async function inHistory(root: string, file: string, relative: string): P
   const blob = hashed.stdout.trim();
   if (hashed.code !== 0 || !SHA.test(blob)) return false;
   const found = await git(["log", "--all", "-1", "--format=%H", `--find-object=${blob}`, "--", relative], root);
-  return found.code === 0 && SHA.test(found.stdout.trim());
+  if (found.code === 0 && SHA.test(found.stdout.trim())) return true;
+  const norm = await normalizedHash(root, file);
+  if (!norm || norm === blob) return false;
+  const normFound = await git(["log", "--all", "-1", "--format=%H", `--find-object=${norm}`, "--", relative], root);
+  return normFound.code === 0 && SHA.test(normFound.stdout.trim());
 }
 
 export interface MergeResult {

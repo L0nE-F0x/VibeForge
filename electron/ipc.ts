@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -137,7 +138,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "updates.get": () => updater.get(),
     "updates.check": () => updater.check(),
-    "updates.run": (size) => {
+    "updates.run": async (size) => {
+      if (install === "installer" && !updater.get().available && !process.env.VIBEFORGE_UPDATE_COMMAND) {
+        await updater.check().catch(() => undefined);
+      }
       const command = updater.get().command;
       if (!command) throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
       // The kind of copy, never the command: a packager's VIBEFORGE_UPDATE_COMMAND can hold a secret.
@@ -339,8 +343,19 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
 export async function answerTalk(ctx: MainContext, request: TalkRequest, gone: AbortSignal): Promise<unknown> {
   if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
-  if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(request.pty) };
-  if (request.op === "tell") return ctx.service.tell({ fromPty: request.pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
-  if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: request.pty, task: request.task });
-  return ctx.service.handTask({ fromPty: request.pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs, gone });
+  let pty = request.pty;
+  if (pty) {
+    const expected = ctx.service.ptyTokens.get(pty);
+    if (expected) {
+      const given = request.ptyToken ?? "";
+      const ok = given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+      if (!ok) return { ok: false, error: "This terminal token isn't valid; run from a VibeForge terminal or restart the session." };
+    } else if (!ctx.service.live.has(pty)) {
+      return { ok: false, error: "That terminal session is no longer active." };
+    }
+  }
+  if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(pty) };
+  if (request.op === "tell") return ctx.service.tell({ fromPty: pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
+  if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: pty, task: request.task });
+  return ctx.service.handTask({ fromPty: pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs, gone });
 }

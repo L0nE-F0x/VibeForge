@@ -645,4 +645,35 @@ describe("Viby settings awareness and parsing", () => {
     expect(lines).toContain("parakeet-tdt-0.6b-v3-int8 [installed]");
     expect(settingsFingerprint(sample)).not.toBe(settingsFingerprint({ ...sample, viby: { ...sample.viby, effort: "high" } }));
   });
+
+  it("fails closed on approval keys without explicit trust/login waiting state, and holds run-now, close-pane, and dirty in-place starts", () => {
+    const mkStep = (partial: Partial<OrchestratorStep>): OrchestratorStep => ({
+      id: "s1",
+      kind: "key",
+      engineId: "",
+      workspaceId: "",
+      branch: "",
+      prompt: "",
+      target: "pty-1",
+      asked: "",
+      state: "planned",
+      error: null,
+      ptyId: null,
+      openedWorkspaceId: null,
+      ...partial,
+    });
+    const ctx: PlanContext = {
+      workspaces: [{ id: "ws-1", name: "App", folder: "/tmp/app", git: true }],
+      engines: [{ id: "claude", label: "Claude Code", available: true }],
+      running: [{ id: "pty-1", engine: "Claude Code", workspace: "App", folder: "/tmp/app", working: false, orchestrated: true }],
+    };
+
+    expect(holdsForGo(mkStep({ prompt: "yes" }), ctx)).toBe(true);
+    expect(holdsForGo(mkStep({ prompt: "enter" }), { ...ctx, running: [{ ...ctx.running[0], waiting: "Continue? (custom prompt)" }] })).toBe(true);
+    expect(holdsForGo(mkStep({ prompt: "yes" }), { ...ctx, running: [{ ...ctx.running[0], working: true, waiting: "Trust this folder?" }] })).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "workbench", prompt: "close-pane" }), ctx)).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "start", target: "", workspaceId: "ws-1", engineId: "claude", prompt: "Fix it.", dirty: 2 }), ctx)).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "task", action: "run-now" }), ctx)).toBe(true);
+    expect(holdsForGo(mkStep({ kind: "routine", action: "run-now" }), ctx)).toBe(true);
+  });
 });

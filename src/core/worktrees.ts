@@ -424,7 +424,7 @@ function unquoteGitPath(raw: string): string {
   return Buffer.from(bytes).toString("utf8");
 }
 
-function diffHeaderTarget(line: string): string | null {
+export function diffHeaderTarget(line: string): string | null {
   if (!line.startsWith("diff --git ")) return null;
   const rest = line.slice("diff --git ".length);
   if (rest.startsWith('"')) {

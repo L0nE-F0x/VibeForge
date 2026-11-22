@@ -66,6 +66,7 @@ const PAUSED_LOOK_MS = 15;
  * One terminal: its process, its mirror and its files.
  * @typedef {Sink & {
  *   id: string,
+ *   ptyToken: string,
  *   pid: number,
  *   cwd: string,
  *   argv: string[],
@@ -227,6 +228,11 @@ function closeSink(sink, done) {
           log("artifacts:", messageOf(error));
         }
       }
+    })
+    .catch((error) => {
+      log("artifacts:", messageOf(error));
+    })
+    .finally(() => {
       if (sink.scrollFd != null) {
         try {
           fs.closeSync(sink.scrollFd);
@@ -235,10 +241,6 @@ function closeSink(sink, done) {
         }
         sink.scrollFd = null;
       }
-      done();
-    })
-    .catch((error) => {
-      log("artifacts:", messageOf(error));
       done();
     });
 }
@@ -533,9 +535,10 @@ function spawnSession(msg) {
   const rows = Math.max(2, Number(msg.rows) || 32);
   const runDir = typeof msg.runDir === "string" && msg.runDir ? msg.runDir : null;
   const id = crypto.randomUUID();
-  // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in.
+  const ptyToken = crypto.randomBytes(24).toString("hex");
+  // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in; VIBEFORGE_PTY_TOKEN authenticates it.
   /** @type {NodeJS.ProcessEnv} */
-  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id };
+  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id, VIBEFORGE_PTY_TOKEN: ptyToken };
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
   const mirror = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
@@ -544,6 +547,7 @@ function spawnSession(msg) {
   /** @type {Omit<Session, keyof CaptureState>} */
   const fields = {
     id,
+    ptyToken,
     pid: term.pid,
     cwd: msg.cwd,
     argv,
@@ -775,7 +779,7 @@ async function handle(msg) {
   switch (msg.op) {
     case "spawn": {
       const session = spawnSession(msg);
-      reply(msg, { ok: true, ptyId: session.id, pid: session.pid });
+      reply(msg, { ok: true, ptyId: session.id, pid: session.pid, ptyToken: session.ptyToken });
       return;
     }
     case "write":

@@ -157,6 +157,9 @@ export function ignoreLines(options: { filesOnly: boolean }): string[] {
       : [
           // A task's copy is registered here with this machine's own paths.
           ".git/worktrees",
+          // Git hooks are executable code; git config carries machine-local paths/filters.
+          ".git/hooks",
+          ".git/config",
           // Git's locks are held for moments; synced, they would stop git on the other machine.
           ".git/*.lock",
           ".git/**/*.lock",

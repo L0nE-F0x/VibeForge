@@ -440,6 +440,11 @@ function readVarint(buf: Uint8Array, pos: number): [number, number] {
   let index = pos;
   while (index < buf.length) {
     const byte = buf[index++];
+    if (shift >= 63) {
+      while (index < buf.length && (buf[index] & 0x80) !== 0) index++;
+      if (index < buf.length) index++;
+      return [result, index];
+    }
     result += (byte & 0x7f) * 2 ** shift;
     if ((byte & 0x80) === 0) return [result, index];
     shift += 7;
@@ -478,13 +483,14 @@ function walkProto(buf: Uint8Array, onField: (field: number, wire: number, value
  * Antigravity CLI (`agy`): a SQLite `.db` per conversation under `~/.gemini/antigravity-cli/conversations`
  * (and `~/.gemini/antigravity/conversations`), with protobuf-encoded `steps` and `gen_metadata`.
  */
-function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<string>): void {
+function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<string>): boolean {
   let db: DatabaseSync;
   try {
     db = new DatabaseSync(file, { readOnly: true });
   } catch {
-    return;
+    return false;
   }
+  let ok = false;
   try {
     const stepTimes = new Map<number, string>();
     const msgTimes = new Map<string, string>();
@@ -577,6 +583,7 @@ function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<st
         count(state.tally, iso ?? fallbackIso, model || fallbackModel || "gemini", { total, cached: cacheRead, output: outTokens });
       });
     }
+    ok = true;
   } catch {
     /* unreadable or mid-write SQLite file; counted on the next pass */
   } finally {
@@ -586,6 +593,7 @@ function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<st
       /* ignore */
     }
   }
+  return ok;
 }
 
 /**
@@ -595,13 +603,14 @@ function agyDb(state: FileState, file: string, fallbackIso: string, seen: Set<st
  * under the same ids. `input` leaves out the cache and `output` leaves out reasoning. A fork starts
  * with copies of its parent's messages, which are skipped the way `opencode stats` skips them.
  */
-function opencodeDb(state: FileState, file: string, since: number, seen: Set<string>): void {
+function opencodeDb(state: FileState, file: string, since: number, seen: Set<string>): boolean {
   let db: DatabaseSync;
   try {
     db = new DatabaseSync(file, { readOnly: true });
   } catch {
-    return;
+    return false;
   }
+  let ok = false;
   try {
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
     const columns = (table: string) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)));
@@ -643,6 +652,7 @@ function opencodeDb(state: FileState, file: string, since: number, seen: Set<str
       const total = num(row.input) + num(row["cache.write"]) + cached + output;
       count(state.tally, museTime(row.at), typeof row.model === "string" && row.model ? row.model : "opencode", { total, cached, output });
     }
+    ok = true;
   } catch {
     /* unreadable, mid-migration or an unknown layout; counted on the next pass */
   } finally {
@@ -652,6 +662,7 @@ function opencodeDb(state: FileState, file: string, since: number, seen: Set<str
       /* ignore */
     }
   }
+  return ok;
 }
 
 // ------------------------------------------------------------------ the ledger
@@ -758,8 +769,8 @@ interface Source {
   /** Logs that only grow are read line by line from where the last pass stopped. */
   lines?: (state: FileState, line: string) => void;
   whole?: (state: FileState, text: string) => void;
-  /** A SQLite database is read again whole when it changes, from `since` (ms) on. */
-  db?: (state: FileState, file: string, stat: Stamp, since: number) => void;
+  /** A SQLite database is read again whole when it changes, from `since` (ms) on; false skips caching failed reads. */
+  db?: (state: FileState, file: string, stat: Stamp, since: number) => boolean;
 }
 
 export class UsageScanner {
@@ -831,6 +842,12 @@ export class UsageScanner {
     for (const key of keys) {
       for (const seen of [this.claudeSeen, this.museSeen, this.agySeen, this.opencodeSeen, this.copilotSeen]) seen.delete(key);
     }
+  }
+
+  private seenSetFor(sourceId: string): Set<string> | null {
+    if (sourceId === "agy") return this.agySeen;
+    if (sourceId === "opencode") return this.opencodeSeen;
+    return null;
   }
 
   /** Only one pass at a time; callers during a pass get its result. */
@@ -946,14 +963,22 @@ export class UsageScanner {
   private async read(source: Source, file: string, stat: Stamp, since: number): Promise<FileState> {
     let state = this.files.get(file);
     if (state && state.size === stat.size && state.mtimeMs === stat.mtimeMs) return state;
+    const prev = state;
+    const prevKeys = prev ? [...prev.keys] : [];
     const fresh = (): FileState => ({ size: 0, mtimeMs: 0, offset: 0, tally: new Map(), keys: new Set(), model: "", limits: null });
     if (!state || source.whole || source.db || stat.size < state.offset) {
-      this.forget(state?.keys ?? []);
+      this.forget(prevKeys);
       state = fresh();
     }
     try {
       if (source.db) {
-        source.db(state, file, stat, since);
+        const ok = source.db(state, file, stat, since);
+        if (!ok) {
+          // Do not cache an empty 0-token reading on SQLITE_BUSY / locked DB; restore previous keys and retry next pass.
+          const seen = this.seenSetFor(source.id);
+          if (seen) for (const key of prevKeys) seen.add(key);
+          return prev ?? fresh();
+        }
       } else if (source.whole) {
         source.whole(state, await fs.promises.readFile(file, "utf8"));
       } else if (source.lines && stat.size > state.offset) {

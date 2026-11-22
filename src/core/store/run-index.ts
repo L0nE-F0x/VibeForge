@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isDirectory } from "../fsx.js";
+import { runFilePaths } from "../run-storage.js";
 import { listRunDirs, normalizeRun, readRunMeta, RUN_FILES, runDir, writeRunMeta } from "../runs.js";
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "../../shared/text.js";
 import type { RunMeta, RunOrigin, RunStatus } from "../types.js";
@@ -322,6 +323,7 @@ export class RunIndex {
 
   deleteRunFile(run: RunMeta, file: keyof typeof RUN_FILES): void {
     const dir = runDir(this.dataRoot, run.id);
-    if (dir) fs.rmSync(path.join(dir, RUN_FILES[file]), { force: true });
+    if (!dir) return;
+    for (const target of runFilePaths(dir, RUN_FILES[file])) fs.rmSync(target, { force: true });
   }
 }

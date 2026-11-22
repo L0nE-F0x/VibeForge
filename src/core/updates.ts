@@ -41,12 +41,36 @@ export function parseVersion(text: string): [number, number, number] | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
-/** True when `candidate` is a later version than `current`. */
+function prerelease(text: string): string[] | null {
+  const match = /^v?\d+\.\d+\.\d+(?:-([0-9A-Za-z.-]+))?/.exec(text.trim());
+  if (!match?.[1]) return null;
+  return match[1].split(".");
+}
+
+/** True when `candidate` is a later version than `current`, following SemVer prerelease precedence. */
 export function isNewer(candidate: string, current: string): boolean {
   const a = parseVersion(candidate);
   const b = parseVersion(current);
   if (!a || !b) return false;
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  const preA = prerelease(candidate);
+  const preB = prerelease(current);
+  if (!preA && !preB) return false;
+  if (!preA) return true;
+  if (!preB) return false;
+  for (let i = 0; i < Math.max(preA.length, preB.length); i++) {
+    if (i >= preA.length) return false;
+    if (i >= preB.length) return true;
+    const x = preA[i];
+    const y = preB[i];
+    if (x === y) continue;
+    const numX = /^\d+$/.test(x) ? Number(x) : null;
+    const numY = /^\d+$/.test(y) ? Number(y) : null;
+    if (numX !== null && numY !== null) return numX > numY;
+    if (numX !== null) return false;
+    if (numY !== null) return true;
+    return x > y;
+  }
   return false;
 }
 

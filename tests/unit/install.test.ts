@@ -88,6 +88,21 @@ beforeAll(() => {
   for (const tool of ["make", "g++", "python3", "rsvg-convert", "update-desktop-database"]) {
     fs.writeFileSync(path.join(stubs, tool), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   }
+  const hasNpm = [`${path.dirname(process.execPath)}`, "/usr/bin", "/bin"].some((dirPath) => {
+    try {
+      fs.accessSync(path.join(dirPath, "npm"), fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!hasNpm) {
+    fs.writeFileSync(
+      path.join(stubs, "npm"),
+      `#!/bin/sh\ncase "$1" in\n  ci) exec "${process.execPath}" install.cjs ;;\n  run) [ "$2" = "build" ] && exec "${process.execPath}" build.cjs ;;\nesac\nexit 1\n`,
+      { mode: 0o755 },
+    );
+  }
   execFileSync("git", ["init", "-q", fake], { env: { ...process.env, ...gitEnv } });
   release("1.0.0");
 });

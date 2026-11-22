@@ -296,6 +296,10 @@ interface Served {
   paired: boolean;
   /** Counts a request that came through a tailnet name without Tailscale's sign-in header. */
   unsigned(): void;
+  /** Limits per-IP `/api/pair` brute force attempts and concurrent `/api/orchestrator/hear` transcriptions. */
+  pairLimited(ip: string): boolean;
+  pairResult(ip: string, ok: boolean): void;
+  hearSlot<T>(job: () => Promise<T>): Promise<T>;
 }
 
 /** A tailnet name: `<machine>.<tailnet>.ts.net`, the one Tailscale Serve and Funnel pass on. */
@@ -329,6 +333,13 @@ function tailnetOf(host: string | undefined): string | null {
 export function peerOrigin(origin: string | undefined, host: string | undefined): string | null {
   const from = (origin ?? "").trim().toLowerCase();
   if (!from) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(from);
+  } catch {
+    return null;
+  }
+  if (parsed.username || parsed.password || parsed.origin.toLowerCase() !== from) return null;
   const secure = /^https:\/\/(.+)$/.exec(from)?.[1];
   const tailnet = tailnetOf(secure);
   if (tailnet) return tailnet === tailnetOf(host) ? from : null;
@@ -425,9 +436,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
   if (method === "POST" && url.pathname === "/api/pair") {
+    const ip = req.socket.remoteAddress ?? "unknown";
+    if (served.pairLimited(ip)) throw new CompanionHttpError("phone.error.wrongCode", 429);
     const body = (await readBody(req, PAIR_MAX)) as { token?: unknown };
     stillServing(served);
-    if (!tokenMatches(opts.token, text(body.token, 80))) throw new CompanionHttpError("phone.error.wrongCode", 401);
+    if (!tokenMatches(opts.token, text(body.token, 80))) {
+      served.pairResult(ip, false);
+      throw new CompanionHttpError("phone.error.wrongCode", 401);
+    }
+    served.pairResult(ip, true);
     sendJson(res, 200, { ok: true, computer: opts.computer?.() ?? "" });
     return;
   }
@@ -462,9 +479,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   if (url.pathname === "/api/orchestrator/hear") {
-    const pcm = await readRaw(req, HEAR_READ_MAX, HEAR_MAX);
-    stillServing(served);
-    sendJson(res, 200, await opts.actions.hear(pcm));
+    const result = await served.hearSlot(async () => {
+      const pcm = await readRaw(req, HEAR_READ_MAX, HEAR_MAX);
+      stillServing(served);
+      return opts.actions.hear(pcm);
+    });
+    sendJson(res, 200, result);
     return;
   }
   const body = (await readBody(req)) as {
@@ -583,6 +603,11 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
   // its connection would otherwise keep this handler, and the old code, for as long as it polls.
   let stopping = false;
   let unsigned = 0;
+  let hearing = 0;
+  const pairFailures = new Map<string, { count: number; resetAt: number }>();
+  const PAIR_WINDOW_MS = 60_000;
+  const PAIR_LIMIT = 12;
+  const HEAR_LIMIT = 2;
   const server = http.createServer((req, res) => {
     if (stopping) {
       res.destroy();
@@ -593,6 +618,34 @@ export function startCompanionHttp(opts: CompanionHttpOptions & { host?: string 
       paired: false,
       unsigned: () => {
         unsigned += 1;
+      },
+      pairLimited: (ip) => {
+        const now = Date.now();
+        const entry = pairFailures.get(ip);
+        if (!entry || now >= entry.resetAt) return false;
+        return entry.count >= PAIR_LIMIT;
+      },
+      pairResult: (ip, ok) => {
+        if (ok) {
+          pairFailures.delete(ip);
+          return;
+        }
+        const now = Date.now();
+        const entry = pairFailures.get(ip);
+        if (!entry || now >= entry.resetAt) pairFailures.set(ip, { count: 1, resetAt: now + PAIR_WINDOW_MS });
+        else entry.count += 1;
+        if (pairFailures.size > 200) {
+          for (const [k, v] of pairFailures) if (now >= v.resetAt) pairFailures.delete(k);
+        }
+      },
+      hearSlot: async (job) => {
+        if (hearing >= HEAR_LIMIT) throw new CompanionHttpError("phone.error.failed", 429);
+        hearing += 1;
+        try {
+          return await job();
+        } finally {
+          hearing -= 1;
+        }
       },
     };
     handle(req, res, opts, served).catch(async (error: unknown) => {

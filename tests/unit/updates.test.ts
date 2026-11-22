@@ -16,6 +16,10 @@ describe("updates", () => {
     expect(isNewer("1.0.0", "1.0.0")).toBe(false);
     expect(isNewer("0.2.9", "0.3.0")).toBe(false);
     expect(isNewer("nightly", "0.3.0")).toBe(false);
+    expect(isNewer("3.2.0", "3.2.0-rc.1")).toBe(true);
+    expect(isNewer("3.2.0-rc.1", "3.2.0")).toBe(false);
+    expect(isNewer("3.2.0-rc.2", "3.2.0-rc.1")).toBe(true);
+    expect(isNewer("3.2.0-beta.1", "3.2.0-alpha.9")).toBe(true);
   });
 
   it("reads GitHub's latest-release answer", () => {

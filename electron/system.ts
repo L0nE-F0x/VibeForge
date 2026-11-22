@@ -55,7 +55,9 @@ export async function adoptShellPath(log: LogFile): Promise<void> {
 
 /** Opens a file or folder in the desktop's app for it. */
 export function openPath(target: string): void {
-  const child = spawn("xdg-open", [target], { stdio: "ignore", detached: true });
+  const clean = typeof target === "string" ? target.trim() : "";
+  if (!clean || clean.includes("\0") || clean.startsWith("-") || !path.isAbsolute(clean)) return;
+  const child = spawn("xdg-open", ["--", clean], { stdio: "ignore", detached: true });
   child.on("error", () => undefined);
   child.unref();
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -88,7 +89,7 @@ export async function compressRun(dir: string): Promise<number> {
     }
     if (size < MIN_BYTES) continue;
     const gz = `${file}.gz`;
-    const temp = `${gz}.${process.pid}.tmp`;
+    const temp = `${gz}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     try {
       const packed = await gzipAsync(await fs.promises.readFile(file), { level: 6 });
       await fs.promises.writeFile(temp, packed);

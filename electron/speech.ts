@@ -207,12 +207,20 @@ export class Speaker {
     const end = () => {
       if (ended) return;
       ended = true;
+      clearTimeout(safety);
       this.progressListener?.(null);
       if (synth.exitCode === null && synth.signalCode === null) synth.kill("SIGTERM");
       this.current = null;
       item.resolve();
       this.next();
     };
+    const maxPlayMs = Math.max(20_000, item.text.length * 300);
+    const safety = setTimeout(() => {
+      this.opts.log.warn(`Voice: ${player.label} playback timed out after ${Math.round(maxPlayMs / 1000)} s`);
+      if (play.exitCode === null && play.signalCode === null) play.kill("SIGTERM");
+      end();
+    }, maxPlayMs);
+    safety.unref?.();
     play.on("close", end);
     play.on("error", end);
     this.opts.speaking(item.text);

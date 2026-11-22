@@ -5,7 +5,7 @@ import path from "node:path";
 import net from "node:net";
 import { describe, expect, it } from "vitest";
 import { answers, listenControl } from "../../electron/control.js";
-import { controlSocketPath, fallbackSocketDir, prepareSocketDir } from "../../src/core/control.js";
+import { controlSocketPath, fallbackSocketDir, parseTalkRequest, prepareSocketDir } from "../../src/core/control.js";
 
 const uid = process.getuid?.() ?? 0;
 const data = "/home/me/.local/share/vibeforge";
@@ -127,5 +127,20 @@ describe("listening on the control socket", () => {
     expect(await ask(socket, JSON.stringify({ op: "who", pty: null }))).toContain('"from":"first"');
     stopFirst();
     expect(fs.existsSync(socket)).toBe(false);
+  });
+
+  it("rejects symlinked runtime dirs and socket paths, and parses ptyToken", () => {
+    const base = tempDir();
+    const targetDir = tempDir();
+    const symRuntime = path.join(base, "rt-link");
+    fs.symlinkSync(targetDir, symRuntime);
+    expect(prepareSocketDir(controlSocketPath(data, symRuntime, uid), uid)).toBe(false);
+
+    const realRuntime = tempDir();
+    const sock = controlSocketPath(data, realRuntime, uid);
+    fs.symlinkSync("/tmp/elsewhere.sock", sock);
+    expect(prepareSocketDir(sock, uid)).toBe(false);
+
+    expect(parseTalkRequest(JSON.stringify({ op: "who", pty: "p1", ptyToken: "secret-hex" }))).toEqual({ op: "who", pty: "p1", ptyToken: "secret-hex" });
   });
 });

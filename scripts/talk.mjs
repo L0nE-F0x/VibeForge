@@ -117,12 +117,14 @@ if (!command || command === "help" || command === "--help" || command === "-h") 
   process.exit(0);
 }
 const pty = process.env.VIBEFORGE_PTY || null;
+const ptyToken = process.env.VIBEFORGE_PTY_TOKEN || undefined;
+const auth = ptyToken ? { pty, ptyToken } : { pty };
 const { flags, words } = parse(rest);
 const timeoutMs = flags.timeout ? Math.round(flags.timeout * 60_000) : undefined;
 
 try {
   if (command === "who") {
-    const answer = await ask({ op: "who", pty });
+    const answer = await ask({ op: "who", ...auth });
     if ("error" in answer) fail(answer.error || "VibeForge refused that.");
     // Folders under your home read as ~/…, as a shell prompt shows them.
     const home = process.env.HOME;
@@ -140,7 +142,7 @@ try {
   }
   if (command === "apply") {
     if (!words[0]) fail(`apply needs a task id\n\n${USAGE}`, 2);
-    const answer = await ask({ op: "apply", pty, task: words[0] });
+    const answer = await ask({ op: "apply", ...auth, task: words[0] });
     if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
     process.stdout.write(`${answer.files.length ? `Applied ${answer.files.join(", ")}. ` : ""}${answer.note}\n`);
     process.exit(answer.conflicts.length ? 1 : 0);
@@ -151,13 +153,13 @@ try {
   if (text === "-" || (!text && !process.stdin.isTTY)) text = await readStdin();
   if (!target || !text.trim()) fail(`${command} needs a name and a message\n\n${USAGE}`, 2);
   if (command === "task") {
-    const answer = await ask({ op: "task", pty, agent: target, text, title: flags.title, start: flags.start, wait: flags.wait, timeoutMs });
+    const answer = await ask({ op: "task", ...auth, agent: target, text, title: flags.title, start: flags.start, wait: flags.wait, timeoutMs });
     if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
     process.stdout.write(`${answer.started ? "Started" : "Made"} task "${answer.title}" (${answer.taskId}).${answer.note ? ` ${answer.note}` : ""}\n`);
     if (answer.reply) process.stdout.write(`\n${answer.reply}\n`);
     process.exit(flags.wait && answer.started && !answer.reply ? 3 : 0);
   }
-  const answer = await ask({ op: "tell", pty, to: target, text, wait: flags.wait, timeoutMs });
+  const answer = await ask({ op: "tell", ...auth, to: target, text, wait: flags.wait, timeoutMs });
   if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
   if (answer.reply) {
     process.stdout.write(`${answer.reply}\n`);

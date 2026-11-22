@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  claudeConfigRoots,
   claudeLogCwd,
   claudeProjectDir,
   claudeTurn,
@@ -9,6 +10,7 @@ import {
   codexTurn,
   grokSessionsDir,
   grokTurn,
+  kimiHomeDirs,
   kimiStateCwd,
   kimiTurn,
   lastReplyIn,
@@ -198,15 +200,17 @@ async function inCwd(files: string[], cwd: string, cwdOf: (head: string) => stri
 async function logFiles(opts: { kind: ReplyLog; home: string; cwd: string; since: number }, cwdOk: Map<string, boolean>): Promise<string[]> {
   const elsewhere = (file: string) => cwdOk.get(file) === false;
   if (opts.kind === "kimi") {
-    const root = path.join(process.env.KIMI_CODE_HOME || path.join(opts.home, ".kimi-code"), "sessions");
     const files: string[] = [];
-    for (const folder of await subdirs(root)) {
-      for (const session of await subdirs(folder)) {
-        if (!cwdOk.has(session)) cwdOk.set(session, kimiStateCwd((await readStart(path.join(session, "state.json"), KEEP_BYTES)) ?? "") === opts.cwd);
-        if (!cwdOk.get(session)) continue;
-        for (const agent of await subdirs(path.join(session, "agents"))) {
-          const file = path.join(agent, "wire.jsonl");
-          if (await recentFile(file, opts.since)) files.push(file);
+    for (const base of kimiHomeDirs(opts.home)) {
+      const root = path.join(base, "sessions");
+      for (const folder of await subdirs(root)) {
+        for (const session of await subdirs(folder)) {
+          if (!cwdOk.has(session)) cwdOk.set(session, kimiStateCwd((await readStart(path.join(session, "state.json"), KEEP_BYTES)) ?? "") === opts.cwd);
+          if (!cwdOk.get(session)) continue;
+          for (const agent of await subdirs(path.join(session, "agents"))) {
+            const file = path.join(agent, "wire.jsonl");
+            if (await recentFile(file, opts.since)) files.push(file);
+          }
         }
       }
     }
@@ -216,9 +220,11 @@ async function logFiles(opts: { kind: ReplyLog; home: string; cwd: string; since
     const dir = claudeProjectDir(opts.home, opts.cwd);
     if ((await mtime(dir)) > 0) return recentJsonl(dir, opts.since);
     // A folder name Claude Code spells differently: find its logs by the cwd written inside them.
-    const root = path.join(opts.home, ".claude", "projects");
     const files: string[] = [];
-    for (const entry of await list(root)) files.push(...(await recentJsonl(path.join(root, entry.name), opts.since, "", elsewhere)));
+    for (const base of claudeConfigRoots(opts.home)) {
+      const root = path.join(base, "projects");
+      for (const entry of await list(root)) files.push(...(await recentJsonl(path.join(root, entry.name), opts.since, "", elsewhere)));
+    }
     return inCwd(files, opts.cwd, claudeLogCwd, cwdOk);
   }
   const now = new Date();

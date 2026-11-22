@@ -320,12 +320,12 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       })
       .then((snap) => {
         if (disposed || !snap) return;
+        if (snap.ansi) term.write(snap.ansi);
         if (!snap.alive) {
           setEnded("ended");
           seen = Number.MAX_SAFE_INTEGER;
           return;
         }
-        term.write(snap.ansi);
         seen = snap.seq;
         for (const event of queue) {
           if (event.seq <= seen) continue;

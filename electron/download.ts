@@ -38,6 +38,7 @@ export async function downloadFiles(files: Download[], opts: DownloadOptions): P
   try {
     for (const file of files) {
       fs.mkdirSync(path.dirname(file.target), { recursive: true });
+      const existedBefore = fs.existsSync(file.target);
       const partial = `${file.target}.part`;
       const mismatch = () => new Error(`${path.basename(file.target)} is not the file VibeForge expected (its size or checksum differs), so it was not kept.`);
       try {
@@ -65,7 +66,7 @@ export async function downloadFiles(files: Download[], opts: DownloadOptions): P
         );
         if (bytes !== file.bytes || hash.digest("hex") !== file.sha256.toLowerCase()) throw mismatch();
         fs.renameSync(partial, file.target);
-        done.push(file.target);
+        if (!existedBefore) done.push(file.target);
       } finally {
         fs.rmSync(partial, { force: true });
       }

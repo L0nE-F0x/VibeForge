@@ -132,7 +132,8 @@ export class ChatDesk {
     const bin = this.core.trash.stash(paths);
     this.core.store.deleteChat(id);
     this.core.emit("chats", "runs");
-    return this.core.keepForUndo(bin, () => {
+    return this.core.keepForUndo(bin, (restored) => {
+      if ((bin.moved.length > 0 && !restored.length) || this.core.store.getChat(id)) return;
       this.core.store.writeChat(record);
       this.core.emit("chats", "runs");
     });

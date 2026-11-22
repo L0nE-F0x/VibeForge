@@ -426,8 +426,13 @@ export function OrchestratorView() {
                 keepKey="orchestrator"
                 onEscape={() => setTypingOpen(false)}
                 onSend={async (text) => {
-                  void call("orchestrator.ask", text).catch((error: unknown) => fail(error, t("orch.failed")));
-                  return true;
+                  try {
+                    await call("orchestrator.ask", text);
+                    return true;
+                  } catch (error: unknown) {
+                    fail(error, t("orch.failed"));
+                    return false;
+                  }
                 }}
               />
               <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} onClick={() => setTypingOpen(false)} />
@@ -525,8 +530,13 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
             keepKey="orchestrator"
             onEscape={onClose}
             onSend={async (text) => {
-              void call("orchestrator.ask", text).catch((error: unknown) => fail(error, t("orch.failed")));
-              return true;
+              try {
+                await call("orchestrator.ask", text);
+                return true;
+              } catch (error: unknown) {
+                fail(error, t("orch.failed"));
+                return false;
+              }
             }}
           />
         </LeaveBar.Provider>

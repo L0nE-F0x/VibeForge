@@ -85,9 +85,18 @@ export class FolderTurns {
     return path.join(this.core.options.dataRoot, "waiting.json");
   }
 
+  private orderedQueue(): Array<[string, Turn]> {
+    return [...this.queue.entries()].sort(([, a], [, b]) => {
+      const aTime = Date.parse(a.since);
+      const bTime = Date.parse(b.since);
+      if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return aTime - bTime;
+      return 0;
+    });
+  }
+
   /** Keeps what is waiting for the next start. Best effort: a wait still works without it. */
   private save(): void {
-    const waiting: SavedTurn[] = [...this.queue.values()].filter((turn) => !turn.slot).map(({ kind, id, folder, since }) => ({ kind, id, folder, since }));
+    const waiting: SavedTurn[] = this.orderedQueue().map(([, turn]) => turn).filter((turn) => !turn.slot).map(({ kind, id, folder, since }) => ({ kind, id, folder, since }));
     const text = JSON.stringify(waiting);
     if (text === this.saved) return;
     try {
@@ -220,7 +229,7 @@ export class FolderTurns {
     if (this.checking || this.holding || this.core.now().getTime() < this.startsAfter) return;
     this.checking = true;
     try {
-      for (const [key, turn] of [...this.queue]) {
+      for (const [key, turn] of this.orderedQueue()) {
         if ((await this.busyIn(turn.folder)).length) continue;
         if (this.queue.get(key) !== turn) continue;
         this.cancel(turn.kind, turn.id);
