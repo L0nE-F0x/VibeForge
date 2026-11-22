@@ -2,7 +2,7 @@ import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus,
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
+import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useOrchestrator, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
 import { runLabel } from "../views/Home.js";
 import { Snippet } from "./Snippet.js";
 import { fuzzyScore, textSnippet } from "../fuzzy.js";
@@ -53,6 +53,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const routines = useRoutines().data;
   const skills = useSkills().data;
   const engines = useEngines().data;
+  const orchestrator = useOrchestrator().data;
   const themes = useThemes();
   const [pickTheme] = useAction(async (theme: string) => call("settings.save", { theme }), t("settings.saveFailed"));
   const [query, setQuery] = useState("");
@@ -86,6 +87,17 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         icon: SquareTerminal,
         act: () => go({ view: "code", workspaceId: workspace.id }),
       })),
+      ...(orchestrator?.threads ?? []).map((thread): Item => ({
+        id: `viby-thread:${thread.id}`,
+        title: thread.title,
+        sub: thread.preview || undefined,
+        kind: "switcher.vibyThread",
+        icon: MessagesSquare,
+        act: () => {
+          void call("orchestrator.selectThread", thread.id);
+          go({ view: "orchestrator" });
+        },
+      })),
       ...[...(chats ?? [])]
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .map((chat): Item => ({
@@ -115,6 +127,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
         act: () => go({ view: "settings", section: section.id }),
       })),
       { id: "shortcuts", title: t("shortcuts.title"), kind: "switcher.setting", icon: Keyboard, act: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
+      { id: "new:viby", title: t("switcher.newViby"), kind: "switcher.action", icon: Sparkles, act: () => { void call("orchestrator.clear"); go({ view: "orchestrator" }); } },
       { id: "new:chat", title: t("switcher.newChat"), kind: "switcher.action", icon: MessageSquarePlus, act: () => go({ view: "chat" }) },
       { id: "new:task", title: t("tasks.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "tasks", taskId: "new" }) },
       { id: "new:skill", title: t("skills.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "skills", skillId: "new" }) },
@@ -122,13 +135,13 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       { id: `theme:${FOLLOW}`, title: `${t("switcher.theme")} · ${t("settings.followOmarchy")}`, sub: themes?.system?.name, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(FOLLOW) },
       ...(themes?.themes ?? []).map((theme): Item => ({ id: `theme:${theme.id}`, title: `${t("switcher.theme")} · ${theme.name}`, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(theme.id) })),
     ];
-  }, [agents, chats, workspaces, tasks, routines, skills, themes, rail, home, t, go, open, pickTheme]);
+  }, [agents, chats, workspaces, orchestrator?.threads, tasks, routines, skills, themes, rail, home, t, go, open, pickTheme]);
 
   const shown = useMemo(() => {
     // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open
     // tasks); the views, which the rail already shows, come after.
     if (!query.trim()) {
-      const rank = (item: Item) => ["chat:", "workspace:", "agent:", "task:", "new:", "view:"].findIndex((prefix) => item.id.startsWith(prefix));
+      const rank = (item: Item) => ["viby-thread:", "chat:", "workspace:", "agent:", "task:", "new:", "view:"].findIndex((prefix) => item.id.startsWith(prefix));
       const order = (item: Item) => (rank(item) < 0 ? 99 : rank(item));
       const openTask = (item: Item) => !item.id.startsWith("task:") || tasks?.find((task) => `task:${task.id}` === item.id)?.status !== "done";
       let chatsShown = 0;

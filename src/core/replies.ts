@@ -302,8 +302,99 @@ export function kimiTurn(log: LogInput, since: number, words = ""): Turn {
   return { prompted: true, matched, reply: null };
 }
 
+// ------------------------------------------------------------------ Copilot CLI
+
+/** Copilot CLI's session state roots (`$COPILOT_HOME/session-state` or `~/.copilot/session-state`). */
+export function copilotRoots(home: string): string[] {
+  const root = process.env.COPILOT_HOME?.trim() || path.join(home, ".copilot");
+  return [path.join(root, "session-state")];
+}
+
+export function copilotLogCwd(head: string): string | null {
+  for (const row of parseLines(head)) {
+    const data = row.data as { cwd?: unknown; context?: { cwd?: unknown } } | undefined;
+    if (typeof data?.context?.cwd === "string") return data.context.cwd;
+    if (typeof data?.cwd === "string") return data.cwd;
+  }
+  return null;
+}
+
+function copilotPromptText(row: Record<string, unknown>): string | null {
+  if (row.type !== "user.message") return null;
+  const data = row.data as { content?: unknown; prompt?: unknown } | undefined;
+  const text = typeof data?.content === "string" ? data.content : typeof data?.prompt === "string" ? data.prompt : "";
+  return text.trim() ? text : null;
+}
+
+function copilotTime(row: Record<string, unknown>): number {
+  const raw = row.timestamp;
+  if (typeof raw === "number") return raw;
+  return typeof raw === "string" ? Date.parse(raw) : NaN;
+}
+
+export function copilotTurn(log: LogInput, since: number, words = ""): Turn {
+  const rows = rowsOf(log);
+  let start = -1;
+  let matched = false;
+  for (let i = 0; i < rows.length; i++) {
+    const prompt = copilotPromptText(rows[i]);
+    if (prompt === null || !(copilotTime(rows[i]) >= since)) continue;
+    if (start < 0 || (!matched && words && mentions(prompt, words))) {
+      start = i;
+      matched = Boolean(words) && mentions(prompt, words);
+      if (matched || !words) break;
+    }
+  }
+  if (start < 0) return NO_TURN;
+  let lastText = "";
+  for (let i = start + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (copilotPromptText(row) !== null) return { prompted: true, matched, reply: null };
+    if (row.type === "assistant.message") {
+      const data = row.data as { content?: unknown; text?: unknown } | undefined;
+      const text = typeof data?.content === "string" ? data.content : typeof data?.text === "string" ? data.text : "";
+      if (text.trim()) lastText = text.trim();
+    } else if (row.type === "assistant.turn_end" && lastText) {
+      return { prompted: true, matched, reply: lastText };
+    }
+  }
+  return { prompted: true, matched, reply: null };
+}
+
+// ------------------------------------------------------------------ OpenCode
+
+/** Normalized turn parser over OpenCode rows read from `opencode.db`. */
+export function opencodeTurn(log: LogInput, since: number, words = ""): Turn {
+  const rows = rowsOf(log);
+  let start = -1;
+  let matched = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.type !== "user" || typeof row.text !== "string" || !(Number(row.time) >= since)) continue;
+    if (start < 0 || (!matched && words && mentions(row.text, words))) {
+      start = i;
+      matched = Boolean(words) && mentions(row.text, words);
+      if (matched || !words) break;
+    }
+  }
+  if (start < 0) return NO_TURN;
+  let lastText = "";
+  let completed = false;
+  for (let i = start + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.type === "user") return { prompted: true, matched, reply: null };
+    if (row.type === "assistant" && typeof row.text === "string" && row.text.trim()) {
+      lastText = row.text.trim();
+      if (row.done === true) completed = true;
+    } else if (row.type === "turn_end" && lastText) {
+      return { prompted: true, matched, reply: lastText };
+    }
+  }
+  return { prompted: true, matched, reply: completed && lastText ? lastText : null };
+}
+
 /** Which engines leave a log VibeForge can read replies from. */
-export type ReplyLog = "claude" | "codex" | "grok" | "kimi";
+export type ReplyLog = "claude" | "codex" | "grok" | "kimi" | "copilot" | "opencode";
 
 export function replyLogFor(engineId: string, bin: string): ReplyLog | null {
   const name = `${engineId} ${path.basename(bin)}`.toLowerCase();
@@ -311,6 +402,8 @@ export function replyLogFor(engineId: string, bin: string): ReplyLog | null {
   if (/\bcodex\b/.test(name)) return "codex";
   if (/\bgrok\b/.test(name)) return "grok";
   if (/\bkimi\b/.test(name)) return "kimi";
+  if (/\bcopilot\b/.test(name)) return "copilot";
+  if (/\bopencode\b/.test(name)) return "opencode";
   return null;
 }
 
@@ -326,23 +419,42 @@ function promptTimes(kind: ReplyLog, log: LogInput): number[] {
         ? rows.filter((row) => row.type === "event_msg" && (row.payload as { type?: unknown } | undefined)?.type === "user_message").map(time)
         : kind === "kimi"
           ? rows.filter((row) => row.type === "turn.prompt").map((row) => Number(row.time))
-          : rows.filter((row) => row.type === "turn_started").map((row) => Date.parse(String(row.ts ?? "")));
+          : kind === "copilot"
+            ? rows.filter((row) => copilotPromptText(row) !== null).map(copilotTime)
+            : kind === "opencode"
+              ? rows.filter((row) => row.type === "user").map((row) => Number(row.time))
+              : rows.filter((row) => row.type === "turn_started").map((row) => Date.parse(String(row.ts ?? "")));
   return times.filter((at) => Number.isFinite(at));
 }
 
+function turnFor(kind: ReplyLog, log: LogInput, events: LogInput, since: number, words = ""): Turn {
+  if (kind === "claude") return claudeTurn(log, since, words);
+  if (kind === "codex") return codexTurn(log, since, words);
+  if (kind === "kimi") return kimiTurn(log, since, words);
+  if (kind === "copilot") return copilotTurn(log, since, words);
+  if (kind === "opencode") return opencodeTurn(log, since, words);
+  return grokTurn(log, events, since, words);
+}
+
 /** The answer of the last turn that has finished in one CLI's log (`events` is Grok Build's second file). */
-export function lastReplyIn(kind: ReplyLog, log: LogInput, events: LogInput = ""): string | null {
+export function lastReplyIn(kind: ReplyLog, log: LogInput, events: LogInput = "", words = ""): string | null {
   const starts = promptTimes(kind, kind === "grok" ? events : log);
+  if (words) {
+    for (const since of starts.slice(-4).reverse()) {
+      const turn = turnFor(kind, log, events, since, words);
+      if (turn.matched && turn.reply?.trim()) return turn.reply.trim();
+    }
+  }
   // The newest turn may still be going; then the one before it is the latest answer.
   for (const since of starts.slice(-2).reverse()) {
-    const turn = kind === "claude" ? claudeTurn(log, since) : kind === "codex" ? codexTurn(log, since) : kind === "kimi" ? kimiTurn(log, since) : grokTurn(log, events, since);
+    const turn = turnFor(kind, log, events, since);
     if (turn.reply?.trim()) return turn.reply.trim();
   }
   return null;
 }
 
 /**
- * A row a turn begins with: a prompt (Claude Code, Codex, Kimi Code), Grok Build's turn start or a
+ * A row a turn begins with: a prompt (Claude Code, Codex, Kimi Code, Copilot, OpenCode), Grok Build's turn start or a
  * message the person wrote in its history. A watcher keeps these when it lets older rows of a long
  * turn go, so the turn can still be found however much the CLI wrote after its prompt.
  */
@@ -350,6 +462,8 @@ export function startsTurn(kind: ReplyLog, row: LogRow): boolean {
   if (kind === "claude") return claudePromptText(row) !== null;
   if (kind === "codex") return row.type === "event_msg" && (row.payload as { type?: unknown } | undefined)?.type === "user_message";
   if (kind === "kimi") return row.type === "turn.prompt";
+  if (kind === "copilot") return copilotPromptText(row) !== null;
+  if (kind === "opencode") return row.type === "user";
   return row.type === "turn_started" || (row.type === "user" && !row.synthetic_reason);
 }
 
@@ -433,4 +547,43 @@ export function speakable(markdown: string, mode: TalkBack, max = SPEAK_MAX): st
   const paragraphs = plain(markdown, mode === "full");
   if (mode === "summary") return clip(paragraphs.find((paragraph) => !/^A code block/.test(paragraph)) ?? "", 360);
   return clip(paragraphs.join(" "), max);
+}
+
+/** Splits spoken prose into natural sentence chunks so TTS starts on the first sentence quickly. */
+export function splitForSpeech(text: string, firstMax = 160, chunkMax = 280): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  if (clean.length <= firstMax) return [clean];
+  const sentences =
+    clean
+      .match(/[^.!?]+(?:[.!?]+|$)/g)
+      ?.map((s) => s.trim())
+      .filter(Boolean) ?? [clean];
+  const chunks: string[] = [];
+  let current = "";
+  const limitFor = () => (chunks.length === 0 ? firstMax : chunkMax);
+  for (const sentence of sentences) {
+    if (sentence.length > limitFor() && !current) {
+      let rest = sentence;
+      while (rest.length > limitFor()) {
+        const lim = limitFor();
+        const slice = rest.slice(0, lim);
+        const cut = Math.max(slice.lastIndexOf(", "), slice.lastIndexOf("; "), slice.lastIndexOf(" "));
+        const splitAt = cut > lim * 0.35 ? cut + 1 : lim;
+        chunks.push(rest.slice(0, splitAt).trim());
+        rest = rest.slice(splitAt).trim();
+      }
+      current = rest;
+      continue;
+    }
+    const joined = current ? `${current} ${sentence}` : sentence;
+    if (current && joined.length > limitFor()) {
+      chunks.push(current);
+      current = sentence;
+    } else {
+      current = joined;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }

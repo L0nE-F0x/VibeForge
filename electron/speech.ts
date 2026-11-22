@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { describeError, type LogFile } from "../src/core/log.js";
+import { splitForSpeech } from "../src/core/replies.js";
 import { findPiper, planPlayer, voiceRate, type Player } from "../src/core/voice.js";
 
 export interface SpeechProgress {
@@ -65,14 +66,18 @@ export class Speaker {
     return this.current !== null || this.queue.length > 0;
   }
 
-  /** Resolves once this text has been spoken, or dropped by `stop`. */
+  /** Resolves once all sentence chunks have been spoken, or dropped by `stop`. */
   speak(text: string, voice: string): Promise<void> {
-    const line = text.replace(/\s+/g, " ").trim();
-    if (!line) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.queue.push({ text: line, voice, resolve });
-      if (!this.current) this.next();
-    });
+    const chunks = splitForSpeech(text);
+    if (!chunks.length) return Promise.resolve();
+    const promises = chunks.map(
+      (chunk) =>
+        new Promise<void>((resolve) => {
+          this.queue.push({ text: chunk, voice, resolve });
+        }),
+    );
+    if (!this.current) this.next();
+    return Promise.all(promises).then(() => undefined);
   }
 
   stop(): void {

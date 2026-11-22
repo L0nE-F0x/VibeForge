@@ -3,7 +3,7 @@
 // conversation, plan cards and Running list, read from and sent to the computer. The planning CLI
 // runs there; the page only shows what it said and passes on what the person says and taps.
 
-import { post, withBusy } from "./api.js";
+import { call, post, withBusy } from "./api.js";
 import { brandMark } from "./art.js";
 import { editingIn, el, sheet } from "./dom.js";
 import { micParts, paintMic } from "./mic.js";
@@ -16,6 +16,11 @@ import { stateLabel, t, tCount } from "./words.js";
 /** @typedef {import("./state.js").PhoneOrchestrator} PhoneOrchestrator */
 /** @typedef {import("./state.js").PhoneTurn} PhoneTurn */
 /** @typedef {import("./state.js").PhoneRunning} PhoneRunning */
+/** @typedef {import("./state.js").ThreadSummary} ThreadSummary */
+/** @typedef {import("./state.js").OrchCheck} OrchCheck */
+
+const MAX_ORCH_IMAGES = 4;
+const MAX_ORCH_IMAGE_BYTES = 10 * 1024 * 1024;
 
 /** @param {string | null | undefined} id */
 export function engineLabel(id) {
@@ -28,6 +33,25 @@ export function maestroPage() {
   parts.planner = el("select", { class: "orch-planner", "aria-label": t("orch.planner"), onchange: () => void saveOrch({ engine: parts.planner.value }) });
   parts.plannerKey = null;
   parts.modes = ["plan", "go"].map((mode) => el("button", { class: "seg", type: "button", "data-mode": mode, "aria-pressed": "false", onclick: () => void saveOrch({ mode }) }, t(`orch.mode.${mode}`)));
+  parts.threadsOpen = el(
+    "button",
+    {
+      class: "ghost top-action",
+      type: "button",
+      onclick: () => {
+        paintThreads();
+        parts.threadsSheet.open();
+      },
+    },
+    t("orch.threads"),
+  );
+  parts.threadsList = el("div", { class: "stack" });
+  parts.threadsKey = null;
+  parts.threadsSheet = sheet(t("orch.threads"), parts.threadsList);
+  parts.memoryOpen = el("button", { class: "ghost top-action", type: "button", onclick: () => void openMemorySheet() }, t("orch.memoryTitle"));
+  parts.memoryBox = el("textarea", { class: "orch-memory-area", placeholder: t("orch.memoryPlaceholder"), "aria-label": t("orch.memoryTitle") });
+  parts.memorySave = el("button", { class: "btn", type: "button", onclick: () => void saveMemorySheet() }, t("common.save"));
+  parts.memorySheet = sheet(t("orch.memoryTitle"), el("p", { class: "small faint" }, t("orch.memoryHint")), parts.memoryBox, el("div", { class: "actions" }, parts.memorySave));
   parts.newTalk = el("button", { class: "ghost top-action", type: "button", title: t("orch.newTip"), onclick: () => void newTalk() }, t("orch.new"));
   parts.runningOpen = el("button", { class: "ghost orch-running-open", type: "button", hidden: true, onclick: () => parts.runningSheet.open() });
   parts.runningList = el("div", { class: "orch-team" });
@@ -59,12 +83,49 @@ export function maestroPage() {
   parts.box.addEventListener("input", () => {
     state.orchDraft = parts.box.value;
   });
+  parts.box.addEventListener("paste", (event) => {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const files = items
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(/** @return {file is File} */ (file) => Boolean(file));
+    if (!files.length) return;
+    event.preventDefault();
+    void addOrchImages(files);
+  });
+  parts.orchImageCache = new Map();
+  parts.orchImagePreview = el("img", { class: "orch-lightbox-img", alt: "" });
+  parts.orchImageSheet = sheet(t("orch.attachImage"), parts.orchImagePreview);
+  parts.orchImageStrip = el("div", { class: "orch-image-strip", hidden: true });
+  parts.orchImageInput = el("input", {
+    type: "file",
+    accept: "image/png,image/jpeg,image/webp,image/gif",
+    multiple: true,
+    hidden: true,
+    onchange: () => {
+      const files = Array.from(parts.orchImageInput.files ?? []);
+      parts.orchImageInput.value = "";
+      if (files.length) void addOrchImages(files);
+    },
+  });
+  parts.orchAttach = el(
+    "button",
+    {
+      class: "ghost small-btn orch-attach",
+      type: "button",
+      title: t("orch.attachImage"),
+      "aria-label": t("orch.attachImage"),
+      onclick: () => parts.orchImageInput.click(),
+    },
+    t("orch.attachImage"),
+  );
+  paintOrchImages();
   micParts();
   parts.say = el("button", { class: "btn", type: "button", onclick: () => void askOrch() }, t("phone.send"));
   return el(
     "section",
     { class: "fit orch" },
-    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.back")), el("h1", { class: "grow" }, t("orch.title")), parts.newTalk),
+    el("div", { class: "top" }, el("button", { class: "back", type: "button", onclick: () => setView("desk") }, t("phone.back")), el("h1", { class: "grow" }, t("orch.title")), parts.threadsOpen, parts.memoryOpen, parts.newTalk),
     el(
       "div",
       { class: "orch-head" },
@@ -73,8 +134,11 @@ export function maestroPage() {
     ),
     parts.runningOpen,
     parts.turns,
-    el("div", { class: "card stack composer orch-composer" }, parts.micNote, parts.box, el("div", { class: "actions" }, parts.mic, parts.say)),
+    el("div", { class: "card stack composer orch-composer" }, parts.orchImageInput, parts.orchImageStrip, parts.micNote, parts.box, el("div", { class: "actions" }, parts.orchAttach, parts.mic, parts.say)),
     parts.runningSheet,
+    parts.threadsSheet,
+    parts.memorySheet,
+    parts.orchImageSheet,
   );
 }
 
@@ -93,9 +157,14 @@ export function updateMaestro() {
     button.disabled = state.busy || !orch;
   }
   parts.newTalk.disabled = state.busy || !orch?.turns.length;
+  parts.threadsOpen.disabled = state.busy || !orch;
+  parts.memoryOpen.disabled = state.busy || !orch;
+  parts.memoryOpen.classList.toggle("on", Boolean(orch?.hasMemory));
   paintRunning();
+  paintThreads();
   parts.orchLoading.hidden = Boolean(orch);
   parts.say.disabled = state.busy || !orch || orch.thinking;
+  if (parts.orchAttach) parts.orchAttach.disabled = state.busy || !orch || orch.thinking || state.orchImages.length >= MAX_ORCH_IMAGES;
   paintMic();
   if (!orch) return;
   const label = engineLabel(orch.engineId);
@@ -107,14 +176,102 @@ export function updateMaestro() {
   parts.notReady.textContent = t("phone.orchNotReady", { engine: label });
   const changed = paintTurns();
   parts.thinking.hidden = !orch.thinking;
-  parts.thinkingText.textContent = t("orch.thinking", { engine: label });
+  parts.thinkingText.textContent = orch.activity?.label
+    ? t(`orch.work.${orch.activity.kind}`, { target: orch.activity.label })
+    : t("orch.thinking", { engine: label });
   parts.thinkingStop.disabled = state.busy;
   for (const button of /** @type {NodeListOf<HTMLButtonElement>} */ (parts.turnList.querySelectorAll("button[data-act]"))) button.disabled = state.busy || button.dataset.off === "1";
-  const key = JSON.stringify([orch.turns.length, orch.thinking, orch.engineReady]);
+  const key = JSON.stringify([orch.turns.length, orch.thinking, orch.engineReady, orch.activity?.kind, orch.activity?.label]);
   if (changed || key !== parts.orchTurnsKey) {
     parts.orchTurnsKey = key;
     if (parts.stickTurns && !editingIn(parts.turns)) parts.turns.scrollTop = parts.turns.scrollHeight;
   }
+}
+
+/** @param {import("./state.js").Sheet} targetSheet */
+function closeSheet(targetSheet) {
+  /** @type {HTMLButtonElement | null} */ (targetSheet.querySelector(".sheet-close"))?.click();
+}
+
+function paintThreads() {
+  const orch = state.orch;
+  const threads = orch?.threads ?? [];
+  const key = JSON.stringify([orch?.activeThreadId, threads, state.busy]);
+  if (key === parts.threadsKey) return;
+  parts.threadsKey = key;
+  if (!threads.length) {
+    parts.threadsList.replaceChildren(el("p", { class: "small faint" }, t("orch.threadsEmpty")));
+    return;
+  }
+  const rows = threads.map((item) =>
+    el(
+      "div",
+      { class: `orch-thread-row${item.id === orch?.activeThreadId ? " active" : ""}` },
+      el(
+        "button",
+        {
+          class: "orch-thread-open",
+          type: "button",
+          disabled: state.busy,
+          onclick: () => void pickThread(item.id),
+        },
+        el("span", { class: "orch-thread-title" }, item.title),
+        item.preview ? el("span", { class: "small faint" }, item.preview) : null,
+      ),
+      el(
+        "button",
+        {
+          class: "ghost small-btn",
+          type: "button",
+          disabled: state.busy,
+          onclick: () => void removeThread(item.id),
+        },
+        t("common.delete"),
+      ),
+    ),
+  );
+  parts.threadsList.replaceChildren(...rows);
+}
+
+/** @param {string} threadId */
+async function pickThread(threadId) {
+  closeSheet(parts.threadsSheet);
+  await withBusy(() => post("/api/orchestrator/thread", { threadId }));
+}
+
+/** @param {string} threadId */
+async function removeThread(threadId) {
+  await withBusy(() => post("/api/orchestrator/deleteThread", { threadId }));
+}
+
+async function openMemorySheet() {
+  parts.memoryBox.value = "";
+  parts.memoryBox.disabled = true;
+  parts.memorySave.disabled = true;
+  parts.memorySheet.open();
+  try {
+    const res = /** @type {{ text?: string }} */ (await call("/api/orchestrator/memory"));
+    parts.memoryBox.value = res.text || "";
+  } finally {
+    parts.memoryBox.disabled = false;
+    parts.memorySave.disabled = false;
+  }
+}
+
+async function saveMemorySheet() {
+  const saved = await withBusy(() => post("/api/orchestrator/memory", { text: parts.memoryBox.value }));
+  if (saved !== false) closeSheet(parts.memorySheet);
+}
+
+/** @param {OrchCheck} check */
+function checkNode(check) {
+  const title = t(check.kind === "lookup" ? "orch.chip.lookedUp" : check.kind === "verify" ? "orch.chip.verified" : "orch.chip.checked", { target: check.label });
+  return el(
+    "details",
+    { class: "orch-check-detail" },
+    el("summary", {}, `${title}${check.summary ? ` · ${check.summary}` : ""}`),
+    check.details ? el("pre", { class: "orch-check-pre" }, check.details) : null,
+  );
 }
 
 /** The planner list, rebuilt only when it changes and never while it is open. */
@@ -199,9 +356,93 @@ function noteNode(note) {
   return el("div", { class: "orch-turn from-vibeforge orch-note" }, whoMark(), el("div", { class: "orch-body" }, said, reply, open ? el("div", { class: "orch-step-actions" }, open) : null));
 }
 
+/** @param {Blob} file @returns {Promise<string | null>} */
+function readOrchImage(file) {
+  if (!file.size || file.size > MAX_ORCH_IMAGE_BYTES) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** @param {File[]} files */
+async function addOrchImages(files) {
+  const urls = (await Promise.all(files.slice(0, MAX_ORCH_IMAGES).map(readOrchImage))).filter(/** @return {url is string} */ (url) => Boolean(url));
+  if (!urls.length) return;
+  const remaining = MAX_ORCH_IMAGES - state.orchImages.length;
+  if (remaining <= 0) return;
+  state.orchImages = [...state.orchImages, ...urls.slice(0, remaining)];
+  paintOrchImages();
+}
+
+function paintOrchImages() {
+  if (!parts.orchImageStrip) return;
+  parts.orchImageStrip.hidden = state.orchImages.length === 0;
+  parts.orchImageStrip.replaceChildren(
+    ...state.orchImages.map((src, idx) =>
+      el(
+        "div",
+        { class: "orch-image-thumb" },
+        el("img", { src, alt: "" }),
+        el(
+          "button",
+          {
+            class: "orch-image-remove",
+            type: "button",
+            "aria-label": t("orch.removeImage"),
+            onclick: () => {
+              state.orchImages = state.orchImages.filter((_, at) => at !== idx);
+              paintOrchImages();
+            },
+          },
+          "×",
+        ),
+      ),
+    ),
+  );
+  if (parts.orchAttach) parts.orchAttach.disabled = state.busy || !state.orch || state.orch.thinking || state.orchImages.length >= MAX_ORCH_IMAGES;
+}
+
+/** @param {string} name @param {HTMLElement} wrap */
+async function fillTurnImage(name, wrap) {
+  let url = parts.orchImageCache.get(name);
+  if (url === undefined) {
+    try {
+      const res = /** @type {{ dataUrl?: string }} */ (await call(`/api/orchestrator/image?name=${encodeURIComponent(name)}`));
+      url = typeof res.dataUrl === "string" ? res.dataUrl : null;
+    } catch {
+      url = null;
+    }
+    parts.orchImageCache.set(name, url);
+  }
+  if (!url || !wrap.isConnected) return;
+  wrap.appendChild(
+    el(
+      "button",
+      {
+        class: "orch-turn-img-btn",
+        type: "button",
+        onclick: () => {
+          parts.orchImagePreview.src = /** @type {string} */ (url);
+          parts.orchImageSheet.open();
+        },
+      },
+      el("img", { src: url, alt: "" }),
+    ),
+  );
+}
+
 /** @param {PhoneTurn} turn */
 function turnNode(turn) {
-  if (turn.from === "you") return el("div", { class: "orch-turn from-you" }, el("span", { class: "orch-said" }, turn.text));
+  if (turn.from === "you") {
+    const imgs = turn.images?.length ? el("div", { class: "orch-turn-images" }) : null;
+    if (imgs && turn.images) {
+      for (const name of turn.images) void fillTurnImage(name, imgs);
+    }
+    return el("div", { class: "orch-turn from-you" }, imgs, turn.text ? el("span", { class: "orch-said" }, turn.text) : null);
+  }
   if (turn.note) return noteNode(turn.note);
   const orch = /** @type {PhoneOrchestrator} */ (state.orch);
   const label = engineLabel(turn.by || orch.engineId);
@@ -210,19 +451,23 @@ function turnNode(turn) {
     : turn.text
       ? el("span", { class: "orch-said" }, turn.text)
       : null;
-  return el("div", { class: "orch-turn from-vibeforge" }, whoMark(), el("div", { class: "orch-body" }, said, turn.steps ? planCard(turn) : null));
+  const checks = turn.checks?.length ? el("div", { class: "orch-checks" }, turn.checks.map((check) => checkNode(check))) : null;
+  return el("div", { class: "orch-turn from-vibeforge" }, whoMark(), el("div", { class: "orch-body" }, said, checks, turn.steps ? planCard(turn) : null));
 }
 
 async function askOrch() {
   const said = parts.box.value.trim();
-  if (!said || !state.orch || state.orch.thinking) return;
+  const images = state.orchImages.slice();
+  if ((!said && !images.length) || !state.orch || state.orch.thinking) return;
   parts.stickTurns = true;
   const sent = await withBusy(async () => {
-    await post("/api/orchestrator/ask", { text: said });
+    await post("/api/orchestrator/ask", { text: said, ...(images.length ? { images } : {}) });
     return true;
   });
   if (!sent) return;
   state.orchDraft = "";
+  state.orchImages = [];
+  paintOrchImages();
   if (parts.box) parts.box.value = "";
 }
 

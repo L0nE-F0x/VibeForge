@@ -1,5 +1,17 @@
 import { isCodingSession } from "./companion.js";
-import { canOrchestrate, orchestratorVoiceWords, stepIssue, withPlannedWorkspaces, type OrchestratorStep, type OrchestratorTurn, type OrchestratorView, type PlanContext, type StepIssue } from "./orchestrator.js";
+import {
+  canOrchestrate,
+  orchestratorVoiceWords,
+  stepIssue,
+  withPlannedWorkspaces,
+  type OrchestratorActivity,
+  type OrchestratorStep,
+  type OrchestratorThreadSummary,
+  type OrchestratorTurn,
+  type OrchestratorView,
+  type PlanContext,
+  type StepIssue,
+} from "./orchestrator.js";
 import type { LiveSession } from "./types.js";
 
 // The Orchestrator as the phone page sees it: the desktop's own conversation and plans
@@ -43,6 +55,7 @@ export interface PhoneOrchestrator {
   engineReady: boolean;
   mode: "plan" | "go";
   thinking: boolean;
+  activity?: OrchestratorActivity | null;
   /** Turns before the ones sent. */
   earlier: number;
   turns: PhoneTurn[];
@@ -56,6 +69,9 @@ export interface PhoneOrchestrator {
   copies?: Array<{ id: string; name: string; branch: string }>;
   /** The computer can turn the phone's speech into words (whisper.cpp and a model, from Settings → Voice). */
   hear: boolean;
+  activeThreadId?: string;
+  threads?: OrchestratorThreadSummary[];
+  hasMemory?: boolean;
 }
 
 export interface PhoneOrchestratorInput {
@@ -135,6 +151,7 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
     engineReady: input.view.engineReady,
     mode: input.view.mode,
     thinking: input.view.thinking,
+    ...(input.view.activity ? { activity: input.view.activity } : {}),
     earlier: Math.max(0, input.view.turns.length - turns.length),
     turns,
     planners: input.engines.filter((item) => canOrchestrate(item)).map((item) => ({ id: item.id, label: item.label, available: item.available })),
@@ -143,6 +160,9 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
     running,
     copies: (input.view.copies ?? []).map((item) => ({ id: item.id, name: item.name, branch: item.branch })),
     hear: input.hear,
+    ...(input.view.activeThreadId ? { activeThreadId: input.view.activeThreadId } : {}),
+    ...(input.view.threads?.length ? { threads: input.view.threads } : {}),
+    ...(input.view.hasMemory ? { hasMemory: true } : {}),
   };
 }
 

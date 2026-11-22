@@ -114,6 +114,24 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       // An item's types list what's on offer without fetching the image itself.
       image: (await clipboard.read()).some((item) => item.types.some((type) => type.startsWith("image/"))),
     }),
+    "app.clipboardImage": async () => {
+      for (const item of await clipboard.read()) {
+        const mime =
+          item.types.find((type) => /^image\/(png|jpeg|jpg|webp|gif)$/i.test(type)) ??
+          item.types.find((type) => type.startsWith("image/") && !/svg/i.test(type));
+        if (!mime) continue;
+        try {
+          const blob = await item.getType(mime);
+          if (!(blob instanceof Blob) || !blob.size) continue;
+          const bytes = Buffer.from(await blob.arrayBuffer());
+          const normMime = mime.toLowerCase() === "image/jpg" ? "image/jpeg" : mime.toLowerCase();
+          return `data:${normMime};base64,${bytes.toString("base64")}`;
+        } catch {
+          /* continue to next clipboard item */
+        }
+      }
+      return null;
+    },
     "usage.summary": () => (s().getSettings().usage ? stats.usage.scan() : null),
     "plans.summary": (fresh) => stats.planSummary(Boolean(fresh)),
     "activity.get": (fresh) => stats.activityFor(s().getSettings().activity, Boolean(fresh)),
@@ -240,7 +258,17 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "live.list": () => s().liveForView(),
     "orchestrator.get": () => s().orchestratorView(),
-    "orchestrator.ask": (text) => s().orchestratorAsk(String(text ?? ""), ctx.looking),
+    "orchestrator.ask": async (text, images) => {
+      const wordsInput = String(text ?? "");
+      const imgList = Array.isArray(images) ? images.filter((item): item is string => typeof item === "string") : undefined;
+      const acted = !imgList?.length
+        ? await s().orchestratorQuickAct(wordsInput, ctx.looking, {
+            opened: (label) => words.say("call.opened", { name: label }),
+          })
+        : { handled: false };
+      if (!acted.handled) await s().orchestratorAsk(wordsInput, ctx.looking, imgList);
+    },
+    "orchestrator.imageData": (name) => s().orchestratorImageData(String(name ?? "")),
     "app.looking": (looking) => {
       const text = (value: unknown) => (typeof value === "string" && value.length <= 200 ? value : undefined);
       const view = looking && typeof looking === "object" ? text((looking as Looking).view) : undefined;
@@ -250,6 +278,11 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "orchestrator.stopThinking": () => s().orchestratorStopThinking(),
     "orchestrator.models": (engineId) => s().orchestratorModels(String(engineId ?? "")),
     "orchestrator.clear": () => s().orchestratorClear(),
+    "orchestrator.selectThread": (threadId) => s().orchestratorSelectThread(String(threadId ?? "")),
+    "orchestrator.renameThread": (threadId, title) => s().orchestratorRenameThread(String(threadId ?? ""), String(title ?? "")),
+    "orchestrator.deleteThread": (threadId) => s().orchestratorDeleteThread(String(threadId ?? "")),
+    "orchestrator.readMemory": () => s().orchestratorReadMemory(),
+    "orchestrator.writeMemory": (text) => s().orchestratorWriteMemory(String(text ?? "")),
     "orchestrator.run": (turnId) => s().orchestratorRun(String(turnId ?? "")),
     "orchestrator.cancel": (turnId) => s().orchestratorCancel(String(turnId ?? "")),
     "orchestrator.editStep": (turnId, stepId, patch) => s().orchestratorEditStep(String(turnId ?? ""), String(stepId ?? ""), patch && typeof patch === "object" ? patch : {}),

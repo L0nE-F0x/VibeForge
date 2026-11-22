@@ -7,6 +7,7 @@ import {
   detectWaitingPrompt,
   formatScheduleBrief,
   formatSettingsRules,
+  inspectsProblems,
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
@@ -19,7 +20,7 @@ import type { ServiceCore } from "./core.js";
 import type { LibraryDesk } from "./library.js";
 import type { MessageDesk } from "./messages.js";
 import type { MaestroCopies } from "./orchestrator-copies.js";
-import { gitIn, isSensitiveInspectPath, LOOKUP_FOLDERS, LOOKUP_WALK_MS, oneLine, readBoundedInspectText, realInside, tildify, expandHome } from "./orchestrator-utils.js";
+import { expandHome, gitIn, isSensitiveInspectPath, LOOKUP_FOLDERS, LOOKUP_WALK_MS, oneLine, parseFileAndRange, readBoundedInspectText, realInside, tildify } from "./orchestrator-utils.js";
 import type { RoutineDesk } from "./routines.js";
 import type { RunDesk } from "./runs.js";
 import type { TaskDesk } from "./tasks.js";
@@ -89,6 +90,13 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
     };
   }
 
+  if (step.action === "problems" || step.action === "diagnostics" || inspectsProblems(step.prompt) || inspectsProblems(step.target)) {
+    return inspectProblems(deps);
+  }
+  if (step.action === "compare" || (!step.workspaceId && !step.target && /\bcompare\b/i.test(step.prompt))) {
+    return compareCopies(deps);
+  }
+
   if (step.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(step.action)) {
     const inspected = await inspectOrchestratorEntity(deps, step.action as "agent" | "skill" | "routine" | "task" | "chat" | "run", step.target);
     if (inspected) return inspected;
@@ -129,6 +137,13 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
   }
   const ws = step.workspaceId ? deps.core.workspaceById(step.workspaceId) : null;
   if (ws && isDirectory(ws.path)) {
+    const searchMatch = step.action === "search" ? step.prompt.trim() : /^(?:search|grep)\s*[:=]\s*(.+)$/i.exec(step.prompt)?.[1]?.trim();
+    if (searchMatch) return searchWorkspace(ws.name, ws.path, searchMatch);
+    const treeMatch = step.action === "tree" ? (step.folder || step.prompt).trim() : /^tree(?:\s+(.+))?$/i.exec(step.prompt)?.[1]?.trim();
+    if (step.action === "tree" || /^tree(?:\s|$)/i.test(step.prompt.trim())) {
+      return workspaceTree(ws.name, ws.path, treeMatch && !/^tree$/i.test(treeMatch) ? treeMatch : "");
+    }
+
     const [branchOut, statusOut, logOut, statOut] = await Promise.all([
       gitIn(["rev-parse", "--abbrev-ref", "HEAD"], ws.path),
       gitIn(["status", "--short"], ws.path),
@@ -161,22 +176,176 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
       .catch(() => [] as string[]);
     if (entries.length) parts.push(`Top-level files: ${entries.join(", ")}`);
 
-    const wantedFile = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
-    if (wantedFile) {
-      const rel = wantedFile.replace(/\\/g, "/");
+    const wantedRaw = (step.folder || (!/\b(?:status|diff|log|files|tree|commits?|branch(?:es)?)\b/i.test(step.prompt) ? step.prompt : "")).trim();
+    if (wantedRaw) {
+      const parsed = parseFileAndRange(wantedRaw);
+      const rel = parsed.file.replace(/\\/g, "/");
       if (isSensitiveInspectPath(rel)) {
-        parts.push(`File ${wantedFile}: [skipped sensitive credential/env file]`);
+        parts.push(`File ${parsed.file}: [skipped sensitive credential/env file]`);
       } else {
-        const safeFile = realInside(ws.path, path.resolve(ws.path, wantedFile));
-        const read = safeFile ? readBoundedInspectText(safeFile) : null;
-        if (read && "text" in read) parts.push(`File ${wantedFile}:\n${read.text}`);
-        else if (read) parts.push(`File ${wantedFile}: [skipped ${read.reason}]`);
+        const safeFile = realInside(ws.path, path.resolve(ws.path, parsed.file));
+        const read = safeFile ? readBoundedInspectText(safeFile, parsed.range) : null;
+        if (read && "text" in read) parts.push(`File ${wantedRaw}:\n${read.text}`);
+        else if (read) parts.push(`File ${parsed.file}: [skipped ${read.reason}]`);
       }
     }
     const cleanStatus = statusOut.code === 0 && statusOut.stdout.trim() ? `${statusOut.stdout.trim().split("\n").length} modified/untracked` : "clean";
     return { summary: `${ws.name}: ${branchOut.stdout.trim() || "folder"} (${cleanStatus})`, details: parts.join("\n\n") };
   }
   return { summary: "Nothing found to inspect.", details: "No matching workspace, running CLI, entity, or copy was found." };
+}
+
+async function inspectProblems(deps: InspectDeps): Promise<{ summary: string; details: string }> {
+  const sections: string[] = [];
+  const waitingPrompts: string[] = [];
+  for (const session of deps.core.listLive()) {
+    if (!isCodingCli(session) || session.working) continue;
+    const screen = deps.core.options.host.screen ? await deps.core.options.host.screen(session.ptyId).catch(() => "") : "";
+    const waiting = screen ? detectWaitingPrompt(screen) : null;
+    if (waiting) waitingPrompts.push(`- ${session.program || session.title} (${session.ptyId}): "${waiting}"`);
+  }
+  if (waitingPrompts.length) sections.push(`Waiting for user prompt (${waitingPrompts.length}):\n${waitingPrompts.join("\n")}`);
+
+  const routines = deps.routines?.listRoutines() ?? [];
+  const brokenRoutines = routines.filter((r) => r.issues.length > 0 || r.failStreak >= 3);
+  if (brokenRoutines.length) {
+    sections.push(
+      `Routines needing attention (${brokenRoutines.length}):\n${brokenRoutines
+        .map((r) => `- ${r.name}: ${[...r.issues, ...(r.failStreak >= 3 ? [`${r.failStreak} consecutive failures`] : [])].join("; ")}`)
+        .join("\n")}`,
+    );
+  }
+
+  const failedRuns = deps.core.store.queryRuns({ status: "failed", limit: 5 });
+  if (failedRuns.length) {
+    sections.push(
+      `Recent failed runs (${failedRuns.length}):\n${failedRuns
+        .map((r) => `- ${r.title} (${r.id}, ${r.engine})${r.error ? `: ${oneLine(r.error, 120)}` : ""}`)
+        .join("\n")}`,
+    );
+  }
+
+  const copies = deps.copies.list();
+  if (copies.length) {
+    sections.push(`Copies waiting for review (${copies.length}):\n${copies.map((c) => `- ${c.name} (${c.branch})`).join("\n")}`);
+  }
+
+  if (!sections.length) return { summary: "No active problems or failed runs.", details: "No waiting prompts, failing routines, failed runs, or pending copies." };
+  return {
+    summary: `${waitingPrompts.length} waiting · ${brokenRoutines.length} routine issues · ${failedRuns.length} failed runs`,
+    details: sections.join("\n\n"),
+  };
+}
+
+function diffFilePaths(patch: string): string[] {
+  const files = new Set<string>();
+  for (const line of patch.split("\n")) {
+    const m = /^diff --git a\/(.+?) b\/(.+?)$/.exec(line);
+    if (m) files.add(m[2]);
+  }
+  return [...files];
+}
+
+async function compareCopies(deps: InspectDeps): Promise<{ summary: string; details: string }> {
+  const copies = deps.copies.list();
+  if (!copies.length) return { summary: "No copies waiting for review.", details: "There are no review copies to compare." };
+  const fileOwners = new Map<string, string[]>();
+  const lines: string[] = [];
+  for (const copy of copies) {
+    const diff = await deps.copies.diff(copy.id).catch(() => "");
+    const files = diffFilePaths(diff);
+    for (const file of files) fileOwners.set(file, [...(fileOwners.get(file) ?? []), copy.name]);
+    lines.push(`- ${copy.name} (${copy.branch}): ${files.length} file${files.length === 1 ? "" : "s"}${files.length ? ` [${files.slice(0, 12).join(", ")}${files.length > 12 ? ", …" : ""}]` : ""}`);
+  }
+  const overlaps = [...fileOwners.entries()].filter(([, owners]) => owners.length > 1);
+  if (overlaps.length) {
+    lines.push("", `Overlapping files (potential conflict):`);
+    for (const [file, owners] of overlaps) lines.push(`- ${file}: touched by ${owners.join(", ")}`);
+  } else if (copies.length > 1) {
+    lines.push("", "No overlapping files — copies can be applied cleanly together.");
+  }
+  return {
+    summary: overlaps.length ? `${overlaps.length} overlapping file(s) across ${copies.length} copies` : `${copies.length} copies compared, no overlaps`,
+    details: lines.join("\n"),
+  };
+}
+
+async function searchWorkspace(name: string, wsPath: string, query: string): Promise<{ summary: string; details: string }> {
+  const grep = await gitIn(["grep", "-n", "-I", "-i", "--max-count=6", "-F", "--", query], wsPath);
+  const hits: string[] = [];
+  if (grep.code === 0 || grep.code === 1) {
+    for (const line of grep.stdout.split("\n")) {
+      if (!line) continue;
+      const sep = line.indexOf(":");
+      const rel = sep > 0 ? line.slice(0, sep) : "";
+      if (rel && isSensitiveInspectPath(rel)) continue;
+      hits.push(oneLine(line, 180));
+      if (hits.length >= 40) break;
+    }
+  } else {
+    const needle = query.toLowerCase();
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 3 || hits.length >= 40) return;
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+      for (const entry of entries) {
+        if (hits.length >= 40) return;
+        if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "target") continue;
+        const full = path.join(dir, entry.name);
+        const rel = path.relative(wsPath, full).replace(/\\/g, "/");
+        if (isSensitiveInspectPath(rel)) continue;
+        if (entry.isDirectory()) await walk(full, depth + 1);
+        else if (entry.isFile()) {
+          const safe = realInside(wsPath, full);
+          const read = safe ? readBoundedInspectText(safe) : null;
+          if (read && "text" in read) {
+            const lines = read.text.split("\n");
+            for (let i = 0; i < lines.length && hits.length < 40; i += 1) {
+              if (lines[i].toLowerCase().includes(needle)) hits.push(`${rel}:${i + 1}:${oneLine(lines[i], 140)}`);
+            }
+          }
+        }
+      }
+    };
+    await walk(wsPath, 1);
+  }
+  return {
+    summary: hits.length ? `${hits.length} match${hits.length === 1 ? "" : "es"} for "${oneLine(query, 40)}" in ${name}` : `No matches for "${oneLine(query, 40)}" in ${name}`,
+    details: hits.length ? `Search "${query}" in ${name}:\n${hits.join("\n")}` : `No occurrences of "${query}" found in ${name}.`,
+  };
+}
+
+async function workspaceTree(name: string, wsPath: string, subpath: string): Promise<{ summary: string; details: string }> {
+  const cleanSub = subpath.replace(/^\/+/, "");
+  const cleanSafe = cleanSub && !cleanSub.split("/").includes("..") ? cleanSub : "";
+  const gitList = await gitIn(["ls-files", ...(cleanSafe ? ["--", cleanSafe] : [])], wsPath);
+  let paths: string[] = [];
+  if (gitList.code === 0 && gitList.stdout.trim()) {
+    paths = gitList.stdout
+      .split("\n")
+      .map((p) => p.trim())
+      .filter((p) => p && !isSensitiveInspectPath(p))
+      .slice(0, 160);
+  } else {
+    const startDir = cleanSafe ? (realInside(wsPath, path.resolve(wsPath, cleanSafe)) ?? wsPath) : wsPath;
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 3 || paths.length >= 160) return;
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+      for (const entry of entries) {
+        if (paths.length >= 160) return;
+        if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist" || entry.name === "target") continue;
+        const full = path.join(dir, entry.name);
+        const rel = path.relative(wsPath, full).replace(/\\/g, "/");
+        if (isSensitiveInspectPath(rel)) continue;
+        paths.push(entry.isDirectory() ? `${rel}/` : rel);
+        if (entry.isDirectory()) await walk(full, depth + 1);
+      }
+    };
+    await walk(startDir, 1);
+  }
+  return {
+    summary: `${name} tree: ${paths.length} path${paths.length === 1 ? "" : "s"}`,
+    details: paths.length ? `Files in ${name}${cleanSafe ? `/${cleanSafe}` : ""}:\n${paths.join("\n")}` : `No files found in ${name}.`,
+  };
 }
 
 export async function inspectOrchestratorEntity(

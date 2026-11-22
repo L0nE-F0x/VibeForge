@@ -187,8 +187,12 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.view();
   }
 
-  orchestratorAsk(text: string, looking?: Looking | null): Promise<void> {
-    return this.orchestrator.ask(text, looking);
+  orchestratorAsk(text: string, looking?: Looking | null, images?: string[]): Promise<void> {
+    return this.orchestrator.ask(text, looking, images);
+  }
+
+  orchestratorImageData(name: string): string | null {
+    return this.orchestrator.imageData(name);
   }
 
   orchestratorLooking(looking: Looking | null): void {
@@ -215,8 +219,36 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.quickShow(target, rawSaid, sayText);
   }
 
+  orchestratorQuickAct(
+    text: string,
+    looking?: Looking | null,
+    words?: Parameters<OrchestratorDesk["quickAct"]>[2],
+  ): Promise<{ handled: boolean; reply?: string }> {
+    return this.orchestrator.quickAct(text, looking, words);
+  }
+
   orchestratorClear(): void {
     this.orchestrator.clear();
+  }
+
+  orchestratorSelectThread(id: string): void {
+    this.orchestrator.selectThread(id);
+  }
+
+  orchestratorRenameThread(id: string, title: string): void {
+    this.orchestrator.renameThread(id, title);
+  }
+
+  orchestratorDeleteThread(id: string): Deleted {
+    return this.orchestrator.deleteThread(id);
+  }
+
+  orchestratorReadMemory(): string {
+    return this.orchestrator.readMemory();
+  }
+
+  orchestratorWriteMemory(text: string): void {
+    this.orchestrator.writeMemory(text);
   }
 
   orchestratorRun(turnId: string): Promise<void> {

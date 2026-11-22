@@ -10,10 +10,11 @@ import {
   Phone,
   PhoneOff,
   RotateCcw,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   CallState,
@@ -28,9 +29,8 @@ import { brainKind, canOrchestrate, orchestratorVoiceWords, plannerFor } from ".
 import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
-import { Composer } from "../components/Session.js";
 import { tipProps } from "../components/Tooltip.js";
-import { Button, Input, Popover, Spinner, useOverlayStack } from "../components/ui.js";
+import { Button, Input, Modal, Popover, Spinner, useOverlayStack } from "../components/ui.js";
 import { readDraft, seedDraft } from "../drafts.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { overlayOpen } from "../overlays.js";
@@ -39,7 +39,9 @@ import { useAction, useNav, useOverlay, useToast } from "../state.js";
 import { CopyList, CopySheet } from "./OrchestratorCopies.js";
 import { TurnChips, NoteTurnView } from "./orchestrator/OrchestratorChips.js";
 import { WaitingConfirm } from "./orchestrator/OrchestratorConfirm.js";
+import { MemoryButton, RunningPill, ThreadsButton, VibyMemorySheet } from "./orchestrator/OrchestratorTopTools.js";
 import { isCodingCli, LeaveBar } from "./orchestrator/shared.js";
+import { VibyComposer } from "./orchestrator/VibyComposer.js";
 
 // Viby: a voice-call-first panel where the call is the whole panel, words land live as spoken,
 // active work shows as a single thin line, and completed steps settle into tappable chips under
@@ -58,6 +60,10 @@ function workingLineText(activity: OrchestratorActivity | null | undefined, t: T
       return t("orch.work.inspect", { target });
     case "lookup":
       return t("orch.work.lookup", { target });
+    case "verify":
+      return t("orch.work.verify", { target });
+    case "memory":
+      return t("orch.work.memory", { target });
     case "start":
       return t("orch.work.start", { target });
     case "workspace":
@@ -108,11 +114,13 @@ export function OrchestratorView() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const live = useLive().data ?? [];
   const callState = useCall();
   const toggleCall = useCallToggle();
   const seesLine = useSeesLine(t);
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const [reviewAnchor, setReviewAnchor] = useState<HTMLElement | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   // Typing and calling sit side by side: the message box is open whenever there is no call.
   const [typingOpen, setTypingOpen] = useState(() => !callState.on || Boolean(readDraft<string>(DRAFT_KEY)?.trim()));
   const [voiceReady, setVoiceReady] = useState<boolean | null>(null);
@@ -153,6 +161,7 @@ export function OrchestratorView() {
   const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
   const turns = view?.turns ?? [];
   const copies = view?.copies ?? [];
+  const waitingTurnId = [...turns].reverse().find((item) => item.plan === "waiting")?.id ?? null;
   const emptyBeforeCall = !callState.on && turns.length === 0 && !view?.thinking;
   // The last copy applied or discarded removes the pill: forget its anchor too, or the popover would
   // open by itself (on a detached button, in the corner) when the next copy appears.
@@ -160,11 +169,32 @@ export function OrchestratorView() {
     if (copies.length === 0) setReviewAnchor(null);
   }, [copies.length]);
 
+  const copyIds = new Set(copies.map((item) => item.openedWorkspaceId).filter(Boolean));
+  const ownWorkspaces = workspaces.filter((item) => !copyIds.has(item.id));
+  const clis = live.filter(isCodingCli);
+  const suggestions = [
+    ...(copies.length > 0 ? [{ key: "review", label: t("orch.suggest.review"), prompt: "Inspect pending copies and summarize their changes" }] : []),
+    ...(clis.length > 0 ? [{ key: "status", label: t("orch.suggest.status"), prompt: "Check what running CLIs are working on and any problems" }] : []),
+    ...(ownWorkspaces.length > 0
+      ? [{ key: "inspect", label: t("orch.suggest.inspect", { target: ownWorkspaces[0].name }), prompt: `Inspect recent work and git status in ${ownWorkspaces[0].name}` }]
+      : []),
+    { key: "remember", label: t("orch.suggest.remember"), draft: "/remember " },
+  ].slice(0, 3);
+
+  const askPrompt = async (text: string) => {
+    try {
+      await call("orchestrator.ask", text);
+    } catch (error: unknown) {
+      fail(error, t("orch.failed"));
+    }
+  };
+
   return (
     <div className={`view viby-view${callState.on ? " in-call" : ""}`}>
       <div className="viby-top">
         <PlannerModelLabel engineId={engineId} locked={callState.on} />
         <span className="grow" />
+        <RunningPill />
         {copies.length > 0 && (
           <button
             type="button"
@@ -176,6 +206,8 @@ export function OrchestratorView() {
             <span>{t.count("orch.reviewCount", copies.length)}</span>
           </button>
         )}
+        <ThreadsButton />
+        <MemoryButton hasMemory={view?.hasMemory} onOpen={() => setMemoryOpen(true)} />
         {!callState.on && turns.length > 0 && (
           <Button size="sm" variant="ghost" icon={RotateCcw} tip={t("orch.newTip")} onClick={() => void clear()}>
             {t("orch.new")}
@@ -190,6 +222,7 @@ export function OrchestratorView() {
           </div>
         </Popover>
       )}
+      {memoryOpen && <VibyMemorySheet onClose={() => setMemoryOpen(false)} />}
 
       {emptyBeforeCall ? (
         <div className="viby-empty">
@@ -214,6 +247,28 @@ export function OrchestratorView() {
             </button>
           )}
           <p className="viby-sees">{seesLine}</p>
+          {view?.engineReady && (
+            <div className="viby-suggest-chips">
+              {suggestions.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className="viby-suggest-chip"
+                  onClick={() => {
+                    if ("draft" in item && item.draft) {
+                      seedDraft(DRAFT_KEY, item.draft);
+                      setTypingOpen(true);
+                    } else if ("prompt" in item && item.prompt) {
+                      void askPrompt(item.prompt);
+                    }
+                  }}
+                >
+                  <Sparkles size={11} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {voiceReady === false && (
             <button type="button" className="viby-voice-setup" onClick={() => go({ view: "settings", section: "voice" })}>
               {t("orch.voiceSetup")}
@@ -228,7 +283,7 @@ export function OrchestratorView() {
         {typingOpen && (
           <div className="viby-composer-wrap">
             <div className="viby-composer-inner">
-              <Composer
+              <VibyComposer
                 placeholder={t("orch.typePlaceholder")}
                 busy={view?.thinking}
                 disabled={!view}
@@ -238,10 +293,12 @@ export function OrchestratorView() {
                 voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
                 draftKey={DRAFT_KEY}
                 keepKey="orchestrator"
+                waitingTurnId={waitingTurnId}
+                onRunWaiting={(id) => void call("orchestrator.run", id).catch((error: unknown) => fail(error, t("orch.failed")))}
                 onEscape={() => setTypingOpen(false)}
-                onSend={async (text) => {
+                onSend={async (text, images) => {
                   try {
-                    await call("orchestrator.ask", text);
+                    await call("orchestrator.ask", text, images);
                     return true;
                   } catch (error: unknown) {
                     fail(error, t("orch.failed"));
@@ -304,9 +361,11 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   const callState = useCall();
   const seesLine = useSeesLine(t);
   const box = useRef<HTMLDivElement>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   useOverlay(true);
   useOverlayStack(box, onClose);
   const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
+  const waitingTurnId = [...(view?.turns ?? [])].reverse().find((item) => item.plan === "waiting")?.id ?? null;
 
   return createPortal(
     <div className="scrim switcher-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -316,6 +375,9 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           <strong>{t("orch.title")}</strong>
           <PlannerModelLabel engineId={engineId} locked={callState.on} />
           <span className="grow" />
+          <RunningPill />
+          <ThreadsButton />
+          <MemoryButton hasMemory={view?.hasMemory} onOpen={() => setMemoryOpen(true)} />
           <CallButton />
           <Button
             size="sm"
@@ -330,9 +392,10 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           </Button>
           <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd={shortcutKeys("overlay.close")} onClick={onClose} />
         </div>
+        {memoryOpen && <VibyMemorySheet onClose={() => setMemoryOpen(false)} />}
         <LeaveBar.Provider value={onClose}>
           <ConversationStream view={view} callState={callState} seesLine={seesLine} compact />
-          <Composer
+          <VibyComposer
             placeholder={t("orch.typePlaceholder")}
             busy={view?.thinking}
             disabled={!view}
@@ -342,10 +405,12 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
             voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
             draftKey={DRAFT_KEY}
             keepKey="orchestrator"
+            waitingTurnId={waitingTurnId}
+            onRunWaiting={(id) => void call("orchestrator.run", id).catch((error: unknown) => fail(error, t("orch.failed")))}
             onEscape={onClose}
-            onSend={async (text) => {
+            onSend={async (text, images) => {
               try {
-                await call("orchestrator.ask", text);
+                await call("orchestrator.ask", text, images);
                 return true;
               } catch (error: unknown) {
                 fail(error, t("orch.failed"));
@@ -759,6 +824,54 @@ const PROBLEM_KEY: Record<NonNullable<OrchestratorTurn["problem"]>, Key> = {
   signIn: "orch.problem.signIn",
 };
 
+function TurnImages({ images }: { images: string[] }) {
+  const t = useT();
+  const [urls, setUrls] = useState<Record<string, string | null>>({});
+  const [preview, setPreview] = useState<string | null>(null);
+  const key = images.join("|");
+
+  useEffect(() => {
+    let canceled = false;
+    void Promise.all(
+      images.map(async (name) => {
+        try {
+          return [name, await call("orchestrator.imageData", name)] as const;
+        } catch {
+          return [name, null] as const;
+        }
+      }),
+    ).then((entries) => {
+      if (canceled) return;
+      const next: Record<string, string | null> = {};
+      for (const [name, url] of entries) next[name] = url;
+      setUrls(next);
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [key]);
+
+  const loaded = images.map((name) => ({ name, url: urls[name] })).filter((item): item is { name: string; url: string } => Boolean(item.url));
+  if (!loaded.length) return null;
+
+  return (
+    <>
+      <div className="orch-turn-images">
+        {loaded.map((item) => (
+          <button key={item.name} type="button" className="orch-turn-img-btn" onClick={() => setPreview(item.url)}>
+            <img src={item.url} alt="" />
+          </button>
+        ))}
+      </div>
+      {preview && (
+        <Modal title={t("orch.attachImage")} onClose={() => setPreview(null)} wide>
+          <img className="orch-lightbox-img" src={preview} alt="" />
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function TurnView({
   turn,
   engineLabel: current,
@@ -779,7 +892,8 @@ function TurnView({
   if (turn.from === "you") {
     return (
       <div className="orch-turn from-you">
-        <span className="orch-said">{turn.text}</span>
+        {turn.images && turn.images.length > 0 && <TurnImages images={turn.images} />}
+        {turn.text && <span className="orch-said">{turn.text}</span>}
       </div>
     );
   }
@@ -863,5 +977,53 @@ function SpokenText({ text, active, callState }: { text: string; active: boolean
   }, [active, callState.phase, tokens.length]);
 
   const visible = shownTokens >= tokens.length ? text : tokens.slice(0, shownTokens).join("");
-  return <span className="orch-said">{visible}</span>;
+  if (shownTokens < tokens.length) return <span className="orch-said">{visible}</span>;
+  return <RichVibyText text={text} />;
+}
+
+/** Lightweight safe Markdown formatter for settled Viby prose (code blocks, inline code, bold, lists). */
+function RichVibyText({ text }: { text: string }) {
+  const parts = text.split(/(```[\s\S]*?```)/g);
+  const inline = (line: string, keyPrefix: string): ReactNode[] => {
+    const out: ReactNode[] = [];
+    const tokens = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+    tokens.forEach((tok, idx) => {
+      if (tok.startsWith("`") && tok.endsWith("`") && tok.length >= 2) {
+        out.push(<code key={`${keyPrefix}-c${idx}`}>{tok.slice(1, -1)}</code>);
+      } else if (tok.startsWith("**") && tok.endsWith("**") && tok.length >= 4) {
+        out.push(<strong key={`${keyPrefix}-b${idx}`}>{tok.slice(2, -2)}</strong>);
+      } else if (tok) {
+        out.push(tok);
+      }
+    });
+    return out;
+  };
+  return (
+    <div className="orch-said viby-rich-text">
+      {parts.map((part, idx) => {
+        if (part.startsWith("```") && part.endsWith("```") && part.length >= 6) {
+          const code = part.replace(/^```[^\n]*\n?/, "").replace(/\n?```$/, "");
+          return (
+            <pre key={`pre-${idx}`} className="mono selectable">
+              {code}
+            </pre>
+          );
+        }
+        const blocks = part.split(/\n{2,}/).filter((b) => b.trim());
+        return blocks.map((block, bIdx) => {
+          const lines = block.split("\n");
+          if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
+            return (
+              <ul key={`ul-${idx}-${bIdx}`}>
+                {lines.map((l, lIdx) => (
+                  <li key={`li-${lIdx}`}>{inline(l.replace(/^\s*[-*]\s+/, ""), `${idx}-${bIdx}-${lIdx}`)}</li>
+                ))}
+              </ul>
+            );
+          }
+          return <p key={`p-${idx}-${bIdx}`}>{inline(block, `${idx}-${bIdx}`)}</p>;
+        });
+      })}
+    </div>
+  );
 }

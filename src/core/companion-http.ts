@@ -18,6 +18,7 @@ type PhoneKey = Extract<keyof typeof en, `phone.${string}`>;
 export const COMPANION_PROMPT_MAX = 8000;
 
 const BODY_MAX = 64_000;
+const ASK_BODY_MAX = 60 * 1024 * 1024;
 const PAIR_MAX = 1024;
 
 /** Speech from the phone: 16 kHz mono s16le, as long as a recording on the computer may be. */
@@ -70,7 +71,8 @@ export type { StepPatch };
 export interface OrchestratorActions {
   view(): PhoneOrchestrator;
   /** Starts a planning turn and returns; the answer comes as a later turn. Refused while one is still answering. */
-  ask(text: string): void;
+  ask(text: string, images?: string[]): void;
+  imageData?(name: string): string | null;
   stopThinking(): void;
   /** New: an empty conversation and a new session for the planner. Running CLIs keep running. */
   clear(): void;
@@ -84,6 +86,10 @@ export interface OrchestratorActions {
   removeStep(turnId: string, stepId: string): void;
   /** The view's own header: which CLI plans, and whether a plan waits for Go. */
   settings(patch: { engine?: string; mode?: "plan" | "go" }): void;
+  selectThread?(threadId: string): void;
+  deleteThread?(threadId: string): void;
+  readMemory?(): string;
+  writeMemory?(text: string): void;
 }
 
 /** A refusal the phone shows: a `phone.*` sentence, sent in the phone's language. */
@@ -419,7 +425,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       "Content-Type": page.type,
       "Content-Length": body.length,
       "Cache-Control": "no-store",
-      "Content-Security-Policy": `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ${connectSources(req.headers.host)}; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'`,
+      "Content-Security-Policy": `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ${connectSources(req.headers.host)}; manifest-src 'self'; worker-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'`,
       // No other page may show this one in a frame and have the phone tap its buttons.
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
@@ -477,6 +483,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     sendJson(res, 200, view, req);
     return;
   }
+  if (method === "GET" && url.pathname === "/api/orchestrator/memory") {
+    sendJson(res, 200, { text: opts.actions.orchestrator.readMemory?.() ?? "" }, req);
+    return;
+  }
+  if (method === "GET" && url.pathname === "/api/orchestrator/image") {
+    const name = text(url.searchParams.get("name"), 120);
+    const dataUrl = name ? (opts.actions.orchestrator.imageData?.(name) ?? null) : null;
+    if (!dataUrl) throw new CompanionHttpError("phone.error.notFound", 404);
+    sendJson(res, 200, { dataUrl }, req);
+    return;
+  }
   if (method !== "POST") throw new CompanionHttpError("phone.error.notFound", 404);
   if (url.pathname === "/api/orchestrator/hear") {
     const result = await served.hearSlot(async () => {
@@ -487,10 +504,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     sendJson(res, 200, result);
     return;
   }
-  const body = (await readBody(req)) as {
+  const body = (await readBody(req, url.pathname === "/api/orchestrator/ask" ? ASK_BODY_MAX : BODY_MAX)) as {
     ptyId?: unknown;
     runId?: unknown;
     text?: unknown;
+    images?: unknown;
     force?: unknown;
     workspaceId?: unknown;
     agentId?: unknown;
@@ -498,6 +516,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     prompt?: unknown;
     turnId?: unknown;
     stepId?: unknown;
+    threadId?: unknown;
     patch?: unknown;
     engine?: unknown;
     mode?: unknown;
@@ -537,14 +556,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   throw new CompanionHttpError("phone.error.notFound", 404);
 }
 
-/** The Orchestrator's buttons: say something, Stop, New, Go, Cancel, a step changed or left out, and the view's header. */
+/** The Orchestrator's buttons: say something, Stop, New, Go, Cancel, threads, memory, a step changed or left out, and the view's header. */
 async function orchestratorPost(
   action: string,
-  body: { text?: unknown; turnId?: unknown; stepId?: unknown; patch?: unknown; engine?: unknown; mode?: unknown },
+  body: { text?: unknown; images?: unknown; turnId?: unknown; stepId?: unknown; threadId?: unknown; patch?: unknown; engine?: unknown; mode?: unknown },
   desk: OrchestratorActions,
 ): Promise<void> {
   const turnId = text(body.turnId, 80);
   const stepId = text(body.stepId, 80);
+  const threadId = text(body.threadId, 80);
   const needTurn = () => {
     if (!turnId) throw new CompanionHttpError("phone.error.invalid", 400);
     return turnId;
@@ -553,13 +573,30 @@ async function orchestratorPost(
     if (!stepId) throw new CompanionHttpError("phone.error.invalid", 400);
     return stepId;
   };
+  const needThread = () => {
+    if (!threadId) throw new CompanionHttpError("phone.error.invalid", 400);
+    return threadId;
+  };
   if (action === "ask") {
     const words = said(body.text, COMPANION_PROMPT_MAX);
-    if (!words) throw new CompanionHttpError("phone.error.empty", 400);
-    desk.ask(words);
+    const images = Array.isArray(body.images) ? body.images.filter((item): item is string => typeof item === "string").slice(0, 4) : [];
+    for (const img of images) {
+      const match = /^data:image\/(?:png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=\s]+)$/i.exec(img.trim());
+      if (!match) throw new CompanionHttpError("phone.error.invalid", 400);
+      const clean = match[1].replace(/\s+/g, "");
+      const pad = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+      if (Math.floor((clean.length * 3) / 4) - pad > 10 * 1024 * 1024) throw new CompanionHttpError("phone.error.tooLarge", 413);
+    }
+    if (!words && !images.length) throw new CompanionHttpError("phone.error.empty", 400);
+    desk.ask(words, images.length ? images : undefined);
   } else if (action === "stop") desk.stopThinking();
   else if (action === "new") desk.clear();
-  else if (action === "go") await started(desk.run(needTurn()));
+  else if (action === "thread") desk.selectThread?.(needThread());
+  else if (action === "deleteThread") desk.deleteThread?.(needThread());
+  else if (action === "memory") {
+    if (typeof body.text !== "string") throw new CompanionHttpError("phone.error.invalid", 400);
+    desk.writeMemory?.(body.text.slice(0, 16_000));
+  } else if (action === "go") await started(desk.run(needTurn()));
   else if (action === "cancel") desk.cancel(needTurn());
   else if (action === "step") desk.editStep(needTurn(), needStep(), stepPatch(body.patch));
   else if (action === "remove") desk.removeStep(needTurn(), needStep());

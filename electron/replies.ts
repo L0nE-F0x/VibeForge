@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   claudeConfigRoots,
   claudeLogCwd,
@@ -8,6 +9,9 @@ import {
   codexDayDir,
   codexLogCwd,
   codexTurn,
+  copilotLogCwd,
+  copilotRoots,
+  copilotTurn,
   grokSessionsDir,
   grokTurn,
   kimiHomeDirs,
@@ -15,6 +19,7 @@ import {
   kimiTurn,
   lastReplyIn,
   logRows,
+  opencodeTurn,
   startsTurn,
   type LogRow,
   type ReplyLog,
@@ -216,6 +221,22 @@ async function logFiles(opts: { kind: ReplyLog; home: string; cwd: string; since
     }
     return files;
   }
+  if (opts.kind === "copilot") {
+    const files: string[] = [];
+    for (const root of copilotRoots(opts.home)) {
+      for (const session of await subdirs(root)) {
+        const file = path.join(session, "events.jsonl");
+        if (!(await recentFile(file, opts.since))) continue;
+        if (!cwdOk.has(session)) {
+          const yaml = await readStart(path.join(session, "workspace.yaml"), 2048);
+          const yamlCwd = yaml?.match(/^cwd:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
+          cwdOk.set(session, (yamlCwd ?? copilotLogCwd((await readStart(file, HEAD_BYTES)) ?? "")) === opts.cwd);
+        }
+        if (cwdOk.get(session)) files.push(file);
+      }
+    }
+    return files;
+  }
   if (opts.kind === "claude") {
     const dir = claudeProjectDir(opts.home, opts.cwd);
     if ((await mtime(dir)) > 0) return recentJsonl(dir, opts.since);
@@ -234,6 +255,107 @@ async function logFiles(opts: { kind: ReplyLog; home: string; cwd: string; since
   return inCwd(files, opts.cwd, codexLogCwd, cwdOk);
 }
 
+/** OpenCode SQLite databases in `$XDG_DATA_HOME/opencode` (or `~/.local/share/opencode`). */
+async function opencodeRowsForCwd(home: string, cwd: string, since: number): Promise<LogRow[]> {
+  const dataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
+  const dir = path.join(dataHome, "opencode");
+  const entries = (await list(dir)).filter((entry) => entry.isFile() && /^opencode(-[\w.-]+)?\.db$/.test(entry.name));
+  const out: LogRow[] = [];
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name);
+    let db: DatabaseSync | null = null;
+    try {
+      const conn = new DatabaseSync(file, { readOnly: true });
+      db = conn;
+      const tables = new Set(conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
+      const colsOf = (table: string) => new Set(conn.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)));
+      const sessionTable = tables.has("session_v2") ? "session_v2" : tables.has("session") ? "session" : null;
+      const sessionCols = sessionTable ? colsOf(sessionTable) : new Set<string>();
+      const dirCol = sessionCols.has("directory") ? "directory" : sessionCols.has("cwd") ? "cwd" : null;
+      const sessionIds = new Set<string>();
+      if (sessionTable && dirCol) {
+        const orderCol = sessionCols.has("time_updated") ? "time_updated" : sessionCols.has("time_created") ? "time_created" : null;
+        const rows = db
+          .prepare(`SELECT id FROM ${sessionTable} WHERE ${dirCol} = ?${orderCol ? ` ORDER BY ${orderCol} DESC` : ""} LIMIT 12`)
+          .all(cwd) as Array<{ id?: unknown }>;
+        for (const r of rows) if (typeof r.id === "string") sessionIds.add(r.id);
+      }
+      const msgTable = tables.has("session_message") ? "session_message" : tables.has("message") ? "message" : null;
+      if (!msgTable) continue;
+      if (sessionTable && dirCol && !sessionIds.size) continue;
+      const msgCols = colsOf(msgTable);
+      const timeCol = msgCols.has("time_created") ? "time_created" : "created_at";
+      const minAt = since - RECENT_MS;
+      const msgRows = db
+        .prepare(
+          `SELECT id, session_id, ${timeCol} AS at, ${msgCols.has("type") ? "type" : "json_extract(data, '$.role')"} AS role, data FROM ${msgTable} WHERE ${timeCol} >= ? ORDER BY ${timeCol} ASC`,
+        )
+        .all(minAt) as Array<{ id?: unknown; session_id?: unknown; at?: unknown; role?: unknown; data?: unknown }>;
+      const filtered = msgRows.filter((row) => !sessionIds.size || (typeof row.session_id === "string" && sessionIds.has(row.session_id)));
+      const partTable = tables.has("session_part") ? "session_part" : tables.has("part") ? "part" : null;
+      const partsByMsg = new Map<string, string[]>();
+      if (partTable && filtered.length) {
+        const partCols = colsOf(partTable);
+        const partRows = db
+          .prepare(`SELECT message_id, data FROM ${partTable}${partCols.has("time_created") ? " ORDER BY time_created ASC" : ""}`)
+          .all() as Array<{ message_id?: unknown; data?: unknown }>;
+        for (const pr of partRows) {
+          if (typeof pr.message_id !== "string" || typeof pr.data !== "string") continue;
+          try {
+            const parsed = JSON.parse(pr.data) as { type?: unknown; text?: unknown; content?: unknown };
+            if (parsed.type === "reasoning" || parsed.type === "tool") continue;
+            const piece = typeof parsed.text === "string" ? parsed.text : typeof parsed.content === "string" ? parsed.content : "";
+            if (piece.trim()) {
+              const bucket = partsByMsg.get(pr.message_id) ?? [];
+              bucket.push(piece.trim());
+              partsByMsg.set(pr.message_id, bucket);
+            }
+          } catch {
+            /* skip unreadable part */
+          }
+        }
+      }
+      for (const row of filtered) {
+        const id = typeof row.id === "string" ? row.id : "";
+        const role = row.role === "user" ? "user" : row.role === "assistant" ? "assistant" : "";
+        if (!role) continue;
+        let dataObj: Record<string, unknown> = {};
+        if (typeof row.data === "string") {
+          try {
+            dataObj = JSON.parse(row.data) as Record<string, unknown>;
+          } catch {
+            dataObj = {};
+          }
+        }
+        const fromParts = id ? (partsByMsg.get(id) ?? []).join("\n\n") : "";
+        const fallbackText =
+          typeof dataObj.content === "string"
+            ? dataObj.content
+            : typeof dataObj.text === "string"
+              ? dataObj.text
+              : typeof (dataObj.summary as { body?: unknown } | undefined)?.body === "string"
+                ? String((dataObj.summary as { body?: unknown }).body)
+                : "";
+        const text = (fromParts || fallbackText).trim();
+        if (!text) continue;
+        const rawTime = Number(row.at);
+        const timeMs = rawTime > 0 && rawTime < 1e12 ? rawTime * 1000 : rawTime;
+        const done = Boolean((dataObj.time as { completed?: unknown } | undefined)?.completed || dataObj.finish);
+        out.push({ type: role, time: timeMs, text, done });
+      }
+    } catch {
+      /* SQLite locked or missing */
+    } finally {
+      try {
+        db?.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return out;
+}
+
 /** Grok Build sessions in `cwd` whose events changed lately, each with when, in listing order. */
 async function grokSessions(home: string, cwd: string, since: number): Promise<Array<{ session: string; at: number }>> {
   const sessions = await subdirs(grokSessionsDir(home, cwd));
@@ -243,24 +365,55 @@ async function grokSessions(home: string, cwd: string, since: number): Promise<A
 
 /**
  * The CLI's latest finished answer in `cwd`, from the session log written to most recently since
- * `since`. Null when there is none yet.
+ * `since` (preferring one matching `words` when multiple sessions run in `cwd`). Null when there is none yet.
  */
-export async function lastReply(opts: { kind: ReplyLog; home: string; cwd: string; since: number }): Promise<string | null> {
+export async function lastReply(opts: { kind: ReplyLog; home: string; cwd: string; since: number; words?: string }): Promise<string | null> {
+  if (opts.kind === "opencode") {
+    const rows = await opencodeRowsForCwd(opts.home, opts.cwd, opts.since);
+    return lastReplyIn("opencode", rows, "", opts.words ?? "");
+  }
   if (opts.kind === "grok") {
-    const newest = (await grokSessions(opts.home, opts.cwd, opts.since)).sort((a, b) => b.at - a.at)[0];
-    if (!newest) return null;
+    const sorted = (await grokSessions(opts.home, opts.cwd, opts.since)).sort((a, b) => b.at - a.at);
+    if (!sorted.length) return null;
+    for (const item of sorted.slice(0, opts.words ? 4 : 1)) {
+      const [history, events] = [newTail(), newTail()];
+      await follow(path.join(item.session, "chat_history.jsonl"), history, KEEP_BYTES);
+      await follow(path.join(item.session, "events.jsonl"), events, KEEP_BYTES);
+      const hRows = rowsIn(history);
+      const eRows = rowsIn(events);
+      if (opts.words && grokTurn(hRows, eRows, opts.since, opts.words).matched) {
+        return lastReplyIn("grok", hRows, eRows, opts.words);
+      }
+      if (!opts.words) return lastReplyIn("grok", hRows, eRows);
+    }
     const [history, events] = [newTail(), newTail()];
-    await follow(path.join(newest.session, "chat_history.jsonl"), history, KEEP_BYTES);
-    await follow(path.join(newest.session, "events.jsonl"), events, KEEP_BYTES);
+    await follow(path.join(sorted[0].session, "chat_history.jsonl"), history, KEEP_BYTES);
+    await follow(path.join(sorted[0].session, "events.jsonl"), events, KEEP_BYTES);
     return lastReplyIn("grok", rowsIn(history), rowsIn(events));
   }
   const files = await logFiles(opts, new Map());
   const times = await Promise.all(files.map(mtime));
-  const newest = files.map((file, index) => ({ file, at: times[index] })).sort((a, b) => b.at - a.at)[0];
-  if (!newest) return null;
+  const sorted = files.map((file, index) => ({ file, at: times[index] })).sort((a, b) => b.at - a.at);
+  if (!sorted.length) return null;
+  if (opts.words) {
+    for (const item of sorted.slice(0, 4)) {
+      const tail = newTail();
+      await follow(item.file, tail, KEEP_BYTES);
+      const rows = rowsIn(tail);
+      const turn =
+        opts.kind === "claude"
+          ? claudeTurn(rows, opts.since, opts.words)
+          : opts.kind === "kimi"
+            ? kimiTurn(rows, opts.since, opts.words)
+            : opts.kind === "copilot"
+              ? copilotTurn(rows, opts.since, opts.words)
+              : codexTurn(rows, opts.since, opts.words);
+      if (turn.matched && turn.reply?.trim()) return turn.reply.trim();
+    }
+  }
   const tail = newTail();
-  await follow(newest.file, tail, KEEP_BYTES);
-  return lastReplyIn(opts.kind, rowsIn(tail));
+  await follow(sorted[0].file, tail, KEEP_BYTES);
+  return lastReplyIn(opts.kind, rowsIn(tail), "", opts.words ?? "");
 }
 
 /**
@@ -277,13 +430,24 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
   const cwdOk = new Map<string, boolean>();
   const started = Date.now();
   const parse = (rows: LogRow[]): Turn =>
-    opts.kind === "claude" ? claudeTurn(rows, opts.since, opts.words) : opts.kind === "kimi" ? kimiTurn(rows, opts.since, opts.words) : codexTurn(rows, opts.since, opts.words);
+    opts.kind === "claude"
+      ? claudeTurn(rows, opts.since, opts.words)
+      : opts.kind === "kimi"
+        ? kimiTurn(rows, opts.since, opts.words)
+        : opts.kind === "copilot"
+          ? copilotTurn(rows, opts.since, opts.words)
+          : codexTurn(rows, opts.since, opts.words);
   // A turn's own prompt stays however long the turn runs: past KEEP_BYTES of tool output after it,
   // the turn could no longer be found and the wait ran to its half hour.
   const keep = (row: LogRow) => startsTurn(opts.kind, row);
 
   const turnsNow = async (): Promise<Turn[]> => {
     const turns: Turn[] = [];
+    if (opts.kind === "opencode") {
+      const rows = await opencodeRowsForCwd(opts.home, opts.cwd, opts.since);
+      if (rows.length) turns.push(opencodeTurn(rows, opts.since, opts.words));
+      return turns;
+    }
     if (opts.kind === "grok") {
       // Grok Build keeps the messages and the turns in two files, so each recent session reads both.
       for (const { session } of await grokSessions(opts.home, opts.cwd, opts.since)) {

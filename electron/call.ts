@@ -25,7 +25,7 @@ type CallService = Pick<
   TeamService,
   "orchestratorView" | "orchestratorAsk" | "orchestratorRun" | "orchestratorCancel" | "orchestratorCall" | "listAgents" | "listEngines" | "listWorkspaces" | "getSettings"
 > &
-  Partial<Pick<TeamService, "orchestratorStopThinking" | "orchestratorQuickShow" | "listTasks" | "listRoutines" | "listSkills">>;
+  Partial<Pick<TeamService, "orchestratorStopThinking" | "orchestratorQuickShow" | "orchestratorQuickAct" | "listTasks" | "listRoutines" | "listSkills">>;
 
 /**
  * A call with Viby. The microphone stays open; each thing said is turned into words here and
@@ -424,6 +424,18 @@ export class Call {
         service.orchestratorCancel(plan.id);
         await this.say(this.opts.words.say("call.cancelled"));
         return;
+      }
+      if (service.orchestratorQuickAct) {
+        const acted = await service.orchestratorQuickAct(dictation.text, this.opts.looking(), {
+          going: this.opts.words.say("call.going"),
+          cancelled: this.opts.words.say("call.cancelled"),
+          opened: (name) => this.opts.words.say("call.opened", { name }),
+        });
+        if (!live()) return;
+        if (acted.handled) {
+          if (acted.reply) await this.say(acted.reply);
+          return;
+        }
       }
       const navTarget = service.orchestratorQuickShow ? quickNav(dictation.text) : null;
       if (navTarget && service.orchestratorQuickShow) {

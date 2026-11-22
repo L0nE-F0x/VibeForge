@@ -11,6 +11,8 @@
 /** @typedef {import("../../src/core/companion-orchestrator.js").PhoneTurn} PhoneTurn */
 /** @typedef {import("../../src/core/companion-orchestrator.js").PhoneStep} PhoneStep */
 /** @typedef {import("../../src/core/companion-orchestrator.js").PhoneRunning} PhoneRunning */
+/** @typedef {import("../../src/core/orchestrator.js").OrchestratorThreadSummary} ThreadSummary */
+/** @typedef {import("../../src/core/orchestrator.js").OrchestratorCheck} OrchCheck */
 /** @typedef {import("../../src/core/plans.js").PlanSummary} PlanSummary */
 /** @typedef {import("../../src/core/plans.js").PlanProvider} PlanProvider */
 /** @typedef {"pair" | "home" | "desk" | "launch" | "session" | "maestro" | "computers"} View */
@@ -125,6 +127,7 @@ const token = shown.token;
  * @property {PlanSummary | null} plans
  * @property {PhoneOrchestrator | null} orch The Orchestrator as the page last read it (GET /api/orchestrator).
  * @property {string} orchDraft What is typed or dictated for the Orchestrator, kept while the page shows something else.
+ * @property {string[]} orchImages Pasted or picked image data URLs queued with the next Orchestrator message.
  */
 
 /** @type {State} */
@@ -143,6 +146,7 @@ export const state = {
   plans: null,
   orch: null,
   orchDraft: "",
+  orchImages: [],
 };
 
 /**
@@ -178,6 +182,14 @@ export const state = {
  * @property {string | null} plannerKey
  * @property {HTMLButtonElement[]} modes
  * @property {HTMLButtonElement} newTalk
+ * @property {HTMLButtonElement} threadsOpen
+ * @property {HTMLDivElement} threadsList
+ * @property {string | null} threadsKey
+ * @property {Sheet} threadsSheet
+ * @property {HTMLButtonElement} memoryOpen
+ * @property {HTMLTextAreaElement} memoryBox
+ * @property {HTMLButtonElement} memorySave
+ * @property {Sheet} memorySheet
  * @property {HTMLButtonElement} runningOpen
  * @property {HTMLDivElement} runningList
  * @property {string | null} runningKey
@@ -203,6 +215,12 @@ export const state = {
  * @property {HTMLDivElement} micNote
  * @property {HTMLButtonElement} mic
  * @property {HTMLButtonElement} say
+ * @property {HTMLInputElement} orchImageInput
+ * @property {HTMLButtonElement} orchAttach
+ * @property {HTMLDivElement} orchImageStrip
+ * @property {Map<string, string | null>} orchImageCache
+ * @property {HTMLImageElement} orchImagePreview
+ * @property {Sheet} orchImageSheet
  */
 
 /** Replaced whole each time a page is built (`show`), so nothing of the page before lingers. */

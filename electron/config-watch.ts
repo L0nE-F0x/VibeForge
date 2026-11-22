@@ -17,6 +17,7 @@ export function configTopics(file: string): Topic[] {
   if (file === "engines.json") return ["engines", "agents", "routines", "tasks"];
   if (file === "settings.json") return ["settings"];
   if (file === "workspaces.json") return ["workspaces"];
+  if (file === "viby.md") return ["orchestrator"];
   return [];
 }
 

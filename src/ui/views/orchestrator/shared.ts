@@ -99,6 +99,8 @@ export function otherStepKey(step: OrchestratorStep): Key {
   if (step.kind === "lookup") return "orch.lookup";
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
+  if (step.kind === "verify") return "orch.verify";
+  if (step.kind === "memory") return act === "clear" ? "orch.memoryClear" : act === "set" ? "orch.memorySet" : "orch.memoryAppend";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
   if (step.kind === "settings") return "orch.settings";

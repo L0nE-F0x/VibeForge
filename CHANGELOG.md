@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-23
+
+**3.4.0: a major Viby upgrade — screenshot and image pasting on desktop and phone, persistent memory (`viby.md`) and conversation history, isolated `verify` auto-fix loops, deep multi-round inspection, 0 ms local reflexes, sentence-streamed voice, and Copilot & OpenCode reply watching.**
+
+### Added
+
+- **Paste or attach screenshots and images in Viby (Desktop & Phone).** Paste (`Ctrl+V`, with automatic Wayland clipboard fallback), drag and drop, or pick up to 4 images (PNG, JPEG, WebP, GIF up to 10 MB each), preview thumbnails and open them in a lightbox; Claude Code (`stream-json`) and Codex (`--image`) inspect images directly, and saved paths on disk are passed to worker CLIs in `start` and `tell` steps.
+- **Persistent Viby memory (`~/.config/vibeforge/viby.md`) and conversation history.** Save cross-session preferences with *"remember …"*, `/remember …`, a `memory` step (`append` / Go-gated `set` and `clear`, with Undo), or the **Viby memory** editor on desktop and phone; **New** archives non-empty threads so you can search, switch, rename, delete, or undo threads from **History** or `Ctrl+K`.
+- **`verify` step with isolated auto-fix retries and parallel wave chaining.** Run test, build, typecheck, or lint checks in a workspace or isolated copy (`retries=`, `timeout=`), automatically feeding failure output back to an attached copy's live CLI to fix and re-verify while keeping **Apply** and unsafe commands gated behind **Go**; `after: true` now waits for every CLI started or told in the current parallel wave.
+- **Deeper multi-round `inspect` and composer `@` / `/` completions.** Up to 3 deduplicated inspection rounds per turn with workspace code search (`action: "search"`), file trees (`action: "tree"`), `file:start-end` line ranges, cross-copy conflict checks (`action: "compare"`), and app/run/routine diagnostics (`action: "problems"`), plus `@workspace` / `@agent` / `@cli` mentions, `/` slash commands, live activity indicators, markdown rendering, and empty-state prompt chips.
+- **0 ms local reflexes, sentence-streamed Piper TTS, and Copilot & OpenCode session logs.** Instant local handling for `/go`, `/cancel`, `/new`, `/undo`, `/review`, `/remember`, `/open`, `/stop-all` and crisp navigation phrases without spawning a planner turn; Piper speaks the first sentence while generating the rest; session-log reply watching adds GitHub Copilot CLI and OpenCode (`opencode.db` / JSON) with prompt-matched disambiguation when several CLIs share a folder.
+
 ## [3.3.1] - 2026-11-22
 
 **3.3.1: persistent split panes, in-terminal search, starter agent templates, ARM64 builds, and full security and performance hardening across Viby, Sync and the phone page.**

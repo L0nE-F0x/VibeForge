@@ -9,6 +9,7 @@ import {
   PLANNED_PREFIX,
   brainArgs,
   branchFromPrompt,
+  claudeImageStdin,
   cleanBranch,
   detectWaitingPrompt,
   emptyPromise,
@@ -18,8 +19,11 @@ import {
   inspectsStorage,
   keySequenceFor,
   lookingLine,
+  normalizeMemoryAction,
   ONLY_LOOKS,
+  parseVerifyOptions,
   plannedFolder,
+  resolveLocalReflex,
   resolveSettingsStep,
   safeInCall,
   sessionGone,
@@ -44,6 +48,7 @@ import {
   type OrchestratorActivity,
   type OrchestratorCheck,
   type OrchestratorStep,
+  type OrchestratorThreadSummary,
   type OrchestratorTurn,
   type OrchestratorView,
   type PlanContext,
@@ -90,14 +95,34 @@ import {
 } from "./orchestrator-entities.js";
 import { inspectOrchestratorStep, lookupOrchestrator, type InspectDeps } from "./orchestrator-inspect.js";
 import {
+  boundedVibyMemory,
+  deleteSavedThread,
+  deriveThreadTitle,
+  listThreadSummaries,
+  loadSavedThread,
+  readSavedImageDataUrl,
+  readVibyMemory,
+  renameSavedThread,
+  savePastedImages,
+  saveThreadSnapshot,
+  spawnVerifyCommand,
+  vibyMemoryFile,
+  writeVibyMemory,
+  type SavedConversation,
+  type SavedPromptImage,
+  type VerifyRunner,
+} from "./orchestrator-threads.js";
+import {
   expandHome,
   formatApplyResult,
   formatLibraryUpdate,
   formatLiveUpdate,
+  formatMemoryUpdate,
   hasCommit,
   isInside,
   libraryFingerprint,
   liveStateFingerprint,
+  memoryFingerprint,
   oneLine,
   START_SIZE,
   tildify,
@@ -127,8 +152,16 @@ const READ_KEEP = 20_000;
 const RECAP_TURNS = 6;
 /** Brief cache window for planner context snapshots; invalidated immediately on any core change event. */
 const CONTEXT_TTL_MS = 1500;
+/** Maximum back-to-back lookup/inspect rounds Viby runs automatically before answering. */
+const MAX_INSPECT_ROUNDS = 3;
 
 interface Conversation {
+  /** Stable thread id so conversations can be archived, switched, renamed, and deleted. */
+  id: string;
+  /** Short human title derived from the first ask or renamed explicitly. */
+  title?: string;
+  createdAt?: string;
+  updatedAt?: string;
   /** The planning CLI's own session, resumed each turn so it remembers what was said. */
   sessionId: string;
   /** The engine that session belongs to; another engine starts a new one. */
@@ -145,6 +178,8 @@ interface Conversation {
   settingsKey?: string;
   /** Agents/skills/routines/tasks/chats fingerprint so a resumed session hears when library items changed. */
   libraryKey?: string;
+  /** Viby durable memory (~/.config/vibeforge/viby.md) fingerprint from the previous turn. */
+  memoryKey?: string;
   turns: OrchestratorTurn[];
 }
 
@@ -156,7 +191,7 @@ export interface BrainRun {
 }
 
 /** Runs one headless turn of a CLI. The real one spawns it; tests hand in their own. */
-export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs?: number) => Promise<BrainRun>;
+export type BrainRunner = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs?: number, stdin?: string) => Promise<BrainRun>;
 
 /** How long a planner has to end after SIGTERM before its whole process group is killed. */
 const KILL_GRACE_MS = 3000;
@@ -181,9 +216,27 @@ export function plannerEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Process
  * whatever it started as well, and one that ignores SIGTERM is killed outright after a short
  * grace instead of holding the turn open for good.
  */
-export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, timeoutMs = BRAIN_TIMEOUT_MS, graceMs = KILL_GRACE_MS): Promise<BrainRun> =>
+export const spawnBrain = (
+  argv: string[],
+  cwd: string,
+  signal: AbortSignal,
+  timeoutMs = BRAIN_TIMEOUT_MS,
+  graceOrStdin: number | string = KILL_GRACE_MS,
+  stdin?: string,
+): Promise<BrainRun> =>
   new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd, env: plannerEnv(), stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const graceMs = typeof graceOrStdin === "number" ? graceOrStdin : KILL_GRACE_MS;
+    const input = typeof graceOrStdin === "string" ? graceOrStdin : stdin;
+    const stdio: ["pipe" | "ignore", "pipe", "pipe"] = [input !== undefined ? "pipe" : "ignore", "pipe", "pipe"];
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd,
+      env: plannerEnv(),
+      stdio,
+      detached: true,
+    });
+    if (input !== undefined) {
+      child.stdin?.end(input);
+    }
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -226,10 +279,10 @@ export const spawnBrain = (argv: string[], cwd: string, signal: AbortSignal, tim
     }, timeoutMs);
     if (signal.aborted) stop();
     else signal.addEventListener("abort", stop, { once: true });
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
       if (stdout.length < MAX_BRAIN_STDOUT) stdout += chunk.slice(0, MAX_BRAIN_STDOUT - stdout.length);
     });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
+    child.stderr?.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
       stderr += error.message;
       done(127);
@@ -256,8 +309,10 @@ export class OrchestratorDesk {
   private readonly chainWaiters = new Map<string, Set<(ok: boolean) => void>>();
   private readonly chainTimers = new Map<string, NodeJS.Timeout>();
   private readonly firstPromptTimers = new Map<string, NodeJS.Timeout>();
+  private readonly activeVerifies = new Set<AbortController>();
   private cachedContext: { at: number; promise: Promise<PlanContext> } | null = null;
   runner: BrainRunner = spawnBrain;
+  verifyRunner: VerifyRunner = spawnVerifyCommand;
   /** Quiet time before a chained `after: true` step considers the previous PTY turn settled. */
   chainSettleMs = 1200;
   /** How long a chained step waits on a terminal that never got busy before going ahead. */
@@ -286,6 +341,34 @@ export class OrchestratorDesk {
     return path.join(this.core.options.dataRoot, "orchestrator");
   }
 
+  private get threadsDir(): string {
+    return path.join(this.dir, "threads");
+  }
+
+  private get imagesDir(): string {
+    return path.join(this.dir, "images");
+  }
+
+  private toSaved(conv: Conversation): SavedConversation {
+    const now = this.core.now().toISOString();
+    return {
+      id: conv.id,
+      title: conv.title || deriveThreadTitle(conv.turns),
+      createdAt: conv.createdAt || now,
+      updatedAt: conv.turns.at(-1)?.at || conv.updatedAt || now,
+      sessionId: conv.sessionId,
+      engineId: conv.engineId,
+      begun: conv.begun,
+      ...(conv.initialRules ? { initialRules: conv.initialRules } : {}),
+      ...(conv.workspacesKey !== undefined ? { workspacesKey: conv.workspacesKey } : {}),
+      ...(conv.liveKey !== undefined ? { liveKey: conv.liveKey } : {}),
+      ...(conv.settingsKey !== undefined ? { settingsKey: conv.settingsKey } : {}),
+      ...(conv.libraryKey !== undefined ? { libraryKey: conv.libraryKey } : {}),
+      ...(conv.memoryKey !== undefined ? { memoryKey: conv.memoryKey } : {}),
+      turns: conv.turns,
+    };
+  }
+
   private load(): Conversation {
     const saved = readJson<Partial<Conversation> | null>(path.join(this.dir, "conversation.json"), null);
     const turns = Array.isArray(saved?.turns) ? saved.turns.filter((turn) => turn && typeof turn.text === "string") : [];
@@ -294,7 +377,12 @@ export class OrchestratorDesk {
       if (turn.plan === "running") turn.plan = "done";
       for (const step of turn.steps ?? []) if (step.state === "running") step.state = "failed";
     }
+    const now = this.core.now().toISOString();
     return {
+      id: typeof saved?.id === "string" && saved.id ? saved.id : randomUUID(),
+      ...(typeof saved?.title === "string" && saved.title ? { title: saved.title } : {}),
+      createdAt: typeof saved?.createdAt === "string" ? saved.createdAt : now,
+      updatedAt: typeof saved?.updatedAt === "string" ? saved.updatedAt : now,
       sessionId: typeof saved?.sessionId === "string" && saved.sessionId ? saved.sessionId : randomUUID(),
       engineId: typeof saved?.engineId === "string" ? saved.engineId : "",
       begun: Boolean(saved?.begun),
@@ -303,13 +391,21 @@ export class OrchestratorDesk {
       ...(typeof saved?.liveKey === "string" ? { liveKey: saved.liveKey } : {}),
       ...(typeof saved?.settingsKey === "string" ? { settingsKey: saved.settingsKey } : {}),
       ...(typeof saved?.libraryKey === "string" ? { libraryKey: saved.libraryKey } : {}),
+      ...(typeof saved?.memoryKey === "string" ? { memoryKey: saved.memoryKey } : {}),
       turns,
     };
   }
 
   private save(): void {
     this.conversation.turns = this.conversation.turns.slice(-KEEP_TURNS);
+    this.conversation.updatedAt = this.conversation.turns.at(-1)?.at || this.core.now().toISOString();
+    if (!this.conversation.title && this.conversation.turns.some((turn) => turn.text.trim())) {
+      this.conversation.title = deriveThreadTitle(this.conversation.turns);
+    }
     writeJson(path.join(this.dir, "conversation.json"), this.conversation);
+    if (this.conversation.turns.length) {
+      saveThreadSnapshot(this.threadsDir, this.toSaved(this.conversation));
+    }
     this.core.emit("orchestrator");
   }
 
@@ -335,6 +431,9 @@ export class OrchestratorDesk {
       turns: this.conversation.turns,
       copies: this.copies.list(),
       projectsFolder: this.projectsFolder(),
+      activeThreadId: this.conversation.id,
+      threads: listThreadSummaries(this.threadsDir, this.toSaved(this.conversation)),
+      hasMemory: Boolean(boundedVibyMemory(this.core.options.configRoot)),
     };
   }
 
@@ -362,6 +461,8 @@ export class OrchestratorDesk {
       if (step.workspaceId) return context.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked;
       return step.asked || step.prompt;
     }
+    if (step.kind === "verify") return context.workspaces.find((item) => item.id === step.workspaceId)?.name || step.asked || step.prompt;
+    if (step.kind === "memory") return step.asked || "Viby memory";
     if (step.kind === "lookup") return step.asked || step.prompt;
     if (step.kind === "workspace") return step.name || step.asked || "";
     if (step.kind === "tell" || step.kind === "read" || step.kind === "stop" || step.kind === "key") {
@@ -512,6 +613,7 @@ export class OrchestratorDesk {
     const allSettings = this.core.store.readSettings();
     const defaultPick = allSettings.defaultEngine;
     const defaultEngine = defaultPick && this.core.resolveEngine(defaultPick) ? defaultPick : undefined;
+    const memory = boundedVibyMemory(this.core.options.configRoot);
     return {
       workspaces,
       engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
@@ -524,6 +626,7 @@ export class OrchestratorDesk {
       ...(routines.length ? { routines } : {}),
       ...(chats.length ? { chats } : {}),
       ...(runs.length ? { runs } : {}),
+      ...(memory ? { memory } : {}),
       projectsFolder: this.projectsFolder(),
       settings: this.buildSettingsContext(allSettings, rows),
     };
@@ -656,22 +759,36 @@ export class OrchestratorDesk {
     this.core.options.host.show?.({ view: "code", ...(workspaceId ? { workspaceId } : {}), ptyId }, false);
   }
 
+  /** Read a saved image thumbnail as a data URL for desktop or phone preview. */
+  imageData(name: string): string | null {
+    return readSavedImageDataUrl(this.imagesDir, name);
+  }
+
   /**
    * What the person said or typed. The answer, and any plan, arrive as later turns. `looking` is
    * where they are in the window, which the planner is told so "this one" and "here" mean something.
    */
-  async ask(text: string, looking?: Looking | null): Promise<void> {
+  async ask(text: string, looking?: Looking | null, images?: string[]): Promise<void> {
     const words = text.trim();
-    if (!words) return;
+    if (!words && !images?.length) return;
     if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
+    const savedImages = savePastedImages(this.imagesDir, images);
     if (looking !== undefined) this.looking = looking;
     const now = this.core.now().toISOString();
-    this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: words });
+    const filenames = savedImages.map((img) => img.filename);
+    this.conversation.turns.push({
+      id: turnId(),
+      at: now,
+      from: "you",
+      text: words,
+      ...(filenames.length ? { images: filenames } : {}),
+    });
     const controller = new AbortController();
     this.thinking = controller;
     this.save();
     try {
-      await this.think(words, controller.signal, looking ?? this.looking);
+      const promptText = words || "Please examine the attached screenshot(s).";
+      await this.think(promptText, controller.signal, looking ?? this.looking, savedImages);
     } finally {
       if (this.thinking === controller) {
         this.thinking = null;
@@ -687,7 +804,7 @@ export class OrchestratorDesk {
     return full;
   }
 
-  private async think(words: string, signal: AbortSignal, looking: Looking | null): Promise<void> {
+  private async think(words: string, signal: AbortSignal, looking: Looking | null, savedImages: SavedPromptImage[] = []): Promise<void> {
     const { engine: picked, mode, model: chosen, effort: chosenEffort } = this.settings();
     const engineId = this.planner();
     // A model or effort picked for another planner means nothing to this one.
@@ -709,6 +826,7 @@ export class OrchestratorDesk {
     const currentLiveKey = liveStateFingerprint(context);
     const currentSettingsKey = settingsFingerprint(context.settings);
     const currentLibraryKey = libraryFingerprint(context);
+    const currentMemoryKey = memoryFingerprint(context.memory ?? "");
     const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
     const plannerKind = brainKind(engine.row);
     const workspacesChanged = Boolean(
@@ -728,6 +846,7 @@ export class OrchestratorDesk {
         liveKey: currentLiveKey,
         settingsKey: currentSettingsKey,
         libraryKey: currentLibraryKey,
+        memoryKey: currentMemoryKey,
       };
     }
     const settingsChanged = Boolean(
@@ -741,8 +860,14 @@ export class OrchestratorDesk {
         this.conversation.libraryKey !== undefined &&
         this.conversation.libraryKey !== currentLibraryKey,
     );
+    const memoryChanged = Boolean(
+      this.conversation.begun &&
+        this.conversation.memoryKey !== undefined &&
+        this.conversation.memoryKey !== currentMemoryKey,
+    );
     const settingsLine = settingsChanged && context.settings ? `(Updated settings:\n${formatSettingsRules(context.settings, { slim: true }).join("\n")})` : "";
     const libraryLine = libraryChanged ? formatLibraryUpdate(context) : "";
+    const memoryLine = memoryChanged ? formatMemoryUpdate(context.memory ?? "") : "";
     const work = path.join(this.dir, "work");
     fs.mkdirSync(work, { recursive: true });
     // Codex reads the schema from a file.
@@ -750,20 +875,47 @@ export class OrchestratorDesk {
     fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
+    const imageLine = savedImages.length
+      ? `(${savedImages.length === 1 ? "Attached screenshot saved on disk" : "Attached screenshots saved on disk"}: ${savedImages.map((img) => img.path).join(", ")})`
+      : "";
     let capturedInitialRules = this.conversation.initialRules;
-    const turn = async (said: string, ctx: PlanContext = context) => {
+    const turn = async (said: string, ctx: PlanContext = context, includeImages = false) => {
       const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
       const liveChanged = keepPromptCache && this.conversation.liveKey !== undefined && this.conversation.liveKey !== liveStateFingerprint(ctx);
       const liveLine = liveChanged ? formatLiveUpdate(ctx) : "";
       const rules = keepPromptCache ? this.conversation.initialRules! : orchestratorRules(ctx);
       if (!this.conversation.begun) capturedInitialRules = rules;
-      const prefix = [here, liveLine, this.conversation.begun ? settingsLine : "", this.conversation.begun ? libraryLine : ""].filter(Boolean).join("\n");
+      const turnImages = includeImages ? savedImages : [];
+      const prefix = [
+        here,
+        includeImages ? imageLine : "",
+        liveLine,
+        this.conversation.begun ? settingsLine : "",
+        this.conversation.begun ? libraryLine : "",
+        this.conversation.begun ? memoryLine : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
       const text = prefix ? `${prefix}\n${said}` : said;
-      const args = brainArgs(engine.row, { text, rules, sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, effort: explicitEffort, schemaFile });
-      return args ? this.runner([engine.binPath, ...args], work, signal) : null;
+      const args = brainArgs(engine.row, {
+        text,
+        rules,
+        sessionId: this.conversation.sessionId,
+        resume: this.conversation.begun,
+        model,
+        effort: explicitEffort,
+        schemaFile,
+        ...(turnImages.length ? { images: turnImages.map((img) => img.path) } : {}),
+      });
+      if (!args) return null;
+      if (plannerKind === "claude" && turnImages.length) {
+        const stdin = claudeImageStdin(text, turnImages);
+        return this.runner([engine.binPath, ...args], work, signal, undefined, stdin);
+      }
+      return this.runner([engine.binPath, ...args], work, signal);
     };
     const initialText = (switchedEngine || workspacesChanged) && !this.conversation.begun ? this.recap(words) : words;
-    let run = await turn(initialText);
+    let run = await turn(initialText, context, true);
     if (!run) {
       this.answer({ text: "", problem: "noEngine" });
       return;
@@ -773,7 +925,7 @@ export class OrchestratorDesk {
     // reminded of what was said lately.
     if (!signal.aborted && !run.timedOut && this.conversation.begun && !output.plan && (run.code !== 0 || output.error) && sessionGone(`${output.error}\n${run.stderr}\n${run.stdout}`)) {
       this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false, initialRules: undefined, liveKey: undefined };
-      const retried = await turn(this.recap(words));
+      const retried = await turn(this.recap(words), context, true);
       if (retried) {
         run = retried;
         output = readBrainOutput(run.stdout);
@@ -790,6 +942,8 @@ export class OrchestratorDesk {
           "",
           `(Your draft answer said "${oneLine(output.plan.say, 200)}" with steps: []. Nothing runs after your answer unless you include steps, and you cannot search or check files yourself. Either return the steps to carry out now using the workspaces and CLIs listed in the rules, or emit a lookup step to search disk and run history, or tell the person plainly what you cannot see and ask.)`,
         ].join("\n"),
+        context,
+        true,
       );
       if (retried) {
         run = retried;
@@ -820,6 +974,7 @@ export class OrchestratorDesk {
     this.conversation.liveKey = currentLiveKey;
     this.conversation.settingsKey = currentSettingsKey;
     this.conversation.libraryKey = currentLibraryKey;
+    this.conversation.memoryKey = currentMemoryKey;
     if (!plan) {
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
@@ -828,38 +983,50 @@ export class OrchestratorDesk {
     let steps = resolvePlan(plan, currentContext);
     const droppedKinds = (rawSteps: NonNullable<typeof plan>["steps"]) => rawSteps.map((s) => s.kind).filter((k) => k && !(STEP_KINDS as readonly string[]).includes(k));
     let unknownKinds = droppedKinds(plan.steps);
-    let checks: OrchestratorCheck[] = [];
-    // A plan whose steps are only lookups or inspections: VibeForge gathers the findings at once
-    // and hands them back so Viby can answer or give the concrete steps in the same turn.
-    if (!signal.aborted && !unknownKinds.length && steps.length > 0 && steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, currentContext))) {
-      this.setActivity({ kind: steps[0].kind, label: this.stepActivityLabel(steps[0], currentContext) });
-      const results = await Promise.all(steps.map((step) => (step.kind === "lookup" ? this.lookup(step.prompt) : this.inspect(step))));
+    const checks: OrchestratorCheck[] = [];
+    const seenChecks = new Set<string>();
+    const checkKey = (step: OrchestratorStep) => `${step.kind}:${step.action ?? ""}:${step.workspaceId}:${step.target}:${step.prompt}`;
+    // A plan whose steps are only lookups or inspections: VibeForge gathers the findings (up to
+    // MAX_INSPECT_ROUNDS rounds with deduplication) and hands them back so Viby can answer or
+    // give the concrete steps in the same turn.
+    for (let round = 0; round < MAX_INSPECT_ROUNDS; round += 1) {
+      if (signal.aborted || unknownKinds.length || !steps.length) break;
+      if (!steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, currentContext))) break;
+      const freshSteps = steps.filter((step) => !seenChecks.has(checkKey(step)));
+      if (!freshSteps.length) {
+        steps = [];
+        unknownKinds = [];
+        break;
+      }
+      for (const step of freshSteps) seenChecks.add(checkKey(step));
+      this.setActivity({ kind: freshSteps[0].kind, label: this.stepActivityLabel(freshSteps[0], currentContext) });
+      const results = await Promise.all(freshSteps.map((step) => (step.kind === "lookup" ? this.lookup(step.prompt) : this.inspect(step))));
       this.setActivity(null);
       if (signal.aborted) return;
-      checks = steps.map((step, idx) => {
-        const copy = step.kind === "inspect" ? copies.find((item) => item.id === step.target) : undefined;
-        const session = step.kind === "inspect" && step.target ? this.core.live.get(step.target) : undefined;
-        return {
-          id: step.id,
-          kind: step.kind as "lookup" | "inspect",
-          label: this.stepActivityLabel(step, currentContext),
-          summary: results[idx].summary,
-          details: results[idx].details.slice(0, 6000),
-          ...(session ? { ptyId: session.ptyId, workspaceId: session.workspaceId } : step.workspaceId ? { workspaceId: step.workspaceId } : {}),
-          ...(copy ? { copyId: copy.id } : {}),
-        };
-      });
-      const details = results
-        .map((res, idx) => `${steps[idx].kind === "lookup" ? "Lookup" : "Inspection"} "${steps[idx].asked || steps[idx].prompt}":\n${res.details}`)
-        .join("\n\n");
-      const followUp = await turn(
-        [
-          "[Findings from VibeForge]",
-          details,
-          "",
-          `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.`,
-        ].join("\n"),
+      const currentCopies = currentContext.copies ?? copies;
+      checks.push(
+        ...freshSteps.map((step, idx) => {
+          const copy = step.kind === "inspect" ? currentCopies.find((item) => item.id === step.target) : undefined;
+          const session = step.kind === "inspect" && step.target ? this.core.live.get(step.target) : undefined;
+          return {
+            id: step.id,
+            kind: step.kind as "lookup" | "inspect",
+            label: this.stepActivityLabel(step, currentContext),
+            summary: results[idx].summary,
+            details: results[idx].details.slice(0, 6000),
+            ...(session ? { ptyId: session.ptyId, workspaceId: session.workspaceId } : step.workspaceId ? { workspaceId: step.workspaceId } : {}),
+            ...(copy ? { copyId: copy.id } : {}),
+          };
+        }),
       );
+      const details = results
+        .map((res, idx) => `${freshSteps[idx].kind === "lookup" ? "Lookup" : "Inspection"} "${freshSteps[idx].asked || freshSteps[idx].prompt}":\n${res.details}`)
+        .join("\n\n");
+      const guidance =
+        round < MAX_INSPECT_ROUNDS - 1
+          ? `Now answer the person's request ("${words}") using these exact findings. Return concrete steps to carry it out, emit further inspect/lookup steps ONLY if a critical detail is still missing, or answer clearly in say with steps: [] if nothing should be started.`
+          : `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.`;
+      const followUp = await turn(["[Findings from VibeForge]", details, "", guidance].join("\n"), currentContext);
       let followed = false;
       if (followUp && !signal.aborted && !followUp.timedOut) {
         const nextOut = readBrainOutput(followUp.stdout);
@@ -869,6 +1036,9 @@ export class OrchestratorDesk {
           currentContext = await this.context(true);
           if (signal.aborted) return;
           this.conversation.liveKey = liveStateFingerprint(currentContext);
+          this.conversation.settingsKey = settingsFingerprint(currentContext.settings);
+          this.conversation.libraryKey = libraryFingerprint(currentContext);
+          this.conversation.memoryKey = memoryFingerprint(currentContext.memory ?? "");
           steps = resolvePlan(plan, currentContext);
           unknownKinds = droppedKinds(plan.steps);
           followed = true;
@@ -879,6 +1049,7 @@ export class OrchestratorDesk {
       if (!followed) {
         steps = [];
         unknownKinds = [];
+        break;
       }
     }
     if (unknownKinds.length) {
@@ -1000,17 +1171,178 @@ export class OrchestratorDesk {
     this.save();
   }
 
-  /** Start over: a new session for the planning CLI, and an empty conversation. */
-  clear(): void {
+  private cancelInFlight(): void {
     this.thinking?.abort();
     this.thinking = null;
     this.activity = null;
+    for (const ac of this.activeVerifies) ac.abort();
+    this.activeVerifies.clear();
     this.forgetTold();
     this.runEpoch += 1;
     // Plans waiting on a terminal to finish end now, instead of staying "running" in the old conversation.
     for (const ptyId of [...this.chainWaiters.keys()]) this.settleChainWaiters(ptyId, false);
-    this.conversation = { sessionId: randomUUID(), engineId: this.planner(), begun: false, turns: [] };
+  }
+
+  /** Start over: archive the current non-empty conversation, then begin a fresh thread and planner session. */
+  clear(): void {
+    if (this.conversation.turns.length) {
+      saveThreadSnapshot(this.threadsDir, this.toSaved(this.conversation));
+    }
+    this.cancelInFlight();
+    const now = this.core.now().toISOString();
+    this.conversation = {
+      id: randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+      sessionId: randomUUID(),
+      engineId: this.planner(),
+      begun: false,
+      turns: [],
+    };
     this.save();
+  }
+
+  readMemory(): string {
+    return readVibyMemory(this.core.options.configRoot);
+  }
+
+  writeMemory(text: string): void {
+    writeVibyMemory(this.core.options.configRoot, text);
+    this.cachedContext = null;
+    this.core.emit("orchestrator");
+  }
+
+  listThreads(): OrchestratorThreadSummary[] {
+    return listThreadSummaries(this.threadsDir, this.toSaved(this.conversation));
+  }
+
+  selectThread(id: string): void {
+    if (id === this.conversation.id) return;
+    if (this.conversation.turns.length) {
+      saveThreadSnapshot(this.threadsDir, this.toSaved(this.conversation));
+    }
+    this.cancelInFlight();
+    const loaded = loadSavedThread(this.threadsDir, id);
+    this.conversation = {
+      id: loaded.id,
+      title: loaded.title,
+      createdAt: loaded.createdAt,
+      updatedAt: loaded.updatedAt,
+      sessionId: loaded.sessionId,
+      engineId: loaded.engineId,
+      begun: loaded.begun,
+      ...(loaded.initialRules ? { initialRules: loaded.initialRules } : {}),
+      ...(loaded.workspacesKey !== undefined ? { workspacesKey: loaded.workspacesKey } : {}),
+      ...(loaded.liveKey !== undefined ? { liveKey: loaded.liveKey } : {}),
+      ...(loaded.settingsKey !== undefined ? { settingsKey: loaded.settingsKey } : {}),
+      ...(loaded.libraryKey !== undefined ? { libraryKey: loaded.libraryKey } : {}),
+      ...(loaded.memoryKey !== undefined ? { memoryKey: loaded.memoryKey } : {}),
+      turns: loaded.turns,
+    };
+    this.save();
+  }
+
+  renameThread(id: string, title: string): void {
+    const active = renameSavedThread(this.threadsDir, id, title, this.toSaved(this.conversation));
+    if (active) {
+      this.conversation.title = oneLine(title, 80);
+      this.save();
+    } else {
+      this.core.emit("orchestrator");
+    }
+  }
+
+  deleteThread(id: string): Deleted {
+    if (id === this.conversation.id) {
+      if (this.conversation.turns.length) {
+        saveThreadSnapshot(this.threadsDir, this.toSaved(this.conversation));
+      }
+      const deleted = deleteSavedThread(this.core, this.threadsDir, id, () => this.core.emit("orchestrator"));
+      this.cancelInFlight();
+      const now = this.core.now().toISOString();
+      this.conversation = {
+        id: randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        sessionId: randomUUID(),
+        engineId: this.planner(),
+        begun: false,
+        turns: [],
+      };
+      this.save();
+      return deleted;
+    }
+    return deleteSavedThread(this.core, this.threadsDir, id, () => this.core.emit("orchestrator"));
+  }
+
+  /**
+   * 0ms local reflex dispatch for deterministic slash commands, waiting-plan approvals/cancels,
+   * undo, mark-reviewed, memory append, stop-all, and single-intent view/workspace navigation.
+   */
+  async quickAct(
+    text: string,
+    looking?: Looking | null,
+    words?: {
+      going?: string;
+      cancelled?: string;
+      newThread?: string;
+      undone?: string;
+      reviewed?: string;
+      remembered?: (note: string) => string;
+      stopped?: (count: number) => string;
+      opened?: (label: string) => string;
+    },
+  ): Promise<{ handled: boolean; reply?: string }> {
+    const trimmed = text.trim();
+    if (!trimmed || this.thinking) return { handled: false };
+    const waitingPlan = [...this.conversation.turns].reverse().find((turn) => turn.plan === "waiting" && turn.steps?.length);
+    const currentLooking = looking !== undefined ? looking : this.looking;
+    const context = await this.context();
+    const reflex = resolveLocalReflex(trimmed, context, currentLooking, Boolean(waitingPlan));
+    if (!reflex) return { handled: false };
+    if (looking !== undefined) this.looking = looking;
+    if (reflex.kind === "plan-go" && waitingPlan) {
+      void this.run(waitingPlan.id).catch(() => undefined);
+      return { handled: true, reply: words?.going ?? "On it." };
+    }
+    if (reflex.kind === "plan-cancel" && waitingPlan) {
+      this.cancel(waitingPlan.id);
+      return { handled: true, reply: words?.cancelled ?? "Cancelled." };
+    }
+    if (reflex.kind === "new-thread") {
+      this.clear();
+      return { handled: true, reply: words?.newThread ?? "Started a new conversation." };
+    }
+    if (reflex.kind !== "steps") return { handled: false };
+    if (reflex.tag === "show" && !this.core.options.host.show) return { handled: false };
+    const steps = resolvePlan({ say: "", steps: reflex.rawSteps }, context);
+    if (!steps.length || steps.some((step) => stepIssue(step, context))) return { handled: false };
+    const now = this.core.now().toISOString();
+    this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: trimmed });
+    const reply =
+      reflex.tag === "show"
+        ? (words?.opened?.(reflex.label) ?? `Opened ${reflex.label}.`)
+        : reflex.tag === "undo"
+          ? (words?.undone ?? "Restored.")
+          : reflex.tag === "reviewed"
+            ? (words?.reviewed ?? "Marked all runs reviewed.")
+            : reflex.tag === "remember"
+              ? (words?.remembered?.(reflex.label) ?? `Remembered in Viby memory: ${reflex.label}`)
+              : (words?.stopped?.(steps.length) ?? `Stopped ${steps.length} running CLI${steps.length === 1 ? "" : "s"}.`);
+    const answered = this.answer({ text: reply, steps, plan: "running" });
+    for (const step of steps) {
+      step.state = "running";
+      try {
+        await this.carryOut(answered, step);
+        step.state = "done";
+      } catch (error) {
+        step.state = "failed";
+        step.error = error instanceof Error ? error.message : String(error);
+      }
+    }
+    answered.plan = "done";
+    this.save();
+    return { handled: true, reply };
   }
 
   private plan(turnIdValue: string): OrchestratorTurn {
@@ -1152,11 +1484,11 @@ export class OrchestratorDesk {
     const epoch = this.runEpoch;
     turn.plan = "running";
     this.save();
-    let prevPtyId: string | null = null;
-    let prevSourceWorkspaceId: string | null = null;
-    let prevOpenedWorkspaceId: string | null = null;
-    // Whether the step before carried out: one marked `after` depends on it, so it doesn't run when that
-    // one failed or was skipped ("fix it, then push" must not push a fix that never started).
+    let wavePtys: string[] = [];
+    let lastSourceWorkspaceId: string | null = null;
+    let lastOpenedWorkspaceId: string | null = null;
+    // Whether the step or wave before carried out: one marked `after` depends on it, so it doesn't run when
+    // that failed or was skipped ("fix it, then push" must not push a fix that never started).
     let prevOk = true;
     for (const step of turn.steps ?? []) {
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
@@ -1165,22 +1497,24 @@ export class OrchestratorDesk {
         this.save();
         continue;
       }
-      if (step.after && prevPtyId) {
-        const settled = await this.waitForChainedPty(prevPtyId, epoch, turn);
-        if (!settled || this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) {
+      if (step.after && wavePtys.length) {
+        const waitingOn = [...wavePtys];
+        wavePtys = [];
+        const settled = await Promise.all(waitingOn.map((ptyId) => this.waitForChainedPty(ptyId, epoch, turn)));
+        if (!settled.every(Boolean) || this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) {
           step.state = "skipped";
           prevOk = false;
           this.save();
           continue;
         }
-        // A follow-up shell or inspection targeting the same workspace works in the copy the previous step opened.
+        // A follow-up shell, verify, or inspection targeting the same workspace works in the copy the previous wave opened.
         if (
-          prevOpenedWorkspaceId &&
-          prevSourceWorkspaceId &&
-          step.workspaceId === prevSourceWorkspaceId &&
-          (step.kind === "shell" || step.kind === "inspect" || (step.kind === "start" && !step.branch))
+          lastOpenedWorkspaceId &&
+          lastSourceWorkspaceId &&
+          step.workspaceId === lastSourceWorkspaceId &&
+          (step.kind === "shell" || step.kind === "inspect" || step.kind === "verify" || (step.kind === "start" && !step.branch))
         ) {
-          step.workspaceId = prevOpenedWorkspaceId;
+          step.workspaceId = lastOpenedWorkspaceId;
         }
       }
       const context = withPlannedWorkspaces(await this.context(), turn.steps ?? []);
@@ -1196,19 +1530,20 @@ export class OrchestratorDesk {
       this.activity = { kind: step.kind, label: this.stepActivityLabel(step, context) };
       this.save();
       try {
-        await this.carryOut(turn, step);
+        await this.carryOut(turn, step, epoch);
         step.state = "done";
         prevOk = true;
         const producedPty = step.ptyId || (step.kind === "tell" ? step.target : null);
         if (producedPty) {
-          prevPtyId = producedPty;
-          prevSourceWorkspaceId = sourceWorkspaceId;
-          prevOpenedWorkspaceId = step.openedWorkspaceId || sourceWorkspaceId;
+          if (step.after) wavePtys = [producedPty];
+          else if (!wavePtys.includes(producedPty)) wavePtys.push(producedPty);
+          lastSourceWorkspaceId = sourceWorkspaceId;
+          lastOpenedWorkspaceId = step.openedWorkspaceId || sourceWorkspaceId;
         }
       } catch (error) {
         step.state = "failed";
         step.error = error instanceof Error ? error.message : String(error);
-        prevPtyId = null;
+        if (step.after) wavePtys = [];
         prevOk = false;
       }
       this.activity = null;
@@ -1305,7 +1640,7 @@ export class OrchestratorDesk {
     };
   }
 
-  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep): Promise<void> {
+  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep, epoch = this.runEpoch): Promise<void> {
     if (step.kind === "workspace") {
       await carryOutWorkspaceStep(this.entityDeps(), turn, step);
       return;
@@ -1316,6 +1651,14 @@ export class OrchestratorDesk {
     }
     if (step.kind === "skill") {
       await carryOutSkillStep(this.entityDeps(), turn, step);
+      return;
+    }
+    if (step.kind === "verify") {
+      await this.carryOutVerifyStep(turn, step, epoch);
+      return;
+    }
+    if (step.kind === "memory") {
+      this.carryOutMemoryStep(step);
       return;
     }
     if (step.kind === "start") {
@@ -1466,6 +1809,129 @@ export class OrchestratorDesk {
       return;
     }
     await this.core.killPty(step.target);
+  }
+
+  private async carryOutVerifyStep(turn: OrchestratorTurn, step: OrchestratorStep, epoch: number): Promise<void> {
+    if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
+    const workspace = this.core.workspaceById(step.workspaceId);
+    if (!workspace) throw new Error("That workspace is gone.");
+    const command = step.prompt.trim();
+    if (!command) throw new Error("Write a verification command to run.");
+    const { retries, timeoutMs } = parseVerifyOptions(step.options);
+    const findFixerPty = (): string => {
+      if (step.target && this.core.isLive(step.target)) return step.target;
+      const priorSteps = turn.steps ?? [];
+      const selfIdx = priorSteps.indexOf(step);
+      for (let i = (selfIdx >= 0 ? selfIdx : priorSteps.length) - 1; i >= 0; i -= 1) {
+        const s = priorSteps[i];
+        if ((s.kind !== "start" && s.kind !== "tell") || !s.ptyId && !s.target) continue;
+        const pty = s.ptyId || s.target;
+        if (pty && this.core.isLive(pty) && (s.openedWorkspaceId === workspace.id || s.workspaceId === workspace.id)) return pty;
+      }
+      return this.core.listLive().find((s) => isCodingCli(s) && s.workspaceId === workspace.id)?.ptyId ?? "";
+    };
+    const fixerPtyId = findFixerPty();
+    const fixerSession = fixerPtyId ? this.core.live.get(fixerPtyId) : undefined;
+    const copies = this.copies.list();
+    const copy = copies.find((item) => item.openedWorkspaceId === (fixerSession?.workspaceId ?? workspace.id));
+    const fixerHandle = fixerPtyId && copy ? this.messages.list().find((item) => item.ptyId === fixerPtyId) : undefined;
+    const maxAttempts = fixerHandle ? retries + 1 : 1;
+    let lastOutput = "";
+    let lastCode: number | null = null;
+    let timedOut = false;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+      this.setActivity({ kind: "verify", label: maxAttempts > 1 ? `${workspace.name} (${attempt}/${maxAttempts})` : workspace.name });
+      const ac = new AbortController();
+      this.activeVerifies.add(ac);
+      let res: { code: number | null; output: string; timedOut: boolean };
+      try {
+        res = await this.verifyRunner(command, workspace.path, ac.signal, timeoutMs, plannerEnv());
+      } finally {
+        this.activeVerifies.delete(ac);
+      }
+      if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+      lastOutput = res.output;
+      lastCode = res.code;
+      timedOut = res.timedOut;
+      if (!timedOut && res.code === 0) {
+        turn.checks = [...(turn.checks ?? []).filter((c) => c.id !== `verify-${step.id}`), {
+          id: `verify-${step.id}`,
+          kind: "verify",
+          label: command,
+          summary: attempt > 1 ? `Passed after ${attempt - 1} fix${attempt === 2 ? "" : "es"}` : "Passed",
+          details: (res.output || "(no output)").slice(-6000),
+          workspaceId: workspace.id,
+          ...(copy ? { copyId: copy.id } : {}),
+          ...(fixerPtyId ? { ptyId: fixerPtyId } : {}),
+        }];
+        step.result = attempt > 1 ? `Passed after ${attempt - 1} fix round${attempt === 2 ? "" : "s"}.` : "Passed.";
+        return;
+      }
+      if (attempt < maxAttempts && fixerHandle && this.core.isLive(fixerPtyId)) {
+        const tail = res.output.trim().slice(-3500);
+        const fixPrompt = `Verification command "${command}" failed (exit ${res.timedOut ? "timeout" : String(res.code ?? "?")}). Fix the failure below and stop when done:\n\n${tail || "(no output)"}`;
+        const sent = await this.messages.tell({ fromPty: null, to: fixerHandle.handle, text: fixPrompt, fromPerson: true });
+        if (!sent.ok) break;
+        const settled = await this.waitForChainedPty(fixerPtyId, epoch, turn);
+        if (!settled || this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+      }
+    }
+
+    turn.checks = [...(turn.checks ?? []).filter((c) => c.id !== `verify-${step.id}`), {
+      id: `verify-${step.id}`,
+      kind: "verify",
+      label: command,
+      summary: timedOut ? "Timed out" : `Exit ${lastCode ?? "?"}`,
+      details: (lastOutput || "(no output)").slice(-6000),
+      workspaceId: workspace.id,
+      ...(copy ? { copyId: copy.id } : {}),
+      ...(fixerPtyId ? { ptyId: fixerPtyId } : {}),
+    }];
+    if (timedOut) throw new Error(`Verification timed out: ${command}.`);
+    throw new Error(`Verification failed (${String(lastCode ?? "?")}): ${command}.`);
+  }
+
+  private carryOutMemoryStep(step: OrchestratorStep): void {
+    const action = normalizeMemoryAction(step.action, Boolean(step.prompt.trim())) ?? "append";
+    const configRoot = this.core.options.configRoot;
+    const file = vibyMemoryFile(configRoot);
+    const hadFile = fs.existsSync(file);
+    const prev = hadFile ? readVibyMemory(configRoot) : "";
+    if (action === "clear") {
+      if (hadFile) {
+        const bin = this.core.trash.stash([file]);
+        step.undo = this.core.keepForUndo(bin, () => {
+          this.cachedContext = null;
+          this.core.emit("orchestrator");
+        }).undo;
+      }
+      this.cachedContext = null;
+      step.result = "Cleared Viby memory (~/.config/vibeforge/viby.md).";
+      return;
+    }
+    if (action === "set") {
+      const text = step.prompt.trim();
+      if (!text) throw new Error("Type something to save to memory.");
+      const bin = this.core.trash.stash([]);
+      writeVibyMemory(configRoot, `${text}\n`);
+      step.undo = this.core.keepForUndo(bin, () => {
+        if (hadFile) writeVibyMemory(configRoot, prev);
+        else fs.rmSync(file, { force: true });
+        this.cachedContext = null;
+        this.core.emit("orchestrator");
+      }).undo;
+      this.cachedContext = null;
+      step.result = "Updated Viby memory (~/.config/vibeforge/viby.md).";
+      return;
+    }
+    const addition = step.prompt.trim();
+    if (!addition) throw new Error("Type something to save to memory.");
+    const next = prev.trimEnd() ? `${prev.trimEnd()}\n- ${addition}\n` : `# Viby Memory\n\n- ${addition}\n`;
+    writeVibyMemory(configRoot, next);
+    this.cachedContext = null;
+    step.result = "Saved to Viby memory (~/.config/vibeforge/viby.md).";
   }
 
   /**
@@ -1656,6 +2122,8 @@ export class OrchestratorDesk {
 
   close(): void {
     this.forgetTold();
+    for (const ac of this.activeVerifies) ac.abort();
+    this.activeVerifies.clear();
     for (const timer of this.firstPromptTimers.values()) clearTimeout(timer);
     this.firstPromptTimers.clear();
     for (const timer of this.chainTimers.values()) clearTimeout(timer);

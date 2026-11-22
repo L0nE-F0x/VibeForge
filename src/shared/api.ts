@@ -59,6 +59,7 @@ import type {
   OrchestratorCheck,
   OrchestratorProblem,
   OrchestratorStep,
+  OrchestratorThreadSummary,
   OrchestratorTurn,
   OrchestratorView,
   StepIssue,
@@ -78,6 +79,7 @@ export type {
   OrchestratorCheck,
   OrchestratorProblem,
   OrchestratorStep,
+  OrchestratorThreadSummary,
   OrchestratorTurn,
   OrchestratorView,
   StepIssue,
@@ -343,6 +345,8 @@ export interface DeskMethods {
   "app.focus": () => void;
   /** The clipboard's text, and whether it also holds an image. */
   "app.clipboard": () => { text: string; image: boolean };
+  /** First raster image on the clipboard as a data URL, or null (used when DOM paste hides images on Wayland). */
+  "app.clipboardImage": () => string | null;
   /** Token usage from the CLIs' own logs, or null when Settings turn it off. */
   "usage.summary": () => UsageSummary | null;
   /**
@@ -472,14 +476,26 @@ export interface DeskMethods {
   /** The Orchestrator's conversation, and whether its planning CLI is answering. */
   "orchestrator.get": () => OrchestratorView;
   /** Say something to the Orchestrator. Resolves once it has answered (the answer comes as a turn). */
-  "orchestrator.ask": (text: string) => void;
+  "orchestrator.ask": (text: string, images?: string[]) => void;
+  /** Read a saved image attachment from a Viby turn as a data URL, or null if missing. */
+  "orchestrator.imageData": (name: string) => string | null;
   /** Where the person is in the window now, for Viby: said whenever it changes. */
   "app.looking": (looking: Looking | null) => void;
   "orchestrator.stopThinking": () => void;
   /** The models a planning CLI offers (Claude Code's aliases, or what Grok Build and Antigravity list). */
   "orchestrator.models": (engineId: string) => string[];
-  /** Start a new conversation. */
+  /** Start a new conversation (archiving non-empty turns to threads). */
   "orchestrator.clear": () => void;
+  /** Switch to a saved Viby conversation thread. */
+  "orchestrator.selectThread": (threadId: string) => void;
+  /** Rename a Viby conversation thread. */
+  "orchestrator.renameThread": (threadId: string, title: string) => void;
+  /** Delete a saved Viby conversation thread (with Undo). */
+  "orchestrator.deleteThread": (threadId: string) => Deleted;
+  /** Read Viby's durable plain-text memory (~/.config/vibeforge/viby.md). */
+  "orchestrator.readMemory": () => string;
+  /** Save Viby's durable plain-text memory (~/.config/vibeforge/viby.md). */
+  "orchestrator.writeMemory": (text: string) => void;
   /** Go: carry out a waiting plan. */
   "orchestrator.run": (turnId: string) => void;
   "orchestrator.cancel": (turnId: string) => void;

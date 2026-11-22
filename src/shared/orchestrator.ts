@@ -5,10 +5,12 @@
 import type { EngineRow } from "../core/types.js";
 import { effortLevels } from "./launch-options.js";
 import {
+  inspectsProblems,
   inspectsStorage,
   isClearWord,
   normalizeAgentAction,
   normalizeChatAction,
+  normalizeMemoryAction,
   normalizeRoutineStepAction,
   normalizeRunAction,
   normalizeSkillAction,
@@ -24,6 +26,7 @@ import { inspectsSettings, resolveSettingsStep, type PlanSettingsContext } from 
 
 export * from "./orchestrator-actions.js";
 export * from "./orchestrator-intel.js";
+export * from "./orchestrator-reflex.js";
 export * from "./orchestrator-settings.js";
 
 /**
@@ -43,6 +46,8 @@ export * from "./orchestrator-settings.js";
  * chat: create, send messages to, continue, stop, rename, switch CLI, or delete plain/agent chats.
  * run: continue, stop, mark reviewed/unreviewed, hand off a run, or tidy run storage.
  * talk: coordinate live CLIs (start review loop, send draft between panes, stop talk, start held handed-out tasks).
+ * verify: run a test/build/lint check in a workspace or copy and auto-nudge a live CLI to fix failures.
+ * memory: append, set, or clear Viby's own durable plain-text memory (~/.config/vibeforge/viby.md).
  */
 export type OrchestratorStepKind =
   | "start"
@@ -65,7 +70,9 @@ export type OrchestratorStepKind =
   | "skill"
   | "chat"
   | "run"
-  | "talk";
+  | "talk"
+  | "verify"
+  | "memory";
 
 /** Every kind of step, for checking what a planner wrote. */
 export const STEP_KINDS: readonly OrchestratorStepKind[] = [
@@ -90,6 +97,8 @@ export const STEP_KINDS: readonly OrchestratorStepKind[] = [
   "chat",
   "run",
   "talk",
+  "verify",
+  "memory",
 ];
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
@@ -244,14 +253,23 @@ export type VibyWord =
 
 export interface OrchestratorCheck {
   id: string;
-  kind: "lookup" | "inspect";
-  /** Short target label for the chip ("Claude Code · VibeForge", "auth"). */
+  kind: "lookup" | "inspect" | "verify";
+  /** Short target label for the chip ("Claude Code · VibeForge", "auth", "npm test"). */
   label: string;
   summary: string;
   details: string;
   ptyId?: string | null;
   workspaceId?: string | null;
   copyId?: string | null;
+}
+
+export interface OrchestratorThreadSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  turnCount: number;
+  preview: string;
 }
 
 export interface OrchestratorActivity {
@@ -265,6 +283,8 @@ export interface OrchestratorTurn {
   at: string;
   from: "you" | "vibeforge";
   text: string;
+  /** Image filenames attached to this turn, saved under dataRoot/orchestrator/images/. */
+  images?: string[];
   /** VibeForge's own word about a CLI, not the planner's answer. */
   note?: MaestroNote;
   /** Inline inspections or lookups Viby carried out while forming this answer. */
@@ -295,6 +315,11 @@ export interface OrchestratorView {
   copies?: MaestroCopy[];
   /** Where a new workspace's folder goes unless a step says otherwise (Settings, or where most are). */
   projectsFolder?: string;
+  /** Active conversation thread id, and saved threads for quick switching/search. */
+  activeThreadId?: string;
+  threads?: OrchestratorThreadSummary[];
+  /** Whether ~/.config/vibeforge/viby.md currently holds non-empty memory. */
+  hasMemory?: boolean;
 }
 
 /** The engines that can plan: the ones with a headless turn, structured output and a way to turn tools off. */
@@ -409,6 +434,8 @@ export interface PlanContext {
   runs?: Array<{ id: string; title: string; status: string; engine: string; origin: string; opened: boolean; changes?: string | null; agent?: string }>;
   /** Where a new workspace goes when the person doesn't say. */
   projectsFolder?: string;
+  /** Viby's own durable plain-text memory (~/.config/vibeforge/viby.md). */
+  memory?: string;
   /** Viby's own settings, voice/STT models, and VibeForge configuration. */
   settings?: PlanSettingsContext;
 }
@@ -552,9 +579,16 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       inspectsSettings(step.target) ||
       inspectsStorage(step.prompt) ||
       inspectsStorage(step.target) ||
-      step.action === "storage"
+      inspectsProblems(step.prompt) ||
+      inspectsProblems(step.target) ||
+      step.action === "storage" ||
+      step.action === "problems" ||
+      step.action === "diagnostics"
     ) {
       return null;
+    }
+    if (step.action === "compare") {
+      return (context.copies ?? []).length > 0 ? null : "copy";
     }
     if (step.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(step.action)) {
       if (!step.target) return "target";
@@ -748,6 +782,17 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       const other = step.agents?.[0] ?? "";
       if (!other || other === step.target || !context.running.some((item) => item.id === other)) return "target";
     }
+    return null;
+  }
+  if (step.kind === "verify") {
+    if (!step.prompt.trim()) return "prompt";
+    if (step.workspaceId) return context.workspaces.some((item) => item.id === step.workspaceId) ? null : "workspace";
+    if (step.target) return context.running.some((item) => item.id === step.target) ? null : "target";
+    return "workspace";
+  }
+  if (step.kind === "memory") {
+    const action = normalizeMemoryAction(step.action, Boolean(step.prompt.trim()));
+    if (!action || (action !== "clear" && !step.prompt.trim())) return "prompt";
     return null;
   }
   if (step.kind === "show" && !step.target) {

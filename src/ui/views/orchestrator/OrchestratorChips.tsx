@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  BookOpen,
   Bot,
   Check,
   CircleAlert,
@@ -14,6 +15,7 @@ import {
   MessagesSquare,
   RotateCcw,
   Search,
+  ShieldCheck,
   Sparkles,
   Square,
   SquareTerminal,
@@ -22,6 +24,7 @@ import {
 } from "lucide-react";
 import { useContext, useState } from "react";
 import type { MaestroNote, OrchestratorCheck, OrchestratorStep, OrchestratorTurn } from "../../../shared/api.js";
+import { isFreeWaitingPrompt } from "../../../shared/orchestrator.js";
 import { call, useEngines, useLive, useOrchestrator, useWorkspaces } from "../../api.js";
 import { VibySprite } from "../../components/Pixel.js";
 import { tipProps } from "../../components/Tooltip.js";
@@ -55,14 +58,18 @@ function CheckChip({ check }: { check: OrchestratorCheck }) {
   const live = useLive().data ?? [];
   const copies = useOrchestrator().data?.copies ?? [];
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const label = t(check.kind === "lookup" ? "orch.chip.lookedUp" : "orch.chip.checked", { target: check.label });
+  const verifyFailed = check.kind === "verify" && /^(?:Exit |Timed out)/.test(check.summary);
+  const label = t(check.kind === "lookup" ? "orch.chip.lookedUp" : check.kind === "verify" ? "orch.chip.verified" : "orch.chip.checked", {
+    target: check.label,
+  });
   const canOpenPty = Boolean(check.ptyId && live.some((item) => item.ptyId === check.ptyId));
   const copy = check.copyId ? copies.find((item) => item.id === check.copyId) : undefined;
+  const Icon = check.kind === "verify" ? (verifyFailed ? CircleAlert : ShieldCheck) : Search;
 
   return (
     <>
-      <button type="button" className="viby-chip" onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
-        <Search size={11} />
+      <button type="button" className={`viby-chip${verifyFailed ? " failed" : ""}`} onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}>
+        <Icon size={11} />
         <span className="truncate">{label}</span>
       </button>
       {anchor && (
@@ -387,6 +394,42 @@ function StepChip({ step }: { step: OrchestratorStep }) {
     );
   }
 
+  if (step.kind === "verify") {
+    const label = step.result ? coreText(step.result) : step.asked || step.prompt;
+    return (
+      <button
+        type="button"
+        className="viby-chip action"
+        disabled={!step.workspaceId}
+        onClick={() => {
+          if (!step.workspaceId) return;
+          leaveBar?.();
+          go({ view: "code", workspaceId: step.workspaceId });
+        }}
+      >
+        <ShieldCheck size={11} />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  }
+
+  if (step.kind === "memory") {
+    return (
+      <>
+        <span className="viby-chip settled">
+          <BookOpen size={11} />
+          <span className="truncate">{step.result ? coreText(step.result) : step.asked || t("orch.memoryTitle")}</span>
+        </span>
+        {step.undo && (
+          <button type="button" className="viby-chip" onClick={() => void undo()}>
+            <RotateCcw size={11} />
+            <span>{t("common.undo")}</span>
+          </button>
+        )}
+      </>
+    );
+  }
+
   if (step.kind === "stop") {
     return (
       <span className="viby-chip settled">
@@ -412,8 +455,14 @@ export function NoteTurnView({ note }: { note: MaestroNote }) {
   const live = useLive().data ?? [];
   const copies = useOrchestrator().data?.copies ?? [];
   const [replyAnchor, setReplyAnchor] = useState<HTMLElement | null>(null);
+  const [approved, setApproved] = useState(false);
+  const [approveTrust, approving] = useAction(async () => {
+    await call("pty.write", note.ptyId, "\r");
+    setApproved(true);
+  }, t("orch.failed"));
   const running = live.some((item) => item.ptyId === note.ptyId);
   const copy = note.copyId ? copies.find((item) => item.id === note.copyId) : undefined;
+  const freeTrust = note.kind === "waiting" && running && !approved && isFreeWaitingPrompt(note.reply ?? undefined);
 
   return (
     <div className="orch-turn from-vibeforge orch-note">
@@ -430,6 +479,12 @@ export function NoteTurnView({ note }: { note: MaestroNote }) {
         </span>
         {(running || copy || note.reply) && (
           <div className="viby-chips">
+            {freeTrust && (
+              <button type="button" className="viby-chip action" disabled={approving} onClick={() => void approveTrust()}>
+                <Check size={11} />
+                <span>{t("orch.approveTrust")}</span>
+              </button>
+            )}
             {running && (
               <button
                 type="button"
