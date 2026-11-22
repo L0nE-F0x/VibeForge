@@ -123,7 +123,17 @@ function wireChanges(): void {
   changesWired = true;
   on("changed", (topics) => invalidate(topics));
   // Relative times, next fires and the two-day inbox window move on their own.
-  setInterval(() => cache.refresh(), 30_000);
+  setInterval(() => {
+    if (typeof document === "undefined" || !document.hidden) cache.refresh();
+  }, 30_000);
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        cache.refresh();
+        for (const entry of minuteReloads.values()) void entry.reload();
+      }
+    });
+  }
 }
 
 export function invalidate(topics: Topic[]): void {
@@ -213,7 +223,13 @@ function useEveryMinute(key: string, reload: () => Promise<void>): void {
   useEffect(() => {
     let shared = minuteReloads.get(key);
     if (!shared) {
-      const made = { readers: 0, reload, timer: setInterval(() => void made.reload(), 60_000) };
+      const made = {
+        readers: 0,
+        reload,
+        timer: setInterval(() => {
+          if (typeof document === "undefined" || !document.hidden) void made.reload();
+        }, 60_000),
+      };
       minuteReloads.set(key, made);
       shared = made;
     }

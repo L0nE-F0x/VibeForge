@@ -88,6 +88,7 @@ export interface PlanSettingsContext {
       leadApplies: boolean;
     };
     keepRuns: { days: number; maxMb: number };
+    terminalPassthrough?: boolean;
   };
 }
 
@@ -106,8 +107,9 @@ function modelLanguageTag(choice: ModelChoice): string {
 }
 
 /** Renders the current Viby, Voice/STT, and VibeForge settings block for `orchestratorRules`. */
-export function formatSettingsRules(settings: PlanSettingsContext): string[] {
+export function formatSettingsRules(settings: PlanSettingsContext, options?: { slim?: boolean }): string[] {
   const { viby, voice, app } = settings;
+  const slim = Boolean(options?.slim);
   const planners = viby.availablePlanners
     .filter((item) => item.available)
     .map((item) => {
@@ -120,10 +122,10 @@ export function formatSettingsRules(settings: PlanSettingsContext): string[] {
     .join(", ");
 
   const installedModelSet = new Set(voice.installedModels.map((item) => item.name));
-  const catalogList = MODEL_CATALOG.map(
-    (choice) =>
-      `${choice.id}${installedModelSet.has(choice.file) ? " [installed]" : ""} (${choice.mb}MB, ${choice.backend}, ${modelLanguageTag(choice)})`,
-  ).join(", ");
+  const catalogList = MODEL_CATALOG.map((choice) => {
+    const mark = installedModelSet.has(choice.file) ? " [installed]" : "";
+    return slim ? `${choice.id}${mark}` : `${choice.id}${mark} (${choice.mb}MB, ${choice.backend}, ${modelLanguageTag(choice)})`;
+  }).join(", ");
   const installedModels = voice.installedModels.length ? voice.installedModels.map((item) => item.name).join(", ") : "none";
   const runtimes = [
     voice.runtimes.whisperServer ? "whisper-server" : voice.runtimes.whisperCli ? "whisper-cli" : "",
@@ -134,14 +136,19 @@ export function formatSettingsRules(settings: PlanSettingsContext): string[] {
     .join(", ") || "none";
 
   const installedVoiceSet = new Set(voice.installedVoices.map((item) => item.name));
-  const voiceCatalogList = VOICE_CATALOG.map((v) => `${v.id}${installedVoiceSet.has(v.id) ? " [installed]" : ""} (${v.language})`).join(", ");
+  const voiceCatalogList = VOICE_CATALOG.map((v) => {
+    const mark = installedVoiceSet.has(v.id) ? " [installed]" : "";
+    return slim ? `${v.id}${mark}` : `${v.id}${mark} (${v.language})`;
+  }).join(", ");
   const installedVoices = voice.installedVoices.length ? voice.installedVoices.map((item) => item.name).join(", ") : "none";
+  const themeLimit = slim ? 8 : 20;
 
   return [
     `- Viby (you): planner=${viby.planner || "none"}${viby.pickedEngine ? "" : " (auto)"}, model=${viby.model || "default"}, effort=${viby.effort || "low (default)"}, mode=${viby.mode}, projectsFolder=${viby.projectsFolder || "~/Projects"}; available planners: ${planners || "none"}`,
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
     `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
-    `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, 20).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
+    `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, themeLimit).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px${app.terminalPassthrough ? ", terminalPassthrough=on" : ""}, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
+    ...(slim ? ['  (Use an `inspect` step with prompt "settings" or "voice" for full model/voice sizes, languages, and themes.)'] : []),
   ];
 }
 

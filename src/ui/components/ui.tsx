@@ -1,6 +1,9 @@
 import { AlertTriangle, Check, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
 import {
+  Children,
+  cloneElement,
   forwardRef,
+  isValidElement,
   useCallback,
   useEffect,
   useId,
@@ -117,13 +120,30 @@ export function Field({
   children: ReactNode;
   className?: string;
 }) {
+  const autoId = useId();
   const split = typeof hint === "string" && !more ? splitHint(hint) : null;
   const shown = split ? split.first : hint;
   const extra = more ?? split?.rest;
+  let control = children;
+  let labelFor: string | undefined;
+  if (Children.count(children) === 1 && isValidElement<{ id?: string }>(children)) {
+    const type = children.type;
+    if (type === Input || type === TextArea || type === Select || type === "input" || type === "textarea" || type === "select") {
+      labelFor = children.props.id || autoId;
+      if (!children.props.id) control = cloneElement(children, { id: labelFor });
+    }
+  }
   return (
     <div className={cx("field", className)}>
-      {label && <span className="field-label">{label}</span>}
-      {children}
+      {label &&
+        (labelFor ? (
+          <label className="field-label" htmlFor={labelFor}>
+            {label}
+          </label>
+        ) : (
+          <span className="field-label">{label}</span>
+        ))}
+      {control}
       {error ? (
         <span className="error">{error}</span>
       ) : shown || extra ? (

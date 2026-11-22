@@ -177,6 +177,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   };
 
   const onKey = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown" || isShortcut("switcher.next", event)) {
       event.preventDefault();
       setActive((index) => (listed.length ? (index + 1) % listed.length : 0));

@@ -38,6 +38,13 @@ export class ReadCache {
     return value;
   }
 
+  /** Populate the cache immediately after VibeForge's own atomic write so follow-up reads avoid re-parsing within SETTLE_MS. */
+  put<T>(file: string, value: T): void {
+    const stamp = fileStamp(file);
+    if (stamp) this.entries.set(file, { key: stamp.key, value: structuredClone(value) });
+    else this.entries.delete(file);
+  }
+
   forget(file: string): void {
     this.entries.delete(file);
   }

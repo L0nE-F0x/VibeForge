@@ -118,6 +118,7 @@ export class RunIndex {
     let db: DatabaseSync | null = null;
     try {
       db = this.db = new DatabaseSync(index);
+      this.configureDb();
       this.migrate();
     } catch (error) {
       if (!isBrokenIndex(error)) throw error;
@@ -125,11 +126,39 @@ export class RunIndex {
       db?.close();
       setIndexAside(index);
       this.db = new DatabaseSync(index);
+      this.configureDb();
       this.migrate();
     }
   }
 
+  private configureDb(): void {
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
+  }
+
+  private withTransaction<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* ignore rollback failure */
+      }
+      throw error;
+    }
+  }
+
   close(): void {
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {
+      /* ignore checkpoint error on close */
+    }
     this.db.close();
   }
 
@@ -147,6 +176,12 @@ export class RunIndex {
       this.db.exec("CREATE INDEX runs_status ON runs(status)");
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_workspace_started ON runs(workspaceId, startedAt DESC)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_agent_started ON runs(agentId, startedAt DESC)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_task ON runs(taskId)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_routine ON runs(routineId)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_chat ON runs(chatId)");
+    this.db.exec("CREATE INDEX IF NOT EXISTS runs_status_opened ON runs(status, openedAt)");
     // What a run said, for search. Filled as runs end, and for older runs by `indexMissingText`.
     this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS run_text USING fts5(
       id UNINDEXED, title, prompt, transcript, tokenize = 'unicode61 remove_diacritics 2'
@@ -159,22 +194,32 @@ export class RunIndex {
     const known = new Set((this.db.prepare("SELECT id FROM runs").all() as Array<{ id: string }>).map((row) => row.id));
     const dirs = listRunDirs(this.dataRoot);
     const onDisk = new Set(dirs.map((dir) => path.basename(dir)));
+    const stale: string[] = [];
     for (const id of known) {
-      if (onDisk.has(id)) continue;
-      this.db.prepare("DELETE FROM runs WHERE id = ?").run(id);
-      this.db.prepare("DELETE FROM run_text WHERE id = ?").run(id);
+      if (!onDisk.has(id)) stale.push(id);
     }
-    let added = 0;
+    const fresh: RunMeta[] = [];
     for (const dir of dirs) {
       if (known.has(path.basename(dir))) continue;
       const meta = readRunMeta(dir);
       // A run's folder is named for its id; one that isn't (copied by hand) would be found in the wrong place.
       if (!meta || meta.id !== path.basename(dir)) continue;
       meta.dir = dir;
-      this.indexRun(meta);
-      added += 1;
+      fresh.push(meta);
     }
-    return added;
+    if (!stale.length && !fresh.length) return 0;
+    return this.withTransaction(() => {
+      if (stale.length) {
+        const delRun = this.db.prepare("DELETE FROM runs WHERE id = ?");
+        const delText = this.db.prepare("DELETE FROM run_text WHERE id = ?");
+        for (const id of stale) {
+          delRun.run(id);
+          delText.run(id);
+        }
+      }
+      for (const meta of fresh) this.indexRun(meta);
+      return fresh.length;
+    });
   }
 
   private indexRun(meta: RunMeta): void {
@@ -252,8 +297,11 @@ export class RunIndex {
 
   /** Make a finished run findable by its words. `transcript` is the text the terminal showed. */
   indexRunText(meta: RunMeta, transcript: string): void {
-    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(meta.id);
-    this.db.prepare("INSERT INTO run_text (id, title, prompt, transcript) VALUES (?, ?, ?, ?)").run(meta.id, meta.title, meta.prompt, searchableText(transcript));
+    const text = searchableText(transcript);
+    this.withTransaction(() => {
+      this.db.prepare("DELETE FROM run_text WHERE id = ?").run(meta.id);
+      this.db.prepare("INSERT INTO run_text (id, title, prompt, transcript) VALUES (?, ?, ?, ?)").run(meta.id, meta.title, meta.prompt, text);
+    });
   }
 
   /** Finished runs not in the search index yet, newest first: older runs, and runs from before search. */
@@ -315,8 +363,10 @@ export class RunIndex {
 
   /** Forget a run entirely: its index row and its folder, which is only ever `<data>/runs/<id>`. */
   deleteRun(run: RunMeta): void {
-    this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
-    this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
+    this.withTransaction(() => {
+      this.db.prepare("DELETE FROM runs WHERE id = ?").run(run.id);
+      this.db.prepare("DELETE FROM run_text WHERE id = ?").run(run.id);
+    });
     const dir = runDir(this.dataRoot, run.id);
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   }

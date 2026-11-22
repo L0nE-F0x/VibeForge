@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isUnchangedOwnWrite } from "../src/core/fsx.js";
 import type { Topic } from "../src/core/types.js";
 
 // The config folder is plain files, so it can change outside VibeForge: edited by hand, or by a
@@ -27,13 +28,16 @@ export function watchConfig(configRoot: string, changed: (topics: Topic[]) => vo
   try {
     watcher = fs.watch(configRoot, { recursive: true, persistent: false }, (_type, file) => {
       if (!file) return;
-      for (const topic of configTopics(String(file))) pending.add(topic);
-      if (!pending.size) return;
+      const rel = String(file);
+      const topics = configTopics(rel);
+      if (!topics.length) return;
+      if (isUnchangedOwnWrite(path.join(configRoot, rel))) return;
+      for (const topic of topics) pending.add(topic);
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
-        const topics = [...pending];
+        const next = [...pending];
         pending.clear();
-        changed(topics);
+        changed(next);
       }, 250);
     });
     watcher.on("error", () => undefined);

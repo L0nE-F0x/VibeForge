@@ -227,7 +227,10 @@ export function DockPanel({
           onFocus={() => {
             editing.current = true;
           }}
-          onKeyDown={(event) => event.key === "Enter" && commit()}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key === "Enter") commit();
+          }}
           onBlur={() => {
             // The id is the one this bar was editing, so a blur during a workspace switch cannot
             // write this address onto the workspace being switched to.

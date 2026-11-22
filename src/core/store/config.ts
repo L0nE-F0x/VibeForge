@@ -20,6 +20,7 @@ export function defaultSettings(): Settings {
     notify: true,
     terminalFontSize: 13,
     terminalFontFamily: "JetBrainsMono Nerd Font",
+    terminalPassthrough: false,
     theme: "omarchy",
     tourDone: false,
     checkUpdates: true,
@@ -141,6 +142,10 @@ export class Config {
       if (!fs.existsSync(file)) writeJson(file, defaults, { mode: 0o600 });
       return defaults;
     }
+    return this.normalizeSettings(raw, defaults);
+  }
+
+  private normalizeSettings(raw: Partial<Settings>, defaults = defaultSettings()): Settings {
     return {
       defaultEngine: str(raw.defaultEngine) || defaults.defaultEngine,
       defaultShell: str(raw.defaultShell) || defaults.defaultShell,
@@ -150,6 +155,7 @@ export class Config {
           ? raw.terminalFontSize
           : defaults.terminalFontSize,
       terminalFontFamily: str(raw.terminalFontFamily) || defaults.terminalFontFamily,
+      terminalPassthrough: bool(raw.terminalPassthrough, defaults.terminalPassthrough),
       // "builtin" was Apex Forge before any theme could be picked.
       theme: raw.theme === "builtin" ? "apex-forge" : isThemeId(str(raw.theme)) ? str(raw.theme) : defaults.theme,
       tourDone: bool(raw.tourDone, defaults.tourDone),
@@ -201,8 +207,9 @@ export class Config {
   }
 
   writeSettings(settings: Settings): void {
-    writeJson(path.join(this.configRoot, "settings.json"), settings, { mode: 0o600 });
-    this.cache.forget(path.join(this.configRoot, "settings.json"));
+    const file = path.join(this.configRoot, "settings.json");
+    writeJson(file, settings, { mode: 0o600 });
+    this.cache.put(file, this.normalizeSettings(settings));
   }
 
   readEngineRows(): EngineRow[] {
@@ -230,8 +237,9 @@ export class Config {
     const file = path.join(this.configRoot, "engines.json");
     const raw = readJson<{ seedRevision?: unknown }>(file, {});
     const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
-    writeJson(file, { engines: normalizeEngineRows(rows), seedRevision: revision });
-    this.cache.forget(file);
+    const normalized = normalizeEngineRows(rows);
+    writeJson(file, { engines: normalized, seedRevision: revision });
+    this.cache.put(file, normalized);
   }
 
   readWorkspaces(): WorkspaceFile {
@@ -251,7 +259,9 @@ export class Config {
   writeWorkspaces(file: WorkspaceFile): void {
     const target = path.join(this.configRoot, "workspaces.json");
     writeJson(target, file);
-    this.cache.forget(target);
+    const normalizedWorkspaces = (file.workspaces ?? []).map(normalizeWorkspace).filter((item): item is Workspace => item !== null);
+    const last = file.lastWorkspaceId && normalizedWorkspaces.some((item) => item.id === file.lastWorkspaceId) ? file.lastWorkspaceId : (normalizedWorkspaces[0]?.id ?? null);
+    this.cache.put(target, { workspaces: normalizedWorkspaces, lastWorkspaceId: last });
   }
 
   readLayout(workspaceId: string): LayoutNode | null {

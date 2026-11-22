@@ -6,6 +6,44 @@ export interface WriteOptions {
   mode?: number;
 }
 
+const ownWriteStamps = new Map<string, string>();
+const ownDeletes = new Map<string, number>();
+
+function rememberBounded<V>(map: Map<string, V>, key: string, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > 256) map.delete(map.keys().next().value as string);
+}
+
+/** Exact stat stamp for a regular file, or null when missing / not a file. */
+export function fileStampKey(file: string): string | null {
+  try {
+    const stat = fs.statSync(file);
+    return stat.isFile() ? `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Record that VibeForge itself removed or stashed `file` so config watchers skip the matching delete event. */
+export function noteOwnDelete(file: string): void {
+  const full = path.resolve(file);
+  ownWriteStamps.delete(full);
+  rememberBounded(ownDeletes, full, Date.now());
+}
+
+/** Whether `file` on disk still holds the exact stat stamp of VibeForge's own atomic write (or a recent own delete). */
+export function isUnchangedOwnWrite(file: string): boolean {
+  const full = path.resolve(file);
+  const stamp = fileStampKey(full);
+  if (stamp !== null) return ownWriteStamps.get(full) === stamp;
+  const now = Date.now();
+  const direct = ownDeletes.get(full);
+  if (direct !== undefined && now - direct < 1000) return true;
+  const parent = ownDeletes.get(path.dirname(full));
+  return parent !== undefined && now - parent < 1000;
+}
+
 /** Write through a temp file and rename, so a crash never leaves half a YAML file behind. */
 export function writeFileAtomic(file: string, text: string, options: WriteOptions = {}): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -14,6 +52,10 @@ export function writeFileAtomic(file: string, text: string, options: WriteOption
   // The umask, or a temp file left by a crash, would otherwise decide.
   if (options.mode !== undefined) fs.chmodSync(temp, options.mode);
   fs.renameSync(temp, file);
+  const full = path.resolve(file);
+  ownDeletes.delete(full);
+  const stamp = fileStampKey(full);
+  if (stamp) rememberBounded(ownWriteStamps, full, stamp);
 }
 
 export function readJson<T>(file: string, fallback: T): T {

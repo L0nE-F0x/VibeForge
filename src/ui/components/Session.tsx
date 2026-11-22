@@ -169,7 +169,7 @@ export function Composer({
             setText(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             // Ctrl+Shift+Enter, which opened the box from the terminal, closes it too.
             if (isShortcut("terminal.write", event)) {
               event.preventDefault();

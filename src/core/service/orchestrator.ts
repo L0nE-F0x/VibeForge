@@ -119,6 +119,8 @@ const NOTE_EVERY_MS = 60_000;
 const READ_KEEP = 20_000;
 /** Turns the planner is reminded of when its session is gone and a new one starts. */
 const RECAP_TURNS = 6;
+/** Brief cache window for planner context snapshots; invalidated immediately on any core change event. */
+const CONTEXT_TTL_MS = 1500;
 /** Folders on disk a lookup names at most, and how long it may look for them. */
 const LOOKUP_FOLDERS = 8;
 const LOOKUP_WALK_MS = 3000;
@@ -130,8 +132,12 @@ interface Conversation {
   engineId: string;
   /** The session exists (its first turn went through), so the next turn resumes it. */
   begun: boolean;
+  /** Turn-1 rendered rules kept stable across resumed Claude/Codex turns to preserve prompt caching. */
+  initialRules?: string;
   /** Non-copy workspaces present when the session began, so adding one refreshes a planner that caches rules on turn 1. */
   workspacesKey?: string;
+  /** Live workspace/running/copy fingerprint from the previous turn for delta updates on resumed cached sessions. */
+  liveKey?: string;
   /** Settings fingerprint from the previous turn, so a resumed session hears when settings changed. */
   settingsKey?: string;
   /** Agents/skills/routines/tasks/chats fingerprint so a resumed session hears when library items changed. */
@@ -247,6 +253,7 @@ export class OrchestratorDesk {
   private readonly chainWaiters = new Map<string, Set<(ok: boolean) => void>>();
   private readonly chainTimers = new Map<string, NodeJS.Timeout>();
   private readonly firstPromptTimers = new Map<string, NodeJS.Timeout>();
+  private cachedContext: { at: number; promise: Promise<PlanContext> } | null = null;
   runner: BrainRunner = spawnBrain;
   /** Quiet time before a chained `after: true` step considers the previous PTY turn settled. */
   chainSettleMs = 1200;
@@ -267,6 +274,9 @@ export class OrchestratorDesk {
   ) {
     this.conversation = this.load();
     this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
+    this.core.onChange(() => {
+      this.cachedContext = null;
+    });
   }
 
   private get dir(): string {
@@ -285,6 +295,11 @@ export class OrchestratorDesk {
       sessionId: typeof saved?.sessionId === "string" && saved.sessionId ? saved.sessionId : randomUUID(),
       engineId: typeof saved?.engineId === "string" ? saved.engineId : "",
       begun: Boolean(saved?.begun),
+      ...(typeof saved?.initialRules === "string" && saved.initialRules ? { initialRules: saved.initialRules } : {}),
+      ...(typeof saved?.workspacesKey === "string" ? { workspacesKey: saved.workspacesKey } : {}),
+      ...(typeof saved?.liveKey === "string" ? { liveKey: saved.liveKey } : {}),
+      ...(typeof saved?.settingsKey === "string" ? { settingsKey: saved.settingsKey } : {}),
+      ...(typeof saved?.libraryKey === "string" ? { libraryKey: saved.libraryKey } : {}),
       turns,
     };
   }
@@ -377,7 +392,19 @@ export class OrchestratorDesk {
   }
 
   /** What the planning CLI is told is here: workspaces, CLIs, agents, tasks, routines, running sessions, and copies waiting for review. */
-  async context(): Promise<PlanContext> {
+  async context(fresh = false): Promise<PlanContext> {
+    if (!fresh && this.cachedContext && Date.now() - this.cachedContext.at < CONTEXT_TTL_MS) {
+      return this.cachedContext.promise;
+    }
+    const promise = this.buildContext().catch((error) => {
+      if (this.cachedContext?.promise === promise) this.cachedContext = null;
+      throw error;
+    });
+    this.cachedContext = { at: Date.now(), promise };
+    return promise;
+  }
+
+  private async buildContext(): Promise<PlanContext> {
     const rows = this.core.store.readEngineRows();
     const workspaces = await Promise.all(
       // No past runs here: they'd go with every turn. A lookup step searches them when asked.
@@ -606,6 +633,7 @@ export class OrchestratorDesk {
         sync: { enabled: all.sync.enabled, name: all.sync.name },
         agentTalk: { ...all.agentTalk },
         keepRuns: { ...all.keepRuns },
+        ...(all.terminalPassthrough ? { terminalPassthrough: true } : {}),
       },
     };
   }
@@ -675,14 +703,16 @@ export class OrchestratorDesk {
       .filter((w) => !copies.some((c) => c.openedWorkspaceId === w.id))
       .map((w) => `${w.id}:${w.name}`)
       .join("|");
+    const currentLiveKey = liveStateFingerprint(context);
     const currentSettingsKey = settingsFingerprint(context.settings);
     const currentLibraryKey = libraryFingerprint(context);
     const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
+    const plannerKind = brainKind(engine.row);
     const workspacesChanged = Boolean(
       this.conversation.begun &&
         this.conversation.workspacesKey !== undefined &&
         this.conversation.workspacesKey !== currentWorkspacesKey &&
-        brainKind(engine.row) === "grok",
+        plannerKind === "grok",
     );
     if (this.conversation.engineId !== engineId || workspacesChanged) {
       this.conversation = {
@@ -690,7 +720,9 @@ export class OrchestratorDesk {
         sessionId: randomUUID(),
         engineId,
         begun: false,
+        initialRules: undefined,
         workspacesKey: currentWorkspacesKey,
+        liveKey: currentLiveKey,
         settingsKey: currentSettingsKey,
         libraryKey: currentLibraryKey,
       };
@@ -706,7 +738,7 @@ export class OrchestratorDesk {
         this.conversation.libraryKey !== undefined &&
         this.conversation.libraryKey !== currentLibraryKey,
     );
-    const settingsLine = settingsChanged && context.settings ? `(Updated settings:\n${formatSettingsRules(context.settings).join("\n")})` : "";
+    const settingsLine = settingsChanged && context.settings ? `(Updated settings:\n${formatSettingsRules(context.settings, { slim: true }).join("\n")})` : "";
     const libraryLine = libraryChanged ? formatLibraryUpdate(context) : "";
     const work = path.join(this.dir, "work");
     fs.mkdirSync(work, { recursive: true });
@@ -715,10 +747,16 @@ export class OrchestratorDesk {
     fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
+    let capturedInitialRules = this.conversation.initialRules;
     const turn = async (said: string, ctx: PlanContext = context) => {
-      const prefix = [here, this.conversation.begun ? settingsLine : "", this.conversation.begun ? libraryLine : ""].filter(Boolean).join("\n");
+      const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
+      const liveChanged = keepPromptCache && this.conversation.liveKey !== undefined && this.conversation.liveKey !== liveStateFingerprint(ctx);
+      const liveLine = liveChanged ? formatLiveUpdate(ctx) : "";
+      const rules = keepPromptCache ? this.conversation.initialRules! : orchestratorRules(ctx);
+      if (!this.conversation.begun) capturedInitialRules = rules;
+      const prefix = [here, liveLine, this.conversation.begun ? settingsLine : "", this.conversation.begun ? libraryLine : ""].filter(Boolean).join("\n");
       const text = prefix ? `${prefix}\n${said}` : said;
-      const args = brainArgs(engine.row, { text, rules: orchestratorRules(ctx), sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, effort: explicitEffort, schemaFile });
+      const args = brainArgs(engine.row, { text, rules, sessionId: this.conversation.sessionId, resume: this.conversation.begun, model, effort: explicitEffort, schemaFile });
       return args ? this.runner([engine.binPath, ...args], work, signal) : null;
     };
     const initialText = (switchedEngine || workspacesChanged) && !this.conversation.begun ? this.recap(words) : words;
@@ -731,7 +769,7 @@ export class OrchestratorDesk {
     // The session it was asked to resume is gone (tidied away by the CLI): start a new one, once,
     // reminded of what was said lately.
     if (!signal.aborted && !run.timedOut && this.conversation.begun && !output.plan && (run.code !== 0 || output.error) && sessionGone(`${output.error}\n${run.stderr}\n${run.stdout}`)) {
-      this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false };
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false, initialRules: undefined, liveKey: undefined };
       const retried = await turn(this.recap(words));
       if (retried) {
         run = retried;
@@ -742,7 +780,7 @@ export class OrchestratorDesk {
     // steps: [] (e.g. a resumed session with stale rules or acting as if a tool turn follows):
     // start a fresh session with the current workspace and running lists and ask once for real steps.
     if (!signal.aborted && !run.timedOut && output.plan && !output.plan.steps.length && emptyPromise(output.plan.say)) {
-      this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false };
+      this.conversation = { ...this.conversation, sessionId: randomUUID(), begun: false, initialRules: undefined, liveKey: undefined };
       const retried = await turn(
         [
           this.recap(words),
@@ -774,7 +812,9 @@ export class OrchestratorDesk {
     // Codex and Antigravity name their own session; the next turn resumes that one.
     if (sessionId) this.conversation.sessionId = sessionId;
     this.conversation.begun = true;
+    if (!this.conversation.initialRules && capturedInitialRules) this.conversation.initialRules = capturedInitialRules;
     this.conversation.workspacesKey = currentWorkspacesKey;
+    this.conversation.liveKey = currentLiveKey;
     this.conversation.settingsKey = currentSettingsKey;
     this.conversation.libraryKey = currentLibraryKey;
     if (!plan) {
@@ -823,8 +863,9 @@ export class OrchestratorDesk {
         if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
         if (nextOut.plan) {
           plan = nextOut.plan;
-          currentContext = await this.context();
+          currentContext = await this.context(true);
           if (signal.aborted) return;
+          this.conversation.liveKey = liveStateFingerprint(currentContext);
           steps = resolvePlan(plan, currentContext);
           unknownKinds = droppedKinds(plan.steps);
           followed = true;
@@ -2884,6 +2925,29 @@ function substitutePlannedId(
       if (changed) later.route = nextRoute;
     }
   }
+}
+
+/** Compact fingerprint of workspaces, live sessions, and review copies so cached planners hear deltas. */
+function liveStateFingerprint(context: PlanContext): string {
+  return JSON.stringify([
+    context.workspaces.map((w) => `${w.id}:${w.name}:${w.folder}:${w.git}`),
+    context.running.map((r) => `${r.id}:${r.engine}:${r.workspace}:${r.working ? 1 : 0}:${r.waiting ?? ""}:${r.branch ?? ""}:${r.asked ?? ""}`),
+    (context.copies ?? []).map((c) => `${c.id}:${c.name}:${c.branch}:${c.workspace}`),
+  ]);
+}
+
+function formatLiveUpdate(context: PlanContext): string {
+  const workspaces = context.workspaces.length ? context.workspaces.map((w) => `${w.name} (${w.folder})`).join(", ") : "none";
+  const running = context.running.length
+    ? context.running
+        .map(
+          (r) =>
+            `${r.id} (${r.engine} in ${r.workspace}, ${r.working ? "working" : r.waiting ? `WAITING ON PROMPT: "${r.waiting}"` : "waiting"}${r.branch ? `, ${r.branch}` : ""}${r.asked ? `; asked: ${r.asked}` : ""})`,
+        )
+        .join("; ")
+    : "none";
+  const copies = context.copies?.length ? context.copies.map((c) => `${c.id} (${c.name}, ${c.branch} from ${c.workspace})`).join(", ") : "none";
+  return `(Updated live state:\n- Workspaces: ${workspaces}\n- Running: ${running}\n- Copies waiting for review: ${copies})`;
 }
 
 /** Compact fingerprint of saved library items so a resumed planner notices changes between turns. */

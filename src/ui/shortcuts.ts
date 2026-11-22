@@ -107,6 +107,8 @@ const LIST = [
   { id: "code.splitDown", keys: "Ctrl+Shift+E", label: "shortcuts.splitDown", group: "shortcuts.code", scope: "code", paused: "overlay", once: true, chord: ctrlShift("e"), terminal: "window" },
   { id: "code.close", keys: "Ctrl+Shift+W", label: "shortcuts.closePane", group: "shortcuts.code", scope: "code", paused: "overlay", once: true, chord: ctrlShift("w"), terminal: "window" },
   { id: "code.maximize", keys: "Ctrl+Shift+M", label: "shortcuts.maximize", group: "shortcuts.code", scope: "code", paused: "overlay", once: true, chord: ctrlShift("m"), terminal: "window" },
+  { id: "code.prevPane", keys: "Ctrl+Shift+[", label: "shortcuts.prevPane", group: "shortcuts.code", scope: "code", paused: "overlay", once: true, chord: { ctrl: true, shift: true, alt: false, meta: false, code: "BracketLeft" }, terminal: "window" },
+  { id: "code.nextPane", keys: "Ctrl+Shift+]", label: "shortcuts.nextPane", group: "shortcuts.code", scope: "code", paused: "overlay", once: true, chord: { ctrl: true, shift: true, alt: false, meta: false, code: "BracketRight" }, terminal: "window" },
   { id: "code.maximizeTitle", gesture: "shortcuts.doubleClick", label: "shortcuts.maximizeTitle", group: "shortcuts.code", scope: "code", paused: "never" },
   { id: "code.movePane", gesture: "shortcuts.drag", label: "shortcuts.movePane", group: "shortcuts.code", scope: "code", paused: "never" },
   { id: "code.moveWorkspace", gesture: "shortcuts.drag", label: "shortcuts.moveWorkspace", group: "shortcuts.code", scope: "code", paused: "never" },
@@ -120,6 +122,7 @@ const LIST = [
   { id: "terminal.interrupt", keys: "Ctrl+C", label: "shortcuts.interrupt", group: "shortcuts.terminals", scope: "terminal", paused: "never" },
   { id: "terminal.drop", gesture: "shortcuts.dropFile", label: "shortcuts.drop", group: "shortcuts.terminals", scope: "terminal", paused: "never" },
   { id: "terminal.write", keys: "Ctrl+Shift+Enter", label: "shortcuts.write", group: "shortcuts.terminals", scope: "terminal", paused: "never", chord: { ctrl: true, shift: true, alt: false, key: "Enter" }, terminal: "own" },
+  { id: "terminal.find", keys: "Ctrl+Shift+F", label: "shortcuts.findTerminal", group: "shortcuts.terminals", scope: "terminal", paused: "never", chord: ctrlShift("f"), terminal: "own" },
 
   // ---------------------------------------------------------------- voice
   { id: "voice.dictate", keys: "Ctrl+Shift+Space", label: "shortcuts.dictate", group: "shortcuts.voice", scope: "voice", paused: "never", chord: { ctrl: true, shift: true, alt: false, meta: false, code: "Space" }, terminal: "first" },

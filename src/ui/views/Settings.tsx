@@ -269,6 +269,13 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
                 </div>
               </Field>
             </div>
+            <Field hint={t("settings.terminalPassthroughHint")}>
+              <Toggle
+                checked={current.terminalPassthrough}
+                onChange={(terminalPassthrough) => void patch({ terminalPassthrough })}
+                label={t("settings.terminalPassthrough")}
+              />
+            </Field>
           </div>
 
           <div className="section-title" id="settings-rail">

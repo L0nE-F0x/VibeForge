@@ -129,6 +129,8 @@ export interface Settings {
   notify: boolean;
   terminalFontSize: number;
   terminalFontFamily: string;
+  /** Let terminal-first chords like plain Ctrl+V (Vim visual block) and Alt+1..9 (tmux) pass straight to programs. */
+  terminalPassthrough: boolean;
   /** "omarchy" follows the desktop's theme; anything else pins one by its folder name, such as "tokyo-night". */
   theme: string;
   /** The welcome tour has been finished or skipped; it opens by itself until then. */

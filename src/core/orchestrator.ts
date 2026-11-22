@@ -233,7 +233,7 @@ export function brainArgs(row: EngineRow, opts: BrainOptions): string[] | null {
     return [
       ...row.args,
       "-p",
-      `${opts.rules}\n\nThe person said:\n${opts.text}`,
+      resume ? opts.text : `${opts.rules}\n\nThe person said:\n${opts.text}`,
       "--output-format",
       "json",
       "--json-schema",
@@ -403,7 +403,7 @@ export function orchestratorRules(context: PlanContext): string {
     ...(routines ? ["", "Scheduled routines:", routines] : []),
     ...(chats ? ["", "Chats:", chats] : []),
     ...(runs ? ["", "Recent runs:", runs] : []),
-    ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings)] : []),
+    ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings, { slim: true })] : []),
   ].join("\n");
 }
 

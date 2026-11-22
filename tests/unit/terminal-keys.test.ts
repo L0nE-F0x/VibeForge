@@ -32,6 +32,14 @@ describe("terminal clipboard keys", () => {
     expect(clipboardKey(key("c", { ctrl: true, alt: true }), true)).toBeNull();
     expect(clipboardKey(key("c"), true)).toBeNull();
   });
+
+  it("lets plain Ctrl+V and Alt+digits pass through when rawKeys is enabled", () => {
+    expect(clipboardKey(key("v", { ctrl: true }), false, true)).toBeNull();
+    expect(clipboardKey(key("V", { ctrl: true, shift: true }), false, true)).toBe("paste");
+    expect(clipboardKey(key("Insert", { shift: true }), false, true)).toBe("paste");
+    expect(appShortcut(key("3", { alt: true }, "Digit3"), true)).toBe(false);
+    expect(appShortcut(key("K", { ctrl: true, shift: true }), true)).toBe(true);
+  });
 });
 
 describe("app shortcuts in a terminal", () => {

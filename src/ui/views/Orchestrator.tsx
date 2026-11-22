@@ -61,7 +61,7 @@ import {
   type PlanContext,
 } from "../../shared/orchestrator.js";
 import { call, useAgents, useChats, useEngines, useLive, useOrchestrator, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
-import { CallButton, callMood, METER_CELLS, useCall, useCallToggle, useUnreadSaid } from "../call.js";
+import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { Composer } from "../components/Session.js";
 import { tipProps } from "../components/Tooltip.js";
@@ -498,7 +498,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
     <div className="scrim switcher-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={box} className="switcher orch-bar" role="dialog" aria-modal aria-label={t("orch.title")} tabIndex={-1}>
         <div className="orch-bar-head">
-          <VibySprite mood={callMood(callState)} size={18} level={callState.level} />
+          <LiveVibySprite mood={callMood(callState)} size={18} active={callState.on} />
           <strong>{t("orch.title")}</strong>
           <PlannerModelLabel engineId={engineId} locked={callState.on} />
           <span className="grow" />
@@ -732,6 +732,7 @@ function ModelPopover({
               placeholder={t("orch.modelPlaceholder")}
               onChange={(event) => setTyped(event.target.value)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {
                   const cleaned = cleanModel(typed);
                   onSave({ ...current, engine: engineId, model: cleaned });
@@ -776,7 +777,6 @@ function LiveCallDock({
   const t = useT();
   const mood = callMood(callState);
   const muted = Boolean(callState.muted);
-  const lit = Math.round(callState.level * METER_CELLS);
   // The call bar is hidden in this tab, so a line nobody read aloud (an error above all) shows here.
   const unread = useUnreadSaid(callState);
   const stateLabel =
@@ -793,15 +793,9 @@ function LiveCallDock({
   return (
     <div className={`viby-live-dock state-${mood}`} role="status" aria-live="polite">
       <div className="viby-live-inner">
-        <VibySprite mood={mood} size={28} level={callState.level} />
+        <LiveVibySprite mood={mood} size={28} active={callState.on} />
         <strong className="viby-live-label">{stateLabel}</strong>
-        {mood === "listening" && (
-          <span className="meter" aria-hidden>
-            {Array.from({ length: METER_CELLS }, (_, i) => (
-              <i key={i} className={i < lit ? (i >= METER_CELLS - 3 ? "hot" : "on") : undefined} />
-            ))}
-          </span>
-        )}
+        {mood === "listening" && <CallMeterCells />}
         {(mood === "speaking" || mood === "thinking") && callState.talkOver && !muted && (
           <span className="faint small truncate">{t("call.talkOverHint")}</span>
         )}
@@ -877,7 +871,7 @@ function ConversationStream({
       <div className="viby-thread">
         {view && turns.length === 0 && !view.thinking && !showLiveUser && (
           <div className="viby-call-ready">
-            {!compact && <VibySprite mood={callMood(callState)} size={52} level={callState.level} />}
+            {!compact && <LiveVibySprite mood={callMood(callState)} size={52} active={callState.on} />}
             <p className="viby-sees">{seesLine}</p>
           </div>
         )}
@@ -1781,7 +1775,10 @@ function InlineField({
       placeholder={label}
       {...(tip ? tipProps(tip) : {})}
       onChange={(event) => setText(event.target.value)}
-      onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
       onFocus={() => {
         focused.current = true;
       }}
@@ -1808,7 +1805,10 @@ function BranchField({ value, onDone }: { value: string; onDone: (branch: string
         aria-label={t("orch.branch")}
         placeholder={t("orch.noBranch")}
         onChange={(event) => setBranch(event.target.value)}
-        onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+        onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
         onBlur={() => branch.trim() !== value && onDone(branch.trim())}
       />
     </label>
@@ -1833,7 +1833,10 @@ function ModelField({ engine, value, onDone }: { engine: Engine | undefined; val
         aria-label={t("orch.model")}
         placeholder={usable ? t("orch.modelDefault") : t("orch.noModel")}
         onChange={(event) => setModel(event.target.value)}
-        onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+        onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
         onBlur={() => {
           const cleaned = cleanModel(model);
           setModel(cleaned);

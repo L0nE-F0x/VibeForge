@@ -20,7 +20,7 @@ interface KeyLike {
   metaKey: boolean;
 }
 
-export function clipboardKey(event: KeyLike, hasSelection: boolean): ClipboardKey {
+export function clipboardKey(event: KeyLike, hasSelection: boolean, rawKeys = false): ClipboardKey {
   if (event.altKey || event.metaKey) return null;
   const key = event.key.toLowerCase();
   if (event.ctrlKey && event.shiftKey && key === "c") return "copy";
@@ -28,16 +28,18 @@ export function clipboardKey(event: KeyLike, hasSelection: boolean): ClipboardKe
   if (event.ctrlKey && !event.shiftKey && key === "insert") return "copy";
   if (event.shiftKey && !event.ctrlKey && key === "insert") return "paste";
   if (isShortcut("terminal.copy", event)) return hasSelection ? "copy" : null;
-  if (isShortcut("terminal.paste", event)) return "paste-or-pass";
+  if (!rawKeys && isShortcut("terminal.paste", event)) return "paste-or-pass";
   return null;
 }
 
 /**
  * App shortcuts that must reach the window instead of the program in the terminal: the ones
  * shortcuts.ts marks for it. Ctrl+Shift+K opens the switcher there; plain Ctrl+K stays the
- * program's (kill to end of line), and so do Alt+← and Alt+→.
+ * program's (kill to end of line), and so do Alt+← and Alt+→. When `rawKeys` is enabled,
+ * `Alt+1…9` also passes through to terminal multiplexers like tmux/weechat.
  */
-export function appShortcut(event: KeyLike): boolean {
+export function appShortcut(event: KeyLike, rawKeys = false): boolean {
+  if (rawKeys && isShortcut("app.workspaces", event)) return false;
   return reachesWindow(event);
 }
 
