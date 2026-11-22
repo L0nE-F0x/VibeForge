@@ -13,7 +13,8 @@
 # (VIBEFORGE_BRANCH=main for unreleased work), when the release has no ready-made build (older ones
 # don't) or none for this CPU. It says which way it went. VIBEFORGE_VERSION=vX.Y.Z installs that
 # release instead of the newest. `--uninstall` removes the command, launcher entry and login entry
-# but keeps your agents, routines and runs.
+# while keeping the app folder, agents, routines and runs; `--purge-app` also removes the app folder
+# in `$DEST` (keeping `~/.config/vibeforge` and `~/.local/share/vibeforge`).
 #
 # An update is unpacked (or built) beside the installed copy, in vibeforge-app.next, and swapped in
 # only once it is whole, so a dropped network, a bad download or a failed build leaves the installed
@@ -69,14 +70,72 @@ die() {
   exit 1
 }
 
+# Package-install command tailored to the Linux distribution running this script.
+pkg_hint() {
+  local kind="$1" extra="${2:-}"
+  if command -v pacman >/dev/null 2>&1; then
+    case "$kind" in
+      curl) printf 'sudo pacman -S --needed curl' ;;
+      runtime) printf 'sudo pacman -S --needed curl tar zstd coreutils' ;;
+      build) printf 'sudo pacman -S --needed %s' "${extra:-git base-devel python}" ;;
+      node) printf 'mise use -g node@lts (or sudo pacman -S nodejs)' ;;
+    esac
+  elif command -v apt-get >/dev/null 2>&1; then
+    case "$kind" in
+      curl) printf 'sudo apt-get install -y curl' ;;
+      runtime) printf 'sudo apt-get install -y curl tar zstd coreutils' ;;
+      build) printf 'sudo apt-get install -y git build-essential python3' ;;
+      node) printf 'mise use -g node@lts (or sudo apt-get install -y nodejs)' ;;
+    esac
+  elif command -v dnf >/dev/null 2>&1; then
+    case "$kind" in
+      curl) printf 'sudo dnf install -y curl' ;;
+      runtime) printf 'sudo dnf install -y curl tar zstd coreutils' ;;
+      build) printf 'sudo dnf install -y git make gcc-c++ python3' ;;
+      node) printf 'mise use -g node@lts (or sudo dnf install -y nodejs)' ;;
+    esac
+  elif command -v zypper >/dev/null 2>&1; then
+    case "$kind" in
+      curl) printf 'sudo zypper install -y curl' ;;
+      runtime) printf 'sudo zypper install -y curl tar zstd coreutils' ;;
+      build) printf 'sudo zypper install -y git make gcc-c++ python3' ;;
+      node) printf 'mise use -g node@lts (or sudo zypper install -y nodejs22)' ;;
+    esac
+  else
+    case "$kind" in
+      curl) printf 'install curl with your package manager' ;;
+      runtime) printf 'install curl, tar, zstd and coreutils with your package manager' ;;
+      build) printf 'install git, make, g++ and python3 with your package manager' ;;
+      node) printf 'mise use -g node@lts (or install Node.js 20+ with your package manager)' ;;
+    esac
+  fi
+}
+
 uninstall() {
-  step "Removing the vibeforge command, launcher entry and login entry"
+  local purge="${1:-0}"
+  DEST="$(realpath -m "$DEST")"
+  [[ "$DEST" != "/" ]] || die "VIBEFORGE_HOME can't be /."
+  if ((purge)) && [[ -e "$DEST" && ! -d "$DEST/.git" && ! -e "$DEST/$MARK" && ! -f "$DEST/dist-electron/main.js" ]]; then
+    die "$DEST exists but is not a VibeForge copy. Refusing to remove it."
+  fi
+  if ((purge)); then
+    step "Removing VibeForge app files, command, launcher entry and login entry"
+  else
+    step "Removing the vibeforge command, launcher entry and login entry"
+  fi
   rm -f "$BIN_DIR/vibeforge" "$APPS_DIR/vibeforge.desktop" "$AUTOSTART"
   rm -f "$ICON_DIR/512x512/apps/vibeforge.png" "$ICON_DIR/256x256/apps/vibeforge.png" "$ICON_DIR/scalable/apps/vibeforge.svg"
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+  if ((purge)); then
+    rm -rf "$DEST" "$DEST.previous" "$DEST.next" "$DEST.download" "$DEST.lock"
+  fi
   # Nothing running is stopped: a VibeForge that is open keeps its terminals until it is quit.
   note "If VibeForge is open, quit it (its tray menu → Quit, or close the window)."
-  note "The app itself is still in $DEST. Delete it with: rm -rf \"$DEST\" \"$DEST.previous\" \"$DEST.lock\""
+  if ((purge)); then
+    note "Removed the app files in $DEST."
+  else
+    note "The app itself is still in $DEST. Re-run with --purge-app or delete with: rm -rf \"$DEST\" \"$DEST.previous\" \"$DEST.lock\""
+  fi
   note "Your data is untouched: ~/.config/vibeforge and ~/.local/share/vibeforge (agents, routines, runs)."
   note "Also left: ~/.config/VibeForge (the window's browser profile: the browser pane's sign-ins and cache)"
   note "and ~/.cache/vibeforge. Delete them too to remove everything."
@@ -94,7 +153,7 @@ uninstall() {
 latest_release_tag() {
   LATEST_TAG=""
   [[ -n "$RELEASES" ]] || return 0
-  command -v curl >/dev/null 2>&1 || die "curl is missing. Install it with: sudo pacman -S --needed curl"
+  command -v curl >/dev/null 2>&1 || die "curl is missing. Install it with: $(pkg_hint curl)"
   local out status=0 code url
   out=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
   ((status == 0)) || die "Could not reach GitHub to find the latest release (curl error $status). Check the network, then run this again."
@@ -203,11 +262,11 @@ build_from_source() {
   if ((${#missing[@]})); then
     local packages
     packages=$(printf '%s\n' "${missing[@]}" | sort -u | tr '\n' ' ')
-    die "Building from source needs build tools. Install them with: sudo pacman -S --needed $packages"
+    die "Building from source needs build tools. Install them with: $(pkg_hint build "$packages")"
   fi
-  # Vite, which builds the app, needs Node 20.19+ or 22.12+.
-  ((NODE_MAJOR > 22 || (NODE_MAJOR == 22 && NODE_MINOR >= 12) || (NODE_MAJOR == 20 && NODE_MINOR >= 19))) ||
-    die "Building VibeForge needs Node 20.19+ or 22.12+ (found $(node --version)). Try: mise use -g node@lts"
+  # Vite, TypeScript 7, and VibeForge's engines require Node 22.12+.
+  ((NODE_MAJOR > 22 || (NODE_MAJOR == 22 && NODE_MINOR >= 12))) ||
+    die "Building VibeForge needs Node 22.12+ (found $(node --version)). Try: mise use -g node@lts"
   command -v npm >/dev/null 2>&1 || die "npm is missing next to node."
 
   # The copy from two updates ago stays until the new one is built: it goes at the swap.
@@ -266,6 +325,15 @@ add_launcher() {
   if command -v rsvg-convert >/dev/null 2>&1; then
     rsvg-convert -w 256 -h 256 "$DEST/resources/icon.svg" -o "$ICON_DIR/256x256/apps/vibeforge.png" 2>/dev/null || true
   fi
+  local exec_cmd="$BIN_DIR/vibeforge"
+  if [[ "$exec_cmd" == *[[:space:]]* || "$exec_cmd" == *[\"\'\\\$]* || "$exec_cmd" == *'`'* ]]; then
+    local escaped="$exec_cmd"
+    escaped="${escaped//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//\$/\\\$}"
+    escaped="${escaped//\`/\\\`}"
+    exec_cmd="\"$escaped\""
+  fi
   cat >"$APPS_DIR/vibeforge.desktop" <<EOF
 [Desktop Entry]
 Version=1.0
@@ -273,7 +341,7 @@ Type=Application
 Name=VibeForge
 GenericName=Agent desk
 Comment=Your coding CLIs, agents, routines and tasks in one window
-Exec=$BIN_DIR/vibeforge
+Exec=$exec_cmd
 TryExec=$BIN_DIR/vibeforge
 Icon=$ICON_DIR/512x512/apps/vibeforge.png
 Terminal=false
@@ -286,7 +354,8 @@ EOF
 }
 
 main() {
-  [[ "${1:-}" == "--uninstall" ]] && uninstall
+  [[ "${1:-}" == "--uninstall" ]] && uninstall 0
+  [[ "${1:-}" == "--purge-app" ]] && uninstall 1
 
   printf '\n  %s%sVibeForge%s %s— your coding agents, forged into one desk%s\n\n' "$bold" "$amber" "$reset" "$dim" "$reset"
 
@@ -317,7 +386,7 @@ main() {
       step "Installing Node LTS with mise"
       mise use -g node@lts
     else
-      die "Node.js is missing; VibeForge's terminals run on it. On Omarchy: mise use -g node@lts (or sudo pacman -S nodejs)"
+      die "Node.js is missing; VibeForge's terminals run on it. Try: $(pkg_hint node)"
     fi
   fi
   # The terminal host is what runs on this Node. node-pty's addon is built against Node-API, which
@@ -379,7 +448,7 @@ main() {
     for tool in curl tar zstd sha256sum; do
       command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
     done
-    ((${#missing[@]} == 0)) || die "Missing ${missing[*]}. Install them with: sudo pacman -S --needed curl tar zstd coreutils"
+    ((${#missing[@]} == 0)) || die "Missing ${missing[*]}. Install them with: $(pkg_hint runtime)"
     fetch_archive "$tag" "$arch"
     why="$NO_ARCHIVE"
   fi
@@ -421,7 +490,11 @@ say_done() {
     source) note "Built from source on this computer." ;;
     ready-made) note "From the release's ready-made build." ;;
   esac
-  note "Open it from the app launcher (Super + Space), or run: vibeforge"
+  if [[ -d "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy" ]]; then
+    note "Open it from the app launcher (Super + Space), or run: vibeforge"
+  else
+    note "Open it from your app launcher, or run: vibeforge"
+  fi
   if ((${#found[@]})); then
     note "CLIs found on PATH: ${found[*]}"
   else

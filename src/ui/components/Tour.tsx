@@ -449,6 +449,7 @@ export function Tour({ onClose }: { onClose: () => void }) {
 
 function Welcome({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
   const t = useT();
+  const { go } = useNav();
   const engines = useEngines().data ?? [];
   const found = engines.filter((engine) => engine.available);
   return (
@@ -491,7 +492,19 @@ function Welcome({ onStart, onSkip }: { onStart: () => void; onSkip: () => void 
             ))}
           </>
         ) : (
-          <span className="faint">{t("tour.welcome.none")}</span>
+          <>
+            <span className="faint grow">{t("tour.welcome.none")}</span>
+            <Button
+              size="sm"
+              icon={Settings}
+              onClick={() => {
+                onSkip();
+                go({ view: "settings", section: "engines" });
+              }}
+            >
+              {t("orch.openSettings")}
+            </Button>
+          </>
         )}
       </div>
       <div className="tour-actions">

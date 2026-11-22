@@ -6,16 +6,16 @@ name: Release
 # Only a commit on main whose CI passed (test, typecheck, lint and smoke) is published. A tag with
 # a hyphen (v2.14.0-rc.1) is a pre-release, and a fix to an older line (2.12.3 after 2.13.0) is
 # published too; neither becomes "latest", which is what the installer and the in-app Update take.
-# Each release carries scripts/install.sh, the ready-made build the installer downloads
-# (vibeforge-<version>-linux-x64.tar.zst, from scripts/pack-release.mjs) and a SHA256SUMS for both.
-# The build is installed from its archive and smoke-tested from the installed copy before it is
-# published, as CI's smoke job does on every pull request.
+# Each release carries scripts/install.sh, ready-made builds for linux-x64 and linux-arm64
+# (vibeforge-<version>-linux-{x64,arm64}.tar.zst, from scripts/pack-release.mjs) and a SHA256SUMS
+# covering all three. Each build is installed from its archive and smoke-tested from the installed
+# copy before it is published, as CI's smoke job does on every pull request.
 #
-# Two jobs, so the token that can write releases never runs the build. "build" runs npm ci, Vite
-# and Electron with a read-only token and no shared npm cache, and hands its files over as an
-# artifact. "publish" only downloads them, records where they came from (a signed build provenance
-# attestation for each file in SHA256SUMS: `gh attestation verify <file> --repo L0nE-F0x/VibeForge`)
-# and creates the release.
+# Two stages, so the token that can write releases never runs the build. "build" runs npm ci, Vite
+# and Electron on both x64 and arm64 runners with a read-only token and no shared npm cache, and
+# hands its files over as artifacts. "publish" downloads them, builds a unified SHA256SUMS, records
+# where they came from (a signed build provenance attestation for each file in SHA256SUMS:
+# `gh attestation verify <file> --repo L0nE-F0x/VibeForge`) and creates the release.
 on:
   push:
     tags: ["v*.*.*"]
@@ -30,9 +30,17 @@ concurrency:
 
 jobs:
   build:
-    name: build
+    name: build (${{ matrix.arch }})
     # The ready-made build's node-pty links against this runner's glibc; Arch's is always newer.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     # Most of it is waiting for CI on the tagged commit; then building and testing the archive.
     timeout-minutes: 60
     permissions:
@@ -105,6 +113,13 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - name: Ensure Xvfb, zstd and Electron libraries (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          if ! command -v xvfb-run >/dev/null || ! command -v zstd >/dev/null || ! ldconfig -p | grep -q libgbm.so.1 || ! ldconfig -p | grep -q libasound.so.2; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends xvfb zstd libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64 libdrm2
+          fi
       # npm ci, vite build, then only what the app runs (Electron, node-pty built here, dist, …),
       # with install.sh and SHA256SUMS beside it in assets/. Then the way a person gets it: the
       # installer downloads the archive (laid out like a release), checks it against SHA256SUMS and
@@ -113,13 +128,21 @@ jobs:
       - name: Pack the ready-made build, install it and smoke-test the installed copy
         run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh assets
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.arch == 'x64'
         with:
-          name: release
+          name: release-x64
           path: |
             assets/install.sh
-            assets/vibeforge-*.tar.zst
-            assets/SHA256SUMS
+            assets/vibeforge-*-linux-x64.tar.zst
             notes.md
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.arch == 'arm64'
+        with:
+          name: release-arm64
+          path: |
+            assets/vibeforge-*-linux-arm64.tar.zst
           if-no-files-found: error
           retention-days: 7
 
@@ -138,10 +161,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release
-      - name: The files are the ones SHA256SUMS lists
+          name: release-x64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-arm64
+          path: assets
+      - name: Combine checksums for install.sh, linux-x64 and linux-arm64
         working-directory: assets
-        run: sha256sum --check SHA256SUMS
+        run: |
+          ls vibeforge-*-linux-x64.tar.zst vibeforge-*-linux-arm64.tar.zst >/dev/null
+          sha256sum install.sh vibeforge-*-linux-x64.tar.zst vibeforge-*-linux-arm64.tar.zst > SHA256SUMS
+          sha256sum --check SHA256SUMS
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: assets/SHA256SUMS
