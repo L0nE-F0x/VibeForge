@@ -3,12 +3,14 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm, type ITerminalOptions } from "@xterm/xterm";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type DragEvent } from "react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type DragEvent, type RefObject } from "react";
 import { shellQuote } from "../../shared/text.js";
 import { call, onPtyData, onPtyExit, pathForFile, useSettings } from "../api.js";
 import { appShortcut, clipboardKey, isWebLink } from "../terminal-keys.js";
 import { mayTakeFocus } from "../overlays.js";
 import { hidePointerTip, showPointerTip } from "./Tooltip.js";
+import { Button, Input } from "./ui.js";
 import { isShortcut } from "../shortcuts.js";
 import { notePtyInput } from "../voice.js";
 import { usePalette, xtermTheme } from "../theme.js";
@@ -143,6 +145,133 @@ function useFileDrop(insert: (text: string) => void) {
   };
 }
 
+interface TermMatch {
+  row: number;
+  col: number;
+  length: number;
+}
+
+function findBufferMatches(term: XTerm, needle: string): TermMatch[] {
+  const clean = needle.toLowerCase();
+  if (!clean) return [];
+  const buf = term.buffer.active;
+  const matches: TermMatch[] = [];
+  for (let row = 0; row < buf.length; row += 1) {
+    const line = buf.getLine(row)?.translateToString(true);
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    let from = 0;
+    while (from <= lower.length - clean.length) {
+      const col = lower.indexOf(clean, from);
+      if (col < 0) break;
+      matches.push({ row, col, length: clean.length });
+      from = col + clean.length;
+    }
+  }
+  return matches;
+}
+
+function useTerminalSearch(termRef: RefObject<XTerm | null>) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchIndex, setMatchIndex] = useState(-1);
+  const matchesRef = useRef<TermMatch[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectAt = useCallback(
+    (index: number) => {
+      const term = termRef.current;
+      const list = matchesRef.current;
+      if (!term || !list.length) return;
+      const wrapped = ((index % list.length) + list.length) % list.length;
+      const hit = list[wrapped];
+      term.select(hit.col, hit.row, hit.length);
+      term.scrollToLine(Math.max(0, hit.row - Math.floor(term.rows / 2)));
+      setMatchIndex(wrapped);
+    },
+    [termRef],
+  );
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!open || !term) {
+      matchesRef.current = [];
+      setMatchCount(0);
+      setMatchIndex(-1);
+      return;
+    }
+    const list = findBufferMatches(term, query);
+    matchesRef.current = list;
+    setMatchCount(list.length);
+    if (list.length) selectAt(list.length - 1);
+    else {
+      term.clearSelection();
+      setMatchIndex(-1);
+    }
+  }, [open, query, termRef, selectAt]);
+
+  const openFind = useCallback(() => {
+    if (!open) {
+      const sel = termRef.current?.getSelection() ?? "";
+      if (sel && !sel.includes("\n") && sel.length <= 120) setQuery(sel);
+    }
+    setOpen(true);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [open, termRef]);
+
+  const closeFind = useCallback(() => {
+    setOpen(false);
+    termRef.current?.clearSelection();
+    termRef.current?.focus();
+  }, [termRef]);
+
+  const step = useCallback(
+    (delta: -1 | 1) => {
+      if (!matchesRef.current.length) return;
+      selectAt(matchIndex + delta);
+    },
+    [matchIndex, selectAt],
+  );
+
+  return { open, query, setQuery, matchCount, matchIndex, inputRef, openFind, closeFind, step };
+}
+
+function TerminalSearchBar({ search }: { search: ReturnType<typeof useTerminalSearch> }) {
+  const t = useT();
+  if (!search.open) return null;
+  const countText = search.query ? (search.matchCount ? `${search.matchIndex + 1}/${search.matchCount}` : t("terminal.findNone")) : "";
+  return (
+    <div className="term-find" onMouseDown={(event) => event.stopPropagation()}>
+      <Input
+        ref={search.inputRef}
+        value={search.query}
+        placeholder={t("terminal.findPlaceholder")}
+        aria-label={t("terminal.findPlaceholder")}
+        onChange={(event) => search.setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            search.closeFind();
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            search.step(event.shiftKey ? -1 : 1);
+          }
+        }}
+      />
+      {countText && <span className="term-find-count">{countText}</span>}
+      <Button size="sm" variant="ghost" icon={ChevronUp} disabled={!search.matchCount} tip={t("terminal.findPrev")} onClick={() => search.step(-1)} />
+      <Button size="sm" variant="ghost" icon={ChevronDown} disabled={!search.matchCount} tip={t("terminal.findNext")} onClick={() => search.step(1)} />
+      <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} onClick={search.closeFind} />
+    </div>
+  );
+}
+
 interface LiveProps {
   ptyId: string;
   /** Hidden terminals skip fitting until they are shown again. */
@@ -176,9 +305,13 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const palette = usePalette();
   const fontFamily = settings?.terminalFontFamily ?? "JetBrainsMono Nerd Font";
   const fontSize = settings?.terminalFontSize ?? 13;
-  const optionsRef = useRef({ fontFamily, fontSize, palette });
-  optionsRef.current = { fontFamily, fontSize, palette };
+  const passthrough = settings?.terminalPassthrough ?? false;
+  const optionsRef = useRef({ fontFamily, fontSize, palette, passthrough });
+  optionsRef.current = { fontFamily, fontSize, palette, passthrough };
   const [ended, setEnded] = useState<string | null>(null);
+  const search = useTerminalSearch(termRef);
+  const openFindRef = useRef(search.openFind);
+  openFindRef.current = search.openFind;
   /** Fit the terminal to its box and tell the program its size once it settles. */
   const refitRef = useRef<() => void>(() => undefined);
 
@@ -248,7 +381,14 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     observer.observe(host);
 
     term.attachCustomKeyEventHandler((event) => {
-      if (appShortcut(event)) return false;
+      if (appShortcut(event, optionsRef.current.passthrough)) return false;
+      if (isShortcut("terminal.find", event)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          openFindRef.current();
+        }
+        return false;
+      }
       if (onComposeRef.current && isShortcut("terminal.write", event)) {
         if (event.type === "keydown") {
           event.preventDefault();
@@ -257,7 +397,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
         return false;
       }
       if (event.type !== "keydown") return true;
-      const action = clipboardKey(event, term.hasSelection());
+      const action = clipboardKey(event, term.hasSelection(), optionsRef.current.passthrough);
       if (!action) return true;
       event.preventDefault();
       if (action === "copy") {
@@ -320,12 +460,12 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
       })
       .then((snap) => {
         if (disposed || !snap) return;
+        if (snap.ansi) term.write(snap.ansi);
         if (!snap.alive) {
           setEnded("ended");
           seen = Number.MAX_SAFE_INTEGER;
           return;
         }
-        term.write(snap.ansi);
         seen = snap.seq;
         for (const event of queue) {
           if (event.seq <= seen) continue;
@@ -404,8 +544,20 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   });
 
   return (
-    <div className={`term${drop.dragging ? " drop-target" : ""}`} {...drop.handlers} data-ended={ended ?? undefined}>
+    <div
+      className={`term${drop.dragging ? " drop-target" : ""}`}
+      {...drop.handlers}
+      data-ended={ended ?? undefined}
+      onKeyDown={(event) => {
+        if (isShortcut("terminal.find", event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          search.openFind();
+        }
+      }}
+    >
       <div ref={hostRef} className="term-host" />
+      <TerminalSearchBar search={search} />
     </div>
   );
 });
@@ -420,6 +572,9 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
   const palette = usePalette();
   const family = settings?.terminalFontFamily ?? "JetBrainsMono Nerd Font";
   const size = settings?.terminalFontSize ?? 13;
+  const search = useTerminalSearch(termRef);
+  const openFindRef = useRef(search.openFind);
+  openFindRef.current = search.openFind;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -440,6 +595,13 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
     // window: J/K, Ctrl+K and the view keys work over a finished run's screen as anywhere else.
     // Even read-only, xterm would otherwise swallow any key that types a byte.
     term.attachCustomKeyEventHandler((event) => {
+      if (isShortcut("terminal.find", event)) {
+        if (event.type === "keydown") {
+          event.preventDefault();
+          openFindRef.current();
+        }
+        return false;
+      }
       if (event.shiftKey && /^(PageUp|PageDown|Home|End)$/.test(event.key)) return true;
       if (event.type === "keydown" && clipboardKey(event, term.hasSelection()) === "copy") {
         event.preventDefault();
@@ -484,8 +646,18 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
   }, [family, size]);
 
   return (
-    <div className="term replay">
+    <div
+      className="term replay"
+      onKeyDown={(event) => {
+        if (isShortcut("terminal.find", event)) {
+          event.preventDefault();
+          event.stopPropagation();
+          search.openFind();
+        }
+      }}
+    >
       <div ref={hostRef} className="term-host" />
+      <TerminalSearchBar search={search} />
     </div>
   );
 }

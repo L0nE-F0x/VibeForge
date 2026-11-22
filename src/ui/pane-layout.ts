@@ -88,3 +88,82 @@ export function unzoomForFocus(zoomed: Record<string, string | null>, focus: Rec
   }
   return next;
 }
+
+export const DIVIDER_PX = 10;
+
+export interface AxisSpan {
+  startPct: number;
+  startPx: number;
+  sizePct: number;
+  sizePx: number;
+}
+
+export interface FlatPaneBox {
+  pane: PaneNode;
+  x: AxisSpan;
+  y: AxisSpan;
+}
+
+export interface FlatDividerBox {
+  path: string;
+  dir: "row" | "col";
+  x: AxisSpan;
+  y: AxisSpan;
+  parentX: AxisSpan;
+  parentY: AxisSpan;
+}
+
+function splitAxis(span: AxisSpan, ratio: number, gapPx: number): [AxisSpan, AxisSpan, AxisSpan] {
+  const netPx = span.sizePx - gapPx;
+  const aSizePct = span.sizePct * ratio;
+  const aSizePx = netPx * ratio;
+  const divStartPct = span.startPct + aSizePct;
+  const divStartPx = span.startPx + aSizePx;
+  return [
+    { startPct: span.startPct, startPx: span.startPx, sizePct: aSizePct, sizePx: aSizePx },
+    { startPct: divStartPct, startPx: divStartPx, sizePct: 0, sizePx: gapPx },
+    { startPct: divStartPct, startPx: divStartPx + gapPx, sizePct: span.sizePct * (1 - ratio), sizePx: netPx * (1 - ratio) },
+  ];
+}
+
+/**
+ * Flatten a binary split tree into absolute `(pct, px)` boxes and divider slots so React can keep
+ * every `<PaneView key={pane.id}>` at constant tree depth across splits, closes, and swaps.
+ */
+export function computeSplitLayout(node: LayoutNode, gapPx = DIVIDER_PX): { panes: FlatPaneBox[]; dividers: FlatDividerBox[] } {
+  const panes: FlatPaneBox[] = [];
+  const dividers: FlatDividerBox[] = [];
+  const full: AxisSpan = { startPct: 0, startPx: 0, sizePct: 1, sizePx: 0 };
+  const walk = (cur: LayoutNode, x: AxisSpan, y: AxisSpan, path: string): void => {
+    if (cur.kind === "pane") {
+      panes.push({ pane: cur, x, y });
+      return;
+    }
+    if (cur.dir === "row") {
+      const [ax, dx, bx] = splitAxis(x, cur.ratio, gapPx);
+      dividers.push({ path, dir: "row", x: dx, y, parentX: x, parentY: y });
+      walk(cur.a, ax, y, `${path}a`);
+      walk(cur.b, bx, y, `${path}b`);
+    } else {
+      const [ay, dy, by] = splitAxis(y, cur.ratio, gapPx);
+      dividers.push({ path, dir: "col", x, y: dy, parentX: x, parentY: y });
+      walk(cur.a, x, ay, `${path}a`);
+      walk(cur.b, x, by, `${path}b`);
+    }
+  };
+  walk(node, full, full, "");
+  return { panes, dividers };
+}
+
+function formatAxis(pct: number, px: number): string {
+  const p = Number((pct * 100).toFixed(4));
+  const x = Number(px.toFixed(2));
+  if (p === 0 && x === 0) return "0px";
+  if (x === 0) return `${p}%`;
+  if (p === 0) return `${x}px`;
+  return `calc(${p}% ${x < 0 ? "-" : "+"} ${Math.abs(x)}px)`;
+}
+
+export function spanCss(span: AxisSpan): { start: string; size: string } {
+  return { start: formatAxis(span.startPct, span.startPx), size: formatAxis(span.sizePct, span.sizePx) };
+}

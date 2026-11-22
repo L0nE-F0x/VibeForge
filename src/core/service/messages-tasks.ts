@@ -1,5 +1,6 @@
 import { cleanText, DEFAULT_WAIT_MS, taskReportText } from "../agent-talk.js";
 import { isCodingCli } from "../checkout.js";
+import { cwdAllowed } from "../places.js";
 import { replyLogFor } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
@@ -27,12 +28,17 @@ export type TaskResult = { ok: true; taskId: string; title: string; started: boo
  * limits it waits for a person to press Start; its first answer, its changes and where they are
  * go back to the CLI that handed it out as a report, and `vibeforge apply` can bring them in.
  */
+/** Bucket key for external control-socket callers without a live VibeForge PTY. */
+const OUTSIDE_KEY = "outside";
+
 export class HandedTasks {
   /** Handed-out tasks and the terminal that handed each one out, which hears back from it. */
   private readonly handed = new Map<string, string>();
+  /** Tasks handed out from an outside terminal (tracked while running for concurrency caps). */
+  private readonly outsideHanded = new Set<string>();
   /** Handed-out tasks waiting for a person to press Start, by the terminal that handed them out. */
   private readonly proposed = new Map<string, string>();
-  /** Tasks each terminal has handed out since a person last typed in it. */
+  /** Tasks each terminal (or `"outside"`) has handed out since a person last typed in it. */
   private readonly handedSince = new Map<string, number>();
   /** How many times each task has been watched again after a report that it waits for a person. */
   private readonly rewatched = new Map<string, number>();
@@ -86,8 +92,12 @@ export class HandedTasks {
       this.handed.delete(taskId);
       this.rewatched.delete(taskId);
     }
-    for (const [taskId, asker] of [...this.proposed]) if (!this.core.live.has(asker)) this.proposed.delete(taskId);
-    for (const asker of [...this.handedSince.keys()]) if (!this.core.live.has(asker)) this.handedSince.delete(asker);
+    for (const taskId of [...this.outsideHanded]) {
+      const task = this.core.store.getTask(taskId);
+      if (!task || !this.core.listLive().some((session) => session.taskId === taskId)) this.outsideHanded.delete(taskId);
+    }
+    for (const [taskId, asker] of [...this.proposed]) if (asker !== OUTSIDE_KEY && !this.core.live.has(asker)) this.proposed.delete(taskId);
+    for (const asker of [...this.handedSince.keys()]) if (asker !== OUTSIDE_KEY && !this.core.live.has(asker)) this.handedSince.delete(asker);
   }
 
   /** `vibeforge task <agent> "…"`: a task for a VibeForge agent, in its own copy so it never works in the sender's folder. */
@@ -105,9 +115,10 @@ export class HandedTasks {
     const workspace =
       this.core.workspaceById(session?.workspaceId) ??
       this.core.workspaceById(parent?.workspaceId) ??
-      this.core.store.readWorkspaces().workspaces.find((item) => agent.places.some((place) => item.path === place || item.path.startsWith(`${place}/`))) ??
+      this.core.store.readWorkspaces().workspaces.find((item) => cwdAllowed(item.path, agent.places)) ??
       null;
     if (!workspace) return { ok: false, error: "Start this from a terminal in a workspace, so VibeForge knows where the task belongs." };
+    if (!cwdAllowed(workspace.path, agent.places)) return { ok: false, error: `${agent.name} is not allowed in ${workspace.name}.` };
     const askedBy = from?.label ?? "a terminal outside VibeForge";
     const isolated = await isGitRepo(workspace.path).catch(() => false);
     const title = taskTitle(input.title?.trim() || text.split("\n")[0]);
@@ -124,34 +135,40 @@ export class HandedTasks {
     this.core.store.writeTask(task);
     this.core.emit("tasks");
     const asker = from?.ptyId ?? null;
+    const callerKey = asker ?? OUTSIDE_KEY;
     this.forget();
     if (asker) this.handed.set(task.id, asker);
+    else this.outsideHanded.add(task.id);
     const reports = asker ? " What it did comes back to you as a message when it finishes." : "";
     if (input.start === false) return { ok: true, taskId: task.id, title, started: false, note: "It waits in To do until a person executes it." };
     if (!isolated) return { ok: true, taskId: task.id, title, started: false, note: `${workspace.path} isn't a git repository, so the task can't have its own copy. It waits in To do for a person to start it.` };
     // How far a CLI goes on its own (Settings → Agents together): a task past it waits for a
-    // person to press Start on the terminal that handed it out.
+    // person to press Start on the terminal that handed it out (or in To do for outside callers).
     const talk = this.settings();
     const held = (why: string): TaskResult => {
       if (asker) this.proposed.set(task.id, asker);
       this.core.emit("live");
       return { ok: true, taskId: task.id, title, started: false, note: asker ? `${why}${reports}` : "It waits in To do for a person to start it." };
     };
-    const handedNow = asker ? (this.handedSince.get(asker) ?? 0) + 1 : 0;
-    if (asker) this.handedSince.set(asker, handedNow);
+    const handedNow = (this.handedSince.get(callerKey) ?? 0) + 1;
+    this.handedSince.set(callerKey, handedNow);
     if (talk.handOff === "ask") return held("It waits for the person to press Start on your terminal's title bar (Ask first, in VibeForge's Settings → Agents together).");
-    if (asker && handedNow > talk.maxHandOffs) return held(`You've handed out ${talk.maxHandOffs} tasks since the person last wrote to you, so this one waits for them to press Start.`);
-    if (asker && this.answers.reportingTo(asker) + (this.starting.get(asker) ?? 0) >= talk.maxWorking) return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to press Start.`);
-    if (!asker) return this.startHanded(task.id, asker, input);
+    if (handedNow > talk.maxHandOffs) return held(`You've handed out ${talk.maxHandOffs} tasks since the person last wrote to you, so this one waits for them to press Start.`);
+    const workingCount = asker
+      ? this.answers.reportingTo(asker)
+      : this.core.listLive().filter((liveSession) => liveSession.taskId && this.outsideHanded.has(liveSession.taskId)).length;
+    if (workingCount + (this.starting.get(callerKey) ?? 0) >= talk.maxWorking) {
+      return held(`${talk.maxWorking} of your tasks are still working, so this one waits for the person to start it.`);
+    }
     // Counted from here, with no wait in between, until it is watched as working (or didn't start).
-    this.starting.set(asker, (this.starting.get(asker) ?? 0) + 1);
+    this.starting.set(callerKey, (this.starting.get(callerKey) ?? 0) + 1);
     let counted = true;
     const release = () => {
       if (!counted) return;
       counted = false;
-      const left = (this.starting.get(asker) ?? 1) - 1;
-      if (left > 0) this.starting.set(asker, left);
-      else this.starting.delete(asker);
+      const left = (this.starting.get(callerKey) ?? 1) - 1;
+      if (left > 0) this.starting.set(callerKey, left);
+      else this.starting.delete(callerKey);
     };
     try {
       return await this.startHanded(task.id, asker, { ...input, started: release });

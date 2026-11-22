@@ -61,9 +61,17 @@ export function mentions(prompt: string, words: string): boolean {
 
 // ------------------------------------------------------------------ Claude Code
 
+/** Claude Code's config directories from CLAUDE_CONFIG_DIR, defaulting to `~/.claude`. */
+export function claudeConfigRoots(home: string): string[] {
+  const raw = process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (!raw) return [path.join(home, ".claude")];
+  const dirs = raw.split(",").map((dir) => dir.trim()).filter(Boolean);
+  return dirs.length ? dirs : [path.join(home, ".claude")];
+}
+
 /** Claude Code's folder for a working directory: every character but letters and digits becomes "-". */
 export function claudeProjectDir(home: string, cwd: string): string {
-  return path.join(home, ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+  return path.join(claudeConfigRoots(home)[0], "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
 }
 
 function claudePromptText(row: Record<string, unknown>): string | null {
@@ -137,10 +145,11 @@ export function claudeLogCwd(head: string): string | null {
 
 // ------------------------------------------------------------------ Codex
 
-/** Codex's day folder for a date: ~/.codex/sessions/YYYY/MM/DD. */
+/** Codex's day folder for a date: `$CODEX_HOME/sessions/YYYY/MM/DD` or `~/.codex/sessions/YYYY/MM/DD`. */
 export function codexDayDir(home: string, date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return path.join(home, ".codex", "sessions", String(date.getFullYear()), pad(date.getMonth() + 1), pad(date.getDate()));
+  const root = process.env.CODEX_HOME?.trim() || path.join(home, ".codex");
+  return path.join(root, "sessions", String(date.getFullYear()), pad(date.getMonth() + 1), pad(date.getDate()));
 }
 
 export function codexLogCwd(head: string): string | null {
@@ -188,7 +197,8 @@ export function codexTurn(log: LogInput, since: number, words = ""): Turn {
 
 /** Grok Build's folder of sessions for a working directory: the directory, percent-encoded. */
 export function grokSessionsDir(home: string, cwd: string): string {
-  return path.join(home, ".grok", "sessions", encodeURIComponent(cwd));
+  const root = process.env.GROK_HOME?.trim() || path.join(home, ".grok");
+  return path.join(root, "sessions", encodeURIComponent(cwd));
 }
 
 function plainText(content: unknown): string {
@@ -220,8 +230,9 @@ export function grokTurn(history: LogInput, events: LogInput, since: number, wor
   const rows = rowsOf(history);
   const prompts = rows.map((row, index) => ({ row, index })).filter(({ row }) => isGrokPrompt(row));
   const offset = Math.max(0, prompts.length - starts.length);
-  const hit = words ? [...prompts].reverse().find(({ row }) => mentions(plainText(row.content), words)) : undefined;
-  const prompt = hit ?? prompts[offset + first];
+  const recentPrompts = prompts.slice(offset + first);
+  const hit = words ? [...recentPrompts].reverse().find(({ row }) => mentions(plainText(row.content), words)) : undefined;
+  const prompt = hit ?? recentPrompts[0];
   const matched = Boolean(hit);
   const promptPos = hit ? prompts.indexOf(hit) : offset + first;
   const startIndex = starts[Math.min(starts.length - 1, Math.max(first, promptPos - offset))].index;
@@ -237,6 +248,12 @@ export function grokTurn(history: LogInput, events: LogInput, since: number, wor
 }
 
 // ------------------------------------------------------------------ Kimi Code
+
+/** Kimi Code's data folders from KIMI_SHARE_DIR / KIMI_CODE_HOME, falling back to ~/.kimi-code and ~/.kimi. */
+export function kimiHomeDirs(home: string): string[] {
+  const envDirs = [process.env.KIMI_SHARE_DIR?.trim(), process.env.KIMI_CODE_HOME?.trim()].filter((d): d is string => Boolean(d));
+  return envDirs.length ? envDirs : [path.join(home, ".kimi-code"), path.join(home, ".kimi")];
+}
 
 /** The working directory a Kimi Code session ran in, from the session's state.json. */
 export function kimiStateCwd(state: string): string | null {

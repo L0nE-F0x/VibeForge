@@ -118,7 +118,8 @@ export class LibraryDesk {
     const bin = this.core.trash.stash([dir]);
     this.setSkillAgents(id, []);
     this.core.emit("skills", "agents");
-    return this.core.keepForUndo(bin, () => {
+    return this.core.keepForUndo(bin, (restored) => {
+      if (!restored.includes(dir)) return;
       this.setSkillAgents(id, agents);
       this.core.emit("skills", "agents");
     });

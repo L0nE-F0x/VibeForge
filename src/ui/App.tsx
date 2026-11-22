@@ -2,7 +2,7 @@ import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizont
 import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { UsagePeriod } from "../shared/api.js";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
+import { call, on, useAppInfo, useInbox, useLive, useNow, useOrchestrator, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
 import { useAttention, useChatAttention, usePtyInView, useWorkspaceInView, type Attention } from "./attention.js";
 import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
@@ -265,6 +265,7 @@ function Rail() {
   const update = useUpdate().data;
   const waiting = update?.available && update.latest ? update.latest.version : null;
   const inbox = useInbox().data ?? [];
+  const copies = useOrchestrator().data?.copies?.length ?? 0;
   const tasks = useTasks().data ?? [];
   const live = useLive().data ?? [];
   const attention = useAttention();
@@ -310,13 +311,18 @@ function Rail() {
     return [...chatAttention.values()].filter((mark) => (mark.agentId !== null) === (view === "agents")).map((mark) => mark.attention);
   };
 
-  /** What a badge counts, said in the tooltip: the two can't be told apart by the number alone. */
+  /** What a badge counts, said in the tooltip: each view's badge has its own meaning. */
   const badgeTip = (view: ViewName, count: number): string =>
-    view === "tasks" ? t.count("rail.tip.tasksReview", count, { count }) : t.count("home.status.review", count, { count }).replaceAll("**", "");
+    view === "tasks"
+      ? t.count("rail.tip.tasksReview", count, { count })
+      : view === "orchestrator"
+        ? t.count("orch.reviewCount", count, { count })
+        : t.count("home.status.review", count, { count }).replaceAll("**", "");
 
   const badge = (view: ViewName): number => {
     if (view === "runs") return inbox.length;
     if (view === "tasks") return review;
+    if (view === "orchestrator") return copies;
     return 0;
   };
 

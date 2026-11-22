@@ -15,7 +15,8 @@
       },
       "suspicious": {
         "noArrayIndexKey": "off",
-        "noControlCharactersInRegex": "off"
+        "noControlCharactersInRegex": "off",
+        "noDebugger": "error"
       }
     }
   }

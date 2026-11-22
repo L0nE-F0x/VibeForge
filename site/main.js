@@ -891,10 +891,30 @@ async function setupStars() {
   const label = $("[data-stars]");
   if (!label) return;
   try {
-    const response = await fetch(`https://api.github.com/repos/${REPO}`, { headers: { Accept: "application/vnd.github+json" } });
+    const cached = sessionStorage.getItem("vf-stars");
+    if (cached) {
+      label.textContent = cached;
+      return;
+    }
+  } catch {
+    /* sessionStorage disabled */
+  }
+  try {
+    const response = await fetch(`https://api.github.com/repos/${REPO}`, {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined,
+    });
     if (!response.ok) return;
     const { stargazers_count: stars } = await response.json();
-    if (typeof stars === "number" && stars > 0) label.textContent = `★ ${stars.toLocaleString()}`;
+    if (typeof stars === "number" && stars > 0) {
+      const text = `★ ${stars.toLocaleString()}`;
+      label.textContent = text;
+      try {
+        sessionStorage.setItem("vf-stars", text);
+      } catch {
+        /* ignore quota / privacy mode errors */
+      }
+    }
   } catch {
     /* offline or rate-limited: the icon alone stays */
   }

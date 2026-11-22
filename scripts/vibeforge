@@ -9,6 +9,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
 
 # The path matches src/core/control.ts. One socket per data folder. Without XDG_RUNTIME_DIR it sits
 # in a /tmp folder only this user can enter; when someone else made that folder, there's no path.
@@ -58,9 +59,8 @@ if [[ "${1:-}" == --voice* ]]; then
   fi
   # Not running: a press opens VibeForge; a release has nothing to stop.
   case "$action" in stop|cancel) exit 0 ;; esac
-  set --
+  set -- --voice "$action"
 fi
-export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
 
 fail() {
   echo "VibeForge: $1" >&2
@@ -147,7 +147,7 @@ if needs_build; then
     mkdir -p "$logdir"
     note "Building the latest code, then opening."
     echo "VibeForge: building the latest code…" >&2
-    if ! (cd "$ROOT" && npm run build) >"$logdir/launch-build.log" 2>&1; then
+    if ! (cd "$ROOT" && if command -v npm >/dev/null 2>&1; then npm run build; else ./node_modules/.bin/vite build; fi) >"$logdir/launch-build.log" 2>&1; then
       echo "VibeForge: build failed. Last lines:" >&2
       tail -n 20 "$logdir/launch-build.log" >&2 || true
       fail "The build failed. See $logdir/launch-build.log"

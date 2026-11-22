@@ -141,4 +141,28 @@ describe("sync: files both machines changed", () => {
     expect(() => store.resolve(nested!.id, "mine")).toThrow(/symbolic link/i);
     expect(fs.readFileSync(path.join(outsideDir, "nested.txt"), "utf8")).toBe("untouched-dir\n");
   });
+
+  it("refuses diff and does not short-circuit keepFile across symbolic links", async () => {
+    const outside = temp();
+    const secretFile = path.join(outside, "secret.txt");
+    fs.writeFileSync(secretFile, "top-secret-token\n");
+    const outsideDir = path.join(outside, "dir");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "nested.txt"), "same-content\n");
+
+    const root = workspace();
+    const store = new ConflictStore(path.join(temp(), "conflicts"));
+    fs.rmSync(path.join(root, "notes.txt"));
+    fs.symlinkSync(secretFile, path.join(root, "notes.txt"));
+    const direct = store.keepFile("vf-ws-000000000000", root, copiesIn(root)[0]);
+    expect(direct).not.toBeNull();
+    await expect(store.diff(direct!.id)).rejects.toThrow(/symbolic link/i);
+
+    fs.symlinkSync(outsideDir, path.join(root, "linked"));
+    const nestedCopy = path.join(root, "linked", "nested.sync-conflict-20261117-204452-MTOM47S.txt");
+    fs.writeFileSync(nestedCopy, "same-content\n");
+    const nested = store.keepFile("vf-ws-000000000000", root, copiesIn(path.join(root, "linked"))[0]);
+    expect(nested).not.toBeNull();
+    await expect(store.diff(nested!.id)).rejects.toThrow(/symbolic link/i);
+  });
 });

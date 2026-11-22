@@ -31,7 +31,7 @@ const INTERNAL = [
   /^Syncthing/,
   /^No free port for Syncthing/,
   /^That file is not inside the workspace\.$/,
-  /^Refusing to write through a symbolic link\.$/,
+  /^Refusing to (?:write|access a file) through a symbolic link\.$/,
 ];
 
 function sources(dir: string): string[] {

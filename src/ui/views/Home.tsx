@@ -1,8 +1,8 @@
-import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, History, Hourglass, KanbanSquare, MessagesSquare, SquareTerminal, TerminalSquare } from "lucide-react";
+import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBranch, History, Hourglass, KanbanSquare, MessagesSquare, Settings, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
-import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
+import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useOrchestrator, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { PickMark } from "../components/ListTools.js";
 import { Snippet } from "../components/Snippet.js";
 import { BlockBars, ContributionGraph, PixelField, PixelWordmark } from "../components/Pixel.js";
@@ -109,6 +109,7 @@ export function HomeView() {
   const { go } = useNav();
   const now = useNow(10_000);
   const inbox = useInbox().data ?? [];
+  const copies = useOrchestrator().data?.copies ?? [];
   const live = useLive().data ?? [];
   const routines = useRoutines().data ?? [];
   const agents = useAgents().data ?? [];
@@ -170,6 +171,7 @@ export function HomeView() {
   const status = [
     live.length ? t.count("home.status.live", live.length) : "",
     inbox.length ? t.count("home.status.review", inbox.length) : "",
+    copies.length ? t.count("home.status.copies", copies.length) : "",
   ].filter(Boolean);
   const statusLine = (status.length ? status.join(" · ") : t("home.status.quiet")) + (upcoming[0] ? ` · ${t("home.status.next", { time: time(upcoming[0].at) })}` : "");
 
@@ -271,6 +273,33 @@ export function HomeView() {
                     {inbox.map((run) => (
                       <RunRow key={run.id} run={run} onClick={() => go({ view: "runs", runId: run.id })} />
                     ))}
+                  </div>
+                </>
+              )}
+
+              {copies.length > 0 && (
+                <>
+                  <div className="section-title">
+                    <GitBranch size={13} /> {t("orch.toReview")} <span className="count">{copies.length}</span>
+                  </div>
+                  <div className="vstack" style={{ gap: 6 }}>
+                    {copies.map((copy) => {
+                      const from = workspaces.find((item) => item.id === copy.workspaceId);
+                      const engineLabel = engines.find((item) => item.id === copy.engineId)?.label ?? copy.engineId;
+                      return (
+                        <button key={copy.id} type="button" className="run-row" onClick={() => go({ view: "orchestrator", copyId: copy.id })}>
+                          <GitBranch size={14} className="accent-text" />
+                          <span className="vstack grow" style={{ gap: 1 }}>
+                            <span className="title truncate">{copy.name}</span>
+                            <span className="meta truncate">
+                              {engineLabel}
+                              {from ? ` · ${from.name}` : ""}
+                            </span>
+                          </span>
+                          <span className="meta">{t("orch.review")}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </>
               )}
@@ -406,12 +435,17 @@ export function HomeView() {
               <div className="section-title">
                 <SquareTerminal size={13} /> {t("home.clis.title")}
                 <span className="grow" />
-                <Button size="sm" variant="ghost" onClick={() => go({ view: "settings" })}>
+                <Button size="sm" variant="ghost" onClick={() => go({ view: "settings", section: "engines" })}>
                   {t("home.clis.manage")}
                 </Button>
               </div>
               {available.length === 0 ? (
-                <div className="home-empty">{t("home.clis.none")}</div>
+                <div className="home-empty hstack" style={{ gap: 10 }}>
+                  <span className="grow">{t("home.clis.none")}</span>
+                  <Button size="sm" icon={Settings} onClick={() => go({ view: "settings", section: "engines" })}>
+                    {t("orch.openSettings")}
+                  </Button>
+                </div>
               ) : (
                 <div className="cli-chips">
                   {available.map((engine) => (

@@ -20,7 +20,7 @@ export interface SpawnRequest {
 }
 
 export interface DeskHost {
-  spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number }>;
+  spawn(request: SpawnRequest): Promise<{ ptyId: string; pid: number; ptyToken?: string }>;
   /** Paste text into a live session and press Enter, or (`enter` false) leave it there for a person to send. */
   send(ptyId: string, text: string, enter?: boolean): Promise<void>;
   /** Write raw keystrokes directly to a live PTY (e.g. answering an interactive TUI prompt). */

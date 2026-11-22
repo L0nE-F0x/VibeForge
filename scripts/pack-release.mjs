@@ -23,6 +23,7 @@ import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseAst } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -69,14 +70,70 @@ export const ENTRIES = [
   "scripts/talk.mjs",
 ];
 
-/** Bare and relative module names a script loads, as written. */
+/**
+ * Extract a static string literal or untagged zero-expression template literal.
+ * @param {Record<string, any>} node
+ * @returns {string | null}
+ */
+function staticString(node) {
+  if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (
+    node.type === "TemplateLiteral" &&
+    Array.isArray(node.expressions) &&
+    node.expressions.length === 0 &&
+    Array.isArray(node.quasis) &&
+    node.quasis.length === 1 &&
+    typeof node.quasis[0]?.value?.cooked === "string"
+  ) {
+    return node.quasis[0].value.cooked;
+  }
+  return null;
+}
+
+/**
+ * Walk an ESTree node subtree and collect module specifiers loaded at runtime.
+ * @param {unknown} value
+ * @param {Set<string>} found
+ */
+function collectSpecifiers(value, found) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectSpecifiers(item, found);
+    return;
+  }
+  /** @type {Record<string, any>} */
+  const node = value;
+  if (typeof node.type === "string") {
+    if (
+      (node.type === "ImportDeclaration" || node.type === "ExportNamedDeclaration" || node.type === "ExportAllDeclaration") &&
+      typeof node.source?.value === "string"
+    ) {
+      found.add(node.source.value);
+    } else if (node.type === "ImportExpression" && node.source) {
+      const spec = staticString(node.source);
+      if (spec) found.add(spec);
+    } else if (
+      node.type === "CallExpression" &&
+      node.callee?.type === "Identifier" &&
+      node.callee.name === "require" &&
+      Array.isArray(node.arguments) &&
+      node.arguments.length >= 1
+    ) {
+      const spec = staticString(node.arguments[0]);
+      if (spec) found.add(spec);
+    }
+  }
+  for (const child of Object.values(node)) {
+    if (child && typeof child === "object") collectSpecifiers(child, found);
+  }
+}
+
+/** Bare and relative module names a script loads, as written, via AST parsing. */
 export function specifiers(text) {
   const found = new Set();
-  // Comments load nothing: a JSDoc `@import … from "./types.js"` is for the type checker only.
-  text = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-  for (const pattern of [/\brequire\(\s*["'`]([^"'`]+)["'`]\s*\)/g, /\bfrom\s*["']([^"']+)["']/g, /\bimport\(\s*["']([^"']+)["']\s*\)/g, /^\s*import\s*["']([^"']+)["']/gm]) {
-    for (const [, spec] of text.matchAll(pattern)) found.add(spec);
-  }
+  // Strip a leading shebang so parseAst can parse executable scripts directly.
+  const source = text.startsWith("#!") ? text.replace(/^#![^\r\n]*/, "") : text;
+  collectSpecifiers(parseAst(source), found);
   return [...found];
 }
 

@@ -8,6 +8,21 @@ interface Clock {
 }
 
 const clocks = new Map<number, Clock>();
+let visibilityWired = false;
+
+function ensureVisibilitySync(): void {
+  if (visibilityWired || typeof document === "undefined") return;
+  visibilityWired = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    const now = Date.now();
+    for (const clock of clocks.values()) {
+      if (!clock.listeners.size) continue;
+      clock.now = now;
+      for (const each of [...clock.listeners]) each();
+    }
+  });
+}
 
 function clockFor(intervalMs: number): Clock {
   let clock = clocks.get(intervalMs);
@@ -25,12 +40,14 @@ export function clockNow(intervalMs: number): number {
 
 /** Hear that clock tick. The clock runs while anyone listens, and stops with the last one. */
 export function subscribeClock(intervalMs: number, listener: () => void): () => void {
+  ensureVisibilitySync();
   const clock = clockFor(intervalMs);
   clock.listeners.add(listener);
   if (!clock.timer) {
     // Fresh when it starts, so what mounts after a quiet spell doesn't show a time from back then.
     clock.now = Date.now();
     clock.timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       clock.now = Date.now();
       for (const each of [...clock.listeners]) each();
     }, intervalMs);

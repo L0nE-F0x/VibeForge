@@ -288,14 +288,16 @@ function restoreScrollback(scrollback) {
   const term = new Terminal({ cols, rows, scrollback: 0, allowProposedApi: true });
   const serializer = new SerializeAddon();
   term.loadAddon(serializer);
-  return writeParsed(term, cut).then(() => {
-    const transcript = viewportText(term);
-    if (!plainText(transcript)) return null;
-    return {
-      ansi: serializer.serialize({ scrollback: 0 }),
-      transcript: transcript.endsWith("\n") ? transcript : `${transcript}\n`,
-    };
-  });
+  return writeParsed(term, cut)
+    .then(() => {
+      const transcript = viewportText(term);
+      if (!plainText(transcript)) return null;
+      return {
+        ansi: serializer.serialize({ scrollback: 0 }),
+        transcript: transcript.endsWith("\n") ? transcript : `${transcript}\n`,
+      };
+    })
+    .finally(() => term.dispose());
 }
 
 module.exports = {

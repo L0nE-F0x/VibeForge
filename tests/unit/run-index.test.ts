@@ -97,6 +97,22 @@ describe("the run index", () => {
     expect(store.getRun(second.id)).toBeNull();
     store.close();
   });
+
+  it("enables WAL mode and creates composite lookup indexes", () => {
+    const dataRoot = tempDir();
+    const store = new Store(tempDir(), dataRoot);
+    const db = new DatabaseSync(path.join(dataRoot, "index.sqlite"), { readOnly: true });
+    const mode = (db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode;
+    const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs'").all() as Array<{ name: string }>).map(
+      (row) => row.name,
+    );
+    expect(mode.toLowerCase()).toBe("wal");
+    expect(indexes).toEqual(
+      expect.arrayContaining(["runs_workspace_started", "runs_agent_started", "runs_task", "runs_routine", "runs_chat", "runs_status_opened"]),
+    );
+    db.close();
+    store.close();
+  });
 });
 
 /** A store with one finished run per title, a minute apart, the first title oldest. */

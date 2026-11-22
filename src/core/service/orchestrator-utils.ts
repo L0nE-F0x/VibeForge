@@ -1,0 +1,213 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { OrchestratorStep, PlanContext } from "../orchestrator.js";
+import type { ApplyResult } from "../worktrees.js";
+
+/** The size a terminal starts at before its pane in Code resizes it. */
+export const START_SIZE = { cols: 120, rows: 32 };
+/** Folders on disk a lookup names at most, and how long it may look for them. */
+export const LOOKUP_FOLDERS = 8;
+export const LOOKUP_WALK_MS = 3000;
+
+export function expandHome(folder: string): string {
+  return folder === "~" ? os.homedir() : folder.startsWith("~/") ? path.join(os.homedir(), folder.slice(2)) : folder;
+}
+
+export function isInside(parent: string, child: string): boolean {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/** Resolve symlinks on both paths so a symlink inside `parent` cannot escape outside it. */
+export function realInside(parent: string, child: string): string | null {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realChild = fs.realpathSync(child);
+    return isInside(realParent, realChild) ? realChild : null;
+  } catch {
+    return null;
+  }
+}
+
+export function oneLine(text: string, max: number): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+}
+
+export function gitIn(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile("git", args, { cwd, timeout: 5000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }, (error, stdout, stderr) => {
+      const code = error ? (typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : 1) : 0;
+      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+    });
+  });
+}
+
+/** A repository with at least one commit, which a copy can be made from. */
+export async function hasCommit(folder: string): Promise<boolean> {
+  return (await gitIn(["rev-parse", "--verify", "-q", "HEAD"], folder)).code === 0;
+}
+
+/** A task or routine step that is waiting for its folder (core.orchWaitsTurn). */
+export function waitsTurn(behind: readonly string[]): string {
+  return `Waiting for ${behind.join(", ") || "another CLI"} in that folder; it starts on its own once it's quiet.`;
+}
+
+/** Files changed and not committed in a repository (new ones included); 0 when git can't say. */
+export async function uncommitted(folder: string): Promise<number> {
+  const status = await gitIn(["status", "--porcelain", "--untracked-files=normal"], folder);
+  return status.code === 0 ? status.stdout.split("\n").filter(Boolean).length : 0;
+}
+
+export function tildify(folder: string): string {
+  const home = os.homedir();
+  return folder === home || folder.startsWith(`${home}/`) ? `~${folder.slice(home.length)}` : folder;
+}
+
+/** Replace a planned placeholder id (`new:<stepId>`) across all later steps in the same turn. */
+export function substitutePlannedId(
+  steps: OrchestratorStep[] | undefined,
+  placeholder: string,
+  realId: string,
+  extraPath?: string,
+): void {
+  if (!steps) return;
+  for (const later of steps) {
+    if (later.workspaceId === placeholder) later.workspaceId = realId;
+    if (later.target === placeholder) later.target = realId;
+    if (later.agentId === placeholder) later.agentId = realId;
+    if (later.taskId === placeholder) later.taskId = realId;
+    if (later.places?.includes(placeholder)) {
+      later.places = later.places.map((p) => (p === placeholder ? (extraPath ?? realId) : p));
+    }
+    if (later.skills?.includes(placeholder)) {
+      later.skills = later.skills.map((s) => (s === placeholder ? realId : s));
+    }
+    if (later.agents?.includes(placeholder)) {
+      later.agents = later.agents.map((a) => (a === placeholder ? realId : a));
+    }
+    if (later.route) {
+      let changed = false;
+      const nextRoute: Record<string, string> = {};
+      for (const [key, val] of Object.entries(later.route)) {
+        if (val === placeholder) {
+          nextRoute[key] = realId;
+          changed = true;
+        } else {
+          nextRoute[key] = val;
+        }
+      }
+      if (changed) later.route = nextRoute;
+    }
+  }
+}
+
+export function formatApplyResult(result: ApplyResult, cleanLabel: string): string {
+  if (result.conflicts.length) {
+    return `Applied with conflicts to sort out in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}. The copy stays until they are.`;
+  }
+  if (result.left) {
+    return `Applied as uncommitted changes. Ignored files stay in the copy (${result.left.files.slice(0, 5).join(", ")}${result.left.files.length > 5 ? "…" : ""}) at ${result.left.folder} until discarded.`;
+  }
+  return cleanLabel;
+}
+
+/** Compact fingerprint of workspaces, live sessions, and review copies so cached planners hear deltas. */
+export function liveStateFingerprint(context: PlanContext): string {
+  return JSON.stringify([
+    context.workspaces.map((w) => `${w.id}:${w.name}:${w.folder}:${w.git}`),
+    context.running.map((r) => `${r.id}:${r.engine}:${r.workspace}:${r.working ? 1 : 0}:${r.waiting ?? ""}:${r.branch ?? ""}:${r.asked ?? ""}`),
+    (context.copies ?? []).map((c) => `${c.id}:${c.name}:${c.branch}:${c.workspace}`),
+  ]);
+}
+
+export function formatLiveUpdate(context: PlanContext): string {
+  const workspaces = context.workspaces.length ? context.workspaces.map((w) => `${w.name} (${w.folder})`).join(", ") : "none";
+  const running = context.running.length
+    ? context.running
+        .map(
+          (r) =>
+            `${r.id} (${r.engine} in ${r.workspace}, ${r.working ? "working" : r.waiting ? `WAITING ON PROMPT: "${r.waiting}"` : "waiting"}${r.branch ? `, ${r.branch}` : ""}${r.asked ? `; asked: ${r.asked}` : ""})`,
+        )
+        .join("; ")
+    : "none";
+  const copies = context.copies?.length ? context.copies.map((c) => `${c.id} (${c.name}, ${c.branch} from ${c.workspace})`).join(", ") : "none";
+  return `(Updated live state:\n- Workspaces: ${workspaces}\n- Running: ${running}\n- Copies waiting for review: ${copies})`;
+}
+
+/** Compact fingerprint of saved library items so a resumed planner notices changes between turns. */
+export function libraryFingerprint(context: PlanContext): string {
+  return JSON.stringify([
+    (context.agents ?? []).map((a) => `${a.id}:${a.name}:${a.engine}:${(a.places ?? []).length}:${(a.skills ?? []).join(",")}:${a.allowRoutines ?? true}`),
+    (context.skills ?? []).map((s) => `${s.id}:${s.name}:${(s.agents ?? []).join(",")}`),
+    (context.routines ?? []).map((r) => `${r.id}:${r.name}:${r.schedule}:${r.enabled}:${r.agentId ?? ""}`),
+    (context.tasks ?? []).map((t) => `${t.id}:${t.title}:${t.status}:${t.agentId ?? ""}:${t.workspaceId ?? ""}:${t.hasCopy ?? false}`),
+    (context.chats ?? []).map((c) => `${c.id}:${c.title}:${c.engine}:${c.agentId ?? ""}`),
+  ]);
+}
+
+export function formatLibraryUpdate(context: PlanContext): string {
+  const lines: string[] = [];
+  lines.push(
+    context.agents?.length
+      ? `- Agents: ${context.agents.map((a) => `${a.id} ("${a.name}", ${a.engine})`).join(", ")}`
+      : "- Agents: none",
+  );
+  if (context.skills?.length) {
+    lines.push(`- Skills: ${context.skills.map((s) => `${s.id} ("${s.name}")`).join(", ")}`);
+  }
+  if (context.routines?.length) {
+    lines.push(`- Routines: ${context.routines.map((r) => `${r.id} ("${r.name}", ${r.schedule}, ${r.enabled ? "on" : "paused"})`).join(", ")}`);
+  }
+  if (context.tasks?.length) {
+    lines.push(`- Tasks: ${context.tasks.map((t) => `${t.id} ("${t.title}", ${t.status})`).join(", ")}`);
+  }
+  if (context.chats?.length) {
+    lines.push(`- Chats: ${context.chats.map((c) => `${c.id} ("${c.title}")`).join(", ")}`);
+  }
+  return `(Updated library state:\n${lines.join("\n")})`;
+}
+
+const SENSITIVE_INSPECT_DIRS = new Set([".ssh", ".gnupg", ".aws", ".kube", ".docker"]);
+const SAFE_ENV_SAMPLES = /^\.env\.(?:example|sample|template)$/i;
+
+export function isSensitiveInspectPath(rel: string): boolean {
+  const parts = rel.split("/").filter(Boolean);
+  if (parts.some((part) => SENSITIVE_INSPECT_DIRS.has(part))) return true;
+  const base = (parts.at(-1) ?? "").toLowerCase();
+  if (!base) return false;
+  if (/^\.env(?:\..+)?$/.test(base) && !SAFE_ENV_SAMPLES.test(base)) return true;
+  if (/^\.(?:npmrc|netrc|pypirc|git-credentials|dockercfg)$/.test(base)) return true;
+  if (/\.(?:pem|key|p12|pfx|keystore|jks|kdbx)$/.test(base)) return true;
+  return /^(?:id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?|authorized_keys|known_hosts|credentials(?:\.json)?)$/.test(base);
+}
+
+export function readBoundedInspectText(fullPath: string): { text: string } | { reason: string } | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(fullPath, fs.constants.O_RDONLY);
+  } catch {
+    return null;
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return null;
+    const cap = Math.min(stat.size, 16 * 1024);
+    const buf = Buffer.allocUnsafe(cap);
+    let offset = 0;
+    while (offset < cap) {
+      const read = fs.readSync(fd, buf, offset, cap - offset, offset);
+      if (read <= 0) break;
+      offset += read;
+    }
+    const slice = buf.subarray(0, offset);
+    if (slice.includes(0)) return { reason: "binary file" };
+    return { text: slice.toString("utf8").slice(0, 8000) };
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}

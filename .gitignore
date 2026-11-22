@@ -13,3 +13,6 @@ docs/archive/*
 !docs/archive/status-log.md
 release/
 vendor/
+*.broken
+*.broken-*
+.tmp*

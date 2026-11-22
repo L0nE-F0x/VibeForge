@@ -143,9 +143,14 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   };
   const stepRef = useRef(step);
   stepRef.current = step;
-  // While reviewing, the next one waiting: below this one, else the first one above it.
+  // While reviewing, the next and previous ones waiting around this one.
   const nextWaiting =
     filter === "review" ? (shownRuns.slice(at + 1).find((run) => !run.openedAt) ?? shownRuns.slice(0, Math.max(0, at)).find((run) => !run.openedAt)) : undefined;
+  const prevWaiting =
+    filter === "review"
+      ? ([...shownRuns.slice(0, Math.max(0, at))].reverse().find((run) => !run.openedAt) ??
+          [...shownRuns.slice(at + 1)].reverse().find((run) => !run.openedAt))
+      : undefined;
 
   // J and K step through the list from anywhere in the view, except while typing or in a terminal.
   useEffect(() => {
@@ -253,7 +258,12 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
         </div>
       </SidePanel>
       {selected ? (
-        <RunDetail key={selected} runId={selected} onNext={nextWaiting ? () => go({ view: "runs", runId: nextWaiting.id, filter }) : undefined} />
+        <RunDetail
+          key={selected}
+          runId={selected}
+          onPrev={prevWaiting && prevWaiting.id !== nextWaiting?.id ? () => go({ view: "runs", runId: prevWaiting.id, filter }) : undefined}
+          onNext={nextWaiting ? () => go({ view: "runs", runId: nextWaiting.id, filter }) : undefined}
+        />
       ) : (
         <Empty icon={History} title={t("runs.empty.title")}>
           {t("runs.empty.body")}

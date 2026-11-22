@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isUnchangedOwnWrite } from "../src/core/fsx.js";
 import type { Topic } from "../src/core/types.js";
 
 // The config folder is plain files, so it can change outside VibeForge: edited by hand, or by a
@@ -23,24 +24,33 @@ export function configTopics(file: string): Topic[] {
 export function watchConfig(configRoot: string, changed: (topics: Topic[]) => void): () => void {
   const pending = new Set<Topic>();
   let timer: NodeJS.Timeout | null = null;
-  let watcher: fs.FSWatcher | null = null;
-  try {
-    watcher = fs.watch(configRoot, { recursive: true, persistent: false }, (_type, file) => {
-      if (!file) return;
-      for (const topic of configTopics(String(file))) pending.add(topic);
-      if (!pending.size) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const topics = [...pending];
-        pending.clear();
-        changed(topics);
-      }, 250);
-    });
-  } catch {
-    watcher = null;
+  const watchers: fs.FSWatcher[] = [];
+  const onEvent = (_type: string, file: string | Buffer | null) => {
+    if (!file) return;
+    const rel = String(file);
+    const topics = configTopics(rel);
+    if (!topics.length) return;
+    if (isUnchangedOwnWrite(path.join(configRoot, rel))) return;
+    for (const topic of topics) pending.add(topic);
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      const next = [...pending];
+      pending.clear();
+      changed(next);
+    }, 250);
+  };
+  // Watch both top-level config files directly (avoiding recursive-watcher drops after atomic renames on older Linux libuv) and subdirectories.
+  for (const recursive of [false, true]) {
+    try {
+      const watcher = fs.watch(configRoot, { recursive, persistent: false }, onEvent);
+      watcher.on("error", () => undefined);
+      watchers.push(watcher);
+    } catch {
+      /* folder unreadable or recursive watch unsupported */
+    }
   }
   return () => {
     if (timer) clearTimeout(timer);
-    watcher?.close();
+    for (const watcher of watchers) watcher.close();
   };
 }

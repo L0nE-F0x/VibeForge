@@ -88,6 +88,21 @@ beforeAll(() => {
   for (const tool of ["make", "g++", "python3", "rsvg-convert", "update-desktop-database"]) {
     fs.writeFileSync(path.join(stubs, tool), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   }
+  const hasNpm = [`${path.dirname(process.execPath)}`, "/usr/bin", "/bin"].some((dirPath) => {
+    try {
+      fs.accessSync(path.join(dirPath, "npm"), fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!hasNpm) {
+    fs.writeFileSync(
+      path.join(stubs, "npm"),
+      `#!/bin/sh\ncase "$1" in\n  ci) exec "${process.execPath}" install.cjs ;;\n  run) [ "$2" = "build" ] && exec "${process.execPath}" build.cjs ;;\nesac\nexit 1\n`,
+      { mode: 0o755 },
+    );
+  }
   execFileSync("git", ["init", "-q", fake], { env: { ...process.env, ...gitEnv } });
   release("1.0.0");
 });
@@ -539,5 +554,57 @@ describe("the installer with ready-made builds", () => {
     const result = installReleased(fresh, { path: noBuildPath() });
     expect(result.status, result.out).toBe(0);
     expect(built(app(fresh))).toBe("3.6.1");
+  });
+
+  it("quotes Exec in vibeforge.desktop when HOME contains spaces", () => {
+    const spaced = path.join(dir, "home with spaces");
+    fs.mkdirSync(spaced, { recursive: true });
+    publish("3.7.0");
+    const result = installReleased(spaced, { path: noBuildPath() });
+    expect(result.status, result.out).toBe(0);
+    const desktop = fs.readFileSync(path.join(spaced, ".local", "share", "applications", "vibeforge.desktop"), "utf8");
+    expect(desktop).toContain(`Exec="${path.join(spaced, ".local", "bin", "vibeforge")}"\n`);
+  });
+
+  it("removes the app folder on --purge-app while keeping user data untouched and refusing unknown directories", () => {
+    const fresh = homeWith("home-purge", "3.8.0");
+    publish("3.8.1");
+    expect(installReleased(fresh, { path: noBuildPath() }).status).toBe(0);
+    const userCfg = path.join(fresh, ".config", "vibeforge", "settings.yaml");
+    fs.mkdirSync(path.dirname(userCfg), { recursive: true });
+    fs.writeFileSync(userCfg, "theme: omarchy\n");
+
+    const result = install(["--purge-app"], { home: fresh });
+    expect(result.status, result.out).toBe(0);
+    expect(fs.existsSync(app(fresh))).toBe(false);
+    expect(fs.existsSync(`${app(fresh)}.previous`)).toBe(false);
+    expect(fs.existsSync(`${app(fresh)}.lock`)).toBe(false);
+    expect(fs.readFileSync(userCfg, "utf8")).toBe("theme: omarchy\n");
+    expect(result.out).toContain("Removed the app files");
+
+    const foreign = path.join(dir, "not-vibeforge");
+    fs.mkdirSync(path.join(foreign, "keep"), { recursive: true });
+    const refused = install(["--purge-app"], { home: fresh, env: { VIBEFORGE_HOME: foreign } });
+    expect(refused.status).not.toBe(0);
+    expect(refused.out).toContain("Refusing to remove it");
+    expect(fs.existsSync(path.join(foreign, "keep"))).toBe(true);
+  });
+
+  it("tailors missing-package hints to apt-get on Debian/Ubuntu systems without pacman", () => {
+    const aptHome = path.join(dir, "home-apt");
+    const aptBin = path.join(dir, "apt-bin");
+    fs.mkdirSync(aptHome, { recursive: true });
+    fs.mkdirSync(aptBin, { recursive: true });
+    for (const cmd of ["bash", "uname", "realpath", "dirname", "mkdir"]) {
+      const target = [`/usr/bin/${cmd}`, `/bin/${cmd}`].find((p) => fs.existsSync(p));
+      if (target) fs.symlinkSync(target, path.join(aptBin, cmd));
+    }
+    fs.symlinkSync(process.execPath, path.join(aptBin, "node"));
+    fs.writeFileSync(path.join(aptBin, "apt-get"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+    const result = install([], { home: aptHome, path: aptBin, env: { VIBEFORGE_RELEASES: releases } });
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain("sudo apt-get install -y curl");
+    expect(result.out).not.toContain("pacman");
   });
 });

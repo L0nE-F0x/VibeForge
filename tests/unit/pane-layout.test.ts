@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutNode } from "../../src/shared/api.js";
-import { movePane, panesOf, placeSession, removePane, setRatioAt, unzoomForFocus } from "../../src/ui/pane-layout.js";
+import { computeSplitLayout, movePane, panesOf, placeSession, removePane, setRatioAt, spanCss, unzoomForFocus } from "../../src/ui/pane-layout.js";
 
 const pane = (id: string): LayoutNode => ({ kind: "pane", id, launch: { type: "shell" } });
 const split = (dir: "row" | "col", a: LayoutNode, b: LayoutNode, ratio = 0.5): LayoutNode => ({ kind: "split", dir, ratio, a, b });
@@ -104,5 +104,29 @@ describe("placing a CLI started outside Code", () => {
     // Ctrl+Shift+D split a new pane off, or a jump focused another: that workspace is restored.
     expect(unzoomForFocus(zoomed, { code: "b", other: "x" })).toEqual({ code: null, other: "x" });
     expect(unzoomForFocus({ code: null }, { code: "b" })).toEqual({ code: null });
+  });
+
+  it("flattens nested splits into exact css coordinates and divider boxes", () => {
+    const solo = computeSplitLayout(pane("a"));
+    expect(solo.dividers).toEqual([]);
+    expect(solo.panes).toHaveLength(1);
+    expect(spanCss(solo.panes[0].x)).toEqual({ start: "0px", size: "100%" });
+    expect(spanCss(solo.panes[0].y)).toEqual({ start: "0px", size: "100%" });
+
+    // [ a | [ b / c ] ] with ratio 0.4 on root row, 0.5 on nested col
+    const layout = split("row", pane("a"), split("col", pane("b"), pane("c")), 0.4);
+    const flat = computeSplitLayout(layout, 10);
+    expect(flat.panes.map((p) => p.pane.id)).toEqual(["a", "b", "c"]);
+    expect(spanCss(flat.panes[0].x)).toEqual({ start: "0px", size: "calc(40% - 4px)" });
+    expect(spanCss(flat.panes[1].x)).toEqual({ start: "calc(40% + 6px)", size: "calc(60% - 6px)" });
+    expect(spanCss(flat.panes[1].y)).toEqual({ start: "0px", size: "calc(50% - 5px)" });
+    expect(spanCss(flat.panes[2].y)).toEqual({ start: "calc(50% + 5px)", size: "calc(50% - 5px)" });
+    expect(flat.dividers.map((d) => ({ path: d.path, dir: d.dir }))).toEqual([
+      { path: "", dir: "row" },
+      { path: "b", dir: "col" },
+    ]);
+    // Swapping panes keeps the exact same pane IDs in computeSplitLayout output.
+    const swapped = movePane(layout, "a", "c", "center");
+    expect(computeSplitLayout(swapped, 10).panes.map((p) => p.pane.id).sort()).toEqual(["a", "b", "c"]);
   });
 });

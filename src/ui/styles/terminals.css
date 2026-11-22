@@ -18,6 +18,33 @@
   min-height: 0;
 }
 
+.term-find {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.75);
+}
+
+.term-find .input {
+  width: 180px;
+  height: 24px;
+  font-size: var(--fs-sm);
+}
+
+.term-find-count {
+  padding: 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
 .term .xterm {
   height: 100%;
 }
@@ -227,27 +254,24 @@
   display: flex;
 }
 
-.split {
+.split-stage {
+  position: relative;
   flex: 1;
-  display: flex;
   min-width: 0;
   min-height: 0;
 }
 
-.split.dir-col {
-  flex-direction: column;
-}
-
-.split > .split-cell {
+.pane-slot {
+  position: absolute;
   display: flex;
   min-width: 0;
   min-height: 0;
 }
 
 .divider {
-  flex: 0 0 10px;
-  position: relative;
+  position: absolute;
   cursor: col-resize;
+  z-index: 1;
 }
 
 /* A faint grip so the gap reads as something you can grab. */
@@ -261,13 +285,13 @@
   transition: opacity 0.15s;
 }
 
-.split.dir-row > .divider::before {
+.divider.dir-row::before {
   width: 2px;
   height: 28px;
   background: radial-gradient(circle, var(--fg-3) 1px, transparent 1.5px) 0 0 / 2px 6px;
 }
 
-.split.dir-col > .divider::before {
+.divider.dir-col::before {
   width: 28px;
   height: 2px;
   background: radial-gradient(circle, var(--fg-3) 1px, transparent 1.5px) 0 0 / 6px 2px;
@@ -278,7 +302,7 @@
   opacity: 0;
 }
 
-.split.dir-col > .divider {
+.divider.dir-col {
   cursor: row-resize;
 }
 
@@ -290,14 +314,14 @@
   transition: background 0.12s;
 }
 
-.split.dir-row > .divider::after {
+.divider.dir-row::after {
   top: 12%;
   bottom: 12%;
   left: 4px;
   width: 2px;
 }
 
-.split.dir-col > .divider::after {
+.divider.dir-col::after {
   left: 12%;
   right: 12%;
   top: 4px;

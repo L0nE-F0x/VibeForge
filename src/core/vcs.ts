@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { diffHeaderTarget } from "./worktrees.js";
 
 interface GitResult {
   code: number;
@@ -27,6 +28,10 @@ function execGit(args: readonly string[], cwd: string, timeoutMs: number, maxBuf
         "--no-optional-locks",
         "-c",
         "color.ui=never",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
         "-c",
         "diff.mnemonicPrefix=false",
         "-c",
@@ -341,8 +346,9 @@ export function slimPatch(patch: string, max = MAX_PATCH): string {
   const blocks = patch.split(/^(?=diff --git )/m).map((block) => {
     const at = block.indexOf("\nGIT binary patch\n");
     if (at < 0) return block;
-    const names = /^diff --git a\/(.+?) b\/(.+)$/m.exec(block);
-    return `${block.slice(0, at + 1)}Binary files ${names ? `a/${names[1]} and b/${names[2]}` : "a and b"} differ\n`;
+    const endOfHeader = block.indexOf("\n");
+    const name = diffHeaderTarget(endOfHeader < 0 ? block : block.slice(0, endOfHeader));
+    return `${block.slice(0, at + 1)}Binary files ${name ? `a/${name} and b/${name}` : "a and b"} differ\n`;
   });
   return capPatch(blocks.join(""), max);
 }
@@ -419,7 +425,8 @@ export function leaveOutUntouched(patch: string, cwd: string, before: DirtyFiles
   return patch
     .split(/^(?=diff --git )/m)
     .map((block) => {
-      const name = /^diff --git a\/.+? b\/(.+)$/m.exec(block)?.[1];
+      const endOfHeader = block.indexOf("\n");
+      const name = diffHeaderTarget(endOfHeader < 0 ? block : block.slice(0, endOfHeader));
       if (!name || !block.startsWith("diff --git ") || !before.has(name)) return block;
       const full = fileInWorkTree(root, name);
       if (!full || fileStamp(full) !== before.get(name)) return block;

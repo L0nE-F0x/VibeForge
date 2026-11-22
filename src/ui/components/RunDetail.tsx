@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   Bot,
   CheckCheck,
+  ChevronsLeft,
   ChevronsRight,
   Copy,
   FileDiff,
@@ -171,7 +172,19 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
 const RUNNING_TOPICS: Topic[] = ["runs", "live", "working"];
 const DONE_TOPICS: Topic[] = ["runs"];
 
-export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded?: boolean; /** While reviewing: open the next run waiting. */ onNext?: () => void }) {
+export function RunDetail({
+  runId,
+  embedded,
+  onPrev,
+  onNext,
+}: {
+  runId: string;
+  embedded?: boolean;
+  /** While reviewing: open the previous run waiting. */
+  onPrev?: () => void;
+  /** While reviewing: open the next run waiting. */
+  onNext?: () => void;
+}) {
   const t = useT();
   const { go } = useNav();
   const { push } = useToast();
@@ -275,6 +288,7 @@ export function RunDetail({ runId, embedded, onNext }: { runId: string; embedded
             {t("common.continue")}
           </Button>
         )}
+        {onPrev && <Button size="sm" variant="ghost" icon={ChevronsLeft} tip={t("runs.prevTip")} kbd={shortcutKeys("runs.prev")} onClick={onPrev} />}
         {onNext && (
           <Button size="sm" icon={ChevronsRight} tip={t("runs.nextTip")} kbd={shortcutKeys("runs.next")} onClick={onNext}>
             {narrow ? null : t("runs.next")}

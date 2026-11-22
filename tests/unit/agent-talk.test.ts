@@ -249,7 +249,7 @@ describe("CLIs talking through VibeForge", () => {
     pass(5000);
     const asked = ctx.svc.tell({ fromPty: a.ptyId, to: "codex", text: "Review it", wait: true, timeoutMs: 10_000 });
     await ctx.svc.pumpMessages();
-    expect(watched).toEqual([{ kind: "codex", words: "[Message from Argy, sent through VibeForge]" }]);
+    expect(watched).toEqual([{ kind: "codex", words: "Review it" }]);
     pass(11_000);
     await ctx.svc.pumpMessages();
     expect(await asked).toMatchObject({ ok: true, timedOut: true, reply: null });
@@ -1011,6 +1011,52 @@ describe("a lead and its team", () => {
     await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "claude" });
     expect(ctx.spawns.at(-1)!.argv.slice(1, 2)).toEqual(["--append-system-prompt"]);
     expect(ctx.spawns.at(-1)!.argv[2]).not.toContain("you lead");
+    ctx.svc.close();
+  });
+
+  it("enforces cwdAllowed and rate/concurrency limits on outside callers, skips stale grok prompts, and triggers stuckMs after an earlier quietAt", async () => {
+    let at = AT;
+    const pass = (ms: number) => (at += ms);
+    const repo = gitRepo();
+    const otherRepo = gitRepo();
+    const ctx = setup({ now: () => new Date(at) });
+    const ws = ctx.svc.addWorkspace(repo).workspaces[0];
+    ctx.svc.addWorkspace(otherRepo);
+    await ctx.svc.saveAgent({ name: "Scoped", brief: "b", engine: "argy", places: [repo] });
+    goAhead(ctx, { maxMessages: 1, maxWorking: 1, maxHandOffs: 2 });
+
+    // Outside caller respects agent places when a live ptyId IS in another workspace (tested via live session in otherRepo):
+    const otherPty = await ctx.svc.startEngine({ workspaceId: ctx.svc.listWorkspaces().workspaces[1].id, engineId: "argy" });
+    expect(await ctx.svc.handTask({ fromPty: otherPty.ptyId, agent: "scoped", text: "Do work" })).toMatchObject({ ok: false, error: expect.stringContaining("not allowed") });
+    await ctx.exit(otherPty.ptyId);
+
+    // Outside tell counts toward maxMessages limit:
+    await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "argy" });
+    pass(5000);
+    expect(await ctx.svc.tell({ fromPty: null, to: "argy", text: "First outside message" })).toMatchObject({ ok: true, delivered: "sent" });
+    pass(5000);
+    expect(await ctx.svc.tell({ fromPty: null, to: "argy", text: "Second outside message" })).toMatchObject({ ok: true, delivered: "draft" });
+
+    // Outside handTask respects maxWorking / maxHandOffs:
+    const h1 = await ctx.svc.handTask({ fromPty: null, agent: "scoped", text: "Task one" });
+    expect(h1).toMatchObject({ ok: true, started: true });
+    const h2 = await ctx.svc.handTask({ fromPty: null, agent: "scoped", text: "Task two" });
+    expect(h2).toMatchObject({ ok: true, started: false });
+
+    // grokTurn ignores an older prompt mentioning the same words before `since`:
+    const history = [
+      { type: "user", content: [{ type: "text", text: "Review it" }] },
+      { type: "assistant", content: [{ type: "text", text: "Old answer" }] },
+      { type: "user", content: [{ type: "text", text: "Review it" }] },
+      { type: "assistant", content: [{ type: "text", text: "New answer" }] },
+    ];
+    const events = [
+      { type: "turn_started", ts: new Date(AT - 10_000).toISOString() },
+      { type: "turn_ended", ts: new Date(AT - 9_000).toISOString() },
+      { type: "turn_started", ts: new Date(AT + 1000).toISOString() },
+      { type: "turn_ended", ts: new Date(AT + 2000).toISOString() },
+    ];
+    expect(grokTurn(history, events, AT, "Review it")).toEqual({ prompted: true, matched: true, reply: "New answer" });
     ctx.svc.close();
   });
 });

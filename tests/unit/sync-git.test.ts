@@ -341,4 +341,29 @@ describe("sync: a repository on two machines", () => {
     await inHistory(root, path.join(root, "notes.txt"), "notes.txt");
     expect(fs.existsSync(marker)).toBe(false);
   });
+
+  it("rescues detached-HEAD commits from HEAD conflict copies and handles CRLF files without filters", async () => {
+    const root = repo();
+    const base = git(root, "rev-parse", "HEAD");
+    git(root, "checkout", "--detach", "-q", base);
+    write(root, "notes.txt", "detached work\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "detached commit");
+    const detached = git(root, "rev-parse", "HEAD");
+
+    // Simulate the other machine winning on main while this machine's detached HEAD became a conflict copy.
+    git(root, "checkout", "-q", "main");
+    fs.writeFileSync(path.join(root, ".git", `HEAD.${STAMP}`), `${detached}\n`);
+    await rescueRepo(root, "desk");
+    expect(git(root, "rev-parse", "refs/heads/detached-head")).toBe(detached);
+    expect(copiesLeft(root)).toEqual([]);
+
+    // LF commit matches a CRLF working/conflict file in history without running clean filters.
+    write(root, "crlf.txt", "line1\nline2\n");
+    git(root, "add", "-A");
+    git(root, "commit", "-qm", "lf file");
+    const crlfCopy = path.join(root, `crlf.${STAMP}.txt`);
+    fs.writeFileSync(crlfCopy, "line1\r\nline2\r\n");
+    expect(await inHistory(root, crlfCopy, "crlf.txt")).toBe(true);
+  });
 });

@@ -113,7 +113,7 @@ describe("sync: folders", () => {
 
   it("keeps heavy folders, conflict copies and this machine's git bookkeeping out", () => {
     const full = ignoreLines({ filesOnly: false });
-    expect(full).toEqual(["(?d)node_modules", "(?d)target", "(?d).venv", "*.sync-conflict-*", ".git/worktrees", ".git/*.lock", ".git/**/*.lock", ".git/gc.pid"]);
+    expect(full).toEqual(["(?d)node_modules", "(?d)target", "(?d).venv", "*.sync-conflict-*", ".git/worktrees", ".git/hooks", ".git/config", ".git/*.lock", ".git/**/*.lock", ".git/gc.pid"]);
     const files = ignoreLines({ filesOnly: true });
     expect(files).toContain("(?d).git");
     expect(files).not.toContain(".git/worktrees");

@@ -225,6 +225,7 @@ export function ListTools({
             value={query}
             onChange={(event) => onQuery(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if (event.key !== "Escape") return;
               event.preventDefault();
               event.stopPropagation();

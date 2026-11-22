@@ -53,6 +53,14 @@ const FREE_PROMPTS = [
   /(?:please )?(?:run \/login|sign in|log in)\b/i,
 ];
 
+/** Whether a waiting prompt explicitly matches a benign folder-trust or sign-in prompt. */
+export function isFreeWaitingPrompt(waiting: string | undefined): boolean {
+  const text = (waiting ?? "").trim();
+  if (!text) return false;
+  const prompt = detectWaitingPrompt(text) ?? text;
+  return FREE_PROMPTS.some((pattern) => pattern.test(prompt));
+}
+
 /** Whether a detected waiting prompt or screen asks to approve a tool, command or edit (not folder trust or sign-in). */
 export function isApprovalPrompt(waitingOrScreen: string): boolean {
   const text = waitingOrScreen.trim();

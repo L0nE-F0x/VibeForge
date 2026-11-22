@@ -90,11 +90,15 @@ describe("store read cache", () => {
   });
 
   it("sees the store's own writes at once", () => {
-    const { store } = settledStore();
+    const { store, files, reads } = settledStore();
     store.writeSettings({ ...store.readSettings(), terminalFontSize: 17 });
-    expect(store.readSettings().terminalFontSize).toBe(17);
     store.writeEngineRows(store.readEngineRows().filter((row) => row.id !== "codex"));
+    const beforeSettings = reads(files.settings);
+    const beforeEngines = reads(files.engines);
+    expect(store.readSettings().terminalFontSize).toBe(17);
+    expect(store.readSettings().terminalFontSize).toBe(17);
     expect(store.readEngineRows().some((row) => row.id === "codex")).toBe(false);
+    expect([reads(files.settings) - beforeSettings, reads(files.engines) - beforeEngines]).toEqual([0, 0]);
     store.writeAgent({ ...agent("ada", "Ada"), goodAt: "tests" });
     expect(store.getAgent("ada")?.goodAt).toBe("tests");
     // Deleting goes through the trash (library.ts): the folder is moved away, and the next read sees it gone.

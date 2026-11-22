@@ -252,6 +252,14 @@ export class Call {
     if (!this.ear) return;
     const service = this.opts.service();
     if (service) this.mode = service.getSettings().voice.talkOver;
+    if (this.mode === "never") {
+      this.open = false;
+      this.thinkingOpen = false;
+    }
+    if (!this.muted) {
+      const shouldListen = !this.busy || this.open || this.thinkingOpen;
+      this.setDeaf(!shouldListen);
+    }
     const voice = this.voiceFile();
     if (!voice) {
       this.opts.voice.speaker.unwarm?.();

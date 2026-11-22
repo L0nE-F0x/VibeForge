@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-22
+
+**3.3.0: persistent split panes, in-terminal search, starter agent templates, ARM64 builds, and full security and performance hardening across Viby, Sync and the phone page.**
+
+### Added
+
+- **Find in terminal (`Ctrl+Shift+F`) and pane cycling (`Ctrl+Shift+[` / `]`).** Search scrollback inside any live or replayed terminal, step between panes from the keyboard, and optionally pass `Ctrl+V` and `Alt+1…9` straight through to terminal programs like Vim and tmux (**Settings → Defaults**).
+- **Splitting or closing a pane keeps neighbouring terminals in place.** Neighbouring panes stay mounted without resetting their scroll position or selection.
+- **Starter agent templates and one-click CLI setup.** **New agent** offers four templates (**Builder**, **Reviewer**, **Bug fixer** and **Test writer**), and empty CLI states jump straight to **Settings → Engines**.
+- **Viby's copies on Home and in the rail.** Branches waiting for review show on **Home** and as a badge on Viby in the rail, and **Runs** adds a **Previous** button (`K`) beside **Next to review** (`J`).
+- **Linux ARM64 builds, multi-distro installer hints and `--purge-app`.** Releases now build and smoke-test `linux-arm64` alongside `linux-x64`, `install.sh` tailors package hints for `pacman`, `apt-get`, `dnf` and `zypper` and adds `--purge-app`, and `packaging/aur/PKGBUILD` is ready for `vibeforge-bin`.
+
+### Changed
+
+- **Lighter Viby turns and background CPU.** Viby keeps a stable first-turn prompt for cache reuse, sends compact live-state updates on later turns, isolates 20 Hz call meter updates from the rest of the UI, pauses background polling while the window is hidden, and loads non-English schedule locales only when needed.
+- **Faster run index and config reads.** The SQLite run index uses WAL mode with composite indexes, and config saves update the in-memory cache directly without re-reading own writes.
+- **Pinned rail footer.** Ask, Live, Help and Settings stay pinned at the foot of the rail on shorter laptop screens.
+
+### Fixed
+
+- **Sync and git rescue:** unmerged index paths and unborn branches are handled cleanly during git rescue, and hidden home dot-folders can't be shared as workspaces.
+- **Session and terminal reliability:** switching chats mid-send no longer drops input, gzipped run artifacts open reliably across Continue, Hand off and Markdown export, `vibeforge tell --wait` ignores older turns' replies, and CJK IME composition no longer triggers shortcuts mid-character.
+- **Voice, calls and the phone page:** iOS Safari recovers from `"interrupted"` audio contexts, the phone page supports browser Back/Forward navigation and keeps recordings isolated when switching computers, and voice downloads and shutdown clean up cleanly.
+
+### Security
+
+- **Per-terminal capability tokens on the control socket,** with rate limiting for outside callers.
+- **Tighter Viby and Sync path checks:** Viby refuses symlinks, `.git` internals and secret files during `inspect`, gates shell redirection, destructive flags and remote URLs behind **Go**, and Sync refuses symlinked files and directories across conflicts and library sync.
+
 ## [3.2.0] - 2026-11-21
 
 **3.2.0: your saved agents and skills sync between your machines, with their memory, folders and CLI.**

@@ -367,13 +367,15 @@ const NEW_AGENT_DRAFT = "agent:new";
 
 function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (agent: Agent) => void }) {
   const t = useT();
+  const { go } = useNav();
   const engines = useEngines().data ?? [];
   const settings = useQuery("settings", ["settings"], () => call("settings.get")).data;
   const home = useAppInfo().data?.home ?? "";
   const available = engines.filter((engine) => engine.available);
   // Kept as a draft, as a new task, skill or routine is: Esc or a click outside doesn't lose a long brief.
-  const [form, setForm] = useDraftState(NEW_AGENT_DRAFT, { name: "", brief: "", engine: "", places: [] as string[], allowRoutines: true });
+  const [form, setForm] = useDraftState(NEW_AGENT_DRAFT, { name: "", brief: "", engine: "", places: [] as string[], allowRoutines: true, goodAt: "" });
   const { name, brief, engine, places, allowRoutines } = form;
+  const goodAt = form.goodAt ?? "";
   const setName = (next: string) => setForm((prev) => ({ ...prev, name: next }));
   const setBrief = (next: string) => setForm((prev) => ({ ...prev, brief: next }));
   const setEngine = (next: string) => setForm((prev) => ({ ...prev, engine: next }));
@@ -391,7 +393,14 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
     if (folder && !places.includes(folder)) setPlaces((prev) => [...prev, folder]);
   });
   const [save, saving] = useAction(async () => {
-    const agent = await call("agents.save", { name, brief, engine, places, allowRoutines });
+    const agent = await call("agents.save", {
+      name,
+      brief,
+      engine,
+      places,
+      allowRoutines,
+      ...(goodAt.trim() ? { goodAt: goodAt.trim() } : {}),
+    });
     forgetDraft(NEW_AGENT_DRAFT);
     onCreated(agent);
   }, t("agents.createFailed"));
@@ -421,6 +430,45 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
         </>
       }
     >
+      {engines.length > 0 && available.length === 0 && (
+        <Notice tone="warn">
+          <div className="hstack wrap" style={{ gap: 8 }}>
+            <span className="grow">{t("agents.noEngines")}</span>
+            <Button
+              size="sm"
+              icon={Settings2}
+              onClick={() => {
+                onClose();
+                go({ view: "settings", section: "engines" });
+              }}
+            >
+              {t("orch.openSettings")}
+            </Button>
+          </div>
+        </Notice>
+      )}
+      <Field label={t("agents.templates")}>
+        <div className="hstack wrap" style={{ gap: 6 }}>
+          {(["builder", "reviewer", "fixer", "tester"] as const).map((id) => (
+            <Button
+              key={id}
+              size="sm"
+              variant="ghost"
+              icon={Sparkles}
+              onClick={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  name: t(`agents.template.${id}.name`),
+                  goodAt: t(`agents.template.${id}.goodAt`),
+                  brief: t(`agents.template.${id}.brief`),
+                }))
+              }
+            >
+              {t(`agents.template.${id}.label`)}
+            </Button>
+          ))}
+        </div>
+      </Field>
       <div className="form-grid">
         <Field label={t("common.name")}>
           <Input autoFocus placeholder={t("agents.namePlaceholder")} value={name} onChange={(event) => setName(event.target.value)} />

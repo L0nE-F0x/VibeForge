@@ -31,8 +31,20 @@ export function controlSocketPath(dataRoot: string, runtimeDir: string | undefin
  * someone else, whose socket it could be. scripts/vibeforge checks the same before connecting.
  */
 export function prepareSocketDir(socketPath: string, uid: number, tmp = "/tmp"): boolean {
+  try {
+    if (fs.lstatSync(socketPath).isSymbolicLink()) return false;
+  } catch {
+    /* socket file not created yet */
+  }
   const dir = path.dirname(socketPath);
-  if (dir !== fallbackSocketDir(uid, tmp)) return true;
+  if (dir !== fallbackSocketDir(uid, tmp)) {
+    try {
+      const stat = fs.lstatSync(dir);
+      return !stat.isSymbolicLink() && stat.isDirectory() && stat.uid === uid;
+    } catch {
+      return false;
+    }
+  }
   try {
     fs.mkdirSync(dir, { mode: 0o700 });
   } catch (error) {
@@ -40,7 +52,7 @@ export function prepareSocketDir(socketPath: string, uid: number, tmp = "/tmp"):
   }
   try {
     const stat = fs.lstatSync(dir);
-    if (!stat.isDirectory() || stat.uid !== uid) return false;
+    if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== uid) return false;
     if ((stat.mode & 0o777) !== 0o700) fs.chmodSync(dir, 0o700);
     return true;
   } catch {
@@ -57,10 +69,10 @@ export function parseControl(line: string): VoiceAction | null {
 
 /** A request from `vibeforge tell|who|task` (scripts/talk.mjs): one JSON line. */
 export type TalkRequest =
-  | { op: "who"; pty: string | null }
-  | { op: "tell"; pty: string | null; to: string; text: string; wait: boolean; timeoutMs?: number }
-  | { op: "task"; pty: string | null; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number }
-  | { op: "apply"; pty: string | null; task: string };
+  | { op: "who"; pty: string | null; ptyToken?: string }
+  | { op: "tell"; pty: string | null; ptyToken?: string; to: string; text: string; wait: boolean; timeoutMs?: number }
+  | { op: "task"; pty: string | null; ptyToken?: string; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number }
+  | { op: "apply"; pty: string | null; ptyToken?: string; task: string };
 
 /** Any request can come back refused, with the reason. */
 export type TalkRefusal = { ok: false; error: string };
@@ -100,21 +112,23 @@ export function parseTalkRequest(line: string): TalkRequest | null {
     return null;
   }
   const pty = text(raw.pty, 200) || null;
-  if (raw.op === "who") return { op: "who", pty };
+  const ptyToken = text(raw.ptyToken, 200) ?? undefined;
+  const auth = ptyToken ? { pty, ptyToken } : { pty };
+  if (raw.op === "who") return { op: "who", ...auth };
   if (raw.op === "apply") {
     const task = text(raw.task, 200);
-    return task ? { op: "apply", pty, task } : null;
+    return task ? { op: "apply", ...auth, task } : null;
   }
   const body = text(raw.text, TALK_REQUEST_MAX);
   if (!body) return null;
   if (raw.op === "tell") {
     const to = text(raw.to, 200);
-    return to ? { op: "tell", pty, to, text: body, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) } : null;
+    return to ? { op: "tell", ...auth, to, text: body, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) } : null;
   }
   if (raw.op === "task") {
     const agent = text(raw.agent, 200);
     if (!agent) return null;
-    return { op: "task", pty, agent, text: body, title: text(raw.title, 200) ?? undefined, start: raw.start !== false, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) };
+    return { op: "task", ...auth, agent, text: body, title: text(raw.title, 200) ?? undefined, start: raw.start !== false, wait: raw.wait === true, timeoutMs: duration(raw.timeoutMs) };
   }
   return null;
 }

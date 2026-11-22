@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (3.2.0, 2026-11-21, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (3.3.0, 2026-11-22, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -30,14 +30,13 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 
 ## Left from recent audits
 
-- [ ] **Neighbouring panes keep their place.** A split or a close remounts the terminal beside it (its scrollback comes back, its scroll position and selection don't). Needs a keyed pane tree in SplitView.
 - [ ] **File names that aren't UTF-8** still go through UTF-8 text when Apply lists what changed. Rare; their content is now carried byte for byte.
 
 ## Parked
 
 - [ ] **A buzz when the phone is locked.** The page already buzzes while it is open. A locked phone needs Web Push, which goes through Apple's or Google's push servers: the first third-party service VibeForge would use. Parked on 2026-10-20; if it comes back, it is opt-in and the push carries no content.
 
-- [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. The package would set `VIBEFORGE_UPDATE_COMMAND` (or be detected as an "other" install) so the in-app Update points to the package manager.
+- [ ] **An AUR package**, so Omarchy users can update with `yay`. Parked because the AUR has closed new account registration for now (2026-09-25); watch aur-general or the Arch news feed for it to reopen. `packaging/aur/PKGBUILD` (`vibeforge-bin`, `x86_64` and `aarch64`, installing without `.vibeforge-installer` so VibeForge leaves updates to the package manager) and the `linux-arm64` release build are ready in the repository.
 
 ## Known rough edges
 

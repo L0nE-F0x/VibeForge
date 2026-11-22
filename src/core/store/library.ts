@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "yaml";
-import { writeFileAtomic } from "../fsx.js";
+import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
 import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
@@ -243,7 +243,9 @@ export class Library {
 
   deleteSkill(id: string): void {
     if (!isSafeId(id)) return;
-    fs.rmSync(path.join(this.configRoot, "skills", id), { recursive: true, force: true });
+    const dir = path.join(this.configRoot, "skills", id);
+    noteOwnDelete(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 
   // ---------------------------------------------------------------- routines
@@ -267,6 +269,7 @@ export class Library {
   deleteRoutine(id: string): void {
     if (!isSafeId(id)) return;
     const file = path.join(this.configRoot, "routines", `${id}.yaml`);
+    noteOwnDelete(file);
     fs.rmSync(file, { force: true });
     this.cache.forget(file);
   }
@@ -294,6 +297,7 @@ export class Library {
   deleteTask(id: string): void {
     if (!isSafeId(id)) return;
     const file = path.join(this.configRoot, "tasks", `${id}.yaml`);
+    noteOwnDelete(file);
     fs.rmSync(file, { force: true });
     this.cache.forget(file);
   }

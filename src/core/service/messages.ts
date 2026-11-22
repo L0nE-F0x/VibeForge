@@ -145,11 +145,11 @@ export class MessageDesk {
         toPty: to.ptyId,
         text: body,
         enter: !atLimit,
-        counts: Boolean(from),
+        counts: !person,
         waiter:
           input.wait && !atLimit
             ? {
-                words: body.split("\n")[0],
+                words: text.split("\n").map((line) => line.trim()).find(Boolean) ?? text.slice(0, 80),
                 deadline: this.nowMs() + waitMs,
                 done: (answered) =>
                   answered

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { noteOwnDelete } from "./fsx.js";
 
 /** A deleted thing's files, moved aside so Undo can put them back. */
 export interface Bin {
@@ -55,6 +56,7 @@ export class Trash {
         if (!fs.existsSync(from)) return;
         fs.mkdirSync(dir, { recursive: true });
         const to = path.join(dir, `${index}-${path.basename(from)}`);
+        noteOwnDelete(from);
         move(from, to);
         moved.push({ from, to });
       });

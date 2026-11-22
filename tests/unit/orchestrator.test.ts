@@ -89,7 +89,9 @@ describe("the Orchestrator's plans", () => {
       "agents",
       "options",
     ]);
-    expect(brainArgs(agy, { text: "x", rules: "r", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" })?.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
+    const agyResumed = brainArgs(agy, { text: "x", rules: "RULES_SHOULD_NOT_REPEAT", sessionId: "conv-1", resume: true, model: "gemini-3.8-flash-low" }) ?? [];
+    expect(agyResumed.slice(0, 2)).toEqual(["-p", "x"]);
+    expect(agyResumed.slice(-4)).toEqual(["--model", "gemini-3.8-flash-low", "--conversation", "conv-1"]);
     expect(brainArgs(grok, { text: "x", rules: "r", sessionId: "s", resume: false, model: "grok-4.6" })).toContain("grok-4.6");
     expect(brainArgs(claude, { text: "x", rules: "r", sessionId: "s", resume: false, model: "haiku" })?.slice(-6, -4)).toEqual(["--model", "haiku"]);
   });
@@ -263,6 +265,9 @@ describe("the Orchestrator's plans", () => {
 
     expect(orchestratorRules(rich)).toContain("Existing Task");
     expect(readBrainOutput("Sorry {not: valid json}").plan).toBeNull();
+    expect(readBrainOutput('I noted {foo} in prose first.\n```json\n{"say":"Hello {world}!","steps":[]}\n```').plan).toEqual({ say: "Hello {world}!", steps: [] });
+    expect(readBrainOutput('{"say":123,"steps":[]}').plan).toBeNull();
+    expect(readBrainOutput('{"say":"ok","steps":"bad"}').plan).toBeNull();
   });
 });
 
@@ -2087,8 +2092,10 @@ describe("Viby settings awareness and self-configuration", () => {
     expect(turn1Rules).toContain("Your settings & VibeForge configuration:");
     expect(turn1Rules).toContain("planner=grok, model=grok-4.7, effort=low, mode=plan");
     expect(turn1Rules).toContain("installed STT models: [ggml-base.en.bin]");
-    expect(turn1Rules).toContain("parakeet-tdt-0.6b-v3-int8 (640MB, sherpa");
-    expect(calls[1][calls[1].indexOf("-p") + 1]).toContain("[Findings from VibeForge]");
+    expect(turn1Rules).toContain("parakeet-tdt-0.6b-v3-int8");
+    const findingsPrompt = calls[1][calls[1].indexOf("-p") + 1];
+    expect(findingsPrompt).toContain("[Findings from VibeForge]");
+    expect(findingsPrompt).toContain("parakeet-tdt-0.6b-v3-int8 (640MB, sherpa");
     expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("You're on Grok 4.7 with ggml-base.en.bin.");
 
     // Turn 2: plan waits in `plan` mode; edit one step on the card, then run Go!
@@ -2125,10 +2132,13 @@ describe("Viby settings awareness and self-configuration", () => {
     };
     await until(() => ctx.svc.getSettings().orchestrator.effort === "high");
 
-    // Turn 4: resumes the same Claude session with `--effort high` and prepends `(Updated settings: ...)`!
+    // Turn 4: resumes the same Claude session with `--effort high`, keeps the Turn-1 system prompt intact for prompt caching, and prepends `(Updated settings: ...)`!
     await ctx.svc.orchestratorAsk("what effort are you on now?");
     const resumedClaude = calls[4];
     expect(resumedClaude).toEqual(expect.arrayContaining(["--resume", "--effort", "high"]));
+    expect(resumedClaude[resumedClaude.indexOf("--append-system-prompt") + 1]).toBe(
+      claudeCall[claudeCall.indexOf("--append-system-prompt") + 1],
+    );
     expect(resumedClaude.at(-1)).toContain("(Updated settings:");
     expect(resumedClaude.at(-1)).toContain("effort=high");
 

@@ -1,0 +1,66 @@
+# Maintainer: Lone Fox <https://github.com/L0nE-F0x>
+# Update checksums from release SHA256SUMS (or with `updpkgsums`) when publishing to AUR.
+pkgname=vibeforge-bin
+pkgver=3.3.0
+pkgrel=1
+pkgdesc="Desktop workspace for coding CLIs (Claude Code, Codex, Grok and more) with real terminals, agents, routines, tasks and Viby"
+arch=('x86_64' 'aarch64')
+url="https://github.com/L0nE-F0x/VibeForge"
+license=('MIT')
+depends=('nodejs>=20' 'alsa-lib' 'at-spi2-core' 'gtk3' 'libdrm' 'libxss' 'mesa' 'nss')
+optdepends=(
+  'whisper.cpp: local voice dictation and Viby calls'
+  'piper-tts: local spoken replies from Viby'
+  'tailscale: private phone companion and cross-machine sync'
+)
+provides=('vibeforge')
+conflicts=('vibeforge')
+options=('!strip')
+
+source_x86_64=("https://github.com/L0nE-F0x/VibeForge/releases/download/v${pkgver}/vibeforge-${pkgver}-linux-x64.tar.zst")
+source_aarch64=("https://github.com/L0nE-F0x/VibeForge/releases/download/v${pkgver}/vibeforge-${pkgver}-linux-arm64.tar.zst")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+  local src_arch="x64"
+  if [[ "$CARCH" == "aarch64" ]]; then
+    src_arch="arm64"
+  fi
+  local extracted="${srcdir}/vibeforge-${pkgver}-linux-${src_arch}"
+
+  install -d "${pkgdir}/opt/vibeforge" "${pkgdir}/usr/bin" \
+    "${pkgdir}/usr/share/applications" \
+    "${pkgdir}/usr/share/icons/hicolor/512x512/apps" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps" \
+    "${pkgdir}/usr/share/licenses/${pkgname}"
+
+  cp -a "${extracted}/." "${pkgdir}/opt/vibeforge/"
+  # Package-managed installs update through pacman/yay rather than install.sh (src/core/updates.ts).
+  rm -f "${pkgdir}/opt/vibeforge/.vibeforge-installer"
+  chmod 0755 "${pkgdir}/opt/vibeforge/scripts/vibeforge"
+  ln -s /opt/vibeforge/scripts/vibeforge "${pkgdir}/usr/bin/vibeforge"
+
+  cat >"${pkgdir}/usr/share/applications/vibeforge.desktop" <<'EOF'
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=VibeForge
+GenericName=Agent desk
+Comment=Your coding CLIs, agents, routines and tasks in one window
+Exec=/usr/bin/vibeforge
+TryExec=/usr/bin/vibeforge
+Icon=vibeforge
+Terminal=false
+Categories=Development;
+Keywords=AI;Agent;Terminal;Code;Claude;Codex;Grok;Antigravity;
+StartupNotify=true
+StartupWMClass=vibeforge
+EOF
+
+  install -Dm0644 "${extracted}/resources/icon.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/vibeforge.png"
+  install -Dm0644 "${extracted}/resources/icon.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/vibeforge.svg"
+  if [[ -f "${extracted}/LICENSE" ]]; then
+    install -Dm0644 "${extracted}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  fi
+}

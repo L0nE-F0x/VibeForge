@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { configTopics, watchConfig } from "../../electron/config-watch.js";
+import { noteOwnDelete, writeJson } from "../../src/core/fsx.js";
 import type { Topic } from "../../src/core/types.js";
 
 describe("what a config file change touches", () => {
@@ -59,6 +60,41 @@ describe("watching the config folder", () => {
     await sleep(500);
     expect(seen).toHaveLength(1);
     expect([...seen[0]].sort()).toEqual(["routines", "settings"]);
+  });
+
+  it("suppresses VibeForge's own atomic saves and noted deletes while still seeing external edits", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-config-watch-"));
+    fs.mkdirSync(path.join(dir, "tasks"));
+    const seen: Topic[][] = [];
+    stop = watchConfig(dir, (topics) => seen.push(topics));
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const until = async (check: () => boolean, ms: number) => {
+      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(20);
+    };
+    // Warm up watcher reliably before asserting suppression.
+    for (let tries = 0; tries < 10 && !seen.length; tries += 1) {
+      fs.writeFileSync(path.join(dir, "workspaces.json"), "{}");
+      await until(() => seen.length > 0, 1000);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    seen.length = 0;
+
+    writeJson(path.join(dir, "settings.json"), { notify: true });
+    const ownTask = path.join(dir, "tasks", "t1.yaml");
+    fs.writeFileSync(ownTask, "title: x\n");
+    await until(() => seen.length > 0, 5000);
+    seen.length = 0;
+
+    noteOwnDelete(ownTask);
+    fs.rmSync(ownTask, { force: true });
+    writeJson(path.join(dir, "settings.json"), { notify: false });
+    await sleep(450);
+    expect(seen).toEqual([]);
+
+    // An external hand-edit right after still triggers normally.
+    fs.writeFileSync(path.join(dir, "settings.json"), '{"notify":true}\n');
+    await until(() => seen.length > 0, 5000);
+    expect(seen.flat()).toContain("settings");
   });
 
   it("stops without a word for a folder it can't watch", () => {

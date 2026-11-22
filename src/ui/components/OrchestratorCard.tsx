@@ -81,7 +81,10 @@ function FolderInput({ value, placeholder, onChange }: { value: string; placehol
       value={typed}
       placeholder={placeholder}
       onChange={(event) => setTyped(event.target.value)}
-      onKeyDown={(event) => event.key === "Enter" && (event.target as HTMLInputElement).blur()}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+      }}
       onBlur={() => typed.trim() !== value && onChange(typed.trim())}
     />
   );
@@ -125,6 +128,7 @@ function ModelPick({ engineId, value, onChange }: { engineId: string; value: str
           if (typed.trim() !== value) onChange(typed.trim());
         }}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "Enter") (event.target as HTMLInputElement).blur();
           if (event.key === "Escape") {
             event.preventDefault();

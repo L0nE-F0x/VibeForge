@@ -140,7 +140,7 @@ export class Answers {
     const session = this.core.live.get(target);
     if (!session || !isCodingCli(session)) return this.dropWaiter(target, waiter, "That CLI isn't running any more.");
     const quietAt = Date.parse(session.quietAt ?? "");
-    const quietSince = quietAt > waiter.since ? quietAt : waiter.stuckMs && !session.quietAt ? waiter.since + waiter.stuckMs : Number.NaN;
+    const quietSince = quietAt > waiter.since ? quietAt : waiter.stuckMs ? waiter.since + waiter.stuckMs : Number.NaN;
     const answered = !session.working && Number.isFinite(quietSince) && now - quietSince >= (waiter.logKind ? LOG_PATIENCE_MS : SETTLE_MS);
     if (answered && !waiter.reading) {
       waiter.reading = true;

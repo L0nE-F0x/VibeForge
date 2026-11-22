@@ -52,7 +52,7 @@ const PREFERRED = ["main", "master", "trunk"];
 
 function git(args: readonly string[], cwd: string): Promise<GitRun> {
   return new Promise((resolve) => {
-    const child = spawn("git", ["-c", "color.ui=never", ...args], {
+    const child = spawn("git", ["-c", "color.ui=never", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", ...args], {
       cwd,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       stdio: ["pipe", "pipe", "pipe"],
@@ -89,12 +89,19 @@ function readFailure(run: GitRun): Error {
 
 /** `git worktree list` puts the main worktree first. A missing git is code 127. */
 async function worktrees(cwd: string): Promise<WorktreeRow[]> {
-  const run = await git(["worktree", "list", "--porcelain"], cwd);
+  const run = await git(["worktree", "list", "--porcelain", "-z"], cwd);
   if (run.code === 127) throw new Error("git was not found on PATH.");
   if (run.code !== 0) throw readFailure(run);
   const rows: WorktreeRow[] = [];
   let current: WorktreeRow | null = null;
-  for (const line of run.stdout.split("\n")) {
+  for (const line of run.stdout.split("\0")) {
+    if (!line) {
+      if (current) {
+        rows.push(current);
+        current = null;
+      }
+      continue;
+    }
     if (line.startsWith("worktree ")) {
       if (current) rows.push(current);
       current = { path: path.resolve(line.slice("worktree ".length)), branch: null };

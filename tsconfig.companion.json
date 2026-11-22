@@ -11,6 +11,8 @@
     "checkJs": true,
     "noEmit": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
     // The page only ever catches its own Errors and fetch's.
     "useUnknownInCatchVariables": false,
     "skipLibCheck": true,

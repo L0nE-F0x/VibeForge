@@ -37,31 +37,92 @@ export function callMood(current: CallState): VibyMood {
 export const TOGGLE_CALL_EVENT = "vibeforge:toggle-call";
 
 let state: CallState = OFF;
+let currentLevel = 0;
 const listeners = new Set<() => void>();
+const levelListeners = new Set<() => void>();
 let wired = false;
+
+function sameCallWithoutLevel(a: CallState, b: CallState): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (key === "level") continue;
+    if (!Object.is((a as unknown as Record<string, unknown>)[key], (b as unknown as Record<string, unknown>)[key])) return false;
+  }
+  return true;
+}
+
+function wire(): void {
+  if (wired) return;
+  wired = true;
+  on("call", set);
+  void call("call.get").then(set, () => undefined);
+}
 
 function set(next: CallState): void {
   const before = state;
-  state = next;
+  const normalized = next.level === 0 ? next : { ...next, level: 0 };
+  const stateChanged = !sameCallWithoutLevel(before, normalized);
+  const levelChanged = next.level !== currentLevel;
+  currentLevel = next.level;
+  if (stateChanged) state = normalized;
   // The same sounds dictation makes: the mic opened, you were heard, the mic closed.
   if (next.on && !before.on) cue("voiceStart");
   else if (!next.on && before.on) cue("voiceCancel");
   else if (next.on && next.phase === "transcribing" && before.phase !== "transcribing") cue("voiceStop");
-  for (const listener of listeners) listener();
+  if (stateChanged) for (const listener of listeners) listener();
+  if (levelChanged) for (const listener of levelListeners) listener();
 }
 
 function subscribe(listener: () => void): () => void {
-  if (!wired) {
-    wired = true;
-    on("call", set);
-    void call("call.get").then(set, () => undefined);
-  }
+  wire();
   listeners.add(listener);
   return () => void listeners.delete(listener);
 }
 
+function subscribeLevel(listener: () => void): () => void {
+  wire();
+  levelListeners.add(listener);
+  return () => void levelListeners.delete(listener);
+}
+
 export function useCall(): CallState {
   return useSyncExternalStore(subscribe, () => state);
+}
+
+/** High-frequency 20Hz mic level isolated from useCall() so non-meter UI does not re-render each tick. */
+export function useCallLevel(): number {
+  return useSyncExternalStore(subscribeLevel, () => currentLevel);
+}
+
+/** Viby sprite that only subscribes to live audio levels when on an active call. */
+export function LiveVibySprite({ mood, size, active, label, className }: { mood: VibyMood; size: number; active: boolean; label?: string; className?: string }) {
+  return active ? <ActiveVibySprite mood={mood} size={size} label={label} className={className} /> : <VibySprite mood={mood} size={size} level={0} label={label} className={className} />;
+}
+
+function ActiveVibySprite({ mood, size, label, className }: { mood: VibyMood; size: number; label?: string; className?: string }) {
+  const level = useCallLevel();
+  return <VibySprite mood={mood} size={size} level={level} label={label} className={className} />;
+}
+
+function RailCallMeter({ phase }: { phase: CallState["phase"] }) {
+  const level = useCallLevel();
+  return (
+    <i className="call-level" aria-hidden>
+      <i style={{ transform: `scaleX(${phase === "listening" || phase === "hearing" ? level : 0})` }} />
+    </i>
+  );
+}
+
+export function CallMeterCells() {
+  const level = useCallLevel();
+  const lit = Math.round(level * METER_CELLS);
+  return (
+    <span className="meter" aria-hidden>
+      {Array.from({ length: METER_CELLS }, (_, i) => (
+        <i key={i} className={i < lit ? (i >= METER_CELLS - 3 ? "hot" : "on") : undefined} />
+      ))}
+    </span>
+  );
 }
 
 /** Start a call, or hang up. Without dictation set up, it says what is missing instead. */
@@ -116,13 +177,9 @@ export function VibyRailButton({ inVibyTab, onOpen }: { inVibyTab: boolean; onOp
       {...tipProps(tip, { kbd, side: "right" })}
       onClick={opens ? onOpen : toggle}
     >
-      <VibySprite mood={callMood(current)} size={19} level={current.level} />
+      <LiveVibySprite mood={callMood(current)} size={19} active={current.on} />
       <span>{current.on ? t("call.railOn") : t("viby.rail")}</span>
-      {current.on && (
-        <i className="call-level" aria-hidden>
-          <i style={{ transform: `scaleX(${current.phase === "listening" || current.phase === "hearing" ? current.level : 0})` }} />
-        </i>
-      )}
+      {current.on && <RailCallMeter phase={current.phase} />}
     </button>
   );
 }
@@ -206,7 +263,6 @@ export function CallBar() {
 
   const mood = callMood(current);
   const { phase } = current;
-  const lit = Math.round(current.level * METER_CELLS);
   const stateLabel =
     mood === "speaking"
       ? t("call.state.speaking")
@@ -220,14 +276,8 @@ export function CallBar() {
 
   return (
     <div ref={ref} className="listening call" role="status" aria-live="polite">
-      <VibySprite mood={mood} size={20} level={current.level} />
-      {phase === "hearing" && !muted && (
-        <span className="meter" aria-hidden>
-          {Array.from({ length: METER_CELLS }, (_, i) => (
-            <i key={i} className={i < lit ? (i >= METER_CELLS - 3 ? "hot" : "on") : undefined} />
-          ))}
-        </span>
-      )}
+      <LiveVibySprite mood={mood} size={20} active={current.on} />
+      {phase === "hearing" && !muted && <CallMeterCells />}
       <button type="button" className="listening-text listening-jump" onClick={() => go({ view: "orchestrator" })}>
         <strong>{stateLabel}</strong>
         {phase === "hearing" && current.liveHeard && <span className="faint truncate"> {current.liveHeard}</span>}

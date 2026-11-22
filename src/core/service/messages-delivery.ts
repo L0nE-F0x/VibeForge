@@ -130,9 +130,9 @@ export class Delivery {
     this.pending.push({ ...item, id: randomBytes(4).toString("hex"), cli: session ? cliIn(session) : null });
   }
 
-  /** The two CLIs have traded as many messages as Settings allows without a person stepping in. */
+  /** The two CLIs or caller have traded as many messages as Settings allows without a person stepping in. */
   atLimit(fromPty: string | null, toPty: string): boolean {
-    return fromPty !== null && (this.counts.get(pairKey(fromPty, toPty)) ?? 0) >= this.core.store.readSettings().agentTalk.maxMessages;
+    return (this.counts.get(pairKey(fromPty ?? "outside", toPty)) ?? 0) >= this.core.store.readSettings().agentTalk.maxMessages;
   }
 
   /** Ready for a message: its CLI isn't working, went quiet a moment ago, and a person isn't halfway through typing. */

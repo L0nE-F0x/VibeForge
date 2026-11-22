@@ -37,6 +37,7 @@ export class ServiceCore {
   readonly store: Store;
   readonly live = new Map<string, LiveSession>();
   readonly ptyByRun = new Map<string, string>();
+  readonly ptyTokens = new Map<string, string>();
   private readonly listeners = new Set<(topics: Topic[]) => void>();
   private readonly exitWaiters = new Map<string, Array<() => void>>();
   private readonly finishing = new Set<Promise<void>>();
@@ -53,6 +54,8 @@ export class ServiceCore {
   private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: Settle }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
+  protected closed = false;
+  private closePromise: Promise<void> | null = null;
   readonly settled: Promise<void>;
 
   constructor(options: DeskOptions) {
@@ -80,10 +83,13 @@ export class ServiceCore {
    * quit waits for a moment: git still had a few steps to go when the app went.
    */
   close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
     for (const entry of this.undoable.values()) clearTimeout(entry.timer);
     const settling = [...this.undoable.values()].flatMap((entry) => (entry.settle ? [entry.settle] : []));
     this.undoable.clear();
     this.trash.empty();
+    this.store.close();
     const tidied = settling.map((settle) => {
       try {
         return Promise.resolve(settle()).then(
@@ -94,8 +100,8 @@ export class ServiceCore {
         return Promise.resolve();
       }
     });
-    this.store.close();
-    return Promise.all(tidied).then(() => undefined);
+    this.closePromise = Promise.all(tidied).then(() => undefined);
+    return this.closePromise;
   }
 
   // ---------------------------------------------------------------- undo
@@ -250,11 +256,12 @@ export class ServiceCore {
   transcriptPath(run: RunMeta): string | null {
     if (!run.dir) return null;
     for (const file of [RUN_FILES.transcript, RUN_FILES.scrollback]) {
-      const full = path.join(run.dir, file);
-      try {
-        if (fs.statSync(full).size > 0) return full;
-      } catch {
-        /* try the next file */
+      for (const candidate of [path.join(run.dir, file), `${path.join(run.dir, file)}.gz`]) {
+        try {
+          if (fs.statSync(candidate).size > 0) return candidate;
+        } catch {
+          /* try the next file */
+        }
       }
     }
     return null;
@@ -431,7 +438,7 @@ export class ServiceCore {
       continuedFrom: input.continuedFrom ?? null,
     };
     this.store.saveRun(meta);
-    let spawned: { ptyId: string; pid: number };
+    let spawned: { ptyId: string; pid: number; ptyToken?: string };
     try {
       spawned = await this.options.host.spawn({
         cwd: input.cwd,
@@ -448,6 +455,7 @@ export class ServiceCore {
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
     }
+    if (spawned.ptyToken) this.ptyTokens.set(spawned.ptyId, spawned.ptyToken);
     this.ptyByRun.set(id, spawned.ptyId);
     this.live.set(spawned.ptyId, {
       ptyId: spawned.ptyId,
@@ -480,11 +488,12 @@ export class ServiceCore {
   async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
+    this.ptyTokens.delete(ptyId);
     this.shellArgv.delete(ptyId);
     this.hostWorking.delete(ptyId);
     try {
-      if (!session?.runId) {
-        this.emit("live");
+      if (this.closed || !session?.runId) {
+        if (!this.closed) this.emit("live");
         return;
       }
       this.ptyByRun.delete(session.runId);
@@ -507,11 +516,15 @@ export class ServiceCore {
     runId: string,
     outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped" },
   ): Promise<void> {
+    if (this.closed) return;
     const run = this.store.getRun(runId);
     if (!run) return;
     const git = await this.writeSnapshot(run);
+    if (this.closed) return;
     const dirty = (await this.dirtyAtStart.get(runId)) ?? null;
+    if (this.closed) return;
     const own = await this.writePatch(run, "", dirty);
+    if (this.closed) return;
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
@@ -582,15 +595,18 @@ export class ServiceCore {
 
   private async settleOrphans(orphans: RunMeta[]): Promise<void> {
     for (const run of orphans) {
+      if (this.closed) return;
       const dir = run.dir;
       let changes = run.changes;
       if (dir && run.cwd && isDirectory(dir)) {
         if (!fs.existsSync(path.join(dir, RUN_FILES.git))) {
           changes = summarizeSnapshot(await this.writeSnapshot(run));
         }
+        if (this.closed) return;
         // The exit that should have frozen the patch never arrived. This is the tree now.
         if (!hasRunFile(dir, RUN_FILES.patch)) await this.writePatch(run, LATE_PATCH_NOTE);
       }
+      if (this.closed) return;
       this.store.saveRun({
         ...run,
         status: "stopped",
@@ -611,6 +627,7 @@ export class ServiceCore {
     if (!trashed.length) return;
     const copies = readJson<{ copies?: Array<{ id?: string }> } | null>(path.join(this.options.dataRoot, "orchestrator", "copies.json"), null)?.copies ?? [];
     for (const item of trashed) {
+      if (this.closed) return;
       if (!item || typeof item !== "object") continue;
       const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
       if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
