@@ -112,7 +112,19 @@ async function machine(name: string, base: string): Promise<Machine> {
 }
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+  return execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
+    cwd,
+    stdio: "pipe",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "T",
+      GIT_AUTHOR_EMAIL: "t@t.invalid",
+      GIT_COMMITTER_NAME: "T",
+      GIT_COMMITTER_EMAIL: "t@t.invalid",
+    },
+  })
+    .toString()
+    .trim();
 }
 
 const read = (file: string) => fs.readFileSync(file, "utf8");

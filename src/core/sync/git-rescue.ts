@@ -469,7 +469,9 @@ export interface MergeResult {
 /** Merges a kept branch into the one checked out. A clean merge also removes the kept branch. */
 export function mergeSaved(root: string, saved: string): Promise<MergeResult> {
   return withRepoLock(root, async () => {
-    const run = await git(["merge", "--no-edit", saved], root);
+    const email = (await git(["config", "--get", "user.email"], root)).stdout.trim();
+    const ident = email ? [] : ["-c", "user.name=VibeForge Sync", "-c", "user.email=sync@vibeforge.local"];
+    const run = await git([...ident, "-c", "commit.gpgsign=false", "merge", "--no-edit", saved], root);
     if (run.code === 0) {
       await git(["branch", "-d", saved], root);
       return { merged: true, files: [], refused: null };

@@ -24,28 +24,33 @@ export function configTopics(file: string): Topic[] {
 export function watchConfig(configRoot: string, changed: (topics: Topic[]) => void): () => void {
   const pending = new Set<Topic>();
   let timer: NodeJS.Timeout | null = null;
-  let watcher: fs.FSWatcher | null = null;
-  try {
-    watcher = fs.watch(configRoot, { recursive: true, persistent: false }, (_type, file) => {
-      if (!file) return;
-      const rel = String(file);
-      const topics = configTopics(rel);
-      if (!topics.length) return;
-      if (isUnchangedOwnWrite(path.join(configRoot, rel))) return;
-      for (const topic of topics) pending.add(topic);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        const next = [...pending];
-        pending.clear();
-        changed(next);
-      }, 250);
-    });
-    watcher.on("error", () => undefined);
-  } catch {
-    watcher = null;
+  const watchers: fs.FSWatcher[] = [];
+  const onEvent = (_type: string, file: string | Buffer | null) => {
+    if (!file) return;
+    const rel = String(file);
+    const topics = configTopics(rel);
+    if (!topics.length) return;
+    if (isUnchangedOwnWrite(path.join(configRoot, rel))) return;
+    for (const topic of topics) pending.add(topic);
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      const next = [...pending];
+      pending.clear();
+      changed(next);
+    }, 250);
+  };
+  // Watch both top-level config files directly (avoiding recursive-watcher drops after atomic renames on older Linux libuv) and subdirectories.
+  for (const recursive of [false, true]) {
+    try {
+      const watcher = fs.watch(configRoot, { recursive, persistent: false }, onEvent);
+      watcher.on("error", () => undefined);
+      watchers.push(watcher);
+    } catch {
+      /* folder unreadable or recursive watch unsupported */
+    }
   }
   return () => {
     if (timer) clearTimeout(timer);
-    watcher?.close();
+    for (const watcher of watchers) watcher.close();
   };
 }

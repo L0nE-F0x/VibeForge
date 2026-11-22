@@ -509,6 +509,6 @@ export class TeamService extends ServiceCore {
     const session = this.live.get(ptyId);
     await super.onPtyExit(ptyId, exitCode, signal);
     // After the run is written, so what it changed is known.
-    this.orchestrator.onExit(session);
+    if (!this.closed) this.orchestrator.onExit(session);
   }
 }

@@ -54,6 +54,7 @@ export class ServiceCore {
   private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: Settle }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
+  protected closed = false;
   readonly settled: Promise<void>;
 
   constructor(options: DeskOptions) {
@@ -81,6 +82,7 @@ export class ServiceCore {
    * quit waits for a moment: git still had a few steps to go when the app went.
    */
   close(): Promise<void> {
+    this.closed = true;
     for (const entry of this.undoable.values()) clearTimeout(entry.timer);
     const settling = [...this.undoable.values()].flatMap((entry) => (entry.settle ? [entry.settle] : []));
     this.undoable.clear();
@@ -95,8 +97,10 @@ export class ServiceCore {
         return Promise.resolve();
       }
     });
-    this.store.close();
-    return Promise.all(tidied).then(() => undefined);
+    const inFlight = [...this.finishing, ...this.recordings.values(), this.settled, ...tidied];
+    return Promise.allSettled(inFlight).then(() => {
+      this.store.close();
+    });
   }
 
   // ---------------------------------------------------------------- undo
@@ -487,8 +491,8 @@ export class ServiceCore {
     this.shellArgv.delete(ptyId);
     this.hostWorking.delete(ptyId);
     try {
-      if (!session?.runId) {
-        this.emit("live");
+      if (this.closed || !session?.runId) {
+        if (!this.closed) this.emit("live");
         return;
       }
       this.ptyByRun.delete(session.runId);
@@ -511,11 +515,13 @@ export class ServiceCore {
     runId: string,
     outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped" },
   ): Promise<void> {
+    if (this.closed) return;
     const run = this.store.getRun(runId);
     if (!run) return;
     const git = await this.writeSnapshot(run);
     const dirty = (await this.dirtyAtStart.get(runId)) ?? null;
     const own = await this.writePatch(run, "", dirty);
+    if (this.closed) return;
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
