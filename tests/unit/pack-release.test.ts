@@ -104,6 +104,23 @@ describe("the ready-made build's file list", () => {
     }
     expect(read("scripts/build-release.sh")).toContain("scripts/pack-release.mjs");
   });
+
+  it("loads on a bare checkout with no node_modules in any parent folder", async () => {
+    expect(specifiers(read("scripts/pack-release.mjs")).filter((spec) => !spec.startsWith("node:"))).toEqual([]);
+    const os = await import("node:os");
+    const { pathToFileURL } = await import("node:url");
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-bare-pack-"));
+    try {
+      fs.mkdirSync(path.join(bare, "scripts"), { recursive: true });
+      fs.mkdirSync(path.join(bare, "electron"), { recursive: true });
+      fs.writeFileSync(path.join(bare, "electron", "pty-host.cjs"), "");
+      fs.copyFileSync(path.join(repo, "scripts", "pack-release.mjs"), path.join(bare, "scripts", "pack-release.mjs"));
+      const loaded = await import(pathToFileURL(path.join(bare, "scripts", "pack-release.mjs")).href);
+      expect(typeof loaded.ships).toBe("function");
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("the Syncthing a copy of VibeForge carries", () => {

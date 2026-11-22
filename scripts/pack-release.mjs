@@ -23,7 +23,6 @@ import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseAst } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -128,12 +127,37 @@ function collectSpecifiers(value, found) {
   }
 }
 
-/** Bare and relative module names a script loads, as written, via AST parsing. */
-export function specifiers(text) {
+/** @type {((source: string) => unknown) | null} */
+let rootParseAst = null;
+
+/**
+ * Load Vite's `parseAst` from `dir/package.json` so importing `pack-release.mjs` on a bare
+ * checkout (before `npm ci` runs in `build`) needs no external `node_modules`.
+ * @param {string} [dir]
+ * @returns {(source: string) => unknown}
+ */
+function loadParseAst(dir = root) {
+  if (dir === root) {
+    if (!rootParseAst) {
+      const vite = /** @type {{ parseAst: (source: string) => unknown }} */ (createRequire(path.join(root, "package.json"))("vite"));
+      rootParseAst = vite.parseAst;
+    }
+    return rootParseAst;
+  }
+  const vite = /** @type {{ parseAst: (source: string) => unknown }} */ (createRequire(path.join(dir, "package.json"))("vite"));
+  return vite.parseAst;
+}
+
+/**
+ * Bare and relative module names a script loads, as written, via AST parsing.
+ * @param {string} text
+ * @param {(source: string) => unknown} [parse]
+ */
+export function specifiers(text, parse = loadParseAst()) {
   const found = new Set();
   // Strip a leading shebang so parseAst can parse executable scripts directly.
   const source = text.startsWith("#!") ? text.replace(/^#![^\r\n]*/, "") : text;
-  collectSpecifiers(parseAst(source), found);
+  collectSpecifiers(parse(source), found);
   return [...found];
 }
 
@@ -232,10 +256,11 @@ async function main(out) {
   // ------------------------------------------------------------------ check it runs
 
   step("Checking that everything it loads is in it");
+  const parse = loadParseAst(build);
   const entries = [...ENTRIES, ...fs.readdirSync(path.join(stage, "dist-electron")).filter((file) => file.endsWith(".js")).map((file) => `dist-electron/${file}`)];
   const missing = [];
   for (const entry of entries) {
-    for (const spec of specifiers(fs.readFileSync(path.join(stage, entry), "utf8"))) {
+    for (const spec of specifiers(fs.readFileSync(path.join(stage, entry), "utf8"), parse)) {
       if (provided(spec)) continue;
       if (spec.startsWith(".")) {
         const target = path.resolve(path.dirname(path.join(stage, entry)), spec);

@@ -6,9 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
-## [3.3.0] - 2026-11-22
+## [3.3.1] - 2026-11-22
 
-**3.3.0: persistent split panes, in-terminal search, starter agent templates, ARM64 builds, and full security and performance hardening across Viby, Sync and the phone page.**
+**3.3.1: persistent split panes, in-terminal search, starter agent templates, ARM64 builds, and full security and performance hardening across Viby, Sync and the phone page.**
 
 ### Added
 
@@ -29,11 +29,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Sync and git rescue:** unmerged index paths and unborn branches are handled cleanly during git rescue, and hidden home dot-folders can't be shared as workspaces.
 - **Session and terminal reliability:** switching chats mid-send no longer drops input, gzipped run artifacts open reliably across Continue, Hand off and Markdown export, `vibeforge tell --wait` ignores older turns' replies, and CJK IME composition no longer triggers shortcuts mid-character.
 - **Voice, calls and the phone page:** iOS Safari recovers from `"interrupted"` audio contexts, the phone page supports browser Back/Forward navigation and keeps recordings isolated when switching computers, and voice downloads and shutdown clean up cleanly.
+- **Release packaging:** load Vite's AST parser from the staged build so `scripts/pack-release.mjs` starts cleanly on a bare checkout without root `node_modules`.
 
 ### Security
 
 - **Per-terminal capability tokens on the control socket,** with rate limiting for outside callers.
 - **Tighter Viby and Sync path checks:** Viby refuses symlinks, `.git` internals and secret files during `inspect`, gates shell redirection, destructive flags and remote URLs behind **Go**, and Sync refuses symlinked files and directories across conflicts and library sync.
+
+## [3.3.0] - 2026-11-22
+
+Tagged before bare-checkout release packing was fixed; superseded by **3.3.1**, which publishes these changes.
 
 ## [3.2.0] - 2026-11-21
 
