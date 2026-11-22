@@ -34,6 +34,8 @@ const EMPTY_HEARD = { short: "phone.micShort", silent: "voice.empty.silent", not
  * @property {AudioWorkletNode | null} node
  * @property {number} timer
  * @property {AbortController | null} upload While it is heard: the request, so Cancel can let go of it.
+ * @property {string} base
+ * @property {string} token
  */
 
 /** The recording, while there is one: starting (the phone asks for the mic), recording, or being heard. @type {Recording | null} */
@@ -135,7 +137,7 @@ function loudness(samples) {
 function micBegin() {
   if (mic) return;
   /** @type {Recording} */
-  const mine = { phase: "starting", latched: false, finish: false, chunks: [], length: 0, level: 0, ctx: null, stream: null, source: null, node: null, timer: 0, upload: null };
+  const mine = { phase: "starting", latched: false, finish: false, chunks: [], length: 0, level: 0, ctx: null, stream: null, source: null, node: null, timer: 0, upload: null, base: state.base, token: state.token };
   micSaid = { text: "", until: 0 };
   try {
     // Made inside the tap itself, or iOS keeps it silent.
@@ -166,7 +168,7 @@ function micBegin() {
       mine.source.connect(mine.node);
       // Connected through to the speakers so it keeps running; it writes nothing, so nothing plays.
       mine.node.connect(ctx.destination);
-      if (ctx.state === "suspended") await ctx.resume();
+      if (ctx.state !== "running") await ctx.resume();
       if (mic !== mine) {
         closeMic(mine);
         return;
@@ -292,7 +294,7 @@ async function micFinish() {
     const limit = window.setTimeout(() => upload.abort(), hearTimeout(pcm.byteLength));
     let response;
     try {
-      response = await fetch(`${state.base}/api/orchestrator/hear`, { method: "POST", headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/octet-stream" }, body: pcm, signal: upload.signal });
+      response = await fetch(`${mine.base}/api/orchestrator/hear`, { method: "POST", headers: { Authorization: `Bearer ${mine.token}`, "Content-Type": "application/octet-stream" }, body: pcm, signal: upload.signal });
     } catch {
       // Cancel let go of it: nothing to say.
       if (mic !== mine) return;
@@ -301,7 +303,7 @@ async function micFinish() {
       window.clearTimeout(limit);
     }
     const body = await response.json().catch(() => ({}));
-    if (mic !== mine) return;
+    if (mic !== mine || state.base !== mine.base) return;
     if (response.status === 401) {
       forget();
       return;

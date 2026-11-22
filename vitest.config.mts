@@ -42,7 +42,10 @@ const floors: Record<string, number> = {
   'src/core/service/messages-tasks.ts': 96,
   'src/core/service/messages-who.ts': 99,
   'src/core/service/messages.ts': 96,
-  'src/core/service/orchestrator.ts': 73,
+  'src/core/service/orchestrator-entities.ts': 86,
+  'src/core/service/orchestrator-inspect.ts': 80,
+  'src/core/service/orchestrator-utils.ts': 87,
+  'src/core/service/orchestrator.ts': 88,
   'src/core/service/routines.ts': 93,
   'src/core/service/runs.ts': 78,
   'src/core/service/shell-runs.ts': 96,
@@ -80,12 +83,13 @@ const floors: Record<string, number> = {
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.{ts,tsx}'],
     globalSetup: ['tests/global-setup.ts'],
     testTimeout: 20_000,
     hookTimeout: 20_000,
     pool: 'forks',
-    fileParallelism: false,
+    fileParallelism: true,
+    maxWorkers: 4,
     // `npm run coverage`: what the tests reach. The core (storage, scheduler, the service) and the
     // code shared with the window have floors; the window and the main process are covered by the
     // smoke test instead.

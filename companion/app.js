@@ -16,7 +16,7 @@
 import { refresh } from "./js/api.js";
 import { listenForInstall, offerInstall } from "./js/install.js";
 import { pairFromLink } from "./js/home.js";
-import { show } from "./js/pages.js";
+import { listenHistory, show } from "./js/pages.js";
 import { openSession } from "./js/session.js";
 import { state, TEXT_KEY } from "./js/state.js";
 import { loadWords } from "./js/words.js";
@@ -83,6 +83,7 @@ void loadWords()
   .then(() => pairFromLink())
   .then(() => {
     show();
+    listenHistory();
     offerInstall();
     if (state.token) void refresh();
   });

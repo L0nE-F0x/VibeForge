@@ -58,6 +58,32 @@ describe("the ready-made build's file list", () => {
     expect(shipped("electron/terminal-capture.cjs")).toBe(true);
   });
 
+  it("extracts static, dynamic, re-export, and require specifiers via AST while ignoring comments and strings", () => {
+    const sample = [
+      "#!/usr/bin/env node",
+      "// import 'fake-from-line-comment';",
+      "/* export * from 'fake-block-comment'; require('fake-block-require'); */",
+      "/** @import { Something } from './jsdoc-only.js' */",
+      'const msg = "failed to read from \'fake-string-pkg\'";',
+      'const msg2 = "/* fake */ require(\\"fake-in-string\\")";',
+      'const obj = { require: (x) => x };',
+      "obj.require('not-real-require');",
+      'import a from "pkg-a";',
+      'import "pkg-side";',
+      'import {\n  x,\n  // inline comment\n  y,\n} from "pkg-multi";',
+      'export * from "./all.js";',
+      'export { z } from "@scope/pkg/sub";',
+      'const loader = () => import("./dyn.mjs");',
+      'const pty = require("node-pty");',
+      'const xterm = require(`@xterm/headless`);',
+      'import "node:fs";',
+      "void a; void x; void y; void msg; void msg2; void loader; void pty; void xterm;",
+    ].join("\n");
+    expect(new Set(specifiers(sample))).toEqual(
+      new Set(["pkg-a", "pkg-side", "pkg-multi", "./all.js", "@scope/pkg/sub", "./dyn.mjs", "node-pty", "@xterm/headless", "node:fs"]),
+    );
+  });
+
   it("ships what the installer checks for after unpacking", () => {
     const install = read("scripts/install.sh");
     const parts = /^REQUIRED_PARTS=\(([^)]+)\)/m.exec(install)?.[1].trim().split(/\s+/) ?? [];

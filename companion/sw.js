@@ -37,6 +37,7 @@ async function pageFile(request) {
   try {
     const response = await fetch(request, kept ? { signal: abort.signal } : {});
     if (response.ok) {
+      if (page) copyUntil = 0;
       void copy.put(request, response.clone());
       return response;
     }

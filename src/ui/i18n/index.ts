@@ -1,3 +1,4 @@
+/// <reference path="../cronstrue-locales.d.ts" />
 import { useSyncExternalStore } from "react";
 import { en } from "./en.js";
 import { isStaleChunk, markUpdated } from "../update-state.js";
@@ -29,12 +30,12 @@ export const LANGUAGES = [
 export type Language = (typeof LANGUAGES)[number]["code"];
 
 const LOADERS: Record<Exclude<Language, "en">, () => Promise<Catalog>> = {
-  de: () => import("./de.js").then((module) => module.de),
-  es: () => import("./es.js").then((module) => module.es),
-  fr: () => import("./fr.js").then((module) => module.fr),
-  pt: () => import("./pt.js").then((module) => module.pt),
-  ja: () => import("./ja.js").then((module) => module.ja),
-  zh: () => import("./zh.js").then((module) => module.zh),
+  de: () => Promise.all([import("./de.js"), import("cronstrue/locales/de")]).then(([module]) => module.de),
+  es: () => Promise.all([import("./es.js"), import("cronstrue/locales/es")]).then(([module]) => module.es),
+  fr: () => Promise.all([import("./fr.js"), import("cronstrue/locales/fr")]).then(([module]) => module.fr),
+  pt: () => Promise.all([import("./pt.js"), import("cronstrue/locales/pt_BR")]).then(([module]) => module.pt),
+  ja: () => Promise.all([import("./ja.js"), import("cronstrue/locales/ja")]).then(([module]) => module.ja),
+  zh: () => Promise.all([import("./zh.js"), import("cronstrue/locales/zh_CN")]).then(([module]) => module.zh),
 };
 
 const CATALOGS: Partial<Record<Language, Catalog>> = { en };

@@ -83,9 +83,34 @@ function banner() {
 /** @param {View} next */
 export function setView(next) {
   // Without a code for the computer on show there is only the page that asks for it, and the list of computers.
-  state.view = state.token || next === "computers" ? next : "pair";
+  const resolved = state.token || next === "computers" ? next : "pair";
+  if (resolved !== state.view && typeof window !== "undefined" && window.history?.pushState) {
+    window.history.pushState({ view: resolved, sessionQuery: { ...state.sessionQuery } }, "");
+  }
+  state.view = resolved;
   show();
   if (state.token) void refresh();
+}
+
+/** Keeps Back navigation inside Companion views rather than closing the PWA immediately. */
+export function listenHistory() {
+  if (typeof window === "undefined" || !window.history?.replaceState) return;
+  window.history.replaceState({ view: state.view, sessionQuery: { ...state.sessionQuery } }, "");
+  window.addEventListener("popstate", (event) => {
+    const entry = event.state && typeof event.state === "object" ? event.state : null;
+    if (entry?.sessionQuery && typeof entry.sessionQuery === "object") {
+      state.sessionQuery = {
+        ptyId: typeof entry.sessionQuery.ptyId === "string" ? entry.sessionQuery.ptyId : "",
+        runId: typeof entry.sessionQuery.runId === "string" ? entry.sessionQuery.runId : "",
+      };
+    }
+    const candidate = /** @type {View | undefined} */ (entry?.view);
+    const next = candidate && (state.token || candidate === "computers") ? candidate : state.token ? "desk" : "pair";
+    if (next === state.view) return;
+    state.view = next;
+    show();
+    if (state.token) void refresh();
+  });
 }
 
 function page() {

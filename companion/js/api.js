@@ -3,6 +3,7 @@
 // someone tapped, run with the buttons held.
 
 import { forgetSeen, watch } from "./buzz.js";
+import { micCancel } from "./mic.js";
 import { show, update } from "./pages.js";
 import { COMPUTER_KEY, computers, nameComputer, parts, saveComputer, state } from "./state.js";
 import { loadWords, t, wordsLoaded } from "./words.js";
@@ -136,6 +137,7 @@ export function forget() {
 export function showComputer(url) {
   const next = computers().find((item) => item.url === url);
   if (!next) return;
+  micCancel(true);
   localStorage.setItem(COMPUTER_KEY, next.url);
   state.base = next.url;
   state.token = next.token;
@@ -153,7 +155,11 @@ export function showComputer(url) {
   window.clearTimeout(timer);
   timer = 0;
   state.view = next.token ? "desk" : "pair";
+  if (typeof window !== "undefined" && window.history?.replaceState) {
+    window.history.replaceState({ view: state.view, sessionQuery: { ...state.sessionQuery } }, "");
+  }
   show();
+  void loadWords().then((ok) => ok && pageIdle() && show());
   void refresh();
 }
 

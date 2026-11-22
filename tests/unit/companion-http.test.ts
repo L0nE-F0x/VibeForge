@@ -585,6 +585,10 @@ describe("what the phone page sends over a slow link", () => {
     expect((await ask("https://studio.ts.net/js/api.js")).body).toBe("cached api");
     expect((await ask("https://studio.ts.net/js/desk.js")).body).toBe("cached desk");
     expect(fetched).toEqual(["https://studio.ts.net/", "https://studio.ts.net/js/api.js"]);
+
+    // A fresh navigation from the live computer resets copyUntil so modules load from the network again.
+    expect((await ask("https://studio.ts.net/", "navigate")).body).toContain("live ");
+    expect((await ask("https://studio.ts.net/js/desk.js")).body).toBe("live https://studio.ts.net/js/desk.js");
   });
 
   it("rejects origins with credentials/paths in peerOrigin and rate-limits repeated failed /api/pair attempts", async () => {

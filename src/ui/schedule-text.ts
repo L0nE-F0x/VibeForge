@@ -1,10 +1,4 @@
 import cronstrue from "cronstrue";
-import "cronstrue/locales/de";
-import "cronstrue/locales/es";
-import "cronstrue/locales/fr";
-import "cronstrue/locales/ja";
-import "cronstrue/locales/pt_BR";
-import "cronstrue/locales/zh_CN";
 import type { Schedule } from "../shared/api.js";
 import type { Translator } from "./i18n/index.js";
 
