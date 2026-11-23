@@ -256,6 +256,11 @@ button.rail-logo:focus-visible {
   max-height: calc(100vh - 16px);
 }
 
+/* What is inside sets the width (Viby's detail popovers are 520px): a menu's cap would cut its right side off. */
+.popover.wide {
+  max-width: calc(100vw - 16px);
+}
+
 .menu-item {
   display: flex;
   align-items: center;
