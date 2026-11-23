@@ -533,7 +533,8 @@ const POPOVER_FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), 
 
 /**
  * A small floating menu anchored to an element. It moves to stay inside the window when its
- * content grows or shrinks. `tall` lets it use the window's height instead of 60% of it.
+ * content grows or shrinks. `tall` lets it use the window's height instead of 60% of it; `wide`
+ * lets what is inside set its width past a menu's 420px (a command's output, a CLI's reply).
  */
 export function Popover({
   anchor,
@@ -541,12 +542,14 @@ export function Popover({
   children,
   align = "start",
   tall = false,
+  wide = false,
 }: {
   anchor: HTMLElement;
   onClose: () => void;
   children: ReactNode;
   align?: "start" | "end";
   tall?: boolean;
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useOverlayStack(ref, onClose, { trap: false });
@@ -617,7 +620,7 @@ export function Popover({
     };
   }, [anchor, onClose]);
   return createPortal(
-    <div ref={ref} className={tall ? "popover tall" : "popover"} style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }} onKeyDown={onKeyDown}>
+    <div ref={ref} className={`popover${tall ? " tall" : ""}${wide ? " wide" : ""}`} style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden", top: 0, left: 0 }} onKeyDown={onKeyDown}>
       {children}
     </div>,
     document.body,

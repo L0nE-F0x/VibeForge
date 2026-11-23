@@ -73,7 +73,7 @@ function CheckChip({ check }: { check: OrchestratorCheck }) {
         <span className="truncate">{label}</span>
       </button>
       {anchor && (
-        <Popover anchor={anchor} onClose={() => setAnchor(null)}>
+        <Popover anchor={anchor} wide onClose={() => setAnchor(null)}>
           <div className="viby-detail-popover">
             <div className="viby-detail-head">
               <strong className="truncate grow">{check.summary || label}</strong>
@@ -249,7 +249,7 @@ function StepChip({ step }: { step: OrchestratorStep }) {
           <span className="truncate">{label}</span>
         </button>
         {replyAnchor && (
-          <Popover anchor={replyAnchor} onClose={() => setReplyAnchor(null)}>
+          <Popover anchor={replyAnchor} wide onClose={() => setReplyAnchor(null)}>
             <div className="viby-detail-popover">
               <div className="viby-detail-head">
                 <strong className="truncate grow">{label}</strong>
@@ -522,7 +522,7 @@ export function NoteTurnView({ note }: { note: MaestroNote }) {
           </div>
         )}
         {replyAnchor && note.reply && (
-          <Popover anchor={replyAnchor} onClose={() => setReplyAnchor(null)}>
+          <Popover anchor={replyAnchor} wide onClose={() => setReplyAnchor(null)}>
             <div className="viby-detail-popover">
               <pre className="viby-detail-pre mono selectable">{note.reply}</pre>
             </div>
