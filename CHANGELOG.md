@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-11-23
+
+**3.4.2: Viby's detail popovers show all of themselves.**
+
 ### Fixed
 
 - **Viby's detail popovers show all of themselves.** What a check said, a CLI's reply and a note's reply opened 520px wide inside a popover capped at 420px, so the right side (the **Review changes** button, the end of long lines) was cut off behind a scrollbar.
