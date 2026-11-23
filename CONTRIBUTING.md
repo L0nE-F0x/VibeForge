@@ -76,7 +76,7 @@ Since `1.0.0`, versions follow [semantic versioning](https://semver.org/). A cha
 
 `package.json`, the git tag (`vX.Y.Z`), and the GitHub Release stay on the same number. Tags are cut by the maintainer when a release is published.
 
-User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under `Unreleased`. The maintainer moves that entry when the release is published.
+User-facing changes get an entry in [CHANGELOG.md](CHANGELOG.md) under `Unreleased`. The maintainer moves that entry when the release is published, and adds the version's link at the bottom (`[X.Y.Z]: …/releases/tag/vX.Y.Z`, and `[Unreleased]` comparing from that tag). Each heading is a link, so a missing line leaves the version unlinkable. A test checks that every heading has one.
 
 Pushing a `vX.Y.Z` tag publishes its GitHub Release (`.github/workflows/release.yml`): the notes are that version's CHANGELOG section, word for word, which is what the in-app Update shows. The tag has to match `package.json`. `npm run release-notes X.Y.Z` prints the same notes locally.
 
