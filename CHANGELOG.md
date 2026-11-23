@@ -1043,7 +1043,31 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.4.2...HEAD
+[3.4.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.2
+[3.4.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.1
+[3.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.0
+[3.3.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.3.1
+[3.3.0]: https://github.com/L0nE-F0x/VibeForge/tree/v3.3.0
+[3.2.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.2.0
+[3.1.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.1.1
+[3.1.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.1.0
+[3.0.3]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.0.3
+[3.0.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.0.2
+[3.0.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.0.1
+[3.0.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.0.0
+[2.24.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.24.1
+[2.24.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.24.0
+[2.23.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.23.0
+[2.22.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.22.0
+[2.21.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.21.0
+[2.20.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.20.0
+[2.19.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.19.0
+[2.18.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.18.0
+[2.17.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.17.2
+[2.17.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.17.1
+[2.17.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.17.0
+[2.16.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.16.0
 [2.15.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.15.0
 [2.14.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.14.1
 [2.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v2.14.0
