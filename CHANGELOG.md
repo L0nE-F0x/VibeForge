@@ -6,9 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-11-24
+
+**3.5.0: an effort picker beside Viby's model.**
+
 ### Added
 
-- **An effort picker beside Viby's model.** The Viby panel and the Viby bar now show the planner's reasoning effort next to its model, offering only the levels that planner takes (Claude Code: low to max; Codex: minimal to xhigh; Antigravity: low to max). It is the same setting as Settings → Orchestrator, so typed and spoken turns both use it, and it is kept across restarts.
+- **An effort picker beside Viby's model.** The Viby panel and the Viby bar now show the planner's reasoning effort next to its model, offering only the levels that planner takes (Claude Code: low to max; Codex: minimal to xhigh; Antigravity: low to max). It is the same setting as **Effort** in Settings → Viby, so typed and spoken turns both use it, and it is kept across restarts.
 
 ### Changed
 
@@ -1051,7 +1055,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.4.2...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.5.0
 [3.4.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.2
 [3.4.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.1
 [3.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.0
