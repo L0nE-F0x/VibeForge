@@ -125,6 +125,8 @@ export class MessageDesk {
       `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
     const promptNote = () =>
       `${to.label} is waiting on an approval prompt, so this was placed in its prompt as a draft without pressing Enter.`;
+    const introduceNote = () =>
+      `${to.label} works in another workspace and this is your first message to it, so it waits in its prompt for a person to press Enter. Once they do, you can talk freely.`;
 
     return new Promise<TellResult>((resolve) => {
       const done = new AbortController();
@@ -168,7 +170,7 @@ export class MessageDesk {
         delivered: (draft, reason) => {
           done.abort();
           if (draft || !input.wait) {
-            finish({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? (reason === "prompt" ? promptNote() : note()) : undefined });
+            finish({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? (reason === "prompt" ? promptNote() : reason === "introduce" ? introduceNote() : note()) : undefined });
           }
         },
         dropped: (why) => finish({ ok: false, error: why }),

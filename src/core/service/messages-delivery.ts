@@ -12,6 +12,9 @@ const BETWEEN_MS = 3000;
 /** A CLI that hasn't gone quiet once since it started may still be drawing its first screen. */
 const BOOT_MS = 5000;
 
+/** Why a message went in without Enter: the two reached their limit, an approval prompt was showing, or they hadn't been introduced. */
+export type DraftReason = "limit" | "prompt" | "introduce";
+
 interface Pending {
   id: string;
   fromPty: string | null;
@@ -24,7 +27,7 @@ interface Pending {
   counts: boolean;
   waiter: WaitSpec | null;
   /** It went in; `draft` when without Enter, because of the limit or a non-free prompt on screen. */
-  delivered?: (draft: boolean, reason?: "limit" | "prompt") => void;
+  delivered?: (draft: boolean, reason?: DraftReason) => void;
   dropped: (why: string) => void;
 }
 
@@ -106,9 +109,34 @@ export class Delivery {
     }
   }
 
+  /** Pairs of CLIs in different workspaces a person has let talk: their first message went in as a draft and a person sent it. */
+  private readonly introduced = new Set<string>();
+  /** First messages waiting as drafts, by the terminal they wait in. */
+  private readonly introductions = new Map<string, Set<string>>();
+
+  /**
+   * Under Ask first, the first message between two CLIs in different workspaces goes in as a draft
+   * for a person to send (decision D1, 2026-11-25): a CLI shouldn't start instructing one working
+   * on another project without anyone seeing it. Once a person sends one, the two talk freely.
+   */
+  needsIntroduction(fromPty: string | null, toPty: string): boolean {
+    if (!fromPty || this.core.store.readSettings().agentTalk.handOff !== "ask") return false;
+    const from = this.core.live.get(fromPty);
+    const to = this.core.live.get(toPty);
+    // Only two workspaces count: a chat or a terminal outside any workspace isn't another project.
+    if (!from?.workspaceId || !to?.workspaceId || from.workspaceId === to.workspaceId) return false;
+    return !this.introduced.has(pairKey(fromPty, toPty));
+  }
+
   /** A person typed `typed` (see typedIn) into a terminal: its counts start again, and a Stop on it is lifted. True when either changed. */
   personTyped(ptyId: string, typed: string): boolean {
     this.lastHuman.set(ptyId, { at: this.nowMs(), sent: /[\r\n]/.test(typed) });
+    // Sending a first message that waited here introduces the two.
+    const waiting = this.introductions.get(ptyId);
+    if (waiting && /[\r\n]/.test(typed)) {
+      for (const key of waiting) this.introduced.add(key);
+      this.introductions.delete(ptyId);
+    }
     const lifted = this.stopped.delete(ptyId);
     return this.forget(ptyId) || lifted;
   }
@@ -181,8 +209,14 @@ export class Delivery {
       const onPrompt = Boolean(waiting && !isFreeWaitingPrompt(waiting));
       // The limit is checked again now: messages queued while the CLI was busy all passed it then.
       const limited = Boolean(item.counts && this.atLimit(item.fromPty, item.toPty));
-      const enter = item.enter && !limited && !onPrompt;
-      const draftReason: "limit" | "prompt" | undefined = !enter ? (onPrompt ? "prompt" : "limit") : undefined;
+      const introduce = Boolean(item.counts && item.enter && this.needsIntroduction(item.fromPty, item.toPty));
+      const enter = item.enter && !limited && !onPrompt && !introduce;
+      const draftReason: DraftReason | undefined = !enter ? (onPrompt ? "prompt" : introduce && !limited ? "introduce" : "limit") : undefined;
+      if (introduce && item.fromPty) {
+        const keys = this.introductions.get(item.toPty) ?? new Set<string>();
+        keys.add(pairKey(item.fromPty, item.toPty));
+        this.introductions.set(item.toPty, keys);
+      }
       try {
         await this.core.options.host.send(item.toPty, item.text, enter);
       } catch {

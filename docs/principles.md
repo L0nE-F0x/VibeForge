@@ -35,7 +35,7 @@ Anything that goes over the network stays off until you turn it on:
 - Dictated words land in the box or terminal and wait for you to press Enter.
 - A call with Viby is the one place speech sends itself: you start it on purpose, the rail shows it for as long as the microphone is open, and what you say reaches only Viby, never a terminal. In a call, steps that work in their own copy, pass a message to a CLI, or only open or read something run at once; everything that waits in Just go, and starting work in place over uncommitted edits, still waits for **Go** (a spoken "go" is that Go). When Viby speaks up by itself in a call (a CLI ended its turn), it only tells you; nothing is started by it.
 - Work done in a task's or Viby's own copy comes back only when you press **Apply**, as uncommitted edits you can read before you commit — or, when the copy has clean commits that were already merged into the workspace's upstream branch (a PR merged on GitHub), by fast-forwarding your branch to that upstream instead of pasting duplicate edits. Checking the upstream branch runs only when you press **Apply** on a copy with clean commits, never in the background.
-- A task one CLI hands another waits for you under **Ask first**, the default. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
+- A task one CLI hands another waits for you under **Ask first**, the default. So does the first message between two CLIs working in different workspaces: it waits in the receiving CLI's prompt until you send it. Two CLIs can trade 8 messages before the next one waits in the prompt for you.
 
 ## Undo instead of "are you sure?"
 

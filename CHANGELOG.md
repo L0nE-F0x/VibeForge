@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
   - agent talk turned on, given a lead or allowed more than now
 
   And when Viby has read a screen, file, diff or reply to make a plan, only steps that just look run without Go. What Viby read could be steering it. "Remember …" typed by you still saves at once.
+- **The first message between CLIs in two different workspaces waits for you.** Under Ask first, the default in Settings → Agents together, a CLI's first `vibeforge tell` to a CLI working in another workspace goes into that CLI's prompt without pressing Enter. You send it, and from then on the two can talk freely. CLIs in the same workspace, and Go ahead, work as before.
 
 ## [3.6.2] - 2026-11-25
 

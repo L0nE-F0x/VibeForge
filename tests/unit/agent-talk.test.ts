@@ -529,6 +529,46 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("leaves the first message between CLIs in two workspaces for a person to send (decision D1)", async () => {
+    let at = AT;
+    const ctx = setup({ now: () => new Date(at) });
+    const shop = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const otherFolder = tempDir();
+    const docs = ctx.svc.addWorkspace(otherFolder).workspaces.find((item) => item.path === otherFolder)!;
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true } });
+    const a = await ctx.svc.startEngine({ workspaceId: shop.id, engineId: "argy" });
+    const b = await ctx.svc.startEngine({ workspaceId: docs.id, engineId: "pasty" });
+    at += 6000;
+    // The first one goes into pasty's prompt without Enter, and says why.
+    const first = await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "one" });
+    expect(first).toMatchObject({ delivered: "draft" });
+    expect(first.ok && first.note).toContain("another workspace");
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, enter: false });
+    // A person sends it in pasty's terminal: from then on the two talk freely.
+    ctx.svc.onHumanInput(b.ptyId, "\r");
+    at += 16_000;
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "two" })).toMatchObject({ delivered: "sent" });
+    // Sent with Enter (the stand-in records a draft as enter: false, and a normal send without it).
+    expect(ctx.sent.at(-1)?.ptyId).toBe(b.ptyId);
+    expect(ctx.sent.at(-1)?.text).toContain("two");
+    expect(ctx.sent.at(-1)?.enter).not.toBe(false);
+    ctx.svc.close();
+  });
+
+  it("lets CLIs in two workspaces talk at once under Go ahead", async () => {
+    let at = AT;
+    const ctx = setup({ now: () => new Date(at) });
+    const shop = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const otherFolder = tempDir();
+    const docs = ctx.svc.addWorkspace(otherFolder).workspaces.find((item) => item.path === otherFolder)!;
+    ctx.svc.saveSettings({ agentTalk: { ...ctx.svc.getSettings().agentTalk, on: true, handOff: "go" } });
+    const a = await ctx.svc.startEngine({ workspaceId: shop.id, engineId: "argy" });
+    await ctx.svc.startEngine({ workspaceId: docs.id, engineId: "pasty" });
+    at += 6000;
+    expect(await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "one" })).toMatchObject({ delivered: "sent" });
+    ctx.svc.close();
+  });
+
   it("sends a selection to another pane as a draft for a person to send", async () => {
     const { ctx, a, b } = await twoClis();
     expect(await ctx.svc.sendDraft({ fromPty: a.ptyId, toPty: b.ptyId, what: "selection", selection: "  the bit I picked\x1b[0m " })).toEqual({ sent: true });
