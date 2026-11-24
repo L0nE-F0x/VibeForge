@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-11-25
+
+**3.6.1: typing into Viby works again, and "go" counts however you say it.**
+
 ### Fixed
 
 - **Typing into Viby works again.** Each key you typed into Viby's message box was erased as soon as it landed, so the box stayed empty and only voice or clicking got through. Typed and pasted text now stays in the box.
@@ -1075,7 +1079,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.1...HEAD
+[3.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.1
 [3.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.0
 [3.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.5.0
 [3.4.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.2
