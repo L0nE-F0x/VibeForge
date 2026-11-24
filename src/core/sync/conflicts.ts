@@ -1,8 +1,8 @@
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { readJson, writeJson } from "../fsx.js";
+import { runGit } from "../git.js";
 import { conflictName, DEFAULT_IGNORES, type ConflictName } from "./protocol.js";
 
 // When a file changes on both machines before they sync, Syncthing keeps the later change in
@@ -313,19 +313,13 @@ export class ConflictStore {
     const from = fs.existsSync(current) ? current : "/dev/null";
     const saved = this.savedFile(id);
     const label = record.kind === "file" ? record.path : `${record.path} (${record.section ?? "text"})`;
-    return new Promise((resolve) => {
-      execFile(
-        "git",
-        ["--no-pager", "-c", "color.ui=never", "-c", "core.quotePath=false", "diff", "--no-index", "--no-ext-diff", "--", from, saved],
-        { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 10_000 },
-        (error, stdout) => {
-          // 1 only means "they differ".
-          const code = (error as { code?: unknown } | null)?.code;
-          if (error && code !== 1) return resolve("");
-          resolve(relabel(stdout ?? "", from, saved, label));
-        },
-      );
+    const run = await runGit(["-c", "color.ui=never", "-c", "core.quotePath=false", "diff", "--no-index", "--", from, saved], {
+      maxBuffer: 4 * 1024 * 1024,
+      timeoutMs: 10_000,
     });
+    // 1 only means "they differ".
+    if (run.code !== 0 && run.code !== 1) return "";
+    return relabel(run.stdout, from, saved, label);
   }
 }
 

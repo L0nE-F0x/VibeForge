@@ -1,8 +1,8 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { runGit } from "../git.js";
 import type { OrchestratorStep, PlanContext } from "../orchestrator.js";
 import type { ApplyResult } from "../worktrees.js";
 
@@ -38,12 +38,7 @@ export function oneLine(text: string, max: number): string {
 }
 
 export function gitIn(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, timeout: 5000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }, (error, stdout, stderr) => {
-      const code = error ? (typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : 1) : 0;
-      resolve({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-    });
-  });
+  return runGit(args, { cwd, timeoutMs: 5000, maxBuffer: 4 * 1024 * 1024 });
 }
 
 /** A repository with at least one commit, which a copy can be made from. */

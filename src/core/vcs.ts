@@ -1,18 +1,8 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { runGit, type GitResult } from "./git.js";
 import { diffHeaderTarget } from "./worktrees.js";
-
-interface GitResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  missing: boolean;
-  /** stdout hit the buffer cap and was cut off. */
-  truncated: boolean;
-}
 
 /**
  * Every git call here is read-only. `--no-optional-locks` keeps status from touching the index
@@ -20,40 +10,10 @@ interface GitResult {
  * says `color.ui = always`.
  */
 function execGit(args: readonly string[], cwd: string, timeoutMs: number, maxBuffer = 8 * 1024 * 1024): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile(
-      "git",
-      [
-        "--no-pager",
-        "--no-optional-locks",
-        "-c",
-        "color.ui=never",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "diff.mnemonicPrefix=false",
-        "-c",
-        "diff.noprefix=false",
-        "-c",
-        "core.quotePath=false",
-        ...args,
-      ],
-      { cwd, timeout: Math.max(1, timeoutMs), encoding: "utf8", maxBuffer, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
-      (error, stdout, stderr) => {
-        const err = error as (NodeJS.ErrnoException & { killed?: boolean }) | null;
-        resolve({
-          code: typeof err?.code === "number" ? err.code : err ? 1 : 0,
-          stdout: stdout ?? "",
-          stderr: stderr ?? "",
-          timedOut: Boolean(err?.killed) || /timed out|ETIMEDOUT/i.test(err?.message ?? ""),
-          missing: err?.code === "ENOENT",
-          truncated: /maxBuffer|STDIO_MAXBUFFER/i.test(err?.message ?? ""),
-        });
-      },
-    );
-  });
+  return runGit(
+    ["--no-optional-locks", "-c", "color.ui=never", "-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false", "-c", "core.quotePath=false", ...args],
+    { cwd, timeoutMs: Math.max(1, timeoutMs), maxBuffer },
+  );
 }
 
 export const NOT_A_REPO = "not a git repo";
