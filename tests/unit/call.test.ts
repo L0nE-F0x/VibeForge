@@ -116,7 +116,8 @@ describe("a call's microphone, cut into the things said", () => {
 describe("words a call answers by itself", () => {
   it("takes go, cancel and hang up when they are all that was said", () => {
     expect(callWord("Go.")).toBe("go");
-    expect(callWord("Yes, go ahead!")).toBe(null);
+    // Said around the answer, not a different request (the founder's call, 2026-11-25).
+    expect(callWord("Yes, go ahead!")).toBe("go");
     expect(callWord("go ahead")).toBe("go");
     expect(callWord("Viby, go ahead.")).toBe("go");
     expect(callWord("Okay go, Vibey")).toBe("go");
@@ -983,7 +984,8 @@ setInterval(() => {
       // PipeWire's client: up until it is ended, and it says with which configuration.
       pipewire: script("pipewire", `fs.writeFileSync(${JSON.stringify(up)}, process.argv.slice(2).join(" "));\nprocess.on("SIGTERM", () => { fs.rmSync(${JSON.stringify(up)}); process.exit(0); });\nsetInterval(() => undefined, 1000);`),
       "pw-cli": script("pw-cli", `if (fs.existsSync(${JSON.stringify(up)})) console.log('\\t\\tnode.name = "vibeforge.call.microphone"');`),
-      "pw-record": script("pw-record", `fs.writeFileSync(${JSON.stringify(args)}, process.argv.slice(2).join(" "));\nsetInterval(() => undefined, 1000);`),
+      // Written whole, then renamed: the test reads it the moment it exists.
+      "pw-record": script("pw-record", `fs.writeFileSync(${JSON.stringify(args)} + ".part", process.argv.slice(2).join(" "));\nfs.renameSync(${JSON.stringify(args)} + ".part", ${JSON.stringify(args)});\nsetInterval(() => undefined, 1000);`),
     };
     const { instance, dataRoot } = voice({ bins });
     try {
@@ -996,8 +998,8 @@ setInterval(() => {
       expect(conf).toBe(path.join(dataRoot, "voice", "echo-cancel.conf"));
       expect(fs.readFileSync(conf, "utf8")).toBe(echoCancelConf());
       ear.close();
-      await until(() => !fs.existsSync(up));
-      expect(ear.cancelsEcho).toBe(false);
+      // The canceller removes its file as it exits; VibeForge hears of the exit a moment later.
+      await until(() => !fs.existsSync(up) && !ear.cancelsEcho);
 
       // Not asked for (Settings say headphones, or never): the microphone as it is.
       fs.rmSync(args);

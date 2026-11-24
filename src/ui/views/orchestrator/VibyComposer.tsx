@@ -246,7 +246,9 @@ export function VibyComposer({
       ref={wrapRef}
       className="viby-composer-box grow"
       onKeyDownCapture={handleKeyDownCapture}
-      onInputCapture={(event) => syncFromTextarea(event.target)}
+      // After the box's own onChange, never before it: a re-render in the capture phase ran while the
+      // box still held its old text, and React put that back over every key typed (2026-11-25).
+      onInput={(event) => syncFromTextarea(event.target)}
       onPasteCapture={handlePasteCapture}
     >
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={handleFileChange} />

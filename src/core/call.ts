@@ -1,3 +1,4 @@
+import { answerForms, CANCEL_WORDS, GO_WORDS, plainWords } from "../shared/plan-answer.js";
 import type { OrchestratorTurn, VibyWord } from "../shared/orchestrator.js";
 import { teammateSummary } from "../shared/orchestrator-intel.js";
 import { speakable } from "./replies.js";
@@ -194,36 +195,13 @@ export class Segmenter {
  */
 export type CallWord = "go" | "cancel" | "hangup" | "hush";
 
-/** Lower case, without punctuation, so "Go ahead." and "go ahead" are the same thing said. */
-function plain(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/['’`]/g, "")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
-}
+const plain = plainWords;
 
 // In each language the window speaks. Whole things said, never words inside a longer sentence:
 // "go to the api workspace" is for Viby.
 const WORDS: Record<CallWord, string[]> = {
-  go: [
-    ...["go", "go ahead", "yes", "yes go", "yes please", "yeah", "yep", "do it", "ok", "okay", "ok go", "okay go", "confirm", "sure", "go for it"],
-    ...["los", "leg los", "ja", "mach", "mach das", "mach es", "ausführen", "bestätigen"],
-    ...["adelante", "sí", "si", "hazlo", "vale", "dale", "confirmar", "de acuerdo"],
-    ...["vas-y", "oui", "fais-le", "d'accord", "allez", "confirmer"],
-    ...["vai", "sim", "pode ir", "faz isso", "manda"],
-    ...["はい", "実行", "実行して", "お願い", "お願いします", "やって", "オーケー"],
-    ...["好", "好的", "开始", "执行", "确认", "可以", "是"],
-  ],
-  cancel: [
-    ...["cancel", "cancel that", "no", "nope", "never mind", "nevermind", "forget it", "don't", "stop", "scrap that"],
-    ...["abbrechen", "nein", "vergiss es", "stopp", "doch nicht"],
-    ...["cancelar", "cancela", "olvídalo", "déjalo"],
-    ...["annuler", "annule", "non", "laisse tomber", "oublie"],
-    ...["não", "esquece", "deixa"],
-    ...["キャンセル", "いいえ", "やめて", "中止", "やめる"],
-    ...["取消", "不", "不要", "算了", "停"],
-  ],
+  go: [...GO_WORDS],
+  cancel: [...CANCEL_WORDS],
   hangup: [
     ...[
       "hang up",
@@ -270,7 +248,14 @@ const POLITE_TAIL = /(?:\s+(?:viby|vibey|vibe|maestro|please|thanks|thank you|fo
 
 export function callWord(said: string): CallWord | null {
   const text = plain(said);
-  return WORD_OF.get(text) ?? WORD_OF.get(text.replace(NAME, "").trim()) ?? WORD_OF.get(text.replace(POLITE_LEAD, "").replace(POLITE_TAIL, "").trim()) ?? null;
+  const exact = WORD_OF.get(text) ?? WORD_OF.get(text.replace(NAME, "").trim()) ?? WORD_OF.get(text.replace(POLITE_LEAD, "").replace(POLITE_TAIL, "").trim());
+  if (exact) return exact;
+  // "Go, go, go, go." and "I said go." answer the card too: the same forms the Viby box hears.
+  for (const form of answerForms(said)) {
+    const word = WORD_OF.get(form);
+    if (word) return word;
+  }
+  return null;
 }
 
 const QUICK_SHOW = /^(?:(?:alright|all right|hey|ok|okay)[,.\s]+)?(?:(?:viby|vibey|vibe|maestro)[,.\s]+)?(?:please[,.\s]+)?(?:switch to|open up|open|show me|show)(?:\s+the)?\s+(.+?)(?:\s+(?:workspace|view|panel|page|tab))?(?:[,.\s]+please)?$/i;

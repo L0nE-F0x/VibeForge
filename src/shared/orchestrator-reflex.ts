@@ -2,6 +2,7 @@
 // (slash commands, Go/Cancel on a waiting plan, Undo, Mark reviewed, Remember, and deep-link navigation).
 // Pure and Node-free so desktop, voice calls, and phone companion share identical reflex logic.
 
+import { planAnswer } from "./plan-answer.js";
 import type { Looking, OrchestratorStepKind, PlanContext } from "./orchestrator.js";
 
 export interface ReflexRawStep {
@@ -241,8 +242,10 @@ export function resolveLocalReflex(
 
   // Waiting-plan reflexes
   if (hasWaitingPlan) {
-    if (/^(?:go|go ahead|run it|do it|yes go|ok go|okay go|confirm)$/.test(lower)) return { kind: "plan-go" };
-    if (/^(?:cancel|cancel that|never mind|nevermind|scrap that)$/.test(lower)) return { kind: "plan-cancel" };
+    // The same answers a call hears: "go", "go, go, go", "I said go", "never mind" (plan-answer.ts).
+    const answer = planAnswer(trimmed);
+    if (answer === "go") return { kind: "plan-go" };
+    if (answer === "cancel") return { kind: "plan-cancel" };
   }
 
   // Single-intent undo & mark-reviewed reflexes

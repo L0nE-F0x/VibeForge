@@ -4,7 +4,7 @@ import type { ChatView } from "../../shared/api.js";
 import { joinDictation } from "../../shared/dictation.js";
 import { shellQuote } from "../../shared/text.js";
 import { call, pathForFile, useAgents, useLive, useQuery, useSettings } from "../api.js";
-import { forgetDraft, readDraft, useDraftState } from "../drafts.js";
+import { forgetDraft, readDraft, seedDraft, useDraftState } from "../drafts.js";
 import { useAction, useNav, useToast } from "../state.js";
 import { estimateTermSize, LiveTerminal, PATH_MIME, ReplayTerminal, type TerminalHandle } from "./Terminal.js";
 import { Button, Empty, StatusChip, TimeAgo } from "./ui.js";
@@ -116,13 +116,20 @@ export function Composer({
   }, [autoFocus]);
 
   async function submit() {
-    const value = textRef.current.trim();
+    const typed = textRef.current;
+    const value = typed.trim();
     if ((!value && !canSendEmpty) || busy || disabled) return;
     const sentFrom = keepKey;
-    const ok = await onSend(value);
-    if (ok === false) return;
+    // Empty the box as it sends, not after: sending can move the box (Viby's leaves the middle of
+    // the view once there's a conversation), and a box made while the send was out read the old
+    // draft back and sent it again with the next message (2026-11-25).
     if (sentFrom) forgetDraft(sentFrom);
     setText("");
+    const ok = await onSend(value);
+    if (ok !== false) return;
+    // It didn't go: put it back, here if this box is still here, and in the draft for one made since.
+    if (sentFrom) seedDraft(sentFrom, typed);
+    setText((now) => (now ? now : typed));
   }
 
   function insert(snippet: string) {
