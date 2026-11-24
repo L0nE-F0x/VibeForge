@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { companionStatus, LISTEN_RETRY_MS, stopCompanion, syncCompanion, type CompanionWire } from "../../electron/companion.js";
-import { newCompanionToken } from "../../src/core/companion.js";
+import { deviceFor, deviceKeyHash, deviceName, newCompanionToken, newDeviceKey } from "../../src/core/companion.js";
+import type { CompanionDevice } from "../../src/core/types.js";
 import { connectSources, hostAllowed, peerOrigin, startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 
 function tempDir(): string {
@@ -236,6 +237,59 @@ describe("who the phone page answers", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe("each phone pairs with a key of its own (decision D18)", () => {
+  it("hands a phone its own key, and stops taking the code as a key once one has paired", async () => {
+    const token = newCompanionToken();
+    const root = tempDir();
+    const devices: CompanionDevice[] = [];
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root,
+      icon: null,
+      actions: actions(),
+      devices: {
+        find: (key) => deviceFor(devices, key),
+        count: () => devices.length,
+        add: (name) => {
+          const key = newDeviceKey();
+          devices.push({ id: `d${devices.length}abcdef`, hash: deviceKeyHash(key), name, addedAt: "" });
+          return key;
+        },
+      },
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    const desk = (key: string) => fetch(`${base}/api/desk`, { headers: { Authorization: `Bearer ${key}` } });
+    try {
+      // A phone paired before 3.6.3 holds only the code: it keeps working while no phone has a key.
+      expect((await desk(token)).status).toBe(200);
+      // Pairing with the code hands this phone a key, named after it.
+      const paired = await fetch(`${base}/api/pair`, { method: "POST", headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }, body: JSON.stringify({ token }) });
+      expect(paired.status).toBe(200);
+      const { key } = (await paired.json()) as { key: string };
+      expect(key).toMatch(/^vfd_[0-9a-f]{48}$/);
+      expect(devices).toEqual([expect.objectContaining({ name: "iPhone", hash: deviceKeyHash(key) })]);
+      expect(JSON.stringify(devices)).not.toContain(key);
+      // The key opens the desk; the code alone no longer does, nor does a made-up key.
+      expect((await desk(key)).status).toBe(200);
+      expect((await desk(token)).status).toBe(401);
+      expect((await desk(newDeviceKey())).status).toBe(401);
+      // Removed in Settings → Phone: signed out.
+      devices.length = 0;
+      devices.push({ id: "other0000", hash: deviceKeyHash(newDeviceKey()), name: "Other", addedAt: "" });
+      expect((await desk(key)).status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("names a phone from its browser", () => {
+    expect(deviceName("Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")).toBe("Android (Pixel 9)");
+    expect(deviceName("Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0")).toBe("Firefox on Linux");
+    expect(deviceName(undefined)).toBe("A browser");
   });
 });
 

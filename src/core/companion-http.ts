@@ -4,7 +4,8 @@ import http from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
 import { cleanText } from "./agent-talk.js";
-import { bearerToken, tokenMatches, type DeskPayload } from "./companion.js";
+import { bearerToken, deviceName, tokenMatches, type DeskPayload } from "./companion.js";
+import type { CompanionDevice } from "./types.js";
 import type { PhoneOrchestrator } from "./companion-orchestrator.js";
 import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
 import type { StepPatch } from "./orchestrator.js";
@@ -148,6 +149,18 @@ export interface CompanionHttpOptions {
   version?: string;
   /** What this computer is called, for a phone that shows more than one. */
   computer?: () => string;
+  /**
+   * Phones with keys of their own (decision D18). Pairing gives a phone its own key; once any phone
+   * has one, the pairing code alone opens nothing but pairing. Without this, the code is the key.
+   */
+  devices?: {
+    /** The paired phone this key belongs to, or null. */
+    find(key: string): CompanionDevice | null;
+    /** How many phones are paired. */
+    count(): number;
+    /** Pairs a phone: its key, to hand it once. */
+    add(name: string): string;
+  };
 }
 
 export interface CompanionHttp {
@@ -451,10 +464,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       throw new CompanionHttpError("phone.error.wrongCode", 401);
     }
     served.pairResult(ip, true);
-    sendJson(res, 200, { ok: true, computer: opts.computer?.() ?? "" });
+    // The phone gets a key of its own: the code stays something to pair with, not a key.
+    const key = opts.devices ? opts.devices.add(deviceName(req.headers["user-agent"])) : undefined;
+    sendJson(res, 200, { ok: true, computer: opts.computer?.() ?? "", ...(key ? { key } : {}) });
     return;
   }
-  if (!tokenMatches(opts.token, bearerToken(req.headers.authorization))) {
+  const given = bearerToken(req.headers.authorization);
+  // A paired phone's own key; or, until the first phone pairs with a key, the code (phones paired before 3.6.3).
+  const known = opts.devices ? Boolean(opts.devices.find(given)) || (opts.devices.count() === 0 && tokenMatches(opts.token, given)) : tokenMatches(opts.token, given);
+  if (!known) {
     throw new CompanionHttpError("phone.pairLead", 401);
   }
   served.paired = true;

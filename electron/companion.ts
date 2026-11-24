@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import os from "node:os";
-import { buildDesk, COMPANION_RECENT_MS, isCodingSession, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
+import { buildDesk, COMPANION_RECENT_MS, deviceFor, deviceKeyHash, isCodingSession, newDeviceKey, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
 import { CompanionHttpError, startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type OrchestratorActions, type SessionPayload } from "../src/core/companion-http.js";
 import { buildPhoneOrchestrator, orchestratorDictationWords } from "../src/core/companion-orchestrator.js";
 import { describeError } from "../src/core/log.js";
@@ -115,6 +116,19 @@ async function apply(wire: CompanionWire): Promise<void> {
       version: wire.version,
       // The name Sync gives this machine, when it has one: the same computer under the same name.
       computer: () => wire.service.getSettings().sync.name || os.hostname(),
+      devices: {
+        find: (key) => deviceFor(wire.service.getSettings().companion.devices ?? [], key),
+        count: () => (wire.service.getSettings().companion.devices ?? []).length,
+        add: (name) => {
+          const key = newDeviceKey();
+          const devices = wire.service.getSettings().companion.devices ?? [];
+          const device = { id: randomBytes(6).toString("hex"), hash: deviceKeyHash(key), name, addedAt: new Date().toISOString() };
+          // The oldest goes once there are 20.
+          wire.service.saveSettings({ companion: { devices: [...devices, device].slice(-20) } });
+          wire.log(`Phone page: paired ${name}`);
+          return key;
+        },
+      },
     });
     boundToken = settings.token;
     status = { listening: true, url, error: null };

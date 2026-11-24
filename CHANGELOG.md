@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
   - agent talk turned on, given a lead or allowed more than now
 
   And when Viby has read a screen, file, diff or reply to make a plan, only steps that just look run without Go. What Viby read could be steering it. "Remember …" typed by you still saves at once.
+- **Each phone pairs with a key of its own.** Giving the pairing code now hands that phone a key of its own, and VibeForge keeps only a hash of it. Settings → Phone lists your phones with **Remove** for each. Once a phone has paired this way, the code alone only pairs; it no longer opens the page. Phones paired before keep working with the code until the first phone pairs again.
 - **A paired machine can't widen what it syncs with this one.** It can still narrow a share, for example to files only or to one direction. If it tries to widen one, the share stays as it was and you're told: syncing both ways where you chose one, or starting to sync `.git` where you chose files only. You change it in Settings → Sync if you agree.
 - **Sync keeps submodules' git hooks and settings to each machine**, as it already did for the repository's own.
 - **A folder that holds other workspaces can't be synced as one**, so `~/Projects` can't send or take every project in it at once.

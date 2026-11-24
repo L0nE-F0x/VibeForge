@@ -92,7 +92,8 @@ export async function call(path, options = {}) {
  * offline and the button comes back. The answer carries what the computer calls itself.
  * @param {string} code
  * @param {string} [url]
- * @returns {Promise<{ computer?: string }>}
+ * A computer from 3.6.3 on also hands this phone a key of its own (`key`), kept instead of the code.
+ * @returns {Promise<{ computer?: string, key?: string }>}
  */
 export function checkCode(code, url) {
   return call("/api/pair", {
@@ -102,6 +103,16 @@ export function checkCode(code, url) {
     refused: t("phone.codeWrong"),
     ...(url === undefined ? {} : { computer: { url, token: "" } }),
   });
+}
+
+/**
+ * The key this phone keeps for a computer: its own, when the computer hands one out (3.6.3 on), or
+ * the code itself for an older computer.
+ * @param {{ key?: string }} answer
+ * @param {string} code
+ */
+export function keyFrom(answer, code) {
+  return typeof answer.key === "string" && /^vfd_[0-9a-f]{48}$/.test(answer.key) ? answer.key : code;
 }
 
 /**

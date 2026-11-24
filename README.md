@@ -205,7 +205,7 @@ It is off until you turn it on, and then it listens on `127.0.0.1:4737` only. **
 sudo tailscale serve --bg --https=443 http://127.0.0.1:4737
 ```
 
-Step 4 then shows the page's address and a QR code. Point the phone's camera at the code and the page opens already paired; type the address instead and the page asks once for the pairing code shown beside it (it's kept in `settings.json`) and remembers it in the phone's browser. **New code** signs every phone out, and **Forget this phone** in the page's settings signs out just that one. To know which step is left, VibeForge asks this computer's own `tailscale` where things stand; it never changes Tailscale's settings itself.
+Step 4 then shows the page's address and a QR code. Point the phone's camera at the code and the page opens already paired; type the address instead and the page asks once for the pairing code shown beside it. Pairing gives that phone a key of its own, which it keeps in its browser; VibeForge keeps only a hash of it in `settings.json`. **Paired phones** in Settings → Phone lists each one with **Remove**, **New code** signs every phone out, and **Forget this phone** in the page's settings signs out just that one. To know which step is left, VibeForge asks this computer's own `tailscale` where things stand; it never changes Tailscale's settings itself.
 
 **More than one computer?** Do the same on each. On the phone, tap the computer's name, then **Add a computer**, and scan the other computer's QR code (Chrome on Android; anywhere else, type its name and pairing code). One page then shows them all: the list says who is working or waiting on each, and a tap switches. The page keeps a copy of itself on the phone, so it still opens when the computer it was installed from is off.
 

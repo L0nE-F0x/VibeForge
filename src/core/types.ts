@@ -214,8 +214,20 @@ export interface AgentTalkSettings {
 export interface CompanionSettings {
   enabled: boolean;
   port: number;
+  /** The pairing code: a phone that gives it gets a key of its own. */
   token: string;
   nudges: string[];
+  /** Phones paired with a key of their own; only a hash of each key is kept (decision D18). */
+  devices?: CompanionDevice[];
+}
+
+/** A paired phone. */
+export interface CompanionDevice {
+  id: string;
+  /** SHA-256 of its key, hex. */
+  hash: string;
+  name: string;
+  addedAt: string;
 }
 
 /** Short tones, made in the app, for moments worth hearing about. */

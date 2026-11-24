@@ -174,6 +174,8 @@ export class ServiceCore {
     // A partial phone-page patch must not drop the pairing code or the saved nudges.
     if (companionPatch) {
       next.companion = normalizeCompanion({ ...current.companion, ...companionPatch });
+      // A new code (the old one cleared) unpairs every phone: each pairs again with the new one.
+      if (companionPatch.token === "" && current.companion.token) next.companion.devices = [];
       if (next.companion.enabled && !next.companion.token) next.companion.token = newCompanionToken();
     }
     this.store.writeSettings(next);
