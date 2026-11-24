@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { effortForModel } from "../../shared/launch-options.js";
 import { isDirectory } from "../fsx.js";
 import {
   branchFromPrompt,
@@ -774,7 +775,10 @@ export async function carryOutSettingsStep(deps: EntityStepDeps, step: Orchestra
     const nextEngine = action.engine !== undefined ? action.engine : (current.engine || activePlanner);
     const changedEngine = action.engine !== undefined && action.engine !== (current.engine || activePlanner);
     const nextModel = action.model !== undefined ? action.model : changedEngine ? "" : current.model;
-    const nextEffort = action.effort !== undefined ? action.effort : changedEngine ? "" : (current.effort ?? "");
+    const keptEffort = action.effort !== undefined ? action.effort : changedEngine ? "" : (current.effort ?? "");
+    // A new model keeps the effort only where it is still valid for it (an Antigravity id names its own).
+    const nextRow = action.model !== undefined && action.effort === undefined ? context.engines.find((e) => e.id === nextEngine) : undefined;
+    const nextEffort = nextRow?.bin !== undefined ? effortForModel({ id: nextRow.id, bin: nextRow.bin }, nextModel, keptEffort) : keptEffort;
     const nextMode = action.mode ?? current.mode;
     const nextProjectsFolder = action.projectsFolder !== undefined ? action.projectsFolder : current.projectsFolder;
     deps.core.saveSettings({

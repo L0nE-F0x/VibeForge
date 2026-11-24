@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { effortLevels } from "../../shared/launch-options.js";
+import { effortForModel, effortLevels } from "../../shared/launch-options.js";
 import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useQuery, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
@@ -40,7 +40,7 @@ export function OrchestratorCard() {
           </Select>
         </Field>
         <Field label={t("orch.model")} hint={t("orch.modelHint")}>
-          <ModelPick key={engineId} engineId={engineId} value={engineId === current.engine ? current.model : ""} onChange={(model) => void save({ ...current, engine: engineId, model })} />
+          <ModelPick key={engineId} engineId={engineId} value={engineId === current.engine ? current.model : ""} onChange={(model) => void save({ ...current, engine: engineId, model, effort: selectedEngine ? effortForModel(selectedEngine, model, currentEffort) : "" })} />
         </Field>
         <Field label={t("orch.effort")} hint={t("orch.effortHint")}>
           <Select value={currentEffort} disabled={!levels.length && !currentEffort} onChange={(event) => void save({ ...current, engine: engineId, effort: event.target.value })}>

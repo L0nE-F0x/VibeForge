@@ -84,6 +84,24 @@ export function agyModelEffort(model: string, effort: string, explicit = true): 
   return { model: own ? model.slice(0, -own.length - 1) : model, effort };
 }
 
+/** The effort a model names itself, which only Antigravity's ids do ("gemini-4-neon-high"); else "". */
+export function modelOwnEffort(row: Pick<EngineRow, "id" | "bin">, model: string | undefined): string {
+  if (launchKind(row) !== "agy") return "";
+  const own = AGY_EFFORT_SUFFIX.exec(cleanModel(model))?.[1] ?? "";
+  return effortLevels(row).includes(own) ? own : "";
+}
+
+/**
+ * The effort to keep once the model is `model`: the level an Antigravity id names, so the model
+ * picked is the one that runs; otherwise `effort` when the CLI takes it, else "" (the default).
+ */
+export function effortForModel(row: Pick<EngineRow, "id" | "bin">, model: string | undefined, effort: string | undefined): string {
+  const own = modelOwnEffort(row, model);
+  if (own) return own;
+  const asked = (effort ?? "").trim().toLowerCase();
+  return effortLevels(row).includes(asked) ? asked : "";
+}
+
 /**
  * The options that start a CLI on `model` with `effort`. A model or an effort the CLI doesn't take
  * is left out, so a step that names one can never start it with an option it refuses.

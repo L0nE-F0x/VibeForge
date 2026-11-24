@@ -564,6 +564,22 @@ describe("store", () => {
     custom.close();
   });
 
+  it("keeps Viby's planner, model and effort across a restart, and drops an effort that is not a level", () => {
+    const configRoot = tempDir();
+    const dataRoot = tempDir();
+    const store = new Store(configRoot, dataRoot);
+    store.writeSettings({ ...store.readSettings(), orchestrator: { engine: "codex", mode: "plan", model: "gpt-5.5", effort: "xhigh", projectsFolder: "" } });
+    store.close();
+    const reopened = new Store(configRoot, dataRoot);
+    expect(reopened.readSettings().orchestrator).toEqual({ engine: "codex", mode: "plan", model: "gpt-5.5", effort: "xhigh", projectsFolder: "" });
+    const file = path.join(configRoot, "settings.json");
+    fs.writeFileSync(file, JSON.stringify({ orchestrator: { engine: "claude", model: "opus", effort: " MAX " } }));
+    expect(reopened.readSettings().orchestrator.effort).toBe("max");
+    fs.writeFileSync(file, JSON.stringify({ orchestrator: { engine: "claude", model: "opus", effort: "--yolo" } }));
+    expect(reopened.readSettings().orchestrator).not.toHaveProperty("effort");
+    reopened.close();
+  });
+
   it("keeps the tour finished once it is, and reads older settings files as not toured", () => {
     const store = new Store(tempDir(), tempDir());
     const file = path.join(store.configRoot, "settings.json");

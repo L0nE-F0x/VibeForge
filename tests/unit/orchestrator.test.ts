@@ -1981,6 +1981,52 @@ describe("Viby settings awareness and self-configuration", () => {
     );
   });
 
+  it("plans at the effort picked for Viby after a restart, and a model picked by voice resets it to one valid for that model", async () => {
+    const agy = { id: "agy", label: "Antigravity", bin: "argy", args: [] };
+    const withAgy = (configRoot: string) => {
+      const file = path.join(configRoot, "engines.json");
+      const json = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+      json.engines.push(agy);
+      fs.writeFileSync(file, JSON.stringify(json));
+    };
+    const first = setup();
+    withAgy(first.configRoot);
+    first.svc.saveSettings({ orchestrator: { engine: "agy", mode: "go", model: "", effort: "max", projectsFolder: "" } });
+    await first.svc.close();
+
+    // A restart: the same settings folder, a new service.
+    const ctx = setup({ configRoot: first.configRoot, dataRoot: first.dataRoot });
+    withAgy(ctx.configRoot);
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject({ engine: "agy", effort: "max" });
+    const calls: string[][] = [];
+    const answers: Array<Record<string, unknown>> = [
+      { say: "Switching to Neon high.", steps: [{ kind: "settings", target: "viby.model", prompt: "gemini-4-neon-high" }] },
+      { say: "Switching to 3.8 Pro.", steps: [{ kind: "settings", target: "viby.model", prompt: "gemini-3.8-pro" }] },
+      { say: "Done.", steps: [] },
+    ];
+    ctx.svc.orchestrator.runner = async (argv): Promise<BrainRun> => {
+      calls.push(argv);
+      const next = answers.shift() ?? { say: "", steps: [] };
+      return { code: 0, stdout: JSON.stringify({ structuredOutput: next }), stderr: "", timedOut: false };
+    };
+    await ctx.svc.orchestratorAsk("use gemini neon high");
+    expect(calls[0]).toEqual(expect.arrayContaining(["--effort", "max"]));
+    // The model names its own level, so max (which would put Neon at max) goes and its high stays.
+    await until(() => ctx.svc.getSettings().orchestrator.model === "gemini-4-neon-high");
+    expect(ctx.svc.getSettings().orchestrator.effort).toBe("high");
+
+    await ctx.svc.orchestratorAsk("now use 3.8 pro");
+    expect(calls[1]).toEqual(expect.arrayContaining(["--model", "gemini-4-neon-high"]));
+    expect(calls[1]).not.toContain("--effort");
+    // A model without a level of its own keeps the one that was set, as agy takes it.
+    await until(() => ctx.svc.getSettings().orchestrator.model === "gemini-3.8-pro");
+    expect(ctx.svc.getSettings().orchestrator.effort).toBe("high");
+
+    await ctx.svc.orchestratorAsk("thanks");
+    expect(calls[2]).toEqual(expect.arrayContaining(["--model", "gemini-3.8-pro", "--effort", "high"]));
+    await ctx.svc.close();
+  });
+
   it("never gives Antigravity an --effort that conflicts with the effort its model id carries", () => {
     const agyRow = { id: "agy", label: "Antigravity", bin: "agy", args: [] };
     const tail = (opts: { model?: string; effort?: string }) => {
