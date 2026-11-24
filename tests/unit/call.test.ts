@@ -116,7 +116,8 @@ describe("a call's microphone, cut into the things said", () => {
 describe("words a call answers by itself", () => {
   it("takes go, cancel and hang up when they are all that was said", () => {
     expect(callWord("Go.")).toBe("go");
-    expect(callWord("Yes, go ahead!")).toBe(null);
+    // Said around the answer, not a different request (the founder's call, 2026-11-25).
+    expect(callWord("Yes, go ahead!")).toBe("go");
     expect(callWord("go ahead")).toBe("go");
     expect(callWord("Viby, go ahead.")).toBe("go");
     expect(callWord("Okay go, Vibey")).toBe("go");
