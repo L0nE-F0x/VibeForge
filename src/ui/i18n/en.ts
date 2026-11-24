@@ -2063,6 +2063,7 @@ export const en = {
   "core.orchMemoryEmpty": "Type something to save to memory.",
   "core.orchBadImage": "Unsupported image format.",
   "core.orchImageTooBig": "That image is larger than 10 MB.",
+  "core.orchApprovalWaiting": "That CLI is waiting on an approval prompt; say Go to answer it.",
   "orch.attachImage": "Attach image",
   "orch.removeImage": "Remove image",
 } as const;

@@ -2051,6 +2051,7 @@ export const ja: Catalog = {
   "core.orchMemoryEmpty": "メモリに保存する内容を入力してください。",
   "core.orchBadImage": "対応していない画像形式です。",
   "core.orchImageTooBig": "この画像は 10 MB を超えています。",
+  "core.orchApprovalWaiting": "その CLI は承認プロンプトで待機中です。応答するには Go と言ってください。",
   "orch.attachImage": "画像を添付",
   "orch.removeImage": "画像を削除",
 };

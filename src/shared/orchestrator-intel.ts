@@ -3,6 +3,30 @@
 // parsing workbench actions, and turning raw CLI replies into natural spoken summaries.
 // No Node imports here so both the window and the main process can run them.
 
+const APPROVAL_MENU_OPTION = /^(?:[❯>*•]\s*)?1[.)]\s*(?:yes|allow|approve|trust|proceed)\b/i;
+const MENU_APPROVAL_WORDS = /\b(?:allow|approve|don't ask again|do not ask again|this command|this edit|always allow|deny|reject)\b/i;
+
+const APPROVAL_LINE_PATTERNS: RegExp[] = [
+  /do you want to (?:proceed|continue|allow|run|make this edit|create|overwrite)[^?\n]*\??/i,
+  /\ballow [^\n]{1,160}\?/i,
+  /[^\n]*\((?:y\/n|yes\/no)\)[^\n]*/i,
+  /[^\n]*\[(?:y\/n|Y\/n|y\/N)\][^\n]*/i,
+];
+
+const TRUST_LINE_PATTERNS: RegExp[] = [
+  /^(?:quick safety check:\s*)?(?:do you trust (?:the files in |the contents of )?this (?:folder|directory|workspace|project)|trust (?:the files in |the contents of )?this (?:folder|directory|workspace|project))[?.!]?$/i,
+];
+
+const LOGIN_LINE_PATTERN = /^(?:session expired\.\s*)?((?:please\s+)?(?:run \/login|sign in|log in)\b[^\n]*)$/i;
+
+function matchPattern(line: string, patterns: readonly RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = pattern.exec(line);
+    if (match) return cleanPromptLine(match[0]);
+  }
+  return null;
+}
+
 /**
  * Inspect the bottom of a quiet terminal's screen for an interactive TUI prompt waiting on a
  * person (folder trust, tool approval, y/n confirmation, sign-in). Null when at a normal prompt.
@@ -11,62 +35,74 @@ export function detectWaitingPrompt(screen: string): string | null {
   if (!screen.trim()) return null;
   const lines = screen
     .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) => cleanPromptLine(line.replace(/\s+/g, " ").trim()))
     .filter(Boolean)
     .slice(-18);
   if (!lines.length) return null;
-  const tail = lines.join("\n");
 
-  const patterns: RegExp[] = [
-    /do you trust the files in this folder\??/i,
-    /trust this (?:folder|directory|workspace|project)\??/i,
-    /do you want to (?:proceed|continue|allow|run|make this edit|create|overwrite)[^?\n]*\??/i,
-    /allow [^\n?]{1,80}\?/i,
-    /[^\n]*\((?:y\/n|yes\/no)\)[^\n]*/i,
-    /[^\n]*\[(?:y\/n|Y\/n|y\/N)\][^\n]*/i,
-    /(?:please )?(?:run \/login|sign in|log in)[^\n]*/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(tail);
-    if (match) return cleanPromptLine(match[0]);
+  // Check the bottom-most numbered confirmation menu first, inspecting only the 1-2 lines
+  // directly above option 1 so trust words inside an earlier command payload can't mask an approval.
+  let yesOption = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (APPROVAL_MENU_OPTION.test(lines[i])) {
+      yesOption = i;
+      break;
+    }
+  }
+  if (yesOption >= 0) {
+    const menuHasApproval = lines.slice(yesOption, yesOption + 4).some((line) => MENU_APPROVAL_WORDS.test(line));
+    const above = lines.slice(Math.max(0, yesOption - 2), yesOption);
+    for (let i = above.length - 1; i >= 0; i--) {
+      const approval = matchPattern(above[i], APPROVAL_LINE_PATTERNS);
+      if (approval) return approval;
+    }
+    if (!menuHasApproval) {
+      for (let i = above.length - 1; i >= 0; i--) {
+        const trust = matchPattern(above[i], TRUST_LINE_PATTERNS);
+        if (trust) return trust;
+        if (above[i].endsWith("?") && /\b(?:allow|proceed|permission|confirm)\b/i.test(above[i])) return above[i];
+      }
+    }
+    return lines[yesOption];
   }
 
-  // Numbered confirmation menu (e.g. Claude Code / Grok Build: "❯ 1. Yes, proceed").
-  const yesOption = lines.findIndex((line) => /^(?:[❯>*•]\s*)?1[.)]\s*(?:yes|allow|approve|trust|proceed)\b/i.test(line));
-  if (yesOption >= 0) {
-    const question = [...lines.slice(0, yesOption)].reverse().find((line) => line.endsWith("?") || /trust|allow|proceed|permission|confirm/i.test(line));
-    return cleanPromptLine(question ?? lines[yesOption]);
+  // Without a numbered menu, scan bottom-to-top for approval prompts first, then anchored trust or sign-in.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const approval = matchPattern(lines[i], APPROVAL_LINE_PATTERNS);
+    if (approval) return approval;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trust = matchPattern(lines[i], TRUST_LINE_PATTERNS);
+    if (trust) return trust;
+    const login = LOGIN_LINE_PATTERN.exec(lines[i]);
+    if (login) return cleanPromptLine(login[1]);
   }
 
   return null;
 }
 
 function cleanPromptLine(line: string): string {
-  const cleaned = line.replace(/^[│╭╰─❯>*•\s]+|[│╭╰─\s]+$/g, "").trim();
+  const cleaned = line.replace(/^[│┃╭╮╰╯┌┐└┘─❯>*•═\s]+|[│┃╭╮╰╯┌┐└┘─═\s]+$/g, "").trim();
   return cleaned.length > 140 ? `${cleaned.slice(0, 139).trimEnd()}…` : cleaned;
 }
 
-const FREE_PROMPTS = [
-  /do you trust\b/i,
-  /\btrust (?:the files in )?this (?:folder|directory|workspace|project)\b/i,
-  /(?:please )?(?:run \/login|sign in|log in)\b/i,
-];
+const APPROVAL_WORDING = /do you want to |\ballow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|^(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\b(?:don't ask again|do not ask again|this command|this edit|always allow|overwrite)\b/i;
 
 /** Whether a waiting prompt explicitly matches a benign folder-trust or sign-in prompt. */
 export function isFreeWaitingPrompt(waiting: string | undefined): boolean {
   const text = (waiting ?? "").trim();
   if (!text) return false;
-  const prompt = detectWaitingPrompt(text) ?? text;
-  return FREE_PROMPTS.some((pattern) => pattern.test(prompt));
+  const prompt = text.includes("\n") ? detectWaitingPrompt(text) : cleanPromptLine(text);
+  if (!prompt || APPROVAL_WORDING.test(prompt)) return false;
+  return TRUST_LINE_PATTERNS.some((pattern) => pattern.test(prompt)) || LOGIN_LINE_PATTERN.test(prompt);
 }
 
 /** Whether a detected waiting prompt or screen asks to approve a tool, command or edit (not folder trust or sign-in). */
 export function isApprovalPrompt(waitingOrScreen: string): boolean {
   const text = waitingOrScreen.trim();
   if (!text) return false;
-  const prompt = detectWaitingPrompt(text) ?? text;
-  if (FREE_PROMPTS.some((pattern) => pattern.test(prompt))) return false;
+  const prompt = detectWaitingPrompt(text) ?? cleanPromptLine(text);
+  if (!prompt || isFreeWaitingPrompt(prompt)) return false;
   return /do you want to |allow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|(?:^|\n)\s*(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\?$/i.test(
     prompt,
   );

@@ -2050,6 +2050,7 @@ export const es: Catalog = {
   "core.orchMemoryEmpty": "Escribe algo para guardar en memoria.",
   "core.orchBadImage": "Formato de imagen no compatible.",
   "core.orchImageTooBig": "Esa imagen pesa más de 10 MB.",
+  "core.orchApprovalWaiting": "Esa CLI espera una confirmación de permiso; di Adelante para responder.",
   "orch.attachImage": "Adjuntar imagen",
   "orch.removeImage": "Quitar imagen",
 };

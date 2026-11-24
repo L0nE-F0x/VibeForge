@@ -123,6 +123,8 @@ export class MessageDesk {
     const body = person ? text : messageText({ fromLabel: from?.label ?? "a terminal outside VibeForge", fromHandle: from?.handle ?? null, text, answer, savedAt: this.files.saveIfLong("messages", text) });
     const note = () =>
       `You and ${to.label} have sent each other ${this.settings().maxMessages} messages without a person stepping in, so this one waits in its prompt for a person to press Enter.`;
+    const promptNote = () =>
+      `${to.label} is waiting on an approval prompt, so this was placed in its prompt as a draft without pressing Enter.`;
 
     return new Promise<TellResult>((resolve) => {
       const done = new AbortController();
@@ -162,10 +164,12 @@ export class MessageDesk {
                 gone: input.gone,
               }
             : null,
-        // With --wait, an answer settles it, unless it went in as a draft (the limit came while it waited).
-        delivered: (draft) => {
+        // With --wait, an answer settles it, unless it went in as a draft (the limit or an approval prompt stopped Enter).
+        delivered: (draft, reason) => {
           done.abort();
-          if (draft || !input.wait) finish({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? note() : undefined });
+          if (draft || !input.wait) {
+            finish({ ok: true, to: to.handle, delivered: draft ? "draft" : "sent", note: draft ? (reason === "prompt" ? promptNote() : note()) : undefined });
+          }
         },
         dropped: (why) => finish({ ok: false, error: why }),
       });

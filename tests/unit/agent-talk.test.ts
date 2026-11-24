@@ -344,6 +344,30 @@ describe("CLIs talking through VibeForge", () => {
     ctx.svc.close();
   });
 
+  it("delivers tells and agent messages as drafts without Enter when the target pane shows an approval prompt", async () => {
+    const { ctx, pass, a, b } = await twoClis();
+    ctx.host.screen = async () => "Do you want to proceed?\n❯ 1. Yes\n  2. No";
+
+    const first = await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Check foo.ts" });
+    await ctx.svc.pumpMessages();
+    expect(first).toMatchObject({ ok: true, delivered: "draft", note: expect.stringMatching(/approval prompt/i) });
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, enter: false });
+
+    pass(4000);
+    const waited = await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Wait check", wait: true });
+    await ctx.svc.pumpMessages();
+    expect(waited).toMatchObject({ ok: true, delivered: "draft", note: expect.stringMatching(/approval prompt/i) });
+    expect(ctx.sent.at(-1)).toMatchObject({ ptyId: b.ptyId, enter: false });
+
+    // Once the prompt clears to a normal shell/CLI prompt, delivery presses Enter again.
+    pass(4000);
+    ctx.host.screen = async () => "pasty> ";
+    const normal = await ctx.svc.tell({ fromPty: a.ptyId, to: "pasty", text: "Continue" });
+    expect(normal).toMatchObject({ ok: true, delivered: "sent" });
+    expect(ctx.sent.at(-1)?.enter).toBeUndefined();
+    ctx.svc.close();
+  });
+
   it("doesn't paste a queued message into another CLI started in the same terminal", async () => {
     const { ctx, pass, workspace, a } = await twoClis();
     const shell = await ctx.svc.startShell({ workspaceId: workspace.id });

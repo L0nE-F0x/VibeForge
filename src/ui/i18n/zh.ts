@@ -2051,6 +2051,7 @@ export const zh: Catalog = {
   "core.orchMemoryEmpty": "请输入要保存到记忆中的内容。",
   "core.orchBadImage": "不支持的图片格式。",
   "core.orchImageTooBig": "该图片超过 10 MB。",
+  "core.orchApprovalWaiting": "该 CLI 正在等待审批提示；说“继续”来回复。",
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
 };

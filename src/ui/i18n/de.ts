@@ -2050,6 +2050,7 @@ export const de: Catalog = {
   "core.orchMemoryEmpty": "Gib etwas zum Merken ein.",
   "core.orchBadImage": "Nicht unterstütztes Bildformat.",
   "core.orchImageTooBig": "Dieses Bild ist größer als 10 MB.",
+  "core.orchApprovalWaiting": "Diese CLI wartet auf eine Freigabeabfrage; sag Los, um zu antworten.",
   "orch.attachImage": "Bild anhängen",
   "orch.removeImage": "Bild entfernen",
 };

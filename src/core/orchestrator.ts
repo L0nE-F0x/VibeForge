@@ -1603,7 +1603,11 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
   if (NEEDS_GO.includes(step.kind)) return true;
   if (isDestructiveStepAction(step.kind, step.action)) return true;
   if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return true;
-  if (step.kind === "tell") return step.prompt.trimStart().startsWith("!");
+  if (step.kind === "tell") {
+    if (step.prompt.trimStart().startsWith("!")) return true;
+    const target = context?.running.find((item) => item.id === step.target);
+    return Boolean(target?.waiting && !isFreeWaitingPrompt(target.waiting));
+  }
   if (step.kind === "key") {
     const action = keySequenceFor(step.prompt);
     if (!action) return false;

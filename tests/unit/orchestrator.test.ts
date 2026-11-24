@@ -2278,4 +2278,43 @@ describe("Viby settings awareness and self-configuration", () => {
 
     await ctx.svc.close();
   });
+
+  it("re-checks the live screen before auto-sending an approval key and refuses when an approval prompt appeared", async () => {
+    const answers: Array<Record<string, unknown>> = [];
+    const ctx = withPlanner(answers);
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const running = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
+    const written: Array<[string, string]> = [];
+    let readCount = 0;
+    let screenText = "╭───╮\n│ Do you trust the files in this folder? │\n│ ❯ 1. Yes, proceed │";
+    ctx.host.screen = async () => {
+      readCount += 1;
+      // Context check sees trust; by the time key execution reads the live screen, it has changed to a tool approval.
+      if (readCount >= 2) {
+        return "Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again for rm";
+      }
+      return screenText;
+    };
+    ctx.host.write = async (ptyId, data) => {
+      written.push([ptyId, data]);
+    };
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+    answers.push({ say: "Sending yes.", steps: [{ kind: "key", target: running.ptyId, prompt: "yes" }] });
+    await ctx.svc.orchestratorAsk("yes");
+    const autoTurn = () => ctx.svc.orchestratorView().turns.find((item) => item.steps?.length);
+    await until(() => autoTurn()?.plan === "done");
+    expect(written).toEqual([]);
+    expect(autoTurn()?.steps?.[0]).toMatchObject({ state: "failed", error: expect.stringMatching(/approval/i) });
+
+    // Explicit Go by the person still sends the key to the approval dialog when asked.
+    screenText = "Do you want to proceed?\n❯ 1. Yes\n  2. No";
+    readCount = 0;
+    answers.push({ say: "Needs Go.", steps: [{ kind: "key", target: running.ptyId, prompt: "yes" }] });
+    await ctx.svc.orchestratorAsk("yes");
+    const heldTurn = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(heldTurn.plan).toBe("waiting");
+    await ctx.svc.orchestratorRun(heldTurn.id);
+    expect(written).toEqual([[running.ptyId, "\r"]]);
+    await ctx.svc.close();
+  });
 });
