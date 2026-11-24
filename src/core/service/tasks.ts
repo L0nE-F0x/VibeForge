@@ -333,6 +333,7 @@ export class TaskDesk {
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });
     }
     this.core.emit("tasks");
+    if (result.pulled) this.core.emit("workspaces");
     return result;
   }
 

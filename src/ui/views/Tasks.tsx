@@ -15,7 +15,7 @@ import { RunRow } from "./Home.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { useT, type Key } from "../i18n/index.js";
 import { changesFor } from "../changes-text.js";
-import { applyConflictNote, applyLeftNote } from "../apply-note.js";
+import { applyToast } from "../apply-note.js";
 import { shortcutKeys } from "../shortcuts.js";
 
 const COLUMNS: Array<{ status: TaskStatus; label: Key }> = [
@@ -353,10 +353,8 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const [applyCopy, applying] = useAction(async () => {
     if (!task || !workspace) return;
     const result = await call("tasks.applyCopy", task.id);
-    if (!result.files.length && !result.left) push("info", t("tasks.applyNothing"));
-    else if (result.conflicts.length) push("error", t("tasks.applyConflicts"), applyConflictNote(t, result));
-    else if (result.left) push("info", t("tasks.appliedLeft", { workspace: workspace.name }), applyLeftNote(t, result.left, home));
-    else push("success", t("tasks.applied", { workspace: workspace.name }), t.count("tasks.appliedBody", result.files.length));
+    const toast = applyToast(t, result, workspace.name, home);
+    push(toast.tone, toast.title, toast.body);
   }, t("tasks.applyFailed"));
   const [discardCopy, discarding] = useAction(async () => {
     if (!task) return;

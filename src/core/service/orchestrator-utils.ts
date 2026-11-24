@@ -109,6 +109,14 @@ export function formatApplyResult(result: ApplyResult, cleanLabel: string): stri
   if (result.conflicts.length) {
     return `Applied with conflicts to sort out in ${result.conflicts.slice(0, 5).join(", ")}${result.conflicts.length > 5 ? "…" : ""}. The copy stays until they are.`;
   }
+  if (result.pulled) {
+    const { branch, upstream, alreadyUpToDate } = result.pulled;
+    const head = alreadyUpToDate ? `Already merged in ${branch}.` : `Already merged on ${upstream}; fast-forwarded ${branch}.`;
+    if (result.left) {
+      return `${head} Ignored files stay in the copy (${result.left.files.slice(0, 5).join(", ")}${result.left.files.length > 5 ? "…" : ""}) at ${result.left.folder} until discarded.`;
+    }
+    return `${head} The copy is gone.`;
+  }
   if (result.left) {
     return `Applied as uncommitted changes. Ignored files stay in the copy (${result.left.files.slice(0, 5).join(", ")}${result.left.files.length > 5 ? "…" : ""}) at ${result.left.folder} until discarded.`;
   }

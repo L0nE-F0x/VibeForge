@@ -145,10 +145,14 @@ export class MaestroCopies {
       if (result.conflicts.length) return result;
       // Files git ignores that only live in the copy keep it, with its workspace, until it is discarded.
       const left = await leftInCopy(copy);
-      if (left.length) return { ...result, left: { folder: copy.path, files: left } };
+      if (left.length) {
+        if (result.pulled) this.core.emit("workspaces");
+        return { ...result, left: { folder: copy.path, files: left } };
+      }
       await removeCopy(copy, this.owner(copy.id));
       this.forget(copy);
       if (copy.openedWorkspaceId && this.core.workspaceById(copy.openedWorkspaceId)) await this.workspaces.removeWorkspace(copy.openedWorkspaceId);
+      else if (result.pulled) this.core.emit("workspaces");
       this.settled(copy, "applied");
       return result;
     });

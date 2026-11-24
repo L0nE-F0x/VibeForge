@@ -39,6 +39,12 @@ export interface ApplyResult {
    * stays with them until it is discarded.
    */
   left?: { folder: string; files: string[] };
+  /**
+   * Set when the copy's commits were already merged on the workspace's branch or its upstream
+   * (e.g. a PR merged on GitHub): the workspace was fast-forwarded instead of writing duplicate
+   * uncommitted edits, or was already up to date.
+   */
+  pulled?: { branch: string; upstream: string; alreadyUpToDate?: boolean };
 }
 
 interface GitRun {
@@ -50,9 +56,12 @@ interface GitRun {
 interface GitOptions {
   input?: string;
   env?: Record<string, string>;
+  timeoutMs?: number;
 }
 
 const TIMEOUT_MS = 60_000;
+const FETCH_TIMEOUT_MS = 5_000;
+const SAFE_GIT = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"] as const;
 
 function gitBytes(args: readonly string[], cwd: string, options: GitOptions = {}): Promise<{ code: number; stdout: Buffer; stderr: string }> {
   return new Promise((resolve) => {
@@ -65,7 +74,7 @@ function gitBytes(args: readonly string[], cwd: string, options: GitOptions = {}
     });
     const chunks: Buffer[] = [];
     let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), TIMEOUT_MS);
+    const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs ?? TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
     child.on("error", (error) => {
@@ -527,6 +536,11 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
         files.push(statusParts[i + 1]);
       }
     }
+    const theirsCommit = (await step(["commit-tree", "--no-gpg-sign", "-p", copy.base, "-m", copy.branch, theirs])).trim();
+    // If the copy's commits are already merged on the workspace's branch or its upstream (a PR
+    // merged on GitHub), fast-forward instead of pasting the same edits back as uncommitted files.
+    const pulled = await tryPullMerged(copy, theirs, theirsCommit);
+    if (pulled) return { files, conflicts: [], kept: [], pulled };
     // The workspace's side: git's index copied, then brought up to what is on disk now.
     const oursIndex = path.join(scratch, "ours");
     try {
@@ -552,7 +566,6 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
     const ours = (await step(["write-tree"], oursIndex)).trim();
     // Commits only so merge-tree can take them (older git wants commits, not trees); nothing points at them.
     const oursCommit = (await step(["commit-tree", "--no-gpg-sign", "-p", copy.base, "-m", "workspace", ours])).trim();
-    const theirsCommit = (await step(["commit-tree", "--no-gpg-sign", "-p", copy.base, "-m", copy.branch, theirs])).trim();
     const merged = await git(["merge-tree", "--write-tree", "-z", oursCommit, theirsCommit], repo);
     if (merged.code !== 0 && merged.code !== 1) throw failure("The changes don't apply to the workspace", merged);
     const [result, ...info] = merged.stdout.split("\0");
@@ -575,6 +588,76 @@ async function applyPatch(copy: WorkingCopy, patch: string, stagedTree: string |
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * Whether `target` (a commit on the workspace's branch or its upstream) already holds every change
+ * the copy made: either `copyHead` is in its history (regular merge), or merging the copy onto it
+ * from `base` changes nothing (squash or rebase merge on GitHub).
+ */
+async function commitContainsCopy(repo: string, base: string, target: string, copyHead: string, theirsCommit: string): Promise<boolean> {
+  if (!isCommitId(target) || target === base) return false;
+  if (await isAncestor(repo, copyHead, target)) return true;
+  if (!(await isAncestor(repo, base, target))) return false;
+  const targetTree = (await git(["rev-parse", "--verify", "-q", `${target}^{tree}`], repo)).stdout.trim();
+  if (!isCommitId(targetTree)) return false;
+  // `theirsCommit`'s parent is `base`, which is an ancestor of `target`, so `base` is their merge-base.
+  const merged = await git(["merge-tree", "--write-tree", "-z", target, theirsCommit], repo);
+  return merged.code === 0 && merged.stdout.split("\0")[0].trim() === targetTree;
+}
+
+/**
+ * When the copy's commits were already merged on the workspace's branch or its upstream, fast-forward
+ * the workspace instead of writing duplicate uncommitted edits. Returns null whenever the copy has
+ * uncommitted edits of its own, isn't merged yet, or can't fast-forward cleanly, so Apply falls back
+ * to its normal three-way merge.
+ */
+async function tryPullMerged(copy: WorkingCopy, theirs: string, theirsCommit: string): Promise<ApplyResult["pulled"] | null> {
+  const repo = copy.repo;
+  // Only a copy with clean commits ahead of its base can already have been pushed and merged.
+  const inCopy = fs.existsSync(copy.path);
+  const copyHead = (await git(["rev-parse", "--verify", "-q", inCopy ? "HEAD" : `refs/heads/${copy.branch}^{commit}`], inCopy ? copy.path : repo)).stdout.trim();
+  if (!isCommitId(copyHead) || copyHead === copy.base) return null;
+  const [baseTree, copyHeadTree] = await Promise.all([
+    git(["rev-parse", "--verify", "-q", `${copy.base}^{tree}`], repo),
+    git(["rev-parse", "--verify", "-q", `${copyHead}^{tree}`], repo),
+  ]);
+  if (!isCommitId(baseTree.stdout.trim()) || theirs === baseTree.stdout.trim()) return null;
+  if (copyHeadTree.stdout.trim() !== theirs) return null;
+
+  const branch = (await git(["symbolic-ref", "--quiet", "--short", "HEAD"], repo)).stdout.trim();
+  if (!branch) return null;
+  const head = (await git(["rev-parse", "--verify", "-q", "HEAD"], repo)).stdout.trim();
+  if (!isCommitId(head)) return null;
+  const upstreamRef = (await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], repo)).stdout.trim();
+
+  // Already committed on this branch (e.g. merged locally or pulled before clicking Apply).
+  if (await commitContainsCopy(repo, copy.base, head, copyHead, theirsCommit)) {
+    return { branch, upstream: upstreamRef || branch, alreadyUpToDate: true };
+  }
+  if (!upstreamRef) return null;
+
+  let upstream = (await git(["rev-parse", "--verify", "-q", "@{u}"], repo)).stdout.trim();
+  let merged = await commitContainsCopy(repo, copy.base, upstream, copyHead, theirsCommit);
+  if (!merged) {
+    // Refresh this branch's upstream ref once (best-effort; offline or auth errors just fall back).
+    const remote = (await git(["config", "--get", `branch.${branch}.remote`], repo)).stdout.trim();
+    const mergeRef = (await git(["config", "--get", `branch.${branch}.merge`], repo)).stdout.trim();
+    if (remote && remote !== "." && !remote.startsWith("-") && mergeRef.startsWith("refs/heads/")) {
+      await git([...SAFE_GIT, "fetch", "--no-tags", "--quiet", "--", remote, mergeRef], repo, {
+        timeoutMs: FETCH_TIMEOUT_MS,
+        env: { SSH_ASKPASS_REQUIRE: "never" },
+      });
+      upstream = (await git(["rev-parse", "--verify", "-q", "@{u}"], repo)).stdout.trim();
+      merged = await commitContainsCopy(repo, copy.base, upstream, copyHead, theirsCommit);
+    }
+  }
+  if (!merged || !(await isAncestor(repo, head, upstream))) return null;
+
+  // Fast-forward only: never creates a merge commit, and refuses cleanly if local edits collide.
+  const ff = await git([...SAFE_GIT, "merge", "--ff-only", "--quiet", upstream], repo);
+  if (ff.code !== 0) return null;
+  return { branch, upstream: upstreamRef };
 }
 
 interface TreeChange {

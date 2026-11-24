@@ -84,6 +84,38 @@ describe("handed-out tasks", () => {
     ctx.svc.close();
   });
 
+  it("fast-forwards a handed task's workspace when its copy was already merged on its remote", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const { repo, ctx, sender, goAhead } = await team();
+    goAhead({ leadApplies: true });
+    const remote = tempDir();
+    git(remote, "init", "--bare", "-q", "-b", "main");
+    git(repo, "branch", "-M", "main");
+    git(repo, "remote", "add", "origin", remote);
+    git(repo, "push", "-q", "-u", "origin", "main");
+    const github = tempDir();
+    git(github, "clone", "-q", remote, ".");
+
+    expect(await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Ship PR" })).toMatchObject({ ok: true, started: true });
+    const copyPath = ctx.spawns.at(-1)!.cwd;
+    fs.writeFileSync(path.join(copyPath, "shipped.txt"), "done\n");
+    git(copyPath, "add", "shipped.txt");
+    git(copyPath, "commit", "-qm", "ship");
+    const branch = git(copyPath, "rev-parse", "--abbrev-ref", "HEAD").trim();
+    git(copyPath, "push", "-q", "origin", branch);
+    git(github, "fetch", "-q", "origin", branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "Ship PR (#1)");
+    git(github, "push", "-q", "origin", "main");
+
+    const applied = await ctx.svc.applyHandedTask({ fromPty: sender, task: "Ship PR" });
+    expect(applied).toMatchObject({ ok: true, files: ["shipped.txt"], conflicts: [] });
+    if (applied.ok) expect(applied.note).toContain("Already merged on origin/main; fast-forwarded main");
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    ctx.svc.close();
+  });
+
   it("forgets tasks that are gone and terminals that ended, so what it keeps doesn't grow while VibeForge runs", async () => {
     const { ctx, workspace, sender } = await team();
     // What it keeps isn't shown anywhere, so this looks inside.

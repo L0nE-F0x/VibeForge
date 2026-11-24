@@ -333,6 +333,11 @@ export class HandedTasks {
       await this.tasks.stopTask(task.id);
       if (live) await this.core.waitForExit(live, 5000);
       const result = await this.tasks.applyCopy(task.id);
+      const how = result.pulled
+        ? result.pulled.alreadyUpToDate
+          ? `Already merged in ${result.pulled.branch}`
+          : `Already merged on ${result.pulled.upstream}; fast-forwarded ${result.pulled.branch}`
+        : "Applied as uncommitted changes";
       return {
         ok: true,
         files: result.files,
@@ -340,8 +345,8 @@ export class HandedTasks {
         note: result.conflicts.length
           ? `Some changes conflict with this folder (${result.conflicts.join(", ")}); the rest are in. The task's copy stays until a person sorts it out.`
           : result.left
-            ? `Applied as uncommitted changes. Files git ignores were left only in the task's copy (${result.left.files.join(", ")}), so it stays at ${result.left.folder} until a person discards it.`
-            : `Applied as uncommitted changes, and the task is done.`,
+            ? `${how}. Files git ignores were left only in the task's copy (${result.left.files.join(", ")}), so it stays at ${result.left.folder} until a person discards it.`
+            : `${how}, and the task is done.`,
       };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };

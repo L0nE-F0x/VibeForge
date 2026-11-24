@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **Apply pulls automatically when a copy's PR is already merged.** When you click **Apply** on a Viby or task copy whose commits were already merged into the workspace's upstream branch (including GitHub squash and rebase merges), VibeForge fast-forwards your local branch instead of pasting those changes back as uncommitted edits, then tidies the copy away. Copies with local-only changes, extra unmerged work, diverged local history, or colliding uncommitted edits keep applying as uncommitted edits as before.
+
 ## [3.5.0] - 2026-11-24
 
 **3.5.0: an effort picker beside Viby's model, and Open in the file manager works again.**

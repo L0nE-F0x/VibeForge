@@ -484,6 +484,71 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("pulls and tidies a copy when its PR was already merged on origin/main, keeping ignored files in the copy", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const remote = tempDir();
+    git(remote, "init", "--bare", "-q", "-b", "main");
+    const repo = tempDir();
+    git(repo, "clone", "-q", remote, ".");
+    fs.writeFileSync(path.join(repo, ".gitignore"), "notes/\n");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    git(repo, "push", "-q", "-u", "origin", "main");
+    const github = tempDir();
+    git(github, "clone", "-q", remote, ".");
+
+    const ctx = withPlanner([
+      { say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: path.basename(repo), branch: "pr-clean", prompt: "Ship it." }] },
+      { say: "Applying.", steps: [{ kind: "apply", target: "pr-clean", prompt: "" }] },
+    ]);
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const { copy } = await startInCopy(ctx, "pr-clean");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    git(copy.path, "commit", "-qam", "ship it");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "feat: ship it (#1)");
+    git(github, "push", "-q", "origin", "main");
+
+    // Apply via Viby's apply step: pulls main, leaves 0 uncommitted files, removes copy, records a clear summary.
+    await ctx.svc.orchestratorAsk("apply pr-clean");
+    const applyTurn = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorRun(applyTurn.id);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.steps?.[0].result).toBe("Already merged on origin/main; fast-forwarded main. The copy is gone.");
+
+    // A second copy with gitignored notes: Apply via Viby still fast-forwards main and keeps the copy for the notes.
+    const ctx2 = withPlanner([
+      { say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: workspace.name, branch: "pr-notes", prompt: "More." }] },
+      { say: "Applying.", steps: [{ kind: "apply", target: "pr-notes", prompt: "" }] },
+    ]);
+    ctx2.svc.addWorkspace(repo);
+    const { copy: copy2 } = await startInCopy(ctx2, "pr-notes");
+    fs.writeFileSync(path.join(copy2.path, "a.txt"), "one\nTHREE\n");
+    git(copy2.path, "commit", "-qam", "more");
+    git(copy2.path, "push", "-q", "origin", copy2.branch);
+    fs.mkdirSync(path.join(copy2.path, "notes"));
+    fs.writeFileSync(path.join(copy2.path, "notes", "scratch.md"), "keep me\n");
+    git(github, "fetch", "-q", "origin", copy2.branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "feat: more (#2)");
+    git(github, "push", "-q", "origin", "main");
+
+    await ctx2.svc.orchestratorAsk("apply pr-notes");
+    const applyTurn2 = ctx2.svc.orchestratorView().turns.at(-1)!;
+    await ctx2.svc.orchestratorRun(applyTurn2.id);
+    expect(ctx2.svc.orchestratorView().turns.at(-1)?.steps?.[0].result).toContain("Already merged on origin/main; fast-forwarded main. Ignored files stay in the copy (notes/)");
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(fs.existsSync(copy2.path)).toBe(true);
+    ctx.svc.close();
+    ctx2.svc.close();
+  });
+
   it("discards a copy with its workspace, puts both back on Undo, and drops the branch once Undo has passed", async () => {
     const { repo, git } = repoWithFile();
     const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "try-it", prompt: "Try it." }] }]);

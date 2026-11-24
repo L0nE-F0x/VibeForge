@@ -365,7 +365,7 @@
               <h3>Show it. It remembers. It checks the work.</h3>
               <p><b>Show it a screenshot.</b> Paste one into Viby's box with <kbd>Ctrl</kbd>+<kbd>V</kbd>, drop it in, or attach it from your phone: <i>“the button in this screenshot overflows on mobile, fix it in landing-page.”</i> Claude Code and Codex look at the image themselves when they plan, and the CLI that does the work gets the file too.</p>
               <p><b>Tell it once.</b> <i>“Remember that tests here use vitest.”</i> Viby keeps it in <code>viby.md</code>, a plain file every conversation reads, and <b>Viby memory</b> opens it to edit. <b>New</b> starts a fresh conversation, and <b>History</b> (or <kbd>Ctrl</kbd>+<kbd>K</kbd>) finds the old ones.</p>
-              <p><b>It checks before you do.</b> Add <i>“and run the tests when it's done”</i>: once the CLI finishes, Viby runs the check in its copy, and if it fails, sends the failure back to that CLI to fix and runs it again. You get the copy when it's green, and <b>Apply</b> is still yours. Before it plans, it can look around too: a terminal's screen, a search through the code, a file tree, what a copy changed. <code>/go</code>, <code>/new</code>, <code>/review</code> and the other quick commands happen instantly, and <code>@</code> fills in your workspaces, agents and CLIs.</p>
+              <p><b>It checks before you do.</b> Add <i>“and run the tests when it's done”</i>: once the CLI finishes, Viby runs the check in its copy, and if it fails, sends the failure back to that CLI to fix and runs it again. You get the copy when it's green, and <b>Apply</b> is still yours — bringing edits into your workspace, or fast-forwarding your branch if its PR is already merged on GitHub. Before it plans, it can look around too: a terminal's screen, a search through the code, a file tree, what a copy changed. <code>/go</code>, <code>/new</code>, <code>/review</code> and the other quick commands happen instantly, and <code>@</code> fills in your workspaces, agents and CLIs.</p>
             </div>
             <div class="art art-orch art-sees" aria-hidden="true">
               <div class="or-bar">
@@ -604,7 +604,7 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-kanban" /></svg></span>
               <h3>A task board you trigger</h3>
-              <p>Queue up tasks and assign an agent without starting anything yet. Hit <b>Execute</b> when you're ready: the agent runs on its own branch in a git worktree, and the finished diff lands in <b>Review</b> to apply or discard.</p>
+              <p>Queue up tasks and assign an agent without starting anything yet. Hit <b>Execute</b> when you're ready: the agent runs on its own branch in a git worktree, and the finished diff lands in <b>Review</b> to apply (or pull if its PR is already merged) or discard.</p>
             </div>
             <div class="art art-board" aria-hidden="true">
               <div class="col"><i>To do</i></div>

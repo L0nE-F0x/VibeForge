@@ -1,3 +1,4 @@
+import type { ApplyResult } from "../shared/api.js";
 import { tildify } from "../shared/text.js";
 import type { Translator } from "./i18n/index.js";
 
@@ -17,4 +18,26 @@ export function applyConflictNote(t: Translator, result: { conflicts: string[]; 
 export function applyLeftNote(t: Translator, left: { folder: string; files: string[] }, home: string): string {
   const shown = left.files.slice(0, 6).join(", ");
   return t("tasks.appliedLeftBody", { files: left.files.length > 6 ? `${shown}, …` : shown, folder: tildify(left.folder, home) });
+}
+
+/** The toast to show after Apply (for a task's or Viby's copy). */
+export function applyToast(
+  t: Translator,
+  result: ApplyResult,
+  workspace: string,
+  home: string,
+): { tone: "info" | "success" | "error"; title: string; body?: string } {
+  if (!result.files.length && !result.left) return { tone: "info", title: t("tasks.applyNothing") };
+  if (result.conflicts.length) return { tone: "error", title: t("tasks.applyConflicts"), body: applyConflictNote(t, result) };
+  if (result.pulled) {
+    const { branch, upstream, alreadyUpToDate } = result.pulled;
+    if (result.left) {
+      return { tone: "info", title: t(alreadyUpToDate ? "tasks.alreadyMergedLeft" : "tasks.pulledLeft", { workspace }), body: applyLeftNote(t, result.left, home) };
+    }
+    return alreadyUpToDate
+      ? { tone: "success", title: t("tasks.alreadyMerged", { workspace }), body: t("tasks.alreadyMergedBody", { branch }) }
+      : { tone: "success", title: t("tasks.pulled", { workspace }), body: t("tasks.pulledBody", { branch, upstream }) };
+  }
+  if (result.left) return { tone: "info", title: t("tasks.appliedLeft", { workspace }), body: applyLeftNote(t, result.left, home) };
+  return { tone: "success", title: t("tasks.applied", { workspace }), body: t.count("tasks.appliedBody", result.files.length) };
 }
