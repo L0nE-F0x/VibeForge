@@ -146,33 +146,131 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
 }
 
 /** A path argument that stays inside the folder: not a flag, not absolute, not from home, never climbing out. */
-const LOCAL_PATH = String.raw`(?!/|~|-|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
-/**
- * The commands a `shell` step may run without a Go, each one whole: tests, builds and checks through
- * the project's own scripts, git that only reads, and listing, reading or making folders in this one.
- */
-const SAFE_SHELL = [
-  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|check|run\s+(?:test|build|lint|typecheck|check)(?::[\w.-]+)?)(?:\s+--?[\w=.:-]+)*$/,
-  /^(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)(?:\s+\.\/\.\.\.)?|pytest|python3?\s+-m\s+pytest)(?:\s+--?[\w=.:-]+)*$/,
-  /^git\s+(?:status|log|diff|show|rev-parse)(?:\s+(?!--output)[\w./~^@:=-]+)*$/,
-  /^git\s+(?:remote\s+-v|branch(?:\s+(?:-a|-r|-v|-vv|--list|--show-current))*)$/,
-  new RegExp(String.raw`^(?:ls|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
-  // tree -o / --output writes a file, so keep those flags off the auto-run list.
-  new RegExp(String.raw`^tree(?:\s+-(?:[a-np-zA-NP-Z0-9]+|-(?!output\b)[\w=-]+))*(?:\s+${LOCAL_PATH})*$`),
-  new RegExp(String.raw`^mkdir(?:\s+-p)?(?:\s+${LOCAL_PATH})+$`),
-  /^(?:pwd|git\s+--version|node\s+--version)$/,
-];
+function isLocalPath(token: string): boolean {
+  if (!token || token.startsWith("/") || token.startsWith("~") || token.startsWith("-")) return false;
+  return !token.split("/").includes("..");
+}
+
+const PKG_RUN_SCRIPT = /^(?:test|build|lint|typecheck|check)(?::[\w.-]+)?$/;
+const PKG_FLAGS = new Set(["-s", "-q", "--silent", "--quiet", "--run", "--if-present", "--noEmit", "--ci", "--watch=false", "--watchAll=false", "--no-cache"]);
+const CARGO_FLAGS = new Set(["-q", "--quiet", "-v", "--verbose", "--workspace", "--all-targets", "--tests", "--lib", "--bins", "--offline", "--locked", "--frozen", "--no-run", "--keep-going"]);
+const GO_FLAGS = new Set(["-v", "-race", "-short", "-failfast", "-json", "-cover"]);
+const PYTEST_FLAGS = new Set(["-q", "--quiet", "-v", "--verbose", "-x", "--exitfirst", "--no-header", "--collect-only", "--co", "--tb=short", "--tb=line", "--tb=no"]);
+const GIT_FLAGS: Record<"status" | "log" | "diff" | "show" | "rev-parse", ReadonlySet<string>> = {
+  status: new Set(["-s", "--short", "-b", "--branch", "--porcelain", "-uno", "-uall", "-u", "--untracked-files"]),
+  log: new Set(["--oneline", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--graph", "--decorate", "--no-merges", "--first-parent", "--all", "--abbrev-commit", "--reverse"]),
+  diff: new Set(["--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--summary", "--cached", "--staged", "--check", "--color=never", "--no-ext-diff"]),
+  show: new Set(["--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--oneline", "--no-patch", "-s", "--no-ext-diff"]),
+  "rev-parse": new Set(["--short", "--abbrev-ref", "--show-toplevel", "--git-dir", "--is-inside-work-tree", "--verify", "-q", "--quiet", "--show-prefix"]),
+};
+const GIT_BRANCH_FLAGS = new Set(["-a", "-r", "-v", "-vv", "--list", "--show-current"]);
+const CAT_FLAGS = new Set(["-n", "-b", "-s", "-T", "-E", "--number"]);
+const WC_FLAGS = new Set(["--lines", "--words", "--bytes", "--chars"]);
+const LS_FLAGS = new Set(["--all", "--almost-all", "--directory", "--human-readable", "--classify"]);
+const TREE_FLAGS = new Set(["--dirsfirst", "--noreport"]);
+
+function isSafeGitArg(token: string, afterDashDash: boolean): boolean {
+  if (!token || !/^[\w./~^@:-]+$/.test(token)) return false;
+  if (afterDashDash) return isLocalPath(token);
+  if (token.startsWith("-") || token.startsWith("/") || token.startsWith("~") || token.startsWith("..")) return false;
+  if (token.split("/").includes("..") || /[/:]~/.test(token)) return false;
+  const colon = token.indexOf(":");
+  if (colon !== -1) {
+    const rev = token.slice(0, colon);
+    const objPath = token.slice(colon + 1);
+    if (rev && !isSafeGitArg(rev, false)) return false;
+    return isLocalPath(objPath);
+  }
+  return true;
+}
+
+function isSafeGitSub(sub: string, args: string[]): boolean {
+  if (sub === "remote") return args.length === 1 && args[0] === "-v";
+  if (sub === "branch") return args.every((t) => GIT_BRANCH_FLAGS.has(t));
+  if (!(sub in GIT_FLAGS)) return false;
+  const subKey = sub as keyof typeof GIT_FLAGS;
+  const flags = GIT_FLAGS[subKey];
+  let afterDashDash = false;
+  for (const token of args) {
+    if (!afterDashDash && token === "--") {
+      afterDashDash = true;
+      continue;
+    }
+    if (!afterDashDash && token.startsWith("-")) {
+      if (flags.has(token)) continue;
+      if (subKey === "log" && /^(?:-\d+|-n\d+|--max-count=\d+)$/.test(token)) continue;
+      if (subKey === "diff" && /^-U\d+$/.test(token)) continue;
+      return false;
+    }
+    if (!isSafeGitArg(token, afterDashDash)) return false;
+  }
+  return true;
+}
+
+function isSafeShellPart(part: string): boolean {
+  if (part === "pwd" || part === "git --version" || part === "node --version") return true;
+  const [cmd, ...rest] = part.split(/\s+/);
+  if (cmd === "npm" || cmd === "pnpm" || cmd === "yarn" || cmd === "bun") {
+    const [sub, ...args] = rest;
+    if (!sub) return false;
+    let tail = args;
+    if (sub === "run") {
+      if (!args[0] || !PKG_RUN_SCRIPT.test(args[0])) return false;
+      tail = args.slice(1);
+    } else if (!/^(?:test|t|build|lint|typecheck|check)$/.test(sub)) {
+      return false;
+    }
+    return tail.every((t, i) => (t === "--" && i < tail.length - 1) || PKG_FLAGS.has(t));
+  }
+  if (cmd === "cargo") {
+    const [sub, ...args] = rest;
+    return !!sub && /^(?:test|build|check|clippy)$/.test(sub) && args.every((t) => CARGO_FLAGS.has(t));
+  }
+  if (cmd === "go") {
+    const [sub, ...args] = rest;
+    return !!sub && /^(?:test|build|vet)$/.test(sub) && args.every((t) => (t.startsWith("-") ? GO_FLAGS.has(t) || /^-count=\d+$/.test(t) : isLocalPath(t)));
+  }
+  if (cmd === "pytest" || ((cmd === "python" || cmd === "python3") && rest[0] === "-m" && rest[1] === "pytest")) {
+    const args = cmd === "pytest" ? rest : rest.slice(2);
+    return args.every((t) => (t.startsWith("-") ? PYTEST_FLAGS.has(t) || /^--maxfail=\d+$/.test(t) : isLocalPath(t)));
+  }
+  if (cmd === "git") {
+    const [sub, ...args] = rest;
+    return !!sub && isSafeGitSub(sub, args);
+  }
+  if (cmd === "mkdir") {
+    const args = rest[0] === "-p" || rest[0] === "--parents" ? rest.slice(1) : rest;
+    return args.length > 0 && args.every(isLocalPath);
+  }
+  if (cmd === "ls" || cmd === "cat" || cmd === "wc" || cmd === "head" || cmd === "tail" || cmd === "tree") {
+    for (let i = 0; i < rest.length; i++) {
+      const t = rest[i];
+      if (!t.startsWith("-")) {
+        if (!isLocalPath(t)) return false;
+        continue;
+      }
+      if (cmd === "ls" && (LS_FLAGS.has(t) || /^-[alh1trSRdF]+$/.test(t))) continue;
+      if (cmd === "cat" && CAT_FLAGS.has(t)) continue;
+      if (cmd === "wc" && (WC_FLAGS.has(t) || /^-[lwcL]+$/.test(t))) continue;
+      if ((cmd === "head" || cmd === "tail") && (/^-(?:\d+|n\d+|-lines=\d+|q|-quiet)$/.test(t) || (t === "-n" && /^\d+$/.test(rest[++i] ?? "")))) continue;
+      if (cmd === "tree" && (TREE_FLAGS.has(t) || /^-(?:[acdfghlpqrstuDFQ]+|L\d+)$/.test(t) || (t === "-L" && /^\d+$/.test(rest[++i] ?? "")))) continue;
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
 
 /**
  * Whether a `shell` step can run without asking for Go (in a call, or in "Just go"): a blank shell,
  * or commands each on the list above joined by `&&`. Anything else waits for Go: deleting, moving,
- * installing, pushing, redirecting, piping, substituting, quoting, and every program not named here.
+ * installing, pushing, redirecting, piping, substituting, quoting, unknown flags, and every program not named here.
  */
 export function isSafeShellCommand(command: string | undefined): boolean {
   const text = (command ?? "").trim();
   if (!text) return true;
   const parts = text.split("&&").map((part) => part.trim());
-  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
+  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && isSafeShellPart(part));
 }
 
 export type WorkbenchAction =
