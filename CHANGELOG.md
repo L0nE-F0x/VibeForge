@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-11-25
+
+**3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**
+
 ### Security
 
 - **More of Viby's steps wait for your Go, even in Just go and on a call.** These now wait:
@@ -1119,7 +1123,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.2...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.0
 [3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2
 [3.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.1
 [3.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.0
