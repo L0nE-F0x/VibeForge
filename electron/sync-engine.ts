@@ -1,18 +1,18 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
-import net from "node:net";
 import path from "node:path";
+import { fallbackSocketDir, prepareSocketDir } from "../src/core/control.js";
 import { lockDown } from "../src/core/sync/protocol.js";
 import type { EngineDevice, EngineEvent, EngineFolder, EngineFolderStatus, SyncEngine } from "../src/core/sync/types.js";
 
 // VibeForge's private Syncthing: the binary a copy of VibeForge carries (vendor/syncthing), with
 // its own home under VibeForge's data folder, started with VibeForge and stopped with it. Its
 // settings are locked down before every start (src/core/sync/protocol.ts): it talks to paired
-// machines directly and to nothing else. Its web interface answers on a socket file in its private
-// home (a loopback port only when that path is too long for a socket), with a key made fresh each
-// start, and only this file uses it.
+// machines directly and to nothing else. Its web interface always answers on a Unix socket (in
+// its private home, or in XDG_RUNTIME_DIR / a 0700 /tmp folder when that path exceeds 107 bytes),
+// with a key made fresh each start, and only this file uses it.
 
 export interface SyncthingOptions {
   binary: string;
@@ -42,26 +42,41 @@ function run(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ co
   });
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      probe.close(() => (address && typeof address === "object" ? resolve(address.port) : reject(new Error("No free port for Syncthing's interface."))));
-    });
-  });
-}
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Where Syncthing's interface answers: a socket file in its private home, so no other user on this
- * computer can reach it (a loopback port answers anyone on the machine, and Syncthing hands any
- * caller of its page a token for it). Unix sockets take paths of at most 107 bytes; a data folder
- * deeper than that falls back to a loopback port.
+ * Where Syncthing's interface answers: a Unix socket file in its private home, or a short hashed
+ * socket under XDG_RUNTIME_DIR / /tmp/vibeforge-<uid> (0700) when the home path is over 107 bytes.
  */
-type Gui = { socketPath: string } | { host: string; port: number };
+type Gui = { socketPath: string };
+
+/** Picks a Unix socket path that fits Linux's 107-byte sun_path limit inside a private directory. */
+export function chooseGuiSocket(
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+  uid = process.getuid?.() ?? 0,
+  tmp = "/tmp",
+): { socketPath: string; external: boolean } {
+  const local = path.join(home, "gui.sock");
+  if (Buffer.byteLength(local) <= 107) return { socketPath: local, external: false };
+  const name = `vf-st-${createHash("sha1").update(home).digest("hex").slice(0, 12)}.sock`;
+  const runtimeDir = env.XDG_RUNTIME_DIR;
+  if (runtimeDir) {
+    const candidate = path.join(runtimeDir, name);
+    if (Buffer.byteLength(candidate) <= 107 && prepareSocketDir(candidate, uid, tmp)) {
+      try {
+        if ((fs.lstatSync(runtimeDir).mode & 0o077) === 0) return { socketPath: candidate, external: true };
+      } catch {
+        /* fall back to /tmp/vibeforge-<uid> */
+      }
+    }
+  }
+  const fallback = path.join(fallbackSocketDir(uid, tmp), name);
+  if (Buffer.byteLength(fallback) <= 107 && prepareSocketDir(fallback, uid, tmp)) {
+    return { socketPath: fallback, external: true };
+  }
+  throw new Error("Syncthing could not prepare a private socket folder.");
+}
 
 /** One request to Syncthing's REST interface, over its socket or port. */
 function guiRequest(gui: Gui, method: string, route: string, headers: Record<string, string>, body: string | undefined, signal: AbortSignal): Promise<{ status: number; text: string }> {
@@ -156,11 +171,11 @@ export class Syncthing implements SyncEngine {
 
     // Its home holds its keys: only this user, whatever the folder was made with.
     fs.chmodSync(options.home, 0o700);
-    const socketPath = path.join(options.home, "gui.sock");
-    const gui: Gui = Buffer.byteLength(socketPath) <= 107 ? { socketPath } : { host: "127.0.0.1", port: await freePort() };
+    const { socketPath } = chooseGuiSocket(options.home);
+    const gui: Gui = { socketPath };
     // A socket left by a Syncthing that crashed would stop the new one listening there.
     fs.rmSync(socketPath, { force: true });
-    const address = "socketPath" in gui ? `unix://${gui.socketPath}` : `http://127.0.0.1:${gui.port}`;
+    const address = `unix://${gui.socketPath}`;
     const key = randomBytes(24).toString("hex");
     const child = spawn(options.binary, ["serve", `--home=${options.home}`, "--no-browser", "--no-upgrade", "--no-restart", "--no-port-probing", `--gui-address=${address}`], {
       // The key goes in the environment, not on the command line, where `ps` would show it.
@@ -199,7 +214,12 @@ export class Syncthing implements SyncEngine {
         } else {
           child.kill("SIGKILL");
         }
+        fs.rmSync(gui.socketPath, { force: true });
         throw new Error("Syncthing did not start in time.");
+      }
+      if (exited) {
+        fs.rmSync(gui.socketPath, { force: true });
+        throw new Error(exited);
       }
       try {
         const response = await guiRequest(gui, "GET", "/rest/system/status", { "X-API-Key": key }, undefined, AbortSignal.timeout(2000));
@@ -212,6 +232,7 @@ export class Syncthing implements SyncEngine {
     const engine = new Syncthing(child, gui, key, id, options);
     child.once("exit", (code, signal) => {
       fs.rmSync(path.join(options.home, "vibeforge.pid"), { force: true });
+      fs.rmSync(gui.socketPath, { force: true });
       if (!engine.stopping) options.onExit(`Syncthing stopped (${signal ?? `code ${code}`}).`);
     });
     void engine.listen();
@@ -225,12 +246,16 @@ export class Syncthing implements SyncEngine {
     this.abort.abort();
     const gone = new Promise<void>((resolve) => (this.child.exitCode !== null || this.child.signalCode ? resolve() : this.child.once("exit", () => resolve())));
     const within = (ms: number) => Promise.race([gone.then(() => true), sleep(ms).then(() => false)]);
-    await this.call("POST", "/rest/system/shutdown").catch(() => undefined);
-    if (await within(STOP_MS)) return;
-    this.signal("SIGTERM");
-    if (await within(STOP_MS)) return;
-    this.signal("SIGKILL");
-    await within(1000);
+    try {
+      await this.call("POST", "/rest/system/shutdown").catch(() => undefined);
+      if (await within(STOP_MS)) return;
+      this.signal("SIGTERM");
+      if (await within(STOP_MS)) return;
+      this.signal("SIGKILL");
+      await within(1000);
+    } finally {
+      fs.rmSync(this.gui.socketPath, { force: true });
+    }
   }
 
   private signal(name: NodeJS.Signals): void {

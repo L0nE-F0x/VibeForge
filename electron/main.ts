@@ -15,7 +15,7 @@ import { savedDockUrl } from "../src/shared/dock-url.js";
 import { syncCompanion } from "./companion.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
-import { guardSession, guardWebContents, secondStartArgs, type GuardableWebContents } from "./guards.js";
+import { debugSwitch, guardSession, guardWebContents, secondStartArgs, type GuardableWebContents } from "./guards.js";
 import { Dock } from "./dock.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { answerTalk, registerIpc } from "./ipc.js";
@@ -66,24 +66,30 @@ app.on("session-created", (made) => {
 app.on("web-contents-created", (_event, contents) => {
   guardWebContents(contents);
 });
+const appRoot = app.getAppPath();
+const copyInstall = installKind(appRoot, {
+  installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
+  marked: fs.existsSync(path.join(appRoot, INSTALLER_MARK)),
+  checkout: fs.existsSync(path.join(appRoot, ".git")),
+});
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
-if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
+const dbg = debugSwitch(process.env, copyInstall);
+if (dbg && "refused" in dbg) log.warn(dbg.refused);
+else if (dbg) {
+  if (dbg.value !== undefined) app.commandLine.appendSwitch(dbg.name, dbg.value);
+  else app.commandLine.appendSwitch(dbg.name);
+}
 
 // ------------------------------------------------------------------ the parts
 
 const supervisor = new PtySupervisor();
-const appRoot = app.getAppPath();
 const ctx = new MainContext({
   roots,
   log,
   supervisor,
   words: new MainText(),
   appRoot,
-  install: installKind(appRoot, {
-    installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
-    marked: fs.existsSync(path.join(appRoot, INSTALLER_MARK)),
-    checkout: fs.existsSync(path.join(appRoot, ".git")),
-  }),
+  install: copyInstall,
   palette: resolvePalette("omarchy"),
 });
 const { send, focusWindow, install } = ctx;

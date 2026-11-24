@@ -62,6 +62,70 @@ const SERVER_IDLE_MS = 2 * 60 * 1000;
 const SERVER_READY_MS = 90_000;
 const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
+/**
+ * Checks Linux /proc to verify that a loopback listening TCP port belongs to `pid` or one of its
+ * descendants, preventing another local process from squatting an ephemeral localhost port.
+ */
+export function pidOwnsLoopbackPort(pid: number, port: number, procRoot = "/proc"): boolean {
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port) || port <= 0) return false;
+  let tcp = "";
+  try {
+    tcp = fs.readFileSync(path.join(procRoot, "net", "tcp"), "utf8");
+  } catch {
+    return false;
+  }
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
+  const targets = new Set([`0100007F:${hexPort}`, `7F000001:${hexPort}`]);
+  const inodes = new Set<string>();
+  for (const line of tcp.split("\n").slice(1)) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 10) continue;
+    if (targets.has(parts[1].toUpperCase()) && parts[3].toUpperCase() === "0A" && parts[9] !== "0") {
+      inodes.add(parts[9]);
+    }
+  }
+  if (inodes.size === 0) return false;
+  const queue = [pid];
+  const seen = new Set<number>(queue);
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    try {
+      const fds = fs.readdirSync(path.join(procRoot, String(current), "fd"));
+      for (const fd of fds) {
+        try {
+          const target = fs.readlinkSync(path.join(procRoot, String(current), "fd", fd));
+          const match = /^socket:\[(\d+)\]$/.exec(target);
+          if (match && inodes.has(match[1])) return true;
+        } catch {
+          /* fd closed between readdir and readlink */
+        }
+      }
+    } catch {
+      /* process exited or fd dir unavailable */
+    }
+    try {
+      for (const tid of fs.readdirSync(path.join(procRoot, String(current), "task"))) {
+        const children = fs.readFileSync(path.join(procRoot, String(current), "task", tid, "children"), "utf8");
+        for (const raw of children.trim().split(/\s+/)) {
+          const childPid = Number(raw);
+          if (Number.isInteger(childPid) && childPid > 0 && !seen.has(childPid)) {
+            seen.add(childPid);
+            queue.push(childPid);
+          }
+        }
+      }
+    } catch {
+      /* task or children file unavailable */
+    }
+  }
+  return false;
+}
+
+/** Python invocation for the sherpa worker: `-I` isolates Python from env/site-packages before ctypes loads. */
+export function sherpaWorkerArgs(payload: string): string[] {
+  return ["-I", "-u", "-c", SHERPA_WORKER_SCRIPT, payload];
+}
+
 interface Server {
   child: ChildProcess;
   port: number;
@@ -706,13 +770,22 @@ export class Voice {
       this.opts.log.info(`Voice: starting whisper-server with ${path.basename(model)}`);
       while (Date.now() - started < SERVER_READY_MS) {
         if (child.exitCode !== null) throw new Error(`whisper-server stopped: ${stderr.trim().split("\n").pop() ?? `exit code ${child.exitCode}`}`);
+        // Wait until the listening socket belongs to this child before trusting /health.
+        if (process.platform === "linux" && (!child.pid || !pidOwnsLoopbackPort(child.pid, server.port))) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          continue;
+        }
         try {
           const response = await fetch(`http://127.0.0.1:${server.port}/health`, { signal: AbortSignal.timeout(1000) });
           if (response.ok) {
+            if (process.platform === "linux" && (!child.pid || !pidOwnsLoopbackPort(child.pid, server.port))) {
+              throw new Error("whisper-server port is held by another process.");
+            }
             this.opts.log.info(`Voice: whisper-server ready in ${((Date.now() - started) / 1000).toFixed(1)} s`);
             return;
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof Error && error.message === "whisper-server port is held by another process.") throw error;
           /* not listening yet */
         }
         await new Promise((resolve) => setTimeout(resolve, 150));
@@ -751,7 +824,7 @@ export class Voice {
       ...(sherpa.libDir ? { LD_LIBRARY_PATH: [sherpa.libDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") } : {}),
     };
     const payload = JSON.stringify({ ...spec, cApiLib: sherpa.cApiLib, language, threads: whisperThreads(os.cpus().length) });
-    const child = spawn(python, ["-u", "-c", SHERPA_WORKER_SCRIPT, payload], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(python, sherpaWorkerArgs(payload), { env, stdio: ["pipe", "pipe", "pipe"] });
     let stderr = "";
     let stdoutBuf = "";
     let closedError: Error | null = null;
@@ -863,6 +936,10 @@ export class Voice {
   private async viaServer(bin: string, model: string, language: string, pcm: Buffer, prompt: string): Promise<string> {
     await this.ensureServer(bin, model, language);
     const server = this.server!;
+    if (process.platform === "linux" && (!server.child.pid || !pidOwnsLoopbackPort(server.child.pid, server.port))) {
+      this.stopServer();
+      throw new Error("whisper-server port is held by another process.");
+    }
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(wavFile(pcm))], { type: "audio/wav" }), "speech.wav");
     form.append("response_format", "json");

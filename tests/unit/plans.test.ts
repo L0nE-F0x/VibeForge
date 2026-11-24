@@ -78,10 +78,10 @@ const ANSWERS: Record<string, unknown> = {
 };
 
 function fakeNetwork(status: (host: string) => number = () => 200) {
-  const calls: Array<{ host: string; headers: Record<string, string> }> = [];
-  const fetch = async (url: string, init: { headers: Record<string, string> }) => {
+  const calls: Array<{ host: string; headers: Record<string, string>; redirect?: RequestRedirect }> = [];
+  const fetch = async (url: string, init: { headers: Record<string, string>; redirect?: RequestRedirect }) => {
     const host = new URL(url).host;
-    calls.push({ host, headers: init.headers });
+    calls.push({ host, headers: init.headers, redirect: init.redirect });
     const code = status(host);
     return { status: code, text: async () => JSON.stringify(ANSWERS[host] ?? {}) };
   };
@@ -147,6 +147,7 @@ describe("plan limits", () => {
     ]);
     expect(network.calls.map((call) => call.host).sort()).toEqual(["api.anthropic.com", "api.kimi.com", "cli-chat-proxy.grok.com"]);
     expect(network.calls.every((call) => call.headers.Authorization.startsWith("Bearer "))).toBe(true);
+    expect(network.calls.every((call) => call.redirect === "error")).toBe(true);
     expect(network.calls.find((call) => call.host === "api.kimi.com")?.headers["X-Msh-Device-Id"]).toBe("device-1");
 
     // Kept: percentages, never a sign-in.
@@ -195,6 +196,27 @@ describe("plan limits", () => {
     // The last numbers survive a restart.
     const reopened = await new PlanWatcher({ home, file, now: () => now, fetch: network.fetch, env: {} }).summary({ network: true, local: [] });
     expect(reopened.providers.find((provider) => provider.id === "claude")?.percent).toBe(99);
+  });
+
+  it("refuses HTTP redirects on requests carrying credentials and marks the provider offline", async () => {
+    const home = signedInHome();
+    const file = path.join(home, "plans.json");
+    const redirects: Array<RequestRedirect | undefined> = [];
+    const watcher = new PlanWatcher({
+      home,
+      file,
+      now: () => NOW,
+      env: {},
+      fetch: async (url, init) => {
+        redirects.push(init.redirect);
+        const host = new URL(url).host;
+        if (host === "api.anthropic.com") throw new TypeError("redirect mode is set to error");
+        return { status: 200, text: async () => JSON.stringify(ANSWERS[host] ?? {}) };
+      },
+    });
+    const summary = await watcher.summary({ network: true, local: [] });
+    expect(redirects.every((mode) => mode === "error")).toBe(true);
+    expect(summary.providers.find((provider) => provider.id === "claude")).toMatchObject({ problem: "offline", percent: null });
   });
 
   it("shows Muse and Codex only when this machine is signed in to them", async () => {

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
+import type { InstallKind } from "../src/core/updates.js";
 import type { TrayWaiter } from "../src/shared/api.js";
 import type { Send } from "./main-context.js";
 
@@ -188,4 +189,19 @@ export function guardWebContents(contents: GuardableWebContents | null | undefin
   if (!contents || guardedContents.has(contents)) return;
   guardedContents.add(contents);
   contents.on?.("select-bluetooth-device", cancelDeviceSelect);
+}
+
+export type DebugSwitch = { name: "remote-debugging-pipe"; value?: undefined } | { name: "remote-debugging-port"; value: string } | { refused: string };
+
+/**
+ * Resolves Chromium's debugging switch. Pipe mode works over inherited fds without opening a local
+ * TCP port, so it is allowed everywhere; port debugging is limited to developer git checkouts.
+ */
+export function debugSwitch(env: NodeJS.ProcessEnv, install: InstallKind): DebugSwitch | null {
+  if (env.VIBEFORGE_DEBUG === "pipe") return { name: "remote-debugging-pipe" };
+  if (env.VIBEFORGE_DEBUG !== "1") return null;
+  if (install !== "checkout") {
+    return { refused: `Ignoring VIBEFORGE_DEBUG=1 on ${install} copy; use VIBEFORGE_DEBUG=pipe instead.` };
+  }
+  return { name: "remote-debugging-port", value: env.VIBEFORGE_DEBUG_PORT || "9223" };
 }

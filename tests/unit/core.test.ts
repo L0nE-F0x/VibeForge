@@ -85,6 +85,20 @@ describe("engines", () => {
     fs.chmodSync(wrapper, 0o755);
     expect(whichBin("fake-cli", `${wrappers}:${dir}`)).toBe(bin);
     expect(whichBin("fake-cli", wrappers)).toBe(wrapper);
+    // Relative PATH entries (., ./bin) must never win over or masquerade as installed tools.
+    const relParent = tempDir();
+    const relBin = path.join(relParent, "relbin", "fake-cli");
+    fs.mkdirSync(path.dirname(relBin), { recursive: true });
+    fs.writeFileSync(relBin, "#!/bin/sh\n");
+    fs.chmodSync(relBin, 0o755);
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(relParent);
+      expect(whichBin("fake-cli", "relbin:.:./relbin")).toBeNull();
+      expect(whichBin("fake-cli", `./relbin:${dir}`)).toBe(bin);
+    } finally {
+      process.chdir(prevCwd);
+    }
     const rows = withAvailability([{ id: "a", label: "A", bin: "fake-cli", args: [] }, { id: "b", label: "B", bin: "missing", args: [] }], (name) => whichBin(name, dir));
     expect(rows.map((row) => [row.id, row.available, row.path])).toEqual([
       ["a", true, bin],

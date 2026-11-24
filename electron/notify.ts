@@ -13,6 +13,11 @@ export interface Note extends NoteTarget {
 
 export type Notify = (note: Note) => void;
 
+/** Builds notify-send arguments, ending flags with `--` before user/run text. */
+export function notifySendArgs(note: Pick<Note, "title" | "body">): string[] {
+  return ["-a", "VibeForge", "--", note.title, note.body];
+}
+
 /**
  * Desktop notifications; clicking one brings VibeForge up on the run or workspace it is about.
  * Where Electron can't show them, notify-send does, without the click.
@@ -35,7 +40,7 @@ export function desktopNotifier(ctx: MainContext): Notify {
       notification.show();
       return;
     }
-    const child = spawn("notify-send", ["-a", "VibeForge", note.title, note.body], { stdio: "ignore", detached: true });
+    const child = spawn("notify-send", notifySendArgs(note), { stdio: "ignore", detached: true });
     child.on("error", () => undefined);
     child.unref();
   };

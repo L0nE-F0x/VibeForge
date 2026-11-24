@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { openNote, type NoteTarget } from "../../electron/guards.js";
+
+vi.mock("electron", () => ({ Notification: { isSupported: () => false } }));
 
 function opened(note: NoteTarget): unknown[][] {
   const sent: unknown[][] = [];
@@ -28,5 +30,10 @@ describe("clicking a desktop notification", () => {
   it("only brings the window up when it names nowhere", () => {
     expect(opened({})).toEqual([]);
     expect(opened({ workspaceId: null, chatId: null, route: null })).toEqual([]);
+  });
+
+  it("passes -- before title and body in notify-send fallback arguments", async () => {
+    const { notifySendArgs } = await import("../../electron/notify.js");
+    expect(notifySendArgs({ title: "-u", body: "--expire-time=1" })).toEqual(["-a", "VibeForge", "--", "-u", "--expire-time=1"]);
   });
 });

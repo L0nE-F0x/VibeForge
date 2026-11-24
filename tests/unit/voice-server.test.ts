@@ -1,4 +1,6 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -9,7 +11,7 @@ import { DEFAULT_DICTATE_KEYS } from "../../src/shared/dictation.js";
 // Downloads go through Electron's network stack, which isn't here; nothing in these tests downloads.
 vi.mock("electron", () => ({ net: {} }));
 
-const { unpackSherpaArchive, Voice } = await import("../../electron/voice.js");
+const { pidOwnsLoopbackPort, sherpaWorkerArgs, unpackSherpaArchive, Voice } = await import("../../electron/voice.js");
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-voice-server-"));
@@ -169,12 +171,14 @@ process.stderr.write('{"lang": "", "text": "Switch to VibeForge now."}\\n');
     const dataRoot = tempDir();
     const bin = tempDir();
     const pidFile = path.join(bin, "sherpa-pid");
+    const argvFile = path.join(bin, "sherpa-argv.json");
     const fakePython = path.join(bin, "python3");
     fs.writeFileSync(
       fakePython,
       `#!/usr/bin/env node
 const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
 process.stdout.write(JSON.stringify({ ready: true }) + "\\n");
 let buf = Buffer.alloc(0);
 process.stdin.on("data", (chunk) => {
@@ -222,6 +226,7 @@ process.stdin.on("data", (chunk) => {
     });
     try {
       expect((await instance.transcribe(speech())).text).toBe("Warm Parakeet heard you.");
+      expect(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(0, 3)).toEqual(["-I", "-u", "-c"]);
       const workerPid = Number(fs.readFileSync(pidFile, "utf8"));
       expect(alive(workerPid)).toBe(true);
       expect((await instance.transcribe(speech())).text).toBe("Warm Parakeet heard you.");
@@ -252,5 +257,46 @@ process.stdin.on("data", (chunk) => {
     expect(fs.existsSync(path.join(dest, "lib", "libsherpa-onnx-c-api.so"))).toBe(true);
     expect(fs.existsSync(path.join(dest, "PIN"))).toBe(true);
     expect(fs.existsSync(path.join(dest, "SOURCE.txt"))).toBe(true);
+  });
+
+  it("builds sherpa worker python arguments with -I isolation", () => {
+    expect(sherpaWorkerArgs('{"ok":true}').slice(0, 3)).toEqual(["-I", "-u", "-c"]);
+    expect(sherpaWorkerArgs('{"ok":true}').at(-1)).toBe('{"ok":true}');
+  });
+
+  it("verifies via /proc whether a loopback listening port belongs to a child pid subtree", async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const decoy = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      if (process.platform === "linux") {
+        expect(pidOwnsLoopbackPort(process.pid, port)).toBe(true);
+        expect(pidOwnsLoopbackPort(decoy.pid!, port)).toBe(false);
+      }
+      const proc = tempDir();
+      fs.mkdirSync(path.join(proc, "net"));
+      const hexPort = (41234).toString(16).toUpperCase().padStart(4, "0");
+      fs.writeFileSync(
+        path.join(proc, "net", "tcp"),
+        [
+          "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+          `   0: 0100007F:${hexPort} 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 555666 1 00000000 100 0 0 10 0`,
+        ].join("\n"),
+      );
+      fs.mkdirSync(path.join(proc, "100", "task", "100"), { recursive: true });
+      fs.writeFileSync(path.join(proc, "100", "task", "100", "children"), "101");
+      fs.mkdirSync(path.join(proc, "101", "fd"), { recursive: true });
+      fs.symlinkSync("socket:[555666]", path.join(proc, "101", "fd", "7"));
+      fs.mkdirSync(path.join(proc, "200", "fd"), { recursive: true });
+      fs.symlinkSync("socket:[111111]", path.join(proc, "200", "fd", "3"));
+
+      expect(pidOwnsLoopbackPort(100, 41234, proc)).toBe(true);
+      expect(pidOwnsLoopbackPort(200, 41234, proc)).toBe(false);
+    } finally {
+      decoy.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

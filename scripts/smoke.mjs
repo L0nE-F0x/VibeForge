@@ -65,7 +65,7 @@ for (const file of attach ? [] : ["dist/index.html", "dist-electron/main.js"]) {
   }
 }
 
-const args = [root, `--user-data-dir=${path.join(scratch, "profile")}`];
+const args = [root, `--user-data-dir=${path.join(scratch, "profile")}`, ...(attach ? [] : ["--remote-debugging-pipe"])];
 // CI runners have no setuid sandbox helper.
 if (process.env.CI) args.push("--no-sandbox");
 // SMOKE_HEADLESS=1 draws nowhere at all, for a run on a desktop you're using.
@@ -87,19 +87,71 @@ const app = attach ? null : spawn(electron, args, {
     MISE_CONFIG_DIR: process.env.MISE_CONFIG_DIR || path.join(process.env.XDG_CONFIG_HOME || path.join(realHome, ".config"), "mise"),
     VIBEFORGE_CONFIG: config,
     VIBEFORGE_DATA: path.join(scratch, "data"),
-    VIBEFORGE_DEBUG: "1",
-    VIBEFORGE_DEBUG_PORT: String(port),
+    VIBEFORGE_DEBUG: "pipe",
     SHELL: "/bin/bash",
   },
-  stdio: ["ignore", "pipe", "pipe"],
+  stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"],
 });
 let appOutput = "";
-app?.stdout.on("data", (chunk) => (appOutput += chunk));
-app?.stderr.on("data", (chunk) => (appOutput += chunk));
+app?.stdout?.on("data", (chunk) => (appOutput += chunk));
+app?.stderr?.on("data", (chunk) => (appOutput += chunk));
 let exited = false;
 app?.on("exit", () => (exited = true));
 
 // ------------------------------------------------------------------ DevTools
+
+/** @type {WebSocket | undefined} */
+let socket;
+/** @type {import("node:stream").Writable | undefined} */
+let pipeOut;
+/** @type {import("node:stream").Readable | undefined} */
+let pipeIn;
+/** @type {string | undefined} */
+let pageSessionId;
+let nextId = 0;
+const waiting = new Map();
+
+/** @param {Record<string, unknown>} payload */
+function sendPacket(payload, timeoutMs = 10_000) {
+  const id = ++nextId;
+  const text = JSON.stringify({ id, ...payload });
+  if (pipeOut) {
+    pipeOut.write(`${text}\0`);
+  } else if (socket) {
+    socket.send(text);
+  } else {
+    throw new Error("DevTools is not connected.");
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiting.delete(id);
+      reject(new Error(`${payload.method} timed out`));
+    }, timeoutMs);
+    waiting.set(id, { resolve, reject, timer });
+  });
+}
+
+function send(method, params = {}, timeoutMs = 10_000) {
+  return sendPacket(pageSessionId ? { sessionId: pageSessionId, method, params } : { method, params }, timeoutMs);
+}
+
+/** @param {string} raw */
+function handleMessage(raw) {
+  const message = JSON.parse(raw);
+  if (message.id && waiting.has(message.id)) {
+    const { resolve, reject, timer } = waiting.get(message.id);
+    clearTimeout(timer);
+    waiting.delete(message.id);
+    if (message.error) reject(new Error(message.error.message));
+    else resolve(message.result);
+    return;
+  }
+  if (pipeOut && message.sessionId !== pageSessionId) return;
+  const pageError = (text) => !BENIGN.some((pattern) => pattern.test(text)) && fail(`page error: ${text.split("\n")[0]}`);
+  if (message.method === "Runtime.exceptionThrown") pageError(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
+  if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") pageError(message.params.args.map((arg) => arg.value ?? arg.description ?? "").join(" "));
+  if (message.method === "Log.entryAdded" && message.params.entry.level === "error") pageError(message.params.entry.text);
+}
 
 async function pageTarget() {
   for (let tries = 0; tries < 150; tries += 1) {
@@ -116,22 +168,35 @@ async function pageTarget() {
   throw new Error("The window never appeared.");
 }
 
-/** @type {WebSocket | undefined} */
-let socket;
-let nextId = 0;
-const waiting = new Map();
-
-function send(method, params = {}, timeoutMs = 10_000) {
-  const id = ++nextId;
-  if (!socket) throw new Error("DevTools is not connected.");
-  socket.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      waiting.delete(id);
-      reject(new Error(`${method} timed out`));
-    }, timeoutMs);
-    waiting.set(id, { resolve, reject, timer });
+async function connectPipe() {
+  if (!app) throw new Error("App process missing.");
+  pipeOut = /** @type {import("node:stream").Writable} */ (app.stdio[3]);
+  pipeIn = /** @type {import("node:stream").Readable} */ (app.stdio[4]);
+  let buf = Buffer.alloc(0);
+  pipeIn.on("data", (chunk) => {
+    buf = Buffer.concat([buf, chunk]);
+    for (let nul = buf.indexOf(0); nul >= 0; nul = buf.indexOf(0)) {
+      const frame = buf.subarray(0, nul).toString("utf8");
+      buf = buf.subarray(nul + 1);
+      if (frame) handleMessage(frame);
+    }
   });
+  for (let tries = 0; tries < 150; tries += 1) {
+    if (exited) throw new Error(`The app exited during start.\n${appOutput}`);
+    try {
+      const { targetInfos } = /** @type {{ targetInfos?: Array<{ targetId: string, type: string, url: string }> }} */ (await sendPacket({ method: "Target.getTargets", params: {} }, 2000));
+      const found = targetInfos?.find((target) => target.type === "page" && target.url.includes("index.html"));
+      if (found) {
+        const { sessionId } = /** @type {{ sessionId: string }} */ (await sendPacket({ method: "Target.attachToTarget", params: { targetId: found.targetId, flatten: true } }));
+        pageSessionId = sessionId;
+        return;
+      }
+    } catch {
+      /* DevTools pipe not ready yet */
+    }
+    await sleep(200);
+  }
+  throw new Error("The window never appeared.");
 }
 
 /** Evaluate in the page and return the value. Promises are awaited. */
@@ -160,28 +225,18 @@ async function key(keyName, code, modifiers = 0) {
 // ------------------------------------------------------------------ the run
 
 async function main() {
-  const target = await pageTarget();
-  const devtools = new WebSocket(target.webSocketDebuggerUrl);
-  socket = devtools;
-  await new Promise((resolve, reject) => {
-    devtools.onopen = resolve;
-    devtools.onerror = () => reject(new Error("Could not reach DevTools."));
-  });
-  devtools.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    if (message.id && waiting.has(message.id)) {
-      const { resolve, reject, timer } = waiting.get(message.id);
-      clearTimeout(timer);
-      waiting.delete(message.id);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result);
-      return;
-    }
-    const pageError = (text) => !BENIGN.some((pattern) => pattern.test(text)) && fail(`page error: ${text.split("\n")[0]}`);
-    if (message.method === "Runtime.exceptionThrown") pageError(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
-    if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") pageError(message.params.args.map((arg) => arg.value ?? arg.description ?? "").join(" "));
-    if (message.method === "Log.entryAdded" && message.params.entry.level === "error") pageError(message.params.entry.text);
-  };
+  if (attach) {
+    const target = await pageTarget();
+    const devtools = new WebSocket(target.webSocketDebuggerUrl);
+    socket = devtools;
+    await new Promise((resolve, reject) => {
+      devtools.onopen = resolve;
+      devtools.onerror = () => reject(new Error("Could not reach DevTools."));
+    });
+    devtools.onmessage = (event) => handleMessage(String(event.data));
+  } else {
+    await connectPipe();
+  }
   await send("Runtime.enable");
   await send("Log.enable");
   // The hidden or virtual display may never be "looking"; let the page believe it is.
@@ -275,6 +330,8 @@ try {
   fail(error instanceof Error ? error.message : String(error));
 } finally {
   socket?.close();
+  pipeOut?.destroy();
+  pipeIn?.destroy();
   if (app) {
     app.kill("SIGTERM");
     for (let tries = 0; tries < 50 && !exited; tries += 1) await sleep(100);

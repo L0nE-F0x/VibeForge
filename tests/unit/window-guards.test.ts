@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { isAppPage, relaunchArgs, settleWithin } from "../../electron/guards.js";
+import { debugSwitch, isAppPage, relaunchArgs, settleWithin } from "../../electron/guards.js";
 
 const registered = new Map<string, (...args: unknown[]) => unknown>();
 vi.mock("electron", () => ({
@@ -121,6 +121,17 @@ describe("IPC method lookup", () => {
     await expect(handler(event, "updates.run")).rejects.toThrow("SHA-256");
     expect(check).toHaveBeenCalledTimes(1);
     expect(startCommand).not.toHaveBeenCalled();
+  });
+
+  it("allows remote-debugging-pipe everywhere and restricts remote-debugging-port to checkouts", () => {
+    expect(debugSwitch({}, "checkout")).toBeNull();
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "pipe" }, "checkout")).toEqual({ name: "remote-debugging-pipe" });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "pipe" }, "installer")).toEqual({ name: "remote-debugging-pipe" });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "pipe" }, "other")).toEqual({ name: "remote-debugging-pipe" });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "1" }, "checkout")).toEqual({ name: "remote-debugging-port", value: "9223" });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "1", VIBEFORGE_DEBUG_PORT: "9333" }, "checkout")).toEqual({ name: "remote-debugging-port", value: "9333" });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "1" }, "installer")).toEqual({ refused: expect.stringContaining("VIBEFORGE_DEBUG=1") });
+    expect(debugSwitch({ VIBEFORGE_DEBUG: "1" }, "other")).toEqual({ refused: expect.stringContaining("VIBEFORGE_DEBUG=1") });
   });
 });
 
