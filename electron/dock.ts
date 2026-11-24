@@ -1,6 +1,7 @@
 import { WebContentsView, type BrowserWindow, type WebContents, type WebContentsViewConstructorOptions } from "electron";
 import type { DockBounds, DockState } from "../src/shared/api.js";
 import { isDockUrl } from "../src/shared/dock-url.js";
+import { guardSession, guardWebContents, type GuardableSession } from "./guards.js";
 
 /** Sessions already armed with a `will-download` blocker so one session never gets duplicate listeners. */
 const downloadGuarded = new WeakSet<object>();
@@ -90,11 +91,15 @@ export class Dock {
     view.setBackgroundColor("#00000000");
     const slot: Slot = { view, current: "", lastShow: "", error: null, epoch: 0, loadingEpoch: 0, committed: false, dead: false, quiet: false };
     const contents = view.webContents;
-    const session = (contents as { session?: { on?: (event: string, listener: (e: { preventDefault(): void }) => void) => void } }).session;
-    if (session && typeof session.on === "function" && !downloadGuarded.has(session)) {
-      downloadGuarded.add(session);
-      session.on("will-download", (event) => event.preventDefault());
+    const dockSession = (contents as { session?: GuardableSession & { on?: (event: string, listener: (e: { preventDefault(): void }) => void) => void } }).session;
+    if (dockSession) {
+      guardSession(dockSession, () => false);
+      if (typeof dockSession.on === "function" && !downloadGuarded.has(dockSession)) {
+        downloadGuarded.add(dockSession);
+        dockSession.on("will-download", (event) => event.preventDefault());
+      }
     }
+    guardWebContents(contents);
     contents.setWindowOpenHandler(({ url }) => {
       // A cleared page stays cleared. Otherwise a link that asks for a new window stays here.
       if (!slot.quiet && isDockUrl(url)) this.navigate(slot, workspaceId, url, false);

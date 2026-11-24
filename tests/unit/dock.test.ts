@@ -7,11 +7,44 @@ vi.mock("electron", () => ({ WebContentsView: class {} }));
 
 const { Dock } = await import("../../electron/dock.js");
 
+function makeFakeSession() {
+  const handlers: {
+    request?: (contents: unknown, permission: string, callback: (allow: boolean) => void) => void;
+    check?: (contents: unknown, permission: string, origin: string) => boolean;
+    device?: () => boolean;
+    display?: (request: unknown, callback: (streams: unknown) => void) => void;
+  } = {};
+  const emitter = new EventEmitter();
+  return {
+    emitter,
+    handlers,
+    on: (event: string, listener: (...args: unknown[]) => void) => {
+      emitter.on(event, listener);
+      return emitter;
+    },
+    setPermissionRequestHandler: (fn: typeof handlers.request) => {
+      handlers.request = fn;
+    },
+    setPermissionCheckHandler: (fn: typeof handlers.check) => {
+      handlers.check = fn;
+    },
+    setDevicePermissionHandler: (fn: typeof handlers.device) => {
+      handlers.device = fn;
+    },
+    setDisplayMediaRequestHandler: (fn: typeof handlers.display) => {
+      handlers.display = fn;
+    },
+  };
+}
+
+const sharedDockSession = makeFakeSession();
+
 /** A page as Electron 45 has it: once destroyed, its view's `webContents` reads as undefined. */
 class FakeContents extends EventEmitter {
   destroyed = false;
   url = "about:blank";
   loads: string[] = [];
+  session = sharedDockSession;
   navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack: () => undefined, goForward: () => undefined };
   isDestroyed = () => this.destroyed;
   getURL = () => this.url;
@@ -115,5 +148,32 @@ describe("the browser dock", () => {
     dock.dispose();
     expect(views[1].page.destroyed).toBe(true);
     expect(views[2].page.destroyed).toBe(true);
+  });
+
+  it("locks down the dock session permissions, downloads, and device pickers", () => {
+    const { dock, views } = setup();
+    dock.show(bounds, "https://example.com/", "shop");
+    let mediaAllowed = true;
+    sharedDockSession.handlers.request?.(views[0].page, "media", (ok) => {
+      mediaAllowed = ok;
+    });
+    expect(mediaAllowed).toBe(false);
+    expect(sharedDockSession.handlers.check?.(views[0].page, "geolocation", "https://example.com")).toBe(false);
+    expect(sharedDockSession.handlers.device?.()).toBe(false);
+    let streams: unknown = null;
+    sharedDockSession.handlers.display?.({}, (value) => {
+      streams = value;
+    });
+    expect(streams).toEqual({});
+
+    const dlEvent = { preventDefault: vi.fn() };
+    sharedDockSession.emitter.emit("will-download", dlEvent);
+    expect(dlEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    const btEvent = { preventDefault: vi.fn() };
+    const btCb = vi.fn();
+    views[0].page.emit("select-bluetooth-device", btEvent, [], btCb);
+    expect(btEvent.preventDefault).toHaveBeenCalledTimes(1);
+    expect(btCb).toHaveBeenCalledWith("");
   });
 });

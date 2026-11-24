@@ -137,3 +137,55 @@ const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
 export function permissionAllowed(ownPage: boolean, permission: string): boolean {
   return (ownPage ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
 }
+
+/** Narrow shapes of Electron's Session and WebContents so session guards run in unit tests too. */
+export interface GuardableWebContents {
+  on?(event: "select-bluetooth-device", listener: (event: { preventDefault(): void }, ...rest: unknown[]) => void): unknown;
+}
+
+export interface GuardableSession {
+  setPermissionRequestHandler?(
+    handler: ((contents: GuardableWebContents | null, permission: string, callback: (allow: boolean) => void) => void) | null,
+  ): void;
+  setPermissionCheckHandler?(
+    handler: ((contents: GuardableWebContents | null, permission: string, origin: string) => boolean) | null,
+  ): void;
+  setDevicePermissionHandler?(handler: ((details: unknown) => boolean) | null): void;
+  setDisplayMediaRequestHandler?(handler: ((request: unknown, callback: (streams: Record<string, never>) => void) => void) | null): void;
+  on?(event: string, listener: (event: { preventDefault(): void }, ...rest: unknown[]) => void): unknown;
+}
+
+const guardedSessions = new WeakSet<object>();
+const guardedContents = new WeakSet<object>();
+
+function cancelDeviceSelect(event: { preventDefault(): void }, ...rest: unknown[]): void {
+  event.preventDefault();
+  const callback = rest.at(-1);
+  if (typeof callback === "function") (callback as (id: string) => void)("");
+}
+
+/**
+ * Lock down permissions, hardware device grants, display capture, and device pickers on an Electron
+ * session (defaultSession, `persist:dock`, or any future partition). Idempotent per session object.
+ */
+export function guardSession(target: GuardableSession | null | undefined, isOwn: (contents: GuardableWebContents | null) => boolean): void {
+  if (!target || guardedSessions.has(target)) return;
+  guardedSessions.add(target);
+  const allowed = (contents: GuardableWebContents | null, permission: string) => permissionAllowed(isOwn(contents), permission);
+  target.setPermissionRequestHandler?.((contents, permission, callback) => callback(allowed(contents, permission)));
+  target.setPermissionCheckHandler?.((contents, permission) => allowed(contents, permission));
+  target.setDevicePermissionHandler?.(() => false);
+  target.setDisplayMediaRequestHandler?.((_request, callback) => callback({}));
+  if (typeof target.on === "function") {
+    for (const event of ["select-hid-device", "select-serial-port", "select-usb-device"]) {
+      target.on(event, cancelDeviceSelect);
+    }
+  }
+}
+
+/** Cancel Bluetooth device selection on a WebContents (a WebContents event rather than a Session one in Electron). */
+export function guardWebContents(contents: GuardableWebContents | null | undefined): void {
+  if (!contents || guardedContents.has(contents)) return;
+  guardedContents.add(contents);
+  contents.on?.("select-bluetooth-device", cancelDeviceSelect);
+}
