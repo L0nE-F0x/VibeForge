@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { programOf } from "./engines.js";
 import { cwdAllowed, isPathInside } from "./places.js";
-import type { CompanionSettings, EngineRow, LiveSession } from "./types.js";
+import type { CompanionDevice, CompanionSettings, EngineRow, LiveSession } from "./types.js";
 
 /** Loopback port the phone page uses. Tailscale Serve publishes this, the app does not. */
 export const COMPANION_PORT = 4737;
@@ -25,7 +25,51 @@ export function defaultCompanion(): CompanionSettings {
     port: COMPANION_PORT,
     token: "",
     nudges: [...DEFAULT_NUDGES],
+    devices: [],
   };
+}
+
+/** A phone's own key, handed out once when it pairs. */
+export function newDeviceKey(): string {
+  return `vfd_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+export function deviceKeyHash(key: string): string {
+  return crypto.createHash("sha256").update(key).digest("hex");
+}
+
+/** The paired phone whose key this is, or null. */
+export function deviceFor(devices: readonly CompanionDevice[], key: string): CompanionDevice | null {
+  if (!/^vfd_[0-9a-f]{48}$/.test(key)) return null;
+  const hash = Buffer.from(deviceKeyHash(key));
+  return devices.find((device) => device.hash.length === hash.length && crypto.timingSafeEqual(Buffer.from(device.hash), hash)) ?? null;
+}
+
+function companionDevices(value: unknown): CompanionDevice[] {
+  if (!Array.isArray(value)) return [];
+  const out: CompanionDevice[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const raw = item as Partial<CompanionDevice>;
+    if (typeof raw.id !== "string" || !/^[0-9a-f]{8,32}$/.test(raw.id)) continue;
+    if (typeof raw.hash !== "string" || !/^[0-9a-f]{64}$/.test(raw.hash)) continue;
+    if (out.some((device) => device.id === raw.id)) continue;
+    out.push({ id: raw.id, hash: raw.hash, name: typeof raw.name === "string" ? raw.name.trim().slice(0, 60) : "", addedAt: typeof raw.addedAt === "string" ? raw.addedAt : "" });
+  }
+  return out.slice(0, 20);
+}
+
+/** A short name for a phone from its browser's User-Agent: "iPhone", "Android (Pixel 9)", "Firefox on Linux". */
+export function deviceName(userAgent: string | undefined): string {
+  const ua = userAgent ?? "";
+  const android = /Android[^;)]*;\s*([^;)]+?)(?:\s+Build|\))/.exec(ua);
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua)) return "iPad";
+  if (android) return `Android (${android[1].trim().slice(0, 30)})`;
+  if (/Android/.test(ua)) return "Android";
+  const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "A browser";
+  const system = /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+  return system ? `${browser} on ${system}` : browser;
 }
 
 export function newCompanionToken(): string {
@@ -61,6 +105,7 @@ export function normalizeCompanion(value: unknown): CompanionSettings {
     port: companionPort(raw.port, defaults.port),
     token: companionToken(raw.token),
     nudges: normalizeNudges(raw.nudges, defaults.nudges),
+    devices: companionDevices(raw.devices),
   };
 }
 

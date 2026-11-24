@@ -225,7 +225,7 @@ describe("full-app control parsers and validators", () => {
       ctx,
     );
     expect(steps.map((s) => holdsForGo(s, ctx))).toEqual([
-      false, // agent create
+      true, // agent create: a new agent with folders, a CLI and a brief waits for Go (D1)
       true, // agent delete
       true, // agent memory-clear
       true, // skill delete
@@ -237,7 +237,7 @@ describe("full-app control parsers and validators", () => {
       true, // run tidy
       true, // settings engines.remove
     ]);
-    expect(safeInCall(steps[0], ctx)).toBe(true);
+    expect(safeInCall(steps[0], ctx)).toBe(false); // a new agent waits for Go in a call too (D1)
     expect(safeInCall(steps[1], ctx)).toBe(false);
     expect(orchestratorRules(ctx)).toContain("Atlas");
     expect(orchestratorRules(ctx)).toContain("Audit");

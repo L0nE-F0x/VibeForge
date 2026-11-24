@@ -7,7 +7,7 @@ type CompanionSettings = Settings["companion"];
 import { call, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useToast } from "../state.js";
-import { Button, cx, Notice, Toggle } from "./ui.js";
+import { Button, cx, Notice, TimeAgo, Toggle } from "./ui.js";
 
 const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
 /** Signs this computer in to Tailscale, for one that has it installed but not connected. */
@@ -209,6 +209,25 @@ export function CompanionCard() {
                     </Button>
                   </div>
                   <span className="step-text">{t("companion.codeHint")}</span>
+                </div>
+              ) : null}
+              {current.token ? (
+                <div className="vstack" style={{ gap: 4 }}>
+                  <span className="field-label">{t("companion.devices")}</span>
+                  {(current.devices ?? []).length ? (
+                    (current.devices ?? []).map((device) => (
+                      <div key={device.id} className="hstack">
+                        <span className="grow">
+                          {device.name || "—"} <span className="faint">· {t("companion.deviceAdded")} {device.addedAt ? <TimeAgo iso={device.addedAt} /> : null}</span>
+                        </span>
+                        <Button size="sm" tip={t("companion.deviceRemoveTip")} onClick={() => patch({ devices: (current.devices ?? []).filter((item) => item.id !== device.id) })}>
+                          {t("companion.deviceRemove")}
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="step-text">{t("companion.devicesNone")}</span>
+                  )}
                 </div>
               ) : null}
             </Step>

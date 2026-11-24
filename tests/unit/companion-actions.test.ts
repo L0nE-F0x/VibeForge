@@ -38,7 +38,7 @@ describe("pairing from the phone", () => {
       `function forgetSeen() {}`,
       `function setView(next) { state.view = next; }`,
       `const seen = new Map();`,
-      ...["POLL_TIMEOUT_MS", "GATEWAY_DOWN", "call", "checkCode"].map((name) => pick("api.js", name)),
+      ...["POLL_TIMEOUT_MS", "GATEWAY_DOWN", "call", "checkCode", "keyFrom"].map((name) => pick("api.js", name)),
       pick("home.js", "shownComputer"),
       pick("home.js", "pair"),
       `globalThis.page = { pair, state };`,
@@ -99,6 +99,12 @@ describe("pairing from the phone", () => {
     expect(page.state).toMatchObject({ error: "", busy: false, token: "vf_right", view: "home" });
     expect(stored.get("vibeforge-phone")).toBe("vf_right");
     expect(asked.at(-1)).toBe('/api/pair {"token":"vf_right"}');
+    // A computer from 3.6.3 on hands the phone a key of its own, kept instead of the code (D18).
+    const key = `vfd_${"ab".repeat(24)}`;
+    answer = reply(200, { ok: true, key });
+    await page.pair("vf_right");
+    expect(page.state).toMatchObject({ token: key });
+    expect(stored.get("vibeforge-phone")).toBe(key);
   });
 
   it("keeps a code with the computer it is for, under the name that computer gives", async () => {

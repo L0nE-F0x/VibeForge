@@ -3,7 +3,7 @@
 // adding one by its address and pairing code, and taking one off.
 
 import { readAddress } from "./address.js";
-import { call, checkCode, showComputer, withBusy } from "./api.js";
+import { call, checkCode, keyFrom, showComputer, withBusy } from "./api.js";
 import { codeField, el } from "./dom.js";
 import { setView, update } from "./pages.js";
 import { computerLabel, computers, nameComputer, parts, removeComputer, saveComputer, state } from "./state.js";
@@ -252,14 +252,14 @@ function add(typedAddress, typedCode) {
     if (!read.url || computers().some((item) => item.url === read.url && item.token)) throw new Error(t("phone.computerSame"));
     // A pasted link carries its code; a code typed beside it wins.
     const given = typedCode.trim() || read.code;
-    /** @type {{ computer?: string }} */
+    /** @type {{ computer?: string, key?: string }} */
     let answer;
     try {
       answer = await checkCode(given, read.url);
     } catch (err) {
       throw err.offline ? new Error(t("phone.computerUnreachable")) : err;
     }
-    saveComputer({ url: read.url, token: given, name: typeof answer.computer === "string" ? answer.computer.trim().slice(0, 80) : "" });
+    saveComputer({ url: read.url, token: keyFrom(answer, given), name: typeof answer.computer === "string" ? answer.computer.trim().slice(0, 80) : "" });
     showComputer(read.url);
   });
 }

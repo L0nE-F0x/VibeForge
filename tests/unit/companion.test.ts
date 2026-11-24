@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDesk, bearerToken, defaultCompanion, isCodingSession, newCompanionToken, normalizeCompanion, normalizeNudges, shellForegroundEngine, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
+import { buildDesk, bearerToken, defaultCompanion, deviceFor, deviceKeyHash, deviceName, isCodingSession, newCompanionToken, newDeviceKey, normalizeCompanion, normalizeNudges, shellForegroundEngine, tailText, tokenMatches, type DeskInput } from "../../src/core/companion.js";
 import { GLYPHS, MARK, PLAN_MARKS } from "../../src/shared/pixel.js";
 import { startCompanionHttp, type CompanionActions } from "../../src/core/companion-http.js";
 import { phoneCoreText, phoneLanguage, phoneWords } from "../../src/core/companion-text.js";
@@ -510,5 +510,46 @@ describe("the phone page's words", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe("phones paired with keys of their own (decision D18)", () => {
+  it("keeps only well-formed devices from settings", () => {
+    const hash = deviceKeyHash(newDeviceKey());
+    const kept = normalizeCompanion({
+      devices: [
+        { id: "abcdef01", hash, name: "  iPhone  ", addedAt: "2026-11-25T00:00:00.000Z" },
+        { id: "abcdef01", hash, name: "again" },
+        { id: "NOT-HEX", hash, name: "x" },
+        { id: "abcdef02", hash: "short", name: "x" },
+        { id: "abcdef03", hash, name: 7 },
+        null,
+        "nope",
+      ],
+    }).devices;
+    expect(kept).toEqual([
+      { id: "abcdef01", hash, name: "iPhone", addedAt: "2026-11-25T00:00:00.000Z" },
+      { id: "abcdef03", hash, name: "", addedAt: "" },
+    ]);
+    expect(normalizeCompanion({ devices: "nope" }).devices).toEqual([]);
+    expect(defaultCompanion().devices).toEqual([]);
+  });
+
+  it("finds a phone by its key, and nothing by anything else", () => {
+    const key = newDeviceKey();
+    const devices = [{ id: "abcdef01", hash: deviceKeyHash(key), name: "iPhone", addedAt: "" }];
+    expect(deviceFor(devices, key)?.name).toBe("iPhone");
+    expect(deviceFor(devices, newDeviceKey())).toBeNull();
+    expect(deviceFor(devices, newCompanionToken())).toBeNull();
+    expect(deviceFor(devices, "")).toBeNull();
+  });
+
+  it("names a phone or browser from its User-Agent", () => {
+    expect(deviceName("Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)")).toBe("iPad");
+    expect(deviceName("Mozilla/5.0 (Linux; Android 15) Mobile")).toBe("Android");
+    expect(deviceName("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36 Edg/131")).toBe("Edge on Windows");
+    expect(deviceName("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15")).toBe("Safari on macOS");
+    expect(deviceName("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36")).toBe("Chrome on Linux");
+    expect(deviceName("curl/8.0")).toBe("A browser");
   });
 });

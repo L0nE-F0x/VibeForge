@@ -318,8 +318,12 @@ describe("Viby next-level capabilities", () => {
     ]);
     ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
 
-    // Append runs freely in go mode
+    // A note the planner adds waits for Go even in go mode, as it goes into every later turn (D1);
+    // "remember …" typed by the person is a local reflex and saves at once.
     await ctx.svc.orchestratorAsk("remember Use strict TypeScript");
+    const appendTurn = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(appendTurn.plan).toBe("waiting");
+    await ctx.svc.orchestratorRun(appendTurn.id);
     await until(() => ctx.svc.orchestratorReadMemory().includes("Use strict TypeScript"));
 
     // Set holds for Go even in "go" mode, and produces an Undo token

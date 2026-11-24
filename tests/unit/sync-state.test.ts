@@ -143,4 +143,22 @@ describe("sync: the note two machines keep between them", () => {
     expect(onLower.changed).toBe(false);
     expect(onLower.state.shares[0].mode).toBe("send");
   });
+
+  it("never lets the other machine widen a share here, only narrow it (decision D2)", () => {
+    const id = "vf-ws-000000000000";
+    // This machine only sends; the other makes it two-way: kept as it was, and reported.
+    const toTwo = settleWithLink(state([{ mode: "send", rev: 1 }]), A, B, theirs({ [id]: { name: "P0", mode: "two", filesOnly: false, hint: "", rev: 2 } }));
+    expect(toTwo.state.shares[0]).toMatchObject({ mode: "send", rev: 1 });
+    expect(toTwo.widened).toEqual([expect.objectContaining({ mode: "two", filesOnly: false, rev: 2 })]);
+    // Files only here; the other starts sending .git too: kept.
+    const withGit = settleWithLink(state([{ mode: "two", filesOnly: true, rev: 1 }]), A, B, theirs({ [id]: { name: "P0", mode: "two", filesOnly: false, hint: "", rev: 2 } }));
+    expect(withGit.state.shares[0]).toMatchObject({ filesOnly: true, rev: 1 });
+    expect(withGit.widened).toHaveLength(1);
+    // Taking only, here; the other turns it around so this machine would send: kept.
+    expect(settleWithLink(state([{ mode: "receive", rev: 1 }]), A, B, theirs({ [id]: { name: "P0", mode: "receive", filesOnly: false, hint: "", rev: 2 } })).widened).toHaveLength(1);
+    // Narrowing is taken over as before, with nothing to report.
+    const narrower = settleWithLink(state([{ mode: "two", rev: 1 }]), A, B, theirs({ [id]: { name: "P0", mode: "two", filesOnly: true, hint: "", rev: 2 } }));
+    expect(narrower.state.shares[0]).toMatchObject({ mode: "two", filesOnly: true, rev: 2 });
+    expect(narrower.widened).toEqual([]);
+  });
 });

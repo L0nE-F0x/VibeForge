@@ -261,6 +261,17 @@ export class SyncDesk {
         this.stateFile.write(state);
         again = true;
       }
+      for (const asked of settled.widened) {
+        const key = `widen:${asked.share.folderId}:${asked.rev}`;
+        if (this.told.has(key)) continue;
+        this.told.add(key);
+        const what = asked.mode !== asked.share.mode ? (asked.mode === "two" ? "both ways" : asked.mode === "receive" ? "only from it to this machine" : "only from this machine to it") : "with its git history";
+        this.host.notify({
+          title: "VibeForge",
+          body: `${link.name || machine.name} changed ${asked.share.name} to sync ${what}. It isn't changed here: to agree, change it in Settings → Sync on this machine.`,
+        });
+        this.host.log(`Sync: kept ${asked.share.name} as it was; ${machine.id.slice(0, 7)} asked to widen it.`);
+      }
       for (const share of settled.ended) {
         this.conflicts.forgetFolder(share.folderId);
         this.host.notify({ title: "VibeForge", body: `${link.name || machine.name} stopped syncing ${share.name}. Its files stay on this machine.` });
@@ -537,6 +548,11 @@ export class SyncDesk {
       if (share.folderId === except) continue;
       if (share.path === resolved) throw new Error("This folder already syncs with a machine.");
       if (inside(share.path, resolved) || inside(resolved, share.path)) throw new Error("A folder inside another synced folder can't sync on its own.");
+    }
+    // A folder that holds other workspaces (~/Projects, say) would send or take all of them at once.
+    const holds = this.host.workspaces().filter((item) => path.resolve(item.path) !== resolved && inside(resolved, path.resolve(item.path)));
+    if (holds.length) {
+      throw new Error(`This folder holds other workspaces (${holds.slice(0, 3).map((item) => item.name).join(", ")}${holds.length > 3 ? ", …" : ""}). Choose a project's own folder.`);
     }
   }
 

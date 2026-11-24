@@ -673,6 +673,26 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("waits for Go on a plan made from what Viby just read, even under Just go (decision D1)", async () => {
+    const place = tempDir();
+    const ctx = withPlanner([
+      // Asked straight out: a new workspace goes at once under Just go.
+      { say: "I'll make it.", steps: [{ kind: "workspace", action: "create", name: "one", folder: path.join(place, "one") }] },
+      // Asked after reading something: the same kind of step waits, as what was read could be steering it.
+      { say: "", steps: [{ kind: "inspect", prompt: "problems" }] },
+      { say: "I'll make it.", steps: [{ kind: "workspace", action: "create", name: "two", folder: path.join(place, "two") }] },
+    ]);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+    await ctx.svc.orchestratorAsk("make a workspace called one");
+    await until(() => ctx.svc.orchestratorView().turns.at(-1)?.plan === "done");
+    await ctx.svc.orchestratorAsk("look at the problems, then make a workspace called two");
+    const held = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(held.checks?.length).toBe(1);
+    expect(held.plan).toBe("waiting");
+    expect(fs.existsSync(path.join(place, "two"))).toBe(false);
+    ctx.svc.close();
+  });
+
   it("skips a step chained after one that didn't carry out", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([]);

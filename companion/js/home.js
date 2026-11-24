@@ -3,7 +3,7 @@
 // opens on, with how it works and the phone's own settings.
 
 import { linkCode } from "./address.js";
-import { checkCode, forget } from "./api.js";
+import { checkCode, forget, keyFrom } from "./api.js";
 import { wordmark } from "./art.js";
 import { forgetSeen } from "./buzz.js";
 import { computerChip, severalComputers } from "./computers.js";
@@ -43,15 +43,17 @@ export async function pairFromLink() {
   // Out of the address bar and the phone's history at once: the code is a key to this computer.
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   const home = computers()[0];
+  let key = code;
   try {
-    const answer = home.token === code ? {} : await checkCode(code, "");
-    saveComputer({ ...home, token: code, name: typeof answer.computer === "string" && answer.computer ? answer.computer : home.name });
+    const answer = await checkCode(code, "");
+    key = keyFrom(answer, code);
+    saveComputer({ ...home, token: key, name: typeof answer.computer === "string" && answer.computer ? answer.computer : home.name });
   } catch {
     return;
   }
   localStorage.setItem(COMPUTER_KEY, "");
   state.base = "";
-  state.token = code;
+  state.token = key;
   state.view = "home";
 }
 
@@ -64,8 +66,9 @@ async function pair(code) {
   try {
     const answer = await checkCode(given);
     const shown = shownComputer();
-    saveComputer({ ...shown, token: given, name: typeof answer.computer === "string" && answer.computer ? answer.computer : shown.name });
-    state.token = given;
+    const key = keyFrom(answer, given);
+    saveComputer({ ...shown, token: key, name: typeof answer.computer === "string" && answer.computer ? answer.computer : shown.name });
+    state.token = key;
     state.busy = false;
     forgetSeen();
     setView("home");

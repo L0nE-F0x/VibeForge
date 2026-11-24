@@ -249,6 +249,13 @@ describe("sync desk", () => {
     await expect(a.desk.updateShare("vf-ws-000000000000", { mode: "two", filesOnly: false })).rejects.toThrow(/no longer syncs/);
   });
 
+  it("won't sync a folder that holds other workspaces, shared or not (decision D2)", async () => {
+    const { a } = await paired();
+    const site = workspace(a, "Site");
+    a.workspaces.push({ id: "projects", name: "Projects", path: path.dirname(site.path), dockUrl: "" });
+    await expect(a.desk.share("projects", B, { mode: "two", filesOnly: false })).rejects.toThrow(/holds other workspaces \(Site\)/);
+  });
+
   it("sends only the files of a branch opened beside its repository", async () => {
     const { a } = await paired();
     const branch = workspace(a, "Branch");
