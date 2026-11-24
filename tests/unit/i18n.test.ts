@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { applyToast } from "../../src/ui/apply-note.js";
 import { de } from "../../src/ui/i18n/de.js";
 import { en } from "../../src/ui/i18n/en.js";
 import { es } from "../../src/ui/i18n/es.js";
 import { fr } from "../../src/ui/i18n/fr.js";
-import { LANGUAGES, loadLanguage, resolveLanguage, translate, translateCount, type Catalog, type Key } from "../../src/ui/i18n/index.js";
+import { LANGUAGES, loadLanguage, resolveLanguage, translate, translateCount, type Catalog, type Key, type Translator } from "../../src/ui/i18n/index.js";
 import { ja } from "../../src/ui/i18n/ja.js";
 import { pt } from "../../src/ui/i18n/pt.js";
 import { zh } from "../../src/ui/i18n/zh.js";
@@ -54,5 +55,32 @@ describe("translations", () => {
     // French treats 0 as singular; Japanese has one form for every number.
     expect(translateCount("fr", "code.running", 0)).toBe("0 terminal en cours");
     expect(translateCount("ja", "code.running", 1)).toBe("1 個のターミナルが稼働中");
+  });
+
+  it("formats Apply toasts for pulled, already-merged, normal, conflicted and left-files results", () => {
+    const t: Translator = Object.assign(
+      (key: Key, values?: Record<string, string | number>) => translate("en", key, values),
+      {
+        language: "en" as const,
+        count: (base: Parameters<typeof translateCount>[1], n: number, values?: Record<string, string | number>) => translateCount("en", base, n, values),
+      },
+    );
+    expect(applyToast(t, { files: ["a.txt"], conflicts: [], pulled: { branch: "main", upstream: "origin/main" } }, "VibeForge", "/home/me")).toEqual({
+      tone: "success",
+      title: "Pulled into VibeForge",
+      body: "Already merged on origin/main; fast-forwarded main. The copy is gone.",
+    });
+    expect(applyToast(t, { files: ["a.txt"], conflicts: [], pulled: { branch: "main", upstream: "origin/main", alreadyUpToDate: true } }, "VibeForge", "/home/me")).toEqual({
+      tone: "success",
+      title: "Already in VibeForge",
+      body: "main already has these changes. The copy is gone.",
+    });
+    expect(
+      applyToast(t, { files: ["a.txt"], conflicts: [], pulled: { branch: "main", upstream: "origin/main" }, left: { folder: "/home/me/wt", files: ["notes/"] } }, "VibeForge", "/home/me"),
+    ).toMatchObject({ tone: "info", title: "Pulled into VibeForge; the copy stays" });
+    expect(applyToast(t, { files: [], conflicts: [] }, "VibeForge", "/home/me")).toEqual({
+      tone: "info",
+      title: "The copy had no changes, so it was removed",
+    });
   });
 });

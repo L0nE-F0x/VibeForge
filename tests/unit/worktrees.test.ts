@@ -397,3 +397,199 @@ describe("making a task's copy", () => {
   });
 });
 
+/** A bare remote ("GitHub"), a local clone on `main` tracking `origin/main`, a second clone for remote merges, and a copy. */
+async function remoteRepoWithCopy(files: Record<string, string | Buffer>, taskId = "task-1") {
+  const remote = temp();
+  git(remote, "init", "--bare", "-q", "-b", "main");
+  const repo = temp();
+  git(repo, "clone", "-q", remote, ".");
+  for (const [name, body] of Object.entries(files)) write(repo, name, body);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "init");
+  git(repo, "push", "-q", "-u", "origin", "main");
+  const github = temp();
+  git(github, "clone", "-q", remote, ".");
+  const dataRoot = temp();
+  const owner: CopyOwner = { dataRoot, taskId };
+  const copy = await createCopy(repo, path.join(dataRoot, "worktrees", taskId), copyBranch(taskId));
+  return { remote, repo, github, copy, owner, dataRoot };
+}
+
+describe("applying a copy that was already merged", () => {
+  it("fetches and fast-forwards main cleanly when the copy was squash-merged on the remote", async () => {
+    const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES, "b.txt": "keep\n" });
+    write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    write(copy.path, "new.txt", "hello\n");
+    git(copy.path, "add", "-A");
+    git(copy.path, "commit", "-qm", "feat: update a");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+
+    // GitHub squash-merges the PR onto origin/main as a brand-new commit; local main hasn't fetched yet.
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "feat: update a (#1)");
+    git(github, "push", "-q", "origin", "main");
+    const mergedSha = git(github, "rev-parse", "HEAD").trim();
+
+    const result = await apply(copy, owner);
+    expect(result).toEqual({
+      files: ["a.txt", "new.txt"],
+      conflicts: [],
+      kept: [],
+      pulled: { branch: "main", upstream: "origin/main" },
+    });
+    expect(git(repo, "rev-parse", "HEAD").trim()).toBe(mergedSha);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(read(repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
+    expect(read(repo, "new.txt")).toBe("hello\n");
+  });
+
+  it("fast-forwards cleanly after a regular merge commit even when another PR landed on top", async () => {
+    const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES, "other.txt": "before\n" });
+    write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(copy.path, "commit", "-qam", "agent change");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+
+    // PR merged with a merge commit, then a second PR edits another file and another line of a.txt.
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "merge", "--no-ff", "-qm", "Merge PR #1", "FETCH_HEAD");
+    write(github, "other.txt", "after\n");
+    write(github, "a.txt", LINES.replace("one", "ONE").replace("five", "FIVE"));
+    git(github, "commit", "-qam", "PR #2");
+    git(github, "push", "-q", "origin", "main");
+    const tip = git(github, "rev-parse", "HEAD").trim();
+
+    const result = await apply(copy, owner);
+    expect(result).toEqual({
+      files: ["a.txt"],
+      conflicts: [],
+      kept: [],
+      pulled: { branch: "main", upstream: "origin/main" },
+    });
+    expect(git(repo, "rev-parse", "HEAD").trim()).toBe(tip);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(read(repo, "other.txt")).toBe("after\n");
+    expect(read(repo, "a.txt")).toBe(LINES.replace("one", "ONE").replace("five", "FIVE"));
+  });
+
+  it("fast-forwards cleanly after a rebase-merge on the remote", async () => {
+    const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES, "other.txt": "base\n" });
+    write(github, "other.txt", "upstream first\n");
+    git(github, "commit", "-qam", "upstream commit");
+    git(github, "push", "-q", "origin", "main");
+
+    write(copy.path, "a.txt", LINES.replace("six", "SIX"));
+    git(copy.path, "commit", "-qam", "agent change");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+
+    // GitHub replays the commit onto the newer origin/main (new SHA, no merge commit).
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "cherry-pick", "FETCH_HEAD");
+    git(github, "push", "-q", "origin", "main");
+    const tip = git(github, "rev-parse", "HEAD").trim();
+
+    const result = await apply(copy, owner);
+    expect(result.pulled).toEqual({ branch: "main", upstream: "origin/main" });
+    expect(git(repo, "rev-parse", "HEAD").trim()).toBe(tip);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
+
+  it("recognises when main was already pulled before clicking Apply", async () => {
+    const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("three", "THREE"));
+    git(copy.path, "commit", "-qam", "agent");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "squash");
+    git(github, "push", "-q", "origin", "main");
+    git(repo, "pull", "--ff-only", "-q");
+
+    const result = await apply(copy, owner);
+    expect(result).toEqual({
+      files: ["a.txt"],
+      conflicts: [],
+      kept: [],
+      pulled: { branch: "main", upstream: "origin/main", alreadyUpToDate: true },
+    });
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
+
+  it("keeps unrelated local edits on fast-forward, and falls back to three-way merge when local edits collide", async () => {
+    const first = await remoteRepoWithCopy({ "a.txt": LINES, "notes.txt": "mine\n" });
+    write(first.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(first.copy.path, "commit", "-qam", "agent");
+    git(first.copy.path, "push", "-q", "origin", first.copy.branch);
+    git(first.github, "fetch", "-q", "origin", first.copy.branch);
+    git(first.github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(first.github, "commit", "-qm", "squash");
+    git(first.github, "push", "-q", "origin", "main");
+    // Unrelated local edit in the workspace stays intact across the fast-forward.
+    write(first.repo, "notes.txt", "mine, edited\n");
+    const pulled = await apply(first.copy, first.owner);
+    expect(pulled.pulled).toEqual({ branch: "main", upstream: "origin/main" });
+    expect(read(first.repo, "notes.txt")).toBe("mine, edited\n");
+    expect(git(first.repo, "status", "--porcelain")).toBe(" M notes.txt\n");
+
+    // When a local edit touches the same file, fast-forward refuses and Apply falls back to three-way merge.
+    const second = await remoteRepoWithCopy({ "a.txt": LINES }, "task-2");
+    write(second.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(second.copy.path, "commit", "-qam", "agent");
+    git(second.copy.path, "push", "-q", "origin", second.copy.branch);
+    git(second.github, "fetch", "-q", "origin", second.copy.branch);
+    git(second.github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(second.github, "commit", "-qm", "squash");
+    git(second.github, "push", "-q", "origin", "main");
+    write(second.repo, "a.txt", LINES.replace("two", "TWO"));
+
+    const fallback = await apply(second.copy, second.owner);
+    expect(fallback).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
+    expect(read(second.repo, "a.txt")).toBe(LINES.replace("two", "TWO").replace("five", "FIVE"));
+  });
+
+  it("falls back to uncommitted edits when the copy has extra unmerged work, local main diverged, or the remote is unreachable", async () => {
+    // 1. Copy has an extra uncommitted edit beyond what was merged on origin/main.
+    const extra = await remoteRepoWithCopy({ "a.txt": LINES });
+    write(extra.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(extra.copy.path, "commit", "-qam", "merged part");
+    git(extra.copy.path, "push", "-q", "origin", extra.copy.branch);
+    git(extra.github, "fetch", "-q", "origin", extra.copy.branch);
+    git(extra.github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(extra.github, "commit", "-qm", "squash");
+    git(extra.github, "push", "-q", "origin", "main");
+    write(extra.copy.path, "extra.txt", "not pushed\n");
+
+    const extraRes = await apply(extra.copy, extra.owner);
+    expect(extraRes.pulled).toBeUndefined();
+    expect(read(extra.repo, "extra.txt")).toBe("not pushed\n");
+
+    // 2. Local main has an unpushed commit (diverged from origin/main), so it cannot fast-forward.
+    const diverged = await remoteRepoWithCopy({ "a.txt": LINES, "local.txt": "0\n" }, "task-div");
+    write(diverged.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(diverged.copy.path, "commit", "-qam", "agent");
+    git(diverged.copy.path, "push", "-q", "origin", diverged.copy.branch);
+    git(diverged.github, "fetch", "-q", "origin", diverged.copy.branch);
+    git(diverged.github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(diverged.github, "commit", "-qm", "squash");
+    git(diverged.github, "push", "-q", "origin", "main");
+    write(diverged.repo, "local.txt", "local commit\n");
+    git(diverged.repo, "commit", "-qam", "local only");
+
+    const divRes = await apply(diverged.copy, diverged.owner);
+    expect(divRes.pulled).toBeUndefined();
+    expect(read(diverged.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
+    expect(read(diverged.repo, "local.txt")).toBe("local commit\n");
+
+    // 3. Remote is unreachable (offline): Apply does not fail and applies locally as uncommitted edits.
+    const offline = await remoteRepoWithCopy({ "a.txt": LINES }, "task-off");
+    write(offline.copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(offline.copy.path, "commit", "-qam", "agent");
+    fs.rmSync(offline.remote, { recursive: true, force: true });
+
+    const offRes = await apply(offline.copy, offline.owner);
+    expect(offRes).toEqual({ files: ["a.txt"], conflicts: [], kept: [] });
+    expect(read(offline.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
+  });
+});
+
