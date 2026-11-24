@@ -297,6 +297,20 @@ const turnId = () => `t${Date.now().toString(36)}${Math.random().toString(36).sl
  * through the CLI chosen in Settings, and carrying plans out. Starting goes through Code's own
  * `startEngine`, each CLI in a new branch's folder beside its workspace.
  */
+/** One step of a plan in a few words, for telling the planner what still waits for Go. */
+export function stepSummary(step: OrchestratorStep): string {
+  const parts: string[] = [step.kind];
+  const action = (step as { action?: string }).action;
+  if (action) parts.push(action);
+  if (step.target) parts.push(step.target);
+  if (step.engineId) parts.push(step.engineId);
+  if (step.agentId) parts.push(`agent ${step.agentId}`);
+  if (step.workspaceId) parts.push(`in ${step.workspaceId}`);
+  const said = step.prompt.trim();
+  if (said) parts.push(`"${said.length > 80 ? `${said.slice(0, 79)}…` : said}"`);
+  return parts.join(" ");
+}
+
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
@@ -878,6 +892,10 @@ export class OrchestratorDesk {
     const imageLine = savedImages.length
       ? `(${savedImages.length === 1 ? "Attached screenshot saved on disk" : "Attached screenshots saved on disk"}: ${savedImages.map((img) => img.path).join(", ")})`
       : "";
+    // A plan that waits for Go hasn't run: say so, or the planner takes "great" or "you didn't do it"
+    // as thanks for work it only proposed (a real call, 2026-11-25).
+    const waiting = [...this.conversation.turns].reverse().find((item) => item.plan === "waiting" && item.steps?.length);
+    const waitingLine = waiting?.steps?.length ? `(Your last plan is waiting for the person's Go and has NOT run yet: ${waiting.steps.map(stepSummary).join("; ")}.)` : "";
     let capturedInitialRules = this.conversation.initialRules;
     const turn = async (said: string, ctx: PlanContext = context, includeImages = false) => {
       const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
@@ -888,6 +906,7 @@ export class OrchestratorDesk {
       const turnImages = includeImages ? savedImages : [];
       const prefix = [
         here,
+        waitingLine,
         includeImages ? imageLine : "",
         liveLine,
         this.conversation.begun ? settingsLine : "",

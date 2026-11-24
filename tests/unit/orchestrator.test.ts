@@ -650,6 +650,29 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("tells the planner a plan still waits for Go, so it never takes thanks for work that didn't run", async () => {
+    const repo = gitRepo();
+    // A real call on 2026-11-25: a plan waited, the person said "Great.", and the planner answered
+    // "Glad that's sorted" as if it had run.
+    const ctx = withPlanner([
+      { say: "I'll start Argy in shop.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "Fix it." }] },
+      { say: "It's ready: say go and it runs.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "Fix it." }] },
+    ]);
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("start argy in shop and fix it");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    expect(ctx.calls[0].argv.join("\n")).not.toContain("waiting for the person's Go");
+    await ctx.svc.orchestratorAsk("Great.");
+    const asked = ctx.calls[1].argv.join("\n");
+    expect(asked).toContain("(Your last plan is waiting for the person's Go and has NOT run yet: start argy in shop");
+    expect(asked).toContain('"Fix it."');
+    // The rules ask for what will happen, not what's done, and to put a waiting plan back on the card.
+    expect(ctx.calls[0].argv.join("\n")).toContain("never as done or underway");
+    expect(ctx.calls[0].argv.join("\n")).toContain("return those same steps again");
+    expect(ctx.svc.orchestratorView().turns.at(-1)?.plan).toBe("waiting");
+    ctx.svc.close();
+  });
+
   it("skips a step chained after one that didn't carry out", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([]);
