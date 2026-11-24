@@ -24,7 +24,7 @@ import type {
   OrchestratorTurn,
   OrchestratorView as View,
 } from "../../shared/api.js";
-import { cleanModel } from "../../shared/launch-options.js";
+import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
 import { brainKind, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
@@ -444,13 +444,20 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
     if (locked) setAnchor(null);
   }, [locked]);
 
+  const effortPick = engine && settings && (
+    <PlannerEffortLabel engine={engine} current={settings.orchestrator} onSave={(next) => void save(next)} />
+  );
+
   if (locked) {
     return (
-      <span className="viby-model locked" {...tipProps(t("orch.modelLocked"))}>
-        <span>{engineLabel}</span>
-        <span className="faint">·</span>
-        <span className="mono">{modelLabel}</span>
-      </span>
+      <>
+        <span className="viby-model locked" {...tipProps(t("orch.modelLocked"))}>
+          <span>{engineLabel}</span>
+          <span className="faint">·</span>
+          <span className="mono">{modelLabel}</span>
+        </span>
+        {effortPick}
+      </>
     );
   }
 
@@ -478,6 +485,62 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
           onClose={() => setAnchor(null)}
         />
       )}
+      {effortPick}
+    </>
+  );
+}
+
+/**
+ * The planner's reasoning effort, beside its model: only the levels that CLI takes (none, and no
+ * button, for one without an effort option). It is read on every turn, typed or spoken, so it can
+ * change during a call too.
+ */
+function PlannerEffortLabel({ engine, current, onSave }: { engine: Engine; current: OrchestratorSettings; onSave: (next: OrchestratorSettings) => void }) {
+  const t = useT();
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const levels = effortLevels(engine);
+  const mine = engine.id === current.engine;
+  const chosen = mine ? (current.effort ?? "") : "";
+  if (!levels.length && !chosen) return null;
+  // Left empty, it plans at low, or at the level an Antigravity model names itself.
+  const shown = chosen || modelOwnEffort(engine, mine ? current.model : "") || "low";
+  const pick = (effort: string) => {
+    onSave({ ...current, engine: engine.id, model: mine ? current.model : "", effort });
+    setAnchor(null);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="viby-model"
+        aria-expanded={Boolean(anchor)}
+        aria-label={t("orch.effort")}
+        {...tipProps(t("orch.effortHint"))}
+        onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}
+      >
+        <span className="mono">{t("orch.effortIs", { effort: shown })}</span>
+        <ChevronDown size={12} className="faint" />
+      </button>
+      {anchor && (
+        <Popover anchor={anchor} onClose={() => setAnchor(null)}>
+          <div className="viby-model-popover">
+            <div className="list-label">{t("orch.effort")}</div>
+            {["", ...(chosen && !levels.includes(chosen) ? [chosen] : []), ...levels].map((level) => (
+              <button
+                key={level || "default"}
+                type="button"
+                role="menuitemradio"
+                aria-checked={chosen === level}
+                className="menu-item"
+                onClick={() => pick(level)}
+              >
+                <span className="viby-menu-check">{chosen === level && <Check size={13} />}</span>
+                <span className={`grow truncate${level ? " mono" : ""}`}>{level ? t("orch.effortIs", { effort: level }) : t("orch.effortLowDefault")}</span>
+              </button>
+            ))}
+          </div>
+        </Popover>
+      )}
     </>
   );
 }
@@ -502,6 +565,13 @@ function ModelPopover({
   const activeEngine = engines.find((item) => item.id === engineId);
   const isClaude = Boolean(activeEngine && brainKind(activeEngine) === "claude");
   const activeModel = engineId === current.engine ? current.model : "";
+  // Another model keeps the effort only where it is still valid for it.
+  const withModel = (model: string): OrchestratorSettings => ({
+    ...current,
+    engine: engineId,
+    model,
+    effort: activeEngine ? effortForModel(activeEngine, model, engineId === current.engine ? current.effort : "") : "",
+  });
   const [models, setModels] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [custom, setCustom] = useState(false);
@@ -563,7 +633,7 @@ function ModelPopover({
           aria-checked={activeModel === "" && !custom}
           className="menu-item"
           onClick={() => {
-            onSave({ ...current, engine: engineId, model: "" });
+            onSave(withModel(""));
             onClose();
           }}
         >
@@ -592,7 +662,7 @@ function ModelPopover({
               aria-checked={selected}
               className="menu-item"
               onClick={() => {
-                onSave({ ...current, engine: engineId, model: name });
+                onSave(withModel(name));
                 onClose();
               }}
             >
@@ -614,7 +684,7 @@ function ModelPopover({
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {
                   const cleaned = cleanModel(typed);
-                  onSave({ ...current, engine: engineId, model: cleaned });
+                  onSave(withModel(cleaned));
                   onClose();
                 } else if (event.key === "Escape") {
                   event.preventDefault();

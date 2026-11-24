@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanModel, effortLevels, launchKind, launchOptionArgs, planLaunch, takesModel } from "../../src/core/engines.js";
+import { effortForModel, modelOwnEffort } from "../../src/shared/launch-options.js";
 import type { EngineRow } from "../../src/core/types.js";
 
 const row = (id: string, bin = id): EngineRow => ({ id, label: id, bin, args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] });
@@ -25,6 +26,26 @@ describe("a CLI's model and effort", () => {
     expect(effortLevels(row("kimi"))).toEqual([]);
     expect(effortLevels(row("cursor-agent"))).toEqual([]);
     expect(effortLevels(row("crush"))).toEqual([]);
+  });
+
+  it("keeps a planner's effort through a model change only where the new model takes it", () => {
+    // Viby's effort picker offers each planner's own levels.
+    expect(effortLevels(row("agy"))).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // A level the CLI takes stays; one it doesn't goes back to the default.
+    expect(effortForModel(row("claude"), "opus", "xhigh")).toBe("xhigh");
+    expect(effortForModel(row("claude"), "sonnet", "High")).toBe("high");
+    expect(effortForModel(row("codex"), "gpt-5.5", "max")).toBe("");
+    expect(effortForModel(row("codex"), "", "minimal")).toBe("minimal");
+    expect(effortForModel(row("claude"), "opus", "minimal")).toBe("");
+    expect(effortForModel(row("claude"), "opus", undefined)).toBe("");
+    expect(effortForModel(row("kimi"), "k3", "high")).toBe("");
+    // An Antigravity id that names its level takes that level, so the model picked is the one that runs.
+    expect(modelOwnEffort(row("agy"), "gemini-4-neon-high")).toBe("high");
+    expect(modelOwnEffort(row("agy"), "gemini-pro-orchestrator")).toBe("");
+    expect(modelOwnEffort(row("claude"), "something-high")).toBe("");
+    expect(effortForModel(row("agy"), "gemini-4-neon-high", "max")).toBe("high");
+    expect(effortForModel(row("agy"), "gemini-3.8-pro", "max")).toBe("max");
+    expect(effortForModel(row("claude"), "something-high", "max")).toBe("max");
   });
 
   it("turns a model and an effort into each CLI's own options, and leaves out what it doesn't take", () => {

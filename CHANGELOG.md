@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-11-24
+
+**3.5.0: an effort picker beside Viby's model, and Open in the file manager works again.**
+
+### Added
+
+- **An effort picker beside Viby's model.** The Viby panel and the Viby bar now show the planner's reasoning effort next to its model, offering only the levels that planner takes (Claude Code: low to max; Codex: minimal to xhigh; Antigravity: low to max). It is the same setting as **Effort** in Settings → Viby, so typed and spoken turns both use it, and it is kept across restarts.
+
+### Changed
+
+- **Picking another planner model keeps the effort only if it still fits.** An effort the new model doesn't take goes back to the default, and an Antigravity model that names its own level (`gemini-4-neon-high`) takes that level. This applies in the Viby panel, in Settings, and when you ask Viby to switch its model.
+
+### Fixed
+
+- **Open in the file manager opens the folder again.** Clicking a workspace's path at the top of Code, and every other button that opens a folder (a run's folder, Settings → Storage, the file tree, a chat's or an agent's folder), did nothing since 3.3.0: the path went to `xdg-open` after a `--`, which `xdg-open` refuses as an unknown option. The folder now opens in your file manager.
+
 ## [3.4.2] - 2026-11-23
 
 **3.4.2: Viby's detail popovers show all of themselves.**
@@ -1043,7 +1059,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.4.2...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.5.0
 [3.4.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.2
 [3.4.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.1
 [3.4.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.0
