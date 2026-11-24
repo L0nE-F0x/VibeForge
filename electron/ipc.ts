@@ -157,14 +157,23 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "updates.get": () => updater.get(),
     "updates.check": () => updater.check(),
     "updates.run": async (size) => {
-      if (install === "installer" && !updater.get().available && !process.env.VIBEFORGE_UPDATE_COMMAND) {
+      if (install === "installer" && !updater.get().command && !process.env.VIBEFORGE_UPDATE_COMMAND) {
         await updater.check().catch(() => undefined);
       }
-      const command = updater.get().command;
-      if (!command) throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
+      const info = updater.get();
+      if (!info.command) {
+        if (install === "installer") {
+          throw new Error(
+            info.error
+              ? `Could not verify this release's SHA-256 checksum (${info.error}), so VibeForge refused to run its installer.`
+              : "This release has no verified SHA-256 checksum from GitHub, so VibeForge refused to run its installer.",
+          );
+        }
+        throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
+      }
       // The kind of copy, never the command: a packager's VIBEFORGE_UPDATE_COMMAND can hold a secret.
       log.info(`Update started for the ${install} copy${process.env.VIBEFORGE_UPDATE_COMMAND ? " (VIBEFORGE_UPDATE_COMMAND)" : ""}`);
-      return s().startCommand({ command, title: "VibeForge update", cwd: os.homedir(), ...size });
+      return s().startCommand({ command: info.command, title: "VibeForge update", cwd: os.homedir(), ...size });
     },
 
     "settings.get": () => s().getSettings(),

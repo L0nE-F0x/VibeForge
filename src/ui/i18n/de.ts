@@ -558,6 +558,7 @@ export const de: Catalog = {
   "updates.installOther": "Auf anderem Weg installiert, in {path}. Aktualisiere es so, wie du es installiert hast.",
   "updates.sheetTitle": "VibeForge aktualisieren",
   "updates.willRun": "Jetzt aktualisieren führt dies in einem Terminal aus, damit du zusehen kannst:",
+  "updates.noDigest": "Für diese Version fehlt die verifizierte SHA-256-Prüfsumme von GitHub, daher führt VibeForge den Installer nicht automatisch aus.",
   "updates.now": "Jetzt aktualisieren",
   "updates.notes": "Versionshinweise",
   "updates.noNotes": "Diese Version hat keine Hinweise.",
@@ -2051,6 +2052,8 @@ export const de: Catalog = {
   "core.orchBadImage": "Nicht unterstütztes Bildformat.",
   "core.orchImageTooBig": "Dieses Bild ist größer als 10 MB.",
   "core.orchApprovalWaiting": "Diese CLI wartet auf eine Freigabeabfrage; sag Los, um zu antworten.",
+  "core.updateNoDigest": "Dieses Release hat keine geprüfte SHA-256-Prüfsumme von GitHub; VibeForge hat die Installation abgelehnt.",
+  "core.updateVerifyFailed": "Die SHA-256-Prüfsumme dieses Releases konnte nicht geprüft werden ({detail}); VibeForge hat die Installation abgelehnt.",
   "orch.attachImage": "Bild anhängen",
   "orch.removeImage": "Bild entfernen",
 };

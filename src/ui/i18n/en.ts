@@ -569,6 +569,7 @@ export const en = {
   "updates.installOther": "Installed some other way, in {path}. Update it the way you installed it.",
   "updates.sheetTitle": "Update VibeForge",
   "updates.willRun": "Update now runs this in a terminal, so you can watch it:",
+  "updates.noDigest": "This release has no verified SHA-256 checksum from GitHub, so VibeForge will not run its installer automatically.",
   "updates.now": "Update now",
   "updates.notes": "Release notes",
   "updates.noNotes": "This release has no notes.",
@@ -2064,6 +2065,8 @@ export const en = {
   "core.orchBadImage": "Unsupported image format.",
   "core.orchImageTooBig": "That image is larger than 10 MB.",
   "core.orchApprovalWaiting": "That CLI is waiting on an approval prompt; say Go to answer it.",
+  "core.updateNoDigest": "This release has no verified SHA-256 checksum from GitHub, so VibeForge refused to run its installer.",
+  "core.updateVerifyFailed": "Could not verify this release's SHA-256 checksum ({detail}), so VibeForge refused to run its installer.",
   "orch.attachImage": "Attach image",
   "orch.removeImage": "Remove image",
 } as const;

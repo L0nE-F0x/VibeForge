@@ -559,6 +559,7 @@ export const ja: Catalog = {
   "updates.installOther": "別の方法で {path} にインストールされています。インストールしたときと同じ方法でアップデートしてください。",
   "updates.sheetTitle": "VibeForge をアップデート",
   "updates.willRun": "「今すぐアップデート」を押すと、次のコマンドをターミナルで実行します。様子はそのまま見られます：",
+  "updates.noDigest": "このリリースにはGitHubの検証済みSHA-256チェックサムがないため、VibeForgeはインストーラーを自動実行しません。",
   "updates.now": "今すぐアップデート",
   "updates.notes": "リリースノート",
   "updates.noNotes": "このリリースにはノートがありません。",
@@ -2052,6 +2053,8 @@ export const ja: Catalog = {
   "core.orchBadImage": "対応していない画像形式です。",
   "core.orchImageTooBig": "この画像は 10 MB を超えています。",
   "core.orchApprovalWaiting": "その CLI は承認プロンプトで待機中です。応答するには Go と言ってください。",
+  "core.updateNoDigest": "このリリースには GitHub の検証済み SHA-256 チェックサムがないため、VibeForge はインストーラーの実行を拒否しました。",
+  "core.updateVerifyFailed": "このリリースの SHA-256 チェックサムを確認できなかったため（{detail}）、VibeForge はインストーラーの実行を拒否しました。",
   "orch.attachImage": "画像を添付",
   "orch.removeImage": "画像を削除",
 };

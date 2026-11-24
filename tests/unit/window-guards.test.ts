@@ -95,5 +95,32 @@ describe("IPC method lookup", () => {
       await expect(handler(event, method), method).rejects.toThrow(`Unknown call ${method}`);
     }
   });
+
+  it("refuses updates.run on an installer copy when no verified command exists", async () => {
+    const { registerIpc } = await import("../../electron/ipc.js");
+    const file = "/opt/Vibe Forge/dist/index.html";
+    const webContents = { id: 1 };
+    const startCommand = vi.fn();
+    const check = vi.fn(async () => ({ available: true, current: "3.6.0", latest: null, command: null, error: null }));
+    const ctx = {
+      win: { webContents },
+      page: { file },
+      install: "installer",
+      svc: () => ({ startCommand }),
+      log: { warn: () => undefined, info: () => undefined },
+    } as unknown as Parameters<typeof registerIpc>[0];
+    const parts = {
+      updater: {
+        get: () => ({ available: true, current: "3.6.0", latest: { tag: "v3.7.0" }, command: null, error: null }),
+        check,
+      },
+    } as unknown as Parameters<typeof registerIpc>[1];
+    registerIpc(ctx, parts);
+    const handler = registered.get("vf:call")!;
+    const event = { sender: webContents, senderFrame: { url: pathToFileURL(file).href } };
+    await expect(handler(event, "updates.run")).rejects.toThrow("SHA-256");
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(startCommand).not.toHaveBeenCalled();
+  });
 });
 

@@ -187,6 +187,11 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
           <code className="update-command selectable">{info.command}</code>
         </div>
       )}
+      {info.available && info.install === "installer" && !info.command && !ptyId && !updated && (
+        <Notice tone="bad" icon={XCircle}>
+          {t("updates.noDigest")}
+        </Notice>
+      )}
       {ptyId && (
         <>
           <div className="update-term">

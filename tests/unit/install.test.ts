@@ -607,4 +607,27 @@ describe("the installer with ready-made builds", () => {
     expect(result.out).toContain("sudo apt-get install -y curl");
     expect(result.out).not.toContain("pacman");
   });
+
+  it("restricts curl to HTTPS protocols and redirects when fetching from an https:// release URL", () => {
+    const httpsHome = path.join(dir, "home-https");
+    const stubBin = path.join(dir, "https-bin");
+    const curlLog = path.join(dir, "curl-https.argv");
+    fs.mkdirSync(httpsHome, { recursive: true });
+    fs.mkdirSync(stubBin, { recursive: true });
+    fs.writeFileSync(
+      path.join(stubBin, "curl"),
+      `#!/bin/sh\nprintf '%s\n' "$*" > "${curlLog}"\nexit 22\n`,
+      { mode: 0o755 },
+    );
+
+    const result = install([], {
+      home: httpsHome,
+      path: `${stubBin}:${stubs}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+      env: { VIBEFORGE_RELEASES: "https://github.com/L0nE-F0x/VibeForge/releases" },
+    });
+    expect(result.status).not.toBe(0);
+    const argv = fs.readFileSync(curlLog, "utf8");
+    expect(argv).toContain("--proto =https");
+    expect(argv).toContain("--proto-redir =https");
+  });
 });

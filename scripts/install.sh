@@ -154,8 +154,12 @@ latest_release_tag() {
   LATEST_TAG=""
   [[ -n "$RELEASES" ]] || return 0
   command -v curl >/dev/null 2>&1 || die "curl is missing. Install it with: $(pkg_hint curl)"
-  local out status=0 code url
-  out=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
+  local out status=0 code url proto=()
+  # Remote downloads must stay on HTTPS across redirects; tests and release builds use local fixtures.
+  if [[ "$RELEASES" != file://* && ! "$RELEASES" =~ ^http://(127\.0\.0\.1|localhost|\[::1\])([:/]|$) ]]; then
+    proto=(--proto =https --proto-redir =https)
+  fi
+  out=$(curl -sS "${proto[@]}" -o /dev/null -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
   ((status == 0)) || die "Could not reach GitHub to find the latest release (curl error $status). Check the network, then run this again."
   code="${out%% *}"
   url="${out#* }"
@@ -199,8 +203,11 @@ fetch_archive() {
   FETCHED="$DEST.download"
   rm -rf "$FETCHED"
   mkdir -p "$FETCHED"
-  local code
-  code=$(curl -sSL --retry 2 --connect-timeout 20 --max-time 60 -o "$FETCHED/SHA256SUMS" -w '%{http_code}' "$RELEASES/download/$tag/SHA256SUMS") || status=$?
+  local code proto=()
+  if [[ "$RELEASES" != file://* && ! "$RELEASES" =~ ^http://(127\.0\.0\.1|localhost|\[::1\])([:/]|$) ]]; then
+    proto=(--proto =https --proto-redir =https)
+  fi
+  code=$(curl -sSL "${proto[@]}" --retry 2 --connect-timeout 20 --max-time 60 -o "$FETCHED/SHA256SUMS" -w '%{http_code}' "$RELEASES/download/$tag/SHA256SUMS") || status=$?
   # Only "not found" means a release from before these builds: GitHub's 404, or a file:// path that
   # isn't there. Any other answer (a rate limit, GitHub having a bad moment) stops, rather than
   # quietly building from source for a minute or asking for build tools nobody needs.
@@ -222,7 +229,7 @@ fetch_archive() {
   # that stalls for a minute gives up instead of waiting forever.
   local progress=(-sS)
   [[ -t 2 ]] && progress=(--progress-bar)
-  curl -fL "${progress[@]}" --retry 2 --connect-timeout 20 --speed-limit 1024 --speed-time 60 -o "$FETCHED/$file" "$RELEASES/download/$tag/$file" ||
+  curl -fL "${proto[@]}" "${progress[@]}" --retry 2 --connect-timeout 20 --speed-limit 1024 --speed-time 60 -o "$FETCHED/$file" "$RELEASES/download/$tag/$file" ||
     die "The download stopped part-way. Check the network, then run this again."
   actual=$(sha256sum "$FETCHED/$file")
   actual="${actual%% *}"
