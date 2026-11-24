@@ -19,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
   - agent talk turned on, given a lead or allowed more than now
 
   And when Viby has read a screen, file, diff or reply to make a plan, only steps that just look run without Go. What Viby read could be steering it. "Remember …" typed by you still saves at once.
+- **A paired machine can't widen what it syncs with this one.** It can still narrow a share, for example to files only or to one direction. If it tries to widen one, the share stays as it was and you're told: syncing both ways where you chose one, or starting to sync `.git` where you chose files only. You change it in Settings → Sync if you agree.
+- **Sync keeps submodules' git hooks and settings to each machine**, as it already did for the repository's own.
+- **A folder that holds other workspaces can't be synced as one**, so `~/Projects` can't send or take every project in it at once.
 - **The first message between CLIs in two different workspaces waits for you.** Under Ask first, the default in Settings → Agents together, a CLI's first `vibeforge tell` to a CLI working in another workspace goes into that CLI's prompt without pressing Enter. You send it, and from then on the two can talk freely. CLIs in the same workspace, and Go ahead, work as before.
 
 ## [3.6.2] - 2026-11-25

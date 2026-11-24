@@ -37,6 +37,7 @@ Every change runs `npm test` (1034 tests at 3.6.2, including the real PTY host d
 - Viby's (formerly Maestro's) checkouts made before 2.14 (`<project>.worktrees/<branch>`) get no Apply or Discard; remove them by hand.
 - The phone page buzzes only while it is open; a locked phone would need Web Push.
 - Sync: a synced agent or skill goes to every paired machine; there's no picking which. Its brief, memory and skills from a paired machine become part of its prompt here, so pair only machines you trust.
+- Sync: a paired machine can narrow a share but never widen it (both ways where you chose one, or `.git` where you chose files only); it asks, and you change it in Settings → Sync. Two-way sync of a workspace still means the other machine's files arrive here, including ones that run code when you work in the folder (package scripts, `.envrc`, a CLI's own settings), so pair only machines you trust.
 - Sync: a workspace syncs with one other machine. A synced workspace is one checkout on two machines: when they were on different branches while apart, the branch switched to last is the one both end up on (the other's commits stay on their branch). With a firewall on both machines and neither opened, they can't connect: Settings → Sync shows the command.
 
 ## Risks

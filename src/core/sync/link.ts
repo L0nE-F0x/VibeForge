@@ -115,6 +115,25 @@ export interface Settled {
   offers: LinkOffer[];
   /** Shares the other machine ended (or declined), now ended here too. */
   ended: ShareRecord[];
+  /** Changes the other machine made that would widen a share here, not taken over (a person makes them here). */
+  widened: Array<{ share: ShareRecord; mode: SyncMode; filesOnly: boolean; rev: number }>;
+}
+
+/** What flows each way for a share, from this machine: `in` when it takes the other's changes, `out` when it sends its own. */
+function flows(mode: SyncMode): { in: boolean; out: boolean } {
+  return { in: mode !== "send", out: mode !== "receive" };
+}
+
+/**
+ * Whether going from one setting to another lets more through: a direction this machine didn't
+ * allow, or `.git` as well as the files. A paired machine may narrow a share on its own, never widen
+ * it (decision D2, 2026-11-25): a widened share could write into this machine, or send it what it
+ * didn't choose to share.
+ */
+export function widens(from: { mode: SyncMode; filesOnly: boolean }, to: { mode: SyncMode; filesOnly: boolean }): boolean {
+  const before = flows(from.mode);
+  const after = flows(to.mode);
+  return (after.in && !before.in) || (after.out && !before.out) || (from.filesOnly && !to.filesOnly);
 }
 
 /**
@@ -126,6 +145,7 @@ export function settleWithLink(state: SyncState, myId: string, machineId: string
   const next: SyncState = structuredClone(state);
   let changed = false;
   const ended: ShareRecord[] = [];
+  const widened: Settled["widened"] = [];
   next.shares = next.shares.filter((share) => {
     if (share.machineId !== machineId || !link.stopped.includes(share.folderId)) return true;
     ended.push(share);
@@ -139,6 +159,10 @@ export function settleWithLink(state: SyncState, myId: string, machineId: string
     const wanted = { mode: mirrorMode(theirs.mode), filesOnly: theirs.filesOnly };
     const same = wanted.mode === share.mode && wanted.filesOnly === share.filesOnly;
     if (theirs.rev > share.rev || (theirs.rev === share.rev && !same && machineId < myId)) {
+      if (widens(share, wanted)) {
+        widened.push({ share: structuredClone(share), mode: wanted.mode, filesOnly: wanted.filesOnly, rev: theirs.rev });
+        continue;
+      }
       share.mode = wanted.mode;
       share.filesOnly = wanted.filesOnly;
       share.rev = theirs.rev;
@@ -157,5 +181,5 @@ export function settleWithLink(state: SyncState, myId: string, machineId: string
     if (next.shares.some((share) => share.folderId === folderId) || next.stopped[folderId] === machineId) continue;
     offers.push({ folderId, name: theirs.name, mode: mirrorMode(theirs.mode), filesOnly: theirs.filesOnly, hint: theirs.hint });
   }
-  return { state: next, changed, offers, ended };
+  return { state: next, changed, offers, ended, widened };
 }
