@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Typing into Viby works again.** Each key you typed into Viby's message box was erased as soon as it landed, so the box stayed empty and only voice or clicking got through. Typed and pasted text now stays in the box.
+- **Viby's box empties when you send.** After the first message of a conversation, the box filled with what you had just sent, and your next message went out joined to it.
+- **"Go" counts however you say it.** A plan waiting for Go now runs when you say or type "Go, go, go", "I said go", "just do it now" or "yes, go ahead", and it is cancelled by "no, no" or "I said cancel", in all seven languages. Before, only a few exact phrases worked; anything else went to the planner, which made another plan that waited again. A longer request such as "go to Settings" still goes to Viby.
+
 ## [3.6.0] - 2026-11-24
 
 **3.6.0: Apply pulls merged PRs automatically, and a cleaner Viby panel.**
