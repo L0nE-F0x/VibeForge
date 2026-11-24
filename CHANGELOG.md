@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-11-25
+
+**3.6.2: the browser dock, Viby's approvals, git, your folders and Update are locked down.**
+
 ### Security
 
 - **Pages in the browser dock can't use your microphone, camera or clipboard.** Since 3.3.0 the dock's pages ran in a session of their own, without the permission lockdown the window has, so a page opened there could use the microphone, camera, clipboard reading, notifications and device pickers without asking. Every session now refuses them.
@@ -1096,7 +1100,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.2...HEAD
+[3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2
 [3.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.1
 [3.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.0
 [3.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.5.0
