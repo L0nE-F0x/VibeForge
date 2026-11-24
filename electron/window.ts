@@ -2,7 +2,7 @@ import path from "node:path";
 import { app, BrowserWindow, nativeImage, session, shell } from "electron";
 import { PageErrors } from "../src/core/log.js";
 import type { Dock } from "./dock.js";
-import { isAppPage, permissionAllowed } from "./guards.js";
+import { guardSession, guardWebContents, isAppPage } from "./guards.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
 import type { Quit } from "./quit.js";
@@ -27,12 +27,10 @@ export class MainWindow {
     },
   ) {}
 
-  /** Electron allows every permission unless told otherwise; see permissionAllowed. */
+  /** Electron allows every permission unless told otherwise; see guardSession. */
   guardPermissions(): void {
     const { ctx } = this;
-    const allowed = (contents: Electron.WebContents | null, permission: string) => permissionAllowed(Boolean(ctx.win && contents === ctx.win.webContents), permission);
-    session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(allowed(contents, permission)));
-    session.defaultSession.setPermissionCheckHandler((contents, permission) => allowed(contents, permission));
+    guardSession(session.defaultSession, (contents) => Boolean(ctx.win && contents === ctx.win.webContents));
   }
 
   async create(): Promise<void> {
@@ -62,6 +60,7 @@ export class MainWindow {
       },
     });
     ctx.win = win;
+    guardWebContents(win.webContents);
     win.once("ready-to-show", () => {
       if (!(startHidden && ctx.service?.getSettings().tray)) {
         ctx.win?.show();

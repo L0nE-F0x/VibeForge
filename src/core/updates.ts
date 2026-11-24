@@ -110,27 +110,21 @@ export function installKind(appRoot: string, found: { installerHome: string; mar
 
 /**
  * The shell command that updates this copy, shown and run in a terminal (bash), or null when it
- * updates some other way (a distro package). `override` is for packagers and tests.
+ * updates some other way (a distro package) or when the installer release has no verified SHA-256
+ * digest. `override` is for packagers and tests.
  *
- * An installer copy runs the install.sh of the release the update check read, from GitHub, after
- * checking it against the SHA-256 GitHub reports for it, and installs that release. Until a
- * release has been read, it runs the latest release's install.sh. A git checkout pulls and builds,
- * with `npm ci` so the lockfile isn't rewritten under the next pull.
+ * An installer copy runs the install.sh of the release the update check read, from GitHub over
+ * HTTPS only, only after checking it against the SHA-256 GitHub reports for it. A git checkout
+ * pulls and builds, with `npm ci` so the lockfile isn't rewritten under the next pull.
  */
 export function updateCommand(kind: InstallKind, appRoot: string, override?: string, release?: Release | null): string | null {
   if (override?.trim()) return override.trim();
   const home = `VIBEFORGE_HOME=${shellQuote(appRoot)}`;
   if (kind === "installer") {
     const installer = release?.installer;
-    if (installer && TAG.test(release.tag)) {
-      const check = installer.sha256
-        ? ` && { echo ${shellQuote(`${installer.sha256}  `)}"$f" | sha256sum --check --status || { echo "This installer does not match the checksum GitHub lists for ${release.tag}, so it was not run." >&2; exit 1; }; }`
-        : "";
-      return `f="$(mktemp)" && trap 'rm -f "$f"' EXIT && curl -fsSL --retry 2 -o "$f" ${shellQuote(installer.url)}${check} && ${home} VIBEFORGE_VERSION=${release.tag} bash "$f"`;
-    }
-    // pipefail: with no network curl fails and bash reads nothing, which on its own exits 0, and
-    // the dialog would offer a restart into the old version.
-    return `set -o pipefail; curl -fsSL ${INSTALL_URL} | ${home} bash`;
+    if (!installer?.sha256 || !release || !TAG.test(release.tag)) return null;
+    const check = ` && { echo ${shellQuote(`${installer.sha256}  `)}"$f" | sha256sum --check --status || { echo "This installer does not match the checksum GitHub lists for ${release.tag}, so it was not run." >&2; exit 1; }; }`;
+    return `f="$(mktemp)" && trap 'rm -f "$f"' EXIT && curl -fsSL --proto =https --proto-redir =https --retry 2 -o "$f" ${shellQuote(installer.url)}${check} && ${home} VIBEFORGE_VERSION=${release.tag} bash "$f"`;
   }
   if (kind === "checkout") return `cd ${shellQuote(appRoot)} && git pull --ff-only && npm ci --no-audit --no-fund && npm run build`;
   return null;

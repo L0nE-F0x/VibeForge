@@ -178,9 +178,10 @@ export class Library {
 
   writeAgent(agent: Agent): void {
     const dir = path.join(this.configRoot, "agents", agent.id);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
     const memoryPath = path.join(dir, "memory.md");
-    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER);
+    if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER, { mode: 0o600 });
     writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
     this.cache.forget(path.join(dir, "agent.yaml"));
   }
@@ -231,7 +232,10 @@ export class Library {
   }
 
   writeSkill(skill: Skill): void {
-    writeFileAtomic(path.join(this.configRoot, "skills", skill.id, "SKILL.md"), skillDocument(skill));
+    const dir = path.join(this.configRoot, "skills", skill.id);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
+    writeFileAtomic(path.join(dir, "SKILL.md"), skillDocument(skill));
   }
 
   /** Where a skill, routine or task lives on disk, for moving it aside (see Trash). Null for a bad id. */

@@ -558,6 +558,7 @@ export const es: Catalog = {
   "updates.installOther": "Instalado de otra forma, en {path}. Actualízalo como lo instalaste.",
   "updates.sheetTitle": "Actualizar VibeForge",
   "updates.willRun": "Actualizar ahora ejecuta esto en un terminal, para que puedas verlo:",
+  "updates.noDigest": "Esta versión no tiene una suma de comprobación SHA-256 verificada de GitHub, por lo que VibeForge no ejecutará su instalador automáticamente.",
   "updates.now": "Actualizar ahora",
   "updates.notes": "Notas de la versión",
   "updates.noNotes": "Esta versión no tiene notas.",
@@ -2050,6 +2051,9 @@ export const es: Catalog = {
   "core.orchMemoryEmpty": "Escribe algo para guardar en memoria.",
   "core.orchBadImage": "Formato de imagen no compatible.",
   "core.orchImageTooBig": "Esa imagen pesa más de 10 MB.",
+  "core.orchApprovalWaiting": "Esa CLI espera una confirmación de permiso; di Adelante para responder.",
+  "core.updateNoDigest": "Esta versión no tiene una suma SHA-256 verificada de GitHub, así que VibeForge se negó a ejecutar el instalador.",
+  "core.updateVerifyFailed": "No se pudo verificar la suma SHA-256 de esta versión ({detail}), así que VibeForge se negó a ejecutar el instalador.",
   "orch.attachImage": "Adjuntar imagen",
   "orch.removeImage": "Quitar imagen",
 };

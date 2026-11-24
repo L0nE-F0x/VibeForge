@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { detectWaitingPrompt, isFreeWaitingPrompt } from "../../shared/orchestrator-intel.js";
 import { HUMAN_DRAFT_MS, pairKey } from "../agent-talk.js";
 import { isCodingCli } from "../checkout.js";
 import type { LiveSession } from "../types.js";
@@ -22,8 +23,8 @@ interface Pending {
   /** Counted against the two CLIs' limit (a person's draft and review steps aren't). */
   counts: boolean;
   waiter: WaitSpec | null;
-  /** It went in; `draft` when without Enter, as it was queued or because the two reached their limit while it waited. */
-  delivered?: (draft: boolean) => void;
+  /** It went in; `draft` when without Enter, because of the limit or a non-free prompt on screen. */
+  delivered?: (draft: boolean, reason?: "limit" | "prompt") => void;
   dropped: (why: string) => void;
 }
 
@@ -175,8 +176,13 @@ export class Delivery {
         item.dropped("That CLI isn't running any more.");
         continue;
       }
+      const screen = this.core.options.host.screen ? await this.core.options.host.screen(item.toPty).catch(() => "") : "";
+      const waiting = detectWaitingPrompt(screen);
+      const onPrompt = Boolean(waiting && !isFreeWaitingPrompt(waiting));
       // The limit is checked again now: messages queued while the CLI was busy all passed it then.
-      const enter = item.enter && !(item.counts && this.atLimit(item.fromPty, item.toPty));
+      const limited = Boolean(item.counts && this.atLimit(item.fromPty, item.toPty));
+      const enter = item.enter && !limited && !onPrompt;
+      const draftReason: "limit" | "prompt" | undefined = !enter ? (onPrompt ? "prompt" : "limit") : undefined;
       try {
         await this.core.options.host.send(item.toPty, item.text, enter);
       } catch {
@@ -191,7 +197,7 @@ export class Delivery {
       }
       // A draft waits for a person, so there's no answer to watch for.
       if (item.waiter && enter) this.answers.watchAnswer(item.toPty, { ...item.waiter, sent: item.text }, sentAt, item.fromPty);
-      item.delivered?.(!enter);
+      item.delivered?.(!enter, draftReason);
       this.core.emit("live");
     }
   }

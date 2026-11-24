@@ -50,7 +50,8 @@ export class SavedFiles {
 
   saveFile(folder: string, ext: string, text: string): string {
     const dir = path.join(this.core.options.dataRoot, folder);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
     const stamp = this.core.now().toISOString().replace(/[:.]/g, "-");
     const file = path.join(dir, `${stamp}-${randomBytes(3).toString("hex")}.${ext}`);
     writeFileAtomic(file, text.endsWith("\n") ? text : `${text}\n`);

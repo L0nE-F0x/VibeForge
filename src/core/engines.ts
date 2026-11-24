@@ -176,7 +176,8 @@ export function whichBin(bin: string, envPath: string = process.env.PATH ?? ""):
   // Prefer the program itself to a mise wrapper in front of it; the wrapper alone still runs.
   let wrapper: string | null = null;
   for (const dir of envPath.split(path.delimiter)) {
-    if (!dir) continue;
+    // Skip relative PATH entries (. or ./bin) so a workspace subfolder never shadows system binaries.
+    if (!dir || !path.isAbsolute(dir)) continue;
     const candidate = path.join(dir, bin);
     if (!executable(candidate)) continue;
     if (!isMiseWrapper(candidate)) return candidate;

@@ -3,6 +3,30 @@
 // parsing workbench actions, and turning raw CLI replies into natural spoken summaries.
 // No Node imports here so both the window and the main process can run them.
 
+const APPROVAL_MENU_OPTION = /^(?:[❯>*•]\s*)?1[.)]\s*(?:yes|allow|approve|trust|proceed)\b/i;
+const MENU_APPROVAL_WORDS = /\b(?:allow|approve|don't ask again|do not ask again|this command|this edit|always allow|deny|reject)\b/i;
+
+const APPROVAL_LINE_PATTERNS: RegExp[] = [
+  /do you want to (?:proceed|continue|allow|run|make this edit|create|overwrite)[^?\n]*\??/i,
+  /\ballow [^\n]{1,160}\?/i,
+  /[^\n]*\((?:y\/n|yes\/no)\)[^\n]*/i,
+  /[^\n]*\[(?:y\/n|Y\/n|y\/N)\][^\n]*/i,
+];
+
+const TRUST_LINE_PATTERNS: RegExp[] = [
+  /^(?:quick safety check:\s*)?(?:do you trust (?:the files in |the contents of )?this (?:folder|directory|workspace|project)|trust (?:the files in |the contents of )?this (?:folder|directory|workspace|project))[?.!]?$/i,
+];
+
+const LOGIN_LINE_PATTERN = /^(?:session expired\.\s*)?((?:please\s+)?(?:run \/login|sign in|log in)\b[^\n]*)$/i;
+
+function matchPattern(line: string, patterns: readonly RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = pattern.exec(line);
+    if (match) return cleanPromptLine(match[0]);
+  }
+  return null;
+}
+
 /**
  * Inspect the bottom of a quiet terminal's screen for an interactive TUI prompt waiting on a
  * person (folder trust, tool approval, y/n confirmation, sign-in). Null when at a normal prompt.
@@ -11,62 +35,74 @@ export function detectWaitingPrompt(screen: string): string | null {
   if (!screen.trim()) return null;
   const lines = screen
     .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
+    .map((line) => cleanPromptLine(line.replace(/\s+/g, " ").trim()))
     .filter(Boolean)
     .slice(-18);
   if (!lines.length) return null;
-  const tail = lines.join("\n");
 
-  const patterns: RegExp[] = [
-    /do you trust the files in this folder\??/i,
-    /trust this (?:folder|directory|workspace|project)\??/i,
-    /do you want to (?:proceed|continue|allow|run|make this edit|create|overwrite)[^?\n]*\??/i,
-    /allow [^\n?]{1,80}\?/i,
-    /[^\n]*\((?:y\/n|yes\/no)\)[^\n]*/i,
-    /[^\n]*\[(?:y\/n|Y\/n|y\/N)\][^\n]*/i,
-    /(?:please )?(?:run \/login|sign in|log in)[^\n]*/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(tail);
-    if (match) return cleanPromptLine(match[0]);
+  // Check the bottom-most numbered confirmation menu first, inspecting only the 1-2 lines
+  // directly above option 1 so trust words inside an earlier command payload can't mask an approval.
+  let yesOption = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (APPROVAL_MENU_OPTION.test(lines[i])) {
+      yesOption = i;
+      break;
+    }
+  }
+  if (yesOption >= 0) {
+    const menuHasApproval = lines.slice(yesOption, yesOption + 4).some((line) => MENU_APPROVAL_WORDS.test(line));
+    const above = lines.slice(Math.max(0, yesOption - 2), yesOption);
+    for (let i = above.length - 1; i >= 0; i--) {
+      const approval = matchPattern(above[i], APPROVAL_LINE_PATTERNS);
+      if (approval) return approval;
+    }
+    if (!menuHasApproval) {
+      for (let i = above.length - 1; i >= 0; i--) {
+        const trust = matchPattern(above[i], TRUST_LINE_PATTERNS);
+        if (trust) return trust;
+        if (above[i].endsWith("?") && /\b(?:allow|proceed|permission|confirm)\b/i.test(above[i])) return above[i];
+      }
+    }
+    return lines[yesOption];
   }
 
-  // Numbered confirmation menu (e.g. Claude Code / Grok Build: "❯ 1. Yes, proceed").
-  const yesOption = lines.findIndex((line) => /^(?:[❯>*•]\s*)?1[.)]\s*(?:yes|allow|approve|trust|proceed)\b/i.test(line));
-  if (yesOption >= 0) {
-    const question = [...lines.slice(0, yesOption)].reverse().find((line) => line.endsWith("?") || /trust|allow|proceed|permission|confirm/i.test(line));
-    return cleanPromptLine(question ?? lines[yesOption]);
+  // Without a numbered menu, scan bottom-to-top for approval prompts first, then anchored trust or sign-in.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const approval = matchPattern(lines[i], APPROVAL_LINE_PATTERNS);
+    if (approval) return approval;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trust = matchPattern(lines[i], TRUST_LINE_PATTERNS);
+    if (trust) return trust;
+    const login = LOGIN_LINE_PATTERN.exec(lines[i]);
+    if (login) return cleanPromptLine(login[1]);
   }
 
   return null;
 }
 
 function cleanPromptLine(line: string): string {
-  const cleaned = line.replace(/^[│╭╰─❯>*•\s]+|[│╭╰─\s]+$/g, "").trim();
+  const cleaned = line.replace(/^[│┃╭╮╰╯┌┐└┘─❯>*•═\s]+|[│┃╭╮╰╯┌┐└┘─═\s]+$/g, "").trim();
   return cleaned.length > 140 ? `${cleaned.slice(0, 139).trimEnd()}…` : cleaned;
 }
 
-const FREE_PROMPTS = [
-  /do you trust\b/i,
-  /\btrust (?:the files in )?this (?:folder|directory|workspace|project)\b/i,
-  /(?:please )?(?:run \/login|sign in|log in)\b/i,
-];
+const APPROVAL_WORDING = /do you want to |\ballow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|^(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\b(?:don't ask again|do not ask again|this command|this edit|always allow|overwrite)\b/i;
 
 /** Whether a waiting prompt explicitly matches a benign folder-trust or sign-in prompt. */
 export function isFreeWaitingPrompt(waiting: string | undefined): boolean {
   const text = (waiting ?? "").trim();
   if (!text) return false;
-  const prompt = detectWaitingPrompt(text) ?? text;
-  return FREE_PROMPTS.some((pattern) => pattern.test(prompt));
+  const prompt = text.includes("\n") ? detectWaitingPrompt(text) : cleanPromptLine(text);
+  if (!prompt || APPROVAL_WORDING.test(prompt)) return false;
+  return TRUST_LINE_PATTERNS.some((pattern) => pattern.test(prompt)) || LOGIN_LINE_PATTERN.test(prompt);
 }
 
 /** Whether a detected waiting prompt or screen asks to approve a tool, command or edit (not folder trust or sign-in). */
 export function isApprovalPrompt(waitingOrScreen: string): boolean {
   const text = waitingOrScreen.trim();
   if (!text) return false;
-  const prompt = detectWaitingPrompt(text) ?? text;
-  if (FREE_PROMPTS.some((pattern) => pattern.test(prompt))) return false;
+  const prompt = detectWaitingPrompt(text) ?? cleanPromptLine(text);
+  if (!prompt || isFreeWaitingPrompt(prompt)) return false;
   return /do you want to |allow |\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]|(?:^|\n)\s*(?:[❯>*•]\s*)?[1-9][.)]\s*(?:yes|allow|approve|proceed)\b|\?$/i.test(
     prompt,
   );
@@ -110,33 +146,131 @@ export function keySequenceFor(said: string | undefined, screen = ""): KeyAction
 }
 
 /** A path argument that stays inside the folder: not a flag, not absolute, not from home, never climbing out. */
-const LOCAL_PATH = String.raw`(?!/|~|-|\.\.(?:/|\s|$))(?![^\s]*/\.\.(?:/|\s|$))[^\s]+`;
-/**
- * The commands a `shell` step may run without a Go, each one whole: tests, builds and checks through
- * the project's own scripts, git that only reads, and listing, reading or making folders in this one.
- */
-const SAFE_SHELL = [
-  /^(?:npm|pnpm|yarn|bun)\s+(?:test|t|build|lint|typecheck|check|run\s+(?:test|build|lint|typecheck|check)(?::[\w.-]+)?)(?:\s+--?[\w=.:-]+)*$/,
-  /^(?:cargo\s+(?:test|build|check|clippy)|go\s+(?:test|build|vet)(?:\s+\.\/\.\.\.)?|pytest|python3?\s+-m\s+pytest)(?:\s+--?[\w=.:-]+)*$/,
-  /^git\s+(?:status|log|diff|show|rev-parse)(?:\s+(?!--output)[\w./~^@:=-]+)*$/,
-  /^git\s+(?:remote\s+-v|branch(?:\s+(?:-a|-r|-v|-vv|--list|--show-current))*)$/,
-  new RegExp(String.raw`^(?:ls|cat|head|tail|wc)(?:\s+-[\w-]+)*(?:\s+${LOCAL_PATH})*$`),
-  // tree -o / --output writes a file, so keep those flags off the auto-run list.
-  new RegExp(String.raw`^tree(?:\s+-(?:[a-np-zA-NP-Z0-9]+|-(?!output\b)[\w=-]+))*(?:\s+${LOCAL_PATH})*$`),
-  new RegExp(String.raw`^mkdir(?:\s+-p)?(?:\s+${LOCAL_PATH})+$`),
-  /^(?:pwd|git\s+--version|node\s+--version)$/,
-];
+function isLocalPath(token: string): boolean {
+  if (!token || token.startsWith("/") || token.startsWith("~") || token.startsWith("-")) return false;
+  return !token.split("/").includes("..");
+}
+
+const PKG_RUN_SCRIPT = /^(?:test|build|lint|typecheck|check)(?::[\w.-]+)?$/;
+const PKG_FLAGS = new Set(["-s", "-q", "--silent", "--quiet", "--run", "--if-present", "--noEmit", "--ci", "--watch=false", "--watchAll=false", "--no-cache"]);
+const CARGO_FLAGS = new Set(["-q", "--quiet", "-v", "--verbose", "--workspace", "--all-targets", "--tests", "--lib", "--bins", "--offline", "--locked", "--frozen", "--no-run", "--keep-going"]);
+const GO_FLAGS = new Set(["-v", "-race", "-short", "-failfast", "-json", "-cover"]);
+const PYTEST_FLAGS = new Set(["-q", "--quiet", "-v", "--verbose", "-x", "--exitfirst", "--no-header", "--collect-only", "--co", "--tb=short", "--tb=line", "--tb=no"]);
+const GIT_FLAGS: Record<"status" | "log" | "diff" | "show" | "rev-parse", ReadonlySet<string>> = {
+  status: new Set(["-s", "--short", "-b", "--branch", "--porcelain", "-uno", "-uall", "-u", "--untracked-files"]),
+  log: new Set(["--oneline", "--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--graph", "--decorate", "--no-merges", "--first-parent", "--all", "--abbrev-commit", "--reverse"]),
+  diff: new Set(["--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--summary", "--cached", "--staged", "--check", "--color=never", "--no-ext-diff"]),
+  show: new Set(["--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--oneline", "--no-patch", "-s", "--no-ext-diff"]),
+  "rev-parse": new Set(["--short", "--abbrev-ref", "--show-toplevel", "--git-dir", "--is-inside-work-tree", "--verify", "-q", "--quiet", "--show-prefix"]),
+};
+const GIT_BRANCH_FLAGS = new Set(["-a", "-r", "-v", "-vv", "--list", "--show-current"]);
+const CAT_FLAGS = new Set(["-n", "-b", "-s", "-T", "-E", "--number"]);
+const WC_FLAGS = new Set(["--lines", "--words", "--bytes", "--chars"]);
+const LS_FLAGS = new Set(["--all", "--almost-all", "--directory", "--human-readable", "--classify"]);
+const TREE_FLAGS = new Set(["--dirsfirst", "--noreport"]);
+
+function isSafeGitArg(token: string, afterDashDash: boolean): boolean {
+  if (!token || !/^[\w./~^@:-]+$/.test(token)) return false;
+  if (afterDashDash) return isLocalPath(token);
+  if (token.startsWith("-") || token.startsWith("/") || token.startsWith("~") || token.startsWith("..")) return false;
+  if (token.split("/").includes("..") || /[/:]~/.test(token)) return false;
+  const colon = token.indexOf(":");
+  if (colon !== -1) {
+    const rev = token.slice(0, colon);
+    const objPath = token.slice(colon + 1);
+    if (rev && !isSafeGitArg(rev, false)) return false;
+    return isLocalPath(objPath);
+  }
+  return true;
+}
+
+function isSafeGitSub(sub: string, args: string[]): boolean {
+  if (sub === "remote") return args.length === 1 && args[0] === "-v";
+  if (sub === "branch") return args.every((t) => GIT_BRANCH_FLAGS.has(t));
+  if (!(sub in GIT_FLAGS)) return false;
+  const subKey = sub as keyof typeof GIT_FLAGS;
+  const flags = GIT_FLAGS[subKey];
+  let afterDashDash = false;
+  for (const token of args) {
+    if (!afterDashDash && token === "--") {
+      afterDashDash = true;
+      continue;
+    }
+    if (!afterDashDash && token.startsWith("-")) {
+      if (flags.has(token)) continue;
+      if (subKey === "log" && /^(?:-\d+|-n\d+|--max-count=\d+)$/.test(token)) continue;
+      if (subKey === "diff" && /^-U\d+$/.test(token)) continue;
+      return false;
+    }
+    if (!isSafeGitArg(token, afterDashDash)) return false;
+  }
+  return true;
+}
+
+function isSafeShellPart(part: string): boolean {
+  if (part === "pwd" || part === "git --version" || part === "node --version") return true;
+  const [cmd, ...rest] = part.split(/\s+/);
+  if (cmd === "npm" || cmd === "pnpm" || cmd === "yarn" || cmd === "bun") {
+    const [sub, ...args] = rest;
+    if (!sub) return false;
+    let tail = args;
+    if (sub === "run") {
+      if (!args[0] || !PKG_RUN_SCRIPT.test(args[0])) return false;
+      tail = args.slice(1);
+    } else if (!/^(?:test|t|build|lint|typecheck|check)$/.test(sub)) {
+      return false;
+    }
+    return tail.every((t, i) => (t === "--" && i < tail.length - 1) || PKG_FLAGS.has(t));
+  }
+  if (cmd === "cargo") {
+    const [sub, ...args] = rest;
+    return !!sub && /^(?:test|build|check|clippy)$/.test(sub) && args.every((t) => CARGO_FLAGS.has(t));
+  }
+  if (cmd === "go") {
+    const [sub, ...args] = rest;
+    return !!sub && /^(?:test|build|vet)$/.test(sub) && args.every((t) => (t.startsWith("-") ? GO_FLAGS.has(t) || /^-count=\d+$/.test(t) : isLocalPath(t)));
+  }
+  if (cmd === "pytest" || ((cmd === "python" || cmd === "python3") && rest[0] === "-m" && rest[1] === "pytest")) {
+    const args = cmd === "pytest" ? rest : rest.slice(2);
+    return args.every((t) => (t.startsWith("-") ? PYTEST_FLAGS.has(t) || /^--maxfail=\d+$/.test(t) : isLocalPath(t)));
+  }
+  if (cmd === "git") {
+    const [sub, ...args] = rest;
+    return !!sub && isSafeGitSub(sub, args);
+  }
+  if (cmd === "mkdir") {
+    const args = rest[0] === "-p" || rest[0] === "--parents" ? rest.slice(1) : rest;
+    return args.length > 0 && args.every(isLocalPath);
+  }
+  if (cmd === "ls" || cmd === "cat" || cmd === "wc" || cmd === "head" || cmd === "tail" || cmd === "tree") {
+    for (let i = 0; i < rest.length; i++) {
+      const t = rest[i];
+      if (!t.startsWith("-")) {
+        if (!isLocalPath(t)) return false;
+        continue;
+      }
+      if (cmd === "ls" && (LS_FLAGS.has(t) || /^-[alh1trSRdF]+$/.test(t))) continue;
+      if (cmd === "cat" && CAT_FLAGS.has(t)) continue;
+      if (cmd === "wc" && (WC_FLAGS.has(t) || /^-[lwcL]+$/.test(t))) continue;
+      if ((cmd === "head" || cmd === "tail") && (/^-(?:\d+|n\d+|-lines=\d+|q|-quiet)$/.test(t) || (t === "-n" && /^\d+$/.test(rest[++i] ?? "")))) continue;
+      if (cmd === "tree" && (TREE_FLAGS.has(t) || /^-(?:[acdfghlpqrstuDFQ]+|L\d+)$/.test(t) || (t === "-L" && /^\d+$/.test(rest[++i] ?? "")))) continue;
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
 
 /**
  * Whether a `shell` step can run without asking for Go (in a call, or in "Just go"): a blank shell,
  * or commands each on the list above joined by `&&`. Anything else waits for Go: deleting, moving,
- * installing, pushing, redirecting, piping, substituting, quoting, and every program not named here.
+ * installing, pushing, redirecting, piping, substituting, quoting, unknown flags, and every program not named here.
  */
 export function isSafeShellCommand(command: string | undefined): boolean {
   const text = (command ?? "").trim();
   if (!text) return true;
   const parts = text.split("&&").map((part) => part.trim());
-  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && SAFE_SHELL.some((pattern) => pattern.test(part)));
+  return parts.every((part) => part !== "" && !/[;|&<>`$\\(){}\n\r*?!'"]/.test(part) && isSafeShellPart(part));
 }
 
 export type WorkbenchAction =

@@ -92,7 +92,9 @@ export class SyncStateFile {
 
   write(next: SyncState): SyncState {
     const clean = normalizeState(next);
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const dir = path.dirname(this.file);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
     writeJson(this.file, clean, { mode: 0o600 });
     this.cached = clean;
     return clean;

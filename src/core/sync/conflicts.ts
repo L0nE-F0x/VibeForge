@@ -1,8 +1,8 @@
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { readJson, writeJson } from "../fsx.js";
+import { runGit } from "../git.js";
 import { conflictName, DEFAULT_IGNORES, type ConflictName } from "./protocol.js";
 
 // When a file changes on both machines before they sync, Syncthing keeps the later change in
@@ -218,8 +218,9 @@ export class ConflictStore {
     const waiting = this.list().find((record) => record.kind === item.kind && record.folderId === item.syncId && record.section === item.section);
     if (waiting) this.archive(waiting.id);
     const record: ConflictRecord = { id: this.newId(), folderId: item.syncId, root: "", kind: item.kind, path: item.name, section: item.section, itemId: item.itemId, savedBranch: null, winner, at: this.now().toISOString() };
-    fs.mkdirSync(this.folder(record.id), { recursive: true });
-    fs.writeFileSync(path.join(this.folder(record.id), SAVED), text);
+    fs.mkdirSync(this.folder(record.id), { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.folder(record.id), 0o700);
+    fs.writeFileSync(path.join(this.folder(record.id), SAVED), text, { mode: 0o600 });
     writeJson(path.join(this.folder(record.id), "meta.json"), record);
     return record;
   }
@@ -264,7 +265,8 @@ export class ConflictStore {
   }
 
   private archive(id: string): void {
-    fs.mkdirSync(this.answered(), { recursive: true });
+    fs.mkdirSync(this.answered(), { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.answered(), 0o700);
     const to = path.join(this.answered(), id);
     fs.rmSync(to, { recursive: true, force: true });
     fs.renameSync(this.folder(id), to);
@@ -308,24 +310,18 @@ export class ConflictStore {
     else if ((record.kind === "agent" || record.kind === "skill") && currentText !== undefined) {
       // What is in the agent or skill now, beside the saved one, so git can compare the two files.
       current = path.join(this.folder(id), "now");
-      fs.writeFileSync(current, currentText);
+      fs.writeFileSync(current, currentText, { mode: 0o600 });
     } else return "";
     const from = fs.existsSync(current) ? current : "/dev/null";
     const saved = this.savedFile(id);
     const label = record.kind === "file" ? record.path : `${record.path} (${record.section ?? "text"})`;
-    return new Promise((resolve) => {
-      execFile(
-        "git",
-        ["--no-pager", "-c", "color.ui=never", "-c", "core.quotePath=false", "diff", "--no-index", "--no-ext-diff", "--", from, saved],
-        { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 10_000 },
-        (error, stdout) => {
-          // 1 only means "they differ".
-          const code = (error as { code?: unknown } | null)?.code;
-          if (error && code !== 1) return resolve("");
-          resolve(relabel(stdout ?? "", from, saved, label));
-        },
-      );
+    const run = await runGit(["-c", "color.ui=never", "-c", "core.quotePath=false", "diff", "--no-index", "--", from, saved], {
+      maxBuffer: 4 * 1024 * 1024,
+      timeoutMs: 10_000,
     });
+    // 1 only means "they differ".
+    if (run.code !== 0 && run.code !== 1) return "";
+    return relabel(run.stdout, from, saved, label);
   }
 }
 

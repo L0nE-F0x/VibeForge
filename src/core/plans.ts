@@ -70,7 +70,7 @@ interface Reading {
   credits: number | null;
 }
 
-type Fetch = (url: string, init: { method?: string; headers: Record<string, string>; body?: string; signal: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
+type Fetch = (url: string, init: { method?: string; headers: Record<string, string>; body?: string; redirect?: RequestRedirect; signal: AbortSignal }) => Promise<{ status: number; text(): Promise<string> }>;
 
 interface Asked {
   url: string;
@@ -832,7 +832,7 @@ export class PlanWatcher {
     if (signIn.expired) return { reading: null, problem: "signin" };
     const { ask } = signIn;
     try {
-      const response = await this.fetch(ask.url, { method: ask.method, headers: ask.headers, body: ask.body, signal: AbortSignal.timeout(ask.timeoutMs) });
+      const response = await this.fetch(ask.url, { method: ask.method, headers: ask.headers, body: ask.body, redirect: "error", signal: AbortSignal.timeout(ask.timeoutMs) });
       if (response.status === 402 || (response.status === 404 && id === "kimi")) return { reading: null, problem: null, noPlan: true };
       if (response.status === 401) return { reading: null, problem: "signin" };
       if (response.status === 429) return { reading: null, problem: "limited" };

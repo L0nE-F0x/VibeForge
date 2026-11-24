@@ -9,9 +9,9 @@ const EVERY_MS = 6 * 60 * 60 * 1000;
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 /**
- * Electron's fetch, on the session the browser dock shares, without that session's cookies: a
- * GitHub sign-in in the dock must not ride along on the update check, which sends nothing but the
- * version in its User-Agent.
+ * Electron's fetch, on the default session (the browser dock keeps its own persist:dock partition),
+ * with credentials omitted so no ambient cookies ride along on the update check, which sends
+ * nothing but the version in its User-Agent.
  */
 const withoutCookies: Fetch = (url, init) => net.fetch(url, { ...init, credentials: "omit" });
 

@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { runGit } from "../git.js";
 import { withRepoLock } from "../worktrees.js";
 import { conflictName } from "./protocol.js";
 
@@ -20,28 +20,11 @@ interface GitRun {
 }
 
 function git(args: readonly string[], cwd: string, input?: string): Promise<GitRun> {
-  return new Promise((resolve) => {
-    // No hooks, fsmonitor, or pathspec globbing: this runs on repo data from another machine.
-    const child = spawn("git", ["--no-pager", "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
-      cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: stderr || error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(input ?? "");
+  // No hooks, fsmonitor, or pathspec globbing: this runs on repo data from another machine.
+  return runGit(["--literal-pathspecs", "-c", "core.quotePath=false", "-c", "color.ui=never", ...args], {
+    cwd,
+    input,
+    timeoutMs: 60_000,
   });
 }
 

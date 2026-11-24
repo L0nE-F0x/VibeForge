@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app, clipboard, dialog, ipcMain, shell } from "electron";
-import type { TalkRequest } from "../src/core/control.js";
+import { TalkRateLimiter, type TalkRequest } from "../src/core/control.js";
 import { listDir } from "../src/core/files.js";
 import { describeError } from "../src/core/log.js";
 import { speakable } from "../src/core/replies.js";
@@ -157,14 +157,23 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "updates.get": () => updater.get(),
     "updates.check": () => updater.check(),
     "updates.run": async (size) => {
-      if (install === "installer" && !updater.get().available && !process.env.VIBEFORGE_UPDATE_COMMAND) {
+      if (install === "installer" && !updater.get().command && !process.env.VIBEFORGE_UPDATE_COMMAND) {
         await updater.check().catch(() => undefined);
       }
-      const command = updater.get().command;
-      if (!command) throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
+      const info = updater.get();
+      if (!info.command) {
+        if (install === "installer") {
+          throw new Error(
+            info.error
+              ? `Could not verify this release's SHA-256 checksum (${info.error}), so VibeForge refused to run its installer.`
+              : "This release has no verified SHA-256 checksum from GitHub, so VibeForge refused to run its installer.",
+          );
+        }
+        throw new Error("This copy of VibeForge updates some other way, such as its package manager.");
+      }
       // The kind of copy, never the command: a packager's VIBEFORGE_UPDATE_COMMAND can hold a secret.
       log.info(`Update started for the ${install} copy${process.env.VIBEFORGE_UPDATE_COMMAND ? " (VIBEFORGE_UPDATE_COMMAND)" : ""}`);
-      return s().startCommand({ command, title: "VibeForge update", cwd: os.homedir(), ...size });
+      return s().startCommand({ command: info.command, title: "VibeForge update", cwd: os.homedir(), ...size });
     },
 
     "settings.get": () => s().getSettings(),
@@ -373,19 +382,40 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
   });
 }
 
+const talkLimiters = new WeakMap<MainContext, TalkRateLimiter>();
+
+function limiterFor(ctx: MainContext): TalkRateLimiter {
+  let limiter = talkLimiters.get(ctx);
+  if (!limiter) {
+    limiter = new TalkRateLimiter();
+    talkLimiters.set(ctx, limiter);
+  }
+  return limiter;
+}
+
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
-export async function answerTalk(ctx: MainContext, request: TalkRequest, gone: AbortSignal): Promise<unknown> {
+export async function answerTalk(
+  ctx: MainContext,
+  request: TalkRequest,
+  gone: AbortSignal,
+  limiter: TalkRateLimiter = limiterFor(ctx),
+): Promise<unknown> {
   if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
-  let pty = request.pty;
+  const pty = request.pty;
   if (pty) {
     const expected = ctx.service.ptyTokens.get(pty);
-    if (expected) {
-      const given = request.ptyToken ?? "";
-      const ok = given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
-      if (!ok) return { ok: false, error: "This terminal token isn't valid; run from a VibeForge terminal or restart the session." };
-    } else if (!ctx.service.live.has(pty)) {
-      return { ok: false, error: "That terminal session is no longer active." };
+    const given = request.ptyToken ?? "";
+    if (!expected || given.length !== expected.length || !timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+      // Charge bad/unregistered tokens to the outside bucket so probing is rate-limited too.
+      limiter.take(null);
+      return {
+        ok: false,
+        error: expected ? "This terminal token isn't valid; run from a VibeForge terminal or restart the session." : "That terminal session is no longer active.",
+      };
     }
+  }
+  if (!limiter.take(pty ?? null)) {
+    return { ok: false, error: "Too many control requests; slow down and try again in a moment." };
   }
   if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(pty) };
   if (request.op === "tell") return ctx.service.tell({ fromPty: pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });

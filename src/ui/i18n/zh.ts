@@ -559,6 +559,7 @@ export const zh: Catalog = {
   "updates.installOther": "通过其他方式安装在 {path}。请用你安装它的方式来更新。",
   "updates.sheetTitle": "更新 VibeForge",
   "updates.willRun": "点击“立即更新”会在终端中运行以下命令，你可以看到全过程：",
+  "updates.noDigest": "此版本缺少 GitHub 提供的已验证 SHA-256 校验和，因此 VibeForge 不会自动运行其安装脚本。",
   "updates.now": "立即更新",
   "updates.notes": "发布说明",
   "updates.noNotes": "此版本没有说明。",
@@ -2051,6 +2052,9 @@ export const zh: Catalog = {
   "core.orchMemoryEmpty": "请输入要保存到记忆中的内容。",
   "core.orchBadImage": "不支持的图片格式。",
   "core.orchImageTooBig": "该图片超过 10 MB。",
+  "core.orchApprovalWaiting": "该 CLI 正在等待审批提示；说“继续”来回复。",
+  "core.updateNoDigest": "此版本缺少 GitHub 验证的 SHA-256 校验和，VibeForge 拒绝运行安装脚本。",
+  "core.updateVerifyFailed": "无法验证此版本的 SHA-256 校验和（{detail}），VibeForge 拒绝运行安装脚本。",
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
 };

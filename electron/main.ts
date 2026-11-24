@@ -15,7 +15,7 @@ import { savedDockUrl } from "../src/shared/dock-url.js";
 import { syncCompanion } from "./companion.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
-import { secondStartArgs } from "./guards.js";
+import { debugSwitch, guardSession, guardWebContents, secondStartArgs, type GuardableWebContents } from "./guards.js";
 import { Dock } from "./dock.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { answerTalk, registerIpc } from "./ipc.js";
@@ -51,8 +51,9 @@ process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in th
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
-// No spellchecker: nothing types prose here, and Chromium's would fetch a dictionary from Google on
-// first start, a request nobody asked for. Each session is told as it is made, before any page.
+let ownWebContents: () => GuardableWebContents | null = () => null;
+// Lock down every session (default, persist:dock, or any future partition) and disable Chromium's
+// spellchecker before any page loads so it never fetches a dictionary from Google.
 app.on("session-created", (made) => {
   try {
     made.setSpellCheckerEnabled(false);
@@ -60,28 +61,39 @@ app.on("session-created", (made) => {
   } catch (error) {
     log.warn(`Could not turn the spellchecker off: ${describeError(error)}`);
   }
+  guardSession(made, (contents) => Boolean(contents && contents === ownWebContents()));
+});
+app.on("web-contents-created", (_event, contents) => {
+  guardWebContents(contents);
+});
+const appRoot = app.getAppPath();
+const copyInstall = installKind(appRoot, {
+  installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
+  marked: fs.existsSync(path.join(appRoot, INSTALLER_MARK)),
+  checkout: fs.existsSync(path.join(appRoot, ".git")),
 });
 if (process.platform === "linux") app.commandLine.appendSwitch("class", "vibeforge");
-if (process.env.VIBEFORGE_DEBUG === "1") app.commandLine.appendSwitch("remote-debugging-port", process.env.VIBEFORGE_DEBUG_PORT || "9223");
+const dbg = debugSwitch(process.env, copyInstall);
+if (dbg && "refused" in dbg) log.warn(dbg.refused);
+else if (dbg) {
+  if (dbg.value !== undefined) app.commandLine.appendSwitch(dbg.name, dbg.value);
+  else app.commandLine.appendSwitch(dbg.name);
+}
 
 // ------------------------------------------------------------------ the parts
 
 const supervisor = new PtySupervisor();
-const appRoot = app.getAppPath();
 const ctx = new MainContext({
   roots,
   log,
   supervisor,
   words: new MainText(),
   appRoot,
-  install: installKind(appRoot, {
-    installerHome: process.env.VIBEFORGE_HOME || path.join(os.homedir(), ".local", "share", "vibeforge-app"),
-    marked: fs.existsSync(path.join(appRoot, INSTALLER_MARK)),
-    checkout: fs.existsSync(path.join(appRoot, ".git")),
-  }),
+  install: copyInstall,
   palette: resolvePalette("omarchy"),
 });
 const { send, focusWindow, install } = ctx;
+ownWebContents = () => ctx.win?.webContents ?? null;
 const notify = desktopNotifier(ctx);
 
 const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats, voice: () => voice, tray: () => tray, sync: () => sync });

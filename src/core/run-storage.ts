@@ -92,7 +92,8 @@ export async function compressRun(dir: string): Promise<number> {
     const temp = `${gz}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
     try {
       const packed = await gzipAsync(await fs.promises.readFile(file), { level: 6 });
-      await fs.promises.writeFile(temp, packed);
+      await fs.promises.writeFile(temp, packed, { mode: 0o600 });
+      await fs.promises.chmod(temp, 0o600);
       await fs.promises.rename(temp, gz);
       await fs.promises.rm(file, { force: true });
       saved += size - packed.length;

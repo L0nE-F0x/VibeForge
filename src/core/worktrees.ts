@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { runGit, runGitBytes } from "./git.js";
 import { isPathInside } from "./places.js";
 import { isSafeId } from "./slug.js";
 
@@ -61,38 +61,16 @@ interface GitOptions {
 
 const TIMEOUT_MS = 60_000;
 const FETCH_TIMEOUT_MS = 5_000;
-const SAFE_GIT = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"] as const;
 
 function gitBytes(args: readonly string[], cwd: string, options: GitOptions = {}): Promise<{ code: number; stdout: Buffer; stderr: string }> {
-  return new Promise((resolve) => {
-    // Plain a/ b/ prefixes whatever the person's git config says, as vcs.ts does, so patches read the same.
-    const pinned = ["-c", "color.ui=never", "-c", "core.quotePath=false", "-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"];
-    const child = spawn("git", [...pinned, ...args], {
-      cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const chunks: Buffer[] = [];
-    let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs ?? TIMEOUT_MS);
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout: Buffer.concat(chunks), stderr: stderr || error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout: Buffer.concat(chunks), stderr });
-    });
-    child.stdin.on("error", () => undefined);
-    child.stdin.end(options.input ?? "");
-  });
+  // Plain a/ b/ prefixes whatever the person's git config says, as vcs.ts does, so patches read the same.
+  const pinned = ["-c", "color.ui=never", "-c", "core.quotePath=false", "-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"];
+  return runGitBytes([...pinned, ...args], { cwd, input: options.input, env: options.env, timeoutMs: options.timeoutMs ?? TIMEOUT_MS });
 }
 
-async function git(args: readonly string[], cwd: string, options: GitOptions = {}): Promise<GitRun> {
-  const run = await gitBytes(args, cwd, options);
-  return { ...run, stdout: run.stdout.toString("utf8") };
+function git(args: readonly string[], cwd: string, options: GitOptions = {}): Promise<GitRun> {
+  const pinned = ["-c", "color.ui=never", "-c", "core.quotePath=false", "-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"];
+  return runGit([...pinned, ...args], { cwd, input: options.input, env: options.env, timeoutMs: options.timeoutMs ?? TIMEOUT_MS });
 }
 
 const chains = new Map<string, Promise<unknown>>();
@@ -213,6 +191,7 @@ async function makeCopy(repo: string, target: string, branch: string, previous: 
   if (tip && !inUse) {
     const resume = previous && previous.branch === branch && path.resolve(previous.repo) === repo && isCommitId(previous.base) && (await isAncestor(repo, previous.base, tip));
     if (resume) {
+      // Deliberately keep core.hooksPath=/dev/null from runGit: creating a copy must not run post-checkout in untrusted repos.
       const added = await git(["worktree", "add", "-q", target, branch], repo);
       if (added.code !== 0) throw failure("Could not make the copy", added);
       return { path: path.resolve(target), branch, base: previous.base, repo };
@@ -223,6 +202,7 @@ async function makeCopy(repo: string, target: string, branch: string, previous: 
       if (renamed.code !== 0) throw failure("Could not make the copy", renamed);
     }
   }
+  // Deliberately keep core.hooksPath=/dev/null from runGit: creating a copy must not run post-checkout in untrusted repos.
   const added = await git(["worktree", "add", "-q", "-B", branch, target, base], repo);
   if (added.code !== 0) throw failure("Could not make the copy", added);
   return { path: path.resolve(target), branch, base, repo };
@@ -644,7 +624,7 @@ async function tryPullMerged(copy: WorkingCopy, theirs: string, theirsCommit: st
     const remote = (await git(["config", "--get", `branch.${branch}.remote`], repo)).stdout.trim();
     const mergeRef = (await git(["config", "--get", `branch.${branch}.merge`], repo)).stdout.trim();
     if (remote && remote !== "." && !remote.startsWith("-") && mergeRef.startsWith("refs/heads/")) {
-      await git([...SAFE_GIT, "fetch", "--no-tags", "--quiet", "--", remote, mergeRef], repo, {
+      await git(["fetch", "--no-tags", "--quiet", "--", remote, mergeRef], repo, {
         timeoutMs: FETCH_TIMEOUT_MS,
         env: { SSH_ASKPASS_REQUIRE: "never" },
       });
@@ -655,7 +635,7 @@ async function tryPullMerged(copy: WorkingCopy, theirs: string, theirsCommit: st
   if (!merged || !(await isAncestor(repo, head, upstream))) return null;
 
   // Fast-forward only: never creates a merge commit, and refuses cleanly if local edits collide.
-  const ff = await git([...SAFE_GIT, "merge", "--ff-only", "--quiet", upstream], repo);
+  const ff = await git(["merge", "--ff-only", "--quiet", upstream], repo);
   if (ff.code !== 0) return null;
   return { branch, upstream: upstreamRef };
 }

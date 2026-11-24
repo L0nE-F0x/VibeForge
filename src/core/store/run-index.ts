@@ -99,7 +99,17 @@ function isBrokenIndex(error: unknown): boolean {
 function setIndexAside(file: string): void {
   const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
   for (const suffix of ["", "-journal", "-wal", "-shm"]) {
-    if (fs.existsSync(`${file}${suffix}`)) fs.renameSync(`${file}${suffix}`, `${aside}${suffix}`);
+    if (fs.existsSync(`${file}${suffix}`)) {
+      fs.renameSync(`${file}${suffix}`, `${aside}${suffix}`);
+      fs.chmodSync(`${aside}${suffix}`, 0o600);
+    }
+  }
+}
+
+function tightenSqliteModes(index: string): void {
+  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+    const target = `${index}${suffix}`;
+    if (fs.existsSync(target)) fs.chmodSync(target, 0o600);
   }
 }
 
@@ -130,6 +140,7 @@ export class RunIndex {
       this.configureDb();
       this.migrate();
     }
+    tightenSqliteModes(index);
   }
 
   private configureDb(): void {

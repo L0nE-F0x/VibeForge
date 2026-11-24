@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
+import type { InstallKind } from "../src/core/updates.js";
 import type { TrayWaiter } from "../src/shared/api.js";
 import type { Send } from "./main-context.js";
 
@@ -136,4 +137,71 @@ const PAGE_PERMISSIONS = new Set([...WEB_PERMISSIONS, "notifications"]);
  */
 export function permissionAllowed(ownPage: boolean, permission: string): boolean {
   return (ownPage ? PAGE_PERMISSIONS : WEB_PERMISSIONS).has(permission);
+}
+
+/** Narrow shapes of Electron's Session and WebContents so session guards run in unit tests too. */
+export interface GuardableWebContents {
+  on?(event: "select-bluetooth-device", listener: (event: { preventDefault(): void }, ...rest: unknown[]) => void): unknown;
+}
+
+export interface GuardableSession {
+  setPermissionRequestHandler?(
+    handler: ((contents: GuardableWebContents | null, permission: string, callback: (allow: boolean) => void) => void) | null,
+  ): void;
+  setPermissionCheckHandler?(
+    handler: ((contents: GuardableWebContents | null, permission: string, origin: string) => boolean) | null,
+  ): void;
+  setDevicePermissionHandler?(handler: ((details: unknown) => boolean) | null): void;
+  setDisplayMediaRequestHandler?(handler: ((request: unknown, callback: (streams: Record<string, never>) => void) => void) | null): void;
+  on?(event: string, listener: (event: { preventDefault(): void }, ...rest: unknown[]) => void): unknown;
+}
+
+const guardedSessions = new WeakSet<object>();
+const guardedContents = new WeakSet<object>();
+
+function cancelDeviceSelect(event: { preventDefault(): void }, ...rest: unknown[]): void {
+  event.preventDefault();
+  const callback = rest.at(-1);
+  if (typeof callback === "function") (callback as (id: string) => void)("");
+}
+
+/**
+ * Lock down permissions, hardware device grants, display capture, and device pickers on an Electron
+ * session (defaultSession, `persist:dock`, or any future partition). Idempotent per session object.
+ */
+export function guardSession(target: GuardableSession | null | undefined, isOwn: (contents: GuardableWebContents | null) => boolean): void {
+  if (!target || guardedSessions.has(target)) return;
+  guardedSessions.add(target);
+  const allowed = (contents: GuardableWebContents | null, permission: string) => permissionAllowed(isOwn(contents), permission);
+  target.setPermissionRequestHandler?.((contents, permission, callback) => callback(allowed(contents, permission)));
+  target.setPermissionCheckHandler?.((contents, permission) => allowed(contents, permission));
+  target.setDevicePermissionHandler?.(() => false);
+  target.setDisplayMediaRequestHandler?.((_request, callback) => callback({}));
+  if (typeof target.on === "function") {
+    for (const event of ["select-hid-device", "select-serial-port", "select-usb-device"]) {
+      target.on(event, cancelDeviceSelect);
+    }
+  }
+}
+
+/** Cancel Bluetooth device selection on a WebContents (a WebContents event rather than a Session one in Electron). */
+export function guardWebContents(contents: GuardableWebContents | null | undefined): void {
+  if (!contents || guardedContents.has(contents)) return;
+  guardedContents.add(contents);
+  contents.on?.("select-bluetooth-device", cancelDeviceSelect);
+}
+
+export type DebugSwitch = { name: "remote-debugging-pipe"; value?: undefined } | { name: "remote-debugging-port"; value: string } | { refused: string };
+
+/**
+ * Resolves Chromium's debugging switch. Pipe mode works over inherited fds without opening a local
+ * TCP port, so it is allowed everywhere; port debugging is limited to developer git checkouts.
+ */
+export function debugSwitch(env: NodeJS.ProcessEnv, install: InstallKind): DebugSwitch | null {
+  if (env.VIBEFORGE_DEBUG === "pipe") return { name: "remote-debugging-pipe" };
+  if (env.VIBEFORGE_DEBUG !== "1") return null;
+  if (install !== "checkout") {
+    return { refused: `Ignoring VIBEFORGE_DEBUG=1 on ${install} copy; use VIBEFORGE_DEBUG=pipe instead.` };
+  }
+  return { name: "remote-debugging-port", value: env.VIBEFORGE_DEBUG_PORT || "9223" };
 }

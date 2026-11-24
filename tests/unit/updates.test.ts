@@ -55,43 +55,28 @@ describe("updates", () => {
     expect(installKind("/usr/lib/vibeforge", { installerHome: installer, marked: false, checkout: false })).toBe("other");
   });
 
-  it("builds the update command for each kind, quoting paths", () => {
+  it("builds the update command for each kind, quoting paths, and refuses installer updates without a digest", () => {
     expect(INSTALL_URL).toBe("https://github.com/L0nE-F0x/VibeForge/releases/latest/download/install.sh");
-    expect(updateCommand("installer", "/home/me/My Apps/vf")).toBe(`set -o pipefail; curl -fsSL ${INSTALL_URL} | VIBEFORGE_HOME='/home/me/My Apps/vf' bash`);
-    expect(updateCommand("installer", "/home/me/My Apps/vf", undefined, null)).toContain(INSTALL_URL);
+    expect(updateCommand("installer", "/home/me/My Apps/vf")).toBeNull();
+    expect(updateCommand("installer", "/home/me/My Apps/vf", undefined, null)).toBeNull();
+    expect(
+      updateCommand("installer", "/home/me/My Apps/vf", undefined, {
+        version: "2.16.0",
+        tag: "v2.16.0",
+        name: "VibeForge 2.16.0",
+        url: "",
+        notes: "",
+        publishedAt: null,
+        installer: { url: "https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh", sha256: null },
+      }),
+    ).toBeNull();
     // npm ci leaves package-lock.json alone, so the next git pull --ff-only still applies.
     expect(updateCommand("checkout", "/home/me/VibeForge")).toBe("cd /home/me/VibeForge && git pull --ff-only && npm ci --no-audit --no-fund && npm run build");
     expect(updateCommand("other", "/usr/lib/vibeforge")).toBeNull();
     expect(updateCommand("other", "/usr/lib/vibeforge", "yay -Syu vibeforge")).toBe("yay -Syu vibeforge");
   });
 
-  it("fails the installer's update when the download or the install fails", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-update-"));
-    const app = path.join(dir, "My App");
-    const command = updateCommand("installer", app) as string;
-    // A stand-in curl: CURL_SAYS is what it "downloads", CURL_EXIT how it ends.
-    fs.mkdirSync(path.join(dir, "bin"));
-    fs.writeFileSync(path.join(dir, "bin", "curl"), '#!/bin/bash\nprintf %s "$CURL_SAYS"\nexit "$CURL_EXIT"\n', { mode: 0o755 });
-    // The terminal runs it the way the service does: bash -c.
-    const run = (says: string, exit = 0) =>
-      spawnSync("/bin/bash", ["-c", command], {
-        encoding: "utf8",
-        env: { PATH: `${path.join(dir, "bin")}:/usr/bin:/bin`, CURL_SAYS: says, CURL_EXIT: String(exit) },
-      });
-
-    const installed = run('echo "installing into $VIBEFORGE_HOME"\n');
-    expect(installed.status).toBe(0);
-    expect(installed.stdout).toBe(`installing into ${app}\n`);
-    // No network: curl fails and sends nothing.
-    expect(run("", 6).status).not.toBe(0);
-    // Cut off part-way: the installer's main() never got its closing brace.
-    expect(run('main() {\n  echo "half"\n', 18).status).not.toBe(0);
-    // The installer itself failing.
-    expect(run("exit 1\n").status).toBe(1);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("runs the release's own installer only when it matches the checksum GitHub lists", () => {
+  it("runs the release's own installer only when it has a matching SHA-256 digest and restricts curl to https", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-update-"));
     const app = path.join(dir, "My App");
     const script = 'echo "installing $VIBEFORGE_VERSION into $VIBEFORGE_HOME"\n';
@@ -105,6 +90,11 @@ describe("updates", () => {
       publishedAt: null,
       installer: { url: "https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh", sha256 },
     });
+    const command = updateCommand("installer", app, undefined, at(sha));
+    expect(command).toContain("--proto =https --proto-redir =https");
+    expect(command).toContain("sha256sum --check --status");
+    expect(updateCommand("installer", app, undefined, at(null))).toBeNull();
+
     // A stand-in curl: writes CURL_SAYS to its -o file, after noting the address it was asked for.
     fs.mkdirSync(path.join(dir, "bin"));
     fs.writeFileSync(
@@ -112,27 +102,27 @@ describe("updates", () => {
       '#!/bin/bash\nout=""\nwhile [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; https://*) echo "$1" >>"$CURL_LOG" ;; esac; shift; done\nprintf %s "$CURL_SAYS" >"$out"\nexit "$CURL_EXIT"\n',
       { mode: 0o755 },
     );
-    const run = (release: Release, says: string, exit = 0) =>
-      spawnSync("/bin/bash", ["-c", updateCommand("installer", app, undefined, release) as string], {
+    const run = (says: string, exit = 0) =>
+      spawnSync("/bin/bash", ["-c", command as string], {
         encoding: "utf8",
         env: { PATH: `${path.join(dir, "bin")}:/usr/bin:/bin`, CURL_SAYS: says, CURL_EXIT: String(exit), CURL_LOG: path.join(dir, "asked") },
       });
 
-    const good = run(at(sha), script);
+    const good = run(script);
     expect(good.status, good.stderr).toBe(0);
     expect(good.stdout).toBe(`installing v2.16.0 into ${app}\n`);
     expect(fs.readFileSync(path.join(dir, "asked"), "utf8")).toBe("https://github.com/L0nE-F0x/VibeForge/releases/download/v2.16.0/install.sh\n");
     // Changed on the way: not run.
-    const tampered = run(at(sha), 'echo "something else"\n');
+    const tampered = run('echo "something else"\n');
     expect(tampered.status).toBe(1);
     expect(tampered.stdout).toBe("");
     expect(tampered.stderr).toContain("does not match the checksum GitHub lists for v2.16.0");
-    // No network.
-    expect(run(at(sha), "", 6).status).not.toBe(0);
-    // A release from before GitHub listed checksums still installs its own tag.
-    expect(run(at(null), script).stdout).toBe(`installing v2.16.0 into ${app}\n`);
+    // No network or partial download.
+    expect(run("", 6).status).not.toBe(0);
+    expect(run('main() {\n  echo "half"\n', 18).status).not.toBe(0);
+    expect(run(`${script}exit 1\n`).status).not.toBe(0);
     // The downloaded installer doesn't stay behind in /tmp.
-    expect(updateCommand("installer", app, undefined, at(sha))).toContain(`trap 'rm -f "$f"' EXIT`);
+    expect(command).toContain(`trap 'rm -f "$f"' EXIT`);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

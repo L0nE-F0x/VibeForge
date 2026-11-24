@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { isDirectory } from "./fsx.js";
+import { runGit } from "./git.js";
 import { isPathInside } from "./places.js";
 import { withRepoLock } from "./worktrees.js";
 
@@ -51,28 +51,7 @@ const TIMEOUT_MS = 60_000;
 const PREFERRED = ["main", "master", "trunk"];
 
 function git(args: readonly string[], cwd: string): Promise<GitRun> {
-  return new Promise((resolve) => {
-    const child = spawn("git", ["-c", "color.ui=never", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", ...args], {
-      cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), TIMEOUT_MS);
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: stderr || error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout, stderr });
-    });
-    child.stdin.on("error", () => undefined);
-    child.stdin.end();
-  });
+  return runGit(["-c", "color.ui=never", "-c", "core.quotePath=false", ...args], { cwd, timeoutMs: TIMEOUT_MS });
 }
 
 function detail(run: GitRun): string {
@@ -200,6 +179,7 @@ async function addCheckout(folder: string, main: string, branch: string): Promis
   }
   if (found && isDirectory(found.path)) return { path: path.resolve(found.path), branch, repoName: path.basename(main) };
   const target = checkoutDir(main, branch);
+  // post-checkout is kept disabled via runGit (`core.hooksPath=/dev/null`): opening a branch never runs repo hooks.
   const added = await git(["worktree", "add", "-q", target, branch], folder);
   if (added.code !== 0) throw openFailure(branch, added);
   return { path: path.resolve(target), branch, repoName: path.basename(main) };

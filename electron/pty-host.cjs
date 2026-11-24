@@ -161,7 +161,8 @@ function openScrollback(sink) {
   if (!sink.runDir) return;
   const file = path.join(sink.runDir, "scrollback.txt");
   try {
-    sink.scrollFd = fs.openSync(file, "a");
+    sink.scrollFd = fs.openSync(file, "a", 0o600);
+    fs.fchmodSync(sink.scrollFd, 0o600);
     sink.scrollBytes = fs.fstatSync(sink.scrollFd).size;
     sink.scrollFile = file;
   } catch (error) {
@@ -207,8 +208,9 @@ function trimScrollback(sink) {
   } finally {
     fs.closeSync(fd);
   }
-  fs.writeFileSync(file, buffer);
-  sink.scrollFd = fs.openSync(file, "a");
+  fs.writeFileSync(file, buffer, { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+  sink.scrollFd = fs.openSync(file, "a", 0o600);
   sink.scrollBytes = keep;
 }
 
@@ -222,8 +224,12 @@ function closeSink(sink, done) {
     .then((captured) => {
       if (sink.runDir) {
         try {
-          fs.writeFileSync(path.join(sink.runDir, "terminal.ansi"), captured.ansi);
-          fs.writeFileSync(path.join(sink.runDir, "transcript.txt"), captured.transcript);
+          const ansiPath = path.join(sink.runDir, "terminal.ansi");
+          const transcriptPath = path.join(sink.runDir, "transcript.txt");
+          fs.writeFileSync(ansiPath, captured.ansi, { mode: 0o600 });
+          fs.chmodSync(ansiPath, 0o600);
+          fs.writeFileSync(transcriptPath, captured.transcript, { mode: 0o600 });
+          fs.chmodSync(transcriptPath, 0o600);
         } catch (error) {
           log("artifacts:", messageOf(error));
         }

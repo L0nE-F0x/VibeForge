@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export interface WriteOptions {
-  /** The file's mode, say 0o600 for one only its owner may read. It replaces an existing file's mode too. */
+  /** File mode (defaults to `0o600` for VibeForge-owned files). Replaces an existing file's mode too. */
   mode?: number;
 }
 
@@ -46,11 +46,12 @@ export function isUnchangedOwnWrite(file: string): boolean {
 
 /** Write through a temp file and rename, so a crash never leaves half a YAML file behind. */
 export function writeFileAtomic(file: string, text: string, options: WriteOptions = {}): void {
+  const mode = options.mode ?? 0o600;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
-  fs.writeFileSync(temp, text, options.mode === undefined ? undefined : { mode: options.mode });
+  fs.writeFileSync(temp, text, { mode });
   // The umask, or a temp file left by a crash, would otherwise decide.
-  if (options.mode !== undefined) fs.chmodSync(temp, options.mode);
+  fs.chmodSync(temp, mode);
   fs.renameSync(temp, file);
   const full = path.resolve(file);
   ownDeletes.delete(full);
@@ -88,7 +89,7 @@ function setAsideBroken(file: string, options: WriteOptions): void {
   } catch {
     const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
     fs.renameSync(file, aside);
-    if (options.mode !== undefined) fs.chmodSync(aside, options.mode);
+    fs.chmodSync(aside, options.mode ?? 0o600);
   }
 }
 

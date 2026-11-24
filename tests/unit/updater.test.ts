@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LogFile } from "../../src/core/log.js";
+import { updateCommand, type Release } from "../../src/core/updates.js";
 
 const netFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
 vi.mock("electron", () => ({ net: { fetch: (url: string, init: RequestInit) => netFetch(url, init) } }));
@@ -93,5 +94,35 @@ describe("the update check", () => {
     const [, init] = netFetch.mock.calls[0];
     expect(init.credentials).toBe("omit");
     expect(new Headers(init.headers).get("User-Agent")).toBe("VibeForge/2.15.0");
+  });
+
+  it("refuses installer commands when the release lookup failed or omitted a SHA-256 digest", async () => {
+    const sha = "b".repeat(64);
+    const makeUpdater = (response: Response) => {
+      const log = new LogFile(path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-updater-digest-")), "log.txt"));
+      return new Updater({
+        current: "2.15.0",
+        install: "installer",
+        command: (latest) => updateCommand("installer", "/opt/vibeforge", undefined, latest as Release | null),
+        url: "https://api.github.com/repos/x/y/releases/latest",
+        log,
+        enabled: () => true,
+        changed: () => undefined,
+        fetch: async () => response,
+      });
+    };
+
+    const unsigned = makeUpdater(
+      new Response(JSON.stringify({ tag_name: "v2.16.0", assets: [{ name: "install.sh" }] })),
+    );
+    expect(unsigned.get().command).toBeNull();
+    expect((await unsigned.check()).command).toBeNull();
+
+    const verified = makeUpdater(
+      new Response(JSON.stringify({ tag_name: "v2.16.0", assets: [{ name: "install.sh", digest: `sha256:${sha}` }] })),
+    );
+    const info = await verified.check();
+    expect(info.command).toContain("--proto =https --proto-redir =https");
+    expect(info.command).toContain(sha);
   });
 });

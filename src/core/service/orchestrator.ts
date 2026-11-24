@@ -12,6 +12,8 @@ import {
   claudeImageStdin,
   cleanBranch,
   detectWaitingPrompt,
+  isApprovalPrompt,
+  isFreeWaitingPrompt,
   emptyPromise,
   formatSettingsRules,
   holdsForGo,
@@ -883,10 +885,11 @@ export class OrchestratorDesk {
     const libraryLine = libraryChanged ? formatLibraryUpdate(context) : "";
     const memoryLine = memoryChanged ? formatMemoryUpdate(context.memory ?? "") : "";
     const work = path.join(this.dir, "work");
-    fs.mkdirSync(work, { recursive: true });
+    fs.mkdirSync(work, { recursive: true, mode: 0o700 });
+    fs.chmodSync(work, 0o700);
     // Codex reads the schema from a file.
     const schemaFile = path.join(work, "plan-schema.json");
-    fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
+    fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA), { mode: 0o600 });
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
     const imageLine = savedImages.length
@@ -1092,7 +1095,7 @@ export class OrchestratorDesk {
     const ready = steps.every((step) => !stepIssue(step, checked));
     const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
     if (ready && !unknownKinds.length && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))) {
-      void this.run(answered.id);
+      void this.run(answered.id, true);
     }
   }
 
@@ -1173,8 +1176,10 @@ export class OrchestratorDesk {
     if (kind !== "grok" && kind !== "agy") return [];
     const cached = this.models.get(engineId);
     if (cached) return cached;
-    fs.mkdirSync(path.join(this.dir, "work"), { recursive: true });
-    const run = await this.runner([engine.binPath, ...engine.row.args, "models"], path.join(this.dir, "work"), new AbortController().signal, MODELS_TIMEOUT_MS);
+    const work = path.join(this.dir, "work");
+    fs.mkdirSync(work, { recursive: true, mode: 0o700 });
+    fs.chmodSync(work, 0o700);
+    const run = await this.runner([engine.binPath, ...engine.row.args, "models"], work, new AbortController().signal, MODELS_TIMEOUT_MS);
     const listed = kind === "grok" ? grokModels(run.stdout) : agyModels(run.stdout);
     if (listed.length) this.models.set(engineId, listed);
     return listed;
@@ -1485,12 +1490,12 @@ export class OrchestratorDesk {
   }
 
   /** Go: carry the plan out, one step after another. A step that fails doesn't stop the rest. */
-  async run(turnIdValue: string): Promise<void> {
+  async run(turnIdValue: string, auto = false): Promise<void> {
     const existing = this.runningPlans.get(turnIdValue);
     if (existing) return existing;
     const turn = this.plan(turnIdValue);
     if (turn.plan !== "waiting") return;
-    const work = this.runSteps(turn);
+    const work = this.runSteps(turn, auto);
     this.runningPlans.set(turnIdValue, work);
     try {
       await work;
@@ -1499,7 +1504,7 @@ export class OrchestratorDesk {
     }
   }
 
-  private async runSteps(turn: OrchestratorTurn): Promise<void> {
+  private async runSteps(turn: OrchestratorTurn, auto = false): Promise<void> {
     const epoch = this.runEpoch;
     turn.plan = "running";
     this.save();
@@ -1549,7 +1554,7 @@ export class OrchestratorDesk {
       this.activity = { kind: step.kind, label: this.stepActivityLabel(step, context) };
       this.save();
       try {
-        await this.carryOut(turn, step, epoch);
+        await this.carryOut(turn, step, epoch, auto);
         step.state = "done";
         prevOk = true;
         const producedPty = step.ptyId || (step.kind === "tell" ? step.target : null);
@@ -1659,7 +1664,7 @@ export class OrchestratorDesk {
     };
   }
 
-  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep, epoch = this.runEpoch): Promise<void> {
+  private async carryOut(turn: OrchestratorTurn, step: OrchestratorStep, epoch = this.runEpoch, auto = false): Promise<void> {
     if (step.kind === "workspace") {
       await carryOutWorkspaceStep(this.entityDeps(), turn, step);
       return;
@@ -1734,6 +1739,14 @@ export class OrchestratorDesk {
       const screen = this.core.options.host.screen ? await this.core.options.host.screen(step.target).catch(() => "") : "";
       const action = keySequenceFor(step.prompt, screen);
       if (!action) throw new Error("Unknown key action.");
+      const approves = action.label === "Yes" || action.label === "Enter" || /^Option [1-9]$/.test(action.label);
+      if (auto && approves) {
+        // Re-check the live screen right before writing: a prompt can move from trust to approval while planning.
+        const livePrompt = detectWaitingPrompt(screen);
+        if (!livePrompt || !isFreeWaitingPrompt(livePrompt) || isApprovalPrompt(screen)) {
+          throw new Error("That CLI is waiting on an approval prompt; say Go to answer it.");
+        }
+      }
       if (this.core.options.host.write) await this.core.options.host.write(step.target, action.data);
       else await this.core.options.host.send(step.target, action.data.replace(/\r$/, ""), action.data.endsWith("\r"));
       this.followTo(session?.workspaceId, step.target);
@@ -1892,7 +1905,7 @@ export class OrchestratorDesk {
         const tail = res.output.trim().slice(-3500);
         const fixPrompt = `Verification command "${command}" failed (exit ${res.timedOut ? "timeout" : String(res.code ?? "?")}). Fix the failure below and stop when done:\n\n${tail || "(no output)"}`;
         const sent = await this.messages.tell({ fromPty: null, to: fixerHandle.handle, text: fixPrompt, fromPerson: true });
-        if (!sent.ok) break;
+        if (!sent.ok || sent.delivered === "draft") break;
         const settled = await this.waitForChainedPty(fixerPtyId, epoch, turn);
         if (!settled || this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       }
