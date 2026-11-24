@@ -1094,7 +1094,11 @@ export class OrchestratorDesk {
     const checked = withPlannedWorkspaces(currentContext, steps);
     const ready = steps.every((step) => !stepIssue(step, checked));
     const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
-    if (ready && !unknownKinds.length && (steps.every((step) => ONLY_LOOKS.includes(step.kind)) || callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))) {
+    // Once Viby has read a screen, a file, a diff or a reply in this turn, what it read could be
+    // steering the plan: only steps that just look go without Go (decision D1, 2026-11-25).
+    const readSomething = checks.length > 0;
+    const lookOnly = steps.every((step) => ONLY_LOOKS.includes(step.kind));
+    if (ready && !unknownKinds.length && (lookOnly || (!readSomething && (callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))))) {
       void this.run(answered.id, true);
     }
   }

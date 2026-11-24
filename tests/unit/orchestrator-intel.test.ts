@@ -432,7 +432,46 @@ describe("orchestrator intelligence: waiting prompts and keys", () => {
 
     // 4. agent memory-set replaces memory.md wholesale.
     expect(holdsForGo(mkStep({ kind: "agent", action: "memory-set", target: "atlas", prompt: "New rules." }))).toBe(true);
-    expect(holdsForGo(mkStep({ kind: "agent", action: "memory-append", target: "atlas", prompt: "Note." }))).toBe(false);
+    // Appending goes into the agent's prompt from then on, so it waits for Go too (D1).
+    expect(holdsForGo(mkStep({ kind: "agent", action: "memory-append", target: "atlas", prompt: "Note." }))).toBe(true);
+
+    // 5. Decision D1: what gives an agent, a skill or a CLI more to act on waits for Go too.
+    const held = (step: Record<string, unknown>, context?: PlanContext) => holdsForGo(mkStep(step), context ?? null);
+    // Agents: new, more folders, another CLI, a new brief, skills, memory, sync. Renaming alone is free.
+    expect(held({ kind: "agent", action: "create", name: "Scout", prompt: "Explore." })).toBe(true);
+    expect(held({ kind: "agent", action: "add-folder", target: "atlas", places: ["/tmp"] })).toBe(true);
+    expect(held({ kind: "agent", action: "edit", target: "atlas", engineId: "codex" })).toBe(true);
+    expect(held({ kind: "agent", action: "edit", target: "atlas", prompt: "New brief." })).toBe(true);
+    expect(held({ kind: "agent", action: "edit", target: "atlas", options: "sync=on" })).toBe(true);
+    expect(held({ kind: "agent", action: "edit", target: "atlas", name: "Atlas Two" })).toBe(false);
+    expect(held({ kind: "agent", action: "remove-folder", target: "atlas", places: ["/tmp"] })).toBe(false);
+    // Skills, routines, tasks, chats, runs and Viby's memory.
+    expect(held({ kind: "skill", action: "create", name: "Lint", prompt: "Run lint." })).toBe(true);
+    expect(held({ kind: "skill", action: "detach", target: "lint" })).toBe(false);
+    expect(held({ kind: "routine", action: "create", prompt: "Audit." })).toBe(true);
+    expect(held({ kind: "routine", action: "enable", target: "daily" })).toBe(true);
+    expect(held({ kind: "routine", action: "disable", target: "daily" })).toBe(false);
+    expect(held({ kind: "task", action: "create-run", prompt: "Fix it." })).toBe(true);
+    expect(held({ kind: "task", action: "create", prompt: "Fix it." })).toBe(false);
+    expect(held({ kind: "chat", action: "send", target: "ch1", prompt: "Hello." })).toBe(true);
+    expect(held({ kind: "chat", action: "rename", target: "ch1", prompt: "Notes" })).toBe(false);
+    expect(held({ kind: "run", action: "continue", target: "rn1", prompt: "Now the tests." })).toBe(true);
+    expect(held({ kind: "run", action: "mark-reviewed", target: "rn1" })).toBe(false);
+    expect(held({ kind: "memory", action: "append", prompt: "Use pnpm." })).toBe(true);
+    // A slash command typed into a CLI, like a shell escape.
+    expect(held({ kind: "tell", target: "pty-1", prompt: "/permissions" })).toBe(true);
+    expect(held({ kind: "tell", target: "pty-1", prompt: "run the tests" })).toBe(false);
+    // Agent talk turned on, given a lead, or allowed more than now; lowering a limit is free.
+    const talk = (on: boolean): PlanContext => ({
+      workspaces: [],
+      engines: [{ id: "claude", label: "Claude Code", available: true }],
+      running: [],
+      settings: { ...baseSettings, app: { ...baseSettings.app, agentTalk: { on, lead: "", handOff: "ask", reviewRounds: 1, maxMessages: 8, maxWorking: 3, maxHandOffs: 4, leadApplies: false } } },
+    });
+    expect(held({ target: "agentTalk.maxMessages", prompt: "20" }, talk(true))).toBe(true);
+    expect(held({ target: "agentTalk.maxMessages", prompt: "4" }, talk(true))).toBe(false);
+    expect(held({ target: "agentTalk", prompt: "on" }, talk(false))).toBe(true);
+    expect(held({ target: "agentTalk", prompt: "off" }, talk(true))).toBe(false);
   });
 });
 

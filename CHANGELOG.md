@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Security
+
+- **More of Viby's steps wait for your Go, even in Just go and on a call.** These now wait:
+  - a new agent, or one given more folders, another CLI, a new brief, skills or memory
+  - a skill made or changed
+  - a routine made, changed or turned on
+  - a task made and started at once
+  - a chat message or continued run with new words
+  - a note added to Viby's memory
+  - a slash command typed into a CLI
+  - agent talk turned on, given a lead or allowed more than now
+
+  And when Viby has read a screen, file, diff or reply to make a plan, only steps that just look run without Go. What Viby read could be steering it. "Remember …" typed by you still saves at once.
+
 ## [3.6.2] - 2026-11-25
 
 **3.6.2: the browser dock, Viby's approvals, git, your folders and Update are locked down.**

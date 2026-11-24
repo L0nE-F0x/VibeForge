@@ -1595,6 +1595,51 @@ export function safeInCall(step: OrchestratorStep, context: PlanContext | null =
 }
 
 /**
+ * Steps that give an agent, a skill or a CLI more to act on, or start work from words the planner
+ * wrote: they wait for Go even in Just go and in a call (decision D1, 2026-11-25). A planner can be
+ * steered by what it read on a screen or in a file, and these are what that would be used for.
+ */
+function reachesFurther(step: OrchestratorStep): boolean {
+  const act = (step.action ?? "").toLowerCase();
+  const said = Boolean(step.prompt.trim());
+  const syncOn = parseOptions(step.options).bool("sync") === true;
+  switch (step.kind) {
+    case "agent":
+      // A new agent, or one given more folders, another CLI, a new brief, skills, memory or sync.
+      return act === "create" || act === "add-folder" || act === "add-skill" || act === "memory-append" || (act === "edit" && (Boolean(step.places?.length) || Boolean(step.engineId) || said || Boolean(step.skills?.length) || syncOn));
+    case "skill":
+      // A skill's body becomes part of every agent's prompt that has it.
+      return act === "create" || act === "attach" || act === "set-agents" || (act === "edit" && (said || syncOn));
+    case "routine":
+      // Work that starts later, on its own.
+      return act === "create" || act === "enable" || (act === "edit" && said);
+    case "task":
+      return act === "create-run";
+    case "chat":
+      return (act === "create" || act === "send") && said;
+    case "run":
+      return act === "continue" && said;
+    case "memory":
+      // Viby's memory goes into every later planning turn.
+      return act === "append";
+    default:
+      return false;
+  }
+}
+
+/** Agent talk turned on, given a lead, or allowed more messages, helpers, hand-offs or review rounds than now. */
+function lessTalkLimit(patch: Record<string, unknown> | undefined, now: { on: boolean; lead: string; reviewRounds: number; maxMessages: number; maxWorking: number; maxHandOffs: number } | undefined): boolean {
+  if (!patch) return false;
+  if (patch.on === true && !now?.on) return true;
+  if (typeof patch.lead === "string" && patch.lead && patch.lead !== now?.lead) return true;
+  for (const field of ["maxMessages", "maxWorking", "maxHandOffs", "reviewRounds"] as const) {
+    const next = patch[field];
+    if (typeof next === "number" && (now === undefined || next > now[field])) return true;
+  }
+  return false;
+}
+
+/**
  * Whether a step waits for Go even in "Just go" mode (and so in a call too): stopping, applying or
  * throwing away work, a shell command that isn't plainly harmless, Ctrl+C (a stop by another name),
  * and a setting that turns something networked on, downloads, or changes how far Viby acts alone.
@@ -1603,8 +1648,10 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
   if (NEEDS_GO.includes(step.kind)) return true;
   if (isDestructiveStepAction(step.kind, step.action)) return true;
   if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return true;
+  if (reachesFurther(step)) return true;
   if (step.kind === "tell") {
-    if (step.prompt.trimStart().startsWith("!")) return true;
+    // A shell escape ("!") or a slash command ("/permissions", "/add-dir") changes what the CLI may do.
+    if (/^[!/]/.test(step.prompt.trimStart())) return true;
     const target = context?.running.find((item) => item.id === step.target);
     return Boolean(target?.waiting && !isFreeWaitingPrompt(target.waiting));
   }
@@ -1646,6 +1693,7 @@ export function holdsForGo(step: OrchestratorStep, context: PlanContext | null =
         "defaultShell" in action.patch ||
         agentTalk?.handOff === "go" ||
         agentTalk?.leadApplies === true ||
+        lessTalkLimit(action.patch.agentTalk as Record<string, unknown> | undefined, context?.settings?.app.agentTalk) ||
         shrinks(keepRuns?.days, curKeep?.days) ||
         shrinks(keepRuns?.maxMb, curKeep?.maxMb)
       );
