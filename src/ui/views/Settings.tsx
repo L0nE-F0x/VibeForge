@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, Workflow, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -308,7 +308,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
           <TalkCard />
 
           <div className="section-title" id="settings-orchestrator">
-            <Workflow size={13} /> {t("orch.title")}
+            <AudioLines size={13} /> {t("orch.title")}
           </div>
           <OrchestratorCard />
 

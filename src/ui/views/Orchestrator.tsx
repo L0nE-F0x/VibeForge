@@ -1,4 +1,5 @@
 import {
+  AudioLines,
   Check,
   ChevronDown,
   CircleAlert,
@@ -7,10 +8,8 @@ import {
   Keyboard,
   Mic,
   MicOff,
-  Phone,
   PhoneOff,
   RotateCcw,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -88,20 +87,20 @@ function workingLineText(activity: OrchestratorActivity | null | undefined, t: T
 }
 
 /** Short summary of what Viby can currently see on this machine, for the empty call state. */
-function useSeesLine(t: Translator): string {
+function useSeesLine(t: Translator): { text: string; active: boolean } {
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const live = useLive().data ?? [];
   const copies = useOrchestrator().data?.copies ?? [];
   const copyIds = new Set(copies.map((item) => item.openedWorkspaceId).filter(Boolean));
   const ownWorkspaces = workspaces.filter((item) => !copyIds.has(item.id));
   const clis = live.filter(isCodingCli);
-  if (ownWorkspaces.length === 0 && clis.length === 0 && copies.length === 0) return t("orch.sees.empty");
+  if (ownWorkspaces.length === 0 && clis.length === 0 && copies.length === 0) return { text: t("orch.sees.empty"), active: false };
   const parts = [
     t.count("orch.sees.workspaces", ownWorkspaces.length),
     clis.length > 0 ? t.count("orch.sees.clis", clis.length) : t("orch.sees.noClis"),
     ...(copies.length > 0 ? [t.count("orch.reviewCount", copies.length)] : []),
   ];
-  return t("orch.seesPrefix", { items: parts.join(" · ") });
+  return { text: parts.join(" · "), active: clis.length > 0 };
 }
 
 // ------------------------------------------------------------------ the full Vibe tab
@@ -114,10 +113,10 @@ export function OrchestratorView() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
-  const live = useLive().data ?? [];
   const callState = useCall();
   const toggleCall = useCallToggle();
-  const seesLine = useSeesLine(t);
+  const sees = useSeesLine(t);
+  const callShortcut = shortcutKeys("app.call");
   const [clear] = useAction(async () => call("orchestrator.clear"), t("orch.failed"));
   const [reviewAnchor, setReviewAnchor] = useState<HTMLElement | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -169,25 +168,31 @@ export function OrchestratorView() {
     if (copies.length === 0) setReviewAnchor(null);
   }, [copies.length]);
 
-  const copyIds = new Set(copies.map((item) => item.openedWorkspaceId).filter(Boolean));
-  const ownWorkspaces = workspaces.filter((item) => !copyIds.has(item.id));
-  const clis = live.filter(isCodingCli);
-  const suggestions = [
-    ...(copies.length > 0 ? [{ key: "review", label: t("orch.suggest.review"), prompt: "Inspect pending copies and summarize their changes" }] : []),
-    ...(clis.length > 0 ? [{ key: "status", label: t("orch.suggest.status"), prompt: "Check what running CLIs are working on and any problems" }] : []),
-    ...(ownWorkspaces.length > 0
-      ? [{ key: "inspect", label: t("orch.suggest.inspect", { target: ownWorkspaces[0].name }), prompt: `Inspect recent work and git status in ${ownWorkspaces[0].name}` }]
-      : []),
-    { key: "remember", label: t("orch.suggest.remember"), draft: "/remember " },
-  ].slice(0, 3);
-
-  const askPrompt = async (text: string) => {
-    try {
-      await call("orchestrator.ask", text);
-    } catch (error: unknown) {
-      fail(error, t("orch.failed"));
-    }
-  };
+  const composer = (
+    <VibyComposer
+      placeholder={t("orch.typePlaceholder")}
+      busy={view?.thinking}
+      disabled={!view}
+      autoFocus
+      sendLabel={t("common.send")}
+      voiceLabel={t("orch.title")}
+      voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
+      draftKey={DRAFT_KEY}
+      keepKey="orchestrator"
+      waitingTurnId={waitingTurnId}
+      onRunWaiting={(id) => void call("orchestrator.run", id).catch((error: unknown) => fail(error, t("orch.failed")))}
+      onEscape={!emptyBeforeCall ? () => setTypingOpen(false) : undefined}
+      onSend={async (text, images) => {
+        try {
+          await call("orchestrator.ask", text, images);
+          return true;
+        } catch (error: unknown) {
+          fail(error, t("orch.failed"));
+          return false;
+        }
+      }}
+    />
+  );
 
   return (
     <div className={`view viby-view${callState.on ? " in-call" : ""}`}>
@@ -226,121 +231,86 @@ export function OrchestratorView() {
 
       {emptyBeforeCall ? (
         <div className="viby-empty">
-          <VibySprite mood="idle" size={64} label={t("orch.title")} className="viby-hero-sprite" />
-          {view && !view.engineReady ? (
-            <div className="orch-problem">
-              <CircleAlert size={14} />
-              <span className="grow">{t("orch.notReady")}</span>
-              <Button size="sm" onClick={() => go({ view: "settings", section: "orchestrator" })}>
-                {t("orch.openSettings")}
-              </Button>
+          <div className="viby-stage">
+            <div className="viby-hero">
+              <div className="viby-hero-aura">
+                <VibySprite mood="idle" size={72} label={t("orch.title")} className="viby-hero-sprite" />
+              </div>
+              <p className="viby-sees">
+                {sees.active && <span className="viby-dot working" aria-hidden />}
+                <span>{sees.text}</span>
+              </p>
             </div>
-          ) : (
-            <button
-              type="button"
-              className="viby-call-hero"
-              {...tipProps(t("call.startTip"), { kbd: shortcutKeys("app.call") })}
-              onClick={toggleCall}
-            >
-              <Phone size={18} strokeWidth={2.1} />
-              <span>{t("call.start")}</span>
-            </button>
-          )}
-          <p className="viby-sees">{seesLine}</p>
-          {view?.engineReady && (
-            <div className="viby-suggest-chips">
-              {suggestions.map((item) => (
+            {view && !view.engineReady ? (
+              <div className="orch-problem">
+                <CircleAlert size={14} />
+                <span className="grow">{t("orch.notReady")}</span>
+                <Button size="sm" onClick={() => go({ view: "settings", section: "orchestrator" })}>
+                  {t("orch.openSettings")}
+                </Button>
+              </div>
+            ) : (
+              <div className="viby-call-group">
                 <button
-                  key={item.key}
                   type="button"
-                  className="viby-suggest-chip"
-                  onClick={() => {
-                    if ("draft" in item && item.draft) {
-                      seedDraft(DRAFT_KEY, item.draft);
-                      setTypingOpen(true);
-                    } else if ("prompt" in item && item.prompt) {
-                      void askPrompt(item.prompt);
-                    }
-                  }}
+                  className="viby-call-hero"
+                  {...tipProps(t("call.startTip"), { kbd: callShortcut })}
+                  onClick={toggleCall}
                 >
-                  <Sparkles size={11} />
-                  <span>{item.label}</span>
+                  <AudioLines size={16} strokeWidth={2} className="viby-call-icon" />
+                  <span>{t("call.start")}</span>
+                  {callShortcut && <kbd className="viby-call-kbd">{callShortcut}</kbd>}
                 </button>
-              ))}
-            </div>
-          )}
-          {voiceReady === false && (
-            <button type="button" className="viby-voice-setup" onClick={() => go({ view: "settings", section: "voice" })}>
-              {t("orch.voiceSetup")}
-            </button>
-          )}
+                {voiceReady === false && (
+                  <button type="button" className="viby-voice-setup" onClick={() => go({ view: "settings", section: "voice" })}>
+                    {t("orch.voiceSetup")}
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="viby-composer-wrap viby-empty-composer">{composer}</div>
+          </div>
         </div>
       ) : (
-        <ConversationStream view={view} callState={callState} seesLine={seesLine} />
+        <ConversationStream view={view} callState={callState} sees={sees} />
       )}
 
-      <div className="viby-bottom">
-        {typingOpen && (
-          <div className="viby-composer-wrap">
-            <div className="viby-composer-inner">
-              <VibyComposer
-                placeholder={t("orch.typePlaceholder")}
-                busy={view?.thinking}
-                disabled={!view}
-                autoFocus
-                sendLabel={t("common.send")}
-                voiceLabel={t("orch.title")}
-                voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
-                draftKey={DRAFT_KEY}
-                keepKey="orchestrator"
-                waitingTurnId={waitingTurnId}
-                onRunWaiting={(id) => void call("orchestrator.run", id).catch((error: unknown) => fail(error, t("orch.failed")))}
-                onEscape={() => setTypingOpen(false)}
-                onSend={async (text, images) => {
-                  try {
-                    await call("orchestrator.ask", text, images);
-                    return true;
-                  } catch (error: unknown) {
-                    fail(error, t("orch.failed"));
-                    return false;
-                  }
-                }}
-              />
-              <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} onClick={() => setTypingOpen(false)} />
+      {!emptyBeforeCall && (
+        <div className="viby-bottom">
+          {typingOpen && (
+            <div className="viby-composer-wrap">
+              <div className="viby-composer-inner">
+                {composer}
+                {callState.on && <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} onClick={() => setTypingOpen(false)} />}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {callState.on ? (
-          <LiveCallDock callState={callState} typingOpen={typingOpen} onToggleTyping={() => setTypingOpen((open) => !open)} />
-        ) : emptyBeforeCall ? (
-          !typingOpen && (
-            <div className="viby-corner-actions">
-              <Button size="sm" variant="ghost" icon={Keyboard} tip={t("orch.typeToggle")} onClick={() => setTypingOpen(true)} />
+          {callState.on ? (
+            <LiveCallDock callState={callState} typingOpen={typingOpen} onToggleTyping={() => setTypingOpen((open) => !open)} />
+          ) : (
+            <div className="viby-after-dock">
+              <button
+                type="button"
+                className="viby-call-again"
+                {...tipProps(t("call.startTip"), { kbd: callShortcut })}
+                onClick={toggleCall}
+              >
+                <AudioLines size={15} strokeWidth={2} className="viby-call-icon" />
+                <span>{t("call.start")}</span>
+              </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={Keyboard}
+                pressed={typingOpen}
+                tip={t("orch.typeToggle")}
+                onClick={() => setTypingOpen((open) => !open)}
+              />
             </div>
-          )
-        ) : (
-          <div className="viby-after-dock">
-            <button
-              type="button"
-              className="viby-call-again"
-              {...tipProps(t("call.startTip"), { kbd: shortcutKeys("app.call") })}
-              onClick={toggleCall}
-            >
-              <Phone size={15} strokeWidth={2.1} />
-              <span>{t("call.start")}</span>
-            </button>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={Keyboard}
-              pressed={typingOpen}
-              tip={t("orch.typeToggle")}
-              onClick={() => setTypingOpen((open) => !open)}
-            />
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {route.view === "orchestrator" && route.copyId && <CopySheet copyId={route.copyId} copies={view?.copies} />}
     </div>
@@ -359,7 +329,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const callState = useCall();
-  const seesLine = useSeesLine(t);
+  const sees = useSeesLine(t);
   const box = useRef<HTMLDivElement>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
   useOverlay(true);
@@ -394,7 +364,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
         </div>
         {memoryOpen && <VibyMemorySheet onClose={() => setMemoryOpen(false)} />}
         <LeaveBar.Provider value={onClose}>
-          <ConversationStream view={view} callState={callState} seesLine={seesLine} compact />
+          <ConversationStream view={view} callState={callState} sees={sees} compact />
           <VibyComposer
             placeholder={t("orch.typePlaceholder")}
             busy={view?.thinking}
@@ -777,12 +747,12 @@ function LiveCallDock({
 function ConversationStream({
   view,
   callState,
-  seesLine,
+  sees,
   compact,
 }: {
   view: View | undefined;
   callState: CallState;
-  seesLine: string;
+  sees: { text: string; active: boolean };
   compact?: boolean;
 }) {
   const t = useT();
@@ -821,7 +791,10 @@ function ConversationStream({
         {view && turns.length === 0 && !view.thinking && !showLiveUser && (
           <div className="viby-call-ready">
             {!compact && <LiveVibySprite mood={callMood(callState)} size={52} active={callState.on} />}
-            <p className="viby-sees">{seesLine}</p>
+            <p className="viby-sees">
+              {sees.active && <span className="viby-dot working" aria-hidden />}
+              <span>{sees.text}</span>
+            </p>
           </div>
         )}
         {view && !view.engineReady && (

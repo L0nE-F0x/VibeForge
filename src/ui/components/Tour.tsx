@@ -19,7 +19,7 @@ import {
   Send,
   Settings,
   SquareTerminal,
-  Workflow,
+  AudioLines,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
@@ -163,7 +163,7 @@ const STEPS: Step[] = [
     route: { view: "orchestrator" },
     target: [".viby-view", ".stage"],
     side: "left",
-    icon: Workflow,
+    icon: AudioLines,
     keys: [[shortcutKeys("app.orchestrator"), "shortcuts.orchestrator"]],
   },
   {

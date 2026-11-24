@@ -1,4 +1,4 @@
-import { Mic, MicOff, Phone, PhoneOff, Square } from "lucide-react";
+import { AudioLines, Mic, MicOff, PhoneOff, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CallState } from "../shared/api.js";
 import type { VibyMood } from "../shared/pixel.js";
@@ -190,7 +190,7 @@ export function CallButton() {
   const current = useCall();
   const toggle = useCallToggle();
   return (
-    <Button size="sm" variant={current.on ? "primary" : "ghost"} icon={current.on ? PhoneOff : Phone} tip={current.on ? t("call.hangUpTip") : t("call.startTip")} kbd={shortcutKeys("app.call")} onClick={toggle}>
+    <Button size="sm" variant={current.on ? "primary" : "ghost"} icon={current.on ? PhoneOff : AudioLines} tip={current.on ? t("call.hangUpTip") : t("call.startTip")} kbd={shortcutKeys("app.call")} onClick={toggle}>
       {current.on ? t("call.hangUp") : t("call.start")}
     </Button>
   );
