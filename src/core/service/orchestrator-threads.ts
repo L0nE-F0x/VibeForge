@@ -78,11 +78,12 @@ export function savePastedImages(imagesDir: string, rawImages: ReadonlyArray<str
     if (!fmt) throw new Error("Unsupported image format.");
     entries.push({ buf, base64: buf.toString("base64"), ...fmt });
   }
-  fs.mkdirSync(imagesDir, { recursive: true });
+  fs.mkdirSync(imagesDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(imagesDir, 0o700);
   return entries.map((entry) => {
     const filename = `img-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}.${entry.ext}`;
     const fullPath = path.join(imagesDir, filename);
-    fs.writeFileSync(fullPath, entry.buf);
+    fs.writeFileSync(fullPath, entry.buf, { mode: 0o600 });
     return { filename, path: fullPath, mediaType: entry.mediaType, base64: entry.base64 };
   });
 }
@@ -179,7 +180,8 @@ function summarizeSaved(conv: SavedConversation): OrchestratorThreadSummary {
 
 export function saveThreadSnapshot(threadsDir: string, conv: SavedConversation): void {
   if (!conv.turns.length) return;
-  fs.mkdirSync(threadsDir, { recursive: true });
+  fs.mkdirSync(threadsDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(threadsDir, 0o700);
   const title = conv.title || deriveThreadTitle(conv.turns);
   const updatedAt = conv.turns.at(-1)?.at || conv.updatedAt;
   writeJson(threadPath(threadsDir, conv.id), { ...conv, title, updatedAt });

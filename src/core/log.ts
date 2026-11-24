@@ -19,11 +19,15 @@ export class LogFile {
     const text = message.trim().replace(/\r?\n/g, "\n    ");
     const line = `${this.now().toISOString()} ${level.toUpperCase().padEnd(5)} ${text}\n`;
     try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const dir = path.dirname(this.file);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      fs.chmodSync(dir, 0o700);
       if (fs.existsSync(this.file) && fs.statSync(this.file).size + Buffer.byteLength(line) > this.maxBytes) {
         fs.renameSync(this.file, `${this.file}.1`);
+        fs.chmodSync(`${this.file}.1`, 0o600);
       }
-      fs.appendFileSync(this.file, line);
+      fs.appendFileSync(this.file, line, { mode: 0o600 });
+      fs.chmodSync(this.file, 0o600);
     } catch {
       /* the log must never break the app */
     }

@@ -885,10 +885,11 @@ export class OrchestratorDesk {
     const libraryLine = libraryChanged ? formatLibraryUpdate(context) : "";
     const memoryLine = memoryChanged ? formatMemoryUpdate(context.memory ?? "") : "";
     const work = path.join(this.dir, "work");
-    fs.mkdirSync(work, { recursive: true });
+    fs.mkdirSync(work, { recursive: true, mode: 0o700 });
+    fs.chmodSync(work, 0o700);
     // Codex reads the schema from a file.
     const schemaFile = path.join(work, "plan-schema.json");
-    fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA));
+    fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA), { mode: 0o600 });
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
     const imageLine = savedImages.length
@@ -1175,8 +1176,10 @@ export class OrchestratorDesk {
     if (kind !== "grok" && kind !== "agy") return [];
     const cached = this.models.get(engineId);
     if (cached) return cached;
-    fs.mkdirSync(path.join(this.dir, "work"), { recursive: true });
-    const run = await this.runner([engine.binPath, ...engine.row.args, "models"], path.join(this.dir, "work"), new AbortController().signal, MODELS_TIMEOUT_MS);
+    const work = path.join(this.dir, "work");
+    fs.mkdirSync(work, { recursive: true, mode: 0o700 });
+    fs.chmodSync(work, 0o700);
+    const run = await this.runner([engine.binPath, ...engine.row.args, "models"], work, new AbortController().signal, MODELS_TIMEOUT_MS);
     const listed = kind === "grok" ? grokModels(run.stdout) : agyModels(run.stdout);
     if (listed.length) this.models.set(engineId, listed);
     return listed;

@@ -39,7 +39,8 @@ export function runDir(dataRoot: string, id: string): string | null {
 
 export function allocateRunDir(dataRoot: string, startedAt: Date, slug: string): { id: string; dir: string } {
   const root = path.join(dataRoot, "runs");
-  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  fs.chmodSync(root, 0o700);
   const base = `${runFolderStamp(startedAt)}_${safeSlug(slug)}`;
   let id = base;
   let suffix = 2;
@@ -48,7 +49,8 @@ export function allocateRunDir(dataRoot: string, startedAt: Date, slug: string):
     suffix += 1;
   }
   const dir = path.join(root, id);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
   return { id, dir };
 }
 

@@ -34,7 +34,7 @@ describe("folders", () => {
     const data = path.join(tempDir(), "data");
     ensureLayout(config, data);
     expect(fs.readdirSync(config).sort()).toEqual(["agents", "layouts", "routines", "skills", "tasks"]);
-    expect(fs.readdirSync(data).sort()).toEqual(["runs", "scratch"]);
+    expect(fs.readdirSync(data).sort()).toEqual(["logs", "runs", "scratch"]);
   });
 });
 

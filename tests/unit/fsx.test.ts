@@ -45,10 +45,15 @@ describe("JSON files", () => {
     writeJson(file, { token: "vf_d" }, { mode: 0o600 });
     expect(mode(file)).toBe(0o600);
     expect(mode(`${file}.broken`)).toBe(0o600);
-    // Without a mode, a file is written as before.
+    // Without an explicit mode, VibeForge-owned files still default to 0o600 (owner-only).
     const plain = path.join(dir, "layout.json");
     writeFileAtomic(plain, "{}\n");
-    fs.writeFileSync(path.join(dir, "plain"), "");
-    expect(mode(plain)).toBe(mode(path.join(dir, "plain")));
+    expect(mode(plain)).toBe(0o600);
+    // Replaces looser pre-existing permissions on overwrite too, unless the caller overrides mode.
+    fs.chmodSync(plain, 0o644);
+    writeFileAtomic(plain, "{}\n");
+    expect(mode(plain)).toBe(0o600);
+    writeFileAtomic(plain, "{}\n", { mode: 0o644 });
+    expect(mode(plain)).toBe(0o644);
   });
 });

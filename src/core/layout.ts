@@ -17,14 +17,16 @@ export function defaultRoots(env: NodeJS.ProcessEnv = process.env): Roots {
   };
 }
 
-/** Create every directory the app owns. Seed files are written by the store on first read. */
+/** Create every directory the app owns and keep its permissions owner-only. */
 export function ensureLayout(configRoot: string, dataRoot: string): void {
-  fs.mkdirSync(configRoot, { recursive: true, mode: 0o700 });
-  fs.mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
-  for (const dir of ["agents", "skills", "routines", "tasks", "layouts"]) {
-    fs.mkdirSync(path.join(configRoot, dir), { recursive: true, mode: 0o700 });
-  }
-  for (const dir of ["runs", "scratch"]) {
-    fs.mkdirSync(path.join(dataRoot, dir), { recursive: true, mode: 0o700 });
+  const dirs = [
+    configRoot,
+    dataRoot,
+    ...["agents", "skills", "routines", "tasks", "layouts"].map((dir) => path.join(configRoot, dir)),
+    ...["runs", "scratch", "logs"].map((dir) => path.join(dataRoot, dir)),
+  ];
+  for (const dir of dirs) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(dir, 0o700);
   }
 }

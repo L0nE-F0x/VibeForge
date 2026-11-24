@@ -54,15 +54,17 @@ export class Trash {
     try {
       paths.forEach((from, index) => {
         if (!fs.existsSync(from)) return;
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        fs.chmodSync(dir, 0o700);
         const to = path.join(dir, `${index}-${path.basename(from)}`);
         noteOwnDelete(from);
         move(from, to);
         moved.push({ from, to });
       });
       if (settle !== undefined) {
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, "settle.json"), `${JSON.stringify(settle)}\n`);
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        fs.chmodSync(dir, 0o700);
+        fs.writeFileSync(path.join(dir, "settle.json"), `${JSON.stringify(settle)}\n`, { mode: 0o600 });
       }
     } catch (error) {
       // Half a delete is worse than none: put back what moved, then report it.

@@ -218,8 +218,9 @@ export class ConflictStore {
     const waiting = this.list().find((record) => record.kind === item.kind && record.folderId === item.syncId && record.section === item.section);
     if (waiting) this.archive(waiting.id);
     const record: ConflictRecord = { id: this.newId(), folderId: item.syncId, root: "", kind: item.kind, path: item.name, section: item.section, itemId: item.itemId, savedBranch: null, winner, at: this.now().toISOString() };
-    fs.mkdirSync(this.folder(record.id), { recursive: true });
-    fs.writeFileSync(path.join(this.folder(record.id), SAVED), text);
+    fs.mkdirSync(this.folder(record.id), { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.folder(record.id), 0o700);
+    fs.writeFileSync(path.join(this.folder(record.id), SAVED), text, { mode: 0o600 });
     writeJson(path.join(this.folder(record.id), "meta.json"), record);
     return record;
   }
@@ -264,7 +265,8 @@ export class ConflictStore {
   }
 
   private archive(id: string): void {
-    fs.mkdirSync(this.answered(), { recursive: true });
+    fs.mkdirSync(this.answered(), { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.answered(), 0o700);
     const to = path.join(this.answered(), id);
     fs.rmSync(to, { recursive: true, force: true });
     fs.renameSync(this.folder(id), to);
@@ -308,7 +310,7 @@ export class ConflictStore {
     else if ((record.kind === "agent" || record.kind === "skill") && currentText !== undefined) {
       // What is in the agent or skill now, beside the saved one, so git can compare the two files.
       current = path.join(this.folder(id), "now");
-      fs.writeFileSync(current, currentText);
+      fs.writeFileSync(current, currentText, { mode: 0o600 });
     } else return "";
     const from = fs.existsSync(current) ? current : "/dev/null";
     const saved = this.savedFile(id);
