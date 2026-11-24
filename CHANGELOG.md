@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Security
+
+- **Pages in the browser dock can't use your microphone, camera or clipboard.** Since 3.3.0 the dock's pages ran in a session of their own, without the permission lockdown the window has, so a page opened there could use the microphone, camera, clipboard reading, notifications and device pickers without asking. Every session now refuses them.
+- **Approval prompts are never mistaken for a folder-trust question.** Viby could read a CLI's request to run a command as a trust question and answer it without waiting for Go. VibeForge now reads only the question above the menu, and looks at the screen again just before pressing a key. A message to a CLI showing an approval prompt, from Viby or from another CLI, goes into its prompt as a draft without pressing Enter.
+- **Git runs without the repository's hooks.** Every git command VibeForge runs (checking status, making a task's copy, Apply, Sync's rescue) now turns off the repository's hooks and fsmonitor, and diffs skip external diff and text-conversion tools. A repository you open can no longer make VibeForge run its code.
+- **Your VibeForge folders are private.** `~/.config/vibeforge`, `~/.local/share/vibeforge` and the run folders are set to owner-only on every start, and VibeForge's own files are written readable by you alone.
+- **The control socket has limits.** `vibeforge tell` and `vibeforge task` requests are rate-limited per terminal and from outside VibeForge, connections are capped, and a terminal id without its token is refused. Hand-out limits are checked before a task is made.
+- **Update never runs an installer it can't check.** If VibeForge couldn't read the installer's SHA-256 from GitHub, Update used to run it unchecked. Now it says why and doesn't run it. Downloads must use https.
+- **Viby's safe commands are tighter.** The commands Viby may run without Go, such as tests and git status, can no longer reach outside the workspace through paths or flags like `--prefix=..` or `git diff --no-index`.
+- **Smaller hardening.**
+  - `VIBEFORGE_DEBUG=1` opens a debugging port only when VibeForge runs from a source checkout; `VIBEFORGE_DEBUG=pipe` works everywhere.
+  - Notification text can't be read as options.
+  - The speech worker's Python ignores the folder it starts in.
+  - Relative entries in PATH are ignored when looking for a CLI.
+  - Plan-limit requests that carry a sign-in don't follow redirects.
+  - Syncthing's control page always sits on a short private socket.
+
 ## [3.6.1] - 2026-11-25
 
 **3.6.1: typing into Viby works again, and "go" counts however you say it.**
