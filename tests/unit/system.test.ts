@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { describeOs, omarchyDoNotDisturb, settleWorkingDir } from "../../electron/system.js";
+import { describeOs, omarchyDoNotDisturb, openPath, settleWorkingDir } from "../../electron/system.js";
 
 const missing = () => {
   throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -68,5 +68,33 @@ describe("the working folder", () => {
     const warnings: string[] = [];
     settleWorkingDir({ warn: (line: string) => warnings.push(line) }, "/nope", missing);
     expect(warnings).toEqual(["Could not move into /nope: ENOENT"]);
+  });
+});
+
+describe("opening a folder in the file manager", () => {
+  const opened = (target: string) => {
+    const runs: Array<[string, string[]]> = [];
+    let unrefs = 0;
+    openPath(target, (command, args) => {
+      runs.push([command, args]);
+      return {
+        on: () => undefined,
+        unref: () => {
+          unrefs += 1;
+        },
+      };
+    });
+    return { runs, unrefs };
+  };
+
+  it("hands the folder to xdg-open on its own, as xdg-open refuses \"--\"", () => {
+    expect(opened("/home/me/projects/landing-page")).toEqual({ runs: [["xdg-open", ["/home/me/projects/landing-page"]]], unrefs: 1 });
+    expect(opened("  /home/me/a folder with spaces  ").runs).toEqual([["xdg-open", ["/home/me/a folder with spaces"]]]);
+  });
+
+  it("opens nothing that isn't an absolute path, so nothing reaches xdg-open as an option", () => {
+    for (const target of ["", "   ", "--help", "-x", "relative/folder", "~/projects", "/bad\0path", 42 as unknown as string]) {
+      expect(opened(target).runs, JSON.stringify(target)).toEqual([]);
+    }
   });
 });

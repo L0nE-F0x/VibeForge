@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [3.5.0] - 2026-11-24
 
-**3.5.0: an effort picker beside Viby's model.**
+**3.5.0: an effort picker beside Viby's model, and Open in the file manager works again.**
 
 ### Added
 
@@ -17,6 +17,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Changed
 
 - **Picking another planner model keeps the effort only if it still fits.** An effort the new model doesn't take goes back to the default, and an Antigravity model that names its own level (`gemini-4-neon-high`) takes that level. This applies in the Viby panel, in Settings, and when you ask Viby to switch its model.
+
+### Fixed
+
+- **Open in the file manager opens the folder again.** Clicking a workspace's path at the top of Code, and every other button that opens a folder (a run's folder, Settings → Storage, the file tree, a chat's or an agent's folder), did nothing since 3.3.0: the path went to `xdg-open` after a `--`, which `xdg-open` refuses as an unknown option. The folder now opens in your file manager.
 
 ## [3.4.2] - 2026-11-23
 

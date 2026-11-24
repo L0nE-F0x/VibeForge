@@ -53,11 +53,21 @@ export async function adoptShellPath(log: LogFile): Promise<void> {
   else log.warn(`Could not read PATH from the login shell (${process.env.SHELL || "/bin/bash"}); CLIs found only on that PATH will show as missing`);
 }
 
-/** Opens a file or folder in the desktop's app for it. */
-export function openPath(target: string): void {
+/** What openPath starts a program with; a test hands in its own. */
+type Launch = (command: string, args: string[]) => { on: (event: "error", listener: () => void) => unknown; unref: () => void };
+
+const launch: Launch = (command, args) => spawn(command, args, { stdio: "ignore", detached: true });
+
+/**
+ * Opens a file or folder in the desktop's app for it: a folder in the file manager. Only an absolute
+ * path goes through, so it always starts with "/" and can't be read as an option. It is passed
+ * without "--": xdg-open takes no options before a path and refuses "--" ("unexpected option"),
+ * which left every Open folder button doing nothing from 3.3.0 to 3.5.0.
+ */
+export function openPath(target: string, start: Launch = launch): void {
   const clean = typeof target === "string" ? target.trim() : "";
-  if (!clean || clean.includes("\0") || clean.startsWith("-") || !path.isAbsolute(clean)) return;
-  const child = spawn("xdg-open", ["--", clean], { stdio: "ignore", detached: true });
+  if (!clean || clean.includes("\0") || !path.isAbsolute(clean)) return;
+  const child = start("xdg-open", [clean]);
   child.on("error", () => undefined);
   child.unref();
 }
