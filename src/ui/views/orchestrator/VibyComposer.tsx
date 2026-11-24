@@ -3,6 +3,7 @@ import { type ChangeEvent, type ClipboardEvent, useMemo, useRef, useState } from
 import { call, useAgents, useEngines, useWorkspaces } from "../../api.js";
 import { Composer } from "../../components/Session.js";
 import { useT } from "../../i18n/index.js";
+import { Rich } from "../../i18n/Rich.js";
 
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -298,6 +299,7 @@ export function VibyComposer({
         voiceWords={voiceWords}
         draftKey={draftKey}
         keepKey={keepKey}
+        hint={<Rich text={t("orch.composerHint")} />}
         leading={
           <button
             type="button"

@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, History, House, KanbanSquare, MessagesSquare, Sparkles, SquareTerminal, Workflow, type LucideIcon } from "lucide-react";
+import { AudioLines, Bot, CalendarClock, History, House, KanbanSquare, MessagesSquare, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import type { Settings } from "../shared/api.js";
 import type { Key } from "./i18n/index.js";
 import type { ViewName } from "./state.js";
@@ -16,7 +16,7 @@ export const VIEWS: Array<{ view: RailView; label: Key; tip: Key; icon: LucideIc
   { view: "skills", label: "rail.skills", tip: "rail.tip.skills", icon: Sparkles },
   { view: "runs", label: "rail.runs", tip: "rail.tip.runs", icon: History },
   // Last, so the Ctrl+number of every view that was already there stays the same.
-  { view: "orchestrator", label: "rail.orchestrator", tip: "rail.tip.orchestrator", icon: Workflow },
+  { view: "orchestrator", label: "rail.orchestrator", tip: "rail.tip.orchestrator", icon: AudioLines },
 ];
 
 /** Code is where the terminals live, so it always stays in the rail. */

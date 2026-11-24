@@ -6,9 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-11-24
+
+**3.6.0: Apply pulls merged PRs automatically, and a cleaner Viby panel.**
+
 ### Changed
 
 - **Apply pulls automatically when a copy's PR is already merged.** When you click **Apply** on a Viby or task copy whose commits were already merged into the workspace's upstream branch (including GitHub squash and rebase merges), VibeForge fast-forwards your local branch instead of pasting those changes back as uncommitted edits, then tidies the copy away. Copies with local-only changes, extra unmerged work, diverged local history, or colliding uncommitted edits keep applying as uncommitted edits as before.
+- **Cleaner Viby panel and voice-wave rail icon.** Replaced Viby's node-graph rail icon with vertical voice-waveform bars (`AudioLines`) across the rail, Settings, Tour, and website. Removed the generic suggestion pills and stray composer close button from Viby's empty screen, centered the message box right beneath Viby before the first turn, and restyled the **Call Viby** button as a sharp accent-tinted console control with waveform bars and its live keyboard shortcut.
 
 ## [3.5.0] - 2026-11-24
 
@@ -1063,7 +1068,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.0
 [3.5.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.5.0
 [3.4.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.2
 [3.4.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.4.1

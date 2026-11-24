@@ -102,7 +102,7 @@
   padding: 6px;
 }
 
-/* Empty state before the first call: almost empty, centered on Viby + one big call button. */
+/* Empty state before the first call or turn: centered Viby stage with call console and composer. */
 .viby-empty {
   flex: 1;
   min-height: 0;
@@ -110,9 +110,39 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 24px;
+  padding: 24px 24px 56px;
   text-align: center;
+}
+
+.viby-stage {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.viby-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.viby-hero-aura {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 6px;
+}
+
+.viby-hero-aura::before {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 68%);
+  pointer-events: none;
 }
 
 .viby-call-ready {
@@ -125,43 +155,131 @@
   text-align: center;
 }
 
+.viby-call-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
 .viby-call-hero {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 46px;
-  padding: 0 26px;
+  height: 40px;
+  padding: 0 12px 0 16px;
   font-family: var(--font-display);
   font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--on-accent);
-  background: var(--accent);
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
   border: 1px solid var(--sel-line);
-  box-shadow: var(--glow);
   cursor: pointer;
-  transition: transform 0.12s, filter 0.12s, box-shadow 0.12s;
+  transition: background 0.14s, border-color 0.14s, box-shadow 0.16s, transform 0.1s;
+}
+
+.viby-call-hero:not(:has(.viby-call-kbd)) {
+  padding-right: 18px;
+}
+
+.viby-call-hero::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 75%, transparent), transparent);
+  pointer-events: none;
+}
+
+.viby-call-icon {
+  color: var(--accent);
+  flex: none;
+  transition: color 0.14s, transform 0.16s;
+}
+
+.viby-call-kbd {
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--fg-3);
+  background: color-mix(in srgb, var(--bg-deep) 65%, transparent);
+  border: 1px solid var(--line);
+  line-height: 1.5;
+  transition: color 0.14s, border-color 0.14s;
 }
 
 .viby-call-hero:hover {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.viby-call-hero:hover .viby-call-icon {
+  color: var(--accent-2);
+  transform: scale(1.06);
+}
+
+.viby-call-hero:hover .viby-call-kbd {
+  color: var(--fg-2);
+  border-color: var(--sel-line);
 }
 
 .viby-call-hero:active {
+  background: var(--press-fill);
   transform: translateY(1px);
 }
 
 .viby-call-hero:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--focus-fill), var(--glow);
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-fill);
 }
 
 .viby-sees {
   margin: 0;
   max-width: 480px;
-  font-size: var(--fs-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: var(--fs-xs);
   color: var(--fg-3);
+  letter-spacing: 0.01em;
   line-height: 1.5;
+}
+
+.viby-empty-composer {
+  width: 100%;
+  padding: 4px 0 0;
+  text-align: left;
+}
+
+.viby-empty-composer .composer {
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+}
+
+.viby-empty-composer .composer-box {
+  background: color-mix(in srgb, var(--bg-raised) 82%, var(--bg-deep));
+  border-color: var(--line-2);
+  padding: 8px 8px 8px 12px;
+}
+
+.viby-empty-composer .composer-box:hover {
+  border-color: var(--hover-line);
+}
+
+.viby-empty-composer .composer-box:focus-within {
+  border-color: var(--focus-line);
+  box-shadow: 0 0 0 3px var(--focus-fill);
 }
 
 .viby-voice-setup {
@@ -475,28 +593,35 @@ button.viby-chip:disabled {
 }
 
 .viby-call-again {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
-  padding: 0 18px;
+  height: 32px;
+  padding: 0 14px;
   font-family: var(--font-display);
   font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--on-accent);
-  background: var(--accent);
+  font-weight: 560;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
   border: 1px solid var(--sel-line);
   cursor: pointer;
-  transition: filter 0.12s, box-shadow 0.12s;
+  transition: background 0.14s, border-color 0.14s, box-shadow 0.16s;
 }
 
 .viby-call-again:hover {
-  filter: brightness(1.08);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  border-color: var(--accent);
   box-shadow: var(--glow);
+}
+
+.viby-call-again:hover .viby-call-icon {
+  color: var(--accent-2);
 }
 
 .viby-call-again:focus-visible {
   outline: none;
+  border-color: var(--focus-line);
   box-shadow: 0 0 0 3px var(--focus-fill);
 }
 
@@ -814,33 +939,6 @@ button.viby-chip:disabled {
 
 .viby-slash-item.active {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-
-.viby-suggest-chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-  max-width: 540px;
-  margin-top: 6px;
-}
-
-.viby-suggest-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--bg-raised);
-  color: var(--fg-2);
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.viby-suggest-chip:hover {
-  border-color: var(--line-2);
-  color: var(--fg);
 }
 
 .viby-rich-text {
