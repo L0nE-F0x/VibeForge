@@ -1066,6 +1066,11 @@ describe("a lead and its team", () => {
     expect(h1).toMatchObject({ ok: true, started: true });
     const h2 = await ctx.svc.handTask({ fromPty: null, agent: "scoped", text: "Task two" });
     expect(h2).toMatchObject({ ok: true, started: false });
+    // Any further outside hand-offs past maxHandOffs (even with start: false) are refused BEFORE writing a task file.
+    const countBefore = ctx.svc.listTasks().length;
+    const h3 = await ctx.svc.handTask({ fromPty: null, agent: "scoped", text: "Task three", start: false });
+    expect(h3).toMatchObject({ ok: false, error: expect.stringMatching(/Outside callers|hand out/i) });
+    expect(ctx.svc.listTasks()).toHaveLength(countBefore);
 
     // grokTurn ignores an older prompt mentioning the same words before `since`:
     const history = [

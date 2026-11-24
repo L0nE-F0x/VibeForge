@@ -134,4 +134,18 @@ describe("handed-out tasks", () => {
     expect(kept()).toEqual({ handed: [next.ok && next.taskId], proposed: [next.ok && next.taskId], handedSince: [other] });
     ctx.svc.close();
   });
+
+  it("refuses live-pane handTask past the held-task cap without writing extra task files", async () => {
+    const { ctx, sender } = await team();
+    for (let i = 1; i <= 4; i += 1) {
+      expect(await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: `Task ${i}` })).toMatchObject({ ok: true, started: false });
+    }
+    const before = ctx.svc.listTasks().length;
+    expect(await ctx.svc.handTask({ fromPty: sender, agent: "helper", text: "Task 5" })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Too many/i),
+    });
+    expect(ctx.svc.listTasks()).toHaveLength(before);
+    ctx.svc.close();
+  });
 });

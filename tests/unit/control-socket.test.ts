@@ -3,9 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { answers, listenControl } from "../../electron/control.js";
 import { controlSocketPath, fallbackSocketDir, parseTalkRequest, prepareSocketDir } from "../../src/core/control.js";
+
+vi.mock("electron", () => ({
+  app: { getVersion: () => "0.0.0" },
+  clipboard: {},
+  dialog: {},
+  ipcMain: { handle: () => undefined },
+  shell: {},
+}));
 
 const uid = process.getuid?.() ?? 0;
 const data = "/home/me/.local/share/vibeforge";
@@ -142,5 +150,110 @@ describe("listening on the control socket", () => {
     expect(prepareSocketDir(sock, uid)).toBe(false);
 
     expect(parseTalkRequest(JSON.stringify({ op: "who", pty: "p1", ptyToken: "secret-hex" }))).toEqual({ op: "who", pty: "p1", ptyToken: "secret-hex" });
+  });
+
+  it("caps simultaneous control socket connections and rate-limits callers per pty and outside", async () => {
+    const dir = tempDir();
+    const socket = path.join(dir, "cap.sock");
+    let holdOpen: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      holdOpen = resolve;
+    });
+    let inTalk = 0;
+    const stop = listenControl(
+      socket,
+      log().log,
+      () => undefined,
+      async () => {
+        inTalk += 1;
+        await held;
+        return { ok: true };
+      },
+      { maxConnections: 1 },
+    );
+    await until(async () => (await answers(socket)) === true);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // One live connection takes the single slot; a second concurrent connection is dropped by maxConnections=1.
+    const first = net.connect(socket, () => first.write(`${JSON.stringify({ op: "who", pty: null })}\n`));
+    first.on("error", () => undefined);
+    await until(() => inTalk === 1);
+    const secondOutcome = await new Promise<string>((resolve) => {
+      const second = net.connect(socket, () => {
+        second.write(`${JSON.stringify({ op: "who", pty: null })}\n`);
+      });
+      const timer = setTimeout(() => {
+        second.destroy();
+        resolve("timedout");
+      }, 400);
+      second.on("close", () => {
+        clearTimeout(timer);
+        resolve("closed");
+      });
+      second.on("error", () => {
+        clearTimeout(timer);
+        resolve("closed");
+      });
+      second.on("data", () => {
+        clearTimeout(timer);
+        resolve("data");
+      });
+    });
+    expect(secondOutcome).toBe("closed");
+    holdOpen();
+    first.destroy();
+    stop();
+
+    // Token bucket rate limiter isolates outside callers from per-PTY buckets and refills over time.
+    const control = await import("../../src/core/control.js");
+    let now = 1000;
+    const limiter = new control.TalkRateLimiter({ outsideCapacity: 2, outsideRefillPerSec: 1, ptyCapacity: 3, ptyRefillPerSec: 1, now: () => now });
+    expect(limiter.take(null)).toBe(true);
+    expect(limiter.take(null)).toBe(true);
+    expect(limiter.take(null)).toBe(false);
+    // Authenticated PTYs keep their own budget.
+    expect(limiter.take("pty-1")).toBe(true);
+    expect(limiter.take("pty-1")).toBe(true);
+    expect(limiter.take("pty-1")).toBe(true);
+    expect(limiter.take("pty-1")).toBe(false);
+    now += 1000;
+    expect(limiter.take(null)).toBe(true);
+
+    // LRU bucket eviction skips "outside" so heavy PTY churn never resets unauthenticated throttling.
+    const capped = new control.TalkRateLimiter({ outsideCapacity: 2, ptyCapacity: 1, maxBuckets: 8, now: () => 0 });
+    expect(capped.take(null)).toBe(true);
+    expect(capped.take("pty-0")).toBe(true);
+    expect(capped.take("pty-0")).toBe(false);
+    for (let i = 1; i <= 8; i += 1) expect(capped.take(`pty-${i}`)).toBe(true);
+    expect(capped.take("pty-0")).toBe(true);
+    expect(capped.take(null)).toBe(true);
+    expect(capped.take(null)).toBe(false);
+
+    // answerTalk fails closed on a live PTY that has no registered token and enforces the limiter.
+    const { answerTalk } = await import("../../electron/ipc.js");
+    const live = new Map([["pty-live", { ptyId: "pty-live" }]]);
+    const ptyTokens = new Map([["pty-authed", "good-token"]]);
+    const ctx = {
+      service: {
+        live,
+        ptyTokens,
+        whoIsHere: () => ({ you: null, clis: [], agents: [] }),
+        tell: vi.fn(async () => ({ ok: true })),
+        handTask: vi.fn(async () => ({ ok: true })),
+        applyHandedTask: vi.fn(async () => ({ ok: true })),
+      },
+    } as never;
+
+    const unregistered = await answerTalk(ctx, { op: "who", pty: "pty-live" }, new AbortController().signal);
+    expect(unregistered).toMatchObject({ ok: false, error: expect.stringMatching(/session|token|active/i) });
+
+    // Unregistered probe spent 1 of 10 outside tokens, so 9 more succeed and the 10th is throttled.
+    const results: unknown[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      results.push(await answerTalk(ctx, { op: "who", pty: null }, new AbortController().signal));
+    }
+    expect(results.slice(0, 9).every((r) => (r as { ok: boolean }).ok)).toBe(true);
+    expect(results[9]).toMatchObject({ ok: false, error: expect.stringMatching(/Too many/i) });
+    expect(await answerTalk(ctx, { op: "who", pty: "pty-authed", ptyToken: "good-token" }, new AbortController().signal)).toMatchObject({ ok: true });
   });
 });

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app, clipboard, dialog, ipcMain, shell } from "electron";
-import type { TalkRequest } from "../src/core/control.js";
+import { TalkRateLimiter, type TalkRequest } from "../src/core/control.js";
 import { listDir } from "../src/core/files.js";
 import { describeError } from "../src/core/log.js";
 import { speakable } from "../src/core/replies.js";
@@ -373,19 +373,40 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
   });
 }
 
+const talkLimiters = new WeakMap<MainContext, TalkRateLimiter>();
+
+function limiterFor(ctx: MainContext): TalkRateLimiter {
+  let limiter = talkLimiters.get(ctx);
+  if (!limiter) {
+    limiter = new TalkRateLimiter();
+    talkLimiters.set(ctx, limiter);
+  }
+  return limiter;
+}
+
 /** A request from `vibeforge tell|who|task` in one of the terminals. */
-export async function answerTalk(ctx: MainContext, request: TalkRequest, gone: AbortSignal): Promise<unknown> {
+export async function answerTalk(
+  ctx: MainContext,
+  request: TalkRequest,
+  gone: AbortSignal,
+  limiter: TalkRateLimiter = limiterFor(ctx),
+): Promise<unknown> {
   if (!ctx.service) return { ok: false, error: "VibeForge is still starting." };
-  let pty = request.pty;
+  const pty = request.pty;
   if (pty) {
     const expected = ctx.service.ptyTokens.get(pty);
-    if (expected) {
-      const given = request.ptyToken ?? "";
-      const ok = given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
-      if (!ok) return { ok: false, error: "This terminal token isn't valid; run from a VibeForge terminal or restart the session." };
-    } else if (!ctx.service.live.has(pty)) {
-      return { ok: false, error: "That terminal session is no longer active." };
+    const given = request.ptyToken ?? "";
+    if (!expected || given.length !== expected.length || !timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+      // Charge bad/unregistered tokens to the outside bucket so probing is rate-limited too.
+      limiter.take(null);
+      return {
+        ok: false,
+        error: expected ? "This terminal token isn't valid; run from a VibeForge terminal or restart the session." : "That terminal session is no longer active.",
+      };
     }
+  }
+  if (!limiter.take(pty ?? null)) {
+    return { ok: false, error: "Too many control requests; slow down and try again in a moment." };
   }
   if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(pty) };
   if (request.op === "tell") return ctx.service.tell({ fromPty: pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });

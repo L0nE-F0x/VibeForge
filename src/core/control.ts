@@ -145,6 +145,70 @@ export function voiceArg(argv: readonly string[]): VoiceAction | null {
 
 export const HOLD_KEYS = { lua: "SUPER + ALT + V", conf: "SUPER ALT, V" };
 
+export interface RateLimiterOptions {
+  ptyCapacity?: number;
+  ptyRefillPerSec?: number;
+  outsideCapacity?: number;
+  outsideRefillPerSec?: number;
+  maxBuckets?: number;
+  now?: () => number;
+}
+
+interface RateBucket {
+  tokens: number;
+  updatedAt: number;
+}
+
+/**
+ * Token-bucket rate limiter for control socket requests, isolating authenticated PTYs from the
+ * shared `"outside"` bucket used by token-less or rejected callers.
+ */
+export class TalkRateLimiter {
+  private readonly buckets = new Map<string, RateBucket>();
+  private readonly ptyCapacity: number;
+  private readonly ptyRefillPerSec: number;
+  private readonly outsideCapacity: number;
+  private readonly outsideRefillPerSec: number;
+  private readonly maxBuckets: number;
+  private readonly now: () => number;
+
+  constructor(opts: RateLimiterOptions = {}) {
+    this.ptyCapacity = opts.ptyCapacity ?? 20;
+    this.ptyRefillPerSec = opts.ptyRefillPerSec ?? 1;
+    this.outsideCapacity = opts.outsideCapacity ?? 10;
+    this.outsideRefillPerSec = opts.outsideRefillPerSec ?? 0.5;
+    this.maxBuckets = Math.max(8, opts.maxBuckets ?? 256);
+    this.now = opts.now ?? (() => Date.now());
+  }
+
+  take(ptyId: string | null): boolean {
+    const key = ptyId ? `pty:${ptyId}` : "outside";
+    const capacity = ptyId ? this.ptyCapacity : this.outsideCapacity;
+    const refillPerSec = ptyId ? this.ptyRefillPerSec : this.outsideRefillPerSec;
+    const now = this.now();
+    const existing = this.buckets.get(key);
+    const elapsedSec = existing ? Math.max(0, (now - existing.updatedAt) / 1000) : 0;
+    const available = existing ? Math.min(capacity, existing.tokens + elapsedSec * refillPerSec) : capacity;
+    if (available < 1) {
+      if (existing) {
+        existing.tokens = available;
+        existing.updatedAt = now;
+      }
+      return false;
+    }
+    this.buckets.delete(key);
+    this.buckets.set(key, { tokens: available - 1, updatedAt: now });
+    if (this.buckets.size > this.maxBuckets) {
+      for (const candidate of this.buckets.keys()) {
+        if (candidate === "outside") continue;
+        this.buckets.delete(candidate);
+        if (this.buckets.size <= this.maxBuckets) break;
+      }
+    }
+    return true;
+  }
+}
+
 /**
  * Hold Super+Alt+V to talk to one agent from anywhere on the desktop. Omarchy's Lua config
  * (bindings.lua), or hyprland.conf.

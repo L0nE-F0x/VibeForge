@@ -5,6 +5,7 @@ import { describeError, type LogFile } from "../src/core/log.js";
 import { parseControl, parseTalkRequest, prepareSocketDir, TALK_REQUEST_MAX, type TalkRequest, type VoiceAction } from "../src/core/control.js";
 
 const VOICE_LINE_MAX = 4096;
+export const CONTROL_MAX_CONNECTIONS = 64;
 
 /**
  * Listens on the control socket for "voice …" lines from `vibeforge --voice …`, and for one-line
@@ -16,6 +17,7 @@ export function listenControl(
   onVoice: (action: VoiceAction) => void,
   /** `gone` aborts when the asker hangs up before its answer (a CLI's tool timed out, say). */
   onTalk: (request: TalkRequest, gone: AbortSignal) => Promise<unknown>,
+  options: { maxConnections?: number } = {},
 ): () => void {
   if (!prepareSocketDir(socketPath, process.getuid?.() ?? 0)) {
     log.warn(`Control socket: ${path.dirname(socketPath)} belongs to someone else, so VibeForge doesn't listen there`);
@@ -69,6 +71,7 @@ export function listenControl(
     });
     socket.on("error", () => undefined);
   });
+  server.maxConnections = options.maxConnections ?? CONTROL_MAX_CONNECTIONS;
   server.on("error", (error) => log.warn(`Control socket: ${describeError(error)}`));
   let stopped = false;
   let listening = false;
