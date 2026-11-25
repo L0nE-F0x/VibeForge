@@ -2075,4 +2075,10 @@ export const en = {
   "core.updateVerifyFailed": "Could not verify this release's SHA-256 checksum ({detail}), so VibeForge refused to run its installer.",
   "orch.attachImage": "Attach image",
   "orch.removeImage": "Remove image",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "Running the plan you said yes to.",
+  "core.orchConfirmedRisky": "That plan hasn't run yet: a step in it changes or stops something, so it waits for you to say go or press Go.",
+  "core.orchConfirmedRead": "That plan hasn't run yet: I made it from what I read on a screen or in a file, so it waits for you to say go or press Go.",
+  "core.orchConfirmedFix": "That plan hasn't run yet: a step on its card needs something picked first.",
 } as const;

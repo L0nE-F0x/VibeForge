@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A yes in your own words runs the plan that waits for Go, when nothing in it needs your Go itself.** Words the go list doesn't catch, like "alright, do the thing you said", go to Viby's planner. When it reads them as a yes to the waiting plan, VibeForge runs that plan as its card shows it, instead of putting up a new copy that waits again. A plan with a step that waits for Go even in Just go (stopping a CLI, a command that deletes, applying a copy), or one Viby made from what it read on a screen or in a file, still waits: Viby says why, and it runs when you say go or press Go. A yes never runs a plan that changed after you saw it.
+
 ## [3.7.0] - 2026-11-25
 
 **3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**

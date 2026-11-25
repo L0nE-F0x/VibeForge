@@ -2063,4 +2063,10 @@ export const zh: Catalog = {
   "core.updateVerifyFailed": "无法验证此版本的 SHA-256 校验和（{detail}），VibeForge 拒绝运行安装脚本。",
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "正在执行你同意的计划。",
+  "core.orchConfirmedRisky": "这个计划还没有执行：其中有一步会更改或停止某些东西，所以要等你说“执行”或按“执行”。",
+  "core.orchConfirmedRead": "这个计划还没有执行：它是根据我在屏幕或文件中读到的内容制定的，所以要等你说“执行”或按“执行”。",
+  "core.orchConfirmedFix": "这个计划还没有执行：卡片上有一步需要先选好某项。",
 };

@@ -7,7 +7,7 @@ import { speakable } from "../src/core/replies.js";
 import type { TeamService } from "../src/core/team-service.js";
 import type { TalkOver } from "../src/core/types.js";
 import type { CallPhase, CallState } from "../src/shared/api.js";
-import type { Looking, VibyWord } from "../src/shared/orchestrator.js";
+import { CONFIRMED_KEY, type Looking, type VibyWord } from "../src/shared/orchestrator.js";
 import { BYTES_PER_SECOND } from "../src/core/voice.js";
 import { vocabularyPrompt } from "../src/shared/dictation.js";
 import type { Ear, Voice } from "./voice.js";
@@ -455,7 +455,12 @@ export class Call {
       if (!live() || this.interrupted) return;
       // No answer: it was stopped from its card or the call's own bar.
       const turn = answerTo(service.orchestratorView().turns);
-      if (turn) await this.say(spokenAnswer(turn, { sayGo: this.opts.words.say("call.sayGo"), planReady: this.opts.words.say("call.planReady"), problem: this.opts.words.say("call.problem") }));
+      if (turn) await this.say(spokenAnswer(turn, {
+            sayGo: this.opts.words.say("call.sayGo"),
+            planReady: this.opts.words.say("call.planReady"),
+            problem: this.opts.words.say("call.problem"),
+            confirmed: (why) => this.opts.words.say(CONFIRMED_KEY[why]),
+          }));
       if (live() && this.hangingUp && !this.interrupted) {
         this.hangingUp = false;
         this.stop();

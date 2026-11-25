@@ -64,6 +64,8 @@ describe("the Orchestrator's plans", () => {
     expect(asked.slice(0, 2)).toEqual(["-p", "RULES\n\nThe person said:\nStart Grok in Dune"]);
     expect(asked).toContain("plan");
     expect(asked).not.toContain("--conversation");
+    // Structured output wants every field required: a yes to the waiting plan is false when it isn't one.
+    expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).required).toEqual(["say", "steps", "hangup", "confirmWaiting"]);
     expect(JSON.parse(asked[asked.indexOf("--json-schema") + 1]).properties.steps.items.required).toEqual([
       "kind",
       "engine",
@@ -673,6 +675,126 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("runs the waiting plan when the planner hears a yes the go words don't catch, and only that plan", async () => {
+    const repo = gitRepo();
+    const start = { kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "Fix it." };
+    const ctx = withPlanner([
+      { say: "I'll start Argy in shop.", steps: [start] },
+      // "alright, do the thing you said" gets past the go words: the planner says it's a yes.
+      { say: "Going.", steps: [], confirmWaiting: true },
+      { say: "I'll start Argy in shop.", steps: [{ ...start, branch: "two" }] },
+      { say: "Doing it.", steps: [{ ...start, branch: "two" }], confirmWaiting: true },
+      { say: "I'll start Argy in shop.", steps: [{ ...start, branch: "three" }] },
+      // A yes that comes with a different plan is a new plan, waiting like any other.
+      { say: "Starting it on four instead.", steps: [{ ...start, branch: "four" }], confirmWaiting: true },
+    ]);
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("start argy in shop and fix it");
+    const card = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(card.plan).toBe("waiting");
+    expect(await ctx.svc.orchestratorQuickAct("alright, do the thing you said")).toEqual({ handled: false });
+    await ctx.svc.orchestratorAsk("alright, do the thing you said");
+    // The planner was told how to say yes.
+    expect(ctx.calls[1].argv.join("\n")).toContain("If they are saying yes to it as it stands, set confirmWaiting: true");
+    await until(() => ctx.svc.orchestratorView().turns.find((turn) => turn.id === card.id)?.plan === "done");
+    expect(ctx.spawns.map((spawn) => path.basename(spawn.cwd))).toEqual(["one"]);
+    // The card that ran is the one the person saw; the answer says so, in Viby's words, not the planner's.
+    const answer = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(answer).toMatchObject({ confirmed: "ran", text: "Running the plan you said yes to." });
+    expect(answer.steps).toBeUndefined();
+
+    // A yes with the same steps again runs the card, not a second copy of it.
+    await ctx.svc.orchestratorAsk("and on two");
+    const second = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorAsk("yes, that one, thank you");
+    await until(() => ctx.svc.orchestratorView().turns.find((turn) => turn.id === second.id)?.plan === "done");
+    expect(ctx.spawns.map((spawn) => path.basename(spawn.cwd))).toEqual(["one", "two"]);
+    expect(ctx.svc.orchestratorView().turns.filter((turn) => turn.steps?.length)).toHaveLength(2);
+
+    await ctx.svc.orchestratorAsk("and on three");
+    const third = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorAsk("sure, but on four");
+    const view = ctx.svc.orchestratorView();
+    expect(view.turns.find((turn) => turn.id === third.id)?.plan).toBe("replaced");
+    expect(view.turns.at(-1)).toMatchObject({ plan: "waiting", steps: [expect.objectContaining({ branch: "four" })] });
+    expect(view.turns.at(-1)?.confirmed).toBeUndefined();
+    expect(ctx.spawns).toHaveLength(2);
+    ctx.svc.close();
+  });
+
+  it("keeps a plan waiting for the person's own Go when the planner's yes isn't enough (decision D1)", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([
+      // A command that deletes waits for Go even in Just go: a yes the planner heard doesn't run it.
+      { say: "I'll clear the build folder.", steps: [{ kind: "shell", workspace: "shop", prompt: "rm -rf build" }] },
+      { say: "Clearing it now.", steps: [], confirmWaiting: true },
+      // A plan made from what Viby read: what it read could be steering the planner's yes as well.
+      { say: "", steps: [{ kind: "inspect", prompt: "problems" }] },
+      { say: "I'll start Argy.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "fix", prompt: "Fix the problem." }] },
+      { say: "Going.", steps: [], confirmWaiting: true },
+      { say: "Going.", steps: [], confirmWaiting: true },
+      // A step that needs something picked first.
+      { say: "Which CLI?", steps: [{ kind: "start", engine: "nobody", workspace: "shop", branch: "pick", prompt: "Second." }] },
+      { say: "Going.", steps: [], confirmWaiting: true },
+    ]);
+    ctx.svc.addWorkspace(repo);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+
+    await ctx.svc.orchestratorAsk("delete the build folder");
+    const risky = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(risky.plan).toBe("waiting");
+    await ctx.svc.orchestratorAsk("alright, do the thing you said");
+    let view = ctx.svc.orchestratorView();
+    // The same card again, newest, still waiting, saying why; the old one gives way to it.
+    const again = view.turns.at(-1)!;
+    expect(again).toMatchObject({ plan: "waiting", confirmed: "risky" });
+    expect(again.text).toContain("it waits for you to say go or press Go");
+    expect(again.steps?.map((step) => [step.kind, step.prompt, step.state])).toEqual([["shell", "rm -rf build", "planned"]]);
+    expect(view.turns.find((turn) => turn.id === risky.id)?.plan).toBe("replaced");
+    expect(ctx.spawns).toHaveLength(0);
+    // The person's own Go still runs it.
+    await ctx.svc.orchestratorRun(again.id);
+    expect(ctx.svc.orchestratorView().turns.find((turn) => turn.id === again.id)?.plan).toBe("done");
+    const ran = ctx.spawns.length;
+    expect(ran).toBe(1);
+
+    await ctx.svc.orchestratorAsk("look at the problems, then fix them");
+    const fromReading = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(fromReading).toMatchObject({ plan: "waiting", checks: [expect.anything()] });
+    await ctx.svc.orchestratorAsk("alright, do the thing you said");
+    const readAgain = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(readAgain).toMatchObject({ plan: "waiting", confirmed: "read" });
+    // Put back, it still came from what was read: a second yes from the planner doesn't run it either.
+    await ctx.svc.orchestratorAsk("yes, that");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ plan: "waiting", confirmed: "read" });
+    expect(ctx.spawns).toHaveLength(ran);
+
+    await ctx.svc.orchestratorAsk("start another one on pick");
+    await ctx.svc.orchestratorAsk("alright, do the thing you said");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ plan: "waiting", confirmed: "fix" });
+    expect(ctx.spawns).toHaveLength(ran);
+    ctx.svc.close();
+  });
+
+  it("doesn't run a waiting plan on the planner's yes once its card changed", async () => {
+    const repo = gitRepo();
+    const ctx = withPlanner([{ say: "I'll start Argy in shop.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "Fix it." }] }]);
+    ctx.svc.addWorkspace(repo);
+    await ctx.svc.orchestratorAsk("start argy in shop and fix it");
+    const card = ctx.svc.orchestratorView().turns.at(-1)!;
+    // While the planner thinks, the card is edited: the yes was to the card as it was.
+    ctx.svc.orchestrator.runner = async (): Promise<BrainRun> => {
+      ctx.svc.orchestratorEditStep(card.id, card.steps?.[0].id ?? "", { prompt: "Fix it, and also push." });
+      return { code: 0, stdout: JSON.stringify({ structuredOutput: { say: "Going.", steps: [], confirmWaiting: true } }), stderr: "", timedOut: false };
+    };
+    await ctx.svc.orchestratorAsk("alright, do the thing you said");
+    const view = ctx.svc.orchestratorView();
+    expect(view.turns.find((turn) => turn.id === card.id)?.plan).toBe("waiting");
+    expect(view.turns.some((turn) => turn.confirmed)).toBe(false);
+    expect(ctx.spawns).toHaveLength(0);
+    ctx.svc.close();
+  });
+
   it("waits for Go on a plan made from what Viby just read, even under Just go (decision D1)", async () => {
     const place = tempDir();
     const ctx = withPlanner([
@@ -875,7 +997,7 @@ describe("the Orchestrator in the service", () => {
     expect(calls[0].slice(1, 3)).toEqual(["exec", "--json"]);
     expect(calls[0]).toContain("gpt-x");
     const schemaFile = calls[0][calls[0].indexOf("--output-schema") + 1];
-    expect(JSON.parse(fs.readFileSync(schemaFile, "utf8")).required).toEqual(["say", "steps", "hangup"]);
+    expect(JSON.parse(fs.readFileSync(schemaFile, "utf8")).required).toEqual(["say", "steps", "hangup", "confirmWaiting"]);
     expect(calls[1].slice(1, 3)).toEqual(["exec", "resume"]);
     expect(calls[1].slice(-3)).toEqual(["--", "thread-9", "still there?"]);
     expect(ctx.svc.orchestratorView().turns.map((turn) => turn.text)).toEqual(["hi", "Hello.", "still there?", "Still here."]);

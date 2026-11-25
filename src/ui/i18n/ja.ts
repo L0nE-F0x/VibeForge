@@ -2063,4 +2063,10 @@ export const ja: Catalog = {
   "core.updateVerifyFailed": "このリリースの SHA-256 チェックサムを確認できなかったため（{detail}）、VibeForge はインストーラーの実行を拒否しました。",
   "orch.attachImage": "画像を添付",
   "orch.removeImage": "画像を削除",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "承認されたプランを実行します。",
+  "core.orchConfirmedRisky": "このプランはまだ実行していません。何かを変更または停止するステップがあるため、「実行」と言うか「実行」を押すまで待機します。",
+  "core.orchConfirmedRead": "このプランはまだ実行していません。画面やファイルで読んだ内容から作ったため、「実行」と言うか「実行」を押すまで待機します。",
+  "core.orchConfirmedFix": "このプランはまだ実行していません。カードのステップで、先に選ぶ必要がある項目があります。",
 };

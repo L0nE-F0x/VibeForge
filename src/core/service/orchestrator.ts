@@ -53,11 +53,14 @@ import {
   type OrchestratorThreadSummary,
   type OrchestratorTurn,
   type OrchestratorView,
+  CONFIRMED_KEY,
+  type PlanConfirmed,
   type PlanContext,
   type VibyWord,
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
 import { speakable } from "../replies.js";
+import { en } from "../../ui/i18n/en.js";
 import { findSherpa } from "../sherpa.js";
 import { repoKind } from "../sync/git-rescue.js";
 import { listThemes } from "../theme.js";
@@ -311,6 +314,41 @@ export function stepSummary(step: OrchestratorStep): string {
   const said = step.prompt.trim();
   if (said) parts.push(`"${said.length > 80 ? `${said.slice(0, 79)}…` : said}"`);
   return parts.join(" ");
+}
+
+/**
+ * What a plan does, as its card shows it, leaving out where each step has got to: two plans with
+ * the same key do the same thing. A yes the planner heard only runs the plan the person saw.
+ */
+export function planKey(steps: readonly OrchestratorStep[]): string {
+  return JSON.stringify(
+    steps.map((step) => [
+      step.kind,
+      step.action ?? "",
+      step.engineId,
+      step.agentId ?? "",
+      step.workspaceId,
+      step.branch,
+      step.prompt,
+      step.target,
+      step.model ?? "",
+      step.effort ?? "",
+      step.name ?? "",
+      step.folder ?? "",
+      step.git ?? false,
+      step.after ?? false,
+      step.view ?? "",
+      step.description ?? "",
+      step.schedule ?? "",
+      step.taskId ?? "",
+      step.status ?? "",
+      step.places ?? [],
+      step.skills ?? [],
+      step.agents ?? [],
+      step.options ?? "",
+      step.route ?? {},
+    ]),
+  );
 }
 
 export class OrchestratorDesk {
@@ -898,7 +936,11 @@ export class OrchestratorDesk {
     // A plan that waits for Go hasn't run: say so, or the planner takes "great" or "you didn't do it"
     // as thanks for work it only proposed (a real call, 2026-11-25).
     const waiting = [...this.conversation.turns].reverse().find((item) => item.plan === "waiting" && item.steps?.length);
-    const waitingLine = waiting?.steps?.length ? `(Your last plan is waiting for the person's Go and has NOT run yet: ${waiting.steps.map(stepSummary).join("; ")}.)` : "";
+    const waitingLine = waiting?.steps?.length
+      ? `(Your last plan is waiting for the person's Go and has NOT run yet: ${waiting.steps.map(stepSummary).join("; ")}. If they are saying yes to it as it stands, set confirmWaiting: true with steps: [].)`
+      : "";
+    // The plan as the person saw it when they answered: a yes is to this, and nothing else.
+    const waitingSeen = waiting?.steps?.length ? planKey(waiting.steps) : "";
     let capturedInitialRules = this.conversation.initialRules;
     const turn = async (said: string, ctx: PlanContext = context, includeImages = false) => {
       const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
@@ -1078,6 +1120,11 @@ export class OrchestratorDesk {
       const note = `Skipped unsupported step: ${[...new Set(unknownKinds)].join(", ")}.`;
       plan = { ...plan, say: plan.say ? `${plan.say} (${note})` : note };
     }
+    // A yes to the plan that waits, with nothing new to do (W21 task 2).
+    if (plan.confirmWaiting && waiting && !unknownKinds.length && (!steps.length || planKey(steps) === waitingSeen)) {
+      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup))) return;
+      if (signal.aborted) return;
+    }
     if (!steps.length) {
       this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
       if (plan.hangup) this.onCall?.({ kind: "hangup" });
@@ -1101,6 +1148,44 @@ export class OrchestratorDesk {
     if (ready && !unknownKinds.length && (lookOnly || (!readSomething && (callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))))) {
       void this.run(answered.id, true);
     }
+  }
+
+  /**
+   * The planner took what the person said ("alright, do the thing you said") as a yes to the plan
+   * waiting for Go. That is the planner's reading of their words, not their Go, so the plan runs, as
+   * its card stands, only where Just go would run it by itself: no step that waits for Go even in
+   * Just go (or, in a call, isn't safe in one), none that needs fixing, and nothing Viby read in the
+   * turn that made it or in this one (decision D1). Otherwise the same plan comes back to the front,
+   * still waiting, with why. False when the plan isn't the one the person answered any more: then
+   * the answer goes on as any other.
+   */
+  private async confirmWaiting(waiting: OrchestratorTurn, seen: string, checks: OrchestratorCheck[], hangup: boolean): Promise<boolean> {
+    const unchanged = () => waiting.plan === "waiting" && this.conversation.turns.includes(waiting) && Boolean(waiting.steps?.length) && planKey(waiting.steps ?? []) === seen;
+    if (!unchanged()) return false;
+    const steps = waiting.steps ?? [];
+    let why: Exclude<PlanConfirmed, "ran"> | null = null;
+    // What was read could be steering the planner's yes as much as the plan.
+    if (checks.length || waiting.checks?.length || waiting.confirmed === "read") why = "read";
+    else {
+      await this.markDirty(steps);
+      const context = withPlannedWorkspaces(await this.context(), steps);
+      const inPlaceDirty = this.onCall ? await this.hasDirtyInPlace(steps) : false;
+      if (steps.some((step) => stepIssue(step, context))) why = "fix";
+      else if (steps.some((step) => holdsForGo(step, context)) || (this.onCall && (inPlaceDirty || steps.some((step) => !safeInCall(step, context))))) why = "risky";
+    }
+    // Go or Cancel pressed, or the card changed, while that was checked.
+    if (!unchanged()) return false;
+    if (!why) {
+      if (hangup) waiting.hangup = true;
+      this.answer({ text: en[CONFIRMED_KEY.ran], confirmed: "ran" });
+      // As Just go runs it: a key that answers a CLI is checked against its screen once more first.
+      void this.run(waiting.id, true).catch(() => undefined);
+      return true;
+    }
+    // The same plan again, newest, so a spoken "go" finds it; still waiting for the person's own Go.
+    for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
+    this.answer({ text: en[CONFIRMED_KEY[why]], confirmed: why, ...(checks.length ? { checks } : {}), steps: structuredClone(steps), plan: "waiting", ...(hangup ? { hangup: true } : {}) });
+    return true;
   }
 
   /** What a new planner session is told: the last few turns, then what the person just said. */

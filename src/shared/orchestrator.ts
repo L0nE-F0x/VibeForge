@@ -3,6 +3,7 @@
 // here, so the window can check a step the same way the main process does.
 
 import type { EngineRow } from "../core/types.js";
+import type { en } from "../ui/i18n/en.js";
 import { effortLevels } from "./launch-options.js";
 import {
   inspectsProblems,
@@ -278,6 +279,16 @@ export interface OrchestratorActivity {
   label: string;
 }
 
+export type PlanConfirmed = "ran" | "risky" | "read" | "fix";
+
+/** The words for a yes the planner heard (`confirmed` on a turn), in the person's language where the window or a call says them. */
+export const CONFIRMED_KEY = {
+  ran: "core.orchConfirmedRan",
+  risky: "core.orchConfirmedRisky",
+  read: "core.orchConfirmedRead",
+  fix: "core.orchConfirmedFix",
+} as const satisfies Record<PlanConfirmed, keyof typeof en>;
+
 export interface OrchestratorTurn {
   id: string;
   at: string;
@@ -294,6 +305,13 @@ export interface OrchestratorTurn {
   plan?: "waiting" | "running" | "done" | "cancelled" | "replaced";
   /** End the active voice call once this turn (and any plan it runs) has been carried out. */
   hangup?: boolean;
+  /**
+   * The planner took what the person said as a yes to the plan waiting for Go. "ran": that plan is
+   * carried out as it stood. Otherwise this turn puts the same plan back, still waiting for their own
+   * Go, and says why: a step changes or stops something ("risky"), it came from what Viby read ("read"),
+   * or a step needs something picked first ("fix").
+   */
+  confirmed?: PlanConfirmed;
   /** The CLI that gave this answer (an engine id), so its words keep its name after the planner changes. */
   by?: string;
   /** The answer went wrong. `detail` is what the CLI said, if anything. */

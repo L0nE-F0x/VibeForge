@@ -2062,4 +2062,10 @@ export const de: Catalog = {
   "core.updateVerifyFailed": "Die SHA-256-Prüfsumme dieses Releases konnte nicht geprüft werden ({detail}); VibeForge hat die Installation abgelehnt.",
   "orch.attachImage": "Bild anhängen",
   "orch.removeImage": "Bild entfernen",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "Ich führe den Plan aus, dem du zugestimmt hast.",
+  "core.orchConfirmedRisky": "Dieser Plan ist noch nicht gelaufen: Ein Schritt darin ändert oder stoppt etwas, deshalb wartet er, bis du Los sagst oder auf Los drückst.",
+  "core.orchConfirmedRead": "Dieser Plan ist noch nicht gelaufen: Ich habe ihn aus dem gemacht, was ich auf einem Bildschirm oder in einer Datei gelesen habe, deshalb wartet er, bis du Los sagst oder auf Los drückst.",
+  "core.orchConfirmedFix": "Dieser Plan ist noch nicht gelaufen: Bei einem Schritt auf seiner Karte muss zuerst etwas ausgewählt werden.",
 };
