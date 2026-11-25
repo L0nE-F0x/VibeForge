@@ -285,6 +285,27 @@ describe("undo", () => {
     third.svc.close();
   });
 
+  it("gives a new chat its own id while a deleted one's Undo is up, so Undo still puts it back", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const withAgent = ctx.svc.createChat({ agentId: agent.id });
+    const plain = ctx.svc.createChat({ engine: "pasty", prompt: "hello" });
+    const sent = await ctx.svc.sendChat(plain.id, "hello");
+    await ctx.exit(sent.ptyId);
+    fs.writeFileSync(path.join(plain.cwd, "notes.md"), "made in the chat\n");
+
+    const deleted = [await ctx.svc.deleteChat(withAgent.id), await ctx.svc.deleteChat(plain.id)];
+    const freshAgent = ctx.svc.createChat({ agentId: agent.id });
+    const freshPlain = ctx.svc.createChat({ engine: "pasty", prompt: "hello" });
+    expect(freshAgent.id).not.toBe(withAgent.id);
+    expect(freshPlain.id).not.toBe(plain.id);
+
+    for (const { undo } of deleted) ctx.svc.undoDelete(undo);
+    expect(ctx.svc.listChats().map((item) => item.id).sort()).toEqual([withAgent.id, plain.id, freshAgent.id, freshPlain.id].sort());
+    expect(fs.readFileSync(path.join(plain.cwd, "notes.md"), "utf8")).toBe("made in the chat\n");
+    ctx.svc.close();
+  });
+
   it("keeps a delete from an earlier session deleted", async () => {
     const ctx = setup();
     const skill = ctx.svc.saveSkill({ name: "Review" });

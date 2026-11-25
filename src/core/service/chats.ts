@@ -17,6 +17,8 @@ export class ChatDesk {
    * to that session, instead of starting (or resuming) a second one.
    */
   private readonly starting = new Map<string, Promise<unknown>>();
+  /** Deleted chats whose Undo is still up: a new chat doesn't take one's id, or Undo couldn't put it back. */
+  private readonly undoable = new Set<string>();
 
   constructor(private readonly core: ServiceCore) {}
 
@@ -131,12 +133,20 @@ export class ChatDesk {
     const record = this.core.store.getChat(id) ?? chat;
     const bin = this.core.trash.stash(paths);
     this.core.store.deleteChat(id);
+    this.undoable.add(id);
     this.core.emit("chats", "runs");
-    return this.core.keepForUndo(bin, (restored) => {
-      if ((bin.moved.length > 0 && !restored.length) || this.core.store.getChat(id)) return;
-      this.core.store.writeChat(record);
-      this.core.emit("chats", "runs");
-    });
+    return this.core.keepForUndo(
+      bin,
+      (restored) => {
+        this.undoable.delete(id);
+        if ((bin.moved.length > 0 && !restored.length) || this.core.store.getChat(id)) return;
+        this.core.store.writeChat(record);
+        this.core.emit("chats", "runs");
+      },
+      () => {
+        this.undoable.delete(id);
+      },
+    );
   }
 
   /**
@@ -273,7 +283,7 @@ export class ChatDesk {
   /** A chat id no other chat has; with `folders`, also one with no folder of that name there. */
   private uniqueChatId(base: string, folders?: string): string {
     const ids = new Set(this.core.store.listChats().map((chat) => chat.id));
-    const taken = (id: string) => ids.has(id) || (folders !== undefined && fs.existsSync(path.join(folders, id)));
+    const taken = (id: string) => ids.has(id) || this.undoable.has(id) || (folders !== undefined && fs.existsSync(path.join(folders, id)));
     const root = slugify(base, 40);
     if (!taken(root)) return root;
     let count = 2;
