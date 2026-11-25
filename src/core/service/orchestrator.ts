@@ -23,7 +23,9 @@ import {
   keySequenceFor,
   lookingLine,
   normalizeMemoryAction,
+  normalizeComputerAction,
   ONLY_LOOKS,
+  parseComputerSurface,
   parseVerifyOptions,
   plannedFolder,
   resolveLocalReflex,
@@ -1037,18 +1039,22 @@ export class OrchestratorDesk {
     // The plan as the person saw it when they answered: a yes is to this, and nothing else.
     const waitingSeen = waiting?.steps?.length ? planKey(waiting.steps) : "";
     let capturedInitialRules = this.conversation.initialRules;
-    const turn = async (said: string, ctx: PlanContext = context, includeImages = false) => {
+    const turn = async (said: string, ctx: PlanContext = context, includeImages = false, extraImages: SavedPromptImage[] = []) => {
       const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
       const liveChanged = keepPromptCache && this.conversation.liveKey !== undefined && this.conversation.liveKey !== liveStateFingerprint(ctx);
       const liveLine = liveChanged ? formatLiveUpdate(ctx) : "";
       const rules = keepPromptCache ? this.conversation.initialRules! : orchestratorRules(ctx);
       if (!this.conversation.begun) capturedInitialRules = rules;
-      const turnImages = includeImages ? savedImages : [];
+      const turnImages = [...(includeImages ? savedImages : []), ...extraImages];
+      const extraImageLine = extraImages.length
+        ? `(Captured screen image${extraImages.length === 1 ? "" : "s"} saved on disk: ${extraImages.map((img) => img.path).join(", ")})`
+        : "";
       const prefix = [
         here,
         recentFocus,
         waitingLine,
         includeImages ? imageLine : "",
+        extraImageLine,
         liveLine,
         this.conversation.begun ? settingsLine : "",
         this.conversation.begun ? libraryLine : "",
@@ -1253,7 +1259,16 @@ export class OrchestratorDesk {
         round < MAX_INSPECT_ROUNDS - 1
           ? `Now answer the person's request ("${words}") using these exact findings. Return concrete steps to carry it out, emit further inspect/lookup steps ONLY if a critical detail is still missing, or answer clearly in say with steps: [] if nothing should be started.`
           : `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.`;
-      const followUp = await turn(["[Findings from VibeForge]", details, "", guidance].join("\n"), currentContext);
+      const inspectImages: SavedPromptImage[] = results.flatMap((res) => {
+        const imgPath = "imagePath" in res && typeof res.imagePath === "string" ? res.imagePath : "";
+        if (!imgPath) return [];
+        try {
+          return [{ filename: path.basename(imgPath), path: imgPath, mediaType: "image/png", base64: fs.readFileSync(imgPath).toString("base64") }];
+        } catch {
+          return [];
+        }
+      });
+      const followUp = await turn(["[Findings from VibeForge]", details, "", guidance].join("\n"), currentContext, false, inspectImages);
       let followed = false;
       if (followUp && !signal.aborted && !followUp.timedOut) {
         const nextOut = readBrainOutput(followUp.stdout);
@@ -2139,6 +2154,21 @@ export class OrchestratorDesk {
       this.carryOutMemoryStep(step);
       return;
     }
+    if (step.kind === "computer") {
+      const computer = this.core.options.host.computer;
+      if (!computer) throw new Error("Desktop computer control is not available on this display session.");
+      const action = normalizeComputerAction(step.action || step.prompt);
+      if (!action) throw new Error("Unsupported action.");
+      const surface = parseComputerSurface(step.options, step.target);
+      step.result = await computer.act({
+        action,
+        surface,
+        target: step.target,
+        prompt: step.prompt,
+        ...(step.options ? { options: step.options } : {}),
+      });
+      return;
+    }
     if (step.kind === "start") {
       if (step.workspaceId.startsWith(PLANNED_PREFIX)) throw new Error("That workspace wasn't made.");
       const workspace = this.core.workspaceById(step.workspaceId);
@@ -2425,7 +2455,7 @@ export class OrchestratorDesk {
    * routines, tasks, chats, runs), a copy's diff, a running CLI's screen and latest reply, or a
    * workspace's git state, branches and files, so Viby can diagnose, review and brainstorm with real facts.
    */
-  inspect(step: OrchestratorStep): Promise<{ summary: string; details: string }> {
+  inspect(step: OrchestratorStep): Promise<{ summary: string; details: string; imagePath?: string }> {
     return inspectOrchestratorStep(this.inspectDeps(), step);
   }
 

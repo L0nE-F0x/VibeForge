@@ -49,7 +49,7 @@ export interface InspectDeps {
  * routines, tasks, chats, runs), a copy's diff, a running CLI's screen and latest reply, or a
  * workspace's git state, branches and files, so Viby can diagnose, review and brainstorm with real facts.
  */
-export async function inspectOrchestratorStep(deps: InspectDeps, step: OrchestratorStep): Promise<{ summary: string; details: string }> {
+export async function inspectOrchestratorStep(deps: InspectDeps, step: OrchestratorStep): Promise<{ summary: string; details: string; imagePath?: string }> {
   if (inspectsQuotas(step.prompt) || inspectsQuotas(step.target)) {
     const details = (await deps.core.options.host.quotas?.()) ?? "Plan limits and token usage are not enabled in Settings.";
     return { summary: oneLine(details, 140), details };
@@ -104,6 +104,27 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
   }
   if (step.action === "compare" || (!step.workspaceId && !step.target && /\bcompare\b/i.test(step.prompt))) {
     return compareCopies(deps);
+  }
+  if (step.action && ["windows", "screen", "desktop", "app-ui", "browser-ui"].includes(step.action)) {
+    const driver = deps.core.options.host.computer;
+    if (!driver) {
+      return {
+        summary: "Desktop inspection is unavailable.",
+        details: "Computer-use inspection driver is not available on this display session.",
+      };
+    }
+    if (step.action === "windows") {
+      const wins = await driver.listWindows();
+      return {
+        summary: `${wins.length} open window${wins.length === 1 ? "" : "s"}`,
+        details: wins.length
+          ? wins.map((w) => `- "${w.title || w.class}" [${w.class}] ws=${w.workspace} at (${w.at[0]},${w.at[1]}) ${w.size[0]}x${w.size[1]}${w.focused ? " [focused]" : ""}`).join("\n")
+          : "No desktop windows reported.",
+      };
+    }
+    const surface = step.action === "app-ui" ? "app" : step.action === "browser-ui" ? "browser" : "desktop";
+    const shot = await driver.screenshot({ surface, ...(step.target ? { target: step.target } : {}) });
+    return { summary: shot.summary, details: shot.details, imagePath: shot.path };
   }
 
   if (step.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(step.action)) {

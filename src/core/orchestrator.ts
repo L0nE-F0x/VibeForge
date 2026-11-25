@@ -14,6 +14,7 @@ import { isFreeWaitingPrompt } from "../shared/orchestrator-intel.js";
 import {
   brainKind,
   cleanQuery,
+  describeComputerStep,
   formatSettingsRules,
   fuzzyMatchName,
   inspectsProblems,
@@ -27,6 +28,7 @@ import {
   NEEDS_GO,
   normalizeAgentAction,
   normalizeChatAction,
+  normalizeComputerAction,
   normalizeMemoryAction,
   normalizePlanCandidate,
   normalizeRoutineStepAction,
@@ -408,7 +410,8 @@ export function orchestratorRules(context: PlanContext): string {
     "- run: manage runs and run storage. action: \"continue\" (target [run id/title] + optional follow-up prompt), \"stop\" (target), \"mark-reviewed\" (target), \"mark-unreviewed\" (target), \"mark-all-reviewed\", \"handoff\" (target [run id] + agent [saved agent]), \"copy-markdown\" (target [run id] — copy run report as Markdown), or \"tidy\" (compress/prune old runs per retention settings).",
     "- talk: coordinate live coding CLIs in Code. action: \"review\" (target [author CLI id] + agents: [reviewer CLI id]), \"send-draft\" (target [from CLI id] + agents: [to CLI id] + prompt: \"reply\" | \"changes\"), \"stop\" (target [CLI id — pause agent-to-agent messages]), or \"start-tasks\" (target [CLI id] + optional places [task ids; empty starts all held tasks]).",
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (keywords). VibeForge runs the lookup at once and hands you the findings.",
-    "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path with optional line range like `src/app.ts:10-80`, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), code search inside a workspace (`action: \"search\"`, `workspace`, `prompt`: query), workspace file tree (`action: \"tree\"`, `workspace`, optional `folder`), cross-copy conflict overlap (`action: \"compare\"`), app/run/routine diagnostics (`action: \"problems\"`), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
+    "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path with optional line range like `src/app.ts:10-80`, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), code search inside a workspace (`action: \"search\"`, `workspace`, `prompt`: query), workspace file tree (`action: \"tree\"`, `workspace`, optional `folder`), cross-copy conflict overlap (`action: \"compare\"`), app/run/routine diagnostics (`action: \"problems\"` | `\"diagnostics\"`), desktop/app UI screenshot (`action: \"screen\"` | `\"app-ui\"` | `\"browser-ui\"`) or open windows (`action: \"windows\"`), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
+    "- computer: observe or safely control the desktop, VibeForge's own UI, or the Browser Dock (ALWAYS waits for explicit Go). action: \"focus-window\" | \"click\" | \"double-click\" | \"right-click\" | \"move\" | \"drag\" | \"scroll\" | \"type\" | \"key\" | \"wait\", target (\"x,y\" coords, \"x1,y1 -> x2,y2\" for drag, or window title/class for focus-window), prompt (text to type, key combo like \"Ctrl+L\", scroll \"down 3\", or wait duration), options (\"surface=desktop|app|browser\"). Inspect the screen/UI first so coordinates and focus are exact.",
     "- verify: run a test, build, typecheck, or lint command in a workspace (or in the isolated copy started earlier in this plan) with `after: true`. Fields: workspace (optional when verifying the preceding `start` step's copy), prompt (command like \"npm test\" or \"npm run typecheck && npm test\"), options (optional `retries=2, timeout=180`). If the check fails while an isolated copy's live CLI is attached, Viby sends the failure output back to that CLI and re-verifies automatically up to `retries` times.",
     "- memory: read/save Viby's own durable plain-text memory (~/.config/vibeforge/viby.md) for cross-session preferences, workspace notes, or conventions. action: \"append\" (add `prompt` note), \"set\" (replace whole memory; waits for Go), or \"clear\" (wipe memory; waits for Go).",
     "- tell: send a message to a CLI already running at its normal input prompt. Fields: target (ptyId), prompt (the message).",
@@ -1041,7 +1044,12 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
         inspectAct === "storage" ||
         inspectAct === "problems" ||
         inspectAct === "diagnostics" ||
-        inspectAct === "compare";
+        inspectAct === "compare" ||
+        inspectAct === "screen" ||
+        inspectAct === "desktop" ||
+        inspectAct === "windows" ||
+        inspectAct === "app-ui" ||
+        inspectAct === "browser-ui";
       const explicitEntity = item.action && ["agent", "skill", "routine", "task", "chat", "run"].includes(item.action) ? item.action : "";
       if (explicitEntity) {
         const query = item.target || item.agent || item.task || item.name || item.prompt || "";
@@ -1454,6 +1462,18 @@ export function resolvePlan(raw: RawPlan, context: PlanContext): OrchestratorSte
         prompt,
         asked: action === "clear" ? "Clear Viby memory" : "Viby memory",
       });
+    } else if (kind === "computer") {
+      const action = normalizeComputerAction(item.action || item.prompt) ?? (item.action ?? "").trim().toLowerCase();
+      const target = (item.target ?? "").trim();
+      const prompt = (item.prompt ?? "").trim();
+      steps.push({
+        ...base,
+        action,
+        target,
+        prompt,
+        ...(item.options ? { options: item.options } : {}),
+        asked: describeComputerStep({ action, target, prompt, options: item.options }),
+      });
     } else if (kind === "apply" || kind === "discard") {
       const copies = context.copies ?? [];
       const copy = copies.find((entry) => entry.id === item.target) ?? matchName(item.target, copies, (entry) => [entry.id, entry.name, entry.branch, `${entry.workspace} ${entry.name}`]);
@@ -1667,6 +1687,7 @@ export function emptyPromise(say: string): boolean {
  * copy, or starting work in place over uncommitted edits still waits for Go.
  */
 export function safeInCall(step: OrchestratorStep, context: PlanContext | null = null): boolean {
+  if (step.kind === "computer") return false;
   if (holdsForGo(step, context)) return false;
   if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return false;
   if (step.kind === "verify" && !step.branch && Boolean(step.dirty)) return false;

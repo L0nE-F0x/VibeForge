@@ -316,6 +316,14 @@ export class Dock {
     this.activeId = workspaceId ?? null;
   }
 
+  /** The currently visible dock page's WebContents, or null when hidden or closed. */
+  activeWebContents(): WebContents | null {
+    const slot = this.activeId ? this.slots.get(this.activeId) : undefined;
+    const contents = slot && !slot.dead ? contentsOf(slot) : null;
+    if (!slot || !contents || !slot.view.getVisible()) return null;
+    return contents;
+  }
+
   /**
    * A still of the page, which the renderer shows while a menu or dialog covers the view. A JPEG
    * data URL, because the app's Content-Security-Policy allows data: images but not blob: ones.

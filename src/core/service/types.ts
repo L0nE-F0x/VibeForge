@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ComputerUseDriver } from "../computer-use.js";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
 import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
@@ -110,6 +111,8 @@ export interface DeskHost {
   autostart?: { get(): boolean; set(on: boolean): boolean };
   /** Write a privacy-safe single-line Viby diagnostic event to the app log (never prompts or output). */
   logDiagnostics?(line: string): void;
+  /** Desktop + app UI computer-use observation and control driver. */
+  computer?: ComputerUseDriver;
 }
 
 export interface DeskOptions {

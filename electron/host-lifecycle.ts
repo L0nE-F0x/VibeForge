@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { whichBin } from "../src/core/engines.js";
+import type { ComputerUseDriver } from "../src/core/computer-use.js";
 import { describeError } from "../src/core/log.js";
 import { PLAN_NAMES } from "../src/core/plans.js";
 import type { DeskHost } from "../src/core/team-service.js";
@@ -32,6 +33,7 @@ export function deskHost(
     updater?: () => Updater;
     openFolder?: (folderPath: string) => Promise<void>;
     writeClipboard?: (text: string) => void;
+    computer?: ComputerUseDriver;
   },
 ): DeskHost {
   const { supervisor, log, words, send } = ctx;
@@ -80,6 +82,7 @@ export function deskHost(
     codeWorkbench: (event) => send("code-workbench", event),
     ...(extras?.openFolder ? { openFolder: extras.openFolder } : {}),
     ...(extras?.writeClipboard ? { writeClipboard: extras.writeClipboard } : {}),
+    ...(extras?.computer ? { computer: extras.computer } : {}),
     ...(extras?.updater
       ? {
           checkUpdates: async () => {

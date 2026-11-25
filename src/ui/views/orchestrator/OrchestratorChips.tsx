@@ -13,6 +13,7 @@ import {
   ListTodo,
   MessageSquare,
   MessagesSquare,
+  Monitor,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -428,6 +429,15 @@ function StepChip({ step }: { step: OrchestratorStep }) {
           </button>
         )}
       </>
+    );
+  }
+
+  if (step.kind === "computer") {
+    return (
+      <span className="viby-chip settled">
+        <Monitor size={11} />
+        <span className="truncate">{step.result ? coreText(step.result) : step.asked || t("orch.computer")}</span>
+      </span>
     );
   }
 

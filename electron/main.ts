@@ -15,6 +15,7 @@ import { INSTALLER_MARK, installKind, RELEASES_URL, restartVia, updateCommand } 
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { tildify } from "../src/shared/text.js";
 import { syncCompanion } from "./companion.js";
+import { createComputerUseDriver } from "./computer-use.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
 import { debugSwitch, guardSession, guardWebContents, secondStartArgs, type GuardableWebContents } from "./guards.js";
@@ -107,6 +108,13 @@ const { send, focusWindow, install } = ctx;
 ownWebContents = () => ctx.win?.webContents ?? null;
 const notify = desktopNotifier(ctx);
 
+const desktopComputer = createComputerUseDriver({
+  dataRoot: roots.dataRoot,
+  getAppWebContents: () => (ctx.win && !ctx.win.isDestroyed() ? ctx.win.webContents : null),
+  getBrowserWebContents: () => dock.activeWebContents(),
+  focusAppWindow: () => focusWindow(),
+});
+
 const host = deskHost(ctx, notify, {
   dock: () => dock,
   stats: () => stats,
@@ -119,6 +127,7 @@ const host = deskHost(ctx, notify, {
     if (err) throw new Error(err);
   },
   writeClipboard: (text) => clipboard.writeText(text),
+  computer: desktopComputer,
 });
 const dock = new Dock(
   () => ctx.win,

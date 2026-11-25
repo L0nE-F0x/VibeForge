@@ -63,6 +63,8 @@ function workingLineText(activity: OrchestratorActivity | null | undefined, t: T
       return t("orch.work.verify", { target });
     case "memory":
       return t("orch.work.memory", { target });
+    case "computer":
+      return t("orch.work.computer", { target });
     case "start":
       return t("orch.work.start", { target });
     case "workspace":
