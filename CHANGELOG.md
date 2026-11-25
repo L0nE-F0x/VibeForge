@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **The phone's Save and Delete buttons say Save and Delete.** On the phone's Viby page, the button under Viby's memory read `common.save` and the button beside each conversation read `common.delete`, in every language: the computer didn't send the phone those two words. They now come in the phone's language like the rest.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
