@@ -6,6 +6,6 @@
   "compilerOptions": {
     "noImplicitAny": true
   },
-  "include": ["electron/pty-host.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"],
+  "include": ["electron/pty-host.cjs", "electron/pty-drain.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"],
   "exclude": []
 }
