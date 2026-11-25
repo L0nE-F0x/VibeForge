@@ -2063,4 +2063,22 @@ export const fr: Catalog = {
   "core.updateVerifyFailed": "Impossible de vérifier la somme SHA-256 de cette version ({detail}) ; VibeForge a refusé de lancer l'installeur.",
   "orch.attachImage": "Joindre une image",
   "orch.removeImage": "Retirer l'image",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "Impossible de lire vos agents.",
+  "load.tasks": "Impossible de lire vos tâches.",
+  "load.skills": "Impossible de lire vos skills.",
+  "load.routines": "Impossible de lire vos routines.",
+  "load.workspaces": "Impossible de lire vos espaces de travail.",
+  "load.settings": "Impossible de lire vos réglages.",
+  "load.engines": "Impossible de lire la liste des CLI.",
+  "load.chats": "Impossible de lire vos chats.",
+  "load.runs": "Impossible de lire vos exécutions.",
+  "load.search": "Impossible de chercher dans vos exécutions.",
+  "load.inbox": "Impossible de lire les exécutions à relire.",
+  "load.viby": "Impossible de lire la conversation et les copies de Viby.",
+  "load.files": "Impossible de lire ce dossier.",
+  "load.other": "Impossible de lire une partie de cette page.",
+  "load.notEmpty": "Cela ne veut pas dire qu'il n'y a rien : la lecture a échoué. Rien n'a été supprimé.",
+  "load.stale": "Ce que vous voyez vient de la dernière lecture réussie.",
 };

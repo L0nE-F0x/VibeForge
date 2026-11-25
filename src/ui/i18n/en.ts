@@ -2075,4 +2075,22 @@ export const en = {
   "core.updateVerifyFailed": "Could not verify this release's SHA-256 checksum ({detail}), so VibeForge refused to run its installer.",
   "orch.attachImage": "Attach image",
   "orch.removeImage": "Remove image",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "Couldn't read your agents.",
+  "load.tasks": "Couldn't read your tasks.",
+  "load.skills": "Couldn't read your skills.",
+  "load.routines": "Couldn't read your routines.",
+  "load.workspaces": "Couldn't read your workspaces.",
+  "load.settings": "Couldn't read your settings.",
+  "load.engines": "Couldn't read the list of CLIs.",
+  "load.chats": "Couldn't read your chats.",
+  "load.runs": "Couldn't read your runs.",
+  "load.search": "Couldn't search your runs.",
+  "load.inbox": "Couldn't read the runs waiting for review.",
+  "load.viby": "Couldn't read Viby's conversation and copies.",
+  "load.files": "Couldn't read this folder.",
+  "load.other": "Couldn't read part of this page.",
+  "load.notEmpty": "This doesn't mean there's nothing here: it couldn't be read. Nothing was deleted.",
+  "load.stale": "What you see is from the last read that worked.",
 } as const;

@@ -2062,4 +2062,22 @@ export const pt: Catalog = {
   "core.updateVerifyFailed": "Não foi possível verificar a soma SHA-256 desta versão ({detail}), então o VibeForge recusou executar o instalador.",
   "orch.attachImage": "Anexar imagem",
   "orch.removeImage": "Remover imagem",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "Não foi possível ler seus agentes.",
+  "load.tasks": "Não foi possível ler suas tarefas.",
+  "load.skills": "Não foi possível ler suas skills.",
+  "load.routines": "Não foi possível ler suas rotinas.",
+  "load.workspaces": "Não foi possível ler seus espaços de trabalho.",
+  "load.settings": "Não foi possível ler seus ajustes.",
+  "load.engines": "Não foi possível ler a lista de CLIs.",
+  "load.chats": "Não foi possível ler seus chats.",
+  "load.runs": "Não foi possível ler suas execuções.",
+  "load.search": "Não foi possível buscar nas suas execuções.",
+  "load.inbox": "Não foi possível ler as execuções esperando revisão.",
+  "load.viby": "Não foi possível ler a conversa e as cópias do Viby.",
+  "load.files": "Não foi possível ler esta pasta.",
+  "load.other": "Não foi possível ler parte desta página.",
+  "load.notEmpty": "Isso não quer dizer que não há nada: não foi possível ler. Nada foi excluído.",
+  "load.stale": "O que você vê é da última leitura que funcionou.",
 };

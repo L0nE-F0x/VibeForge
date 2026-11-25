@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A list that couldn't be read says so, instead of looking empty.** When reading your agents, tasks, skills, routines, chats, runs, settings or a folder in Files fails, the view shows why, says nothing was deleted, and has **Try again**. Before, it said "No agents yet." or "Nothing queued.", or Settings stayed blank, which looked like your work was gone. A list that fails while you're in another view is named in a notice in the corner, with its own **Try again**. Settings shows a placeholder while it loads instead of a blank page.
+
 ## [3.7.0] - 2026-11-25
 
 **3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**

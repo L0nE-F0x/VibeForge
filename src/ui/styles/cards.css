@@ -280,6 +280,23 @@
   color: color-mix(in srgb, var(--red) 70%, var(--fg));
 }
 
+/* A list that couldn't be read, where the list would be (LoadState.tsx). */
+.load-failed {
+  padding: 8px;
+  min-width: 0;
+}
+
+/* A list already pads its rows. */
+.list-scroll > .load-failed {
+  padding: 0;
+}
+
+/* The reason is often one long path: it wraps inside a narrow list instead of running off it. */
+.load-failed .notice > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .notice.accent {
   border-color: var(--sel-line);
   background: var(--gradient-soft);

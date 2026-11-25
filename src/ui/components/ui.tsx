@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, Info, KeyRound, Loader2, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Info, KeyRound, Loader2, RotateCcw, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   Children,
   cloneElement,
@@ -23,7 +23,7 @@ import { createPortal } from "react-dom";
 import type { RunStatus } from "../../shared/api.js";
 import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
-import { useNow } from "../api.js";
+import { retryFailedLoads, useLoadFailures, useNow } from "../api.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
 import { pushOverlay, returnFocus } from "../overlays.js";
@@ -693,9 +693,57 @@ export function MenuButton({ items, children, ...button }: Omit<ButtonProps, "on
 
 const TOAST_EDGE = 16;
 
+/** Try again, busy while it reads. A read that fails again keeps its error on screen, so nothing more is said. */
+export function useRetry(reload: () => Promise<void>): [() => void, boolean] {
+  const [busy, setBusy] = useState(false);
+  const run = () => {
+    if (busy) return;
+    setBusy(true);
+    void reload()
+      .catch(() => undefined)
+      .finally(() => setBusy(false));
+  };
+  return [run, busy];
+}
+
+/**
+ * Every named read that failed and no view shows in place (LoadFailed), with one Try again for
+ * them all: a list that couldn't load never passes for an empty one, whichever view is open.
+ */
+function LoadProblems() {
+  const t = useT();
+  const failures = useLoadFailures();
+  const [retry, busy] = useRetry(retryFailedLoads);
+  if (!failures.length) return null;
+  const sentences = [...new Set(failures.map((failure) => failure.what))];
+  const errors = [...new Set(failures.map((failure) => failure.error))];
+  return (
+    <div className="toast error" role="alert">
+      <AlertTriangle size={16} className="toast-icon" />
+      <div className="grow">
+        {sentences.map((sentence) => (
+          <div key={sentence} className="toast-title">
+            {t(sentence)}
+          </div>
+        ))}
+        {errors.map((error) => (
+          <div key={error} className="toast-body selectable">
+            {error}
+          </div>
+        ))}
+        <div className="toast-body">{t(failures.every((failure) => failure.stale) ? "load.stale" : "load.notEmpty")}</div>
+      </div>
+      <Button size="sm" className="toast-action" icon={RotateCcw} busy={busy} onClick={retry}>
+        {t("common.tryAgain")}
+      </Button>
+    </div>
+  );
+}
+
 export function Toasts() {
   const t = useT();
   const toasts = useToastList();
+  const failures = useLoadFailures();
   const { dismiss } = useToast();
   const dock = useDockArea();
   const ref = useRef<HTMLDivElement>(null);
@@ -703,7 +751,7 @@ export function Toasts() {
   const [place, setPlace] = useState<{ right: number; box: Box | null }>({ right: TOAST_EDGE, box: null });
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node || toasts.length === 0) {
+    if (!node || (toasts.length === 0 && failures.length === 0)) {
       setPlace((prev) => (prev.box ? { right: TOAST_EDGE, box: null } : prev));
       return;
     }
@@ -712,11 +760,12 @@ export function Toasts() {
     const right = toastRight(stack, view, dock, TOAST_EDGE);
     const box = { left: view.width - right - stack.width, top: view.height - TOAST_EDGE - stack.height, right: view.width - right, bottom: view.height - TOAST_EDGE };
     setPlace((prev) => (prev.right === right && sameBox(prev.box, box) ? prev : { right, box }));
-  }, [toasts, dock]);
+  }, [toasts, failures, dock]);
   // With no room beside the dock, the stack lands on it and the dock steps aside.
   useLayer(place.box);
   return createPortal(
     <div ref={ref} className="toasts" aria-live="polite" style={place.right !== TOAST_EDGE ? { right: place.right } : undefined}>
+      <LoadProblems />
       {toasts.map((toast) => {
         const Icon = toast.kind === "error" ? XCircle : toast.kind === "success" ? CheckCircle2 : Info;
         return (

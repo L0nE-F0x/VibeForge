@@ -2063,4 +2063,22 @@ export const ja: Catalog = {
   "core.updateVerifyFailed": "このリリースの SHA-256 チェックサムを確認できなかったため（{detail}）、VibeForge はインストーラーの実行を拒否しました。",
   "orch.attachImage": "画像を添付",
   "orch.removeImage": "画像を削除",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "エージェントを読み込めませんでした。",
+  "load.tasks": "タスクを読み込めませんでした。",
+  "load.skills": "スキルを読み込めませんでした。",
+  "load.routines": "ルーティンを読み込めませんでした。",
+  "load.workspaces": "ワークスペースを読み込めませんでした。",
+  "load.settings": "設定を読み込めませんでした。",
+  "load.engines": "CLI の一覧を読み込めませんでした。",
+  "load.chats": "チャットを読み込めませんでした。",
+  "load.runs": "実行履歴を読み込めませんでした。",
+  "load.search": "実行履歴を検索できませんでした。",
+  "load.inbox": "レビュー待ちの実行を読み込めませんでした。",
+  "load.viby": "Viby の会話とコピーを読み込めませんでした。",
+  "load.files": "このフォルダーを読み込めませんでした。",
+  "load.other": "このページの一部を読み込めませんでした。",
+  "load.notEmpty": "何もないのではなく、読み込めなかっただけです。何も削除されていません。",
+  "load.stale": "表示しているのは、最後に読み込めたときの内容です。",
 };

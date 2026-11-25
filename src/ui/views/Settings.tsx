@@ -16,7 +16,8 @@ import { OrchestratorCard } from "../components/OrchestratorCard.js";
 import { ThemeField } from "../components/ThemePicker.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
-import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "../components/ui.js";
+import { Button, Chip, Field, Input, Notice, Segmented, Select, Skeleton, Toggle } from "../components/ui.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { tipProps } from "../components/Tooltip.js";
 import { PINNED, railViews, type RailView } from "../rail.js";
 import { useAction, useNav, useToast, type Route } from "../state.js";
@@ -221,7 +222,18 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
     setHere(id);
   };
 
-  if (!current) return null;
+  // Until settings are read: a stand-in page, or why they couldn't be, never a blank page.
+  if (!current) {
+    return (
+      <div className="main">
+        <div className="page-head">
+          <SettingsIcon size={17} className="accent-text" />
+          <h1 className="grow">{t("settings.title")}</h1>
+        </div>
+        <div className="page-body">{settings.error ? <LoadFailed query={settings} /> : <Skeleton rows={6} page />}</div>
+      </div>
+    );
+  }
   const available = rows.filter((engine) => engine.available);
 
   return (

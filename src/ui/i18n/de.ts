@@ -2062,4 +2062,22 @@ export const de: Catalog = {
   "core.updateVerifyFailed": "Die SHA-256-Prüfsumme dieses Releases konnte nicht geprüft werden ({detail}); VibeForge hat die Installation abgelehnt.",
   "orch.attachImage": "Bild anhängen",
   "orch.removeImage": "Bild entfernen",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "Deine Agenten ließen sich nicht lesen.",
+  "load.tasks": "Deine Aufgaben ließen sich nicht lesen.",
+  "load.skills": "Deine Skills ließen sich nicht lesen.",
+  "load.routines": "Deine Routinen ließen sich nicht lesen.",
+  "load.workspaces": "Deine Arbeitsbereiche ließen sich nicht lesen.",
+  "load.settings": "Deine Einstellungen ließen sich nicht lesen.",
+  "load.engines": "Die Liste der CLIs ließ sich nicht lesen.",
+  "load.chats": "Deine Chats ließen sich nicht lesen.",
+  "load.runs": "Deine Läufe ließen sich nicht lesen.",
+  "load.search": "Deine Läufe ließen sich nicht durchsuchen.",
+  "load.inbox": "Die Läufe, die auf Prüfung warten, ließen sich nicht lesen.",
+  "load.viby": "Vibys Unterhaltung und Kopien ließen sich nicht lesen.",
+  "load.files": "Dieser Ordner ließ sich nicht lesen.",
+  "load.other": "Ein Teil dieser Seite ließ sich nicht lesen.",
+  "load.notEmpty": "Das heißt nicht, dass hier nichts ist: Es ließ sich nur nicht lesen. Gelöscht wurde nichts.",
+  "load.stale": "Was du siehst, stammt vom letzten Lesen, das geklappt hat.",
 };

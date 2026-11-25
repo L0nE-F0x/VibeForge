@@ -2063,4 +2063,22 @@ export const zh: Catalog = {
   "core.updateVerifyFailed": "无法验证此版本的 SHA-256 校验和（{detail}），VibeForge 拒绝运行安装脚本。",
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
+
+  // ---------------------------------------------------------------- lists that couldn't be read
+  "load.agents": "无法读取你的智能体。",
+  "load.tasks": "无法读取你的任务。",
+  "load.skills": "无法读取你的技能。",
+  "load.routines": "无法读取你的例行任务。",
+  "load.workspaces": "无法读取你的工作区。",
+  "load.settings": "无法读取你的设置。",
+  "load.engines": "无法读取 CLI 列表。",
+  "load.chats": "无法读取你的聊天。",
+  "load.runs": "无法读取你的运行记录。",
+  "load.search": "无法搜索你的运行记录。",
+  "load.inbox": "无法读取待审查的运行。",
+  "load.viby": "无法读取 Viby 的对话和副本。",
+  "load.files": "无法读取这个文件夹。",
+  "load.other": "无法读取此页面的一部分。",
+  "load.notEmpty": "这并不代表这里什么都没有，只是没能读取。没有删除任何内容。",
+  "load.stale": "你看到的是上一次成功读取的内容。",
 };

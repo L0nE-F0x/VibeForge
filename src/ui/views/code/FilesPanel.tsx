@@ -1,8 +1,9 @@
 import { ChevronDown, ChevronRight, Copy, ExternalLink, File, Folder, FolderOpen, Link2, RefreshCw } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { FileNode } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
-import { call, useAppInfo } from "../../api.js";
+import { call, errorText, useAppInfo } from "../../api.js";
+import { LoadFailed } from "../../components/LoadState.js";
 import { PATH_MIME } from "../../components/Terminal.js";
 import { tipProps } from "../../components/Tooltip.js";
 import { Button, Skeleton } from "../../components/ui.js";
@@ -69,19 +70,36 @@ function TreeLevel({
     if (clicks === 0) onInsert(path);
     else if (clicks === 1) pending.current = window.setTimeout(() => onInsert(path), DOUBLE_CLICK_MS);
   };
+  // A folder that couldn't be read says so, with Try again, instead of passing for an empty one.
+  const [failed, setFailed] = useState<string | null>(null);
+  const reading = useRef(0);
+  const read = useCallback(() => {
+    reading.current += 1;
+    const mine = reading.current;
+    return call("files.list", dir).then(
+      (list) => {
+        if (mine !== reading.current) return;
+        setNodes(list);
+        setFailed(null);
+      },
+      (error: unknown) => {
+        if (mine === reading.current) setFailed(errorText(error));
+      },
+    );
+  }, [dir]);
   useEffect(() => {
-    let cancelled = false;
-    void call("files.list", dir)
-      .then((list) => !cancelled && setNodes(list))
-      .catch(() => !cancelled && setNodes([]));
+    void read();
+    // A read still on its way when the folder changes or the level goes is ignored.
     return () => {
-      cancelled = true;
+      reading.current += 1;
     };
-  }, [dir, refreshKey]);
-  if (!nodes) return depth === 0 ? <Skeleton rows={5} /> : null;
-  if (nodes.length === 0 && depth === 0) return <div className="faint" style={{ padding: 10 }}>{t("files.empty")}</div>;
+  }, [read, refreshKey]);
+  const failure = failed === null ? null : <LoadFailed query={{ error: failed, data: nodes ?? undefined, reload: read, key: null, what: "load.files" }} />;
+  if (!nodes) return failure ?? (depth === 0 ? <Skeleton rows={5} /> : null);
+  if (nodes.length === 0 && depth === 0) return failure ?? <div className="faint" style={{ padding: 10 }}>{t("files.empty")}</div>;
   return (
     <>
+      {failure}
       {nodes.map((node) => {
         const isDir = node.kind === "dir";
         const expanded = Boolean(open[node.path]);
