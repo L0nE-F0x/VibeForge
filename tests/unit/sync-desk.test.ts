@@ -389,6 +389,47 @@ describe("sync desk", () => {
     expect((await a.desk.view()).shares).toEqual([]);
   });
 
+  it.skipIf(process.getuid?.() === 0)("keeps syncing the other workspaces when one's folder can't be written", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { a } = await paired();
+    const site = workspace(a, "Site");
+    const code = workspace(a, "Code");
+    const docs = workspace(a, "Docs");
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: code.path, stdio: "pipe" }).toString().trim();
+    git("init", "-q", "-b", "main");
+    await a.desk.share(site.id, B, { mode: "two", filesOnly: false });
+    await a.desk.share(code.id, B, { mode: "two", filesOnly: false });
+    // Site: its ignore file gone and the folder read-only (a read-only mount, a permissions mistake).
+    fs.rmSync(path.join(site.path, ".stignore"));
+    fs.chmodSync(site.path, 0o555);
+    // Code: git's exclude file, short of Syncthing's lines, can't be written.
+    const info = path.join(code.path, ".git", "info");
+    fs.writeFileSync(path.join(info, "exclude"), "");
+    fs.chmodSync(info, 0o555);
+    fs.chmodSync(path.join(info, "exclude"), 0o444);
+    const link = path.join(a.dataRoot, "sync", "link", shortId(B));
+    try {
+      await a.desk.share(docs.id, B, { mode: "two", filesOnly: false });
+      a.desk.detach();
+      await a.desk.attach(a.engine);
+      const shares = (await a.desk.view()).shares;
+      expect(shares.find((share) => share.workspaceId === "site")?.state).toBe("error");
+      expect(shares.find((share) => share.workspaceId === "code")?.state).toBe("error");
+      expect(shares.find((share) => share.workspaceId === "docs")?.state).not.toBe("error");
+      // Not handed to Syncthing without its ignore lines; the other one is.
+      expect(a.engine.foldersNow.map((folder) => folder.path)).toEqual([link, docs.path]);
+    } finally {
+      fs.chmodSync(site.path, 0o755);
+      fs.chmodSync(info, 0o755);
+      fs.chmodSync(path.join(info, "exclude"), 0o644);
+    }
+    // Writable again: they sync again at the next look.
+    a.desk.detach();
+    await a.desk.attach(a.engine);
+    expect(fs.readFileSync(path.join(site.path, ".stignore"), "utf8")).toContain("(?d)node_modules");
+    expect(a.engine.foldersNow.map((folder) => folder.path).sort()).toEqual([link, docs.path, site.path, code.path].sort());
+  });
+
   it("unpairs the other machine too, with a last note", async () => {
     const { a, b } = await paired();
     const site = workspace(a, "Site");

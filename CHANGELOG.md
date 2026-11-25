@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **One synced folder that can't be written to no longer stops Sync for every workspace.** When VibeForge needed to write a shared folder's `.stignore` and couldn't (a read-only drive, a permissions mistake), Sync didn't start at all and tried again every 30 seconds, and sharing, stopping or pairing failed with a permission error. Now that workspace shows **Can't sync** and isn't synced until it can be written to again, and the others carry on.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

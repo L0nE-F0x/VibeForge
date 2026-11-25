@@ -74,7 +74,7 @@ export class SyncDesk {
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly told = new Set<string>();
   private live: Record<string, string[]> = {};
-  /** Shares whose folder is missing here. */
+  /** Shares whose folder is missing here, or can't be written to. */
   private readonly missing = new Set<string>();
   /** How long unpairing waits for its last note to reach a machine that is connected. Tests shorten it. */
   unpairWaitMs = 2500;
@@ -133,7 +133,8 @@ export class SyncDesk {
       this.library?.setMe(shortId(engine.id));
       await this.libraryPass(true);
       for (const share of this.stateFile.read().shares) {
-        if (isDirectory(share.path)) await this.handleCopies(share, walkCopies(share.path));
+        // One that can't sync just now takes nothing in.
+        if (isDirectory(share.path) && !this.missing.has(share.folderId)) await this.handleCopies(share, walkCopies(share.path));
       }
       this.host.changed();
     });
@@ -179,11 +180,19 @@ export class SyncDesk {
         this.missing.add(share.folderId);
         continue;
       }
-      const ignoreFile = path.join(share.path, ".stignore");
-      const before = fs.existsSync(ignoreFile) ? fs.readFileSync(ignoreFile, "utf8") : "";
-      const after = mergeIgnoreFile(before, ignoreLines({ filesOnly: share.filesOnly }));
-      if (after !== before) fs.writeFileSync(ignoreFile, after);
-      if (!share.filesOnly) await prepareRepo(share.path);
+      try {
+        const ignoreFile = path.join(share.path, ".stignore");
+        const before = fs.existsSync(ignoreFile) ? fs.readFileSync(ignoreFile, "utf8") : "";
+        const after = mergeIgnoreFile(before, ignoreLines({ filesOnly: share.filesOnly }));
+        if (after !== before) fs.writeFileSync(ignoreFile, after);
+        if (!share.filesOnly) await prepareRepo(share.path);
+      } catch (error) {
+        // A folder that can't be written to (read-only, a permissions mistake) doesn't sync without
+        // its ignore lines, and doesn't stop the others: it shows as an error until it can be.
+        this.missing.add(share.folderId);
+        this.host.log(`Sync: could not prepare ${share.name} to sync: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
       wanted.set(share.folderId, { id: share.folderId, label: share.name, path: share.path, type: folderType(share.mode), devices: [share.machineId], watchDelay: this.workspaceDelay });
     }
 
@@ -382,8 +391,8 @@ export class SyncDesk {
     }
     if (repo && gitSettled) {
       this.gitPending.delete(share.folderId);
-      await prepareRepo(share.path);
       try {
+        await prepareRepo(share.path);
         const rescue = await rescueRepo(share.path, slugify(this.host.machineName(), 24));
         for (const branch of rescue?.branches ?? []) fresh = this.conflicts.noteCommits(share.folderId, share.path, branch.branch, branch.saved, shortId(share.machineId));
         if (rescue) this.host.log(`Sync: both machines changed ${share.name}'s git history; ${rescue.branches.length} branch(es) kept aside, ${rescue.settled.length} file(s) put back, ${rescue.removed} copies removed`);
