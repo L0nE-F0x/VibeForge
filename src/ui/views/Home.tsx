@@ -268,7 +268,7 @@ export function HomeView() {
           {recent.length > 0 && (
             <button type="button" className="home-activity" onClick={() => go({ view: "runs", filter: "all" })}>
               <span className="value">{recent.length}</span>
-              <span className="label">{t("home.stat.runs")}</span>
+              <span className="label">{t.count("home.stat.runs", recent.length)}</span>
               <span className="grow" />
               <BlockBars values={runsPerDay} label={t("home.stat.runsChart")} />
             </button>

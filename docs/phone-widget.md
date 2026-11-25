@@ -45,7 +45,7 @@ With the Android SDK, `apksigner verify --print-certs vibeforge-widget.apk` show
 1. Open the downloaded file on the phone.
 2. Android asks you to allow your browser (or file manager) to **install unknown apps**. Allow it for that app. You can turn it off again afterwards in the phone's settings.
 3. Google Play Protect may warn that it doesn't know this app, because it isn't from the Play Store. If you checked the file as above, choose to install anyway.
-4. Long-press an empty spot on your home screen, choose **Widgets**, and add **VibeForge Dashboard** (under VibeForge Widget). The setup screen opens.
+4. Long-press an empty spot on your home screen, choose **Widgets**, and add **VibeForge Dashboard** (under VibeForge Widget). Some phones open the widget's setup screen straight away; on others the widget says to tap **⚙**, which opens it.
 
 ## Pair it
 
