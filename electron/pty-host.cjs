@@ -471,6 +471,10 @@ function spawnSession(msg) {
   // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in; VIBEFORGE_PTY_TOKEN authenticates it.
   /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id, VIBEFORGE_PTY_TOKEN: ptyToken };
+  // What the terminal VibeForge was started from says about itself: this one is no tmux or screen
+  // window (tmux would refuse to start in it, and its commands would reach that pane), and not that
+  // terminal's size. node-pty drops these only when it is handed process.env itself, not a copy.
+  for (const key of ["TMUX", "TMUX_PANE", "STY", "WINDOW", "WINDOWID", "TERMCAP", "COLUMNS", "LINES"]) delete env[key];
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
   // The tail reads the output, the end included, into onData below; node-pty emits nothing before

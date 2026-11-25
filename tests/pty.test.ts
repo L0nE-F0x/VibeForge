@@ -201,6 +201,16 @@ describe("pty host", () => {
     expect(host.counted(pty)).toEqual({ last: 3000, after: "switch=[]" });
   });
 
+  it("starts terminals that aren't the tmux pane, or the size, of the terminal VibeForge came from", async () => {
+    const from = { TMUX: "/tmp/tmux-1000/default,4242,0", TMUX_PANE: "%7", STY: "4242.pts-0.box", WINDOWID: "4242", COLUMNS: "80", LINES: "24" };
+    const host = await startHost({ command: process.execPath, env: from });
+    const script = `env | grep -E '^(${Object.keys(from).join("|")})=' | sed 's/^/LEAKED /'; echo ENV-DONE; sleep 30`;
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/sh", "-c", script], cols: 100, rows: 30 })).ptyId);
+    await host.until(async () => (await host.screen(pty)).includes("ENV-DONE"));
+    expect(await host.screen(pty)).not.toContain("LEAKED");
+    await host.request({ op: "kill", ptyId: pty });
+  });
+
   it("keeps two terminals in their own folders and their input apart", async () => {
     const host = await startHost();
     const [a, b] = [tempDir(), tempDir()];
