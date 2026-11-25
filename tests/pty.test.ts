@@ -326,6 +326,24 @@ describe("pty host", () => {
     expect(fs.existsSync(path.join(second, "terminal.ansi"))).toBe(true);
   });
 
+  it("records all that follows the screen it starts from, even output that arrives as it starts", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    // Numbered lines, a few every millisecond, so output is on its way at the moment recording begins.
+    const program = "let i = 0; setInterval(() => { for (let k = 0; k < 4; k++) console.log('L' + ++i); }, 1)";
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: [process.execPath, "-e", program], cols: 40, rows: 10 })).ptyId);
+    await host.until(() => (host.printed.get(pty) ?? 0) > 2000);
+    await host.request({ op: "record", ptyId: pty, runDir });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await host.request({ op: "record", ptyId: pty, runDir: null });
+    await host.request({ op: "kill", ptyId: pty });
+    // The last line can be cut where recording stopped.
+    const numbers = [...fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8").matchAll(/^L(\d+)$/gm)].map((match) => Number(match[1])).slice(0, -1);
+    expect(numbers.length).toBeGreaterThan(100);
+    // One line after another: none missing where the screen it started from ends.
+    expect(numbers.filter((number, index) => index > 0 && number !== numbers[index - 1] + 1)).toEqual([]);
+  });
+
   it("reports a terminal working while its screen changes and quiet once it holds still", async () => {
     const host = await startHost();
     const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: BASH })).ptyId);
