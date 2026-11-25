@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A cron routine with `H` in it is turned down instead of running at random.** `H 9 * * *` was accepted, but each check read the `H` as another minute, so the routine ran several times between 09:00 and 10:00 and the next times shown changed every time Routines opened. Cron has no `H`, and Viby already turned it down; the routine editor now does too.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

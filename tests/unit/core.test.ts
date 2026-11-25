@@ -238,6 +238,17 @@ describe("routines", () => {
     expect(isScheduleValid({ kind: "every", minutes: 7.5 })).toBe(false);
   });
 
+  it("turns down H, which cron-parser reads as a new random time each time", () => {
+    // Every tick read "H 9 * * *" as another minute past nine: it ran several times a day, and
+    // the next fires shown changed each time Routines asked.
+    for (const expr of ["H 9 * * *", "0 H * * *", "1,H 9 * * *", "0-H 9 * * *", "H(0-29)/5 * * * *", "0 9 H * *", "0 9 * * H#2"]) {
+      expect(isScheduleValid({ kind: "cron", expr })).toBe(false);
+      expect(nextFireTimes({ kind: "cron", expr }, new Date("2026-09-25T10:00:00"), 2)).toEqual([]);
+    }
+    expect(isScheduleValid({ kind: "cron", expr: "0 9 * * THU" })).toBe(true);
+    expect(isScheduleValid({ kind: "cron", expr: "0 9 * * MON-FRI" })).toBe(true);
+  });
+
   it("finds a slot that lands exactly on now", () => {
     expect(mostRecentSlot(base.schedule, new Date("2026-09-25T09:00:00"))?.getTime()).toBe(new Date("2026-09-25T09:00:00").getTime());
   });

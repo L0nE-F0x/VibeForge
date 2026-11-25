@@ -70,6 +70,10 @@ export function isScheduleValid(schedule: Schedule | null | undefined): boolean 
   if (schedule.kind === "cron") {
     const expr = typeof schedule.expr === "string" ? schedule.expr.trim() : "";
     if (expr.split(/\s+/).length !== 5) return false;
+    // cron-parser reads `H` as a random value and picks it again every time it reads the
+    // expression, so each tick would see another time and the routine run several times a day.
+    // Cron has no `H` (Viby's own check turns it down too); THU and the like are not one.
+    if (/(?<![A-Za-z])H(?![A-Za-z])/.test(expr)) return false;
     try {
       CronExpressionParser.parse(expr);
       return true;
