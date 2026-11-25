@@ -9,10 +9,25 @@ import {
   type WebContentsLike,
 } from "../../electron/computer-use.js";
 import {
+  buildDotoolInput,
+  buildDotoolPointerInput,
+  buildHyprDispatchArgs,
+  buildHyprFallbackFocusSelector,
+  buildHyprFocusSelector,
   buildWtypeArgs,
+  buildYdotoolKeyArgs,
+  escapeHyprRegex,
+  formatComputerCommandError,
+  hyprDispatchFailureReason,
+  installHintFor,
+  isHyprLuaDispatchError,
   matchDesktopWindow,
+  parseHyprConfigProvider,
   parseHyprctlClients,
   parseHyprctlMonitors,
+  parseHyprWorkspaceShortcut,
+  quoteLuaString,
+  screenshotToLogicalCoords,
   UINPUT_HELPER_SCRIPT,
 } from "../../src/core/computer-use.js";
 import {
@@ -133,10 +148,103 @@ describe("Computer-use shared parsers and validation", () => {
 
     expect(buildWtypeArgs("type", "hello; rm -rf /")).toEqual(["--", "hello; rm -rf /"]);
     expect(buildWtypeArgs("key", "Ctrl+Shift+T")).toEqual(["-M", "ctrl", "-M", "shift", "-k", "t", "-m", "shift", "-m", "ctrl"]);
+    expect(buildWtypeArgs("key", "Super+1")).toEqual(["-M", "logo", "-k", "1", "-m", "logo"]);
+    expect(buildWtypeArgs("key", "Super+Shift+Return")).toEqual(["-M", "logo", "-M", "shift", "-k", "Return", "-m", "shift", "-m", "logo"]);
+    expect(buildWtypeArgs("key", "Ctrl+.")).toEqual(["-M", "ctrl", "-k", "period", "-m", "ctrl"]);
+    expect(buildWtypeArgs("key", "Ctrl+-")).toEqual(["-M", "ctrl", "-k", "minus", "-m", "ctrl"]);
+    expect(buildWtypeArgs("key", "Ctrl+/")).toEqual(["-M", "ctrl", "-k", "slash", "-m", "ctrl"]);
+    expect(buildWtypeArgs("key", "Ctrl+,")).toEqual(["-M", "ctrl", "-k", "comma", "-m", "ctrl"]);
+    expect(buildWtypeArgs("key", "Ctrl+_")).toEqual(["-M", "ctrl", "-k", "underscore", "-m", "ctrl"]);
     expect(buildWtypeArgs("key", "invalid;key")).toBeNull();
     expect(UINPUT_HELPER_SCRIPT).toContain('struct.pack("=HHHH80sI"');
     expect(UINPUT_HELPER_SCRIPT).toContain('struct.pack("=qqHHi"');
     expect(UINPUT_HELPER_SCRIPT).not.toContain("HHHHi64sI");
+  });
+
+  it("handles Hyprland Lua/hyprlang dispatch builders, regex escaping, 1.25x scaling, fallback input builders, and full error formatting", () => {
+    expect(parseHyprWorkspaceShortcut("Super+1")).toBe("1");
+    expect(parseHyprWorkspaceShortcut("Super+9")).toBe("9");
+    expect(parseHyprWorkspaceShortcut("Super+0")).toBe("10");
+    expect(parseHyprWorkspaceShortcut("Super+Shift+1")).toBeNull();
+    expect(parseHyprWorkspaceShortcut("Ctrl+1")).toBeNull();
+    expect(parseHyprWorkspaceShortcut("Super+a")).toBeNull();
+
+    const trickyTitle = "He Made Over $900 Million Doing THIS (Part 1) [4K] - YouTube";
+    expect(escapeHyprRegex(trickyTitle)).toBe("He Made Over \\$900 Million Doing THIS \\(Part 1\\) \\[4K\\] - YouTube");
+    expect(buildHyprFocusSelector({ address: "0x55807b1a32d0", title: trickyTitle, class: "google-chrome" })).toBe("address:0x55807b1a32d0");
+    expect(buildHyprFocusSelector({ address: "", title: trickyTitle, class: "google-chrome" })).toBe(
+      "title:^He Made Over \\$900 Million Doing THIS \\(Part 1\\) \\[4K\\] - YouTube$",
+    );
+    expect(buildHyprFallbackFocusSelector({ title: "", class: "google-chrome" })).toBe("class:^google-chrome$");
+
+    expect(parseHyprConfigProvider("\nconfigProvider: lua\nbackend: drm\n")).toBe("lua");
+    expect(parseHyprConfigProvider("configProvider: hyprlang\n")).toBe("hyprlang");
+    expect(isHyprLuaDispatchError('error: [string "return hl.dispatch(focuswindow ...)"]:1:')).toBe(true);
+    expect(isHyprLuaDispatchError("ok")).toBe(false);
+
+    expect(quoteLuaString('title:^$900 "quoted"\\path$')).toBe('"title:^$900 \\"quoted\\"\\\\path$"');
+    expect(buildHyprDispatchArgs("hyprlang", { kind: "workspace", workspace: "1" })).toEqual(["dispatch", "workspace", "1"]);
+    expect(buildHyprDispatchArgs("lua", { kind: "workspace", workspace: "1" })).toEqual(["dispatch", 'hl.dsp.focus({ workspace = "1" })']);
+    expect(buildHyprDispatchArgs("lua", { kind: "focuswindow", selector: "address:0x55807b1a32d0" })).toEqual([
+      "dispatch",
+      'hl.dsp.focus({ window = "address:0x55807b1a32d0" })',
+    ]);
+    expect(buildHyprDispatchArgs("lua", { kind: "movecursor", x: 1024, y: 576 })).toEqual([
+      "dispatch",
+      "hl.dsp.cursor.move({ x = 1024, y = 576 })",
+    ]);
+
+    expect(hyprDispatchFailureReason("", "")).toBeNull();
+    expect(hyprDispatchFailureReason("ok\n", "")).toBeNull();
+    expect(hyprDispatchFailureReason("warning: =[C]:-1: hl.focus: window not found\n", "")).toContain("window not found");
+
+    expect(screenshotToLogicalCoords({ x: 1280, y: 720 }, { x: 0, y: 0, scale: 1 })).toEqual({ x: 1280, y: 720 });
+    expect(screenshotToLogicalCoords({ x: 1280, y: 720 }, { x: 0, y: 0, scale: 1.25 })).toEqual({ x: 1024, y: 576 });
+    expect(screenshotToLogicalCoords({ x: 2560, y: 1440 }, { x: 0, y: 0, scale: 1.25 })).toEqual({ x: 2048, y: 1152 });
+    expect(screenshotToLogicalCoords({ x: 1500, y: 900 }, { x: 1920, y: 0, scale: 1.5 })).toEqual({ x: 2920, y: 600 });
+
+    expect(buildYdotoolKeyArgs("type", "hi")).toEqual(["type", "--", "hi"]);
+    expect(buildYdotoolKeyArgs("key", "Ctrl+L")).toEqual(["key", "29:1", "38:1", "38:0", "29:0"]);
+    expect(buildDotoolInput("type", "hello\nworld")).toBe("type hello\nkey enter\ntype world\n");
+    expect(buildDotoolInput("key", "Super+Shift+Return")).toBe("key super+shift+enter\n");
+    expect(buildDotoolPointerInput("right-click")).toBe("click right\n");
+    expect(buildDotoolPointerInput("scroll-v", -3)).toBe("wheel -3\n");
+
+    expect(installHintFor(["wtype"], "pacman")).toBe("Install with: sudo pacman -S wtype");
+    expect(installHintFor(["ydotool"], "apt")).toBe("Install with: sudo apt-get install -y ydotool");
+    expect(installHintFor(["grim"], "dnf")).toBe("Install with: sudo dnf install -y grim");
+    expect(installHintFor(["xdotool"], "zypper")).toBe("Install with: sudo zypper install -y xdotool");
+    expect(installHintFor(["wtype"], null)).toContain("system package manager");
+
+    const formatted = formatComputerCommandError({
+      file: "/usr/bin/wtype",
+      args: ["-M", "super", "-k", "1", "-m", "super"],
+      code: 1,
+      stderr: "Invalid modifier name 'super'",
+      stdout: "usage hint",
+    });
+    expect(formatted).toContain("Command failed (exit 1): /usr/bin/wtype -M super -k 1 -m super");
+    expect(formatted).toContain("Invalid modifier name 'super'");
+    expect(formatted).toContain("usage hint");
+
+    const uinputErr = formatComputerCommandError({
+      file: "/usr/bin/python3",
+      args: ["-I", "-c", UINPUT_HELPER_SCRIPT, "click"],
+      code: 1,
+      stderr: "PermissionError: [Errno 13] Permission denied: '/dev/uinput'",
+    });
+    expect(uinputErr).toContain("<uinput-helper> click");
+    expect(uinputErr).not.toContain("UI_DEV_SETUP");
+    expect(uinputErr).toContain("/dev/uinput");
+
+    const vkErr = formatComputerCommandError({
+      file: "/usr/bin/wtype",
+      args: ["--", "hi"],
+      code: 1,
+      stderr: "Compositor does not support the virtual keyboard protocol",
+    });
+    expect(vkErr).toContain("Hint:");
+    expect(vkErr).toContain("ydotool");
   });
 });
 
@@ -239,6 +347,205 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
     expect(
       createComputerUseDriver({ dataRoot, getAppWebContents: () => null, getBrowserWebContents: () => null, env: { DISPLAY: ":0" }, platform: "linux" }),
     ).toBeInstanceOf(X11Driver);
+  });
+
+  it("handles Hyprland 0.56+ Lua dispatch, 1.25x scaling, title fallback with $, and Super+number workspaces", async () => {
+    const dataRoot = tempDir();
+    const calls: Array<{ file: string; args: string[]; input?: string }> = [];
+    const bins = new Set(["hyprctl", "grim", "wtype", "python3"]);
+    let failAddrWithNotFound = false;
+
+    const driver = new HyprlandWaylandDriver({
+      dataRoot,
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (bins.has(b) ? `/usr/bin/${b}` : null),
+      uinputWritable: () => true,
+      execFileImpl: async (file, args, opts) => {
+        calls.push({ file, args, input: opts?.input });
+        if (file.endsWith("hyprctl") && args[0] === "status") {
+          return { stdout: "\nconfigProvider: lua\nbackend: drm\n", stderr: "" };
+        }
+        if (file.endsWith("hyprctl") && args[1] === "clients") {
+          return {
+            stdout: JSON.stringify([
+              {
+                address: "0x55807b1a32d0",
+                class: "google-chrome",
+                title: "He Made Over $900 Million Doing THIS - YouTube - Google Chrome",
+                workspace: { id: 1, name: "1" },
+                at: [12, 12],
+                size: [2024, 1104],
+                focusHistoryID: 2,
+                mapped: true,
+              },
+            ]),
+            stderr: "",
+          };
+        }
+        if (file.endsWith("hyprctl") && args[1] === "monitors") {
+          return { stdout: JSON.stringify([{ name: "DP-1", width: 2560, height: 1440, x: 0, y: 0, scale: 1.25, focused: true }]), stderr: "" };
+        }
+        if (file.endsWith("hyprctl") && args[0] === "dispatch") {
+          if (failAddrWithNotFound && args[1].includes("address:0x55807b1a32d0")) {
+            return { stdout: "warning: =[C]:-1: hl.focus: window not found\n", stderr: "" };
+          }
+          return { stdout: "ok\n", stderr: "" };
+        }
+        if (file.endsWith("grim")) {
+          fs.writeFileSync(args[args.length - 1], pngStub);
+        }
+        return { stdout: "", stderr: "" };
+      },
+    });
+
+    const shot = await driver.screenshot({ surface: "desktop" });
+    expect(shot.details).toContain("DP-1 (2560x1440 px / 2048x1152 logical @ 0,0, scale 1.25, focused)");
+    expect(shot.details).toContain("Coordinate scaling:");
+
+    // Super+1 uses native Hyprland workspace dispatch in Lua mode rather than wtype
+    const wsRes = await driver.act({ action: "key", surface: "desktop", target: "", prompt: "Super+1" });
+    expect(wsRes).toBe("Switched to workspace 1.");
+    expect(calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args[0] === "dispatch" && c.args[1] === 'hl.dsp.focus({ workspace = "1" })')).toBe(true);
+    expect(calls.some((c) => c.file === "/usr/bin/wtype")).toBe(false);
+
+    // focus-window uses Lua hl.dsp.focus
+    await driver.act({
+      action: "focus-window",
+      surface: "desktop",
+      target: "He Made Over $900 Million Doing THIS - YouTube - Google Chrome",
+      prompt: "",
+    });
+    expect(
+      calls.some(
+        (c) => c.file === "/usr/bin/hyprctl" && c.args[0] === "dispatch" && c.args[1] === 'hl.dsp.focus({ window = "address:0x55807b1a32d0" })',
+      ),
+    ).toBe(true);
+
+    // If address lookup fails with "window not found", retries with regex-escaped title
+    failAddrWithNotFound = true;
+    await driver.act({
+      action: "focus-window",
+      surface: "desktop",
+      target: "He Made Over $900 Million Doing THIS - YouTube - Google Chrome",
+      prompt: "",
+    });
+    expect(
+      calls.some(
+        (c) =>
+          c.file === "/usr/bin/hyprctl" &&
+          c.args[0] === "dispatch" &&
+          c.args[1] === 'hl.dsp.focus({ window = "title:^He Made Over \\\\$900 Million Doing THIS - YouTube - Google Chrome$" })',
+      ),
+    ).toBe(true);
+
+    // Click converts 1.25x screenshot coordinates to Hyprland logical coordinates
+    await driver.act({ action: "click", surface: "desktop", target: "1280,720", prompt: "" });
+    expect(
+      calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args[0] === "dispatch" && c.args[1] === "hl.dsp.cursor.move({ x = 1024, y = 576 })"),
+    ).toBe(true);
+
+    // Explicit logical coordinates bypass scaling
+    await driver.act({ action: "click", surface: "desktop", target: "1280,720", prompt: "", options: "surface=desktop, coords=logical" });
+    expect(
+      calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args[0] === "dispatch" && c.args[1] === "hl.dsp.cursor.move({ x = 1280, y = 720 })"),
+    ).toBe(true);
+
+    // Scroll at coordinates scales too
+    await driver.act({ action: "scroll", surface: "desktop", target: "640,360", prompt: "down 3" });
+    expect(
+      calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args[0] === "dispatch" && c.args[1] === "hl.dsp.cursor.move({ x = 512, y = 288 })"),
+    ).toBe(true);
+  });
+
+  it("auto-recovers from hyprlang to Lua dispatch, falls back across input tools, and surfaces full error hints", async () => {
+    const dataRoot = tempDir();
+    const calls: Array<{ file: string; args: string[]; input?: string }> = [];
+    const bins = new Set(["hyprctl", "pacman", "wtype", "dotool"]);
+    let firstDispatch = true;
+
+    const driver = new HyprlandWaylandDriver({
+      dataRoot,
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (bins.has(b) ? `/usr/bin/${b}` : null),
+      uinputWritable: () => false,
+      execFileImpl: async (file, args, opts) => {
+        calls.push({ file, args, input: opts?.input });
+        if (file.endsWith("hyprctl") && args[0] === "status") {
+          return { stdout: "", stderr: "" };
+        }
+        if (file.endsWith("hyprctl") && args[0] === "dispatch" && firstDispatch) {
+          firstDispatch = false;
+          const err = new Error("Command failed");
+          Object.assign(err, { code: 7, stdout: 'error: [string "return hl.dispatch(workspace 2)"]:1: \')\' expected', stderr: "" });
+          throw err;
+        }
+        if (file.endsWith("wtype")) {
+          const err = new Error("Command failed");
+          Object.assign(err, { code: 1, stderr: "Compositor does not support the virtual keyboard protocol" });
+          throw err;
+        }
+        return { stdout: "ok\n", stderr: "" };
+      },
+    });
+
+    // Legacy dispatch fails with hl.dispatch error -> auto-retries in Lua mode and succeeds
+    await driver.act({ action: "key", surface: "desktop", target: "", prompt: "Super+2" });
+    expect(calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args[1] === 'hl.dsp.focus({ workspace = "2" })')).toBe(true);
+
+    // wtype fails due to missing virtual-keyboard protocol -> falls back to dotool via stdin
+    await driver.act({ action: "type", surface: "desktop", target: "", prompt: "hello" });
+    expect(calls.some((c) => c.file === "/usr/bin/dotool" && c.input === "type hello\n")).toBe(true);
+
+    // Non-writable /dev/uinput without ydotool/dotool reports exact reason and pacman install hint
+    bins.delete("dotool");
+    bins.add("python3");
+    await expect(driver.act({ action: "click", surface: "desktop", target: "100,100", prompt: "" })).rejects.toThrow(
+      /\/dev\/uinput is not writable.*sudo pacman -S ydotool/,
+    );
+
+    // Missing all keyboard tools reports missing binaries and install hint
+    bins.delete("wtype");
+    await expect(driver.act({ action: "type", surface: "desktop", target: "", prompt: "hello" })).rejects.toThrow(
+      /wtype, ydotool, dotool.*sudo pacman -S wtype/,
+    );
+  });
+
+  it("uses ydotool when wtype is absent and preserves stdout + stderr via real execFile", async () => {
+    const dataRoot = tempDir();
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const bins = new Set(["hyprctl", "ydotool"]);
+    const ydoDriver = new HyprlandWaylandDriver({
+      dataRoot,
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (bins.has(b) ? `/usr/bin/${b}` : null),
+      execFileImpl: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: "ok\n", stderr: "" };
+      },
+    });
+
+    await ydoDriver.act({ action: "key", surface: "desktop", target: "", prompt: "Ctrl+L" });
+    await ydoDriver.act({ action: "drag", surface: "desktop", target: "100,200 -> 300,400", prompt: "" });
+    expect(calls.some((c) => c.file === "/usr/bin/ydotool" && c.args.join(" ") === "key 29:1 38:1 38:0 29:0")).toBe(true);
+    expect(calls.some((c) => c.file === "/usr/bin/ydotool" && c.args.join(" ") === "click 0x40")).toBe(true);
+    expect(calls.some((c) => c.file === "/usr/bin/ydotool" && c.args.join(" ") === "click 0x80")).toBe(true);
+
+    // Verify defaultExecFile surfaces both stdout and stderr (such as Hyprland's Lua error on stdout)
+    const binDir = tempDir();
+    const fakeWtype = path.join(binDir, "wtype");
+    fs.writeFileSync(fakeWtype, "#!/bin/sh\necho 'stdout Lua diagnostic'\necho 'stderr modifier failure' >&2\nexit 7\n", { mode: 0o755 });
+    const realExecDriver = new HyprlandWaylandDriver({
+      dataRoot,
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (b === "wtype" ? fakeWtype : null),
+    });
+    await expect(realExecDriver.act({ action: "key", surface: "desktop", target: "", prompt: "Ctrl+C" })).rejects.toThrow(
+      /Command failed \(exit 7\).*stderr modifier failure.*stdout Lua diagnostic/s,
+    );
   });
 });
 

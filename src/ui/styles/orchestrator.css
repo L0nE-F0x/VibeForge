@@ -490,6 +490,27 @@ button.viby-chip:disabled {
   border-color: color-mix(in srgb, var(--red) 45%, var(--line));
 }
 
+.viby-chip.failed.step-error {
+  height: auto;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 4px 8px;
+  align-items: flex-start;
+  cursor: text;
+  line-height: 1.4;
+}
+
+.viby-chip.failed.step-error svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.viby-chip-error {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .viby-detail-popover {
   width: min(520px, calc(100vw - 48px));
   display: flex;

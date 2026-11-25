@@ -2106,6 +2106,7 @@ export const pt: Catalog = {
   "core.cuPlaceDesktop": "Área de trabalho inteira",
   "core.orchComputerNoWindow": "Nenhuma janela aberta corresponde a esse nome.",
   "core.orchComputerNoSurface": "Esta visualização não está aberta agora.",
+  "core.orchComputerMissingTool": "Falha na área de trabalho ({action}): {detail}. {hint}",
   "core.updateNoDigest": "Esta versão não tem soma SHA-256 verificada do GitHub, então o VibeForge recusou executar o instalador.",
   "core.updateVerifyFailed": "Não foi possível verificar a soma SHA-256 desta versão ({detail}), então o VibeForge recusou executar o instalador.",
   "orch.attachImage": "Anexar imagem",
