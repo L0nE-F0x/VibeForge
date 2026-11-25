@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse, stringify } from "yaml";
 import { tildify } from "../../shared/text.js";
-import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
+import { isDirectory, noteOwnDelete, writeFileAtomic } from "../fsx.js";
 import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
@@ -444,9 +444,12 @@ export class Library {
       if (isMissing(error)) return [];
       throw unreadable(root, error);
     }
+    // A folder linked in from elsewhere (a dotfiles repository, a skill another CLI uses too) is
+    // one: reading it by id goes through the link already, so the list mustn't leave it out.
+    const isFolder = (entry: fs.Dirent) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(path.join(root, entry.name)));
     const ids =
       extension === "/"
-        ? entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+        ? entries.filter(isFolder).map((entry) => entry.name)
         : entries.filter((entry) => entry.name.endsWith(extension)).map((entry) => entry.name.slice(0, -extension.length));
     return ids.filter((id) => isSafeId(id));
   }

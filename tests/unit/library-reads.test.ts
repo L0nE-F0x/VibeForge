@@ -102,6 +102,27 @@ describe.skipIf(asRoot)("reading the library", () => {
     expect(files.find((file) => file.id === "locked")?.file).toBe(path.join(config, "agents", "locked", "agent.yaml"));
   });
 
+  it("lists an agent or a skill whose folder is a link to one kept elsewhere, and deletes only the link", () => {
+    const { config, store: s } = store();
+    const elsewhere = temp();
+    // A dotfiles repository (GNU Stow links each folder in), or a skill shared with another CLI.
+    fs.mkdirSync(path.join(elsewhere, "atlas"));
+    fs.writeFileSync(path.join(elsewhere, "atlas", "agent.yaml"), "name: Atlas\nengine: claude\nbrief: Help.\n");
+    fs.mkdirSync(path.join(elsewhere, "release-notes"));
+    fs.writeFileSync(path.join(elsewhere, "release-notes", "SKILL.md"), "---\nname: Release notes\ndescription: Notes.\n---\n\nWrite them.\n");
+    fs.symlinkSync(path.join(elsewhere, "atlas"), path.join(config, "agents", "atlas"));
+    fs.symlinkSync(path.join(elsewhere, "release-notes"), path.join(config, "skills", "release-notes"));
+    // A link to nothing, or to a file, is no agent.
+    fs.symlinkSync(path.join(elsewhere, "gone"), path.join(config, "agents", "gone"));
+    fs.symlinkSync(path.join(elsewhere, "atlas", "agent.yaml"), path.join(config, "agents", "file"));
+
+    expect(s.listAgents().map((item) => item.name)).toEqual(["Atlas"]);
+    expect(s.listSkills().map((item) => item.name)).toEqual(["Release notes"]);
+    s.deleteSkill("release-notes");
+    expect(s.listSkills()).toEqual([]);
+    expect(fs.readFileSync(path.join(elsewhere, "release-notes", "SKILL.md"), "utf8")).toContain("Write them.");
+  });
+
   it("throws for a memory or skill that can't be read, and gives nothing only for one not written yet", () => {
     const { config, store: s } = store();
     s.writeAgent(agent("atlas"));

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Agents and skills whose folder is a link show up.** An agent or skill folder linked into `~/.config/vibeforge` from somewhere else (a dotfiles repository kept with GNU Stow, or a skill you share with another CLI) was missing from Agents, Skills and what Viby is told, though an agent that listed the skill still got it. They're listed now. Deleting one removes only the link.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
