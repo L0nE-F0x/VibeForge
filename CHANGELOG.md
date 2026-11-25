@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A task whose title ends in a space no longer stays Unsaved.** Saving trimmed the title, but the sheet still compared what you typed, so it kept saying Unsaved with Save and Discard lit, kept the edit as a draft, and let **Run** try a blocked task. It now compares the title as it is saved.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

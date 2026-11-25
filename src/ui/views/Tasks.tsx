@@ -278,6 +278,32 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
 /** How many of a task's runs its sheet lists; the rest are in Runs. */
 const TASK_RUNS = 50;
 
+/** What a task sheet's fields hold. */
+export interface TaskFields {
+  title: string;
+  body: string;
+  agentId: string;
+  workspaceId: string;
+  isolated: boolean;
+  shareCheckout: boolean;
+}
+
+/**
+ * Whether the sheet holds something to save: always for a new task. The title is compared as the
+ * core keeps it (trimmed), or a space typed at its end would stay Unsaved after every Save.
+ */
+export function taskEdited(fields: TaskFields, task: TaskView | null): boolean {
+  return (
+    !task ||
+    fields.title.trim() !== task.title ||
+    fields.body !== task.body ||
+    (fields.agentId || null) !== task.agentId ||
+    (fields.workspaceId || null) !== task.workspaceId ||
+    fields.isolated !== task.isolated ||
+    fields.shareCheckout !== task.shareCheckout
+  );
+}
+
 function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClose: () => void; onCreated: (task: TaskView) => void }) {
   const t = useT();
   const { go } = useNav();
@@ -325,8 +351,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     });
   const setWorkspaceId = (next: string) => setForm((prev) => ({ ...prev, workspaceId: next }));
 
-  const dirty =
-    !task || title !== task.title || body !== task.body || (agentId || null) !== task.agentId || (workspaceId || null) !== task.workspaceId || isolated !== task.isolated || shareCheckout !== task.shareCheckout;
+  const dirty = taskEdited({ title, body, agentId, workspaceId, isolated, shareCheckout }, task);
   const fields = () => ({ title, body, agentId: agentId || null, workspaceId: workspaceId || null, isolated, shareCheckout });
   const agent = agents.find((item) => item.id === agentId);
   const workspace = workspaces.find((item) => item.id === workspaceId);
