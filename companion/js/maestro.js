@@ -7,7 +7,7 @@ import { call, post, withBusy } from "./api.js";
 import { brandMark } from "./art.js";
 import { editingIn, el, sheet } from "./dom.js";
 import { micParts, paintMic } from "./mic.js";
-import { setView } from "./pages.js";
+import { setView, update } from "./pages.js";
 import { pendingSteps, planCard, sizePrompts } from "./plan-card.js";
 import { openSession } from "./session.js";
 import { parts, state } from "./state.js";
@@ -262,9 +262,14 @@ async function openMemorySheet() {
   try {
     const res = /** @type {{ text?: string }} */ (await call("/api/orchestrator/memory"));
     parts.memoryBox.value = res.text || "";
-  } finally {
     parts.memoryBox.disabled = false;
     parts.memorySave.disabled = false;
+  } catch (err) {
+    // A memory that didn't load is not an empty one: an open box would take a note and Save would
+    // replace the whole memory with it. The sheet closes and the banner says why.
+    closeSheet(parts.memorySheet);
+    state.actionError = err.message;
+    update();
   }
 }
 

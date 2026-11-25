@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **The phone's Viby memory no longer opens blank when it fails to load.** If the connection dropped as you tapped **Memory** on the phone page, you got an empty, editable box, and **Save** replaced all of Viby's memory with whatever you typed. The panel now closes and the banner says what went wrong.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
