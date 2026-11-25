@@ -769,6 +769,22 @@ describe("a call with Viby", () => {
     expect(desk.isOpen()).toBe(false);
   });
 
+  it("hangs up after the note it is saying, when a plan asks to end the call meanwhile, and says no more", async () => {
+    const desk = call({ hears: [], slowSpeech: true });
+    desk.instance.start();
+    // Two CLIs end their turns: the first is said at once, the second waits behind it.
+    desk.word({ kind: "note", note });
+    desk.word({ kind: "note", note: { ...note, workspace: "docs" } });
+    await until(() => desk.isSpeaking());
+    expect(desk.spoken).toEqual(["Claude Code in api finished its turn."]);
+    // A plan run from its card asks to end the call while the first note is being said.
+    desk.word({ kind: "hangup" });
+    desk.finishSpeaking();
+    await until(() => !desk.instance.get().on);
+    expect(desk.spoken).toEqual(["Claude Code in api finished its turn."]);
+    expect(desk.isOpen()).toBe(false);
+  });
+
   it("confirms a waiting computer-use plan from spoken go, yes, do it, and natural variants", async () => {
     for (const phrase of ["Go.", "Yes.", "Do it.", "Um, go.", "Go ahead and do it."]) {
       const plan = turn({
