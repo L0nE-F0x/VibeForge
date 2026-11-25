@@ -1,6 +1,7 @@
 import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, Map as MapIcon, RefreshCw, ScrollText, Stethoscope } from "lucide-react";
 import { useCallback, useRef } from "react";
 import type { AppInfo, Engine, Settings } from "../../shared/api.js";
+import { computerText } from "../../shared/computer.js";
 import type { DictateButton } from "../../shared/dictation.js";
 import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
@@ -48,7 +49,7 @@ export function issueUrl(kind: "bug" | "feature", info: AppInfo | undefined, eng
 
 /** Versions, a few settings and the end of VibeForge's own log, in English for the bug report. */
 export async function diagnosticsText(info: AppInfo | undefined, engines: Engine[], settings: Settings | undefined): Promise<string> {
-  const lines = await call("app.logTail", 200);
+  const [lines, computer] = await Promise.all([call("app.logTail", 200), call("app.computer").catch(() => null)]);
   return [
     "VibeForge diagnostics",
     "",
@@ -58,6 +59,7 @@ export async function diagnosticsText(info: AppInfo | undefined, engines: Engine
       ? `Settings: theme ${settings.theme}, language ${settings.language}, shell ${settings.defaultShell}, default engine ${settings.defaultEngine}, update checks ${settings.checkUpdates ? "on" : "off"}`
       : "Settings: not loaded",
     "",
+    ...(computer ? [...computerText(computer), ""] : []),
     `Last ${lines.length} log lines (${info?.logFile ?? "?"}):`,
     "```",
     ...lines,

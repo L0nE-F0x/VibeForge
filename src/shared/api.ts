@@ -1,5 +1,6 @@
 // The contract between the renderer and the main process. The renderer calls
 // `call("agents.list")`; the main process implements every key of DeskMethods.
+import type { ComputerFacts } from "./computer.js";
 import type { FileNode } from "../core/files.js";
 import type { RunQuery } from "../core/store.js";
 import type {
@@ -343,6 +344,8 @@ export interface DeskMethods {
   "app.openPath": (target: string) => void;
   "app.openExternal": (url: string) => void;
   "app.pickFolder": (title?: string) => string | null;
+  /** What VibeForge depends on, looked for now: Settings → This computer and Copy diagnostics. */
+  "app.computer": () => ComputerFacts;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
   "app.restart": () => void;

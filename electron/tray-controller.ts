@@ -148,6 +148,12 @@ export class TrayController {
       .catch((error: unknown) => log.warn(`Translations: ${describeError(error)}`));
   }
 
+  /** Asks now whether something hosts the tray, for Settings → This computer, and keeps the answer. */
+  async checkHost(): Promise<boolean> {
+    this.hosted = await this.findHost();
+    return this.hosted;
+  }
+
   private findHost(): Promise<boolean> {
     return new Promise((resolve) => {
       execFile(

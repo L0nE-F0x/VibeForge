@@ -24,6 +24,7 @@ import { isSyncMode } from "../src/core/sync/protocol.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import type { Call } from "./call.js";
 import { Chimes } from "./chimes.js";
+import { probeComputer } from "./computer.js";
 import type { TrayController } from "./tray-controller.js";
 import type { Updater } from "./updater.js";
 import type { Voice } from "./voice.js";
@@ -95,6 +96,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "app.openExternal": (url) => {
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     },
+    "app.computer": async () => probeComputer({ engines: s().listEngines(), voice: voice.status(), trayHost: await tray.checkHost(), syncthing: sync.engineInfo() }),
     "app.pickFolder": async (title) => {
       // Electron opens dialogs in Downloads unless told where. Projects sit side by side, so start
       // beside the folder picked last, or beside the newest workspace.
