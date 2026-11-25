@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A repository synced as files only no longer shows Syncthing's files as changes.** With **Files only** on, and for a branch opened as its own folder (which always syncs files only), `git status` listed `.stfolder/` and `.stignore` as new files, the workspace counted them as uncommitted, and a CLI that committed everything could commit them. They are now kept out of git as they already were when `.git` syncs too.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

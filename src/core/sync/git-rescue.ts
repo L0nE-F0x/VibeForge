@@ -57,7 +57,24 @@ export async function prepareRepo(root: string): Promise<void> {
     const now = await git(["config", "--local", "--get", key], root);
     if (now.stdout.trim() !== value) await git(["config", "--local", key, value], root);
   }
-  const file = path.join(root, ".git", "info", "exclude");
+  await hideSyncFiles(root);
+}
+
+/**
+ * Keeps Syncthing's own two files out of `git status`, so they never show as changes or get
+ * committed. Also where only the files sync and `.git` stays on each machine, and in a branch
+ * opened beside its repository, whose exclude file is that repository's.
+ */
+export async function hideSyncFiles(root: string): Promise<void> {
+  const kind = repoKind(root);
+  if (kind === "none") return;
+  let file = path.join(root, ".git", "info", "exclude");
+  if (kind === "checkout") {
+    // Its repository named outright, so git never takes one in a folder above for it.
+    const where = await git([`--git-dir=${path.join(root, ".git")}`, "rev-parse", "--git-path", "info/exclude"], root);
+    if (where.code !== 0 || !where.stdout.trim()) return;
+    file = path.resolve(root, where.stdout.trim());
+  }
   let text = "";
   try {
     text = fs.readFileSync(file, "utf8");
