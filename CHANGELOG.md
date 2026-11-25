@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **`/trust` answers the CLI that is asking.** Typed while you looked at a CLI that asked nothing, `/trust` pressed <kbd>Enter</kbd> in that one: it sent whatever was typed in its prompt, and the CLI that was asking (one Viby had just started in a new copy, say) kept waiting. It now answers the CLI in front only when it is the one asking, and otherwise the only CLI asking.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
