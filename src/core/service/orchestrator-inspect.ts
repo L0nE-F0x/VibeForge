@@ -41,6 +41,7 @@ export interface InspectDeps {
   listModels: (engineId: string) => Promise<string[]>;
   buildSettingsContext: () => PlanSettingsContext;
   projectsFolder: () => string;
+  diagnostics?: () => string;
 }
 
 /**
@@ -90,7 +91,15 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
     };
   }
 
-  if (step.action === "problems" || step.action === "diagnostics" || inspectsProblems(step.prompt) || inspectsProblems(step.target)) {
+  if (step.action === "diagnostics" || /\bdiagnostics?\b/i.test(`${step.prompt} ${step.target}`)) {
+    const diag = deps.diagnostics?.() ?? "No Viby diagnostics recorded yet.";
+    const problems = await inspectProblems(deps);
+    return {
+      summary: diag.split("\n")[0] || problems.summary,
+      details: [diag, "", problems.details].join("\n"),
+    };
+  }
+  if (step.action === "problems" || inspectsProblems(step.prompt) || inspectsProblems(step.target)) {
     return inspectProblems(deps);
   }
   if (step.action === "compare" || (!step.workspaceId && !step.target && /\bcompare\b/i.test(step.prompt))) {

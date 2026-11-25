@@ -58,6 +58,7 @@ export function deskHost(
     },
     record: (ptyId, runDir) => supervisor.record(ptyId, runDir),
     resolveBin: (bin) => whichBin(bin),
+    logDiagnostics: (line) => log.info(line),
     // The core speaks English; its notes are put in the window's language here.
     notify: (note) => notify({ ...note, body: words.coreText(note.body) }),
     finished: (run) => send("run-finished", run),

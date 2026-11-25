@@ -102,6 +102,8 @@ export interface DeskHost {
   voiceStopDownload?(): void;
   /** Login autostart state and setter, for Viby's `settings` step. */
   autostart?: { get(): boolean; set(on: boolean): boolean };
+  /** Write a privacy-safe single-line Viby diagnostic event to the app log (never prompts or output). */
+  logDiagnostics?(line: string): void;
 }
 
 export interface DeskOptions {

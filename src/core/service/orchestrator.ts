@@ -60,6 +60,7 @@ import {
   type VibyWord,
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
+import { VibyDiagnostics, formatDiagnosticsLogLine, type VibyTurnOutcome } from "./orchestrator-diagnostics.js";
 import { speakable } from "../replies.js";
 import { en } from "../../ui/i18n/en.js";
 import { findSherpa } from "../sherpa.js";
@@ -374,7 +375,9 @@ function madeFromReading(turn: OrchestratorTurn): boolean {
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
+  private thinkingDone: Promise<void> | null = null;
   private activity: OrchestratorActivity | null = null;
+  readonly diagnostics = new VibyDiagnostics();
   private runEpoch = 0;
   private readonly runningPlans = new Map<string, Promise<void>>();
   /** Models each planner listed, kept for this run of VibeForge. */
@@ -398,6 +401,8 @@ export class OrchestratorDesk {
   chainSettleMs = 1200;
   /** How long a chained step waits on a terminal that never got busy before going ahead. */
   chainIdleMs = 15_000;
+  /** Hard upper bound on a single chained PTY wait so a hung terminal never deadlocks the plan. */
+  chainMaxWaitMs = 15 * 60_000;
   /** Time before checking whether a newly started CLI is stuck on a folder-trust/permission prompt. */
   firstPromptMs = 8000;
 
@@ -890,6 +895,9 @@ export class OrchestratorDesk {
     const words = text.trim();
     if (!words && !images?.length) return;
     if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
+    // Wait for a recently aborted/stopped turn to unwind its cleanup before launching the next one.
+    if (this.thinkingDone) await this.thinkingDone.catch(() => undefined);
+    if (this.thinking) throw new Error("Viby is still answering. Wait for it, or stop it.");
     const savedImages = savePastedImages(this.imagesDir, images);
     if (looking !== undefined) this.looking = looking;
     const now = this.core.now().toISOString();
@@ -903,6 +911,11 @@ export class OrchestratorDesk {
     });
     const controller = new AbortController();
     this.thinking = controller;
+    let finishThinking!: () => void;
+    const donePromise = new Promise<void>((resolve) => {
+      finishThinking = resolve;
+    });
+    this.thinkingDone = donePromise;
     this.save();
     try {
       const promptText = words || "Please examine the attached screenshot(s).";
@@ -912,6 +925,8 @@ export class OrchestratorDesk {
         this.thinking = null;
         this.activity = null;
       }
+      if (this.thinkingDone === donePromise) this.thinkingDone = null;
+      finishThinking();
       this.save();
     }
   }
@@ -923,19 +938,33 @@ export class OrchestratorDesk {
   }
 
   private async think(words: string, signal: AbortSignal, looking: Looking | null, savedImages: SavedPromptImage[] = []): Promise<void> {
+    const turnStartedAt = Date.now();
+    let contextMs = 0;
+    let plannerMs = 0;
+    let warmHit = false;
+    let repaired = false;
+    let outcome: VibyTurnOutcome = "aborted";
+    let stepKinds: string[] = [];
+    let errorKind: string | undefined;
     const { engine: picked, mode, model: chosen, effort: chosenEffort } = this.settings();
     const engineId = this.planner();
+    let model = "";
+    try {
     // A model or effort picked for another planner means nothing to this one.
     const explicitModel = engineId === picked ? chosen : "";
     const explicitEffort = engineId === picked ? (chosenEffort ?? "") : "";
     const engine = engineId ? this.core.resolveEngine(engineId) : null;
     if (!engine || !canOrchestrate(engine.row)) {
+      outcome = "noEngine";
+      errorKind = "noEngine";
       this.answer({ text: "", problem: "noEngine" });
       return;
     }
     // In a live voice call, default Claude Code to haiku unless the person chose a specific model.
-    const model = explicitModel || (this.onCall && brainKind(engine.row) === "claude" ? "haiku" : "");
+    model = explicitModel || (this.onCall && brainKind(engine.row) === "claude" ? "haiku" : "");
+    const contextStartedAt = Date.now();
     const context = await this.context();
+    contextMs = Date.now() - contextStartedAt;
     const copies = this.copies.list();
     const currentWorkspacesKey = context.workspaces
       .filter((w) => !copies.some((c) => c.openedWorkspaceId === w.id))
@@ -1035,6 +1064,7 @@ export class OrchestratorDesk {
         schemaFile,
         ...(turnImages.length ? { images: turnImages.map((img) => img.path) } : {}),
       };
+      const pStartedAt = Date.now();
       if (this.runner === spawnBrain && this.warmPlanners && plannerKind === "claude") {
         const warmRun = await this.plannerPool.runTurn({
           binPath: engine.binPath,
@@ -1046,22 +1076,28 @@ export class OrchestratorDesk {
           timeoutMs: BRAIN_TIMEOUT_MS,
           onEarlySay: this.onEarlySay ?? undefined,
         });
-        if (warmRun && (warmRun.timedOut || signal.aborted || warmRun.code === 0)) return warmRun;
+        if (warmRun && (warmRun.timedOut || signal.aborted || warmRun.code === 0)) {
+          warmHit = true;
+          plannerMs += Date.now() - pStartedAt;
+          return warmRun;
+        }
       }
       const args = brainArgs(engine.row, brainOpts);
       if (!args) return null;
-      if (plannerKind === "claude" && turnImages.length) {
-        const stdin = claudeImageStdin(text, turnImages);
-        return this.runner([engine.binPath, ...args], work, signal, undefined, stdin);
-      }
-      if (this.runner === spawnBrain && this.onEarlySay) {
-        return spawnBrain([engine.binPath, ...args], work, signal, BRAIN_TIMEOUT_MS, KILL_GRACE_MS, undefined, this.onEarlySay);
-      }
-      return this.runner([engine.binPath, ...args], work, signal);
+      const runResult =
+        plannerKind === "claude" && turnImages.length
+          ? await this.runner([engine.binPath, ...args], work, signal, undefined, claudeImageStdin(text, turnImages))
+          : this.runner === spawnBrain && this.onEarlySay
+            ? await spawnBrain([engine.binPath, ...args], work, signal, BRAIN_TIMEOUT_MS, KILL_GRACE_MS, undefined, this.onEarlySay)
+            : await this.runner([engine.binPath, ...args], work, signal);
+      plannerMs += Date.now() - pStartedAt;
+      return runResult;
     };
     const initialText = (switchedEngine || workspacesChanged) && !this.conversation.begun ? this.recap(words) : words;
     let run = await turn(initialText, context, true);
     if (!run) {
+      outcome = "noEngine";
+      errorKind = "noEngine";
       this.answer({ text: "", problem: "noEngine" });
       return;
     }
@@ -1097,16 +1133,17 @@ export class OrchestratorDesk {
     }
     // If a planner exited cleanly with malformed/unparseable output, run one compact schema-repair retry before failing.
     if (!signal.aborted && !run.timedOut && run.code === 0 && !output.error && !output.plan) {
+      repaired = true;
       const repairPrompt = [
         this.recap(words),
         "",
         `(Your previous answer could not be parsed as valid plan JSON. Respond ONLY with a single JSON object matching {"say": string, "steps": [...]} for the person's request. Valid step kinds: ${STEP_KINDS.join(", ")}.)`,
       ].join("\n");
-      const repaired = await turn(repairPrompt, context, true);
-      if (repaired && !signal.aborted && !repaired.timedOut && repaired.code === 0) {
-        const nextOut = readBrainOutput(repaired.stdout);
+      const repairedTurn = await turn(repairPrompt, context, true);
+      if (repairedTurn && !signal.aborted && !repairedTurn.timedOut && repairedTurn.code === 0) {
+        const nextOut = readBrainOutput(repairedTurn.stdout);
         if (nextOut.plan) {
-          run = repaired;
+          run = repairedTurn;
           output = nextOut;
         }
       }
@@ -1119,12 +1156,17 @@ export class OrchestratorDesk {
     if (!completed && !this.conversation.begun) this.conversation.sessionId = randomUUID();
     if (signal.aborted) return;
     if (run.timedOut) {
+      outcome = "timeout";
+      errorKind = "timeout";
       this.answer({ text: "", problem: "timeout" });
       return;
     }
     if ((run.code !== 0 || error) && !plan) {
       const detail = lastLines(error || run.stderr || run.stdout);
-      this.answer({ text: "", problem: signedOut(`${error}\n${run.stderr}\n${run.stdout}`) ? "signIn" : "failed", detail });
+      const isSignIn = signedOut(`${error}\n${run.stderr}\n${run.stdout}`);
+      outcome = isSignIn ? "signIn" : "failed";
+      errorKind = isSignIn ? "signIn" : error ? "cliError" : `exit_${run.code}`;
+      this.answer({ text: "", problem: isSignIn ? "signIn" : "failed", detail });
       return;
     }
     // Codex and Antigravity name their own session; the next turn resumes that one.
@@ -1137,6 +1179,8 @@ export class OrchestratorDesk {
     this.conversation.libraryKey = currentLibraryKey;
     this.conversation.memoryKey = currentMemoryKey;
     if (!plan) {
+      outcome = "unreadable";
+      errorKind = "unreadable";
       this.answer({ text: "", problem: "unreadable", detail: lastLines(text) });
       return;
     }
@@ -1146,10 +1190,11 @@ export class OrchestratorDesk {
     let unknownKinds = droppedKinds(plan.steps);
     // If every emitted step used an unknown kind, give the planner one repair turn naming the valid kinds.
     if (!signal.aborted && unknownKinds.length && !steps.length) {
+      repaired = true;
       const repairPrompt = `Your previous plan used unsupported step kind(s): ${[...new Set(unknownKinds)].join(", ")}. Valid step kinds are ONLY: ${STEP_KINDS.join(", ")}. Rewrite the plan JSON for "${oneLine(words, 240)}" using only valid step kinds (or steps: [] with a clear explanation in say).`;
-      const repaired = await turn(repairPrompt, currentContext, false);
-      if (repaired && !signal.aborted && !repaired.timedOut && repaired.code === 0) {
-        const nextOut = readBrainOutput(repaired.stdout);
+      const repairedTurn = await turn(repairPrompt, currentContext, false);
+      if (repairedTurn && !signal.aborted && !repairedTurn.timedOut && repairedTurn.code === 0) {
+        const nextOut = readBrainOutput(repairedTurn.stdout);
         if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
         if (nextOut.plan) {
           const nextSteps = resolvePlan(nextOut.plan, currentContext);
@@ -1237,10 +1282,14 @@ export class OrchestratorDesk {
     }
     // A yes to the plan that waits, with nothing new to do (W21 task 2).
     if (plan.confirmWaiting && waiting && !unknownKinds.length && (!steps.length || planKey(steps) === waitingSeen)) {
-      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup), signal)) return;
+      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup), signal)) {
+        outcome = "answered";
+        return;
+      }
       if (signal.aborted) return;
     }
     if (!steps.length) {
+      outcome = "answered";
       this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
       if (plan.hangup) this.onCall?.({ kind: "hangup" });
       return;
@@ -1253,6 +1302,8 @@ export class OrchestratorDesk {
     const carried = this.conversation.turns.some((item) => item.plan === "waiting" && item.steps?.length && madeFromReading(item) && planKey(item.steps) === key);
     // A new plan takes the place of one still waiting for Go.
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
+    outcome = "planned";
+    stepKinds = steps.map((step) => step.kind);
     const answered = this.answer({
       text: plan.say,
       ...(checks.length ? { checks } : {}),
@@ -1273,6 +1324,26 @@ export class OrchestratorDesk {
     const lookOnly = steps.every((step) => ONLY_LOOKS.includes(step.kind));
     if (ready && !unknownKinds.length && (lookOnly || (!readSomething && (callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))))) {
       void this.run(answered.id, true);
+    }
+    } finally {
+      const finalOutcome: VibyTurnOutcome = signal.aborted ? "aborted" : outcome;
+      const metric = {
+        at: this.core.now().toISOString(),
+        source: "think" as const,
+        ...(engineId ? { engineId } : {}),
+        ...(model ? { model } : {}),
+        warmSession: warmHit,
+        repaired,
+        totalMs: Math.max(0, Date.now() - turnStartedAt),
+        contextMs,
+        plannerMs,
+        outcome: finalOutcome,
+        stepKinds,
+        failedSteps: 0,
+        ...(errorKind && !signal.aborted ? { errorKind } : {}),
+      };
+      this.diagnostics.record(metric);
+      this.core.options.host.logDiagnostics?.(formatDiagnosticsLogLine(metric));
     }
   }
 
@@ -1578,18 +1649,31 @@ export class OrchestratorDesk {
             : reflex.tag === "remember"
               ? (words?.remembered?.(reflex.label) ?? `Remembered in Viby memory: ${reflex.label}`)
               : (words?.stopped?.(steps.length) ?? `Stopped ${steps.length} running CLI${steps.length === 1 ? "" : "s"}.`);
+    const startedAt = Date.now();
     const answered = this.answer({ text: reply, steps, plan: "running" });
+    let failedSteps = 0;
     for (const step of steps) {
       step.state = "running";
       try {
         await this.carryOut(answered, step);
         step.state = "done";
       } catch (error) {
+        failedSteps += 1;
         step.state = "failed";
         step.error = error instanceof Error ? error.message : String(error);
       }
     }
     answered.plan = "done";
+    const metric = {
+      at: this.core.now().toISOString(),
+      source: "quickAct" as const,
+      totalMs: Math.max(0, Date.now() - startedAt),
+      outcome: (failedSteps ? "failed" : "executed") as VibyTurnOutcome,
+      stepKinds: steps.map((step) => step.kind),
+      failedSteps,
+    };
+    this.diagnostics.record(metric);
+    this.core.options.host.logDiagnostics?.(formatDiagnosticsLogLine(metric));
     this.save();
     return { handled: true, reply };
   }
@@ -1730,6 +1814,7 @@ export class OrchestratorDesk {
   }
 
   private async runSteps(turn: OrchestratorTurn, auto = false): Promise<void> {
+    const runStartedAt = Date.now();
     const epoch = this.runEpoch;
     turn.plan = "running";
     this.save();
@@ -1844,8 +1929,30 @@ export class OrchestratorDesk {
     this.activity = null;
     if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
     turn.plan = "done";
+    const failedSteps = allSteps.filter((step) => step.state === "failed").length;
+    const metric = {
+      at: this.core.now().toISOString(),
+      source: "run" as const,
+      totalMs: Math.max(0, Date.now() - runStartedAt),
+      executionMs: Math.max(0, Date.now() - runStartedAt),
+      outcome: (failedSteps ? "failed" : "executed") as VibyTurnOutcome,
+      stepKinds: allSteps.map((step) => step.kind),
+      failedSteps,
+    };
+    this.diagnostics.record(metric);
+    this.core.options.host.logDiagnostics?.(formatDiagnosticsLogLine(metric));
     this.save();
     if (turn.hangup) this.onCall?.({ kind: "hangup" });
+  }
+
+  private async checkChainedPtyPrompt(ptyId: string): Promise<boolean> {
+    if (!this.core.options.host.screen) return false;
+    const screen = await this.core.options.host.screen(ptyId).catch(() => "");
+    const waiting = screen ? detectWaitingPrompt(screen) : null;
+    if (!waiting) return false;
+    const session = this.core.live.get(ptyId);
+    if (session?.orchestrated) this.addNote(session, "waiting", null, waiting);
+    return true;
   }
 
   private waitForChainedPty(ptyId: string, epoch: number, turn: OrchestratorTurn): Promise<boolean> {
@@ -1855,7 +1962,14 @@ export class OrchestratorDesk {
       return Promise.resolve(!run?.stopRequested);
     }
     return new Promise((resolve) => {
+      let settled = false;
+      let idle: NodeJS.Timeout | undefined;
+      let maxWait: NodeJS.Timeout | undefined;
       const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (idle) clearTimeout(idle);
+        if (maxWait) clearTimeout(maxWait);
         const set = this.chainWaiters.get(ptyId);
         set?.delete(done);
         if (set && !set.size) this.chainWaiters.delete(ptyId);
@@ -1864,13 +1978,19 @@ export class OrchestratorDesk {
       const set = this.chainWaiters.get(ptyId) ?? new Set();
       set.add(done);
       this.chainWaiters.set(ptyId, set);
-      // Only going busy and then quiet settles the wait. A terminal that never gets busy (a command that
-      // finished at once, a CLI already idle) would hold the plan "running" for good: once it has been
-      // quiet this long with nothing pending, the next step goes.
-      const idle = setTimeout(() => {
-        if (set.has(done) && !this.core.live.get(ptyId)?.working && !this.chainTimers.has(ptyId)) done(true);
+      // Only going busy and then quiet settles the wait. A terminal that never gets busy
+      // would hold the plan "running" for good, EXCEPT when blocked on a waiting TUI prompt.
+      idle = setTimeout(() => {
+        if (settled || !set.has(done) || this.core.live.get(ptyId)?.working || this.chainTimers.has(ptyId)) return;
+        void this.checkChainedPtyPrompt(ptyId).then((blocked) => {
+          if (!settled) done(!blocked);
+        });
       }, this.chainIdleMs);
       idle.unref();
+      maxWait = setTimeout(() => {
+        done(false);
+      }, this.chainMaxWaitMs);
+      maxWait.unref();
     });
   }
 
@@ -1928,6 +2048,12 @@ export class OrchestratorDesk {
       listModels: (engineId) => this.listModels(engineId),
       buildSettingsContext: () => this.buildSettingsContext(),
       projectsFolder: () => this.projectsFolder(),
+      diagnostics: () =>
+        this.diagnostics.formatSummary({
+          warmActive: this.plannerPool.activePid !== null,
+          cachedContext: this.cachedContext !== null,
+          activeWaits: this.chainWaiters.size,
+        }),
     };
   }
 
@@ -2341,7 +2467,12 @@ export class OrchestratorDesk {
       const timer = setTimeout(() => {
         this.chainTimers.delete(ptyId);
         const live = this.core.live.get(ptyId);
-        if (!live?.working) this.settleChainWaiters(ptyId, true);
+        if (!live?.working) {
+          void this.checkChainedPtyPrompt(ptyId).then((blocked) => {
+            if (this.core.live.get(ptyId)?.working) return;
+            this.settleChainWaiters(ptyId, !blocked);
+          });
+        }
       }, this.chainSettleMs);
       timer.unref();
       this.chainTimers.set(ptyId, timer);
