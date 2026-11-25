@@ -219,6 +219,28 @@ describe("the phone page's poll", () => {
     expect(link.page.state()).toMatchObject({ desk: { workspaces: [{ id: "w" }] }, error: "", pollFailures: 0 });
   });
 
+  it("reads an answer that broke off on the way as offline, and never keeps its tag for what it couldn't read", async () => {
+    const heard: string[] = [];
+    let first = true;
+    const link = pagePoll((_route, headers) => {
+      heard.push(headers["If-None-Match"] ?? "");
+      // The phone changed networks halfway through the first answer. The desk hasn't changed since,
+      // so the computer says "nothing changed" to anyone who has that answer's tag.
+      if (first) {
+        first = false;
+        return { ms: 50, text: '{"workspaces":[{"id":', etag: 'W/"one"' };
+      }
+      return headers["If-None-Match"] === 'W/"one"' ? { ms: 50, status: 304 } : { ms: 50, body: { workspaces: [{ id: "w" }] }, etag: 'W/"one"' };
+    });
+    void link.page.refresh();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(link.page.state()).toMatchObject({ desk: null, error: "phone.offline", pollFailures: 1 });
+    await vi.advanceTimersByTimeAsync(4100);
+    // The next poll asks for the whole answer again, and the desk shows.
+    expect(heard).toEqual(["", ""]);
+    expect(link.page.state()).toMatchObject({ desk: { workspaces: [{ id: "w" }] }, error: "", pollFailures: 0 });
+  });
+
   it("loads the page again once the computer runs another version, but never over words still being typed", async () => {
     let version = "2.15.0";
     const link = pagePoll(() => ({ ms: 50, body: { workspaces: [], version } }));
