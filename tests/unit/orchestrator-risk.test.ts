@@ -238,6 +238,9 @@ describe("Centralized risk classification and approval policy", () => {
     expect(isPersonLedComputerStep(openTerminal, "click play")).toBe(false);
     expect(isPersonLedComputerStep(openTerminal, "press super enter to open a terminal")).toBe(true);
     expect(isPersonLedComputerStep(copy, "press control c")).toBe(true);
+    // German names the key Strg, as the German window does, and says it "Steuerung".
+    expect(isPersonLedComputerStep(copy, "drück Strg+C")).toBe(true);
+    expect(isPersonLedComputerStep(copy, "drück Steuerung C")).toBe(true);
     expect(isPersonLedComputerStep(click, "")).toBe(true);
     expect(isPersonLedComputerStep(step({ kind: "show" }), "anything")).toBe(false);
 
