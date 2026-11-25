@@ -574,6 +574,16 @@ export const pt: Catalog = {
   "updates.restartBody.other": "{count} terminais ainda estão rodando. Reiniciar vai interrompê-los; as execuções guardam suas transcrições.",
   "updates.waitToClose": "Espere a atualização terminar, ou pressione `Ctrl` `C` no terminal dela para interromper.",
 
+  // ---------------------------------------------------------------- updates: Go back and the releases in between
+  "updates.goBack": "Voltar para {version}",
+  "updates.goBackHint": "Muda para a versão instalada antes desta, que ainda está neste computador. Nada é baixado, e as configurações e os dados ficam como estão. Atualizar traz a mais recente de volta.",
+  "updates.goingBack": "Voltando. Mantenha o VibeForge aberto até terminar.",
+  "updates.wentBack": "Pronto. Reinicie o VibeForge para começar a usar a {version}.",
+  "updates.goBackStopped": "A volta parou com o código de saída {code}. O terminal mostra o motivo.",
+  "updates.alsoSince": "Também lançadas desde a {current}",
+  "updates.readMore": "Ler mais",
+  "core.noGoBack": "Esta cópia do VibeForge não guarda nenhuma versão anterior para onde voltar.",
+
   "diagnostics.title": "Diagnóstico",
   "diagnostics.hint": "Copia suas versões, seus ajustes e as últimas 200 linhas do log do VibeForge, prontas para colar em um relato de bug. O log registra o que o app fez e o que deu errado, nunca seus prompts nem a saída dos terminais.",
   "diagnostics.copy": "Copiar diagnóstico",

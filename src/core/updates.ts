@@ -109,6 +109,88 @@ export function installKind(appRoot: string, found: { installerHome: string; mar
 }
 
 /**
+ * The folder the installer manages for this copy. The installer puts each release in
+ * `<install folder>/versions/<version>/` and starts the one `current` links to, so a copy in a
+ * versions/ folder belongs to the folder above it. Anything else (an install from before
+ * versions/, a checkout) is its own folder.
+ */
+export function installRoot(appRoot: string): string {
+  const resolved = path.resolve(appRoot);
+  const up = path.dirname(resolved);
+  return path.basename(up) === "versions" ? path.dirname(up) : resolved;
+}
+
+/** True for a copy in the installer's versions/ folder, which keeps the version before it for Go back. */
+export function inVersions(appRoot: string): boolean {
+  return installRoot(appRoot) !== path.resolve(appRoot);
+}
+
+/**
+ * The version Go back returns to: the one the install folder's `previous` links to, by its
+ * package.json, or null when there is none (a copy from before versions/, or a first install).
+ * `read` returns a file's text, or null.
+ */
+export function previousVersion(appRoot: string, read: (file: string) => string | null): string | null {
+  if (!inVersions(appRoot)) return null;
+  const text = read(path.join(installRoot(appRoot), "previous", "package.json"));
+  if (!text) return null;
+  try {
+    const version = (JSON.parse(text) as { version?: unknown }).version;
+    return typeof version === "string" && parseVersion(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The shell command Go back runs in a terminal: this version's own install.sh with --rollback,
+ * which switches `current` and `previous` and downloads nothing. Null when this copy can't go back.
+ */
+export function rollbackCommand(kind: InstallKind, appRoot: string): string | null {
+  if (kind !== "installer" || !inVersions(appRoot)) return null;
+  return `VIBEFORGE_HOME=${shellQuote(installRoot(appRoot))} bash ${shellQuote(path.join(path.resolve(appRoot), "scripts", "install.sh"))} --rollback`;
+}
+
+/**
+ * How Restart starts VibeForge again. A version in versions/ restarts through the install folder's
+ * current launcher, so after an update or Go back it is the version installed now that starts:
+ * starting its own Electron with its own folder again would bring back the version it is. Null for
+ * any other copy, which restarts as it started. `args` are the restart's arguments (relaunchArgs).
+ */
+export function restartVia(appRoot: string, args: readonly string[], exists: (file: string) => boolean): { execPath: string; args: string[] } | null {
+  if (!inVersions(appRoot)) return null;
+  const launcher = path.join(installRoot(appRoot), "current", "scripts", "vibeforge");
+  if (!exists(launcher)) return null;
+  const own = path.resolve(appRoot);
+  // The launcher adds these itself.
+  const added = new Set(["--class=vibeforge", "--enable-wayland-ime"]);
+  return { execPath: launcher, args: args.filter((arg) => !added.has(arg) && (arg.startsWith("-") || path.resolve(arg) !== own)) };
+}
+
+/** GitHub's list of releases for the "latest release" address the update check asks. */
+export function releaseListUrl(latestUrl: string): string | null {
+  return /\/releases\/latest$/.test(latestUrl) ? latestUrl.replace(/\/latest$/, "?per_page=50") : null;
+}
+
+/**
+ * The releases after `current` and before `latest`, newest first, from GitHub's release list:
+ * what someone who skipped them hasn't read yet. Drafts and pre-releases are left out.
+ */
+export function releasesBetween(json: unknown, current: string, latest: string): Release[] {
+  if (!Array.isArray(json)) return [];
+  const found = new Map<string, Release>();
+  for (const raw of json) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    if (item.draft === true || item.prerelease === true) continue;
+    const release = releaseFrom(item);
+    if (release && isNewer(release.version, current) && isNewer(latest, release.version)) found.set(release.version, release);
+  }
+  return [...found.values()].sort((a, b) => (isNewer(a.version, b.version) ? -1 : 1));
+}
+
+
+/**
  * The shell command that updates this copy, shown and run in a terminal (bash), or null when it
  * updates some other way (a distro package) or when the installer release has no verified SHA-256
  * digest. `override` is for packagers and tests.
@@ -119,7 +201,8 @@ export function installKind(appRoot: string, found: { installerHome: string; mar
  */
 export function updateCommand(kind: InstallKind, appRoot: string, override?: string, release?: Release | null): string | null {
   if (override?.trim()) return override.trim();
-  const home = `VIBEFORGE_HOME=${shellQuote(appRoot)}`;
+  // The install folder, not this version's own folder inside it.
+  const home = `VIBEFORGE_HOME=${shellQuote(kind === "installer" ? installRoot(appRoot) : appRoot)}`;
   if (kind === "installer") {
     const installer = release?.installer;
     if (!installer?.sha256 || !release || !TAG.test(release.tag)) return null;

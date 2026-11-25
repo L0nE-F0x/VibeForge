@@ -1,6 +1,6 @@
 import { net } from "electron";
 import { describeError, type LogFile } from "../src/core/log.js";
-import { isNewer, releaseFrom, type InstallKind, type Release } from "../src/core/updates.js";
+import { isNewer, releaseFrom, releaseListUrl, releasesBetween, type InstallKind, type Release } from "../src/core/updates.js";
 import type { UpdateInfo } from "../src/shared/api.js";
 
 const FIRST_CHECK_MS = 20_000;
@@ -38,7 +38,18 @@ export class Updater {
       fetch?: Fetch;
     },
   ) {
-    this.info = { current: opts.current, latest: null, available: false, checking: false, checkedAt: null, error: null, install: opts.install, command: opts.command(null) };
+    this.info = {
+      current: opts.current,
+      latest: null,
+      available: false,
+      checking: false,
+      checkedAt: null,
+      error: null,
+      install: opts.install,
+      command: opts.command(null),
+      between: [],
+      goBack: null,
+    };
   }
 
   get(): UpdateInfo {
@@ -80,7 +91,8 @@ export class Updater {
       if (!response.ok && response.status !== 404) throw new Error(`GitHub answered ${response.status} ${response.statusText}`.trim());
       const latest = response.ok ? releaseFrom(await response.json()) : null;
       const available = latest ? isNewer(latest.version, this.opts.current) : false;
-      this.set({ latest, available, checking: false, checkedAt: new Date().toISOString(), error: null, command: this.opts.command(latest) });
+      const between = available && latest ? await this.skipped(latest) : [];
+      this.set({ latest, available, checking: false, checkedAt: new Date().toISOString(), error: null, command: this.opts.command(latest), between });
       this.opts.log.info(`Update check: ${latest ? `newest release ${latest.version}` : "no releases published"}, this is ${this.opts.current}${available ? " (update available)" : ""}`);
     } catch (error) {
       const message = error instanceof Error && error.name === "TimeoutError" ? "GitHub did not answer in time." : describeError(error).split("\n")[0];
@@ -88,5 +100,24 @@ export class Updater {
       this.opts.log.warn(`Update check failed: ${message}`);
     }
     return this.info;
+  }
+
+  /**
+   * The releases between this version and `latest`, for their notes: one more request, made only
+   * when an update is there. Not getting them leaves the newest release's notes, as before.
+   */
+  private async skipped(latest: Release): Promise<Release[]> {
+    const url = releaseListUrl(this.opts.url);
+    if (!url) return [];
+    try {
+      const response = await (this.opts.fetch ?? withoutCookies)(url, {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": `VibeForge/${this.opts.current}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      return response.ok ? releasesBetween(await response.json(), this.opts.current, latest.version) : [];
+    } catch (error) {
+      this.opts.log.warn(`Could not read the releases since ${this.opts.current}: ${describeError(error).split("\n")[0]}`);
+      return [];
+    }
   }
 }

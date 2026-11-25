@@ -575,6 +575,16 @@ export const ja: Catalog = {
   "updates.restartBody.other": "{count} 個のターミナルがまだ稼働中です。再起動すると停止しますが、実行の記録は残ります。",
   "updates.waitToClose": "アップデートが終わるまで待つか、そのターミナルで `Ctrl` `C` を押して止めてください。",
 
+  // ---------------------------------------------------------------- updates: Go back and the releases in between
+  "updates.goBack": "{version} に戻す",
+  "updates.goBackHint": "このバージョンの前にインストールされていたバージョンに切り替えます。まだこのコンピューターにあるので、何もダウンロードしません。設定とデータはそのままです。アップデートで最新版に戻せます。",
+  "updates.goingBack": "前のバージョンに戻しています。終わるまで VibeForge を開いたままにしてください。",
+  "updates.wentBack": "完了しました。{version} を使うには VibeForge を再起動してください。",
+  "updates.goBackStopped": "前のバージョンへの切り替えは終了コード {code} で止まりました。理由はターミナルに表示されています。",
+  "updates.alsoSince": "{current} 以降のほかのリリース",
+  "updates.readMore": "続きを読む",
+  "core.noGoBack": "この VibeForge には戻れる以前のバージョンがありません。",
+
   "diagnostics.title": "診断",
   "diagnostics.hint": "バージョン、設定、VibeForge 自身のログの最後の 200 行をコピーします。そのまま不具合報告に貼り付けられます。ログに残るのはアプリの動作とエラーだけで、プロンプトやターミナルの出力は含まれません。",
   "diagnostics.copy": "診断情報をコピー",

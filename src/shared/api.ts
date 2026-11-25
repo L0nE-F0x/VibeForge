@@ -198,6 +198,13 @@ export interface UpdateInfo {
   install: InstallKind;
   /** What "Update now" runs in a terminal; null when this copy updates some other way. */
   command: string | null;
+  /**
+   * The releases between this version and the newest, newest first, so someone who skipped some
+   * reads what each changed. Empty when none were skipped or the list couldn't be read.
+   */
+  between: Release[];
+  /** The version installed before this one, still on disk, that Go back returns to; null when there is none. */
+  goBack: { version: string; command: string } | null;
 }
 
 export type VoicePhase = "idle" | "recording" | "transcribing";
@@ -404,6 +411,8 @@ export interface DeskMethods {
   "updates.check": () => UpdateInfo;
   /** Starts the update command in a terminal. */
   "updates.run": (size?: TermSize) => { ptyId: string };
+  /** Starts Go back (the installer's --rollback) in a terminal. */
+  "updates.rollback": (size?: TermSize) => { ptyId: string };
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;

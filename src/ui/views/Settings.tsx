@@ -1,10 +1,10 @@
-import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Undo2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
 import { call, useActivity, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnostics } from "../components/Help.js";
-import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
+import { checkedAt, installText, showGoBack, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
 import { ComputerCard } from "../components/ComputerCard.js";
@@ -505,6 +505,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
                     {installText(update, info?.appPath ?? "", t)}
                   </span>
                 </span>
+                {update.goBack && (
+                  <Button icon={Undo2} tip={t("updates.goBackHint")} onClick={showGoBack}>
+                    {t("updates.goBack", { version: update.goBack.version })}
+                  </Button>
+                )}
                 <Button icon={RefreshCw} busy={update.checking} onClick={() => void call("updates.check")}>
                   {t("updates.checkNow")}
                 </Button>

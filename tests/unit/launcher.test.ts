@@ -141,7 +141,7 @@ describe("the vibeforge launcher", () => {
     // A PATH with what the launcher uses, and no node.
     const tools = path.join(dir, "no-node-bin");
     fs.mkdirSync(tools, { recursive: true });
-    for (const tool of ["env", "dirname", "readlink", "sha1sum", "cut", "id", "stat", "mkdir", "chmod", "notify-send"]) {
+    for (const tool of ["env", "basename", "dirname", "readlink", "sha1sum", "cut", "id", "stat", "mkdir", "chmod", "notify-send"]) {
       const found = [path.join(dir, "bin"), "/usr/bin", "/bin"].map((folder) => path.join(folder, tool)).find((file) => fs.existsSync(file));
       if (found && !fs.existsSync(path.join(tools, tool))) fs.symlinkSync(found, path.join(tools, tool));
     }
@@ -162,5 +162,75 @@ describe("the vibeforge launcher", () => {
     expect(result.stderr).toContain("installed\\ copy bash");
     expect(result.stderr).not.toContain("npm install");
     expect(result.code).toBe(1);
+  });
+
+  /** An installer copy in `<root>/versions/1.0.0`, with `electron` as given; runs it as the app launcher would (no terminal). */
+  function versionedCopy(name: string, electron: string) {
+    const root = path.join(dir, name);
+    const copy = path.join(root, "versions", "1.0.0");
+    for (const sub of ["scripts", "dist", "dist-electron", "node_modules/electron/dist"]) fs.mkdirSync(path.join(copy, sub), { recursive: true });
+    fs.copyFileSync(path.join(dir, "app", "scripts", "vibeforge"), path.join(copy, "scripts", "vibeforge"));
+    fs.writeFileSync(path.join(copy, "scripts", "install.sh"), 'echo "installer $* HOME=$VIBEFORGE_HOME"\n');
+    fs.writeFileSync(path.join(copy, "dist", "index.html"), "");
+    fs.writeFileSync(path.join(copy, "dist-electron", "main.js"), "");
+    fs.writeFileSync(path.join(copy, "node_modules", "electron", "dist", "electron"), electron, { mode: 0o755 });
+    for (const marked of [root, copy]) fs.writeFileSync(path.join(marked, ".vibeforge-installer"), "");
+    fs.symlinkSync("versions/1.0.0", path.join(root, "current"));
+    return root;
+  }
+
+  function start(launcher: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    return new Promise((resolve) => {
+      const child = spawn("bash", [launcher, ...args], {
+        env: { PATH: `${path.join(dir, "bin")}:${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: path.join(dir, "home"), XDG_CACHE_HOME: path.join(dir, "cache"), XDG_RUNTIME_DIR: dir, ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+    });
+  }
+
+  it("hands --rollback, --uninstall and --purge-app to the copy's installer, for the install folder", async () => {
+    const root = versionedCopy("versioned", "#!/bin/sh\nexit 0\n");
+    for (const flag of ["--rollback", "--uninstall", "--purge-app"]) {
+      const result = await start(path.join(root, "current", "scripts", "vibeforge"), [flag]);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe(`installer ${flag} HOME=${root}`);
+    }
+  });
+
+  it("starts the copy's own folder with its real path, and says why when Electron stops as it starts", async () => {
+    const said = path.join(dir, "notified");
+    fs.writeFileSync(path.join(dir, "bin", "notify-send"), `#!/bin/sh\nprintf '%s\\n' "$*" >>"${said}"\nexit 0\n`, { mode: 0o755 });
+    const notified = async () => {
+      for (let tries = 0; tries < 100 && !fs.existsSync(said); tries++) await new Promise((resolve) => setTimeout(resolve, 50));
+      return fs.existsSync(said) ? fs.readFileSync(said, "utf8") : "";
+    };
+    try {
+      const broken = versionedCopy("broken", '#!/bin/sh\necho "started with $1"\necho "error while loading shared libraries: libgtk-3.so.0" >&2\nexit 127\n');
+      // Electron replaces the launcher, so its exit code is the launcher's.
+      const result = await start(path.join(broken, "current", "scripts", "vibeforge"), [], { VIBEFORGE_LAUNCH_WAIT: "20" });
+      expect(result.code).toBe(127);
+      const message = await notified();
+      expect(message).toContain("VibeForge can't start");
+      expect(message).toContain("It stopped as it started");
+      expect(message).toContain("libgtk-3.so.0");
+      const log = fs.readFileSync(path.join(dir, "cache", "vibeforge", "launch.log"), "utf8");
+      // The version's real folder, not the link that leads to it.
+      expect(log).toContain(`started with ${path.join(broken, "versions", "1.0.0")}`);
+      expect(log).toContain("VibeForge: It stopped as it started");
+      // One that keeps running is left to it.
+      fs.rmSync(said, { force: true });
+      const fine = versionedCopy("fine", "#!/bin/sh\nsleep 2\n");
+      const ok = await start(path.join(fine, "current", "scripts", "vibeforge"), [], { VIBEFORGE_LAUNCH_WAIT: "5" });
+      expect(ok.code).toBe(0);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(fs.existsSync(said)).toBe(false);
+    } finally {
+      fs.writeFileSync(path.join(dir, "bin", "notify-send"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
   });
 });

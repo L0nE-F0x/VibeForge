@@ -1,10 +1,21 @@
 #!/usr/bin/env node
 // @ts-check
-// Packs the ready-made VibeForge a release carries: vibeforge-<version>-linux-<arch>.tar.zst, with
-// what the built app reads at runtime and nothing else, so installing and updating compile nothing.
-// scripts/build-release.sh runs it and then installs and smoke-tests the result (CI on every pull
-// request, release.yml for each tag); scripts/install.sh downloads the archive, checks it against
-// the release's SHA256SUMS and swaps it in.
+// Packs the ready-made VibeForge a release carries, with what the built app reads at runtime and
+// nothing else, so installing and updating compile nothing. Four archives for this CPU:
+//
+//   vibeforge-app-<version>-linux-<arch>.tar.zst   the app without Electron and Syncthing, about 2 MB
+//   electron-<electron>-linux-<arch>.tar.zst       Electron's own folder (node_modules/electron/dist)
+//   syncthing-<syncthing>-linux-<arch>.tar.zst     the pinned Syncthing (vendor/syncthing)
+//   vibeforge-<version>-linux-<arch>.tar.zst       all of it in one, for anyone who downloads by hand
+//
+// The app's manifest.json names the Electron and Syncthing it needs and the SHA-256 of their files
+// (tree_hash in scripts/install.sh, which this runs), so an update downloads only the app when
+// those are already on the computer, and uses a copy only when it is the same file for file. An
+// Electron or Syncthing archive holds exactly the upstream files and is packed the same way every
+// time (same names, order, owner and dates), so two releases on the same Electron publish the
+// same bytes. scripts/build-release.sh runs this and then installs and smoke-tests the result (CI
+// on every pull request, release.yml for each tag); scripts/install.sh downloads the archives,
+// checks them against the release's SHA256SUMS and switches to the new version.
 //
 //   node scripts/pack-release.mjs [out-dir]        (out-dir defaults to release/)
 //
@@ -13,8 +24,8 @@
 // what building from source needs (git, base-devel, python, Node 22.12+), and zstd.
 // VIBEFORGE_PACK_REF=v2.14.1 packs another commit or tag.
 //
-// Entries are sorted, owned by root and dated to the commit, so packing a commit twice gives the
-// same tree. The archive holds one folder, vibeforge-<version>-linux-<arch>/.
+// Entries are sorted, owned by root and dated to the commit (Electron's and Syncthing's to a fixed
+// date), so packing a commit twice gives the same tree. Each archive holds one folder named like it.
 
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -208,7 +219,9 @@ async function main(out) {
     console.log("  Uncommitted changes are not packed: this packs the last commit.");
   }
 
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-pack-"));
+  // Its real path: a script run from under a linked TMPDIR doesn't know it is the one started
+  // (import.meta.url is the real path, process.argv[1] the linked one) and would do nothing.
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-pack-")));
   process.on("exit", () => fs.rmSync(work, { recursive: true, force: true }));
   for (const signal of /** @type {const} */ (["SIGINT", "SIGTERM"])) process.on(signal, () => process.exit(130));
 
@@ -302,9 +315,14 @@ async function main(out) {
   });
   if (!String(said).includes("pty-ok")) fail(`node-pty started, but its terminal said: ${JSON.stringify(said)}`);
 
-  // The terminal host starts from the archive on this Node and says it's ready.
+  // The terminal host starts from the archive on the archive's own Electron, run as Node (as an
+  // installed copy runs it, with no Node on the computer), and says it's ready.
   await new Promise((resolve) => {
-    const host = spawn(process.execPath, [path.join(stage, "electron", "pty-host.cjs")], { cwd: stage, stdio: ["pipe", "pipe", "pipe"] });
+    const host = spawn(path.join(stage, "node_modules", "electron", "dist", "electron"), [path.join(stage, "electron", "pty-host.cjs")], {
+      cwd: stage,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     let text = "";
     const timer = setTimeout(() => fail(`The terminal host did not start within 10 seconds: ${text}`), 10_000);
     host.stdout.on("data", (chunk) => {
@@ -323,36 +341,99 @@ async function main(out) {
   const glibc = [...new Set([...addon.matchAll(/GLIBC_(\d+(?:\.\d+)+)/g)].map((match) => match[1]))].sort((a, b) => a.localeCompare(b, "en", { numeric: true })).at(-1);
   console.log(`  node-pty's addon needs glibc ${glibc ?? "?"} or newer`);
 
+  // ------------------------------------------------------------------ the manifest
+
+  const electronVersion = JSON.parse(fs.readFileSync(path.join(stage, "node_modules", "electron", "package.json"), "utf8")).version;
+  const syncthingVersion = String(JSON.parse(fs.readFileSync(path.join(build, "scripts", "syncthing.json"), "utf8")).version).replace(/^v/, "");
+  const parts = runtimeParts(stage, { arch, electron: electronVersion, syncthing: syncthingVersion });
+  const manifest = manifestFor({ version, arch, parts, treeHash: (dir) => treeHash(dir, path.join(build, "scripts", "install.sh")) });
+  fs.writeFileSync(path.join(stage, "manifest.json"), manifest);
+
   // ------------------------------------------------------------------ pack
 
   fs.mkdirSync(out, { recursive: true });
-  const archive = path.join(out, `${name}.tar.zst`);
-  step(`Packing ${archive}`);
-  fs.rmSync(archive, { force: true });
-  // zstd: every Arch install has it (pacman, curl and systemd need it) and it unpacks the ~290 MB in
-  // well under a second; xz, also in base, is 6% smaller but slower to unpack. --long=27 stays
-  // within the window zstd unpacks without being told.
-  run("tar", [
-    "--sort=name",
-    "--format=posix",
-    "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
-    `--mtime=@${epoch}`,
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "--mode=u+rwX,go+rX,go-w",
-    "--use-compress-program=zstd -19 --long=27 -T0 -q",
-    "-cf",
-    archive,
-    "-C",
-    work,
-    name,
-  ]);
+  const made = [];
+  /** @param {string} file @param {string} from @param {string} folder @param {string} rename @param {{ epoch?: string, exclude?: string[] }} [opts] */
+  const pack = (file, from, folder, rename, opts = {}) => {
+    const archive = path.join(out, file);
+    step(`Packing ${archive}`);
+    fs.rmSync(archive, { force: true });
+    // zstd: every Arch install has it (pacman, curl and systemd need it) and it unpacks the ~290 MB in
+    // well under a second; xz, also in base, is 6% smaller but slower to unpack. --long=27 stays
+    // within the window zstd unpacks without being told.
+    run("tar", [
+      "--sort=name",
+      "--format=posix",
+      "--pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime",
+      `--mtime=@${opts.epoch ?? epoch}`,
+      "--owner=0",
+      "--group=0",
+      "--numeric-owner",
+      "--mode=u+rwX,go+rX,go-w",
+      ...(opts.exclude ?? []).map((item) => `--exclude=${folder}/${item}`),
+      `--transform=s,^${folder.replace(/[.]/g, "\\.")},${rename},`,
+      "--use-compress-program=zstd -19 --long=27 -T0 -q",
+      "-cf",
+      archive,
+      "-C",
+      from,
+      folder,
+    ]);
+    made.push(archive);
+  };
+  const runtimes = parts.map((part) => part.relative);
+  pack(`vibeforge-app-${version}-linux-${arch}.tar.zst`, work, name, `vibeforge-app-${version}-linux-${arch}`, { exclude: runtimes });
+  for (const part of parts) pack(`${part.name}.tar.zst`, path.dirname(path.join(stage, part.relative)), path.basename(part.relative), part.name, { epoch: RUNTIME_EPOCH });
+  pack(`${name}.tar.zst`, work, name, name);
 
-  const hash = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
-  const megabytes = (fs.statSync(archive).size / 1e6).toFixed(1);
-  console.log(`\n✓ ${path.basename(archive)}: ${megabytes} MB, packed in ${Math.round((Date.now() - t0) / 1000)} s`);
-  console.log(`  ${hash}  ${path.basename(archive)}`);
+  console.log("");
+  for (const archive of made) {
+    const hash = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
+    console.log(`✓ ${path.basename(archive)}: ${(fs.statSync(archive).size / 1e6).toFixed(1)} MB  ${hash}`);
+  }
+  console.log(`  packed in ${Math.round((Date.now() - t0) / 1000)} s`);
+}
+
+/** The date Electron's and Syncthing's archives carry, whatever the commit: the same files pack to the same bytes. */
+export const RUNTIME_EPOCH = "946684800";
+
+/**
+ * The parts packed on their own, besides the app: where each is in the app's folder and the name
+ * of its archive (and of its folder in the install's runtime/).
+ * @param {string} stage @param {{ arch: string, electron: string, syncthing: string }} versions
+ */
+export function runtimeParts(stage, versions) {
+  return [
+    { kind: "electron", relative: "node_modules/electron/dist", name: `electron-${versions.electron}-linux-${versions.arch}`, dir: path.join(stage, "node_modules", "electron", "dist") },
+    { kind: "syncthing", relative: "vendor/syncthing", name: `syncthing-${versions.syncthing}-linux-${versions.arch}`, dir: path.join(stage, "vendor", "syncthing") },
+  ];
+}
+
+/**
+ * The manifest.json the app archive carries, one key per line, which scripts/install.sh reads with sed.
+ * @param {{ version: string, arch: string, parts: Array<{ kind: string, name: string, dir: string }>, treeHash: (dir: string) => string }} opts
+ */
+export function manifestFor({ version, arch, parts, treeHash: hash }) {
+  /** @type {Record<string, string>} */
+  const fields = { version, arch };
+  for (const part of parts) {
+    fields[part.kind] = part.name;
+    fields[`${part.kind}Tree`] = hash(part.dir);
+  }
+  return `${JSON.stringify(fields, null, 2)}\n`;
+}
+
+/**
+ * The SHA-256 of a folder's files, by scripts/install.sh's own tree_hash, so the two can never differ.
+ * @param {string} dir @param {string} [installer]
+ */
+export function treeHash(dir, installer = path.join(root, "scripts", "install.sh")) {
+  const text = fs.readFileSync(installer, "utf8");
+  const fn = /^tree_hash\(\) \{\n[\s\S]*?\n\}\n/m.exec(text)?.[0];
+  if (!fn) fail(`${installer} has no tree_hash function.`);
+  const hash = execFileSync("bash", ["-c", `set -euo pipefail\n${fn}\ntree_hash "$1"`, "tree-hash", dir], { encoding: "utf8" }).trim();
+  if (!/^[0-9a-f]{64}$/.test(hash)) fail(`tree_hash of ${dir} gave ${JSON.stringify(hash)}.`);
+  return hash;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

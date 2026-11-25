@@ -1,10 +1,11 @@
-import { CheckCircle2, Download, ExternalLink, RefreshCw, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, RefreshCw, RotateCcw, Undo2, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { UpdateInfo } from "../../shared/api.js";
+import type { Release } from "../../core/updates.js";
 import { call, useLive, useUpdate } from "../api.js";
 import { useT, type Translator } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
-import { notesBlocks } from "../notes.js";
+import { headline, notesBlocks } from "../notes.js";
 import { useConfirm, useToast } from "../state.js";
 import { markUpdated, useUpdated } from "../update-state.js";
 import { LiveTerminal } from "./Terminal.js";
@@ -17,6 +18,15 @@ export const SHOW_UPDATE_EVENT = "vibeforge:update";
 
 export function showUpdate(): void {
   window.dispatchEvent(new Event(SHOW_UPDATE_EVENT));
+}
+
+/** Set by showGoBack: the dialog starts Go back as it opens. */
+let goBackOnOpen = false;
+
+/** Opens the update dialog and starts Go back in it: the press on "Go back to …" was the decision. */
+export function showGoBack(): void {
+  goBackOnOpen = true;
+  showUpdate();
 }
 
 function Notes({ text }: { text: string }) {
@@ -40,6 +50,32 @@ function Notes({ text }: { text: string }) {
             <Rich text={block.text} />
           </p>
         ),
+      )}
+    </div>
+  );
+}
+
+/** A release this version skipped: its name and what it leads with, the whole notes on request. */
+function Skipped({ release }: { release: Release }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const lead = headline(release.notes);
+  return (
+    <div className="update-skipped">
+      <button type="button" className="update-skipped-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span className="update-skipped-name">{release.name}</span>
+        {!open && lead && (
+          <span className="faint">
+            <Rich text={lead} />
+          </span>
+        )}
+      </button>
+      {open && (release.notes.trim() ? <Notes text={release.notes} /> : <div className="update-notes">{t("updates.noNotes")}</div>)}
+      {!open && release.notes.trim() && (
+        <button type="button" className="update-skipped-more" onClick={() => setOpen(true)}>
+          {t("updates.readMore")}
+        </button>
       )}
     </div>
   );
@@ -109,35 +145,50 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
   const { fail } = useToast();
   const [ptyId, setPtyId] = useState<string | null>(null);
   const [exit, setExit] = useState<{ code: number | null; signal: number | null } | null>(null);
+  // What the terminal runs: the update, or Go back to the version before.
+  const [job, setJob] = useState<"update" | "goBack">("update");
+  // The version Go back went to, kept once the info about it changes.
+  const [wentTo, setWentTo] = useState<string | null>(null);
   const running = Boolean(ptyId) && !exit;
   // Updated earlier in this session (the dialog was closed without restarting): Restart, not Update now again.
   const updated = useUpdated();
   const restart = useRestart(ptyId);
   useEffect(() => {
-    if (exit?.code === 0) markUpdated();
-  }, [exit]);
+    if (exit?.code === 0 && job === "update") markUpdated();
+  }, [exit, job]);
+  // Opened by "Go back to …": start it.
+  useEffect(() => {
+    if (goBackOnOpen) {
+      goBackOnOpen = false;
+      void start("goBack");
+    }
+  }, []);
 
   // Opening this is asking: check now if nothing is known yet.
   useEffect(() => {
     if (info && !info.checkedAt && !info.checking) void call("updates.check").catch(() => undefined);
   }, [info?.checkedAt, info?.checking]);
 
-  if (!info) return null;
-  const latest = info.latest;
-  const succeeded = exit?.code === 0 || (updated && !running && !exit);
-
-  const start = async () => {
+  async function start(kind: "update" | "goBack") {
     setExit(null);
     setPtyId(null);
+    setJob(kind);
     try {
-      const started = await call("updates.run", { cols: 110, rows: 14 });
+      if (kind === "goBack") setWentTo((await call("updates.get")).goBack?.version ?? null);
+      const started = await call(kind === "goBack" ? "updates.rollback" : "updates.run", { cols: 110, rows: 14 });
       setPtyId(started.ptyId);
     } catch (error) {
       fail(error);
     }
-  };
+  }
 
-  const footer = running ? null : succeeded ? (
+  if (!info) return null;
+  const latest = info.latest;
+  const wentBack = job === "goBack" && exit?.code === 0;
+  const succeeded = exit?.code === 0 || (job === "update" && updated && !running && !exit);
+  const between = info.between ?? [];
+
+  const footer = running ? null : succeeded || wentBack ? (
     <Button variant="primary" icon={RotateCcw} onClick={() => void restart()}>
       {t("updates.restart")}
     </Button>
@@ -148,13 +199,18 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
           {t("updates.notes")}
         </Button>
       )}
+      {info.goBack && (
+        <Button variant="ghost" icon={Undo2} tip={t("updates.goBackHint")} onClick={() => void start("goBack")}>
+          {exit && job === "goBack" ? t("common.tryAgain") : t("updates.goBack", { version: info.goBack.version })}
+        </Button>
+      )}
       <span className="grow" />
       <Button icon={RefreshCw} busy={info.checking} onClick={() => void call("updates.check")}>
         {t("updates.checkNow")}
       </Button>
       {info.available && info.command && (
-        <Button variant="primary" icon={Download} onClick={() => void start()}>
-          {exit ? t("common.tryAgain") : t("updates.now")}
+        <Button variant="primary" icon={Download} onClick={() => void start("update")}>
+          {exit && job === "update" ? t("common.tryAgain") : t("updates.now")}
         </Button>
       )}
     </>
@@ -172,6 +228,16 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
         <>
           <div className="list-label">{latest.name}</div>
           {latest.notes.trim() ? <Notes text={latest.notes} /> : <div className="update-notes">{t("updates.noNotes")}</div>}
+          {between.length > 0 && (
+            <>
+              <div className="list-label">{t("updates.alsoSince", { current: info.current })}</div>
+              <div className="vstack" style={{ gap: 6 }}>
+                {between.map((release) => (
+                  <Skipped key={release.tag} release={release} />
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
       {!ptyId && updated && (
@@ -199,7 +265,11 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
           </div>
           {running ? (
             <Notice>
-              {t("updates.running")} <Rich text={t("updates.waitToClose")} />
+              {job === "goBack" ? t("updates.goingBack") : t("updates.running")} <Rich text={t("updates.waitToClose")} />
+            </Notice>
+          ) : wentBack ? (
+            <Notice tone="accent" icon={CheckCircle2}>
+              {wentTo ? t("updates.wentBack", { version: wentTo }) : t("updates.doneUnknown")}
             </Notice>
           ) : succeeded ? (
             <Notice tone="accent" icon={CheckCircle2}>
@@ -207,7 +277,7 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
             </Notice>
           ) : (
             <Notice tone="bad" icon={XCircle}>
-              {t("updates.stopped", { code: exit?.code ?? exit?.signal ?? "?" })}
+              {job === "goBack" ? t("updates.goBackStopped", { code: exit?.code ?? exit?.signal ?? "?" }) : t("updates.stopped", { code: exit?.code ?? exit?.signal ?? "?" })}
             </Notice>
           )}
         </>

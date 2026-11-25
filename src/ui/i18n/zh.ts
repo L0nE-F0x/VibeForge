@@ -575,6 +575,16 @@ export const zh: Catalog = {
   "updates.restartBody.other": "还有 {count} 个终端在运行。重新启动会停止它们，运行记录会保留文字记录。",
   "updates.waitToClose": "请等待更新完成，或在其终端中按 `Ctrl` `C` 停止。",
 
+  // ---------------------------------------------------------------- updates: Go back and the releases in between
+  "updates.goBack": "回到 {version}",
+  "updates.goBackHint": "切换到此前安装的版本，它仍在这台电脑上。不会下载任何内容，设置和数据保持不变。更新可回到最新版本。",
+  "updates.goingBack": "正在切回。完成前请保持 VibeForge 打开。",
+  "updates.wentBack": "完成。重启 VibeForge 即可开始使用 {version}。",
+  "updates.goBackStopped": "切回已停止，退出代码 {code}。终端中显示了原因。",
+  "updates.alsoSince": "{current} 之后还发布了",
+  "updates.readMore": "阅读更多",
+  "core.noGoBack": "此 VibeForge 副本没有可以回到的早期版本。",
+
   "diagnostics.title": "诊断",
   "diagnostics.hint": "复制你的版本信息、设置，以及 VibeForge 自身日志的最后 200 行，可直接粘贴到错误报告中。日志只记录应用做了什么、出了什么错，从不包含你的提示词或终端输出。",
   "diagnostics.copy": "复制诊断信息",
