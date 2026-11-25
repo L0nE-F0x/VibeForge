@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A routine set for midnight runs on the night summer time starts at midnight.** Where the clock jumps from 00:00 to 01:00 (Chile, Egypt, Cuba, Lebanon), a cron routine for 00:00 or 00:30 didn't run that night at all, though Routines showed it at 01:00. It now runs at 01:00, as Routines says.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

@@ -64,3 +64,26 @@ describe("interval routines across summer time", () => {
     expect(skippedHour).toEqual({ action: "fire", scheduledAt: "2026-03-29T01:30:00.000Z" });
   });
 });
+
+describe("cron routines where summer time starts at midnight", () => {
+  it("fires a midnight routine at 01:00 on the night the clock skips midnight", () => {
+    // Chile's clocks went from 00:00 to 01:00 on Sunday 2026-09-06; Egypt, Cuba and Lebanon change
+    // at midnight too.
+    process.env.TZ = "America/Santiago";
+    try {
+      const base = { appStartedAt: new Date("2026-09-01T00:00:00Z"), enabled: true, allowRoutines: true, engineAvailable: true, previousStillRunning: false } as const;
+      const daily = { kind: "cron", expr: "0 0 * * *" } as const;
+      // The Routines page says the next one is at 01:00 (-03), and that is when it fires.
+      expect(iso(nextFireTimes(daily, new Date("2026-09-05T23:00:00Z"), 2))).toEqual(["2026-09-06T04:00:00.000Z", "2026-09-07T03:00:00.000Z"]);
+      expect(decideRoutineTick({ ...base, schedule: daily, now: new Date("2026-09-06T04:00:30Z"), lastFiredAt: "2026-09-05T04:00:00.000Z" })).toEqual({ action: "fire", scheduledAt: "2026-09-06T04:00:00.000Z" });
+      // Once, and on time again the next night.
+      expect(decideRoutineTick({ ...base, schedule: daily, now: new Date("2026-09-06T04:01:00Z"), lastFiredAt: "2026-09-06T04:00:00.000Z" })).toEqual({ action: "skip", reason: "not-due" });
+      expect(decideRoutineTick({ ...base, schedule: daily, now: new Date("2026-09-07T03:00:30Z"), lastFiredAt: "2026-09-06T04:00:00.000Z" })).toEqual({ action: "fire", scheduledAt: "2026-09-07T03:00:00.000Z" });
+      // A weekly one on Sundays at midnight too.
+      const weekly = { kind: "cron", expr: "0 0 * * 0" } as const;
+      expect(decideRoutineTick({ ...base, schedule: weekly, now: new Date("2026-09-06T04:00:30Z"), lastFiredAt: "2026-08-30T04:00:00.000Z" })).toEqual({ action: "fire", scheduledAt: "2026-09-06T04:00:00.000Z" });
+    } finally {
+      process.env.TZ = "Europe/Berlin";
+    }
+  });
+});

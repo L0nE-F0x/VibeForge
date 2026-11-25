@@ -130,19 +130,28 @@ function sameWallMinute(a: Date, b: Date): boolean {
   );
 }
 
+/** One cron-parser step, or null where it gives up ("loop limit exceeded"). */
+function cronStep(step: () => Date): Date | null {
+  try {
+    return step();
+  } catch {
+    return null;
+  }
+}
+
 export function mostRecentSlot(schedule: Schedule, now: Date): Date | null {
   if (!isScheduleValid(schedule)) return null;
   if (schedule.kind === "every") return new Date(intervalSlot(now.getTime(), schedule.minutes));
   try {
     // cron-parser's prev() skips a fire that lands exactly on currentDate, so check both sides.
-    const prev = CronExpressionParser.parse(schedule.expr, { currentDate: now }).prev().toDate();
-    const onTheDot = CronExpressionParser.parse(schedule.expr, { currentDate: new Date(now.getTime() - 1) })
-      .next()
-      .toDate();
-    const candidates = [prev, onTheDot].filter((date) => date.getTime() <= now.getTime());
+    // Where summer time starts at midnight (Chile, Egypt, Cuba, Lebanon), prev() gives up for the
+    // whole day after a fire the clock skipped: the walk forward below still finds that fire.
+    const prev = cronStep(() => CronExpressionParser.parse(schedule.expr, { currentDate: now }).prev().toDate());
+    const onTheDot = cronStep(() => CronExpressionParser.parse(schedule.expr, { currentDate: new Date(now.getTime() - 1) }).next().toDate());
+    const candidates = [prev, onTheDot].filter((date): date is Date => date !== null && date.getTime() <= now.getTime());
     // When spring-forward skipped the scheduled hour, prev() jumps back past today: walk forward from 3h ago to pick up the shifted fire (matches nextFireTimes).
-    if (prev.getTime() < now.getTime() - 2 * 3600_000) {
-      const probe = CronExpressionParser.parse(schedule.expr, { currentDate: new Date(Math.max(prev.getTime(), now.getTime() - 3 * 3600_000)) });
+    if (!prev || prev.getTime() < now.getTime() - 2 * 3600_000) {
+      const probe = CronExpressionParser.parse(schedule.expr, { currentDate: new Date(Math.max(prev?.getTime() ?? 0, now.getTime() - 3 * 3600_000)) });
       for (let i = 0; i < 4; i += 1) {
         const next = probe.next().toDate();
         if (next.getTime() > now.getTime()) break;
