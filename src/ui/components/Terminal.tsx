@@ -620,6 +620,9 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
     };
     doFit();
     term.write(ansi || `\x1b[2m${emptyText}\x1b[0m`, () => {
+      // A screen replaced mid-write (a run that just ended) is already disposed: xterm then throws
+      // on scrollToBottom, found by e2e/task-copy.e2e.ts.
+      if (disposed) return;
       term.write("\x1b[?25l");
       term.scrollToBottom();
     });
