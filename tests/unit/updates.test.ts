@@ -5,7 +5,23 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { describeError, LogFile, PageErrors } from "../../src/core/log.js";
 import crypto from "node:crypto";
-import { INSTALL_URL, installKind, isNewer, parseVersion, releaseFrom, updateCommand, type Release } from "../../src/core/updates.js";
+import {
+  INSTALL_URL,
+  installKind,
+  installRoot,
+  inVersions,
+  isNewer,
+  parseVersion,
+  previousVersion,
+  releaseFrom,
+  releaseListUrl,
+  releasesBetween,
+  restartVia,
+  rollbackCommand,
+  updateCommand,
+  type Release,
+} from "../../src/core/updates.js";
+import { headline } from "../../src/ui/notes.js";
 
 describe("updates", () => {
   it("compares versions numerically, with or without a leading v", () => {
@@ -123,7 +139,75 @@ describe("updates", () => {
     expect(run(`${script}exit 1\n`).status).not.toBe(0);
     // The downloaded installer doesn't stay behind in /tmp.
     expect(command).toContain(`trap 'rm -f "$f"' EXIT`);
+    // A version in the installer's versions/ updates the install folder above it, never itself.
+    const versioned = updateCommand("installer", path.join(app, "versions", "3.8.0"), undefined, at(sha));
+    const inside = spawnSync("/bin/bash", ["-c", versioned as string], {
+      encoding: "utf8",
+      env: { PATH: `${path.join(dir, "bin")}:/usr/bin:/bin`, CURL_SAYS: script, CURL_EXIT: "0", CURL_LOG: path.join(dir, "asked") },
+    });
+    expect(inside.stdout).toBe(`installing v2.16.0 into ${app}\n`);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("versioned installs", () => {
+  const root = "/home/me/.local/share/vibeforge-app";
+  const version = `${root}/versions/3.8.0`;
+
+  it("tells a version in versions/ from a copy that is its own folder", () => {
+    expect(installRoot(version)).toBe(root);
+    expect(installRoot(`${version}/`)).toBe(root);
+    expect(inVersions(version)).toBe(true);
+    // An install from before versions/, and a checkout.
+    expect(installRoot(root)).toBe(root);
+    expect(inVersions(root)).toBe(false);
+    expect(inVersions("/home/me/code/VibeForge")).toBe(false);
+  });
+
+  it("reads the version Go back returns to from the install folder's previous link", () => {
+    const files: Record<string, string> = { [`${root}/previous/package.json`]: JSON.stringify({ name: "vibeforge", version: "3.7.2" }) };
+    const read = (file: string) => files[file] ?? null;
+    expect(previousVersion(version, read)).toBe("3.7.2");
+    expect(previousVersion(root, read)).toBeNull();
+    expect(previousVersion(version, () => null)).toBeNull();
+    expect(previousVersion(version, () => "not json")).toBeNull();
+    expect(previousVersion(version, () => JSON.stringify({ version: "banana" }))).toBeNull();
+  });
+
+  it("goes back with the running version's own installer, for installer copies in versions/ only", () => {
+    expect(rollbackCommand("installer", version)).toBe(`VIBEFORGE_HOME=${root} bash ${version}/scripts/install.sh --rollback`);
+    expect(rollbackCommand("installer", "/home/me/My Apps/vf/versions/1.0.0")).toBe("VIBEFORGE_HOME='/home/me/My Apps/vf' bash '/home/me/My Apps/vf/versions/1.0.0/scripts/install.sh' --rollback");
+    expect(rollbackCommand("installer", root)).toBeNull();
+    expect(rollbackCommand("checkout", version)).toBeNull();
+    expect(rollbackCommand("other", version)).toBeNull();
+  });
+
+  it("restarts a version in versions/ through the current launcher, so the installed version starts", () => {
+    const launcher = `${root}/current/scripts/vibeforge`;
+    const there = (file: string) => file === launcher;
+    expect(restartVia(version, [version, "--class=vibeforge", "--enable-wayland-ime", "--voice", "start"], there)).toEqual({ execPath: launcher, args: ["--voice", "start"] });
+    expect(restartVia(version, [`${version}/`], there)).toEqual({ execPath: launcher, args: [] });
+    // Not in versions/, or no launcher to start: restart as it started.
+    expect(restartVia(root, [root], there)).toBeNull();
+    expect(restartVia(version, [version], () => false)).toBeNull();
+  });
+
+  it("lists the releases between this version and the newest, newest first, without drafts or pre-releases", () => {
+    expect(releaseListUrl("https://api.github.com/repos/x/y/releases/latest")).toBe("https://api.github.com/repos/x/y/releases?per_page=50");
+    expect(releaseListUrl("http://127.0.0.1:9/fake")).toBeNull();
+    const list = ["v3.8.0", "v3.7.2", "v3.7.1", "v3.7.0", "v3.6.2", "v3.9.0-rc.1"].map((tag) => ({ tag_name: tag, body: `**${tag} changed.** More.`, prerelease: tag.includes("-") }));
+    list.push({ tag_name: "v3.7.3", body: "", prerelease: false, draft: true } as never);
+    expect(releasesBetween(list, "3.7.0", "3.8.0").map((release) => release.version)).toEqual(["3.7.2", "3.7.1"]);
+    expect(releasesBetween(list, "3.7.2", "3.8.0")).toEqual([]);
+    expect(releasesBetween({ message: "rate limited" }, "3.7.0", "3.8.0")).toEqual([]);
+    expect(releasesBetween([null, 4, { tag_name: "nope" }], "3.7.0", "3.8.0")).toEqual([]);
+  });
+
+  it("finds what a release's notes lead with", () => {
+    expect(headline("**Updates download only what changed.** Electron stays.")).toBe("Updates download only what changed.");
+    expect(headline("- **Two\nlines** after")).toBe("Two lines");
+    expect(headline("\n\n## Fixed\n- a thing")).toBe("Fixed");
+    expect(headline("")).toBe("");
   });
 });
 

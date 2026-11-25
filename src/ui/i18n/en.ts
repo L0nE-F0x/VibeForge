@@ -585,6 +585,16 @@ export const en = {
   "updates.restartBody.other": "{count} terminals are still running. Restarting stops them; runs keep their transcripts.",
   "updates.waitToClose": "Wait for the update to finish, or press `Ctrl` `C` in its terminal to stop it.",
 
+  // ---------------------------------------------------------------- updates: Go back and the releases in between
+  "updates.goBack": "Go back to {version}",
+  "updates.goBackHint": "Switches to the version installed before this one, which is still on this computer. Nothing is downloaded, and settings and data stay as they are. Update brings the newest back.",
+  "updates.goingBack": "Going back. Keep VibeForge open until this finishes.",
+  "updates.wentBack": "Done. Restart VibeForge to start using {version}.",
+  "updates.goBackStopped": "Going back stopped with exit code {code}. The terminal shows why.",
+  "updates.alsoSince": "Also released since {current}",
+  "updates.readMore": "Read more",
+  "core.noGoBack": "This copy of VibeForge keeps no earlier version to go back to.",
+
   // ---------------------------------------------------------------- diagnostics
   "diagnostics.title": "Diagnostics",
   "diagnostics.hint": "Copies your versions, settings and the last 200 lines of VibeForge's own log, ready to paste into a bug report. The log records what the app did and what went wrong, never your prompts or terminal output.",

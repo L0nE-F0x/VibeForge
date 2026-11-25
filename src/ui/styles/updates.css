@@ -60,3 +60,51 @@
   border: 1px solid var(--line);
   overflow: hidden;
 }
+
+/* The releases between this version and the newest: one line each, the notes on request. */
+.update-skipped {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-sm);
+}
+
+.update-skipped-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.update-skipped-head svg {
+  flex: none;
+  align-self: center;
+}
+
+.update-skipped-name {
+  flex: none;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.update-skipped-more {
+  align-self: flex-start;
+  margin-left: 19px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.update-skipped-more:hover,
+.update-skipped-head:hover .update-skipped-name {
+  text-decoration: underline;
+}

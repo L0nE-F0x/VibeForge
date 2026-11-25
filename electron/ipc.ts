@@ -9,7 +9,8 @@ import { whichBin } from "../src/core/engines.js";
 import { describeError } from "../src/core/log.js";
 import { speakable } from "../src/core/replies.js";
 import { listThemes } from "../src/core/theme.js";
-import type { Method, MethodArgs, MethodResult } from "../src/shared/api.js";
+import { isNewer, previousVersion, restartVia, rollbackCommand } from "../src/core/updates.js";
+import type { Method, MethodArgs, MethodResult, UpdateInfo } from "../src/shared/api.js";
 import type { Looking } from "../src/shared/orchestrator.js";
 import { companionStatus } from "./companion.js";
 import { phoneReach, serveCommand } from "../src/core/phone-reach.js";
@@ -72,6 +73,13 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     }
     return chimes;
   };
+  /** The older version Go back returns to, read from the install folder each time (an update or Go back changes it). */
+  const goBackTo = (): UpdateInfo["goBack"] => {
+    const command = rollbackCommand(install, ctx.appRoot);
+    const version = command ? previousVersion(ctx.appRoot, (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null)) : null;
+    return command && version && isNewer(app.getVersion(), version) ? { version, command } : null;
+  };
+  const withGoBack = (info: UpdateInfo): UpdateInfo => ({ ...info, goBack: goBackTo() });
   return {
     "app.info": () => ({
       version: app.getVersion(),
@@ -115,7 +123,9 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "app.restart": () => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
       log.info("Restarting");
-      app.relaunch({ execPath: process.execPath, args: relaunchArgs(process.argv) });
+      // A version in the installer's versions/ comes back through the current launcher, so the
+      // version installed now starts (after an update or Go back), not this one again.
+      app.relaunch(restartVia(ctx.appRoot, relaunchArgs(process.argv), fs.existsSync) ?? { execPath: process.execPath, args: relaunchArgs(process.argv) });
       ctx.quitting = true;
       app.quit();
     },
@@ -167,8 +177,14 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       return log.tail(count);
     },
 
-    "updates.get": () => updater.get(),
-    "updates.check": () => updater.check(),
+    "updates.get": () => withGoBack(updater.get()),
+    "updates.check": async () => withGoBack(await updater.check()),
+    "updates.rollback": (size) => {
+      const goBack = goBackTo();
+      if (!goBack) throw new Error("This copy of VibeForge keeps no earlier version to go back to.");
+      log.info(`Go back to ${goBack.version} started`);
+      return s().startCommand({ command: goBack.command, title: "VibeForge: go back", cwd: os.homedir(), ...size });
+    },
     "updates.run": async (size) => {
       if (install === "installer" && !updater.get().command && !process.env.VIBEFORGE_UPDATE_COMMAND) {
         await updater.check().catch(() => undefined);
