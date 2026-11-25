@@ -43,6 +43,7 @@ import {
   rms,
   serverArgs,
   SILENCE_RMS,
+  trimSilence,
   wavFile,
   whisperThreads,
   type Recorder,
@@ -584,18 +585,20 @@ export class Voice {
     const status = this.status();
     this.checkReady(status, false, true);
     const model = status.model!;
+    const trimmed = trimSilence(pcm);
+    const trimmedSeconds = trimmed.length / BYTES_PER_SECOND;
     let via: string;
     let raw: string;
     if (modelBackend(model) === "sherpa") {
-      const result = await this.viaSherpa(model, status.language, pcm);
+      const result = await this.viaSherpa(model, status.language, trimmed);
       via = result.via;
       raw = result.raw;
     } else if (status.server) {
       via = "whisper-server";
-      raw = await this.viaServer(status.server, model, status.language, pcm, prompt);
+      raw = await this.viaServer(status.server, model, status.language, trimmed, prompt);
     } else {
       via = "whisper-cli";
-      raw = await this.viaCli(status.cli as string, model, status.language, pcm, prompt, seconds);
+      raw = await this.viaCli(status.cli as string, model, status.language, trimmed, prompt, trimmedSeconds);
     }
     const text = cleanTranscript(raw);
     this.opts.log.info(`Voice: ${seconds.toFixed(1)} s${from} transcribed in ${((Date.now() - since) / 1000).toFixed(1)} s by ${via} with ${path.basename(model)}`);

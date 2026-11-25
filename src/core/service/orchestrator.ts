@@ -15,6 +15,7 @@ import {
   isApprovalPrompt,
   isFreeWaitingPrompt,
   emptyPromise,
+  extractEarlySay,
   formatSettingsRules,
   holdsForGo,
   inspectsQuotas,
@@ -85,6 +86,7 @@ import type { ServiceCore } from "./core.js";
 import type { LibraryDesk } from "./library.js";
 import type { MessageDesk } from "./messages.js";
 import { MaestroCopies, type CopyOutcome } from "./orchestrator-copies.js";
+import { PlannerSessionPool } from "./planner-session.js";
 import {
   carryOutAgentStep,
   carryOutChatStep,
@@ -159,6 +161,10 @@ const RECAP_TURNS = 6;
 const CONTEXT_TTL_MS = 1500;
 /** Maximum back-to-back lookup/inspect rounds Viby runs automatically before answering. */
 const MAX_INSPECT_ROUNDS = 3;
+/** TTL for cached workspace git-repo checks inside buildContext(). */
+const GIT_REPO_CACHE_MS = 15_000;
+/** TTL for cached theme directory scans inside buildSettingsContext(). */
+const THEMES_CACHE_MS = 30_000;
 
 interface Conversation {
   /** Stable thread id so conversations can be archived, switched, renamed, and deleted. */
@@ -228,6 +234,7 @@ export const spawnBrain = (
   timeoutMs = BRAIN_TIMEOUT_MS,
   graceOrStdin: number | string = KILL_GRACE_MS,
   stdin?: string,
+  onEarlySay?: (say: string) => void,
 ): Promise<BrainRun> =>
   new Promise((resolve) => {
     const graceMs = typeof graceOrStdin === "number" ? graceOrStdin : KILL_GRACE_MS;
@@ -246,6 +253,7 @@ export const spawnBrain = (
     let stderr = "";
     let timedOut = false;
     let finished = false;
+    let earlySaySent = false;
     let killTimer: NodeJS.Timeout | null = null;
     const group = (name: NodeJS.Signals) => {
       if (child.pid === undefined) return;
@@ -286,6 +294,13 @@ export const spawnBrain = (
     else signal.addEventListener("abort", stop, { once: true });
     child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
       if (stdout.length < MAX_BRAIN_STDOUT) stdout += chunk.slice(0, MAX_BRAIN_STDOUT - stdout.length);
+      if (!earlySaySent && onEarlySay) {
+        const early = extractEarlySay(stdout);
+        if (early) {
+          earlySaySent = true;
+          onEarlySay(early);
+        }
+      }
     });
     child.stderr?.setEncoding("utf8").on("data", (chunk: string) => (stderr = (stderr + chunk).slice(-8000)));
     child.on("error", (error) => {
@@ -370,8 +385,15 @@ export class OrchestratorDesk {
   private readonly firstPromptTimers = new Map<string, NodeJS.Timeout>();
   private readonly activeVerifies = new Set<AbortController>();
   private cachedContext: { at: number; promise: Promise<PlanContext> } | null = null;
+  private readonly gitRepoCache = new Map<string, { at: number; git: boolean }>();
+  private themesCache: { at: number; ids: string[] } | null = null;
+  private readonly plannerPool = new PlannerSessionPool();
   runner: BrainRunner = spawnBrain;
   verifyRunner: VerifyRunner = spawnVerifyCommand;
+  /** Reuse persistent warm stream-json stdio sessions for compatible planners when using `spawnBrain`. */
+  warmPlanners = true;
+  /** Fired as soon as a streaming planner completes its top-level `"say"` field (for early TTS prep). */
+  onEarlySay: ((say: string) => void) | null = null;
   /** Quiet time before a chained `after: true` step considers the previous PTY turn settled. */
   chainSettleMs = 1200;
   /** How long a chained step waits on a terminal that never got busy before going ahead. */
@@ -393,6 +415,7 @@ export class OrchestratorDesk {
     this.copies = new MaestroCopies(core, workspaces, (copy, outcome) => this.copySettled(copy, outcome));
     this.core.onChange(() => {
       this.cachedContext = null;
+      this.gitRepoCache.clear();
     });
   }
 
@@ -567,11 +590,34 @@ export class OrchestratorDesk {
     return promise;
   }
 
+  private async isGitRepoCached(folder: string): Promise<boolean> {
+    const key = path.resolve(folder);
+    const now = Date.now();
+    const cached = this.gitRepoCache.get(key);
+    if (cached && now - cached.at < GIT_REPO_CACHE_MS) return cached.git;
+    const git = await isGitRepo(folder).catch(() => false);
+    this.gitRepoCache.set(key, { at: now, git });
+    return git;
+  }
+
+  private listThemesCached(): string[] {
+    const now = Date.now();
+    if (this.themesCache && now - this.themesCache.at < THEMES_CACHE_MS) return this.themesCache.ids;
+    let ids: string[] = [];
+    try {
+      ids = listThemes().themes.map((t) => t.id);
+    } catch {
+      ids = [];
+    }
+    this.themesCache = { at: now, ids };
+    return ids;
+  }
+
   private async buildContext(): Promise<PlanContext> {
     const rows = this.core.store.readEngineRows();
     const workspaces = await Promise.all(
       // No past runs here: they'd go with every turn. A lookup step searches them when asked.
-      this.core.store.readWorkspaces().workspaces.map(async (item) => ({ id: item.id, name: item.name, folder: tildify(item.path), git: await isGitRepo(item.path).catch(() => false) })),
+      this.core.store.readWorkspaces().workspaces.map(async (item) => ({ id: item.id, name: item.name, folder: tildify(item.path), git: await this.isGitRepoCached(item.path) })),
     );
     const names = new Map(workspaces.map((item) => [item.id, item.name]));
     const copies = this.copies.list();
@@ -633,18 +679,21 @@ export class OrchestratorDesk {
       };
     });
     const rawTasks = readable<Task & { waiting: unknown }>(() => (this.tasks ? this.tasks.listTasks() : this.core.store.listTasks().map((t) => ({ ...t, waiting: null }))));
-    const tasks = rawTasks.slice(0, 25).map((item) => ({
-      id: item.id,
-      title: item.title,
-      status: item.status,
-      ...(item.workspaceId && names.get(item.workspaceId) ? { workspace: names.get(item.workspaceId) } : {}),
-      ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
-      ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
-      ...(item.agentId ? { agentId: item.agentId } : {}),
-      isolated: item.isolated,
-      ...(item.copy ? { hasCopy: true } : {}),
-      ...(item.waiting ? { waiting: true } : {}),
-    }));
+    const tasks = [...rawTasks]
+      .sort((a, b) => Number(a.status === "done") - Number(b.status === "done"))
+      .slice(0, 20)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        ...(item.workspaceId && names.get(item.workspaceId) ? { workspace: names.get(item.workspaceId) } : {}),
+        ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}),
+        ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
+        ...(item.agentId ? { agentId: item.agentId } : {}),
+        isolated: item.isolated,
+        ...(item.copy ? { hasCopy: true } : {}),
+        ...(item.waiting ? { waiting: true } : {}),
+      }));
     const routines = readable(() => (this.routines ? this.routines.listRoutines() : [])).map((item) => ({
       id: item.id,
       name: item.name,
@@ -660,7 +709,7 @@ export class OrchestratorDesk {
     const rawChats = this.chats ? this.chats.listChats() : [];
     const chats = [...rawChats]
       .sort((a, b) => Number(b.live) - Number(a.live) || b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 20)
+      .slice(0, 12)
       .map((item) => ({
         id: item.id,
         title: item.title,
@@ -669,16 +718,20 @@ export class OrchestratorDesk {
         agentId: item.agentId,
         live: item.live,
       }));
-    const runs = this.core.store.queryRuns({ limit: 15 }).map((item) => ({
-      id: item.id,
-      title: item.title,
-      status: item.status,
-      engine: item.engine,
-      origin: item.origin,
-      opened: Boolean(item.openedAt),
-      ...(item.changes ? { changes: item.changes } : {}),
-      ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
-    }));
+    const runs = this.core.store
+      .queryRuns({ limit: 15 })
+      .sort((a, b) => Number(Boolean(a.openedAt)) - Number(Boolean(b.openedAt)))
+      .slice(0, 10)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        engine: item.engine,
+        origin: item.origin,
+        opened: Boolean(item.openedAt),
+        ...(item.changes ? { changes: item.changes } : {}),
+        ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
+      }));
     const allSettings = this.core.store.readSettings();
     const defaultPick = allSettings.defaultEngine;
     const defaultEngine = defaultPick && this.core.resolveEngine(defaultPick) ? defaultPick : undefined;
@@ -743,12 +796,7 @@ export class OrchestratorDesk {
       ? hostVoice.speaker
       : pickVoice(voices, all.voice.speaker, all.language === "system" ? "en" : all.language);
 
-    let availableThemes: string[] = [];
-    try {
-      availableThemes = listThemes().themes.map((t) => t.id);
-    } catch {
-      availableThemes = [];
-    }
+    const availableThemes = this.listThemesCached();
 
     return {
       viby: {
@@ -977,7 +1025,7 @@ export class OrchestratorDesk {
         .filter(Boolean)
         .join("\n");
       const text = prefix ? `${prefix}\n${said}` : said;
-      const args = brainArgs(engine.row, {
+      const brainOpts = {
         text,
         rules,
         sessionId: this.conversation.sessionId,
@@ -986,11 +1034,28 @@ export class OrchestratorDesk {
         effort: explicitEffort,
         schemaFile,
         ...(turnImages.length ? { images: turnImages.map((img) => img.path) } : {}),
-      });
+      };
+      if (this.runner === spawnBrain && this.warmPlanners && plannerKind === "claude") {
+        const warmRun = await this.plannerPool.runTurn({
+          binPath: engine.binPath,
+          row: engine.row,
+          opts: brainOpts,
+          images: turnImages.length ? turnImages : undefined,
+          cwd: work,
+          signal,
+          timeoutMs: BRAIN_TIMEOUT_MS,
+          onEarlySay: this.onEarlySay ?? undefined,
+        });
+        if (warmRun && (warmRun.timedOut || signal.aborted || warmRun.code === 0)) return warmRun;
+      }
+      const args = brainArgs(engine.row, brainOpts);
       if (!args) return null;
       if (plannerKind === "claude" && turnImages.length) {
         const stdin = claudeImageStdin(text, turnImages);
         return this.runner([engine.binPath, ...args], work, signal, undefined, stdin);
+      }
+      if (this.runner === spawnBrain && this.onEarlySay) {
+        return spawnBrain([engine.binPath, ...args], work, signal, BRAIN_TIMEOUT_MS, KILL_GRACE_MS, undefined, this.onEarlySay);
       }
       return this.runner([engine.binPath, ...args], work, signal);
     };
@@ -1358,6 +1423,7 @@ export class OrchestratorDesk {
     this.thinking?.abort();
     this.thinking = null;
     this.activity = null;
+    this.plannerPool.dropSession();
     for (const ac of this.activeVerifies) ac.abort();
     this.activeVerifies.clear();
     this.forgetTold();
@@ -1673,7 +1739,9 @@ export class OrchestratorDesk {
     // Whether the step or wave before carried out: one marked `after` depends on it, so it doesn't run when
     // that failed or was skipped ("fix it, then push" must not push a fix that never started).
     let prevOk = true;
-    for (const step of turn.steps ?? []) {
+    const allSteps = turn.steps ?? [];
+    for (let idx = 0; idx < allSteps.length; idx += 1) {
+      const step = allSteps[idx];
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       if (step.after && !prevOk) {
         step.state = "skipped";
@@ -1700,13 +1768,53 @@ export class OrchestratorDesk {
           step.workspaceId = lastOpenedWorkspaceId;
         }
       }
-      const context = withPlannedWorkspaces(await this.context(), turn.steps ?? []);
+      const context = withPlannedWorkspaces(await this.context(), allSteps);
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
       if (stepIssue(step, context)) {
         step.state = "skipped";
         prevOk = false;
         this.save();
         continue;
+      }
+      // Run consecutive independent `start` steps in the current wave concurrently when all inputs are ready.
+      if (step.kind === "start" && !step.after && !step.workspaceId.startsWith(PLANNED_PREFIX)) {
+        const batch: OrchestratorStep[] = [step];
+        for (let look = idx + 1; look < allSteps.length; look += 1) {
+          const next = allSteps[look];
+          if (next.kind !== "start" || next.after || next.workspaceId.startsWith(PLANNED_PREFIX) || stepIssue(next, context)) break;
+          batch.push(next);
+        }
+        if (batch.length > 1) {
+          for (const item of batch) item.state = "running";
+          this.activity = { kind: "start", label: batch.map((item) => this.stepActivityLabel(item, context)).join(" · ") };
+          this.save();
+          const sourceWorkspaces = batch.map((item) => item.workspaceId || null);
+          await Promise.all(
+            batch.map(async (item) => {
+              try {
+                await this.carryOut(turn, item, epoch, auto);
+                item.state = "done";
+              } catch (error) {
+                item.state = "failed";
+                item.error = error instanceof Error ? error.message : String(error);
+              }
+            }),
+          );
+          for (let b = 0; b < batch.length; b += 1) {
+            const item = batch[b];
+            if (item.state === "done" && item.ptyId) {
+              if (!wavePtys.includes(item.ptyId)) wavePtys.push(item.ptyId);
+              lastSourceWorkspaceId = sourceWorkspaces[b];
+              lastOpenedWorkspaceId = item.openedWorkspaceId || sourceWorkspaces[b];
+            }
+          }
+          prevOk = batch.every((item) => item.state === "done");
+          this.activity = null;
+          if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+          this.save();
+          idx += batch.length - 1;
+          continue;
+        }
       }
       const sourceWorkspaceId = step.workspaceId || null;
       step.state = "running";
@@ -2322,6 +2430,7 @@ export class OrchestratorDesk {
     for (const ptyId of [...this.chainWaiters.keys()]) this.settleChainWaiters(ptyId, false);
     this.thinking?.abort();
     this.thinking = null;
+    this.plannerPool.dispose();
   }
 }
 

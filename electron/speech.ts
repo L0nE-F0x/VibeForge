@@ -23,6 +23,18 @@ interface StandbyPiper {
   dead: boolean;
 }
 
+interface PrefetchedUtterance {
+  item: Utterance;
+  rate: number;
+  synth: ChildProcess;
+  getStderr: () => string;
+  chunks: Buffer[];
+  bytes: number;
+  done: boolean;
+  onData: (() => void) | null;
+  onEnd: (() => void) | null;
+}
+
 const WARM_IDLE_MS = 2 * 60 * 1000;
 
 /**
@@ -36,6 +48,8 @@ export class Speaker {
   private queue: Utterance[] = [];
   private current: { piper: ChildProcess; player: ChildProcess; item: Utterance } | null = null;
   private standby: StandbyPiper | null = null;
+  private prefetched: PrefetchedUtterance | null = null;
+  private readonly rates = new Map<string, number>();
   private keepWarm = false;
   private warmTimer: NodeJS.Timeout | null = null;
   private progressListener: ((info: SpeechProgress | null) => void) | null = null;
@@ -83,6 +97,7 @@ export class Speaker {
   stop(): void {
     const dropped = this.queue.splice(0);
     for (const item of dropped) item.resolve();
+    this.dropPrefetched();
     const current = this.current;
     if (!current) return;
     current.piper.kill("SIGTERM");
@@ -140,6 +155,64 @@ export class Speaker {
     if (entry && !entry.dead && entry.piper.exitCode === null && entry.piper.signalCode === null) entry.piper.kill("SIGTERM");
   }
 
+  private dropPrefetched(): void {
+    const entry = this.prefetched;
+    this.prefetched = null;
+    if (!entry) return;
+    entry.onData = null;
+    entry.onEnd = null;
+    if (entry.synth.exitCode === null && entry.synth.signalCode === null) entry.synth.kill("SIGTERM");
+  }
+
+  private readVoiceRate(voice: string): number {
+    const cached = this.rates.get(voice);
+    if (cached !== undefined) return cached;
+    let rate = 22_050;
+    try {
+      rate = voiceRate(JSON.parse(fs.readFileSync(`${voice}.json`, "utf8")));
+    } catch {
+      /* Piper's usual rate */
+    }
+    this.rates.set(voice, rate);
+    return rate;
+  }
+
+  private startPrefetch(piper: string, upcoming: Utterance): void {
+    if (this.prefetched?.item === upcoming) return;
+    this.dropPrefetched();
+    const rate = this.readVoiceRate(upcoming.voice);
+    const { child: synth, getStderr } = this.takeStandby(piper, upcoming.voice);
+    const entry: PrefetchedUtterance = {
+      item: upcoming,
+      rate,
+      synth,
+      getStderr,
+      chunks: [],
+      bytes: 0,
+      done: false,
+      onData: null,
+      onEnd: null,
+    };
+    this.prefetched = entry;
+    synth.stdout?.on("data", (chunk: Buffer) => {
+      if (this.prefetched !== entry && !entry.onData) return;
+      entry.chunks.push(chunk);
+      entry.bytes += chunk.length;
+      entry.onData?.();
+    });
+    synth.stdout?.on("end", () => {
+      entry.done = true;
+      entry.onEnd?.();
+    });
+    synth.on("error", (error) => this.opts.log.warn(`Voice: Piper failed to start: ${describeError(error)}`));
+    synth.on("close", (code, signal) => {
+      entry.done = true;
+      if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${getStderr().trim().split("\n").pop() ?? ""}`);
+      entry.onEnd?.();
+    });
+    synth.stdin?.end(`${upcoming.text}\n`);
+  }
+
   private takeStandby(piper: string, voice: string): { child: ChildProcess; getStderr: () => string } {
     const ready = this.standby;
     if (ready && ready.voice === voice && !ready.dead && ready.piper.exitCode === null && ready.piper.signalCode === null) {
@@ -165,6 +238,7 @@ export class Speaker {
   private next(): void {
     const item = this.queue.shift();
     if (!item) {
+      this.dropPrefetched();
       this.opts.speaking(null);
       return;
     }
@@ -176,39 +250,75 @@ export class Speaker {
       this.next();
       return;
     }
-    let rate = 22_050;
-    try {
-      rate = voiceRate(JSON.parse(fs.readFileSync(`${item.voice}.json`, "utf8")));
-    } catch {
-      /* Piper's usual rate */
-    }
-    const { child: synth, getStderr } = this.takeStandby(piper, item.voice);
+    const prefetched = this.prefetched?.item === item ? this.prefetched : null;
+    if (prefetched) this.prefetched = null;
+    else this.dropPrefetched();
+
+    const rate = prefetched ? prefetched.rate : this.readVoiceRate(item.voice);
     const argv = player.argv(rate);
     const play = spawn(argv[0], argv.slice(1), { stdio: ["pipe", "ignore", "pipe"] });
-    this.current = { piper: synth, player: play, item };
-    let bytes = 0;
-    let startedAt = 0;
-    let ended = false;
-    synth.stdout?.on("data", (chunk: Buffer) => {
-      bytes += chunk.length;
-      if (!startedAt && !ended) {
-        startedAt = Date.now();
-        this.progressListener?.({ text: item.text, startedAt, durationMs: 0 });
-      }
-    });
-    synth.stdout?.on("end", () => {
-      if (startedAt && !ended) {
-        const durationMs = Math.max(180, Math.round((bytes / (rate * 2)) * 1000));
-        this.progressListener?.({ text: item.text, startedAt, durationMs });
-      }
-    });
-    synth.stdout?.pipe(play.stdin!);
     play.stdin?.on("error", () => undefined);
-    synth.on("error", (error) => this.opts.log.warn(`Voice: Piper failed to start: ${describeError(error)}`));
     play.on("error", (error) => this.opts.log.warn(`Voice: ${player.label} failed to start: ${describeError(error)}`));
-    synth.on("close", (code, signal) => {
-      if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${getStderr().trim().split("\n").pop() ?? ""}`);
-    });
+
+    let synth: ChildProcess;
+    let ended = false;
+    let startedAt = 0;
+
+    if (prefetched) {
+      synth = prefetched.synth;
+      this.current = { piper: synth, player: play, item };
+      let flushed = 0;
+      const flush = () => {
+        if (ended) return;
+        while (flushed < prefetched.chunks.length) {
+          const chunk = prefetched.chunks[flushed++];
+          if (!startedAt) {
+            startedAt = Date.now();
+            this.progressListener?.({ text: item.text, startedAt, durationMs: 0 });
+          }
+          play.stdin?.write(chunk);
+        }
+        if (prefetched.done) {
+          if (startedAt) {
+            const durationMs = Math.max(180, Math.round((prefetched.bytes / (rate * 2)) * 1000));
+            this.progressListener?.({ text: item.text, startedAt, durationMs });
+          }
+          play.stdin?.end();
+        }
+      };
+      prefetched.onData = flush;
+      prefetched.onEnd = flush;
+      flush();
+    } else {
+      const taken = this.takeStandby(piper, item.voice);
+      synth = taken.child;
+      const getStderr = taken.getStderr;
+      this.current = { piper: synth, player: play, item };
+      let bytes = 0;
+      synth.stdout?.on("data", (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (!startedAt && !ended) {
+          startedAt = Date.now();
+          this.progressListener?.({ text: item.text, startedAt, durationMs: 0 });
+        }
+      });
+      synth.stdout?.on("end", () => {
+        if (startedAt && !ended) {
+          const durationMs = Math.max(180, Math.round((bytes / (rate * 2)) * 1000));
+          this.progressListener?.({ text: item.text, startedAt, durationMs });
+        }
+      });
+      synth.stdout?.pipe(play.stdin!);
+      synth.on("error", (error) => this.opts.log.warn(`Voice: Piper failed to start: ${describeError(error)}`));
+      synth.on("close", (code, signal) => {
+        if (code && !signal) this.opts.log.warn(`Voice: Piper exited with code ${code}: ${getStderr().trim().split("\n").pop() ?? ""}`);
+      });
+      synth.stdin?.end(`${item.text}\n`);
+    }
+
+    // Look ahead: synthesize sentence chunk N+1 in parallel while chunk N plays.
+    if (this.queue.length > 0) this.startPrefetch(piper, this.queue[0]);
+
     const end = () => {
       if (ended) return;
       ended = true;
@@ -229,7 +339,6 @@ export class Speaker {
     play.on("close", end);
     play.on("error", end);
     this.opts.speaking(item.text);
-    synth.stdin?.end(`${item.text}\n`);
   }
 
   dispose(): void {

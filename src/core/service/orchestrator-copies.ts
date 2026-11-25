@@ -29,8 +29,10 @@ export type CopyOutcome = "applied" | "discarded" | null;
  */
 export class MaestroCopies {
   private copies: MaestroCopy[];
-  /** Apply, Discard and making a copy, one at a time, so two clicks can't apply one copy twice. */
+  /** Apply, Discard and copy id reservation serialized so two clicks can't race or collide. */
   private chain: Promise<unknown> = Promise.resolve();
+  private readonly repoChains = new Map<string, Promise<unknown>>();
+  private readonly reservedIds = new Set<string>();
 
   constructor(
     private readonly core: ServiceCore,
@@ -65,6 +67,18 @@ export class MaestroCopies {
     return run;
   }
 
+  private perRepo<T>(repoPath: string, job: () => Promise<T>): Promise<T> {
+    const key = path.resolve(repoPath);
+    const prev = this.repoChains.get(key) ?? Promise.resolve();
+    const run = prev.then(job, job);
+    const settled = run.catch(() => undefined);
+    this.repoChains.set(key, settled);
+    void settled.then(() => {
+      if (this.repoChains.get(key) === settled) this.repoChains.delete(key);
+    });
+    return run;
+  }
+
   /** The copy is checked by name against VibeForge's own worktrees folder before git touches it. */
   private owner(id: string): CopyOwner {
     return { dataRoot: this.core.options.dataRoot, taskId: id };
@@ -79,32 +93,41 @@ export class MaestroCopies {
   /**
    * A copy for a start step: a new `vibeforge/<name>` branch from the commit the workspace is on,
    * named for the branch the plan asked for, and its own workspace (not the one Code shows).
+   * Copies on distinct repositories can be created in parallel while same-repo git worktree writes serialize cleanly.
    */
-  make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string }> {
-    return this.serial(async () => {
-      const name = cleanBranch(input.branch) || "maestro";
-      const id = await this.freeId(input.workspace.path, name);
-      const made = await createCopy(input.workspace.path, path.join(this.core.options.dataRoot, "worktrees", id), copyBranch(id));
-      const copy: MaestroCopy = {
-        id,
-        turnId: input.turnId,
-        stepId: input.stepId,
-        engineId: input.engineId,
-        prompt: input.prompt,
-        name,
-        workspaceId: input.workspace.id,
-        openedWorkspaceId: null,
-        at: this.core.now().toISOString(),
-        ...made,
-      };
-      // Kept before anything else can fail, so a copy that never got its workspace can still be discarded.
-      this.copies.push(copy);
-      this.save();
-      const openedWorkspaceId = this.workspaces.addQuietly(folderInCopy(made, input.workspace.path), `${input.workspace.name} · ${name}`);
-      copy.openedWorkspaceId = openedWorkspaceId;
-      this.save();
-      return { ...copy, openedWorkspaceId };
+  async make(input: { turnId: string; stepId: string; engineId: string; prompt: string; branch: string; workspace: Workspace }): Promise<MaestroCopy & { openedWorkspaceId: string }> {
+    const name = cleanBranch(input.branch) || "maestro";
+    const id = await this.serial(async () => {
+      const picked = await this.freeId(input.workspace.path, name);
+      this.reservedIds.add(picked);
+      return picked;
     });
+    try {
+      return await this.perRepo(input.workspace.path, async () => {
+        const made = await createCopy(input.workspace.path, path.join(this.core.options.dataRoot, "worktrees", id), copyBranch(id));
+        const copy: MaestroCopy = {
+          id,
+          turnId: input.turnId,
+          stepId: input.stepId,
+          engineId: input.engineId,
+          prompt: input.prompt,
+          name,
+          workspaceId: input.workspace.id,
+          openedWorkspaceId: null,
+          at: this.core.now().toISOString(),
+          ...made,
+        };
+        // Kept before anything else can fail, so a copy that never got its workspace can still be discarded.
+        this.copies.push(copy);
+        this.save();
+        const openedWorkspaceId = this.workspaces.addQuietly(folderInCopy(made, input.workspace.path), `${input.workspace.name} · ${name}`);
+        copy.openedWorkspaceId = openedWorkspaceId;
+        this.save();
+        return { ...copy, openedWorkspaceId };
+      });
+    } finally {
+      this.reservedIds.delete(id);
+    }
   }
 
   /**
@@ -116,7 +139,7 @@ export class MaestroCopies {
     for (let n = 1; n <= MAX_NAMES; n += 1) {
       const id = n === 1 ? base : `${base}-${n}`;
       const target = isSafeId(id) ? expectedCopyPath(this.core.options.dataRoot, id) : null;
-      if (!target || fs.existsSync(target) || this.copies.some((item) => item.id === id) || this.core.store.getTask(id)) continue;
+      if (!target || fs.existsSync(target) || this.reservedIds.has(id) || this.copies.some((item) => item.id === id) || this.core.store.getTask(id)) continue;
       if (await branchExists(folder, copyBranch(id))) continue;
       return id;
     }
