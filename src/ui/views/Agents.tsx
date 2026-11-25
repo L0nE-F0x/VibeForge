@@ -18,11 +18,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
 import { listText, tildify } from "../../shared/text.js";
-import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSkills } from "../api.js";
+import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSettings, useSkills } from "../api.js";
 import { autosaveDue, oneLine } from "../autosave.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { ListBar, NoMatch, PickMark, activeFilterLabels, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { matchesQuery, nameOrder, timeOf, type ListSpec } from "../list-view.js";
@@ -155,8 +156,10 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const library = useLibrary().data;
   const syncReady = useSyncReady().ready;
   const list = agents.data ?? [];
+  // A list that couldn't be read says so, and isn't taken for "no agents" (nor drops the one asked for).
+  const unreadable = agents.error !== null && agents.data === undefined;
   const selected = list.find((agent) => agent.id === route.agentId) ?? null;
-  useDropMissing(agents.loaded, Boolean(route.agentId) && !selected, { view: "agents" });
+  useDropMissing(agents.loaded && !unreadable, Boolean(route.agentId) && !selected, { view: "agents" });
   const chatAttention = useChatAttention();
   const wants = (agentId: string) => [...chatAttention.values()].some((mark) => mark.agentId === agentId && mark.attention === "waiting");
 
@@ -280,7 +283,8 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
           }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
-          {agents.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
+          <LoadFailed query={agents} />
+          {agents.loaded && !unreadable && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
           {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
           {view.shown.map((agent) => {
             const live = chatLive(agent.id);
@@ -317,7 +321,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
       </SidePanel>
       {selected ? (
         <AgentDetail key={selected.id} agent={selected} tab={tab} chatId={chatId} />
-      ) : (
+      ) : unreadable ? null : (
         <Empty
           icon={Bot}
           title={t("agents.empty.title")}
@@ -369,7 +373,7 @@ function NewAgent({ onClose, onCreated }: { onClose: () => void; onCreated: (age
   const t = useT();
   const { go } = useNav();
   const engines = useEngines().data ?? [];
-  const settings = useQuery("settings", ["settings"], () => call("settings.get")).data;
+  const settings = useSettings().data;
   const home = useAppInfo().data?.home ?? "";
   const available = engines.filter((engine) => engine.available);
   // Kept as a draft, as a new task, skill or routine is: Esc or a click outside doesn't lose a long brief.

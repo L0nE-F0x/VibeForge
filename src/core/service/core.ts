@@ -633,7 +633,9 @@ export class ServiceCore {
       if (!item || typeof item !== "object") continue;
       const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
       if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
-      if (this.store.getTask(note.taskId) || copies.some((entry) => entry?.id === note.taskId)) continue;
+      // A task that is still there with a copy (Execute made a new one) owns that folder and branch; a
+      // discarded copy's task is still there without one, and its copy goes.
+      if (this.store.getTask(note.taskId)?.copy || copies.some((entry) => entry?.id === note.taskId)) continue;
       await removeCopy(note.copy, { dataRoot: this.options.dataRoot, taskId: note.taskId }, true).catch(() => undefined);
     }
   }

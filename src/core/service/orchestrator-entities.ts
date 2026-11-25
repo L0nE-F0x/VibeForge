@@ -516,7 +516,8 @@ export async function carryOutTaskStep(deps: EntityStepDeps, turn: OrchestratorT
     return;
   }
   if (action === "discard") {
-    await deps.tasks.discardCopy(step.target);
+    // Undone from the step, as a delete is.
+    step.undo = (await deps.tasks.discardCopy(step.target)).undo;
     step.result = "Discarded task copy.";
     return;
   }

@@ -4,6 +4,7 @@ import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useAppInfo, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
@@ -49,6 +50,8 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   const [creating, setCreating] = useState(false);
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const list = tasks.data ?? [];
+  // A board that couldn't be read says so above its columns, and its columns don't claim "Nothing queued".
+  const unreadable = tasks.error !== null && tasks.data === undefined;
 
   // ------------------------------------------------ search, filter, sort, select
   const agentName = (task: TaskView) => agents.find((item) => item.id === task.agentId)?.name ?? "";
@@ -113,7 +116,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   // "new" (from Ctrl+K) opens a blank task, like the New task button.
   const open = route.taskId && route.taskId !== "new" ? list.find((task) => task.id === route.taskId) ?? null : null;
   const drafting = creating || route.taskId === "new";
-  useDropMissing(tasks.loaded, Boolean(route.taskId) && !drafting && !open, { view: "tasks" });
+  useDropMissing(tasks.loaded && !unreadable, Boolean(route.taskId) && !drafting && !open, { view: "tasks" });
 
   const onDrop = (status: TaskStatus) => async (event: DragEvent) => {
     setDropTarget(null);
@@ -168,6 +171,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
           {view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
         </div>
       )}
+      <LoadFailed query={tasks} />
       <div className={`board${selection.selecting ? " picking" : ""}`} onKeyDown={selection.onKeyDown}>
         {COLUMNS.map((column) => {
           const items = view.shown.filter((task) => task.status === column.status);
@@ -192,8 +196,8 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
               <div className="column-body">
                 {items.length === 0 && (
                   <div className="faint" style={{ padding: "8px 4px", fontSize: "var(--fs-sm)" }}>
-                    {/* Narrowed, an empty column only means nothing here matches. */}
-                    {view.narrowed ? "—" : column.status === "todo" ? t("tasks.empty.todo") : column.status === "running" ? t("tasks.empty.running") : column.status === "review" ? t("tasks.empty.review") : "—"}
+                    {/* Narrowed, an empty column only means nothing here matches; unread, nothing is known. */}
+                    {view.narrowed || unreadable ? "—" : column.status === "todo" ? t("tasks.empty.todo") : column.status === "running" ? t("tasks.empty.running") : column.status === "review" ? t("tasks.empty.review") : "—"}
                   </div>
                 )}
                 {items.map((task) => {
@@ -356,12 +360,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     const toast = applyToast(t, result, workspace.name, home);
     push(toast.tone, toast.title, toast.body);
   }, t("tasks.applyFailed"));
+  // Discarding happens at once, with Undo on the toast, as deleting does. Its button only shows
+  // while no CLI is working in the copy, so nothing running is stopped by it.
   const [discardCopy, discarding] = useAction(async () => {
     if (!task) return;
-    const ok = await confirm({ title: t("tasks.discardCopyTitle", { title: task.title }), body: t("tasks.discardCopyBody"), confirm: t("tasks.discardCopy"), danger: true });
-    if (ok) await call("tasks.discardCopy", task.id);
+    const result = await call("tasks.discardCopy", task.id);
+    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
   }, t("tasks.discardFailed"));
-  const [forgetCopy] = useAction(async () => task && call("tasks.discardCopy", task.id), t("tasks.discardFailed"));
   const [allowFolder, allowing] = useAction(async () => {
     if (!agent || !workspace) return;
     await call("agents.save", { ...agent, places: [...agent.places, workspace.path] });
@@ -491,7 +496,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
                 <Rich text={t("tasks.copyUntrusted", { path: task.copy.path })} />
               </span>
               {!live && (
-                <Button size="sm" variant="ghost" icon={X} busy={discarding} onClick={() => void forgetCopy()}>
+                <Button size="sm" variant="ghost" icon={X} busy={discarding} onClick={() => void discardCopy()}>
                   {t("tasks.forgetCopy")}
                 </Button>
               )}

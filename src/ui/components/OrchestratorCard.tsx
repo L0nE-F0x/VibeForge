@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { effortForModel, effortLevels } from "../../shared/launch-options.js";
 import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
-import { call, useEngines, useQuery, useSettings } from "../api.js";
+import { call, useEngines, useOrchestrator, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import type { OrchestratorSettings } from "../../shared/api.js";
@@ -16,7 +16,7 @@ export function OrchestratorCard() {
   const engines = useEngines().data ?? [];
   const [save] = useAction(async (orchestrator: OrchestratorSettings) => call("settings.save", { orchestrator }), t("settings.saveFailed"));
   // Maestro's own view says where a new workspace goes when this is left empty.
-  const view = useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get")).data;
+  const view = useOrchestrator().data;
   if (!settings) return null;
   const current = settings.orchestrator;
   const planners = engines.filter((engine) => canOrchestrate(engine));

@@ -15,6 +15,21 @@ export interface QueryOptions {
   keep?: boolean;
   /** Read again by the 30 s refresh (the default). A run's files don't move with the clock. */
   poll?: boolean;
+  /**
+   * What the query reads, for the window to name when the read fails (an i18n key). A failed
+   * read with one is listed in failures() until it reads again, so a list that couldn't load
+   * never passes for an empty one.
+   */
+  what?: string;
+}
+
+/** A read that failed, for someone who is reading it. */
+export interface Failure {
+  key: string;
+  what: string;
+  error: string;
+  /** Earlier data is still on screen: the last read failed, not the first. */
+  stale: boolean;
 }
 
 /** The topics a query follows, or a choice made from what it read last. */
@@ -27,6 +42,7 @@ export interface Entry {
   fetcher: () => Promise<unknown>;
   keep: boolean;
   poll: boolean;
+  what: string | null;
   data: unknown;
   error: string | null;
   /** Fresh: no change reported since the last read. */
@@ -71,6 +87,10 @@ export class QueryCache {
   private readonly entries = new Map<string, Entry>();
   /** Unkept entries nobody reads, oldest first. */
   private readonly idle = new Set<Entry>();
+  /** Keys whose failure a view shows in place, so the window-wide list leaves them out. */
+  private readonly shown = new Map<string, number>();
+  private failing: readonly Failure[] = [];
+  private readonly failureListeners = new Set<() => void>();
 
   constructor(private readonly describe: (error: unknown) => string) {}
 
@@ -84,6 +104,7 @@ export class QueryCache {
         fetcher,
         keep: true,
         poll: true,
+        what: null,
         data: undefined,
         error: null,
         loaded: false,
@@ -98,6 +119,8 @@ export class QueryCache {
     entry.fetcher = fetcher;
     entry.keep = options.keep ?? true;
     entry.poll = options.poll ?? true;
+    // A reader that doesn't name it (a card reading the same key) doesn't take the name away.
+    entry.what = options.what ?? entry.what;
     return entry;
   }
 
@@ -111,9 +134,11 @@ export class QueryCache {
     if (!this.entries.has(entry.key)) this.entries.set(entry.key, entry);
     entry.subscribers.set(notify, topics);
     if (!entry.loaded && !entry.inflight) void this.load(entry);
+    if (entry.error) this.recount();
     return () => {
       entry.subscribers.delete(notify);
       if (!entry.subscribers.size && !entry.keep) this.rest(entry);
+      if (entry.error) this.recount();
     };
   }
 
@@ -163,9 +188,57 @@ export class QueryCache {
     for (const entry of this.entries.values()) if (entry.poll && entry.subscribers.size) void this.load(entry);
   }
 
+  /**
+   * Named reads that failed and someone is reading, oldest first. The same array until one
+   * starts or stops failing, so a reader of it renders only then.
+   */
+  failures(): readonly Failure[] {
+    return this.failing;
+  }
+
+  /** Hear when failures() changes. */
+  onFailures(listener: () => void): () => void {
+    this.failureListeners.add(listener);
+    return () => this.failureListeners.delete(listener);
+  }
+
+  /** Read again everything whose last read failed and someone is reading. */
+  retry(): Promise<void> {
+    const failed = [...this.entries.values()].filter((entry) => entry.error !== null && entry.subscribers.size);
+    return Promise.all(failed.map((entry) => this.load(entry))).then(() => undefined);
+  }
+
+  /** A view shows `key`'s failure itself while this is held: the window-wide list leaves it out. */
+  showHere(key: string): () => void {
+    this.shown.set(key, (this.shown.get(key) ?? 0) + 1);
+    this.recount();
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      const left = (this.shown.get(key) ?? 1) - 1;
+      if (left > 0) this.shown.set(key, left);
+      else this.shown.delete(key);
+      this.recount();
+    };
+  }
+
   private publish(entry: Entry): void {
+    const wasFailing = entry.snapshot.error !== null;
     entry.snapshot = { data: entry.data, error: entry.error, loaded: entry.loaded };
     for (const notify of entry.subscribers.keys()) notify();
+    if (wasFailing || entry.error !== null) this.recount();
+  }
+
+  private recount(): void {
+    const next: Failure[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.error === null || !entry.what || !entry.subscribers.size || this.shown.has(entry.key)) continue;
+      next.push({ key: entry.key, what: entry.what, error: entry.error, stale: entry.data !== undefined });
+    }
+    if (sameData(next, this.failing)) return;
+    this.failing = next;
+    for (const listener of this.failureListeners) listener();
   }
 
   private rest(entry: Entry): void {

@@ -280,6 +280,51 @@
   color: color-mix(in srgb, var(--red) 70%, var(--fg));
 }
 
+/* A list that couldn't be read, where the list would be (LoadState.tsx). */
+.load-failed {
+  padding: 8px;
+  min-width: 0;
+}
+
+/* A list already pads its rows. */
+.list-scroll > .load-failed {
+  padding: 0;
+}
+
+/*
+ * Read as plainly as a toast: the red is the icon and the border, the words are the theme's own
+ * text colours, so they keep their contrast in light and dark themes alike.
+ */
+.load-failed .notice.bad {
+  color: var(--fg);
+  background: var(--bg-raised);
+}
+
+.load-failed-title {
+  font-weight: 620;
+  color: var(--fg);
+}
+
+.load-failed-reason {
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+
+.load-failed-hint {
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+}
+
+.load-failed .notice.bad > svg {
+  color: var(--red);
+}
+
+/* The reason is often one long path: it wraps inside a narrow list instead of running off it. */
+.load-failed .notice > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .notice.accent {
   border-color: var(--sel-line);
   background: var(--gradient-soft);

@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Security
 
 - **A plan Viby made from what it read keeps waiting for your Go when it comes back unchanged.** If Viby made a plan after reading a screen, file, diff or reply, and its planner handed back the same steps in a later turn that read nothing, the new copy no longer counted as made from what was read, so under Just go its steps could run without Go. The copy now waits for Go as the first one did.
+- **A list that couldn't be read says so, instead of looking empty.** When reading your agents, tasks, skills, routines, chats, runs, settings or a folder in Files fails, the view shows why, says nothing was deleted, and has **Try again**. Before, it said "No agents yet." or "Nothing queued.", or Settings stayed blank, which looked like your work was gone. A list that fails while you're in another view is named in a notice in the corner, with its own **Try again**. Settings shows a placeholder while it loads instead of a blank page.
+- **Discarding a task's copy has Undo, and no longer asks first.** **Discard copy** in a task now happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>, as deleting does and as Viby's copies already did. Undo brings back the copy's folder with its commits and uncommitted edits, and the task points at it again; the copy's branch is removed once the chance to undo has passed. When Viby discards a task's copy, its step has **Undo** too.
 
 ## [3.7.0] - 2026-11-25
 

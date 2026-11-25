@@ -298,7 +298,8 @@ function StepChip({ step }: { step: OrchestratorStep }) {
   }
 
   if (step.kind === "agent" || step.kind === "skill" || step.kind === "task" || step.kind === "routine" || step.kind === "chat") {
-    const isDelete = step.action === "delete";
+    // Discarding a task's copy is undone the same way as a delete.
+    const isDelete = step.action === "delete" || (step.kind === "task" && step.action === "discard");
     if (isDelete) {
       return (
         <>

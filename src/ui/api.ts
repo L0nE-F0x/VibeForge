@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { clockNow, subscribeClock } from "./clock.js";
 import { coreText } from "./core-text.js";
-import { QueryCache, type QueryOptions, type Topics } from "./query-cache.js";
+import type { Key } from "./i18n/index.js";
+import { QueryCache, type Failure, type QueryOptions, type Topics } from "./query-cache.js";
 import type { DeskEvents, Method, MethodArgs, MethodResult, PlanSummary, Topic, UsageSummary, VibeForgeBridge } from "../shared/api.js";
 
 declare global {
@@ -142,9 +143,18 @@ export function invalidate(topics: Topic[]): void {
 
 export interface Query<T> {
   data: T | undefined;
+  /** Why the last read failed. `data` is then what was read before, if anything was. */
   error: string | null;
   loaded: boolean;
   reload: () => Promise<void>;
+  key: string | null;
+  /** What it reads, in words for a failed read (an i18n key), when it was given one. */
+  what: Key | null;
+}
+
+/** Options for a query the window names when it fails to read. */
+export interface NamedQueryOptions extends QueryOptions {
+  what?: Key;
 }
 
 /**
@@ -155,7 +165,7 @@ export function useQuery<T>(
   key: string | null,
   topics: Topic[] | ((data: T | undefined) => Topic[]),
   fetcher: () => Promise<T>,
-  options?: QueryOptions,
+  options?: NamedQueryOptions,
 ): Query<T> {
   wireChanges();
   const fetcherRef = useRef(fetcher);
@@ -167,7 +177,27 @@ export function useQuery<T>(
   const subscribe = useCallback((notify: () => void) => (entry ? cache.subscribe(entry, notify, wanted) : () => undefined), [key, follow]);
   const snapshot = useSyncExternalStore(subscribe, () => entry?.snapshot ?? EMPTY);
   const reload = useCallback(() => (entry ? cache.load(entry) : Promise.resolve()), [entry]);
-  return { data: snapshot.data as T | undefined, error: snapshot.error, loaded: snapshot.loaded, reload };
+  return { data: snapshot.data as T | undefined, error: snapshot.error, loaded: snapshot.loaded, reload, key, what: options?.what ?? null };
+}
+
+/**
+ * Named reads that failed while something reads them, and that no view shows in place: the
+ * window lists these, so a list that couldn't load never looks like an empty one.
+ */
+export function useLoadFailures(): ReadonlyArray<Failure & { what: Key }> {
+  return useSyncExternalStore(subscribeFailures, () => cache.failures()) as ReadonlyArray<Failure & { what: Key }>;
+}
+
+const subscribeFailures = (listener: () => void) => cache.onFailures(listener);
+
+/** Read again every query whose last read failed. */
+export function retryFailedLoads(): Promise<void> {
+  return cache.retry();
+}
+
+/** While `shown`, this view says itself that `key` failed to load, and the window-wide list leaves it out. */
+export function useLoadShownHere(key: string | null, shown: boolean): void {
+  useEffect(() => (key && shown ? cache.showHere(key) : undefined), [key, shown]);
 }
 
 const EMPTY = { data: undefined, error: null, loaded: false };
@@ -192,19 +222,20 @@ export function useNow(intervalMs = 15_000): number {
 
 // ------------------------------------------------------------------ common queries
 
-export const useEngines = () => useQuery("engines", ["engines"], () => call("engines.list"));
-export const useSettings = () => useQuery("settings", ["settings"], () => call("settings.get"));
-export const useAgents = () => useQuery("agents", ["agents"], () => call("agents.list"));
-export const useSkills = () => useQuery("skills", ["skills"], () => call("skills.list"));
+// Each list a person keeps is named (`what`), so a read of it that fails is said in the window.
+export const useEngines = () => useQuery("engines", ["engines"], () => call("engines.list"), { what: "load.engines" });
+export const useSettings = () => useQuery("settings", ["settings"], () => call("settings.get"), { what: "load.settings" });
+export const useAgents = () => useQuery("agents", ["agents"], () => call("agents.list"), { what: "load.agents" });
+export const useSkills = () => useQuery("skills", ["skills"], () => call("skills.list"), { what: "load.skills" });
 // A CLI going busy or quiet ("working") changes who a task or routine waits behind, and the live list.
-export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live", "working"], () => call("routines.list"));
-export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live", "working"], () => call("tasks.list"));
-export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
+export const useRoutines = () => useQuery("routines", ["routines", "runs", "agents", "engines", "live", "working"], () => call("routines.list"), { what: "load.routines" });
+export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "workspaces", "engines", "live", "working"], () => call("tasks.list"), { what: "load.tasks" });
+export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"), { what: "load.workspaces" });
 // Runs git status in every workspace: only the list and finished runs change what it reports (the 30 s poll
 // catches edits). Sync, Viby and task events come many times a second and would keep git running back to back.
 export const useWorkspaceStatus = () => useQuery("workspace-status", ["workspaces", "runs"], () => call("workspaces.status"));
-export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
-export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
+export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"), { what: "load.viby" });
+export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"), { what: "load.inbox" });
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
 /** Sync between machines: follows what the engine reports, and the switch in Settings. */
 export const useSync = () => useQuery("sync", ["sync", "settings", "workspaces"], () => call("sync.view"));
@@ -266,6 +297,6 @@ export function usePlans(): Query<PlanSummary | null> & { refresh: () => Promise
   return { ...query, refresh };
 }
 export const useChats = (agentId: string | null | undefined) =>
-  useQuery(`chats:${agentId === undefined ? "*" : (agentId ?? "none")}`, ["chats", "runs", "live"], () =>
-    call("chats.list", agentId === undefined ? {} : { agentId }),
-  );
+  useQuery(`chats:${agentId === undefined ? "*" : (agentId ?? "none")}`, ["chats", "runs", "live"], () => call("chats.list", agentId === undefined ? {} : { agentId }), {
+    what: "load.chats",
+  });
