@@ -1,4 +1,4 @@
-import { slugify } from "./slug.js";
+import { hasSlug, slugify } from "./slug.js";
 import { isCodingCli, sessionFolder } from "./checkout.js";
 import type { LiveSession } from "./types.js";
 
@@ -24,6 +24,8 @@ export interface Reachable {
   label: string;
   engineId: string | null;
   agentId: string | null;
+  /** The agent's name ("Notes"), or null for a bare CLI. */
+  agentName: string | null;
   workspaceId: string | null;
   cwd: string;
   working: boolean;
@@ -82,6 +84,7 @@ export function reachable(live: readonly LiveSession[], names: Names, handles?: 
       label: agent ? `${agent} (${engineLabel})` : engineLabel,
       engineId: engine?.id ?? session.programEngineId ?? null,
       agentId: session.agentId,
+      agentName: agent,
       workspaceId: session.workspaceId,
       cwd: sessionFolder(session),
       working: Boolean(session.working),
@@ -100,17 +103,28 @@ export type Resolved = { ok: true; to: Reachable } | { ok: false; reason: "none"
  * or label matches when only one such CLI is in the sender's workspace, or only one at all.
  */
 export function resolveTarget(name: string, fromPty: string | null, list: readonly Reachable[]): Resolved {
-  const wanted = slugify(name.trim(), 48);
-  const exact = list.find((item) => item.handle === wanted);
+  const asked = name.trim();
+  // A name in other letters (テスト) has only the slug every such name has, so it goes by the name itself.
+  const wanted = hasSlug(asked) ? slugify(asked, 48) : null;
+  const exact = wanted ? list.find((item) => item.handle === wanted) : undefined;
   if (exact) return exact.ptyId === fromPty ? { ok: false, reason: "self", options: [] } : { ok: true, to: exact };
   const others = list.filter((item) => item.ptyId !== fromPty);
-  const matches = others.filter((item) => item.engineId === wanted || slugify(item.label, 48) === wanted || item.handle.replace(/-\d+$/, "") === wanted);
+  const matches = others.filter(
+    (item) =>
+      (item.agentName !== null && sameName(item.agentName, asked)) ||
+      (wanted !== null && (item.engineId === wanted || slugify(item.label, 48) === wanted || item.handle.replace(/-\d+$/, "") === wanted)),
+  );
   if (matches.length === 1) return { ok: true, to: matches[0] };
   const from = list.find((item) => item.ptyId === fromPty);
   const near = from ? matches.filter((item) => item.workspaceId === from.workspaceId) : [];
   if (near.length === 1) return { ok: true, to: near[0] };
   if (!matches.length) return { ok: false, reason: "none", options: others.map((item) => item.handle) };
   return { ok: false, reason: "ambiguous", options: matches.map((item) => item.handle) };
+}
+
+/** One name, whatever its case, and with é typed as one letter or as e and an accent. */
+export function sameName(a: string, b: string): boolean {
+  return a.trim().normalize("NFC").toLowerCase() === b.trim().normalize("NFC").toLowerCase();
 }
 
 /** Escapes and bracketed-paste markers can't ride along: they would type keys of their own. */
