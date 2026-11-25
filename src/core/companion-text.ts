@@ -1,3 +1,4 @@
+import { CONFIRMED_KEY } from "../shared/orchestrator.js";
 import { matchCoreText } from "../ui/core-match.js";
 import { en } from "../ui/i18n/en.js";
 
@@ -56,8 +57,21 @@ export function fill(text: string, vars?: Record<string, string>): string {
 /** Groups of keys the page uses whole. */
 const PHONE_PREFIXES = ["phone.", "plans.", "orch."] as const;
 
-/** The window's words the page shares, one by one: the Orchestrator's name in the rail, and what dictation says on the desktop too. */
-const PHONE_KEYS: readonly Key[] = ["rail.orchestrator", "common.cancel", "common.close", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+/**
+ * The window's words the page shares, one by one: the Orchestrator's name in the rail, what
+ * dictation says on the desktop too, and what Viby says when the planner heard a yes.
+ */
+const PHONE_KEYS: readonly Key[] = [
+  "rail.orchestrator",
+  "common.cancel",
+  "common.close",
+  "common.notOnPath",
+  "voice.listening",
+  "voice.transcribing",
+  "voice.empty.silent",
+  "voice.empty.nothing",
+  ...Object.values(CONFIRMED_KEY),
+];
 
 /** Every word the page shows, in one language, English where a catalog has none. */
 export async function phoneWords(language: PhoneLanguage): Promise<Record<string, string>> {
