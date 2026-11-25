@@ -15,6 +15,8 @@ const POLL_SLOWEST_MS = 16_000;
 const POLL_TIMEOUT_MS = 15_000;
 let polling = false;
 let pollAgain = false;
+/** Lets go of the poll on its way: picking another computer doesn't wait out the answer of the one before. @type {AbortController | null} */
+let pollStop = null;
 let pollFailures = 0;
 let timer = 0;
 let plansAt = 0;
@@ -37,7 +39,8 @@ const RELOADED_KEY = "vibeforge-reloaded-for";
  * The computer's answer, read as JSON. A refusal throws with what it said; a link that fails throws `offline`.
  * A read (GET) sends the ETag of its last answer, and a 304 gives that answer back.
  * @param {string} path
- * @param {{ method?: string, body?: BodyInit, timeout?: number, refused?: string, type?: string, acts?: boolean, computer?: { url: string, token: string } }} [options] `refused`: what a refusal that gives no reason means here.
+ * @param {{ method?: string, body?: BodyInit, timeout?: number, stop?: AbortSignal, refused?: string, type?: string, acts?: boolean, computer?: { url: string, token: string } }} [options] `refused`: what a refusal that gives no reason means here.
+ *   `stop`: gives up before the timeout does (with one).
  *   `acts`: it changes something on the computer, so one that got no answer in time may still have been done.
  *   `computer`: another computer than the one on show (one being added, or asked how it is doing). Nothing of its answer is kept.
  * @returns {Promise<any>}
@@ -54,6 +57,7 @@ export async function call(path, options = {}) {
   if (last) headers["If-None-Match"] = last.etag;
   const abort = options.timeout ? new AbortController() : null;
   const limit = abort ? window.setTimeout(() => abort.abort(), options.timeout) : 0;
+  options.stop?.addEventListener("abort", () => abort?.abort(), { once: true });
   /** @type {Response} */
   let response;
   /** @type {any} */
@@ -165,6 +169,8 @@ export function showComputer(url) {
   pollFailures = 0;
   window.clearTimeout(timer);
   timer = 0;
+  // A poll still waiting on the one before (off, its poll not yet timed out) is let go of, so this one is asked now.
+  pollStop?.abort();
   state.view = next.token ? "desk" : "pair";
   if (typeof window !== "undefined" && window.history?.replaceState) {
     window.history.replaceState({ view: state.view, sessionQuery: { ...state.sessionQuery } }, "");
@@ -202,8 +208,10 @@ async function poll() {
   const mine = ++state.ticket;
   const shown = state.view;
   const timeout = POLL_TIMEOUT_MS;
+  const stop = new AbortController();
+  pollStop = stop;
   try {
-    const payload = await call("/api/desk", { timeout });
+    const payload = await call("/api/desk", { timeout, stop: stop.signal });
     // A change of page has already replaced what this one would show: the next poll asks for that page.
     if (mine !== state.ticket) return;
     checkVersion(payload.version);
@@ -219,7 +227,7 @@ async function poll() {
     let refused = "";
     /** @param {string} route */
     const more = (route) =>
-      call(route, { timeout }).catch((err) => {
+      call(route, { timeout, stop: stop.signal }).catch((err) => {
         if (err.offline) throw err;
         refused = err.message;
         return undefined;

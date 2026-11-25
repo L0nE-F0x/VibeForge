@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Switching away from a computer that is off shows the next one at once.** On the phone, picking another computer while the one on show was off or asleep left the new one's desk empty for up to 15 seconds: the page first waited for the old computer's request to give up. It now lets go of that request and asks the computer you picked straight away.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

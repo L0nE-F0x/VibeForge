@@ -68,10 +68,15 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
     `function update() { updates += 1; }`,
     `function wordsLoaded() { return true; }`,
     `function loadWords() { return Promise.resolve(true); }`,
+    // What showComputer reaches for beyond api.js: the computers this phone keeps, and what it lets go of on the way.
+    `const COMPUTER_KEY = "vibeforge-computer"; const localStorage = { setItem() {} };`,
+    `function computers() { return [{ url: "", token: "vf_test", name: "" }, { url: "https://laptop.tail1234.ts.net", token: "vfd_laptop", name: "" }]; }`,
+    `function micCancel() {}`,
+    `function forgetSeen() {}`,
     ...["POLL_MS", "POLL_SLOWEST_MS", "POLL_TIMEOUT_MS", "GATEWAY_DOWN", "seen", "RELOADED_KEY"].map((name) => line("const", name)),
-    ...["polling", "pollAgain", "pollFailures", "version"].map((name) => line("let", name)),
-    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "ownVersion", "reloadOnce", "withBusy"].map(pick),
-    `globalThis.page = { refresh, withBusy, state: () => ({ desk: state.desk, plans: state.plans, error: state.error, actionError: state.actionError, pollFailures, updates, reloads }), setView(next) { state.view = next; show(); void refresh(); }, set(patch) { Object.assign(state, patch); } };`,
+    ...["polling", "pollAgain", "pollStop", "pollFailures", "version"].map((name) => line("let", name)),
+    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "ownVersion", "reloadOnce", "withBusy", "showComputer"].map(pick),
+    `globalThis.page = { refresh, withBusy, showComputer, state: () => ({ desk: state.desk, plans: state.plans, error: state.error, actionError: state.actionError, pollFailures, updates, reloads }), setView(next) { state.view = next; show(); void refresh(); }, set(patch) { Object.assign(state, patch); } };`,
   ].join("\n");
   const context = vm.createContext({
     window: {
@@ -86,6 +91,7 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
   const handle = context.page as {
     refresh(): Promise<void>;
     withBusy(task: () => Promise<unknown>): Promise<unknown>;
+    showComputer(url: string): void;
     setView(view: string): void;
     set(patch: Record<string, unknown>): void;
     state(): { desk: unknown; plans: unknown; error: string; actionError: string; pollFailures: number; updates: number; reloads: number };
@@ -147,6 +153,18 @@ describe("the phone page's poll", () => {
     await vi.advanceTimersByTimeAsync(33_000);
     expect(link.page.state()).toMatchObject({ error: "", pollFailures: 0 });
     expect(link.fetches.slice(5).map((seen) => seen.at)).toEqual([135_000, 137_100]);
+    expect(link.most()).toBe(1);
+  });
+
+  it("lets go of the poll of a computer that doesn't answer when another is picked, instead of waiting it out", async () => {
+    const link = pagePoll((route) => (route.startsWith("https://laptop.tail1234.ts.net/") ? { ms: 50, body: route.endsWith("/api/desk") ? { workspaces: [{ id: "laptop" }] } : {} } : { ms: 100_000_000 }));
+    void link.page.refresh();
+    await vi.advanceTimersByTimeAsync(1000);
+    // The desktop is off and its poll hasn't given up yet (that takes 15 s). The laptop is picked.
+    link.page.showComputer("https://laptop.tail1234.ts.net");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(link.fetches[0]).toMatchObject({ route: "/api/desk", aborted: true });
+    expect(link.page.state()).toMatchObject({ desk: { workspaces: [{ id: "laptop" }] }, error: "", pollFailures: 0 });
     expect(link.most()).toBe(1);
   });
 
