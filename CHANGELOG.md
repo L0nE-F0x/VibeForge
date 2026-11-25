@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ctrl+Z only undoes.** While the notice that the terminal host stopped was up, Ctrl+Z (anywhere outside a box or a terminal, with no Undo on screen) pressed its **Continue all** and started every cut-off CLI again; on the "Something went wrong" notice it copied the diagnostics over your clipboard. Both buttons now sit under the notice's text, where Ctrl+Z never reaches, as the problem notice's do.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
