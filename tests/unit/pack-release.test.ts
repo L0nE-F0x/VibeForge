@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { fetchSyncthing, mark, parseSums, pinned, present, RELEASE_KEY, sourceNote, verifiedSums } from "../../scripts/fetch-syncthing.mjs";
-import { APP_FILES, ENTRIES, LEFT_OUT, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
+import { APP_FILES, ENTRIES, LEFT_OUT, manifestFor, PACKAGES, provided, runtimeParts, ships, specifiers, treeHash } from "../../scripts/pack-release.mjs";
 
 // scripts/pack-release.mjs packs a list of files, not the whole checkout. These keep the list in
 // step with what the app reads from its folder at runtime, so a change that loads something new
@@ -221,3 +223,68 @@ describe("the Syncthing a copy of VibeForge carries", () => {
   });
 });
 
+
+describe("the release split into the app, Electron and Syncthing", () => {
+  /** A function of scripts/install.sh, run on its own in bash. */
+  const installFn = (name: string, ...args: string[]) => {
+    const fn = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m").exec(read("scripts/install.sh"))?.[0];
+    expect(fn, name).toBeTruthy();
+    return execFileSync("bash", ["-c", `set -euo pipefail\n${fn}\n${name} "$@"`, name, ...args], { encoding: "utf8" });
+  };
+
+  it("names Electron's and Syncthing's archives by version and CPU, in a manifest install.sh reads", () => {
+    const parts = runtimeParts("/stage", { arch: "x64", electron: "45.3.2", syncthing: "2.1.7" });
+    expect(parts.map((part) => [part.kind, part.relative, part.name, part.dir])).toEqual([
+      ["electron", "node_modules/electron/dist", "electron-45.3.2-linux-x64", "/stage/node_modules/electron/dist"],
+      ["syncthing", "vendor/syncthing", "syncthing-2.1.7-linux-x64", "/stage/vendor/syncthing"],
+    ]);
+    // Both are folders the whole build carries, which the app archive leaves out and install.sh links in.
+    expect(PACKAGES.electron).toContain("dist");
+    expect(shipped("vendor/syncthing/syncthing")).toBe(true);
+    const manifest = manifestFor({ version: "3.8.0", arch: "x64", parts, treeHash: (dir) => (dir.includes("electron") ? "a" : "b").repeat(64) });
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "vf-manifest-")), "manifest.json");
+    fs.writeFileSync(file, manifest);
+    const fields = { version: "3.8.0", electron: "electron-45.3.2-linux-x64", electronTree: "a".repeat(64), syncthing: "syncthing-2.1.7-linux-x64", syncthingTree: "b".repeat(64) };
+    for (const [key, value] of Object.entries(fields)) expect(installFn("json_field", file, key), key).toBe(`${value}\n`);
+    expect(JSON.parse(manifest)).toMatchObject(fields);
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  });
+
+  it("hashes a folder with install.sh's own tree_hash: contents, names, the executable bit and links count, its marks don't", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-tree-"));
+    fs.mkdirSync(path.join(dir, "locales"));
+    fs.writeFileSync(path.join(dir, "electron"), "binary", { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, "locales", "en-US.pak"), "pak");
+    const first = treeHash(dir);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(installFn("tree_hash", dir).trim()).toBe(first);
+    fs.writeFileSync(path.join(dir, ".vibeforge-installer"), "");
+    expect(treeHash(dir)).toBe(first);
+    fs.chmodSync(path.join(dir, "electron"), 0o644);
+    const notExecutable = treeHash(dir);
+    expect(notExecutable).not.toBe(first);
+    fs.chmodSync(path.join(dir, "electron"), 0o755);
+    expect(treeHash(dir)).toBe(first);
+    fs.writeFileSync(path.join(dir, "locales", "en-US.pak"), "changed");
+    expect(treeHash(dir)).not.toBe(first);
+    fs.writeFileSync(path.join(dir, "locales", "en-US.pak"), "pak");
+    fs.renameSync(path.join(dir, "locales", "en-US.pak"), path.join(dir, "locales", "de.pak"));
+    expect(treeHash(dir)).not.toBe(first);
+    fs.renameSync(path.join(dir, "locales", "de.pak"), path.join(dir, "locales", "en-US.pak"));
+    fs.symlinkSync("electron", path.join(dir, "alias"));
+    expect(treeHash(dir)).not.toBe(first);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("publishes the app, Electron, Syncthing and the whole build for both CPUs in the one release", () => {
+    const workflow = read(path.join(".github", "workflows", "release.yml"));
+    for (const arch of ["x64", "arm64"]) {
+      for (const kind of ["vibeforge", "electron", "syncthing"]) expect(workflow, `${kind} ${arch}`).toContain(`assets/${kind}-*-linux-${arch}.tar.zst`);
+    }
+    expect(workflow).toContain('"vibeforge-app-$version-linux-$arch.tar.zst"');
+    expect(workflow).toContain("files=(assets/install.sh assets/*.tar.zst assets/SHA256SUMS)");
+    // Updating from the last release before versioned installs is tried before every release.
+    expect(read("scripts/build-release.sh")).toContain("scripts/try-updates.sh");
+    expect(read("scripts/try-updates.sh")).toContain("legacy_tag=v3.7.2");
+  });
+});
