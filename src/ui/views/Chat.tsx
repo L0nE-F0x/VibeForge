@@ -171,6 +171,7 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
                     void rename();
                   }}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                     if (event.key === "Enter") {
                       event.preventDefault();
                       event.currentTarget.blur();
