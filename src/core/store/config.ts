@@ -7,7 +7,7 @@ import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import type { WorkspaceFile } from "../workspaces.js";
-import type { ComputerUseGrant, EngineRow, LayoutNode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
+import type { ComputerUseGrant, EngineRow, LayoutNode, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
@@ -39,7 +39,7 @@ export function defaultSettings(): Settings {
     keepRuns: { days: 0, maxMb: 0 },
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
-    orchestrator: { engine: "", mode: "plan", model: "", projectsFolder: "" },
+    orchestrator: { engine: "", mode: "go", model: "", projectsFolder: "", terse: true },
     computerUse: {
       on: false,
       app: { see: true, pointer: true, keys: true },
@@ -216,11 +216,21 @@ export class Config {
       },
       orchestrator: (() => {
         const effort = str(raw.orchestrator?.effort).trim().toLowerCase();
+        const rawMode = str(raw.orchestrator?.mode).trim().toLowerCase();
+        const mode: OrchestratorMode =
+          rawMode === "plan" || rawMode === "ask"
+            ? "plan"
+            : rawMode === "never" || rawMode === "auto"
+              ? "never"
+              : rawMode === "go" || rawMode === "risky"
+                ? "go"
+                : defaults.orchestrator.mode;
         return {
           engine: str(raw.orchestrator?.engine).trim() || defaults.orchestrator.engine,
-          mode: raw.orchestrator?.mode === "go" ? "go" : "plan",
+          mode,
           model: cleanModel(str(raw.orchestrator?.model)),
           projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
+          terse: bool(raw.orchestrator?.terse, defaults.orchestrator.terse ?? true),
           ...(/^[a-z]{2,12}$/.test(effort) ? { effort } : {}),
         };
       })(),

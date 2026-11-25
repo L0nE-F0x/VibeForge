@@ -3,6 +3,7 @@ import os from "node:os";
 import { buildDesk, COMPANION_RECENT_MS, deviceFor, deviceKeyHash, isCodingSession, newDeviceKey, shellForegroundEngine, tailText, type DeskPayload, type DeskRun } from "../src/core/companion.js";
 import { CompanionHttpError, startCompanionHttp, type CompanionActions, type CompanionHttp, type LaunchResult, type OrchestratorActions, type SessionPayload } from "../src/core/companion-http.js";
 import { buildPhoneOrchestrator, orchestratorDictationWords } from "../src/core/companion-orchestrator.js";
+import { planAnswer } from "../src/shared/plan-answer.js";
 import { describeError } from "../src/core/log.js";
 import { canOrchestrate } from "../src/core/orchestrator.js";
 import { vocabularyPrompt } from "../src/shared/dictation.js";
@@ -227,14 +228,19 @@ export function orchestratorFor(wire: Pick<CompanionWire, "service" | "canHear" 
           service.orchestratorClear();
           return;
         }
-        if (trimmed === "/go" || trimmed === "/cancel") {
-          const waiting = [...service.orchestratorView().turns].reverse().find((turn) => turn.plan === "waiting");
+        const turns = service.orchestratorView().turns;
+        const waiting = [...turns].reverse().find((turn) => turn.plan === "waiting" && turn.steps?.length);
+        const latestIsWaiting = turns.findLast((turn) => !turn.note)?.plan === "waiting";
+        const spokenAnswer = waiting && latestIsWaiting ? planAnswer(trimmed) : null;
+        if (trimmed === "/go" || spokenAnswer === "go") {
           if (waiting) {
-            if (trimmed === "/go") {
-              void service.orchestratorRun(waiting.id).catch((error: unknown) => wire.log(`Orchestrator, run from phone: ${describeError(error).split("\n")[0]}`));
-            } else {
-              service.orchestratorCancel(waiting.id);
-            }
+            void service.orchestratorRun(waiting.id).catch((error: unknown) => wire.log(`Orchestrator, run from phone: ${describeError(error).split("\n")[0]}`));
+            return;
+          }
+        }
+        if (trimmed === "/cancel" || spokenAnswer === "cancel") {
+          if (waiting) {
+            service.orchestratorCancel(waiting.id);
             return;
           }
         }

@@ -17,24 +17,25 @@ import {
   emptyPromise,
   extractEarlySay,
   formatSettingsRules,
-  holdsForGo,
   inspectsQuotas,
   inspectsStorage,
+  isHighRiskStep,
+  isLowRiskComputerStep,
+  isReadOnlyStep,
   keySequenceFor,
   lookingLine,
   normalizeMemoryAction,
   normalizeComputerAction,
   computerGrantFor,
   computerUseBlocked,
-  ONLY_LOOKS,
   parseComputerSurface,
   parseVerifyOptions,
   plannedFolder,
   resolveLocalReflex,
   resolveSettingsStep,
-  safeInCall,
   sessionGone,
   settingsFingerprint,
+  shouldAutoRunPlan,
   withPlannedWorkspaces,
   type MaestroCopy,
   type MaestroNote,
@@ -66,6 +67,7 @@ import {
 } from "../orchestrator.js";
 import { cwdAllowed } from "../places.js";
 import { VibyDiagnostics, formatDiagnosticsLogLine, type VibyTurnOutcome } from "./orchestrator-diagnostics.js";
+import { planAnswer } from "../../shared/plan-answer.js";
 import { speakable } from "../replies.js";
 import { en } from "../../ui/i18n/en.js";
 import { findSherpa } from "../sherpa.js";
@@ -813,6 +815,7 @@ export class OrchestratorDesk {
         planner,
         pickedEngine: all.orchestrator.engine,
         mode: all.orchestrator.mode,
+        terse: all.orchestrator.terse !== false,
         model: planner && planner === all.orchestrator.engine ? all.orchestrator.model : "",
         effort: planner && planner === all.orchestrator.engine ? (all.orchestrator.effort ?? "") : "",
         projectsFolder: this.projectsFolder(),
@@ -952,7 +955,8 @@ export class OrchestratorDesk {
     let outcome: VibyTurnOutcome = "aborted";
     let stepKinds: string[] = [];
     let errorKind: string | undefined;
-    const { engine: picked, mode, model: chosen, effort: chosenEffort } = this.settings();
+    const { engine: picked, mode, model: chosen, effort: chosenEffort, terse } = this.settings();
+    const terseReplies = terse !== false;
     const engineId = this.planner();
     let model = "";
     try {
@@ -1220,15 +1224,64 @@ export class OrchestratorDesk {
       }
     }
     const checks: OrchestratorCheck[] = [];
+    const executedChainSteps: OrchestratorStep[] = [];
+    const chainSummaries: string[] = [];
     const seenChecks = new Set<string>();
     const checkKey = (step: OrchestratorStep) => `${step.kind}:${step.action ?? ""}:${step.workspaceId}:${step.target}:${step.prompt}`;
-    // A plan whose steps are only lookups or inspections: VibeForge gathers the findings (up to
-    // MAX_INSPECT_ROUNDS rounds with deduplication) and hands them back so Viby can answer or
-    // give the concrete steps in the same turn.
+    const epoch = this.runEpoch;
+    // Observe-then-act loop (up to MAX_INSPECT_ROUNDS): executes leading instant actions
+    // (such as focus-window/show) + trailing lookup/inspect steps and feeds findings and
+    // screenshots back to the planner in the same turn.
     for (let round = 0; round < MAX_INSPECT_ROUNDS; round += 1) {
       if (signal.aborted || unknownKinds.length || !steps.length) break;
-      if (!steps.every((step) => (step.kind === "lookup" || step.kind === "inspect") && !stepIssue(step, currentContext))) break;
-      const freshSteps = steps.filter((step) => !seenChecks.has(checkKey(step)));
+      if (steps.some((step) => stepIssue(step, currentContext))) break;
+      const observeStart = steps.findLastIndex((step) => step.kind !== "lookup" && step.kind !== "inspect") + 1;
+      const observeSteps = steps.slice(observeStart);
+      if (!observeSteps.length) break;
+      const leading = steps.slice(0, observeStart);
+      if (
+        leading.length > 0 &&
+        !(
+          leading.every((step) => !step.after && (step.kind === "computer" || step.kind === "show" || step.kind === "workbench")) &&
+          shouldAutoRunPlan(leading, currentContext, { mode, inCall: Boolean(this.onCall), fromReading: checks.length > 0 })
+        )
+      ) {
+        break;
+      }
+      if (leading.length > 0) {
+        const chainTurn: OrchestratorTurn = { id: turnId(), at: this.core.now().toISOString(), from: "vibeforge", text: "" };
+        for (let i = 0; i < leading.length; i += 1) {
+          const step = leading[i];
+          step.state = "running";
+          this.setActivity({ kind: step.kind, label: this.stepActivityLabel(step, currentContext) });
+          try {
+            await this.carryOut(chainTurn, step, epoch, mode !== "never");
+            step.state = "done";
+            executedChainSteps.push(step);
+            chainSummaries.push(`${step.asked || step.kind}${step.result ? `: ${step.result}` : ""}`);
+          } catch (error) {
+            step.state = "failed";
+            step.error = error instanceof Error ? error.message : String(error);
+            this.setActivity(null);
+            const remaining = steps.slice(i + 1).map((pending) => ({ ...pending, state: "skipped" as const }));
+            const allFailedChain = [...executedChainSteps, step, ...remaining];
+            outcome = "planned";
+            stepKinds = allFailedChain.map((item) => item.kind);
+            this.answer({
+              text: step.error || plan.say,
+              ...(checks.length ? { checks } : {}),
+              steps: allFailedChain,
+              plan: "done",
+              ...(plan.hangup ? { hangup: true } : {}),
+            });
+            return;
+          }
+          if (signal.aborted) return;
+        }
+        this.setActivity(null);
+      }
+      // If a leading action just ran (e.g. focus-window), allow re-capturing observe steps so screenshots stay fresh.
+      const freshSteps = leading.length > 0 ? observeSteps : observeSteps.filter((step) => !seenChecks.has(checkKey(step)));
       if (!freshSteps.length) {
         steps = [];
         unknownKinds = [];
@@ -1255,13 +1308,17 @@ export class OrchestratorDesk {
           };
         }),
       );
-      const details = results
-        .map((res, idx) => `${freshSteps[idx].kind === "lookup" ? "Lookup" : "Inspection"} "${freshSteps[idx].asked || freshSteps[idx].prompt}":\n${res.details}`)
-        .join("\n\n");
+      const details = [
+        ...(chainSummaries.length ? [`Already carried out in this turn:\n${chainSummaries.map((line) => `- ${line}`).join("\n")}`] : []),
+        ...results.map((res, idx) => `${freshSteps[idx].kind === "lookup" ? "Lookup" : "Inspection"} "${freshSteps[idx].asked || freshSteps[idx].prompt}":\n${res.details}`),
+      ].join("\n\n");
+      const terseNote = terseReplies
+        ? ' Keep `say` ultra-short (e.g. "Clicked play." or "") if your steps auto-run; use future tense ("I\'ll ...") only if a step will wait for Go.'
+        : ' Leave `say: ""` on any further inspect steps; use future tense ("I\'ll ...") only if a step will wait for Go.';
       const guidance =
         round < MAX_INSPECT_ROUNDS - 1
-          ? `Now answer the person's request ("${words}") using these exact findings. Return concrete steps to carry it out, emit further inspect/lookup steps ONLY if a critical detail is still missing, or answer clearly in say with steps: [] if nothing should be started.`
-          : `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.`;
+          ? `Now answer the person's request ("${words}") using these exact findings. Return concrete steps to carry it out, emit further inspect/lookup steps ONLY if a critical detail is still missing, or answer clearly in say with steps: [] if nothing should be started.${terseNote}`
+          : `Now answer the person's request ("${words}") using these exact findings. Return the concrete steps to carry it out now, or answer clearly in say with steps: [] if nothing should be started.${terseNote}`;
       const inspectImages: SavedPromptImage[] = results.flatMap((res) => {
         const imgPath = "imagePath" in res && typeof res.imagePath === "string" ? res.imagePath : "";
         if (!imgPath) return [];
@@ -1303,48 +1360,72 @@ export class OrchestratorDesk {
     }
     // A yes to the plan that waits, with nothing new to do (W21 task 2).
     if (plan.confirmWaiting && waiting && !unknownKinds.length && (!steps.length || planKey(steps) === waitingSeen)) {
-      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup), signal)) {
+      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup), signal, words)) {
         outcome = "answered";
         return;
       }
       if (signal.aborted) return;
     }
     if (!steps.length) {
-      outcome = "answered";
-      this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), ...(plan.hangup ? { hangup: true } : {}) });
+      outcome = executedChainSteps.length ? "planned" : "answered";
+      if (executedChainSteps.length) stepKinds = executedChainSteps.map((step) => step.kind);
+      this.answer({
+        text: plan.say,
+        ...(checks.length ? { checks } : {}),
+        ...(executedChainSteps.length ? { steps: executedChainSteps, plan: "done" as const } : {}),
+        ...(plan.hangup ? { hangup: true } : {}),
+      });
       if (plan.hangup) this.onCall?.({ kind: "hangup" });
       return;
     }
     await this.markDirty(steps);
-    const inPlaceDirty = this.onCall ? await this.hasDirtyInPlace(steps) : false;
+    const inPlaceDirty = await this.hasDirtyInPlace(steps);
     // The same steps as a waiting plan made from what Viby read are still made from it: returned
     // unchanged in a later turn, they keep the mark rather than lose it (decision D1).
     const key = planKey(steps);
     const carried = this.conversation.turns.some((item) => item.plan === "waiting" && item.steps?.length && madeFromReading(item) && planKey(item.steps) === key);
     // A new plan takes the place of one still waiting for Go.
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
+    const checked = withPlannedWorkspaces(currentContext, steps);
+    const ready = steps.every((step) => !stepIssue(step, checked));
+    // Once Viby has read a screen, a file, a diff or a reply in this turn, what it read could be
+    // steering the plan: low-risk computer actions after reading still auto-run under "go", while
+    // code-writing / destructive actions stay guarded (decision D1).
+    const readSomething = checks.length > 0 || carried;
+    const willAutoRun =
+      ready &&
+      !unknownKinds.length &&
+      shouldAutoRunPlan(steps, checked, {
+        mode,
+        inCall: Boolean(this.onCall),
+        fromReading: readSomething,
+        inPlaceDirty,
+      });
+    const combinedChecks: OrchestratorCheck[] = !willAutoRun && executedChainSteps.length
+      ? [
+          ...checks,
+          ...executedChainSteps.map((step) => ({
+            id: step.id,
+            kind: "inspect" as const,
+            label: step.asked || step.kind,
+            summary: step.result || "Done",
+            details: `${step.asked || step.kind}${step.result ? `: ${step.result}` : ""}`,
+          })),
+        ]
+      : checks;
+    const finalSteps = willAutoRun && executedChainSteps.length ? [...executedChainSteps, ...steps] : steps;
     outcome = "planned";
-    stepKinds = steps.map((step) => step.kind);
+    stepKinds = finalSteps.map((step) => step.kind);
     const answered = this.answer({
       text: plan.say,
-      ...(checks.length ? { checks } : {}),
+      ...(combinedChecks.length ? { checks: combinedChecks } : {}),
       ...(carried ? { fromReading: true } : {}),
-      steps,
+      steps: finalSteps,
       plan: "waiting",
       ...(plan.hangup ? { hangup: true } : {}),
     });
-    // Just go: at once, unless a step needs fixing, or would stop, apply or throw away someone's work.
-    // Showing something or reading an answer out changes nothing, so a plan of only those goes at once either way.
-    // In a voice call, safe steps (isolated branch copies, workspaces, tells, tasks, routines) also go at once.
-    const checked = withPlannedWorkspaces(currentContext, steps);
-    const ready = steps.every((step) => !stepIssue(step, checked));
-    const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
-    // Once Viby has read a screen, a file, a diff or a reply in this turn, what it read could be
-    // steering the plan: only steps that just look go without Go (decision D1, 2026-11-25).
-    const readSomething = checks.length > 0 || carried;
-    const lookOnly = steps.every((step) => ONLY_LOOKS.includes(step.kind));
-    if (ready && !unknownKinds.length && (lookOnly || (!readSomething && (callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))))) {
-      void this.run(answered.id, true);
+    if (willAutoRun) {
+      void this.run(answered.id, mode !== "never");
     }
     } finally {
       const finalOutcome: VibyTurnOutcome = signal.aborted ? "aborted" : outcome;
@@ -1377,27 +1458,33 @@ export class OrchestratorDesk {
    * still waiting, with why. False when the plan isn't the one the person answered any more: then
    * the answer goes on as any other.
    */
-  private async confirmWaiting(waiting: OrchestratorTurn, seen: string, checks: OrchestratorCheck[], hangup: boolean, signal: AbortSignal): Promise<boolean> {
+  private async confirmWaiting(waiting: OrchestratorTurn, seen: string, checks: OrchestratorCheck[], hangup: boolean, signal: AbortSignal, words: string): Promise<boolean> {
     const unchanged = () => !signal.aborted && waiting.plan === "waiting" && this.conversation.turns.includes(waiting) && Boolean(waiting.steps?.length) && planKey(waiting.steps ?? []) === seen;
     if (!unchanged()) return false;
     const steps = waiting.steps ?? [];
     let why: Exclude<PlanConfirmed, "ran"> | null = null;
-    // What was read could be steering the planner's yes as much as the plan.
-    if (checks.length || madeFromReading(waiting)) why = "read";
-    else {
-      await this.markDirty(steps);
-      const context = withPlannedWorkspaces(await this.context(), steps);
-      const inPlaceDirty = this.onCall ? await this.hasDirtyInPlace(steps) : false;
-      if (steps.some((step) => stepIssue(step, context))) why = "fix";
-      else if (steps.some((step) => holdsForGo(step, context)) || (this.onCall && (inPlaceDirty || steps.some((step) => !safeInCall(step, context))))) why = "risky";
+    await this.markDirty(steps);
+    const context = withPlannedWorkspaces(await this.context(), steps);
+    const inPlaceDirty = await this.hasDirtyInPlace(steps);
+    const mode = this.settings().mode;
+    const directGo = planAnswer(words) === "go";
+    if (steps.some((step) => stepIssue(step, context))) {
+      why = "fix";
+    } else if (mode === "never" || directGo) {
+      why = null;
+    } else if (checks.length > 0) {
+      why = "read";
+    } else if (inPlaceDirty || steps.some((step) => isHighRiskStep(step, context))) {
+      why = "risky";
+    } else if (madeFromReading(waiting) && !steps.every((step) => isReadOnlyStep(step) || isLowRiskComputerStep(step))) {
+      why = "read";
     }
     // Stopped, Go or Cancel pressed, or the card changed, while that was checked.
     if (!unchanged()) return false;
     if (!why) {
       if (hangup) waiting.hangup = true;
       this.answer({ text: en[CONFIRMED_KEY.ran], confirmed: "ran" });
-      // As Just go runs it: a key that answers a CLI is checked against its screen once more first.
-      void this.run(waiting.id, true).catch(() => undefined);
+      void this.run(waiting.id, !directGo && mode !== "never").catch(() => undefined);
       return true;
     }
     // The same plan again, newest, so a spoken "go" finds it; still waiting for the person's own Go.
@@ -1636,7 +1723,12 @@ export class OrchestratorDesk {
   ): Promise<{ handled: boolean; reply?: string }> {
     const trimmed = text.trim();
     if (!trimmed || this.thinking) return { handled: false };
-    const waitingPlan = [...this.conversation.turns].reverse().find((turn) => turn.plan === "waiting" && turn.steps?.length);
+    const turns = this.conversation.turns;
+    const latestNonNote = turns.findLast((turn) => !turn.note);
+    const anyWaiting = [...turns].reverse().find((turn) => turn.plan === "waiting" && turn.steps?.length);
+    const waitingForWord = latestNonNote?.plan === "waiting" && latestNonNote.steps?.length ? latestNonNote : undefined;
+    const explicitSlash = /^\/(?:go|cancel)(?:\s|$)/i.test(trimmed);
+    const waitingPlan = explicitSlash ? anyWaiting : waitingForWord;
     const currentLooking = looking !== undefined ? looking : this.looking;
     const context = await this.context();
     const reflex = resolveLocalReflex(trimmed, context, currentLooking, Boolean(waitingPlan));
@@ -1696,7 +1788,7 @@ export class OrchestratorDesk {
         return { handled: true, reply: msg };
       }
     }
-    if (reflex.tag === "trust" && (holdsForGo(steps[0], effectiveContext) || (this.onCall && !safeInCall(steps[0], effectiveContext)))) {
+    if (reflex.tag === "trust" && this.settings().mode !== "never" && isHighRiskStep(steps[0], effectiveContext)) {
       for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
       const reply = `${reflex.label} is waiting on an approval prompt; say Go or press Go to confirm.`;
       this.answer({ text: reply, steps, plan: "waiting" });
@@ -1907,6 +1999,10 @@ export class OrchestratorDesk {
     for (let idx = 0; idx < allSteps.length; idx += 1) {
       const step = allSteps[idx];
       if (this.runEpoch !== epoch || !this.conversation.turns.includes(turn)) return;
+      if (step.state === "done") {
+        prevOk = true;
+        continue;
+      }
       if (step.after && !prevOk) {
         step.state = "skipped";
         this.save();

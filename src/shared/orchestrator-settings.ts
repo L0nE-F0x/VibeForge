@@ -2,7 +2,7 @@
 // for `settings` steps so Viby can read and change any VibeForge setting on the person's behalf.
 // Pure and Node-free so the main process, the desktop plan card, and the phone view share one check.
 
-import type { EngineRow } from "../core/types.js";
+import type { EngineRow, OrchestratorMode } from "../core/types.js";
 import { cleanModel, effortLevels } from "./launch-options.js";
 import { describeComputerGrants, type ComputerUseGrants } from "./computer-use.js";
 import { parseOptions } from "./orchestrator-actions.js";
@@ -16,7 +16,9 @@ export interface PlanSettingsContext {
     planner: string;
     /** Explicit planner id in settings ("" when automatic). */
     pickedEngine: string;
-    mode: "plan" | "go";
+    mode: OrchestratorMode;
+    /** Whether spoken/status replies stay terse on auto-running steps. */
+    terse?: boolean;
     model: string;
     /** Explicit reasoning effort in settings ("" when using the fast "low" default). */
     effort: string;
@@ -147,8 +149,10 @@ export function formatSettingsRules(settings: PlanSettingsContext, options?: { s
   const installedVoices = voice.installedVoices.length ? voice.installedVoices.map((item) => item.name).join(", ") : "none";
   const themeLimit = slim ? 8 : 20;
 
+  const approvalLabel = viby.mode === "plan" ? "ask-all" : viby.mode === "never" ? "never-ask" : "ask-risky";
+
   return [
-    `- Viby (you): planner=${viby.planner || "none"}${viby.pickedEngine ? "" : " (auto)"}, model=${viby.model || "default"}, effort=${viby.effort || "low (default)"}, mode=${viby.mode}, projectsFolder=${viby.projectsFolder || "~/Projects"}; available planners: ${planners || "none"}`,
+    `- Viby (you): planner=${viby.planner || "none"}${viby.pickedEngine ? "" : " (auto)"}, model=${viby.model || "default"}, effort=${viby.effort || "low (default)"}, mode=${viby.mode} (${approvalLabel}), terse=${viby.terse === false ? "off" : "on"}, projectsFolder=${viby.projectsFolder || "~/Projects"}; available planners: ${planners || "none"}`,
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
     `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, themeLimit).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px${app.terminalPassthrough ? ", terminalPassthrough=on" : ""}, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
@@ -164,6 +168,7 @@ export function settingsFingerprint(settings: PlanSettingsContext | undefined): 
   return JSON.stringify([
     viby.planner,
     viby.mode,
+    viby.terse !== false,
     viby.model,
     viby.effort,
     viby.projectsFolder,
@@ -314,7 +319,8 @@ export type SettingsAction =
       engine?: string;
       model?: string;
       effort?: string;
-      mode?: "plan" | "go";
+      mode?: OrchestratorMode;
+      terse?: boolean;
       projectsFolder?: string;
       summary: string;
     }
@@ -419,6 +425,39 @@ function isPlannerRow(row: Pick<EngineRow, "id" | "bin">): boolean {
   return /\b(?:grok|claude|codex|agy)\b|antigravity/.test(name);
 }
 
+function parseApprovalMode(raw: string, allowAmbiguous = false): OrchestratorMode | null {
+  const clean = raw.trim().toLowerCase().replace(/[.!]+$/, "").replace(/\s+/g, " ");
+  if (/^(?:plan|show|show me first|ask|ask all|ask always|ask for everything|ask before everything|everything|always ask|review|wait)$/.test(clean)) {
+    return "plan";
+  }
+  if (
+    /^(?:go|just go|risky|ask risky|ask only for risky|ask only for risky actions|ask for risky|ask for risky actions|ask for risky only|risky only|only risky|balanced|normal)$/.test(
+      clean,
+    ) ||
+    (allowAmbiguous && clean === "default")
+  ) {
+    return "go";
+  }
+  if (
+    /^(?:never|never ask|never ask for approval|always|always go|all|no ask|no approval|no confirmations?|immediate|immediately|full auto|autonomous)$/.test(
+      clean,
+    ) ||
+    (allowAmbiguous && clean === "auto")
+  ) {
+    return "never";
+  }
+  return null;
+}
+
+function parseTerseFlag(raw: string): boolean | null {
+  const b = parseBool(raw);
+  if (b !== null) return b;
+  const clean = raw.trim().toLowerCase().replace(/[.!]+$/, "");
+  if (/^(?:terse|brief|short|concise|quiet|compact)$/.test(clean)) return true;
+  if (/^(?:verbose|full|detailed|chatty|long|normal)$/.test(clean)) return false;
+  return null;
+}
+
 /**
  * Parses a `settings` step into a concrete `SettingsAction`, or returns `{ issue, asked }` when
  * something named by the step is unknown or unsupported.
@@ -434,18 +473,23 @@ export function resolveSettingsStep(
   const modelArg = (input.model ?? "").trim();
   const effortArg = (input.effort ?? "").trim().toLowerCase();
   const folderArg = (input.folder ?? "").trim();
+  const opts = parseOptions(input.options);
 
   // 1. Viby / Orchestrator self-configuration
   const isVibyRoot =
     (!key && Boolean(engineArg || modelArg || effortArg)) ||
     /^(?:viby|vibey|maestro|orchestrator|self|planner)$/.test(key);
-  const isVibySub = /^(?:viby|vibey|maestro|orchestrator)(?:engine|planner|cli|model|effort|reasoningeffort|mode|projectsfolder|projects|folder)$/.test(key);
+  const isVibySub =
+    /^(?:viby|vibey|maestro|orchestrator)(?:engine|planner|cli|model|effort|reasoningeffort|mode|approval|approvals|approvalmode|terse|tersereplies|concise|projectsfolder|projects|folder)$/.test(
+      key,
+    ) || /^(?:approval|approvals|approvalmode|terse|tersereplies)$/.test(key);
 
   if (isVibyRoot || isVibySub) {
     let engine: string | undefined;
     let model: string | undefined;
     let effort: string | undefined;
-    let mode: "plan" | "go" | undefined;
+    let mode: OrchestratorMode | undefined;
+    let terse: boolean | undefined;
     let projectsFolder: string | undefined;
 
     if (key.endsWith("engine") || key.endsWith("planner") || key.endsWith("cli") || (key === "planner" && value)) {
@@ -478,11 +522,14 @@ export function resolveSettingsStep(
       const askedEffort = (effortArg || value).toLowerCase();
       if (!askedEffort) return { action: null, issue: "effort", asked: "Viby effort" };
       effort = isResetWord(askedEffort) ? "" : askedEffort;
-    } else if (key.endsWith("mode")) {
-      const clean = value.toLowerCase();
-      if (/^(?:go|just go|auto|immediate|immediately)$/.test(clean)) mode = "go";
-      else if (/^(?:plan|show|show me first|ask|review|wait)$/.test(clean)) mode = "plan";
-      else return { action: null, issue: "prompt", asked: value || "Viby mode" };
+    } else if (key.endsWith("mode") || key.endsWith("approval") || key.endsWith("approvals") || key.endsWith("approvalmode")) {
+      const parsedMode = parseApprovalMode(value, true);
+      if (!parsedMode) return { action: null, issue: "prompt", asked: value || "Viby mode" };
+      mode = parsedMode;
+    } else if (key.endsWith("terse") || key.endsWith("tersereplies") || key.endsWith("concise")) {
+      const parsedTerse = parseTerseFlag(value);
+      if (parsedTerse === null) return { action: null, issue: "prompt", asked: value || "Viby terse replies" };
+      terse = parsedTerse;
     } else if (key.endsWith("projectsfolder") || key.endsWith("projects") || key.endsWith("folder")) {
       const askedFolder = folderArg || value;
       if (!askedFolder) return { action: null, issue: "folder", asked: "projects folder" };
@@ -491,6 +538,18 @@ export function resolveSettingsStep(
       else return { action: null, issue: "folder", asked: askedFolder };
     } else {
       // Root `target: "viby"` with one or more fields
+      const optMode = opts.str("mode") ?? opts.str("approval");
+      if (optMode) {
+        const parsedMode = parseApprovalMode(optMode, true);
+        if (!parsedMode) return { action: null, issue: "prompt", asked: optMode };
+        mode = parsedMode;
+      }
+      const optTerse = opts.str("terse");
+      if (optTerse !== undefined) {
+        const parsedTerse = parseTerseFlag(optTerse);
+        if (parsedTerse === null) return { action: null, issue: "prompt", asked: optTerse };
+        terse = parsedTerse;
+      }
       if (engineArg) {
         if (isResetWord(engineArg)) {
           engine = "";
@@ -521,8 +580,8 @@ export function resolveSettingsStep(
       }
       if (value) {
         const lower = value.toLowerCase();
-        if (/^(?:go|just go)$/.test(lower)) mode = "go";
-        else if (/^(?:plan|show me first)$/.test(lower)) mode = "plan";
+        const maybeMode = parseApprovalMode(value);
+        if (maybeMode && mode === undefined) mode = maybeMode;
         else if (!engineArg && !modelArg && !effortArg) {
           const maybeEngine = matchEngine(value, context.engines);
           if (maybeEngine && isPlannerRow({ id: maybeEngine.id, bin: maybeEngine.bin ?? maybeEngine.id })) {
@@ -557,7 +616,7 @@ export function resolveSettingsStep(
       }
     }
 
-    if (engine === undefined && model === undefined && effort === undefined && mode === undefined && projectsFolder === undefined) {
+    if (engine === undefined && model === undefined && effort === undefined && mode === undefined && terse === undefined && projectsFolder === undefined) {
       return { action: null, issue: "prompt", asked: "Viby settings" };
     }
 
@@ -565,10 +624,11 @@ export function resolveSettingsStep(
     if (engine !== undefined) parts.push(engine ? (context.engines.find((e) => e.id === engine)?.label ?? engine) : "auto planner");
     if (model !== undefined) parts.push(model || "default model");
     if (effort !== undefined) parts.push(effort ? `${effort} effort` : "default effort");
-    if (mode !== undefined) parts.push(`mode: ${mode}`);
+    if (mode !== undefined) parts.push(`approval: ${mode === "plan" ? "ask for everything" : mode === "never" ? "never ask" : "ask only for risky"}`);
+    if (terse !== undefined) parts.push(`terse replies: ${terse ? "on" : "off"}`);
     if (projectsFolder !== undefined) parts.push(`folder: ${projectsFolder || "auto"}`);
     const summary = `Viby · ${parts.join(" · ")}`;
-    return { action: { op: "viby", engine, model, effort, mode, projectsFolder, summary }, issue: null, asked: summary };
+    return { action: { op: "viby", engine, model, effort, mode, terse, projectsFolder, summary }, issue: null, asked: summary };
   }
 
   // 2. Voice & STT model selection / download

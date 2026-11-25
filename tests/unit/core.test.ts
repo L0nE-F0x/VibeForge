@@ -582,10 +582,11 @@ describe("store", () => {
     const configRoot = tempDir();
     const dataRoot = tempDir();
     const store = new Store(configRoot, dataRoot);
+    expect(store.readSettings().orchestrator).toEqual({ engine: "", mode: "go", model: "", projectsFolder: "", terse: true });
     store.writeSettings({ ...store.readSettings(), orchestrator: { engine: "codex", mode: "plan", model: "gpt-5.5", effort: "xhigh", projectsFolder: "" } });
     store.close();
     const reopened = new Store(configRoot, dataRoot);
-    expect(reopened.readSettings().orchestrator).toEqual({ engine: "codex", mode: "plan", model: "gpt-5.5", effort: "xhigh", projectsFolder: "" });
+    expect(reopened.readSettings().orchestrator).toEqual({ engine: "codex", mode: "plan", model: "gpt-5.5", effort: "xhigh", projectsFolder: "", terse: true });
     const file = path.join(configRoot, "settings.json");
     fs.writeFileSync(file, JSON.stringify({ orchestrator: { engine: "claude", model: "opus", effort: " MAX " } }));
     expect(reopened.readSettings().orchestrator.effort).toBe("max");

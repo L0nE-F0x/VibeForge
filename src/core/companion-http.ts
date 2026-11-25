@@ -5,7 +5,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { cleanText } from "./agent-talk.js";
 import { bearerToken, deviceName, tokenMatches, type DeskPayload } from "./companion.js";
-import type { CompanionDevice } from "./types.js";
+import type { CompanionDevice, OrchestratorMode } from "./types.js";
 import type { PhoneOrchestrator } from "./companion-orchestrator.js";
 import { phoneCoreText, phoneLanguage, phoneSay, phoneWords, type PhoneLanguage } from "./companion-text.js";
 import type { StepPatch } from "./orchestrator.js";
@@ -85,8 +85,8 @@ export interface OrchestratorActions {
   cancel(turnId: string): void;
   editStep(turnId: string, stepId: string, patch: StepPatch): void;
   removeStep(turnId: string, stepId: string): void;
-  /** The view's own header: which CLI plans, and whether a plan waits for Go. */
-  settings(patch: { engine?: string; mode?: "plan" | "go" }): void;
+  /** The view's own header: which CLI plans, and when a plan waits for Go. */
+  settings(patch: { engine?: string; mode?: OrchestratorMode }): void;
   selectThread?(threadId: string): void;
   deleteThread?(threadId: string): void;
   readMemory?(): string;
@@ -620,7 +620,15 @@ async function orchestratorPost(
   else if (action === "remove") desk.removeStep(needTurn(), needStep());
   else if (action === "settings") {
     const engine = text(body.engine, 80);
-    const mode = body.mode === "plan" || body.mode === "go" ? body.mode : undefined;
+    const rawMode = typeof body.mode === "string" ? body.mode.trim().toLowerCase() : "";
+    const mode: OrchestratorMode | undefined =
+      rawMode === "plan" || rawMode === "ask"
+        ? "plan"
+        : rawMode === "go" || rawMode === "risky"
+          ? "go"
+          : rawMode === "never" || rawMode === "auto"
+            ? "never"
+            : undefined;
     if (!engine && !mode) throw new CompanionHttpError("phone.error.invalid", 400);
     desk.settings({ ...(engine ? { engine } : {}), ...(mode ? { mode } : {}) });
   } else throw new CompanionHttpError("phone.error.notFound", 404);

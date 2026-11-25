@@ -776,6 +776,67 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("defaults to ask-only-for-risky (go) with terse replies and lets confirmWaiting run a waiting computer-use plan from inspect", async () => {
+    const fresh = setup();
+    expect(fresh.svc.getSettings().orchestrator).toEqual({ engine: "", mode: "go", model: "", projectsFolder: "", terse: true });
+    await fresh.svc.close();
+
+    const clicks: string[] = [];
+    const ctx = withPlanner([]);
+    ctx.svc.saveSettings({
+      orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7", projectsFolder: "" },
+      computerUse: {
+        on: true,
+        desktop: { see: true, pointer: true, keys: true },
+        app: { see: true, pointer: true, keys: true },
+        browser: { see: true, pointer: true, keys: true },
+      },
+    });
+    const pngPath = path.join(ctx.dataRoot, "screen.png");
+    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    ctx.host.computer = {
+      capabilities: async () => ({
+        platform: "linux",
+        sessionType: "wayland",
+        compositor: "hyprland",
+        canScreenshot: true,
+        canListWindows: true,
+        canPointer: true,
+        canKeyboard: true,
+        canAppUi: true,
+      }),
+      listWindows: async () => [],
+      screenshot: async () => ({ path: pngPath, width: 1280, height: 720, surface: "desktop", summary: "Screen", details: "Desktop" }),
+      act: async (req) => {
+        clicks.push(`${req.action}:${req.target}`);
+        return `Clicked ${req.target}`;
+      },
+    };
+    const answers = [
+      { say: "", steps: [{ kind: "inspect", action: "screen", target: "", prompt: "screen" }] },
+      { say: "I'll click Play.", steps: [{ kind: "computer", action: "click", target: "640,360", options: "surface=desktop" }] },
+      { say: "Clicking Play.", steps: [], confirmWaiting: true },
+      { say: "I'll turn off terse replies.", steps: [{ kind: "settings", op: "viby", target: "terse", prompt: "off" }] },
+    ];
+    ctx.svc.orchestrator.runner = async () => ({ code: 0, stdout: JSON.stringify({ structuredOutput: answers.shift() }), stderr: "", timedOut: false });
+
+    await ctx.svc.orchestratorAsk("click play");
+    const waiting = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(waiting).toMatchObject({ plan: "waiting", checks: [expect.anything()] });
+
+    await ctx.svc.orchestratorAsk("yes, click it");
+    await until(() => ctx.svc.orchestratorView().turns.find((t) => t.id === waiting.id)?.plan === "done");
+    expect(ctx.svc.orchestratorView().turns.find((t) => t.id === waiting.id)?.plan).toBe("done");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ confirmed: "ran" });
+    expect(clicks).toEqual(["click:640,360"]);
+
+    await ctx.svc.orchestratorAsk("turn off terse mode");
+    const terseWait = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorRun(terseWait.id);
+    expect(ctx.svc.getSettings().orchestrator.terse).toBe(false);
+    await ctx.svc.close();
+  });
+
   it("doesn't run a waiting plan on the planner's yes once its card changed", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([{ say: "I'll start Argy in shop.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "one", prompt: "Fix it." }] }]);
@@ -2040,7 +2101,16 @@ describe("Viby speaks up", () => {
     const heard: VibyWord[] = [];
     ctx.svc.orchestratorCall((word) => heard.push(word));
 
-    // Starting a CLI in a clean workspace during a call runs immediately even under "Show me first".
+    // Under explicit "Ask for everything" ("plan"), non-read steps still wait for Go even in a call.
+    const heldInPlan = await ctx.ask("start grok under plan", {
+      say: "I'll start Grok.",
+      steps: [{ kind: "start", engine: "grok", workspace: workspace.name }],
+    });
+    expect(heldInPlan()?.plan).toBe("waiting");
+    ctx.svc.orchestratorCancel(heldInPlan()?.id ?? "");
+
+    // Switch to "go" (new default): safe non-destructive steps run immediately in a call without waiting for Go.
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
     const started = await ctx.ask("start grok here", {
       say: "On it.",
       steps: [{ kind: "start", engine: "grok", workspace: workspace.name }],
@@ -2095,6 +2165,7 @@ describe("Viby speaks up", () => {
 
   it("inspects workspaces, waiting prompts and quotas in the same turn, answers TUI prompts with key, drives workbench actions, and chains after: true steps", async () => {
     const ctx = desk();
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
     const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
     fs.writeFileSync(path.join(ctx.place, "hello.txt"), "hello world\n");
     let screenText = "╭───╮\n│ Do you trust the files in this folder? │\n│ ❯ 1. Yes, proceed │";
@@ -2432,7 +2503,7 @@ describe("Viby settings awareness and self-configuration", () => {
     expect(updated.terminalFontSize).toBe(15);
     expect(updated.sounds.volume).toBe(0.5);
     expect(autostartOn).toBe(true);
-    expect(updated.orchestrator).toEqual({ engine: "claude", mode: "go", model: "sonnet", projectsFolder: "", effort: "medium" });
+    expect(updated.orchestrator).toEqual({ engine: "claude", mode: "go", model: "sonnet", projectsFolder: "", effort: "medium", terse: true });
 
     // Turn 3: now planned by Claude Code (`pasty`) with `--model sonnet --effort medium`, and since mode is now `go`, runs immediately!
     await ctx.svc.orchestratorAsk("bump your effort to high");

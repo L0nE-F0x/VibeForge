@@ -10,7 +10,6 @@ import path from "node:path";
 import { slugify } from "./slug.js";
 import type { EngineRow } from "./types.js";
 import { agyModelEffort, cleanModel, effortLevels } from "../shared/launch-options.js";
-import { isFreeWaitingPrompt } from "../shared/orchestrator-intel.js";
 import {
   brainKind,
   cleanQuery,
@@ -21,11 +20,7 @@ import {
   inspectsQuotas,
   inspectsSettings,
   inspectsStorage,
-  isLoopbackUrl,
-  isDestructiveStepAction,
-  isSafeShellCommand,
-  keySequenceFor,
-  NEEDS_GO,
+  isHighRiskStep,
   normalizeAgentAction,
   normalizeChatAction,
   normalizeComputerAction,
@@ -40,7 +35,6 @@ import {
   parseOptions,
   parseRoutineSchedule,
   parseTaskStatus,
-  parseWorkbenchAction,
   plannedId,
   repairJsonObjects,
   resolveSettingsStep,
@@ -393,6 +387,14 @@ export function orchestratorRules(context: PlanContext): string {
   const defaultRule = context.defaultEngine
     ? `Never pick an engine the person didn't ask for unless they asked to start work without naming a CLI, in which case use their default CLI (${context.defaultEngine}).`
     : "Never pick an engine the person didn't ask for; if they didn't say which, ask.";
+  const approvalMode = context.settings?.viby.mode ?? "go";
+  const terseReplies = context.settings?.viby.terse !== false;
+  const approvalSummary =
+    approvalMode === "plan"
+      ? "Ask for everything (every non-read step waits for Go before running)"
+      : approvalMode === "never"
+        ? "Never ask (every valid step runs straight away without waiting for Go)"
+        : "Ask only for risky actions (read-only steps, computer-use focus/click/double-click/right-click/scroll/move/drag/type/key/wait, workspace switching, tells to running CLIs, and non-destructive actions run straight away; destructive deletes, apply/discard, in-place code edits, memory set/clear, stopping CLIs, broad/network settings, and irreversible/outward actions still wait for Go)";
   return [
     "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those, 'VIB', or 'I\\'ll be'), the person's conversational partner, personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, saved agents, skills, chats, tasks and scheduled routines at once.",
     "Whatever planning CLI runs you under the hood, you are always Viby. The person often talks to you in a live voice call or dictates quickly, so expect STT slips and homophones ('Oh Marchy' = Omarchy, 'Hyperland' = Hyprland, 'Cloud'/'Clawd' = Claude Code, 'Code X' = Codex, 'Grock' = Grok Build, 'Anti gravity' = Antigravity, 'Star Leger' = Star Ledger, 'Vibe Forje' = VibeForge) and typed `@mentions` (`@Workspace`). Strip `@` when matching and resolve entities generously against the lists below.",
@@ -411,14 +413,14 @@ export function orchestratorRules(context: PlanContext): string {
     "- talk: coordinate live coding CLIs in Code. action: \"review\" (target [author CLI id] + agents: [reviewer CLI id]), \"send-draft\" (target [from CLI id] + agents: [to CLI id] + prompt: \"reply\" | \"changes\"), \"stop\" (target [CLI id — pause agent-to-agent messages]), or \"start-tasks\" (target [CLI id] + optional places [task ids; empty starts all held tasks]).",
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (keywords). VibeForge runs the lookup at once and hands you the findings.",
     "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path with optional line range like `src/app.ts:10-80`, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), code search inside a workspace (`action: \"search\"`, `workspace`, `prompt`: query), workspace file tree (`action: \"tree\"`, `workspace`, optional `folder`), cross-copy conflict overlap (`action: \"compare\"`), app/run/routine diagnostics (`action: \"problems\"` | `\"diagnostics\"`), desktop/app UI screenshot (`action: \"screen\"` | `\"app-ui\"` | `\"browser-ui\"`) or open windows (`action: \"windows\"`), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
-    "- computer: observe or safely control the desktop, VibeForge's own UI, or the Browser Dock (ALWAYS waits for explicit Go). action: \"focus-window\" | \"click\" | \"double-click\" | \"right-click\" | \"move\" | \"drag\" | \"scroll\" | \"type\" | \"key\" | \"wait\", target (\"x,y\" coords, \"x1,y1 -> x2,y2\" for drag, or window title/class for focus-window), prompt (text to type, key combo like \"Ctrl+L\", scroll \"down 3\", or wait duration), options (\"surface=desktop|app|browser\"). Inspect the screen/UI first so coordinates and focus are exact.",
+    "- computer: desktop, VibeForge UI, or Browser Dock actions. action: \"focus-window\" | \"click\" | \"double-click\" | \"right-click\" | \"move\" | \"drag\" | \"scroll\" | \"type\" | \"key\" | \"wait\", target (\"x,y\" coords, \"x1,y1 -> x2,y2\" for drag, or window title/class for focus-window), prompt (text to type, key combo like \"Ctrl+L\", scroll \"down 3\", or wait duration), options (\"surface=desktop|app|browser\"). Low-risk computer actions run straight away under \"ask only for risky actions\" and \"never ask\" (as long as Settings → Computer use grants that surface), and wait for Go under \"ask for everything\". To observe and act in one turn without extra round trips, emit `inspect` (`screen` / `windows` / `app-ui` / `browser-ui`) — or a leading `[computer(focus-window), inspect(screen)]` chain — and then emit the click/type/scroll immediately once you see the screenshot.",
     "- verify: run a test, build, typecheck, or lint command in a workspace (or in the isolated copy started earlier in this plan) with `after: true`. Fields: workspace (optional when verifying the preceding `start` step's copy), prompt (command like \"npm test\" or \"npm run typecheck && npm test\"), options (optional `retries=2, timeout=180`). If the check fails while an isolated copy's live CLI is attached, Viby sends the failure output back to that CLI and re-verifies automatically up to `retries` times.",
     "- memory: read/save Viby's own durable plain-text memory (~/.config/vibeforge/viby.md) for cross-session preferences, workspace notes, or conventions. action: \"append\" (add `prompt` note), \"set\" (replace whole memory; waits for Go), or \"clear\" (wipe memory; waits for Go).",
     "- tell: send a message to a CLI already running at its normal input prompt. Fields: target (ptyId), prompt (the message).",
     "- key: answer an interactive TUI prompt or send a keystroke to a running CLI (folder trust, y/n, menu choice, Enter, Escape, Ctrl+C). Fields: target (ptyId), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
     "- shell: open a shell terminal in a workspace, optionally running a command. Fields: workspace, prompt (shell command; empty to only open a shell).",
     "- workbench: control VibeForge's workbench directly. Fields: workspace (when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"focus-next\", \"focus-prev\", \"zoom\", \"close-pane\", \"diff\", \"open-folder\", \"mark-reviewed\", \"check-updates\", or \"undo\" to undo the last delete!), folder (for mkdir), branch (to open as its own workspace), target (URL for browser, copy/run id for diff, or optional undo token).",
-    "- settings: change VibeForge settings — including your own planner/model/effort/mode, voice/STT models & downloads (`voice.model`, `voice.download`, `voice.stopDownload`, `voice.speaker`, `voice.language`, `voice.talkBack`, `voice.talkOver`, `voice.mouseButton`, `voice.sendButton`, `voice.agent`), app settings (`defaultEngine`, `defaultShell`, `theme`, `language`, `terminalFontSize`, `terminalFontFamily`, `notify`, `sounds`, `sounds.volume`, `tray`, `closeToTray`, `autostart`, `usage`, `planLimits`, `quotaAlerts`, `activity`, `checkUpdates`, `agentTalk`, `agentTalk.lead`, `agentTalk.handOff`, `agentTalk.leadApplies`, `agentTalk.maxMessages`, `agentTalk.reviewRounds`, `agentTalk.maxWorking`, `agentTalk.maxHandOffs`, `companion`, `companion.nudges`, `sync`, `sync.name`, `keepRuns.days`, `keepRuns.maxMb`), left rail (`rail.hide`, `rail.show`, `rail.order`), and custom coding CLIs (`engines.recheck`, `engines.add`/`engines.edit` with engine=id, name=label, folder=binary, prompt=args, options=\"promptArgs=..., continueArgs=...\", `engines.remove` with engine=id). Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
+    "- settings: change VibeForge settings — including your own planner/model/effort/approval mode (`viby.mode` or `viby.approval`: `plan` | `risky` | `never`) and terse replies (`viby.terse`: `on` | `off`), voice/STT models & downloads (`voice.model`, `voice.download`, `voice.stopDownload`, `voice.speaker`, `voice.language`, `voice.talkBack`, `voice.talkOver`, `voice.mouseButton`, `voice.sendButton`, `voice.agent`), app settings (`defaultEngine`, `defaultShell`, `theme`, `language`, `terminalFontSize`, `terminalFontFamily`, `notify`, `sounds`, `sounds.volume`, `tray`, `closeToTray`, `autostart`, `usage`, `planLimits`, `quotaAlerts`, `activity`, `checkUpdates`, `agentTalk`, `agentTalk.lead`, `agentTalk.handOff`, `agentTalk.leadApplies`, `agentTalk.maxMessages`, `agentTalk.reviewRounds`, `agentTalk.maxWorking`, `agentTalk.maxHandOffs`, `companion`, `companion.nudges`, `sync`, `sync.name`, `keepRuns.days`, `keepRuns.maxMb`), left rail (`rail.hide`, `rail.show`, `rail.order`), and custom coding CLIs (`engines.recheck`, `engines.add`/`engines.edit` with engine=id, name=label, folder=binary, prompt=args, options=\"promptArgs=..., continueArgs=...\", `engines.remove` with engine=id). Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
     "- stop: close a running CLI. Fields: target (ptyId).",
     "- show: bring something up on screen (changes nothing). Fields: target (running CLI id, view name `home|agents|code|chat|tasks|routines|skills|runs|viby|settings` to open that view, OR a specific agent, task, routine, skill, chat, copy, or run name/id to deep-link straight to it!), workspace (to open a workspace in Code), options (optional `tab=chats|brief|memory|skills|folders|runs|settings` for an agent, or `section=appearance|engines|orchestrator|voice|sounds|tray|usage|agent-talk|phone|sync|storage|rail|updates` for settings).",
     "- read: read out verbatim to the person what a running CLI last answered. Fields: target (ptyId), prompt (\"all\" for the whole answer; otherwise empty).",
@@ -440,8 +442,11 @@ export function orchestratorRules(context: PlanContext): string {
     "- After a tell or a start, VibeForge itself tells the person when that CLI has answered, with the start of its answer. Don't add a read step for an answer that isn't there yet, and don't tell them to ask for it.",
     "- When the person attaches screenshots or images (their paths on disk are listed in parentheses in their message), inspect the visual details directly from those images and, if you start or tell a coding CLI to act on them, include those file paths in the step prompt so the worker CLI can view them too.",
     "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, creating, or starting something when `steps` is empty — emit the step instead.",
-    "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('I'll create your Reviewer agent and schedule the weekday audit.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name items by their human names.",
-    "- Your steps are shown as a card, and anything that changes something can wait for the person's Go before it runs (in Plan mode it always does). So unless every step only shows or reads, word `say` as what will happen ('I'll stop Claude Code in VibeForge, then start a fresh one.'), never as done or underway: no 'Done', 'Going', 'On it', 'Sorted' or 'I've…' for steps that haven't run.",
+    `- Current approval setting: ${approvalSummary}. Spoken reply style: ${terseReplies ? "terse (default — act directly without narrating steps beforehand)" : "conversational"}.`,
+    terseReplies
+      ? "- `say` is spoken aloud, with no markdown and never raw internal ids such as pty-3 (use human names). When emitting intermediate `inspect` / `lookup` (or `[computer(focus-window), inspect(screen)]`) steps that continue in this turn, leave `say: \"\"` — never announce 'I'll take a screenshot and then...' before acting. When all final steps will auto-run straight away under the current approval setting, either leave `say: \"\"` or give a very short confirmation ('Clicked play.', 'Focused Chrome.', 'Switched to API.', 'Done.'). For questions or brainstorming (`steps: []`), answer concisely in natural plain speech."
+      : "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('I'll create your Reviewer agent and schedule the weekday audit.', 'Switched to VibeForge.'). When emitting intermediate `inspect` / `lookup` (or `[computer(focus-window), inspect(screen)]`) steps that continue in this turn, leave `say: \"\"` rather than narrating 'I'll take a screenshot...'. No stiff filler, no markdown, and never an id such as pty-3: name items by their human names.",
+    "- For plans that WILL wait for Go before running (high-risk steps under 'ask only for risky actions', or any non-read step under 'ask for everything'), word `say` as what will happen ('I'll stop Claude Code in VibeForge, then start a fresh one.'), never as done or underway: no 'Done', 'Going', 'On it', 'Sorted' or 'I've…' for steps that still wait for Go. Use future-tense 'I'll ...' planning wording only where approval is required.",
     "- When a request starts with a note that your last plan is waiting for Go and hasn't run, nothing in it has happened yet. If the person is saying yes to that plan as it stands, in any words ('alright, do the thing you said', 'yes, that one'), set top-level `confirmWaiting: true` with steps: [] and a short `say`; VibeForge then runs it or tells them why it still waits. If they are thanking you or asking why it hasn't happened, return those same steps again, so the card stays in front of them, and say it runs as soon as they say go or press Go. A question, a doubt, a change or thanks alone is not a yes: leave `confirmWaiting` false or omitted.",
     "",
     "Workspaces:",
@@ -1681,127 +1686,17 @@ export function emptyPromise(say: string): boolean {
 }
 
 /**
- * Whether a step in a voice call can run at once without asking "Say go, or cancel": anything that
- * only looks, makes or opens a workspace, tells a CLI, runs a task/routine, or starts a CLI in an
- * isolated review copy (or in a clean/blank checkout). Stopping a CLI, applying or discarding a
- * copy, or starting work in place over uncommitted edits still waits for Go.
+ * Whether a step is low-risk and safe to run without asking in a call / "ask only for risky actions".
+ * Delegates to the centralized risk classifier in `src/shared/orchestrator-risk.ts`.
  */
 export function safeInCall(step: OrchestratorStep, context: PlanContext | null = null): boolean {
-  if (step.kind === "computer") return false;
-  if (holdsForGo(step, context)) return false;
-  if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return false;
-  if (step.kind === "verify" && !step.branch && Boolean(step.dirty)) return false;
-  if (step.kind === "workbench") {
-    const action = parseWorkbenchAction(step);
-    return !(action?.op === "pane" && action.action === "close");
-  }
-  return true;
+  return !isHighRiskStep(step, context);
 }
 
 /**
- * Steps that give an agent, a skill or a CLI more to act on, or start work from words the planner
- * wrote: they wait for Go even in Just go and in a call (decision D1, 2026-11-25). A planner can be
- * steered by what it read on a screen or in a file, and these are what that would be used for.
- */
-function reachesFurther(step: OrchestratorStep): boolean {
-  const act = (step.action ?? "").toLowerCase();
-  const said = Boolean(step.prompt.trim());
-  const syncOn = parseOptions(step.options).bool("sync") === true;
-  switch (step.kind) {
-    case "agent":
-      // A new agent, or one given more folders, another CLI, a new brief, skills, memory or sync.
-      return act === "create" || act === "add-folder" || act === "add-skill" || act === "memory-append" || (act === "edit" && (Boolean(step.places?.length) || Boolean(step.engineId) || said || Boolean(step.skills?.length) || syncOn));
-    case "skill":
-      // A skill's body becomes part of every agent's prompt that has it.
-      return act === "create" || act === "attach" || act === "set-agents" || (act === "edit" && (said || syncOn));
-    case "routine":
-      // Work that starts later, on its own.
-      return act === "create" || act === "enable" || (act === "edit" && said);
-    case "task":
-      return act === "create-run";
-    case "chat":
-      return (act === "create" || act === "send") && said;
-    case "run":
-      return act === "continue" && said;
-    case "memory":
-      // Viby's memory goes into every later planning turn.
-      return act === "append";
-    default:
-      return false;
-  }
-}
-
-/** Agent talk turned on, given a lead, or allowed more messages, helpers, hand-offs or review rounds than now. */
-function lessTalkLimit(patch: Record<string, unknown> | undefined, now: { on: boolean; lead: string; reviewRounds: number; maxMessages: number; maxWorking: number; maxHandOffs: number } | undefined): boolean {
-  if (!patch) return false;
-  if (patch.on === true && !now?.on) return true;
-  if (typeof patch.lead === "string" && patch.lead && patch.lead !== now?.lead) return true;
-  for (const field of ["maxMessages", "maxWorking", "maxHandOffs", "reviewRounds"] as const) {
-    const next = patch[field];
-    if (typeof next === "number" && (now === undefined || next > now[field])) return true;
-  }
-  return false;
-}
-
-/**
- * Whether a step waits for Go even in "Just go" mode (and so in a call too): stopping, applying or
- * throwing away work, a shell command that isn't plainly harmless, Ctrl+C (a stop by another name),
- * and a setting that turns something networked on, downloads, or changes how far Viby acts alone.
+ * Whether a step is high-risk and waits for Go under "ask only for risky actions".
+ * Delegates to the centralized risk classifier in `src/shared/orchestrator-risk.ts`.
  */
 export function holdsForGo(step: OrchestratorStep, context: PlanContext | null = null): boolean {
-  if (NEEDS_GO.includes(step.kind)) return true;
-  if (isDestructiveStepAction(step.kind, step.action)) return true;
-  if (step.kind === "start" && !step.branch && Boolean(step.prompt.trim()) && Boolean(step.dirty)) return true;
-  if (reachesFurther(step)) return true;
-  if (step.kind === "tell") {
-    // A shell escape ("!") or a slash command ("/permissions", "/add-dir") changes what the CLI may do.
-    if (/^[!/]/.test(step.prompt.trimStart())) return true;
-    const target = context?.running.find((item) => item.id === step.target);
-    return Boolean(target?.waiting && !isFreeWaitingPrompt(target.waiting));
-  }
-  if (step.kind === "key") {
-    const action = keySequenceFor(step.prompt);
-    if (!action) return false;
-    if (action.interrupts) return true;
-    const target = context?.running.find((item) => item.id === step.target);
-    // Escape interrupts a live turn in Claude Code and Codex.
-    if (action.label === "Escape") return Boolean(target?.working);
-    const approves = action.label === "Yes" || action.label === "Enter" || /^Option [1-9]$/.test(action.label);
-    // Fail closed for approval keys: only bypass Go when the live CLI is idle on an explicit folder-trust or sign-in prompt.
-    if (approves) return !(!step.after && target && !target.working && isFreeWaitingPrompt(target.waiting));
-    return false;
-  }
-  if (step.kind === "shell" || step.kind === "verify") return !isSafeShellCommand(step.prompt);
-  if (step.kind === "workbench") {
-    const action = parseWorkbenchAction(step);
-    if (action?.op === "pane" && action.action === "close") return true;
-    // A page on another site could carry what the planner was shown in its address; one on this
-    // computer (a dev server) opens at once.
-    return action?.op === "browser-open" && !isLoopbackUrl(action.url);
-  }
-  if (step.kind === "settings") {
-    const action = resolveSettingsStep(step, context ?? { engines: [] }).action;
-    if (!action) return false;
-    if (action.op === "voice-download" || action.op === "engine-save" || action.op === "engine-remove") return true;
-    if (action.op === "voice-model" || action.op === "voice-speaker") return Boolean(action.downloadId);
-    if (action.op === "viby") return action.mode === "go";
-    if (action.op === "app-patch") {
-      const agentTalk = action.patch.agentTalk as { handOff?: string; leadApplies?: boolean } | undefined;
-      const keepRuns = action.patch.keepRuns as { days?: number; maxMb?: number } | undefined;
-      const curKeep = context?.settings?.app.keepRuns;
-      // 0 means keep forever / unlimited, so moving from 0 or missing to any positive cap shrinks retention.
-      const shrinks = (next: number | undefined, prev: number | undefined) =>
-        typeof next === "number" && next > 0 && (prev === undefined || prev === 0 || next < prev);
-      return (
-        Boolean(action.networkOn) ||
-        "defaultShell" in action.patch ||
-        agentTalk?.handOff === "go" ||
-        agentTalk?.leadApplies === true ||
-        lessTalkLimit(action.patch.agentTalk as Record<string, unknown> | undefined, context?.settings?.app.agentTalk) ||
-        shrinks(keepRuns?.days, curKeep?.days) ||
-        shrinks(keepRuns?.maxMb, curKeep?.maxMb)
-      );
-    }
-  }
-  return false;
+  return isHighRiskStep(step, context);
 }

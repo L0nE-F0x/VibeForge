@@ -192,17 +192,21 @@ export interface SyncSettings {
   name: string;
 }
 
+export type OrchestratorMode = "plan" | "go" | "never";
+
 export interface OrchestratorSettings {
   /** The engine that turns what the person says into a plan; empty until one is picked (see plannerFor). */
   engine: string;
-  /** "plan" shows the plan with a Go button; "go" carries it out at once. */
-  mode: "plan" | "go";
+  /** "plan": ask before everything; "go": ask only for risky actions (default); "never": never ask. */
+  mode: OrchestratorMode;
   /** A model for that CLI to plan with; empty keeps its own default. */
   model: string;
   /** Reasoning effort for the planning CLI ("low", "medium", "high"…); omitted/empty uses "low". */
   effort?: string;
   /** Where a workspace Maestro makes gets its folder; empty: where most workspaces are, else ~/Projects. */
   projectsFolder: string;
+  /** Keep spoken replies ultra-short (or silent) when actions run straight away without Go. Default: true. */
+  terse?: boolean;
 }
 
 /** What Viby may do in one place on the screen. */
@@ -216,8 +220,8 @@ export interface ComputerUseGrant {
 }
 
 /**
- * Viby's computer use. Off until a person turns it on; then each place has its own grants. Every
- * click, scroll or key still waits for Go.
+ * Viby's computer use. Off until a person turns it on; then each place has its own grants. Whether
+ * allowed actions wait for Go follows `orchestrator.mode`.
  */
 export interface ComputerUseSettings {
   on: boolean;
