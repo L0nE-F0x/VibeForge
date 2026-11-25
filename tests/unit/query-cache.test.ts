@@ -39,6 +39,33 @@ describe("query cache", () => {
     expect(entry.snapshot.data).toEqual([{ id: "a", live: false }]);
   });
 
+  it("reads again, when someone returns, what changed while nobody read it and its fetch was out", async () => {
+    const cache = new QueryCache(String);
+    let release: (value: string) => void = () => undefined;
+    let calls = 0;
+    const fetcher = () => {
+      calls += 1;
+      return new Promise<string>((resolve) => {
+        release = resolve;
+      });
+    };
+    const entry = cache.entry("tasks", ["tasks"], fetcher);
+    const leave = cache.subscribe(entry, () => undefined, entry.topics);
+    // The view is left while its read is still out, and the main process reports a change meanwhile.
+    leave();
+    cache.invalidate(["tasks"]);
+    release("before the change");
+    await tick();
+    expect(calls).toBe(1);
+
+    cache.subscribe(entry, () => undefined, entry.topics);
+    await tick();
+    expect(calls).toBe(2);
+    release("after the change");
+    await tick();
+    expect(entry.snapshot.data).toBe("after the change");
+  });
+
   it("publishes an error once, and the data again when it comes back", async () => {
     const cache = new QueryCache((error) => (error instanceof Error ? error.message : String(error)));
     const { state, fetcher } = source({ n: 1 });
