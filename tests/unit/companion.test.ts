@@ -411,7 +411,9 @@ describe("the phone page's words", () => {
       "rail.orchestrator",
       "common.cancel",
       "common.close",
+      "common.delete",
       "common.notOnPath",
+      "common.save",
       "voice.listening",
       "voice.transcribing",
       "voice.empty.silent",
@@ -425,6 +427,21 @@ describe("the phone page's words", () => {
     expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
     for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {
       expect((await phoneWords(language))["phone.credit"]).toContain("{name}");
+    }
+  });
+
+  it("serves every word the page asks for by name, so none shows as its key", async () => {
+    // t("…") and tCount("…") with the key written out, in every module of the page.
+    const folder = path.join(import.meta.dirname, "../../companion");
+    const files = ["app.js", ...fs.readdirSync(path.join(folder, "js")).map((name) => `js/${name}`)];
+    const asked = new Set<string>();
+    for (const file of files) {
+      for (const match of fs.readFileSync(path.join(folder, file), "utf8").matchAll(/\b(t|tCount)\(\s*"([^"]+)"/g)) asked.add(match[1] === "tCount" ? `${match[2]}.other` : match[2]);
+    }
+    expect(asked.size).toBeGreaterThan(100);
+    for (const language of ["en", "de", "ja"] as const) {
+      const words = await phoneWords(language);
+      expect([...asked].filter((key) => !words[key]), language).toEqual([]);
     }
   });
 

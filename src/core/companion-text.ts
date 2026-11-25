@@ -58,14 +58,17 @@ export function fill(text: string, vars?: Record<string, string>): string {
 const PHONE_PREFIXES = ["phone.", "plans.", "orch."] as const;
 
 /**
- * The window's words the page shares, one by one: the Orchestrator's name in the rail, what
- * dictation says on the desktop too, and what Viby says when the planner heard a yes.
+ * The window's words the page shares, one by one: the Orchestrator's name in the rail, the buttons
+ * it shares with the window (Save on Viby's memory, Delete on a conversation), what dictation says
+ * on the desktop too, and what Viby says when the planner heard a yes.
  */
 const PHONE_KEYS: readonly Key[] = [
   "rail.orchestrator",
   "common.cancel",
   "common.close",
+  "common.delete",
   "common.notOnPath",
+  "common.save",
   "voice.listening",
   "voice.transcribing",
   "voice.empty.silent",
