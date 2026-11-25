@@ -869,8 +869,6 @@ export const zh: Catalog = {
   "tasks.applyNothing": "副本没有改动，已将其删除",
   "tasks.applyFailed": "无法应用改动",
   "tasks.discardCopy": "丢弃副本",
-  "tasks.discardCopyTitle": "丢弃“{title}”的副本？",
-  "tasks.discardCopyBody": "其 worktree 和分支连同其中的所有改动都会被删除。各次运行保存的差异会保留。",
   "tasks.discardFailed": "无法丢弃副本",
   "tasks.copyChip": "独立副本",
   "tasks.copyUntrusted": "此任务的副本指向 **{path}**，它不在 VibeForge 的 worktrees 文件夹中。VibeForge 不会应用、暂存或删除它。选择“忘记”可清除这条记录，文件夹保持原样。",
@@ -2064,7 +2062,7 @@ export const zh: Catalog = {
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "无法读取你的智能体。",
   "load.tasks": "无法读取你的任务。",
   "load.skills": "无法读取你的技能。",
@@ -2081,4 +2079,5 @@ export const zh: Catalog = {
   "load.other": "无法读取此页面的一部分。",
   "load.notEmpty": "这并不代表这里什么都没有，只是没能读取。没有删除任何内容。",
   "load.stale": "你看到的是上一次成功读取的内容。",
+  "tasks.copyDiscarded": "已丢弃“{title}”的副本",
 };

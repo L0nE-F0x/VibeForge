@@ -881,8 +881,6 @@ export const en = {
   "tasks.applyNothing": "The copy had no changes, so it was removed",
   "tasks.applyFailed": "Could not apply the changes",
   "tasks.discardCopy": "Discard copy",
-  "tasks.discardCopyTitle": "Discard the copy of \"{title}\"?",
-  "tasks.discardCopyBody": "Its worktree and branch are removed with every change in them. Runs keep their saved diffs.",
   "tasks.discardFailed": "Could not discard the copy",
   "tasks.copyChip": "Own copy",
   "tasks.copyUntrusted": "This task's copy points at **{path}**, which isn't in VibeForge's worktrees folder. VibeForge won't apply, stage or delete it. Forget it to clear the record; the folder stays as it is.",
@@ -2076,7 +2074,7 @@ export const en = {
   "orch.attachImage": "Attach image",
   "orch.removeImage": "Remove image",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "Couldn't read your agents.",
   "load.tasks": "Couldn't read your tasks.",
   "load.skills": "Couldn't read your skills.",
@@ -2093,4 +2091,5 @@ export const en = {
   "load.other": "Couldn't read part of this page.",
   "load.notEmpty": "This doesn't mean there's nothing here: it couldn't be read. Nothing was deleted.",
   "load.stale": "What you see is from the last read that worked.",
+  "tasks.copyDiscarded": "Discarded the copy of \"{title}\"",
 } as const;

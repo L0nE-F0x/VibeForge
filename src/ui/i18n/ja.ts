@@ -869,8 +869,6 @@ export const ja: Catalog = {
   "tasks.applyNothing": "コピーに変更がなかったので、コピーを削除しました",
   "tasks.applyFailed": "変更を適用できませんでした",
   "tasks.discardCopy": "コピーを破棄",
-  "tasks.discardCopyTitle": "「{title}」のコピーを破棄しますか？",
-  "tasks.discardCopyBody": "worktree とブランチを、その中の変更ごと削除します。実行に保存された差分は残ります。",
   "tasks.discardFailed": "コピーを破棄できませんでした",
   "tasks.copyChip": "専用コピー",
   "tasks.copyUntrusted": "このタスクのコピーは **{path}** を指していますが、VibeForge の worktrees フォルダーの外です。VibeForge は適用・ステージ・削除をしません。「忘れる」で記録だけ消せます。フォルダーはそのまま残ります。",
@@ -2064,7 +2062,7 @@ export const ja: Catalog = {
   "orch.attachImage": "画像を添付",
   "orch.removeImage": "画像を削除",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "エージェントを読み込めませんでした。",
   "load.tasks": "タスクを読み込めませんでした。",
   "load.skills": "スキルを読み込めませんでした。",
@@ -2081,4 +2079,5 @@ export const ja: Catalog = {
   "load.other": "このページの一部を読み込めませんでした。",
   "load.notEmpty": "何もないのではなく、読み込めなかっただけです。何も削除されていません。",
   "load.stale": "表示しているのは、最後に読み込めたときの内容です。",
+  "tasks.copyDiscarded": "「{title}」のコピーを破棄しました",
 };

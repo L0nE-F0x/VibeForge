@@ -436,7 +436,7 @@ export interface DeskMethods {
   /** Bring an isolated task's changes into its workspace as uncommitted edits. */
   "tasks.applyCopy": (id: string) => ApplyResult;
   /** Throw an isolated task's copy away. */
-  "tasks.discardCopy": (id: string) => TaskView;
+  "tasks.discardCopy": (id: string) => Deleted;
 
   "chats.list": (filter?: { agentId?: string | null }) => ChatView[];
   "chats.create": (input: { agentId?: string | null; engine?: string; prompt?: string }) => ChatView;

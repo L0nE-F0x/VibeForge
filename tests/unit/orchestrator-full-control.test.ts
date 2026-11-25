@@ -570,6 +570,8 @@ describe("end-to-end Viby full-app control via TeamService", () => {
 
     const t3 = await askAndRun(ctx, "Discard copy and delete task");
     expect(t3?.steps?.every((s) => s.state === "done")).toBe(true);
+    // Discarding the copy can be undone from its step, as deleting can.
+    expect(t3?.steps?.[0].undo).toBeTruthy();
     expect(ctx.svc.listTasks()).toHaveLength(0);
   });
 

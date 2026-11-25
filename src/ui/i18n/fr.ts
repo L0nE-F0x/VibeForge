@@ -869,8 +869,6 @@ export const fr: Catalog = {
   "tasks.applyNothing": "La copie n'avait aucun changement, elle a été supprimée",
   "tasks.applyFailed": "Impossible d'appliquer les changements",
   "tasks.discardCopy": "Abandonner la copie",
-  "tasks.discardCopyTitle": "Abandonner la copie de « {title} » ?",
-  "tasks.discardCopyBody": "Son worktree et sa branche sont retirés avec tous leurs changements. Les exécutions gardent leurs diffs enregistrés.",
   "tasks.discardFailed": "Impossible d'abandonner la copie",
   "tasks.copyChip": "Copie à part",
   "tasks.copyUntrusted": "La copie de cette tâche pointe vers **{path}**, qui n'est pas dans le dossier des worktrees de VibeForge. VibeForge ne l'appliquera, ne l'indexera ni ne la supprimera. Oubliez-la pour effacer l'entrée ; le dossier reste tel quel.",
@@ -2064,7 +2062,7 @@ export const fr: Catalog = {
   "orch.attachImage": "Joindre une image",
   "orch.removeImage": "Retirer l'image",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "Impossible de lire vos agents.",
   "load.tasks": "Impossible de lire vos tâches.",
   "load.skills": "Impossible de lire vos skills.",
@@ -2081,4 +2079,5 @@ export const fr: Catalog = {
   "load.other": "Impossible de lire une partie de cette page.",
   "load.notEmpty": "Cela ne veut pas dire qu'il n'y a rien : la lecture a échoué. Rien n'a été supprimé.",
   "load.stale": "Ce que vous voyez vient de la dernière lecture réussie.",
+  "tasks.copyDiscarded": "Copie de « {title} » abandonnée",
 };

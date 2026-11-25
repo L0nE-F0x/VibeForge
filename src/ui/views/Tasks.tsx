@@ -360,12 +360,13 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
     const toast = applyToast(t, result, workspace.name, home);
     push(toast.tone, toast.title, toast.body);
   }, t("tasks.applyFailed"));
+  // Discarding happens at once, with Undo on the toast, as deleting does. Its button only shows
+  // while no CLI is working in the copy, so nothing running is stopped by it.
   const [discardCopy, discarding] = useAction(async () => {
     if (!task) return;
-    const ok = await confirm({ title: t("tasks.discardCopyTitle", { title: task.title }), body: t("tasks.discardCopyBody"), confirm: t("tasks.discardCopy"), danger: true });
-    if (ok) await call("tasks.discardCopy", task.id);
+    const result = await call("tasks.discardCopy", task.id);
+    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
   }, t("tasks.discardFailed"));
-  const [forgetCopy] = useAction(async () => task && call("tasks.discardCopy", task.id), t("tasks.discardFailed"));
   const [allowFolder, allowing] = useAction(async () => {
     if (!agent || !workspace) return;
     await call("agents.save", { ...agent, places: [...agent.places, workspace.path] });
@@ -495,7 +496,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
                 <Rich text={t("tasks.copyUntrusted", { path: task.copy.path })} />
               </span>
               {!live && (
-                <Button size="sm" variant="ghost" icon={X} busy={discarding} onClick={() => void forgetCopy()}>
+                <Button size="sm" variant="ghost" icon={X} busy={discarding} onClick={() => void discardCopy()}>
                   {t("tasks.forgetCopy")}
                 </Button>
               )}

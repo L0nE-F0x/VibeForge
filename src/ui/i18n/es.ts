@@ -868,8 +868,6 @@ export const es: Catalog = {
   "tasks.applyNothing": "La copia no tenía cambios y se eliminó",
   "tasks.applyFailed": "No se pudieron aplicar los cambios",
   "tasks.discardCopy": "Descartar copia",
-  "tasks.discardCopyTitle": "¿Descartar la copia de «{title}»?",
-  "tasks.discardCopyBody": "Se quitan su worktree y su rama con todos los cambios. Las ejecuciones conservan sus diffs guardados.",
   "tasks.discardFailed": "No se pudo descartar la copia",
   "tasks.copyChip": "Copia propia",
   "tasks.copyUntrusted": "La copia de esta tarea apunta a **{path}**, que no está en la carpeta de worktrees de VibeForge. VibeForge no la aplicará, preparará ni borrará. Olvídala para quitar el registro; la carpeta se queda como está.",
@@ -2063,7 +2061,7 @@ export const es: Catalog = {
   "orch.attachImage": "Adjuntar imagen",
   "orch.removeImage": "Quitar imagen",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "No se pudieron leer tus agentes.",
   "load.tasks": "No se pudieron leer tus tareas.",
   "load.skills": "No se pudieron leer tus skills.",
@@ -2080,4 +2078,5 @@ export const es: Catalog = {
   "load.other": "No se pudo leer una parte de esta página.",
   "load.notEmpty": "Esto no significa que no haya nada: no se pudo leer. No se ha borrado nada.",
   "load.stale": "Lo que ves es de la última lectura que funcionó.",
+  "tasks.copyDiscarded": "Copia de «{title}» descartada",
 };

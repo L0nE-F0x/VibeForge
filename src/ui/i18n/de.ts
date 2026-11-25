@@ -868,8 +868,6 @@ export const de: Catalog = {
   "tasks.applyNothing": "Die Kopie hatte keine Änderungen und wurde entfernt",
   "tasks.applyFailed": "Die Änderungen ließen sich nicht übernehmen",
   "tasks.discardCopy": "Kopie verwerfen",
-  "tasks.discardCopyTitle": "Die Kopie von „{title}“ verwerfen?",
-  "tasks.discardCopyBody": "Worktree und Branch werden mit allen Änderungen darin entfernt. Läufe behalten ihre gespeicherten Diffs.",
   "tasks.discardFailed": "Die Kopie ließ sich nicht verwerfen",
   "tasks.copyChip": "Eigene Kopie",
   "tasks.copyUntrusted": "Die Kopie dieser Aufgabe zeigt auf **{path}**, und das liegt nicht in VibeForges Worktree-Ordner. VibeForge übernimmt, staged oder löscht dort nichts. Vergiss sie, um den Eintrag zu entfernen; der Ordner bleibt, wie er ist.",
@@ -2063,7 +2061,7 @@ export const de: Catalog = {
   "orch.attachImage": "Bild anhängen",
   "orch.removeImage": "Bild entfernen",
 
-  // ---------------------------------------------------------------- lists that couldn't be read
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
   "load.agents": "Deine Agenten ließen sich nicht lesen.",
   "load.tasks": "Deine Aufgaben ließen sich nicht lesen.",
   "load.skills": "Deine Skills ließen sich nicht lesen.",
@@ -2080,4 +2078,5 @@ export const de: Catalog = {
   "load.other": "Ein Teil dieser Seite ließ sich nicht lesen.",
   "load.notEmpty": "Das heißt nicht, dass hier nichts ist: Es ließ sich nur nicht lesen. Gelöscht wurde nichts.",
   "load.stale": "Was du siehst, stammt vom letzten Lesen, das geklappt hat.",
+  "tasks.copyDiscarded": "Kopie von „{title}“ verworfen",
 };
