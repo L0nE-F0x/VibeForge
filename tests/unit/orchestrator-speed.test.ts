@@ -171,7 +171,8 @@ process.stdin.on("end", () => {
     try {
       await speaker.speak(`${c1} ${c2} ${c3}`, voiceFile);
       expect(spokenEvents).toEqual([c1, c2, c3, null]);
-      expect(fs.readFileSync(rateReads, "utf8").trim().split("\n")).toEqual([c1, c2, c3]);
+      // Chunk N+1 is synthesized while chunk N plays, so the first two can reach Piper in either order.
+      expect(fs.readFileSync(rateReads, "utf8").trim().split("\n").sort()).toEqual([c1, c2, c3].sort());
       expect(fs.readFileSync(playLog, "utf8").trim().split("\n")).toEqual(["16000", "16000", "16000"]);
       // Second utterance reuses cached sample rate from memory even if the sidecar json is gone.
       fs.rmSync(`${voiceFile}.json`);
