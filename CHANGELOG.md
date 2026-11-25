@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A terminal keeps the end of its output when its program finishes.** When a program printed a lot and ended while VibeForge was still catching up with it (a long build or test run, a big log), its last lines could be missing from the pane, from the run's saved screen and from its transcript. This happened most with Node 22, and also when the pane was opening or coming back into view at that moment. Those last lines could also show up ahead of the lines printed before them. Now every line arrives, in the order it was printed.
+
 ## [3.7.0] - 2026-11-25
 
 **3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**

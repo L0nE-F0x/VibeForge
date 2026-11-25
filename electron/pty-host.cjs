@@ -12,6 +12,7 @@ const pty = require("node-pty");
 const { Terminal } = require("@xterm/headless");
 const { SerializeAddon } = require("@xterm/addon-serialize");
 const { SCROLLBACK_LINES, attachCapture, captureWrite, captureSynced, captureFinish } = require("./terminal-capture.cjs");
+const { attachTail } = require("./pty-drain.cjs");
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
 const SCROLLBACK_SLACK_BYTES = 512 * 1024;
@@ -41,6 +42,7 @@ const PAUSED_LOOK_MS = 15;
 // The messages are typed in pty-protocol.ts, which the window's side (supervisor.ts) uses too.
 /** @import { PtyAnswer, PtyLine, PtyOp, PtyRequest } from "./pty-protocol.js" */
 /** @import { Capture, CaptureState } from "./terminal-capture.cjs" */
+/** @import { Tail } from "./pty-drain.cjs" */
 
 /**
  * A run folder's terminal files and the mirror that writes them (see the scrollback file below).
@@ -71,6 +73,7 @@ const PAUSED_LOOK_MS = 15;
  *   cwd: string,
  *   argv: string[],
  *   term: import("node-pty").IPty,
+ *   tail: Tail,
  *   cols: number,
  *   rows: number,
  *   seq: number,
@@ -92,9 +95,9 @@ const PAUSED_LOOK_MS = 15;
  *   unsent: number,
  *   paused: boolean,
  *   holds?: number,
+ *   afterHold?: () => void,
  *   pauseTimer: NodeJS.Timeout | undefined,
  *   gone: boolean,
- *   onData?: (data: string) => void,
  *   exitWaiters?: Array<() => void>,
  *   programKey?: string,
  * }} Session
@@ -433,55 +436,21 @@ function alive(pid) {
   }
 }
 
-/**
- * Synchronously drain any unread bytes from a paused pty master fd once the process exits,
- * before node-pty's 200 ms destroy timer closes the socket underneath a stalled event loop.
- * @param {Session} session
- */
-function drainClosingPty(session) {
-  if (!session.paused || session.holds || session.exited || !session.onData) return;
-  const internal = /** @type {{ _fd?: number, _socket?: { _readableState?: { decoder?: { write(chunk: Buffer): string, end(): string } } } }} */ (
-    /** @type {unknown} */ (session.term)
-  );
-  const fd = typeof internal._fd === "number" ? internal._fd : -1;
-  if (fd < 0) return;
-  const decoder = internal._socket?._readableState?.decoder;
-  const buf = Buffer.allocUnsafe(64 * 1024);
-  for (;;) {
-    let read = 0;
-    try {
-      read = fs.readSync(fd, buf, 0, buf.length, null);
-    } catch (error) {
-      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
-      if (code === "EIO" && decoder) {
-        const tail = decoder.end();
-        if (tail) session.onData(tail);
-      }
-      break;
-    }
-    if (read <= 0) break;
-    const slice = buf.subarray(0, read);
-    const text = decoder ? decoder.write(slice) : slice.toString("utf8");
-    if (text) session.onData(text);
-  }
-}
-
 /** @param {Session} session */
 function throttle(session) {
   if (session.paused || session.gone || pendingOf(session) <= PENDING_HIGH) return;
-  const internal = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (session.term));
-  if (internal._boundClose || !alive(session.pid)) {
+  if (session.tail.closing() || !alive(session.pid)) {
     session.gone = true;
     return;
   }
   session.paused = true;
   session.term.pause();
-  // node-pty drops what is still unread 200 ms after the program exits, so a paused pane keeps
-  // looking for that (plus the _boundClose setter in spawnSession) and drains/resumes immediately.
+  // node-pty drops what is still unread 200 ms after the program exits. The tail hands that over
+  // when node-pty hears the exit; this also catches a program reaped before node-pty heard it.
   session.pauseTimer = setInterval(() => {
-    if (!internal._boundClose && alive(session.pid)) return;
+    if (!session.tail.closing() && alive(session.pid)) return;
     session.gone = true;
-    drainClosingPty(session);
+    session.tail.drain();
     release(session);
   }, PAUSED_LOOK_MS);
 }
@@ -513,7 +482,10 @@ function release(session) {
  */
 function hold(session) {
   session.holds = (session.holds || 0) + 1;
-  if (session.holds > 1 || session.paused) return;
+  if (session.holds > 1) return;
+  // What the tail reads while held (the program ended) waits for the hold to end.
+  session.tail.hold();
+  if (session.paused) return;
   try {
     session.term.pause();
   } catch {
@@ -524,12 +496,19 @@ function hold(session) {
 /** @param {Session} session */
 function unhold(session) {
   session.holds = Math.max(0, (session.holds || 0) - 1);
-  if (session.holds > 0 || session.paused || session.exited) return;
-  try {
-    session.term.resume();
-  } catch {
-    /* the pty closed underneath us */
+  if (session.holds > 0) return;
+  session.tail.letGo();
+  if (!session.paused) {
+    try {
+      session.term.resume();
+    } catch {
+      /* the pty closed underneath us */
+    }
   }
+  // An exit heard during the hold is finished now, after what it left.
+  const finishing = session.afterHold;
+  session.afterHold = undefined;
+  if (finishing) finishing();
 }
 
 // ------------------------------------------------------------------ sessions
@@ -547,6 +526,15 @@ function spawnSession(msg) {
   const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id, VIBEFORGE_PTY_TOKEN: ptyToken };
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
+  // The tail reads the output, the end included, into onData below; node-pty emits nothing before
+  // this turn is over.
+  const tail = attachTail(term, (data) => onData(data), {
+    onClosing: () => {
+      session.gone = true;
+      release(session);
+    },
+    log,
+  });
   const mirror = new Terminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
   const serializer = new SerializeAddon();
   mirror.loadAddon(serializer);
@@ -559,6 +547,7 @@ function spawnSession(msg) {
     argv,
     runDir,
     term,
+    tail,
     mirror,
     serializer,
     cols,
@@ -608,26 +597,6 @@ function spawnSession(msg) {
     if (!session.flushTimer) session.flushTimer = setTimeout(() => flush(session), FLUSH_MS);
     throttle(session);
   };
-  session.onData = onData;
-
-  const internalTerm = /** @type {{ _boundClose?: boolean }} */ (/** @type {unknown} */ (term));
-  let boundClose = Boolean(internalTerm._boundClose);
-  Object.defineProperty(term, "_boundClose", {
-    configurable: true,
-    enumerable: true,
-    get: () => boundClose,
-    set: (value) => {
-      boundClose = Boolean(value);
-      if (boundClose) {
-        session.gone = true;
-        drainClosingPty(session);
-        release(session);
-      }
-    },
-  });
-
-  term.onData(onData);
-
   term.onExit(({ exitCode, signal }) => {
     // node-pty can report the exit before the last bytes are read; give them a moment.
     setTimeout(() => finish(session, exitCode, signal), EXIT_SETTLE_MS);
@@ -644,6 +613,12 @@ function spawnSession(msg) {
  */
 function finish(session, exitCode, signal) {
   if (session.exited) return;
+  // A snapshot holding the output has what the program left; the exit waits for it to be let go.
+  if (session.holds) {
+    session.afterHold = () => finish(session, exitCode, signal);
+    return;
+  }
+  session.tail.drain();
   session.exited = true;
   session.gone = true;
   release(session);
