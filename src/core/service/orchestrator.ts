@@ -45,6 +45,7 @@ import {
   signedOut,
   orchestratorRules,
   readBrainOutput,
+  recentFocusLine,
   resolvePlan,
   stepIssue,
   type Looking,
@@ -1023,6 +1024,7 @@ export class OrchestratorDesk {
     fs.writeFileSync(schemaFile, JSON.stringify(STRICT_PLAN_SCHEMA), { mode: 0o600 });
     // Said ahead of every request, not in the rules: a resumed session may not read those again.
     const here = lookingLine(looking, context);
+    const recentFocus = recentFocusLine(this.conversation.turns.slice(0, -1), context, looking);
     const imageLine = savedImages.length
       ? `(${savedImages.length === 1 ? "Attached screenshot saved on disk" : "Attached screenshots saved on disk"}: ${savedImages.map((img) => img.path).join(", ")})`
       : "";
@@ -1044,6 +1046,7 @@ export class OrchestratorDesk {
       const turnImages = includeImages ? savedImages : [];
       const prefix = [
         here,
+        recentFocus,
         waitingLine,
         includeImages ? imageLine : "",
         liveLine,
@@ -1635,10 +1638,63 @@ export class OrchestratorDesk {
     }
     if (reflex.kind !== "steps") return { handled: false };
     if (reflex.tag === "show" && !this.core.options.host.show) return { handled: false };
-    const steps = resolvePlan({ say: "", steps: reflex.rawSteps }, context);
-    if (!steps.length || steps.some((step) => stepIssue(step, context))) return { handled: false };
+    const effectiveContext = reflex.tag === "trust" ? await this.context(true) : context;
+    const steps = resolvePlan({ say: "", steps: reflex.rawSteps }, effectiveContext);
+    if (!steps.length || steps.some((step) => stepIssue(step, effectiveContext))) return { handled: false };
     const now = this.core.now().toISOString();
     this.conversation.turns.push({ id: turnId(), at: now, from: "you", text: trimmed });
+    const startedAt = Date.now();
+    if (reflex.tag === "diagnostics") {
+      steps[0].state = "running";
+      try {
+        const res = await this.inspect(steps[0]);
+        steps[0].state = "done";
+        steps[0].result = res.summary;
+        const answered = this.answer({
+          text: res.summary,
+          checks: [{ id: steps[0].id, kind: "inspect", label: "Diagnostics", summary: res.summary, details: res.details.slice(0, 6000) }],
+          steps,
+          plan: "done",
+        });
+        void answered;
+        const metric = {
+          at: this.core.now().toISOString(),
+          source: "quickAct" as const,
+          totalMs: Math.max(0, Date.now() - startedAt),
+          outcome: "executed" as VibyTurnOutcome,
+          stepKinds: steps.map((step) => step.kind),
+          failedSteps: 0,
+        };
+        this.diagnostics.record(metric);
+        this.core.options.host.logDiagnostics?.(formatDiagnosticsLogLine(metric));
+        this.save();
+        return { handled: true, reply: res.summary };
+      } catch (error) {
+        steps[0].state = "failed";
+        steps[0].error = error instanceof Error ? error.message : String(error);
+        const msg = steps[0].error || "Diagnostics failed.";
+        this.answer({ text: msg, steps, plan: "done" });
+        this.save();
+        return { handled: true, reply: msg };
+      }
+    }
+    if (reflex.tag === "trust" && (holdsForGo(steps[0], effectiveContext) || (this.onCall && !safeInCall(steps[0], effectiveContext)))) {
+      for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
+      const reply = `${reflex.label} is waiting on an approval prompt; say Go or press Go to confirm.`;
+      this.answer({ text: reply, steps, plan: "waiting" });
+      const metric = {
+        at: this.core.now().toISOString(),
+        source: "quickAct" as const,
+        totalMs: Math.max(0, Date.now() - startedAt),
+        outcome: "planned" as VibyTurnOutcome,
+        stepKinds: steps.map((step) => step.kind),
+        failedSteps: 0,
+      };
+      this.diagnostics.record(metric);
+      this.core.options.host.logDiagnostics?.(formatDiagnosticsLogLine(metric));
+      this.save();
+      return { handled: true, reply };
+    }
     const reply =
       reflex.tag === "show"
         ? (words?.opened?.(reflex.label) ?? `Opened ${reflex.label}.`)
@@ -1648,8 +1704,13 @@ export class OrchestratorDesk {
             ? (words?.reviewed ?? "Marked all runs reviewed.")
             : reflex.tag === "remember"
               ? (words?.remembered?.(reflex.label) ?? `Remembered in Viby memory: ${reflex.label}`)
-              : (words?.stopped?.(steps.length) ?? `Stopped ${steps.length} running CLI${steps.length === 1 ? "" : "s"}.`);
-    const startedAt = Date.now();
+              : reflex.tag === "trust"
+                ? `Sent Enter to ${reflex.label}.`
+                : reflex.tag === "routine-pause"
+                  ? `Paused routine ${reflex.label}.`
+                  : reflex.tag === "theme"
+                    ? `Switched theme to ${reflex.label}.`
+                    : (words?.stopped?.(steps.length) ?? `Stopped ${steps.length} running CLI${steps.length === 1 ? "" : "s"}.`);
     const answered = this.answer({ text: reply, steps, plan: "running" });
     let failedSteps = 0;
     for (const step of steps) {

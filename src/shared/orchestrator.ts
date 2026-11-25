@@ -671,7 +671,7 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     if (!action) return "prompt";
-    if ((action.op === "branch" || action.op === "browser-open") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+    if ((action.op === "branch" || action.op === "browser-open" || action.op === "open-folder") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
     return null;
   }
   if (step.kind === "agent") {

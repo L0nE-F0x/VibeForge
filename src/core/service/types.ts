@@ -74,8 +74,14 @@ export interface DeskHost {
     event:
       | { kind: "browser-open"; workspaceId: string; url: string }
       | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
-      | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" },
+      | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" | "focus-next" | "focus-prev" },
   ): void;
+  /** Open a local folder in the desktop file manager. */
+  openFolder?(folderPath: string): Promise<void>;
+  /** Copy plain/markdown text to the system clipboard. */
+  writeClipboard?(text: string): void;
+  /** Trigger an app update check and return a short summary. */
+  checkUpdates?(): Promise<string>;
   /** Formatted plan limits and token usage summary for Viby's `inspect` step. */
   quotas?(): Promise<string>;
   /** Live voice, STT and TTS status on this machine, for Viby's context and `inspect` step. */

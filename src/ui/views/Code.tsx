@@ -122,7 +122,16 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         if (ws.id !== cur?.id) setCurrentId(ws.id);
         if (event.action === "split-right") p.newTerminal(ws, "row");
         else if (event.action === "split-down") p.newTerminal(ws, "col");
-        else {
+        else if (event.action === "focus-next" || event.action === "focus-prev") {
+          const layout = p.layouts[ws.id];
+          const all = layout ? panesOf(layout) : [];
+          if (!all.length) return;
+          const currentPaneId = p.focusedPane(ws.id).paneId;
+          const curIdx = currentPaneId ? all.findIndex((item) => item.id === currentPaneId) : -1;
+          const delta = event.action === "focus-next" ? 1 : -1;
+          const nextIdx = curIdx < 0 ? 0 : (curIdx + delta + all.length) % all.length;
+          p.focusPane(ws.id, all[nextIdx].id);
+        } else {
           const { pane } = p.focusedPane(ws.id);
           const fallback = p.layouts[ws.id] ? panesOf(p.layouts[ws.id]!)[0] : undefined;
           const targetPane = pane ?? fallback;

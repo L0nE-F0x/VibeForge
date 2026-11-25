@@ -645,6 +645,13 @@ export async function carryOutRunStep(deps: EntityStepDeps, step: OrchestratorSt
     step.result = `Handed off as task "${created.title}".`;
     return;
   }
+  if (action === "copy-markdown") {
+    if (!deps.runs) throw new Error("That run no longer exists.");
+    const md = await deps.runs.runMarkdown(step.target);
+    deps.core.options.host.writeClipboard?.(md);
+    step.result = "Copied run as Markdown.";
+    return;
+  }
 }
 
 export async function carryOutTalkStep(deps: EntityStepDeps, step: OrchestratorStep): Promise<void> {
@@ -749,6 +756,18 @@ export async function carryOutWorkbenchStep(deps: EntityStepDeps, step: Orchestr
       return;
     }
     throw new Error(`No copy or run matched "${action.target}".`);
+  }
+  if (action.op === "open-folder") {
+    const ws = step.workspaceId ? deps.core.workspaceById(step.workspaceId) : null;
+    if (!ws) throw new Error("That workspace is gone.");
+    await deps.core.options.host.openFolder?.(ws.path);
+    step.result = `Opened ${tildify(ws.path)}.`;
+    return;
+  }
+  if (action.op === "check-updates") {
+    const msg = (await deps.core.options.host.checkUpdates?.()) || "Checked for updates.";
+    step.result = msg;
+    return;
   }
 }
 

@@ -24,7 +24,7 @@ export type LocalReflex =
   | { kind: "new-thread" }
   | {
       kind: "steps";
-      tag: "show" | "undo" | "reviewed" | "remember" | "stop-all";
+      tag: "show" | "undo" | "reviewed" | "remember" | "stop-all" | "diagnostics" | "trust" | "routine-pause" | "theme";
       label: string;
       rawSteps: ReflexRawStep[];
     };
@@ -211,6 +211,30 @@ export function resolveLocalReflex(
         rawSteps: own.map((r) => ({ kind: "stop", target: r.id })),
       };
     }
+    if ((cmd === "diagnostics" || cmd === "status") && !arg) {
+      return {
+        kind: "steps",
+        tag: "diagnostics",
+        label: "Diagnostics",
+        rawSteps: [{ kind: "inspect", action: "diagnostics", prompt: "viby diagnostics" }],
+      };
+    }
+    if (cmd === "trust" && !arg) {
+      const waitingClis = context.running.filter((r) => Boolean(r.waiting));
+      const cli =
+        (looking?.ptyId ? context.running.find((r) => r.id === looking.ptyId) : undefined) ??
+        (waitingClis.length === 1 ? waitingClis[0] : undefined) ??
+        (context.running.length === 1 ? context.running[0] : undefined);
+      if (cli) {
+        return {
+          kind: "steps",
+          tag: "trust",
+          label: `${cli.engine} · ${cli.workspace}`,
+          rawSteps: [{ kind: "key", target: cli.id, prompt: "enter" }],
+        };
+      }
+      return null;
+    }
     if ((cmd === "open" || cmd === "show") && arg) {
       const nav = buildShowStep(arg, context, looking);
       if (nav) return { kind: "steps", tag: "show", label: nav.label, rawSteps: [nav.step] };
@@ -256,6 +280,29 @@ export function resolveLocalReflex(
   }
   if (/^(?:mark all(?: runs)? reviewed|clear review inbox|mark everything reviewed)$/.test(lower)) {
     return { kind: "steps", tag: "reviewed", label: "Mark all runs reviewed", rawSteps: [{ kind: "workbench", prompt: "mark-reviewed" }] };
+  }
+
+  // Deterministic routine pause & theme switch reflexes when unambiguous and non-compound
+  if (!/\b(?:and|then|also)\b/i.test(stripped)) {
+    const pauseRoutine = /^(?:pause|disable|turn off)\s+(?:the\s+)?routine\s+(.+)$/i.exec(stripped);
+    if (pauseRoutine) {
+      const rt = findMatch(pauseRoutine[1], context.routines ?? [], (r) => [r.id, r.name]);
+      if (rt) {
+        return { kind: "steps", tag: "routine-pause", label: rt.name, rawSteps: [{ kind: "routine", action: "disable", target: rt.id }] };
+      }
+    }
+    const themeSwitch = /^(?:switch|change|set)(?:\s+the)?\s+theme\s+(?:to\s+)?(.+)$/i.exec(stripped);
+    if (themeSwitch) {
+      const rawTheme = themeSwitch[1].trim();
+      if (/^(?:omarchy|auto|system|desktop)$/i.test(rawTheme)) {
+        return { kind: "steps", tag: "theme", label: "omarchy", rawSteps: [{ kind: "settings", target: "theme", prompt: "omarchy" }] };
+      }
+      const themes = context.settings?.app.availableThemes ?? [];
+      const matched = findMatch(rawTheme, themes, (id) => [id, id.replace(/[-_]+/g, " ")]);
+      if (matched) {
+        return { kind: "steps", tag: "theme", label: matched, rawSteps: [{ kind: "settings", target: "theme", prompt: matched }] };
+      }
+    }
   }
 
   // Never hijack compound sentences for navigation

@@ -12,6 +12,7 @@ import type { Notify } from "./notify.js";
 import { lastReply, watchReply } from "./replies.js";
 import { childEnv } from "./shell-env.js";
 import type { Stats } from "./stats.js";
+import type { Updater } from "./updater.js";
 import type { Voice } from "./voice.js";
 
 // The terminal host (electron/pty-host.cjs) owns every terminal. This starts it, relays what it
@@ -28,6 +29,9 @@ export function deskHost(
     voice?: () => Voice;
     tray?: () => { readonly autostart: boolean; setAutostart(on: boolean): void; sync(): void };
     sync?: () => { setLibrarySync(kind: "agent" | "skill", id: string, on: boolean): Promise<void> };
+    updater?: () => Updater;
+    openFolder?: (folderPath: string) => Promise<void>;
+    writeClipboard?: (text: string) => void;
   },
 ): DeskHost {
   const { supervisor, log, words, send } = ctx;
@@ -74,6 +78,16 @@ export function deskHost(
     },
     dockCommand: (command) => extras?.dock?.().command(command),
     codeWorkbench: (event) => send("code-workbench", event),
+    ...(extras?.openFolder ? { openFolder: extras.openFolder } : {}),
+    ...(extras?.writeClipboard ? { writeClipboard: extras.writeClipboard } : {}),
+    ...(extras?.updater
+      ? {
+          checkUpdates: async () => {
+            await extras.updater!().check();
+            return "Checked for updates.";
+          },
+        }
+      : {}),
     quotas: async () => {
       const stats = extras?.stats?.();
       if (!stats || !ctx.service) return "Plan limits and token usage are unavailable.";

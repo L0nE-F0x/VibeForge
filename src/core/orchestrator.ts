@@ -46,6 +46,7 @@ import {
   STEP_KINDS,
   type Looking,
   type OrchestratorStep,
+  type OrchestratorTurn,
   type PlanContext,
 } from "../shared/orchestrator.js";
 
@@ -404,7 +405,7 @@ export function orchestratorRules(context: PlanContext): string {
     "- routine: manage scheduled routines. action: \"create\" (fields: name, agent [saved agent name/id, or inherited from task], task [optional existing or planned task name/id to attach its prompt and agent], schedule [5-field cron like \"0 9 * * 1-5\", interval like \"every 30 minutes\" / \"every 2 hours\", or natural phrase like \"weekdays at 9am\" / \"daily at 6pm\" / \"every Monday at 10am\"], prompt [instructions, or inherited from attached task], options [optional: enabled=true|false, notify=true|false, shareCheckout=true|false]), \"edit\" (target + any fields to change, including schedule, agent, task, name, prompt, options), \"delete\" (target), \"run\" (target — waits turn if folder busy), \"run-now\" (target — force start past busy folder), \"enable\" / \"disable\" (target), or \"cancel-wait\" (target).",
     "- task: manage tasks on the Kanban board. action: \"create\" (add to To Do board without starting yet; fields: name [title], prompt [body/instructions], agent [optional saved agent], workspace [optional workspace], options [optional: isolated=true|false, shareCheckout=true|false]), \"create-run\" (create AND execute immediately; needs workspace, agent, prompt), \"edit\" (target + any of name, prompt, agent, workspace, status, options [agent=none / workspace=none to clear]), \"run\" (target — execute task), \"run-now\" (target — execute past busy folder), \"continue\" (target + optional follow-up prompt), \"stop\" (target), \"status\" (target + status: \"todo\" | \"review\" | \"done\"), \"cancel-wait\" (target), \"apply\" (apply task copy changes to workspace), \"discard\" (discard task copy), \"handoff\" (target [finished run id] + agent [saved agent to hand off to]), or \"delete\" (target).",
     "- chat: manage plain and agent chats. action: \"create\" (agent [for an agent chat] OR engine [CLI for a plain scratch chat], optional name [title], optional prompt [first message — creates and sends immediately!]), \"send\" (target [chat id/title] or agent [finds/creates agent chat] + prompt), \"continue\" (target), \"stop\" (target), \"rename\" (target + name), \"set-engine\" (target [plain chat] + engine), or \"delete\" (target).",
-    "- run: manage runs and run storage. action: \"continue\" (target [run id/title] + optional follow-up prompt), \"stop\" (target), \"mark-reviewed\" (target), \"mark-unreviewed\" (target), \"mark-all-reviewed\", \"handoff\" (target [run id] + agent [saved agent]), or \"tidy\" (compress/prune old runs per retention settings).",
+    "- run: manage runs and run storage. action: \"continue\" (target [run id/title] + optional follow-up prompt), \"stop\" (target), \"mark-reviewed\" (target), \"mark-unreviewed\" (target), \"mark-all-reviewed\", \"handoff\" (target [run id] + agent [saved agent]), \"copy-markdown\" (target [run id] — copy run report as Markdown), or \"tidy\" (compress/prune old runs per retention settings).",
     "- talk: coordinate live coding CLIs in Code. action: \"review\" (target [author CLI id] + agents: [reviewer CLI id]), \"send-draft\" (target [from CLI id] + agents: [to CLI id] + prompt: \"reply\" | \"changes\"), \"stop\" (target [CLI id — pause agent-to-agent messages]), or \"start-tasks\" (target [CLI id] + optional places [task ids; empty starts all held tasks]).",
     "- lookup: search VibeForge's run history, git branches and project folders on disk when the person asks to find a past session, branch, or project folder not listed below. Fields: prompt (keywords). VibeForge runs the lookup at once and hands you the findings.",
     "- inspect: inspect a running CLI's terminal screen and latest reply (`target: ptyId`), a copy's git diff (`target: copyId`), a workspace's git status/log/diff/files/branches (`workspace`, optional `folder` file path with optional line range like `src/app.ts:10-80`, `prompt`: \"status\" | \"diff\" | \"branches\" | file path), code search inside a workspace (`action: \"search\"`, `workspace`, `prompt`: query), workspace file tree (`action: \"tree\"`, `workspace`, optional `folder`), cross-copy conflict overlap (`action: \"compare\"`), app/run/routine diagnostics (`action: \"problems\"`), plan limits & tokens (`prompt: \"limits\"` or `\"usage\"`), Viby/VibeForge/voice settings (`prompt: \"settings\"` | `\"voice\"` | `\"themes\"`), run storage usage (`prompt: \"storage\"`), or the full details/brief/memory/body of any saved agent, skill, routine, task, chat, or run (`action: \"agent\" | \"skill\" | \"routine\" | \"task\" | \"chat\" | \"run\"` + `target`) in the same turn before answering.",
@@ -413,7 +414,7 @@ export function orchestratorRules(context: PlanContext): string {
     "- tell: send a message to a CLI already running at its normal input prompt. Fields: target (ptyId), prompt (the message).",
     "- key: answer an interactive TUI prompt or send a keystroke to a running CLI (folder trust, y/n, menu choice, Enter, Escape, Ctrl+C). Fields: target (ptyId), prompt (\"yes\", \"no\", \"enter\", \"escape\", \"interrupt\", \"1\"..\"9\", \"up\", \"down\", \"tab\").",
     "- shell: open a shell terminal in a workspace, optionally running a command. Fields: workspace, prompt (shell command; empty to only open a shell).",
-    "- workbench: control VibeForge's workbench directly. Fields: workspace (when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"zoom\", \"close-pane\", \"diff\", \"mark-reviewed\", or \"undo\" to undo the last delete!), folder (for mkdir), branch (to open as its own workspace), target (URL for browser, copy/run id for diff, or optional undo token).",
+    "- workbench: control VibeForge's workbench directly. Fields: workspace (when applicable), prompt (\"mkdir\", \"branch\", \"browser\", \"reload\", \"back\", \"forward\", \"files\", \"close-side\", \"split-right\", \"split-down\", \"focus-next\", \"focus-prev\", \"zoom\", \"close-pane\", \"diff\", \"open-folder\", \"mark-reviewed\", \"check-updates\", or \"undo\" to undo the last delete!), folder (for mkdir), branch (to open as its own workspace), target (URL for browser, copy/run id for diff, or optional undo token).",
     "- settings: change VibeForge settings — including your own planner/model/effort/mode, voice/STT models & downloads (`voice.model`, `voice.download`, `voice.stopDownload`, `voice.speaker`, `voice.language`, `voice.talkBack`, `voice.talkOver`, `voice.mouseButton`, `voice.sendButton`, `voice.agent`), app settings (`defaultEngine`, `defaultShell`, `theme`, `language`, `terminalFontSize`, `terminalFontFamily`, `notify`, `sounds`, `sounds.volume`, `tray`, `closeToTray`, `autostart`, `usage`, `planLimits`, `quotaAlerts`, `activity`, `checkUpdates`, `agentTalk`, `agentTalk.lead`, `agentTalk.handOff`, `agentTalk.leadApplies`, `agentTalk.maxMessages`, `agentTalk.reviewRounds`, `agentTalk.maxWorking`, `agentTalk.maxHandOffs`, `companion`, `companion.nudges`, `sync`, `sync.name`, `keepRuns.days`, `keepRuns.maxMb`), left rail (`rail.hide`, `rail.show`, `rail.order`), and custom coding CLIs (`engines.recheck`, `engines.add`/`engines.edit` with engine=id, name=label, folder=binary, prompt=args, options=\"promptArgs=..., continueArgs=...\", `engines.remove` with engine=id). Selecting an uninstalled catalog STT model on `voice.model` (or voice on `voice.speaker`) downloads and selects it automatically.",
     "- stop: close a running CLI. Fields: target (ptyId).",
     "- show: bring something up on screen (changes nothing). Fields: target (running CLI id, view name `home|agents|code|chat|tasks|routines|skills|runs|viby|settings` to open that view, OR a specific agent, task, routine, skill, chat, copy, or run name/id to deep-link straight to it!), workspace (to open a workspace in Code), options (optional `tab=chats|brief|memory|skills|folders|runs|settings` for an agent, or `section=appearance|engines|orchestrator|voice|sounds|tray|usage|agent-talk|phone|sync|storage|rail|updates` for settings).",
@@ -1583,6 +1584,56 @@ export function lookingLine(looking: Looking | null | undefined, context: PlanCo
     if (running) parts.push(`terminal ${running.id} running ${running.engine} in ${running.workspace}`);
   }
   return `(In front of the person right now: ${parts.join(", ")}.)`;
+}
+
+/**
+ * Compact cross-turn entity hint so pronouns ("it", "that one", "there") resolve reliably
+ * across follow-up turns without bloating the planner prompt.
+ */
+export function recentFocusLine(turns: readonly OrchestratorTurn[], context: PlanContext, looking?: Looking | null): string {
+  const recent = turns.filter((t) => (t.steps && t.steps.length > 0) || (t.checks && t.checks.length > 0)).slice(-4).reverse();
+  if (!recent.length) return "";
+  const seen = new Set<string>();
+  const items: string[] = [];
+  const push = (key: string, label: string) => {
+    if (seen.has(key) || items.length >= 6) return;
+    seen.add(key);
+    items.push(label);
+  };
+  for (const turn of recent) {
+    for (const step of turn.steps ?? []) {
+      const ptyId = step.ptyId || (["tell", "read", "stop", "key"].includes(step.kind) ? step.target : "");
+      const cli = ptyId && ptyId !== looking?.ptyId ? context.running.find((r) => r.id === ptyId) : undefined;
+      if (cli) push(`cli:${cli.id}`, `CLI ${cli.engine} [${cli.id}]`);
+      const wsId = step.openedWorkspaceId || step.workspaceId;
+      const ws = wsId && wsId !== looking?.workspaceId ? context.workspaces.find((w) => w.id === wsId) : undefined;
+      if (ws) push(`ws:${ws.id}`, `workspace "${ws.name}" [${ws.id}]`);
+      const copyId = step.copyId || (step.kind === "apply" || step.kind === "discard" ? step.target : "");
+      const copy = copyId ? context.copies?.find((c) => c.id === copyId) : undefined;
+      if (copy) push(`copy:${copy.id}`, `copy "${copy.name}" (${copy.branch}) [${copy.id}]`);
+      const agId = step.agentId || (step.kind === "agent" ? step.target : "");
+      const ag = agId ? context.agents?.find((a) => a.id === agId) : undefined;
+      if (ag) push(`agent:${ag.id}`, `agent "${ag.name}" [${ag.id}]`);
+      const tkId = step.taskId || (step.kind === "task" ? step.target : "");
+      const tk = tkId ? context.tasks?.find((t) => t.id === tkId) : undefined;
+      if (tk) push(`task:${tk.id}`, `task "${tk.title}" [${tk.id}]`);
+      const rt = step.kind === "routine" && step.target ? context.routines?.find((r) => r.id === step.target) : undefined;
+      if (rt) push(`routine:${rt.id}`, `routine "${rt.name}" [${rt.id}]`);
+      const sk = step.kind === "skill" && step.target ? context.skills?.find((s) => s.id === step.target) : undefined;
+      if (sk) push(`skill:${sk.id}`, `skill "${sk.name}" [${sk.id}]`);
+      const ch = step.kind === "chat" && step.target ? context.chats?.find((c) => c.id === step.target) : undefined;
+      if (ch) push(`chat:${ch.id}`, `chat "${ch.title}" [${ch.id}]`);
+    }
+    for (const check of turn.checks ?? []) {
+      const cli = check.ptyId && check.ptyId !== looking?.ptyId ? context.running.find((r) => r.id === check.ptyId) : undefined;
+      if (cli) push(`cli:${cli.id}`, `CLI ${cli.engine} [${cli.id}]`);
+      const ws = check.workspaceId && check.workspaceId !== looking?.workspaceId ? context.workspaces.find((w) => w.id === check.workspaceId) : undefined;
+      if (ws) push(`ws:${ws.id}`, `workspace "${ws.name}" [${ws.id}]`);
+      const copy = check.copyId ? context.copies?.find((c) => c.id === check.copyId) : undefined;
+      if (copy) push(`copy:${copy.id}`, `copy "${copy.name}" (${copy.branch}) [${copy.id}]`);
+    }
+  }
+  return items.length ? `(Recent turn focus for "it" / "that one" / "there": ${items.join(", ")}.)` : "";
 }
 
 /**

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, Menu, nativeImage, powerMonitor, session } from "electron";
+import { app, clipboard, Menu, nativeImage, powerMonitor, session, shell } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
@@ -107,7 +107,19 @@ const { send, focusWindow, install } = ctx;
 ownWebContents = () => ctx.win?.webContents ?? null;
 const notify = desktopNotifier(ctx);
 
-const host = deskHost(ctx, notify, { dock: () => dock, stats: () => stats, voice: () => voice, tray: () => tray, sync: () => sync });
+const host = deskHost(ctx, notify, {
+  dock: () => dock,
+  stats: () => stats,
+  voice: () => voice,
+  tray: () => tray,
+  sync: () => sync,
+  updater: () => updater,
+  openFolder: async (folderPath) => {
+    const err = await shell.openPath(folderPath);
+    if (err) throw new Error(err);
+  },
+  writeClipboard: (text) => clipboard.writeText(text),
+});
 const dock = new Dock(
   () => ctx.win,
   (state) => send("dock", state),

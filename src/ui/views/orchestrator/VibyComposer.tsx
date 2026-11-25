@@ -37,6 +37,8 @@ const SLASH_COMMANDS: ReadonlyArray<{ cmd: string; insert: string; hint: string;
   { cmd: "/review", insert: "/review", hint: "Mark all runs reviewed", immediate: true },
   { cmd: "/remember", insert: "/remember ", hint: "Save note to viby.md" },
   { cmd: "/stop-all", insert: "/stop-all", hint: "Stop Viby's running CLIs", immediate: true },
+  { cmd: "/diagnostics", insert: "/diagnostics", hint: "Show Viby diagnostics & issues", immediate: true },
+  { cmd: "/trust", insert: "/trust", hint: "Approve folder-trust prompt", immediate: true },
   { cmd: "/open", insert: "/open ", hint: "Jump to view or workspace" },
 ];
 

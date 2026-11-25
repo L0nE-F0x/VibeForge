@@ -639,7 +639,7 @@ export interface TrayWaiter {
 export type CodeWorkbenchEvent =
   | { kind: "browser-open"; workspaceId: string; url: string }
   | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
-  | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" };
+  | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" | "focus-next" | "focus-prev" };
 
 export interface DeskEvents {
   changed: Topic[];
