@@ -9,7 +9,7 @@ import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
 import type { Agent, AgentTier, LibraryKind, Routine, Schedule, Skill, Task, TaskStatus, UnreadableItem } from "../types.js";
 import { carryUnknown, formatVersion, type Shape } from "./carry.js";
-import { bool, str, strList, strOrNull } from "./fields.js";
+import { bool, fromHome, str, strList, strOrNull } from "./fields.js";
 import type { ReadCache } from "./read-cache.js";
 
 export const MEMORY_STARTER =
@@ -144,7 +144,7 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
     engine: str(record.engine),
     brief: str(record.brief),
     memoryFile: "memory.md",
-    places: strList(record.places),
+    places: strList(record.places).map(fromHome),
     skills: strList(record.skills),
     allowRoutines: bool(record.allowRoutines, true),
     goodAt: oneLine(str(record.goodAt)),

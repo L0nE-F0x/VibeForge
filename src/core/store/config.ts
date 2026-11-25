@@ -9,7 +9,7 @@ import { isThemeId } from "../theme.js";
 import type { WorkspaceFile } from "../workspaces.js";
 import type { ComputerUseGrant, EngineRow, LayoutNode, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
-import { bool, str, strOrNull } from "./fields.js";
+import { bool, fromHome, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
 import type { ReadCache } from "./read-cache.js";
 import { cleanModel } from "../../shared/launch-options.js";
@@ -115,7 +115,7 @@ function normalizeWorkspace(value: unknown): Workspace | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const id = str(record.id);
-  const folder = str(record.path);
+  const folder = fromHome(str(record.path));
   if (!isSafeId(id) || !folder) return null;
   return { id, name: str(record.name) || path.basename(folder) || id, path: folder, dockUrl: str(record.dockUrl) };
 }

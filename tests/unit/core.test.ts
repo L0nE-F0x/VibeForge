@@ -512,6 +512,31 @@ describe("store", () => {
     store.close();
   });
 
+  it("reads a folder written from home (~/…) in agent.yaml or workspaces.json from this machine's home", () => {
+    const store = new Store(tempDir(), tempDir());
+    const saved = process.env.HOME;
+    const home = tempDir();
+    process.env.HOME = home;
+    try {
+      const project = path.join(home, "Projects", "shop");
+      fs.mkdirSync(project, { recursive: true });
+      // The window shows these folders as ~/Projects/shop, so that is how one gets written by hand.
+      fs.mkdirSync(path.join(store.configRoot, "agents", "atlas"), { recursive: true });
+      fs.writeFileSync(path.join(store.configRoot, "agents", "atlas", "agent.yaml"), "name: Atlas\nengine: claude\nbrief: Help.\nplaces:\n  - ~/Projects/shop\n  - /srv/other\n");
+      fs.writeFileSync(path.join(store.configRoot, "workspaces.json"), JSON.stringify({ workspaces: [{ id: "shop", name: "Shop", path: "~/Projects/shop" }] }));
+      const agent = store.getAgent("atlas");
+      expect(agent?.places).toEqual([project, "/srv/other"]);
+      expect(cwdAllowed(path.join(project, "src"), agent?.places ?? [])).toBe(true);
+      expect(store.readWorkspaces().workspaces[0]?.path).toBe(project);
+      // Only a leading ~ means home: anything else stays as written.
+      fs.writeFileSync(path.join(store.configRoot, "agents", "atlas", "agent.yaml"), "name: Atlas\nplaces:\n  - ~other/x\n  - /srv/~/x\n");
+      expect(store.getAgent("atlas")?.places).toEqual(["~other/x", "/srv/~/x"]);
+    } finally {
+      process.env.HOME = saved;
+      store.close();
+    }
+  });
+
   it("seeds engines.json and settings.json on first read", () => {
     const store = new Store(tempDir(), tempDir());
     expect(store.readEngineRows().map((row) => row.id)).toContain("claude");
