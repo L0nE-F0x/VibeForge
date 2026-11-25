@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { controlSocketPath, hyprlandBindings, parseControl, voiceArg } from "../../src/core/control.js";
 import { claudeLogCwd, claudeProjectDir, claudeTurn, codexLogCwd, codexTurn, mentions, replyLogFor, speakable } from "../../src/core/replies.js";
@@ -207,5 +211,21 @@ describe("talk: the control socket", () => {
     expect(lua).not.toContain("converse");
     const conf = hyprlandBindings("/opt/vf/scripts/vibeforge", false);
     expect(conf).toContain("bindr = SUPER ALT, V, exec, /opt/vf/scripts/vibeforge --voice stop");
+  });
+
+  it("writes bindings that still start a launcher in a folder with a space in its name", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-bind-"));
+    try {
+      const launcher = path.join(dir, "Vibe Forge", "scripts", "vibeforge");
+      fs.mkdirSync(path.dirname(launcher), { recursive: true });
+      fs.writeFileSync(launcher, `#!/bin/sh\nprintf '%s\\n' "$*" >> "${dir}/ran"\n`, { mode: 0o755 });
+      // What Hyprland's exec does with the command: sh -c.
+      const conf = /^bind = SUPER ALT, V, exec, (.+)$/m.exec(hyprlandBindings(launcher, false))?.[1] ?? "";
+      const lua = /^o\.bind\("SUPER \+ ALT \+ V", "VibeForge: stop talking", "(.+)", \{ release = true \}\)$/m.exec(hyprlandBindings(launcher, true))?.[1] ?? "";
+      for (const command of [conf, lua]) expect(spawnSync("sh", ["-c", command]).status, command).toBe(0);
+      expect(fs.readFileSync(path.join(dir, "ran"), "utf8")).toBe("--voice start\n--voice stop\n");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

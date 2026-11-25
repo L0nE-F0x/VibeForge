@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **The hold-to-talk keybinding works for a VibeForge in a folder with a space in its name.** Without `vibeforge` on your `PATH`, **Settings → Voice** writes the launcher's full path into Hyprland's config, and a space in it split the command, so <kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd> did nothing. The path is now quoted.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

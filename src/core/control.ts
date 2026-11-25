@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { shellQuote } from "../shared/text.js";
 
 // The control socket: how `vibeforge --voice start` reaches the running window in a few
 // milliseconds, instead of starting a second Electron only to be handed off, and how
@@ -211,10 +212,11 @@ export class TalkRateLimiter {
 
 /**
  * Hold Super+Alt+V to talk to one agent from anywhere on the desktop. Omarchy's Lua config
- * (bindings.lua), or hyprland.conf.
+ * (bindings.lua), or hyprland.conf. Hyprland runs the command with `sh -c`, so a launcher in a
+ * folder with a space in its name is quoted.
  */
 export function hyprlandBindings(launcher: string, lua: boolean): string {
-  const run = (action: string) => `${launcher} --voice ${action}`;
+  const run = (action: string) => `${shellQuote(launcher)} --voice ${action}`;
   if (lua) {
     return [
       "-- VibeForge voice: hold to talk to one agent, from anywhere",
