@@ -124,6 +124,9 @@ export function HomeView() {
   const [markAll, marking] = useAction(() => call("runs.markAllOpened"));
   // The newest runs of any age, for the first steps: one recorded, and one opened.
   const latestRuns = useQuery("home-first-runs", ["runs"], () => call("runs.list", { limit: 20 }), { poll: false }).data;
+  // The opened one asked for on its own: every CLI session in Code is a run, mostly never opened,
+  // so a day's work would push it out of the newest and bring the steps back.
+  const openedRuns = useQuery("home-first-opened", ["runs"], () => call("runs.list", { opened: true, limit: 1 }), { poll: false }).data;
   const settings = useSettings().data;
 
   const time = (iso: string) => fireTime(iso, t.language, now);
@@ -138,9 +141,9 @@ export function HomeView() {
   const greeting = t(hour < 5 ? "home.greeting.night" : hour < 12 ? "home.greeting.morning" : hour < 18 ? "home.greeting.afternoon" : "home.greeting.evening");
   const date = new Date(now).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short" });
   const clock = new Date(now).toLocaleTimeString(t.language, { hour: "2-digit", minute: "2-digit" });
-  const steps = firstSteps({ workspaces: workspaces.length, runs: latestRuns ?? [] });
+  const steps = firstSteps({ workspaces: workspaces.length, runs: [...(latestRuns ?? []), ...(openedRuns ?? [])] });
   // Until the runs are read, the steps wait rather than flash in front of someone who has done them.
-  const onboarding = latestRuns !== undefined && !firstStepsDone(steps);
+  const onboarding = latestRuns !== undefined && openedRuns !== undefined && !firstStepsDone(steps);
   const rail = settings?.rail;
   // The CLI the "Run a CLI" step starts: the default one when it is here, else the first found.
   const firstCli = available.find((engine) => engine.id === settings?.defaultEngine) ?? available[0] ?? null;
