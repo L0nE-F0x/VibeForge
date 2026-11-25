@@ -179,6 +179,8 @@ export interface Settings {
   agentTalk: AgentTalkSettings;
   /** The Orchestrator: which CLI plans, and whether a plan waits for Go. */
   orchestrator: OrchestratorSettings;
+  /** What Viby may see and do on the screen. Only a person changes it, in Settings; Viby can't. */
+  computerUse: ComputerUseSettings;
   /** Workspaces synced with your other machines. Off until turned on. */
   sync: SyncSettings;
 }
@@ -201,6 +203,30 @@ export interface OrchestratorSettings {
   effort?: string;
   /** Where a workspace Maestro makes gets its folder; empty: where most workspaces are, else ~/Projects. */
   projectsFolder: string;
+}
+
+/** What Viby may do in one place on the screen. */
+export interface ComputerUseGrant {
+  /** Take screenshots of it (and, on the desktop, list the open windows). */
+  see: boolean;
+  /** Click, scroll, drag and move the pointer (on the desktop, also bring a window to the front). */
+  pointer: boolean;
+  /** Type text and press keys. */
+  keys: boolean;
+}
+
+/**
+ * Viby's computer use. Off until a person turns it on; then each place has its own grants. Every
+ * click, scroll or key still waits for Go.
+ */
+export interface ComputerUseSettings {
+  on: boolean;
+  /** VibeForge's own window. */
+  app: ComputerUseGrant;
+  /** The Browser Dock in Code. */
+  browser: ComputerUseGrant;
+  /** The whole desktop: every window that's open. */
+  desktop: ComputerUseGrant;
 }
 
 /** How far CLIs may go on their own when they talk to each other. */

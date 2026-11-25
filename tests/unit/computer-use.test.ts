@@ -16,7 +16,10 @@ import {
   UINPUT_HELPER_SCRIPT,
 } from "../../src/core/computer-use.js";
 import {
+  computerGrantFor,
   computerStepIssue,
+  computerUseBlocked,
+  describeComputerGrants,
   describeComputerStep,
   holdsForGo,
   isReadOnlyComputerAction,
@@ -27,6 +30,7 @@ import {
   parseComputerSurface,
   parseComputerWaitMs,
   resolvePlan,
+  resolveSettingsStep,
   safeInCall,
   validateKeyCombo,
   type PlanContext,
@@ -44,6 +48,9 @@ function setupWithClaude() {
   ctx.svc.saveSettings({ orchestrator: { engine: "claude", mode: "go", model: "", projectsFolder: "" } });
   return ctx;
 }
+
+const ALL = { see: true, pointer: true, keys: true };
+const NONE = { see: false, pointer: false, keys: false };
 
 describe("Computer-use shared parsers and validation", () => {
   it("normalizes actions, surfaces, coordinates, drags, scrolls, waits, and key combos safely", () => {
@@ -237,6 +244,7 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
 describe("Viby orchestrator multimodal screen inspection + Go-gated computer steps", () => {
   it("keeps computer steps strictly gated behind Go and passes captured screenshots to follow-up planning turns", async () => {
     const ctx = setupWithClaude();
+    ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: ALL, desktop: ALL } });
     const dummyCtx: PlanContext = { workspaces: [], engines: [], running: [] };
     const [resolved] = resolvePlan({ say: "", steps: [{ kind: "computer", action: "click", target: "540,320", options: "surface=desktop" }] }, dummyCtx);
     expect(resolved.kind).toBe("computer");
@@ -317,3 +325,110 @@ describe("Viby orchestrator multimodal screen inspection + Go-gated computer ste
     expect(acted).toEqual([{ action: "click", target: "540,320", surface: "app" }]);
   });
 });
+
+describe("Computer use is the person's to allow, place by place", () => {
+  function fakeDriver(pngPath: string, acted: string[], shots: string[]) {
+    return {
+      capabilities: async () => ({
+        platform: "linux",
+        sessionType: "wayland" as const,
+        compositor: "hyprland" as const,
+        canScreenshot: true,
+        canListWindows: true,
+        canPointer: true,
+        canKeyboard: true,
+        canAppUi: true,
+      }),
+      listWindows: async () => {
+        shots.push("windows");
+        return [];
+      },
+      screenshot: async ({ surface }: { surface?: "desktop" | "app" | "browser" } = {}) => {
+        shots.push(surface ?? "desktop");
+        return { path: pngPath, surface: surface ?? "desktop", summary: "Captured", details: "" };
+      },
+      act: async (req: { action: string; surface: string }) => {
+        acted.push(`${req.action}@${req.surface}`);
+        return "done";
+      },
+    };
+  }
+
+  it("starts off, and grants only what the person ticked", () => {
+    const off = setup().svc.getSettings().computerUse;
+    expect(off.on).toBe(false);
+    expect(computerUseBlocked(off, "app", "see")).toContain("Computer use is off");
+    const some = { on: true, app: ALL, browser: { see: true, pointer: false, keys: false }, desktop: NONE };
+    expect(computerUseBlocked(some, "app", "keys")).toBeNull();
+    expect(computerUseBlocked(some, "browser", "see")).toBeNull();
+    expect(computerUseBlocked(some, "browser", "pointer")).toContain("click or scroll in the Browser in Code");
+    expect(computerUseBlocked(some, "desktop", "see")).toContain("look at the desktop");
+    // Waiting needs no grant, but still needs computer use on.
+    expect(computerUseBlocked(some, "desktop", computerGrantFor("wait"))).toBeNull();
+    expect(computerGrantFor("focus-window")).toBe("pointer");
+    expect(computerGrantFor("windows")).toBe("see");
+    expect(computerGrantFor("key")).toBe("keys");
+    expect(describeComputerGrants(off)).toContain("OFF");
+    expect(describeComputerGrants(some)).toContain("browser: see; desktop: nothing");
+  });
+
+  it("refuses a screenshot or an action that isn't allowed, checked when it runs", async () => {
+    const ctx = setupWithClaude();
+    const pngPath = path.join(tempDir(), "screen.png");
+    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const acted: string[] = [];
+    const shots: string[] = [];
+    ctx.host.computer = fakeDriver(pngPath, acted, shots);
+    // After an inspect, Viby asks the planner again with what it found: that answer has no steps.
+    const seen = { say: "Here's what I found.", steps: [] };
+    const answers = [
+      { say: "Looking.", steps: [{ kind: "inspect", action: "screen", target: "", prompt: "screen" }] },
+      seen,
+      { say: "Click it?", steps: [{ kind: "computer", action: "click", target: "10,10", options: "surface=desktop" }] },
+      { say: "Click it?", steps: [{ kind: "computer", action: "click", target: "10,10", options: "surface=desktop" }] },
+      { say: "Looking.", steps: [{ kind: "inspect", action: "app-ui", target: "", prompt: "app" }] },
+      seen,
+      { say: "Typing.", steps: [{ kind: "computer", action: "type", prompt: "hi", options: "surface=app" }] },
+    ];
+    ctx.svc.orchestrator.runner = async () => ok(JSON.stringify({ session_id: "s-perm", structured_output: answers.shift() ?? { say: "Done.", steps: [] } }));
+
+    // Off: no screenshot is taken.
+    await ctx.svc.orchestratorAsk("what's on my screen");
+    expect(shots).toEqual([]);
+    expect(ctx.svc.orchestratorView().turns.find((t) => t.checks?.length)?.checks?.[0].details).toContain("Computer use is off");
+
+    // Off: Go doesn't click.
+    await ctx.svc.orchestratorAsk("click it");
+    let turn = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorRun(turn.id);
+    turn = ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)!;
+    expect(turn.steps?.[0].state).toBe("failed");
+    expect(turn.steps?.[0].error).toContain("Computer use is off");
+    expect(acted).toEqual([]);
+
+    // On for VibeForge's window only: the desktop stays out of reach, even after the plan was made.
+    await ctx.svc.orchestratorAsk("click it");
+    turn = ctx.svc.orchestratorView().turns.at(-1)!;
+    ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: NONE, desktop: NONE } });
+    await ctx.svc.orchestratorRun(turn.id);
+    turn = ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)!;
+    expect(turn.steps?.[0].error).toContain("isn't allowed to click or scroll in the desktop");
+    expect(acted).toEqual([]);
+
+    await ctx.svc.orchestratorAsk("look at vibeforge");
+    expect(shots).toEqual(["app"]);
+    await ctx.svc.orchestratorAsk("type hi");
+    turn = ctx.svc.orchestratorView().turns.at(-1)!;
+    await ctx.svc.orchestratorRun(turn.id);
+    expect(acted).toEqual(["type@app"]);
+  });
+
+  it("can't be turned on by Viby's own settings steps", () => {
+    const engines = [{ id: "claude", label: "Claude Code", available: true, bin: "claude" }];
+    for (const target of ["computerUse", "computerUse.on", "computer use", "computer", "screen control", "desktop control", "computerUse.desktop.pointer"]) {
+      const res = resolveSettingsStep({ target, prompt: "on" }, { engines });
+      expect(JSON.stringify(res.action ?? {})).not.toMatch(/computerUse|"computer"/);
+    }
+  });
+});
+

@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Undo2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, MousePointerClick, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Undo2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -13,6 +13,7 @@ import { SyncCard } from "../components/SyncCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
 import { StorageCard } from "../components/StorageCard.js";
 import { TalkCard } from "../components/TalkCard.js";
+import { ComputerUseCard } from "../components/ComputerUseCard.js";
 import { OrchestratorCard } from "../components/OrchestratorCard.js";
 import { ThemeField } from "../components/ThemePicker.js";
 import { TrayCard } from "../components/TrayCard.js";
@@ -324,6 +325,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
             <AudioLines size={13} /> {t("orch.title")}
           </div>
           <OrchestratorCard />
+
+          <div className="section-title" id="settings-computer-use">
+            <MousePointerClick size={13} /> {t("cu.title")}
+          </div>
+          <ComputerUseCard />
 
           <div className="section-title" id="settings-voice">
             <Mic size={13} /> {t("voice.title")}

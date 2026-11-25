@@ -24,6 +24,8 @@ import {
   lookingLine,
   normalizeMemoryAction,
   normalizeComputerAction,
+  computerGrantFor,
+  computerUseBlocked,
   ONLY_LOOKS,
   parseComputerSurface,
   parseVerifyOptions,
@@ -814,6 +816,7 @@ export class OrchestratorDesk {
         model: planner && planner === all.orchestrator.engine ? all.orchestrator.model : "",
         effort: planner && planner === all.orchestrator.engine ? (all.orchestrator.effort ?? "") : "",
         projectsFolder: this.projectsFolder(),
+        computer: all.computerUse,
         availablePlanners,
       },
       voice: {
@@ -2160,6 +2163,9 @@ export class OrchestratorDesk {
       const action = normalizeComputerAction(step.action || step.prompt);
       if (!action) throw new Error("Unsupported action.");
       const surface = parseComputerSurface(step.options, step.target);
+      // Checked when it runs, not when it was planned: the person may have changed it since.
+      const blocked = computerUseBlocked(this.core.store.readSettings().computerUse, surface, computerGrantFor(action));
+      if (blocked) throw new Error(blocked);
       step.result = await computer.act({
         action,
         surface,

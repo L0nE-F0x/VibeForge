@@ -230,3 +230,47 @@ export function describeComputerStep(step: { action?: string; target?: string; p
   if (action === "key") return `Key ${(step.prompt || step.target || "").trim()}${surfSuffix}`;
   return `Wait ${(step.prompt || step.target || "500ms").trim()}`;
 }
+
+/** Which of a place's grants an action needs: seeing it, the pointer, or the keyboard. `null` for waiting. */
+export type ComputerGrantKind = "see" | "pointer" | "keys";
+
+export function computerGrantFor(action: ComputerActionKind): ComputerGrantKind | null {
+  if (action === "screenshot" || action === "windows") return "see";
+  if (action === "type" || action === "key") return "keys";
+  if (action === "wait") return null;
+  return "pointer";
+}
+
+/** The person's computer-use settings, as Settings → Viby → Computer use keeps them. */
+export interface ComputerUseGrants {
+  on: boolean;
+  app: Record<ComputerGrantKind, boolean>;
+  browser: Record<ComputerGrantKind, boolean>;
+  desktop: Record<ComputerGrantKind, boolean>;
+}
+
+const SURFACE_WORDS: Record<ComputerSurface, string> = { app: "VibeForge's window", browser: "the Browser in Code", desktop: "the desktop" };
+const GRANT_WORDS: Record<ComputerGrantKind, string> = { see: "look at", pointer: "click or scroll in", keys: "type or press keys in" };
+
+/**
+ * Why Viby may not do this, or null when it may. Only a person turns these on, in Settings → Viby →
+ * Computer use: Viby can't change them itself.
+ */
+export function computerUseBlocked(grants: ComputerUseGrants | undefined, surface: ComputerSurface, grant: ComputerGrantKind | null): string | null {
+  if (!grants?.on) return "Computer use is off. A person can turn it on in Settings → Viby → Computer use.";
+  if (grant && !grants[surface][grant]) return `Viby isn't allowed to ${GRANT_WORDS[grant]} ${SURFACE_WORDS[surface]}. A person can allow it in Settings → Viby → Computer use.`;
+  return null;
+}
+
+/** One line for the planner: what it may do on the screen right now. */
+export function describeComputerGrants(grants: ComputerUseGrants | undefined): string {
+  if (!grants?.on) {
+    return "Computer use: OFF. Don't plan `computer` steps or screen/windows/app-ui/browser-ui inspects; if the person asks for one, say a person can turn it on in Settings → Viby → Computer use. You can't change this setting yourself.";
+  }
+  const place = (surface: ComputerSurface) => {
+    const g = grants[surface];
+    const allowed = [g.see ? "see" : "", g.pointer ? "click/scroll" : "", g.keys ? "type/keys" : ""].filter(Boolean);
+    return `${surface}: ${allowed.length ? allowed.join(", ") : "nothing"}`;
+  };
+  return `Computer use allowed by the person (only they change it, in Settings → Viby → Computer use; you can't): ${place("app")}; ${place("browser")}; ${place("desktop")}. Plan only what is allowed; if they ask for more, say where they can allow it.`;
+}

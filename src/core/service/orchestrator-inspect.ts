@@ -4,6 +4,7 @@ import path from "node:path";
 import { isCodingCli } from "../checkout.js";
 import { isDirectory } from "../fsx.js";
 import {
+  computerUseBlocked,
   detectWaitingPrompt,
   formatScheduleBrief,
   formatSettingsRules,
@@ -106,6 +107,9 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
     return compareCopies(deps);
   }
   if (step.action && ["windows", "screen", "desktop", "app-ui", "browser-ui"].includes(step.action)) {
+    const surface = step.action === "app-ui" ? "app" : step.action === "browser-ui" ? "browser" : "desktop";
+    const blocked = computerUseBlocked(deps.core.store.readSettings().computerUse, surface, "see");
+    if (blocked) return { summary: "Not allowed to look at the screen.", details: blocked };
     const driver = deps.core.options.host.computer;
     if (!driver) {
       return {
@@ -122,7 +126,6 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
           : "No desktop windows reported.",
       };
     }
-    const surface = step.action === "app-ui" ? "app" : step.action === "browser-ui" ? "browser" : "desktop";
     const shot = await driver.screenshot({ surface, ...(step.target ? { target: step.target } : {}) });
     return { summary: shot.summary, details: shot.details, imagePath: shot.path };
   }
