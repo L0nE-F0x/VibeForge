@@ -21,6 +21,7 @@ import {
   inspectsStorage,
   isHighRiskStep,
   isLowRiskComputerStep,
+  isPersonLedComputerStep,
   isReadOnlyStep,
   keySequenceFor,
   lookingLine,
@@ -1243,7 +1244,7 @@ export class OrchestratorDesk {
         leading.length > 0 &&
         !(
           leading.every((step) => !step.after && (step.kind === "computer" || step.kind === "show" || step.kind === "workbench")) &&
-          shouldAutoRunPlan(leading, currentContext, { mode, inCall: Boolean(this.onCall), fromReading: checks.length > 0 })
+          shouldAutoRunPlan(leading, currentContext, { mode, fromReading: checks.length > 0, said: words })
         )
       ) {
         break;
@@ -1389,7 +1390,8 @@ export class OrchestratorDesk {
     const checked = withPlannedWorkspaces(currentContext, steps);
     const ready = steps.every((step) => !stepIssue(step, checked));
     // Once Viby has read a screen, a file, a diff or a reply in this turn, what it read could be
-    // steering the plan: low-risk computer actions after reading still auto-run under "go", while
+    // steering the plan: under "go", low-risk computer actions the person asked for still auto-run
+    // (pointing where the screen shows; typing and shortcuts only from their own words), while
     // code-writing / destructive actions stay guarded (decision D1).
     const readSomething = checks.length > 0 || carried;
     const willAutoRun =
@@ -1397,8 +1399,8 @@ export class OrchestratorDesk {
       !unknownKinds.length &&
       shouldAutoRunPlan(steps, checked, {
         mode,
-        inCall: Boolean(this.onCall),
         fromReading: readSomething,
+        said: words,
         inPlaceDirty,
       });
     const combinedChecks: OrchestratorCheck[] = !willAutoRun && executedChainSteps.length
@@ -1476,7 +1478,10 @@ export class OrchestratorDesk {
       why = "read";
     } else if (inPlaceDirty || steps.some((step) => isHighRiskStep(step, context))) {
       why = "risky";
-    } else if (madeFromReading(waiting) && !steps.every((step) => isReadOnlyStep(step) || isLowRiskComputerStep(step))) {
+    } else if (
+      madeFromReading(waiting) &&
+      !steps.every((step) => isReadOnlyStep(step) || (isLowRiskComputerStep(step) && isPersonLedComputerStep(step, `${this.askedFor(waiting)} ${words}`)))
+    ) {
       why = "read";
     }
     // Stopped, Go or Cancel pressed, or the card changed, while that was checked.
@@ -1502,7 +1507,17 @@ export class OrchestratorDesk {
     return true;
   }
 
-  /** What a new planner session is told: the last few turns, then what the person just said. */
+  /** What the person said that led to this turn: their last words before it. */
+  private askedFor(turn: OrchestratorTurn): string {
+    const at = this.conversation.turns.indexOf(turn);
+    for (let i = at - 1; i >= 0; i -= 1) {
+      const item = this.conversation.turns[i];
+      if (item.from === "you") return item.text;
+    }
+    return "";
+  }
+
+    /** What a new planner session is told: the last few turns, then what the person just said. */
   private recap(words: string): string {
     const said = this.conversation.turns
       .slice(0, -1)

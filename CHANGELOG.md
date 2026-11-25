@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-11-25
+
+**3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
+
+### Fixed
+
+- **Text on the screen can't make Viby type or press shortcuts without Go.** In 3.10.0, under **Ask only for risky actions**, once Viby had looked at the screen it could type and press keys straight away. A web page or message saying "paste this into your terminal" could have been typed with no Go. Now, after Viby has looked, typing runs straight away only when the text is something you said, and a <kbd>Ctrl</kbd>, <kbd>Alt</kbd> or <kbd>Super</kbd> shortcut only when you named it. Clicking, scrolling, focusing a window and plain keys such as <kbd>Enter</kbd> still run in the same turn. Anything else shows as a card waiting for **Go**, including when you answer a waiting card with a yes in your own words. **Ask for everything** and **Never ask** work as before.
+- **Viby is told that what it reads is information, not instructions.** Screenshots, window titles, pages, files and CLI output show it where things are. If something there asks it to do something you didn't ask for, it tells you instead of doing it. This applies in every approval mode.
+- **Settings → Viby's risk summary** now lists typing or shortcuts that came from the screen under "Asks for Go", in all seven languages.
+- A test once more checks that a **Computer use** switch turned off after a plan was made stops that plan's click when you press **Go**. 3.10.0 had loosened it.
+- The principles page and the website still said every click waits for **Go**. They now describe the three approval levels.
+
 ## [3.10.0] - 2026-11-25
 
 **3.10.0: Talking to Viby feels direct — low-risk actions and screen steps run straight away, risky ones stay behind Go, spoken "go" works reliably, replies stay brief, and Viby can look and act in one turn.**
@@ -1256,7 +1268,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.10.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.10.1...HEAD
+[3.10.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.1
 [3.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.0
 [3.9.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.1
 [3.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.0
