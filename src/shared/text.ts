@@ -29,20 +29,24 @@ export function timeAgo(iso: string | null | undefined, now = Date.now(), langua
   // A clock that ticks every few seconds (TimeAgo) sees something that just happened as slightly
   // ahead of it; that is "just now", not "in a moment".
   if (future && s <= 60) return language.startsWith("en") ? "just now" : new Intl.RelativeTimeFormat(language, { numeric: "auto", style: "short" }).format(0, "second");
+  // The unit is picked from the rounded number, so 59 min 40 s is an hour and 23 h 40 min a day,
+  // not "60 min" or "24 hr".
+  const minutes = Math.max(1, Math.round(s / 60));
+  const hours = Math.max(1, Math.round(s / 3600));
   if (!language.startsWith("en")) {
     const format = new Intl.RelativeTimeFormat(language, { numeric: "auto", style: "short" });
     const sign = future ? 1 : -1;
     if (s < 45) return format.format(0, "second");
-    if (s < 3600) return format.format(sign * Math.max(1, Math.round(s / 60)), "minute");
-    if (s < 86400) return format.format(sign * Math.max(1, Math.round(s / 3600)), "hour");
+    if (minutes < 60) return format.format(sign * minutes, "minute");
+    if (hours < 24) return format.format(sign * hours, "hour");
     return format.format(sign * Math.max(1, Math.round(s / 86400)), "day");
   }
   let text: string;
   if (s < 45) text = future ? "in a moment" : "just now";
   else if (s < 90) text = "1 min";
-  else if (s < 3600) text = `${Math.round(s / 60)} min`;
+  else if (minutes < 60) text = `${minutes} min`;
   else if (s < 5400) text = "1 hr";
-  else if (s < 86400) text = `${Math.round(s / 3600)} hr`;
+  else if (hours < 24) text = `${hours} hr`;
   else if (s < 172800) text = future ? "tomorrow" : "yesterday";
   else text = `${Math.round(s / 86400)} days`;
   if (text === "just now" || text === "in a moment" || text === "yesterday" || text === "tomorrow") return text;
