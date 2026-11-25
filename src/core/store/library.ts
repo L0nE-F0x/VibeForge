@@ -154,8 +154,27 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
   };
 }
 
+/** SKILL.md's front matter (group 1) and body (group 2). */
+const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+
+/**
+ * The front matter fields VibeForge uses. A SKILL.md can hold more, from the Agent Skills format
+ * other CLIs read (`allowed-tools`, `license`, `metadata`) or written by hand: a save carries them over.
+ */
+const SKILL_SHAPE: Shape = { name: true, description: true };
+
+/** The front matter of a SKILL.md about to be saved over; null when there is none, or it doesn't parse. */
+function savedFront(file: string): unknown {
+  try {
+    const match = fs.readFileSync(file, "utf8").match(FRONT_MATTER);
+    return match ? (parse(match[1]) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseSkill(id: string, text: string): Skill {
-  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  const match = text.match(FRONT_MATTER);
   if (!match) return { id, name: id, description: "", body: text.trim() };
   let front: { name?: unknown; description?: unknown } | null;
   try {
@@ -171,8 +190,9 @@ export function parseSkill(id: string, text: string): Skill {
   };
 }
 
-export function skillDocument(skill: Skill): string {
-  const front = yamlText({ name: skill.name, description: skill.description }).trimEnd();
+/** SKILL.md for `skill`, with the front matter fields of `saved` (what the file held) that VibeForge doesn't use. */
+export function skillDocument(skill: Skill, saved: unknown = null): string {
+  const front = yamlText(carryUnknown({ name: skill.name, description: skill.description }, saved, SKILL_SHAPE)).trimEnd();
   return `---\n${front}\n---\n\n${skill.body.trim()}\n`;
 }
 
@@ -321,7 +341,8 @@ export class Library {
     const dir = path.join(this.configRoot, "skills", skill.id);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
-    writeFileAtomic(path.join(dir, "SKILL.md"), skillDocument(skill));
+    const file = path.join(dir, "SKILL.md");
+    writeFileAtomic(file, skillDocument(skill, savedFront(file)));
   }
 
   /** Where a skill, routine or task lives on disk, for moving it aside (see Trash). Null for a bad id. */
