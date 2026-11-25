@@ -166,7 +166,9 @@ export class QueryCache {
         },
       )
       .finally(() => {
-        entry.loaded = true;
+        // Changed while this read was out and nobody is reading: what it brought is already old,
+        // so whoever reads next starts a fresh read.
+        entry.loaded = !(entry.stale && !entry.subscribers.size);
         entry.inflight = null;
         if (changed) this.publish(entry);
         if (entry.stale && entry.subscribers.size) void this.load(entry);
@@ -179,7 +181,10 @@ export class QueryCache {
     for (const entry of this.entries.values()) {
       if (!follows(entry, topics)) continue;
       if (entry.subscribers.size) void this.load(entry);
-      else entry.loaded = false;
+      else {
+        entry.loaded = false;
+        if (entry.inflight) entry.stale = true;
+      }
     }
   }
 

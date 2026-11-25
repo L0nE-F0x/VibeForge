@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A view you come back to no longer shows what it read just before something changed.** If you left a list while it was loading and a task, run or agent changed in that moment, the list reopened with the old data until the next change or the 30-second refresh. It reads again as soon as you are back.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
