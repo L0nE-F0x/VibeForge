@@ -216,7 +216,9 @@ process.stdin.on("end", () => {
     ctx.host.spawn = async (req) => {
       inFlight += 1;
       peakInFlight = Math.max(peakInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 40));
+      // Each start makes its copy first, which takes as long as git takes, so the first start waits
+      // here (up to 3 s) for the second to arrive. Started one after the other, it never would.
+      for (const end = Date.now() + 3000; peakInFlight < 2 && Date.now() < end; ) await new Promise((r) => setTimeout(r, 10));
       try {
         return await origSpawn(req);
       } finally {
