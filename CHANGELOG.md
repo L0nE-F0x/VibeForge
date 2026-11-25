@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plan that ends the call ends it after a spoken go too.** In a call, saying "go" to a plan that finishes by hanging up (open Tasks, then hang up) ran the plan, but the call stayed on: the plan was done while Viby was still saying "Going.", and its hang-up was forgotten. The call now ends once Viby has said it.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
