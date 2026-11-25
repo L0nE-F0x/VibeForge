@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, dialog, nativeImage, session, shell } from "electron";
 import { PageErrors } from "../src/core/log.js";
+import { relaunchOptions } from "../src/core/updates.js";
 import type { Dock } from "./dock.js";
 import { guardSession, guardWebContents, isAppPage, relaunchArgs } from "./guards.js";
 import type { MainContext } from "./main-context.js";
@@ -64,7 +66,7 @@ export class MainWindow {
     guardWebContents(win.webContents);
     win.once("ready-to-show", () => {
       if (!(startHidden && ctx.service?.getSettings().tray)) {
-        ctx.win?.show();
+        ctx.focusWindow();
         return;
       }
       // From the login autostart entry, the window waits in the tray, once something hosts one.
@@ -173,7 +175,7 @@ export class MainWindow {
         if (win.isDestroyed() || ctx.quitting) return;
         if (response === 1) {
           log.info("Restarting, after the window's page kept stopping");
-          app.relaunch({ execPath: process.execPath, args: relaunchArgs(process.argv) });
+          app.relaunch(relaunchOptions(ctx.appRoot, process.execPath, relaunchArgs(process.argv), fs.existsSync));
           ctx.quitting = true;
           app.quit();
           return;

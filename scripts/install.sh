@@ -444,7 +444,11 @@ wrapper_for() {
   printf 'root=%q\nself=%q\n' "$DEST" "$1"
   cat <<'EOF'
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ -z "${ELECTRON_RUN_AS_NODE:-}" && -x "$root/current/scripts/vibeforge" && "$(readlink -f "$root/current")" != "$self" ]]; then
+helper=0
+for arg in "$@"; do
+  case "$arg" in --type=*) helper=1; break ;; esac
+done
+if ((!helper)) && [[ -z "${ELECTRON_RUN_AS_NODE:-}" && -x "$root/current/scripts/vibeforge" && "$(readlink -f "$root/current")" != "$self" ]]; then
   args=()
   for arg in "$@"; do
     case "$arg" in "$self" | "$self/" | --class=vibeforge | --enable-wayland-ime) ;; *) args+=("$arg") ;; esac

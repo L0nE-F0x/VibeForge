@@ -46,6 +46,7 @@ function pushRoute(prev: Route[], route: Route): Route[] {
 
 const VIEWS: ViewName[] = ["home", "agents", "code", "chat", "tasks", "routines", "skills", "runs", "orchestrator", "settings"];
 const NAV_KEY = "vf.nav";
+const LAST_VERSION_KEY = "vf.lastVersion";
 
 /** A route this page could have made: a saved one, or one handed back by the tray or a notification. */
 export function isRoute(value: unknown): value is Route {
@@ -54,12 +55,58 @@ export function isRoute(value: unknown): value is Route {
   return VIEWS.includes(route.view as ViewName) && Object.entries(route).every(([key, item]) => key === "view" || item === undefined || typeof item === "string");
 }
 
+function readLeft(saved: unknown): Array<[ViewName, Route]> {
+  if (!saved || typeof saved !== "object") return [];
+  const raw = (saved as { left?: unknown }).left;
+  return Array.isArray(raw) ? raw.filter((entry): entry is [ViewName, Route] => Array.isArray(entry) && isRoute(entry[1]) && entry[1].view === entry[0]) : [];
+}
+
+/**
+ * Point the next window start at Home while preserving where each other view was left.
+ * Called right before restarting for an update so the window opens on the Home screen.
+ */
+export function openHomeOnNextStart(
+  storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage,
+): void {
+  if (!storage) return;
+  let left: Array<[ViewName, Route]> = [];
+  try {
+    left = readLeft(JSON.parse(storage.getItem(NAV_KEY) ?? "null"));
+  } catch {
+    left = [];
+  }
+  try {
+    storage.setItem(NAV_KEY, JSON.stringify({ route: { view: "home" }, left }));
+  } catch {
+    /* storage can be unavailable */
+  }
+}
+
+/**
+ * Records the running app version and returns true when this profile just moved from another
+ * recorded version (e.g. an update applied outside the in-app Restart button), so the window
+ * opens on Home.
+ */
+export function landOnHomeAfterUpdate(
+  version: string,
+  storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage,
+): boolean {
+  if (!storage || !version) return false;
+  let previous: string | null = null;
+  try {
+    previous = storage.getItem(LAST_VERSION_KEY);
+    storage.setItem(LAST_VERSION_KEY, version);
+  } catch {
+    return false;
+  }
+  return Boolean(previous && previous !== version);
+}
+
 /** Where the last session was: the open view and where each view was left. */
 function loadNav(): { route: Route; left: Array<[ViewName, Route]> } {
   try {
     const saved = JSON.parse(localStorage.getItem(NAV_KEY) ?? "null") as { route?: unknown; left?: unknown } | null;
-    const left = Array.isArray(saved?.left) ? saved.left.filter((entry): entry is [ViewName, Route] => Array.isArray(entry) && isRoute(entry[1]) && entry[1].view === entry[0]) : [];
-    return { route: isRoute(saved?.route) ? saved.route : { view: "home" }, left };
+    return { route: isRoute(saved?.route) ? saved.route : { view: "home" }, left: readLeft(saved) };
   } catch {
     return { route: { view: "home" }, left: [] };
   }

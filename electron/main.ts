@@ -11,7 +11,7 @@ import { MainText } from "../src/core/main-text.js";
 import { TeamService } from "../src/core/team-service.js";
 import { iconColors, iconPng, refreshLauncherIcons } from "../src/core/brand-icon.js";
 import { resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
-import { INSTALLER_MARK, installKind, RELEASES_URL, restartVia, updateCommand } from "../src/core/updates.js";
+import { INSTALLER_MARK, installKind, RELEASES_URL, relaunchOptions, updateCommand } from "../src/core/updates.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { tildify } from "../src/shared/text.js";
 import { syncCompanion } from "./companion.js";
@@ -220,7 +220,7 @@ if (!app.requestSingleInstanceLock()) {
       // Through the install's current launcher, so an update installed meanwhile is the one that starts.
       if (!voiceArg(argv)) {
         const args = secondStartArgs(process.argv, argv);
-        app.relaunch(restartVia(appRoot, args, fs.existsSync) ?? { execPath: process.execPath, args });
+        app.relaunch(relaunchOptions(appRoot, process.execPath, args, fs.existsSync));
       }
       return;
     }

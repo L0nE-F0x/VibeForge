@@ -876,6 +876,10 @@ describe("the installer with ready-made builds", () => {
       expect(restart.trim()).toBe("launcher 4.4.0 --hidden");
       const asNode = spawnSync(path.join(dest, "node_modules", "electron", "dist", "electron"), ["-e", "1"], { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
       expect(asNode.stderr).toContain("electron 40.1.0 as node");
+      for (const helper of ["--type=relauncher", "--type=utility"]) {
+        const child = execFileSync(path.join(dest, "node_modules", "electron", "dist", "electron"), [helper, "---", dest], { encoding: "utf8" });
+        expect(child.trim()).toBe(`electron 40.1.0 ${helper} --- ${dest}`);
+      }
       // Going back to 3.7.2 puts its own Electron back in place for it.
       expect(fs.existsSync(path.join(prev(old), "node_modules", "electron", "dist", "electron.real"))).toBe(true);
       expect(install(["--rollback"], { home: old }).status).toBe(0);
@@ -968,4 +972,144 @@ describe("the installer with ready-made builds", () => {
     expect(result.status).not.toBe(0);
     expect(result.out).toContain("Unknown option --frobnicate");
   });
+
+  it("restarts cleanly via real Electron app.relaunch after migrating an open pre-versions install", async () => {
+    const realElectron = path.join(repo, "node_modules", "electron", "dist", "electron");
+    const realDist = path.dirname(realElectron);
+    const realHome = path.join(dir, "home-real-relaunch");
+    const dest = app(realHome);
+    const cache = path.join(realHome, ".cache");
+    const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-rt-"));
+    const dataDir = path.join(realHome, ".local", "share", "vibeforge");
+    const binDir = path.join(realHome, "bin");
+    const saidFile = path.join(realHome, "notified.txt");
+    const readyFile = path.join(realHome, "legacy-ready.txt");
+    const triggerFile = path.join(realHome, "relaunch-now.txt");
+    const startedFile = path.join(realHome, "started-new.json");
+    const profileDir = path.join(realHome, "profile");
+    for (const folder of [cache, runtimeDir, dataDir, binDir, profileDir]) fs.mkdirSync(folder, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(binDir, "notify-send"), `#!/bin/sh\nprintf '%s\\n' "$*" >>${JSON.stringify(saidFile)}\n`, { mode: 0o755 });
+
+    // Legacy 3.7.2 layout running the real Electron binary (replaced in place by install.sh while open).
+    writeFiles(dest, {
+      "package.json": [JSON.stringify({ name: "vibeforge", version: "3.7.2", main: "dist-electron/main.js" }), 0o644],
+      "dist/index.html": ["<html></html>", 0o644],
+      "scripts/vibeforge": ["#!/bin/sh\nexit 0\n", 0o755],
+      "resources/icon.png": ["", 0o644],
+      "resources/icon.svg": ["<svg xmlns='http://www.w3.org/2000/svg'/>", 0o644],
+      ".vibeforge-installer": ["", 0o644],
+      "node_modules/node-pty/build/Release/pty.node": ["", 0o644],
+      "node_modules/node-pty/package.json": [JSON.stringify({ name: "node-pty", main: "index.js" }), 0o644],
+      "node_modules/node-pty/index.js": ["module.exports = {};\n", 0o644],
+      "dist-electron/main.js": [
+        `const { app } = require("electron");
+const fs = require("fs");
+app.whenReady().then(() => {
+  fs.writeFileSync(${JSON.stringify(readyFile)}, String(process.pid));
+  const timer = setInterval(() => {
+    if (!fs.existsSync(${JSON.stringify(triggerFile)})) return;
+    clearInterval(timer);
+    app.relaunch({ execPath: process.execPath, args: process.argv.slice(1).filter((arg) => arg !== "--hidden") });
+    app.quit();
+  }, 50);
+});
+`,
+        0o644,
+      ],
+    });
+    writeFiles(path.join(dest, "vendor", "syncthing"), runtimeFiles("syncthing", "2.1.7"));
+    const legacyDist = path.join(dest, "node_modules", "electron", "dist");
+    fs.mkdirSync(legacyDist, { recursive: true });
+    for (const entry of fs.readdirSync(realDist)) {
+      if (entry === "electron") fs.copyFileSync(realElectron, path.join(legacyDist, entry));
+      else fs.symlinkSync(path.join(realDist, entry), path.join(legacyDist, entry));
+    }
+    fs.chmodSync(path.join(legacyDist, "electron"), 0o755);
+
+    const env = {
+      ...process.env,
+      HOME: realHome,
+      XDG_CACHE_HOME: cache,
+      XDG_RUNTIME_DIR: runtimeDir,
+      VIBEFORGE_DATA: dataDir,
+      VIBEFORGE_LAUNCH_WAIT: "15",
+      PATH: `${binDir}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+    };
+    const legacyArgs = [
+      dest,
+      "--class=vibeforge",
+      "--enable-wayland-ime",
+      "--ozone-platform=headless",
+      "--hidden",
+      ...(process.env.CI ? ["--no-sandbox"] : []),
+      `--user-data-dir=${profileDir}`,
+    ];
+    let legacyOutput = "";
+    const legacy = spawn(path.join(legacyDist, "electron"), legacyArgs, { env, stdio: ["ignore", "pipe", "pipe"] });
+    legacy.stdout.on("data", (chunk: Buffer) => (legacyOutput += chunk.toString()));
+    legacy.stderr.on("data", (chunk: Buffer) => (legacyOutput += chunk.toString()));
+
+    let newPid = 0;
+    try {
+      for (let tries = 0; tries < 200 && !fs.existsSync(readyFile); tries++) await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fs.existsSync(readyFile), `legacy electron failed to start:\n${legacyOutput}`).toBe(true);
+
+      publishSplit("4.8.0");
+      const update = installReleased(realHome, { path: noBuildPath(), env: { VIBEFORGE_HOME: dest } });
+      expect(update.status, update.out).toBe(0);
+
+      // Give the newly installed version the real launcher, real Electron dist, and a test main.js.
+      const nextDir = path.join(app(realHome), "versions", "4.8.0");
+      fs.writeFileSync(path.join(nextDir, "package.json"), JSON.stringify({ name: "vibeforge", version: "4.8.0", main: "dist-electron/main.js" }, null, 2));
+      fs.copyFileSync(path.join(repo, "scripts", "vibeforge"), path.join(nextDir, "scripts", "vibeforge"));
+      fs.chmodSync(path.join(nextDir, "scripts", "vibeforge"), 0o755);
+      fs.rmSync(path.join(nextDir, "node_modules", "electron", "dist"), { recursive: true, force: true });
+      fs.symlinkSync(realDist, path.join(nextDir, "node_modules", "electron", "dist"));
+      fs.writeFileSync(
+        path.join(nextDir, "dist-electron", "main.js"),
+        `const { app } = require("electron");
+const crypto = require("crypto");
+const fs = require("fs");
+const net = require("net");
+const path = require("path");
+const tag = crypto.createHash("sha1").update(process.env.VIBEFORGE_DATA).digest("hex").slice(0, 8);
+const sock = path.join(process.env.XDG_RUNTIME_DIR, "vibeforge-" + tag + ".sock");
+const srv = net.createServer((socket) => socket.end());
+app.whenReady().then(() => {
+  srv.listen(sock, () => {
+    fs.writeFileSync(${JSON.stringify(startedFile)}, JSON.stringify({ argv: process.argv, pid: process.pid }));
+  });
+});
+setInterval(() => {}, 1000);
+`,
+      );
+
+      fs.writeFileSync(triggerFile, "go");
+      for (let tries = 0; tries < 200 && !fs.existsSync(startedFile); tries++) await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fs.existsSync(startedFile), `relaunch did not start 4.8.0:\n${legacyOutput}`).toBe(true);
+
+      const started = JSON.parse(fs.readFileSync(startedFile, "utf8")) as { argv: string[]; pid: number };
+      newPid = started.pid;
+      expect(started.argv.some((arg) => arg.includes(path.join("versions", "4.8.0")))).toBe(true);
+      expect(started.argv).not.toContain("--hidden");
+
+      // Let scripts/vibeforge's watcher finish its wait window and verify no error notification fired.
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+      expect(legacyOutput).not.toContain("relauncher.cc");
+      expect(fs.existsSync(saidFile), fs.existsSync(saidFile) ? fs.readFileSync(saidFile, "utf8") : "").toBe(false);
+      const launchLog = fs.readFileSync(path.join(cache, "vibeforge", "launch.log"), "utf8");
+      expect(launchLog).not.toContain("relauncher.cc");
+      expect(launchLog).not.toContain("It stopped as it started");
+    } finally {
+      if (newPid > 0) {
+        try {
+          process.kill(newPid, "SIGKILL");
+        } catch {
+          /* already exited */
+        }
+      }
+      if (legacy.exitCode === null && legacy.signalCode === null) legacy.kill("SIGKILL");
+      fs.rmSync(runtimeDir, { recursive: true, force: true });
+    }
+  }, 25_000);
 });

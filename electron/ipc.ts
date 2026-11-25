@@ -9,7 +9,7 @@ import { whichBin } from "../src/core/engines.js";
 import { describeError } from "../src/core/log.js";
 import { speakable } from "../src/core/replies.js";
 import { listThemes } from "../src/core/theme.js";
-import { isNewer, previousVersion, restartVia, rollbackCommand } from "../src/core/updates.js";
+import { isNewer, previousVersion, relaunchOptions, rollbackCommand } from "../src/core/updates.js";
 import type { Method, MethodArgs, MethodResult, UpdateInfo } from "../src/shared/api.js";
 import type { Looking } from "../src/shared/orchestrator.js";
 import { companionStatus } from "./companion.js";
@@ -130,7 +130,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       log.info("Restarting");
       // A version in the installer's versions/ comes back through the current launcher, so the
       // version installed now starts (after an update or Go back), not this one again.
-      app.relaunch(restartVia(ctx.appRoot, relaunchArgs(process.argv), fs.existsSync) ?? { execPath: process.execPath, args: relaunchArgs(process.argv) });
+      app.relaunch(relaunchOptions(ctx.appRoot, process.execPath, relaunchArgs(process.argv), fs.existsSync));
       ctx.quitting = true;
       app.quit();
     },

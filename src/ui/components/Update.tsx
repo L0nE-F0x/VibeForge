@@ -6,7 +6,7 @@ import { call, useLive, useUpdate } from "../api.js";
 import { useT, type Translator } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { headline, notesBlocks } from "../notes.js";
-import { useConfirm, useToast } from "../state.js";
+import { openHomeOnNextStart, useConfirm, useToast } from "../state.js";
 import { markUpdated, useUpdated } from "../update-state.js";
 import { LiveTerminal } from "./Terminal.js";
 import { Button, Empty, Modal, Notice } from "./ui.js";
@@ -113,6 +113,7 @@ function useRestart(own: string | null = null): () => Promise<void> {
       const ok = await confirm({ title: t("updates.restartTitle"), body: t.count("updates.restartBody", others), confirm: t("updates.restart") });
       if (!ok) return;
     }
+    openHomeOnNextStart();
     await call("app.restart");
   };
 }

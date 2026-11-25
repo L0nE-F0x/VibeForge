@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { debugSwitch, isAppPage, relaunchArgs, settleWithin } from "../../electron/guards.js";
+import { landOnHomeAfterUpdate, openHomeOnNextStart } from "../../src/ui/state.js";
 
 const registered = new Map<string, (...args: unknown[]) => unknown>();
 vi.mock("electron", () => ({
@@ -63,6 +64,37 @@ describe("restarting", () => {
     expect(relaunchArgs(["/usr/lib/electron/electron", "/opt/vibeforge", "--hidden"])).toEqual(["/opt/vibeforge"]);
     expect(relaunchArgs(["/usr/lib/electron/electron", "/opt/vibeforge", "--ozone-platform=wayland"])).toEqual(["/opt/vibeforge", "--ozone-platform=wayland"]);
     expect(relaunchArgs(["/usr/lib/electron/electron"])).toEqual([]);
+  });
+
+  it("points the next launch at Home while keeping per-view places, and lands on Home after a version change", () => {
+    const map = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => void map.set(key, value),
+    };
+    const left = [["agents", { view: "agents", agentId: "a1" }]];
+    storage.setItem("vf.nav", JSON.stringify({ route: { view: "settings", section: "updates" }, left }));
+    openHomeOnNextStart(storage);
+    expect(JSON.parse(storage.getItem("vf.nav") ?? "null")).toEqual({ route: { view: "home" }, left });
+
+    storage.setItem("vf.nav", "{broken");
+    openHomeOnNextStart(storage);
+    expect(JSON.parse(storage.getItem("vf.nav") ?? "null")).toEqual({ route: { view: "home" }, left: [] });
+    openHomeOnNextStart(null);
+
+    expect(landOnHomeAfterUpdate("3.7.1", storage)).toBe(false);
+    expect(landOnHomeAfterUpdate("3.7.1", storage)).toBe(false);
+    expect(landOnHomeAfterUpdate("3.8.0", storage)).toBe(true);
+    expect(landOnHomeAfterUpdate("3.8.0", storage)).toBe(false);
+    expect(landOnHomeAfterUpdate("3.8.0", null)).toBe(false);
+    expect(
+      landOnHomeAfterUpdate("3.8.1", {
+        getItem: () => {
+          throw new Error("denied");
+        },
+        setItem: () => undefined,
+      }),
+    ).toBe(false);
   });
 });
 

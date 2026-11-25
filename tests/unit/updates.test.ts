@@ -7,12 +7,14 @@ import { describeError, LogFile, PageErrors } from "../../src/core/log.js";
 import crypto from "node:crypto";
 import {
   INSTALL_URL,
+  INSTALLER_MARK,
   installKind,
   installRoot,
   inVersions,
   isNewer,
   parseVersion,
   previousVersion,
+  relaunchOptions,
   releaseFrom,
   releaseListUrl,
   releasesBetween,
@@ -182,14 +184,22 @@ describe("versioned installs", () => {
     expect(rollbackCommand("other", version)).toBeNull();
   });
 
-  it("restarts a version in versions/ through the current launcher, so the installed version starts", () => {
+  it("restarts an installer copy through the current launcher, and falls back otherwise", () => {
     const launcher = `${root}/current/scripts/vibeforge`;
+    const mark = `${root}/${INSTALLER_MARK}`;
     const there = (file: string) => file === launcher;
+    const markedRoot = (file: string) => file === launcher || file === mark;
     expect(restartVia(version, [version, "--class=vibeforge", "--enable-wayland-ime", "--voice", "start"], there)).toEqual({ execPath: launcher, args: ["--voice", "start"] });
     expect(restartVia(version, [`${version}/`], there)).toEqual({ execPath: launcher, args: [] });
-    // Not in versions/, or no launcher to start: restart as it started.
+    expect(restartVia(root, [root, "--class=vibeforge"], markedRoot)).toEqual({ execPath: launcher, args: [] });
+    expect(relaunchOptions(version, "/usr/bin/electron", [version, "--hidden"], there)).toEqual({ execPath: launcher, args: ["--hidden"] });
+    // Unmarked checkout or missing launcher: restart as it started.
     expect(restartVia(root, [root], there)).toBeNull();
     expect(restartVia(version, [version], () => false)).toBeNull();
+    expect(relaunchOptions("/home/me/code/VibeForge", "/usr/bin/electron", ["/home/me/code/VibeForge"], () => false)).toEqual({
+      execPath: "/usr/bin/electron",
+      args: ["/home/me/code/VibeForge"],
+    });
   });
 
   it("lists the releases between this version and the newest, newest first, without drafts or pre-releases", () => {
