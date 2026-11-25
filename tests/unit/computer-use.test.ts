@@ -512,6 +512,40 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
     );
   });
 
+  it("waits, scrolls, drags and lists windows on X11 too, with xdotool", async () => {
+    const calls: string[] = [];
+    const bins = new Set(["xdotool", "import"]);
+    const x11 = new X11Driver({
+      dataRoot: tempDir(),
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (bins.has(b) ? `/usr/bin/${b}` : null),
+      execFileImpl: async (file, args) => {
+        calls.push(`${path.basename(file)} ${args.join(" ")}`);
+        if (args[0] === "search") return { stdout: "101\n102\n", stderr: "" };
+        if (args[0] === "getwindowname") return { stdout: `Window ${args[1]}\n`, stderr: "" };
+        return { stdout: "", stderr: "" };
+      },
+    });
+    // Each of these said "Desktop computer control is not available on this display session."
+    expect(await x11.act({ action: "wait", surface: "desktop", target: "", prompt: "10ms" })).toBe("Waited 10ms.");
+    expect(await x11.act({ action: "windows", surface: "desktop", target: "", prompt: "" })).toBe("2 windows open.");
+    expect(await x11.act({ action: "screenshot", surface: "desktop", target: "", prompt: "" })).toContain("Captured X11 desktop");
+    await x11.act({ action: "scroll", surface: "desktop", target: "640,360", prompt: "down 2" });
+    await x11.act({ action: "scroll", surface: "desktop", target: "", prompt: "left" });
+    await x11.act({ action: "drag", surface: "desktop", target: "100,200 -> 300,400", prompt: "" });
+    // X's wheel is buttons 4 to 7; a drag holds button 1 down between the two moves.
+    expect(calls.filter((call) => !/^xdotool (search|getwindowname)|^import /.test(call))).toEqual([
+      "xdotool mousemove --sync 640 360",
+      "xdotool click --repeat 2 5",
+      "xdotool click --repeat 3 6",
+      "xdotool mousemove --sync 100 200",
+      "xdotool mousedown 1",
+      "xdotool mousemove --sync 300 400",
+      "xdotool mouseup 1",
+    ]);
+  });
+
   it("uses ydotool when wtype is absent and preserves stdout + stderr via real execFile", async () => {
     const dataRoot = tempDir();
     const calls: Array<{ file: string; args: string[] }> = [];

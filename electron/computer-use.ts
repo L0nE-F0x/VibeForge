@@ -795,6 +795,16 @@ export class X11Driver implements ComputerUseDriver {
 
   async act(req: ComputerActionRequest): Promise<string> {
     if (req.surface === "app" || req.surface === "browser") return this.appUi.act(req);
+    if (req.action === "screenshot") return (await this.screenshot({ surface: "desktop" })).summary;
+    if (req.action === "windows") {
+      const wins = await this.listWindows();
+      return `${wins.length} window${wins.length === 1 ? "" : "s"} open.`;
+    }
+    if (req.action === "wait") {
+      const ms = parseComputerWaitMs(req.prompt || req.target) ?? 500;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return `Waited ${ms}ms.`;
+    }
     const xdo = this.bin("xdotool");
     if (!xdo) {
       const pkgMgr = packageManagerOf((b) => Boolean(this.bin(b)));
@@ -814,6 +824,25 @@ export class X11Driver implements ComputerUseDriver {
       if (req.action === "click") await this.exec(xdo, ["click", "1"]);
       else if (req.action === "double-click") await this.exec(xdo, ["click", "--repeat", "2", "1"]);
       else if (req.action === "right-click") await this.exec(xdo, ["click", "3"]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "scroll") {
+      const scroll = parseComputerScroll(req.prompt || req.target);
+      if (!scroll) throw new Error("Unsupported action.");
+      const coords = parseComputerCoordinates(req.target);
+      if (coords) await this.exec(xdo, ["mousemove", "--sync", String(coords.x), String(coords.y)]);
+      // X's wheel is buttons 4 (up), 5 (down), 6 (left) and 7 (right).
+      const button = { up: "4", down: "5", left: "6", right: "7" }[scroll.direction];
+      await this.exec(xdo, ["click", "--repeat", String(scroll.amount), button]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "drag") {
+      const drag = parseComputerDrag(req.target || req.prompt);
+      if (!drag) throw new Error("Unsupported action.");
+      await this.exec(xdo, ["mousemove", "--sync", String(drag.fromX), String(drag.fromY)]);
+      await this.exec(xdo, ["mousedown", "1"]);
+      await this.exec(xdo, ["mousemove", "--sync", String(drag.toX), String(drag.toY)]);
+      await this.exec(xdo, ["mouseup", "1"]);
       return describeComputerStep(req);
     }
     if (req.action === "type") {
