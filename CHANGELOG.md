@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Terminals started from a VibeForge opened in tmux are its own.** VibeForge started from a tmux (or screen) pane handed every terminal that pane's `TMUX`, so `tmux` refused to start in one ("sessions should be nested with care") and tmux commands there reached the pane VibeForge came from. A `COLUMNS` or `LINES` exported there also told every program the old terminal's size, whatever the pane's. Terminals no longer inherit them.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
