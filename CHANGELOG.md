@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Undo brings a deleted chat back after you start a new one.** A new chat with the same agent, or with the same first words, took the deleted chat's name while its **Undo** was still on screen, and **Undo** then did nothing: the chat and its history stayed gone. A new chat now gets a name of its own until the chance to undo has passed, as a new agent already did.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
