@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hold to talk (<kbd>Super</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>) works when `XDG_DATA_HOME` or `HOME` ends in a slash.** The `vibeforge` launcher worked out another control socket than the window's, so a press started a second VibeForge to hand the words over, losing the first of them, and letting go stopped nothing. `vibeforge` started again also didn't see the open window, and a git checkout could rebuild under it.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

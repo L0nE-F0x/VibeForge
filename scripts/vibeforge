@@ -37,7 +37,8 @@ fi
 # in a /tmp folder only this user can enter; when someone else made that folder, there's no path.
 control_sock() {
   local data tag dir
-  data="${VIBEFORGE_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/vibeforge}"
+  # Squeezed as path.join in src/core/layout.ts does, so an XDG_DATA_HOME or HOME ending in "/" hashes the same.
+  data="${VIBEFORGE_DATA:-$(printf %s "${XDG_DATA_HOME:-$HOME/.local/share}/vibeforge" | tr -s /)}"
   tag="$(printf %s "$data" | sha1sum | cut -c1-8)"
   if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
     dir="$XDG_RUNTIME_DIR"

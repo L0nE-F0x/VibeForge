@@ -6,6 +6,7 @@ import net from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { answers, listenControl } from "../../electron/control.js";
 import { controlSocketPath, fallbackSocketDir, parseTalkRequest, prepareSocketDir } from "../../src/core/control.js";
+import { defaultRoots } from "../../src/core/layout.js";
 
 vi.mock("electron", () => ({
   app: { getVersion: () => "0.0.0" },
@@ -28,14 +29,14 @@ const mode = (dir: string) => fs.statSync(dir).mode & 0o777;
  * scripts/vibeforge's control_sock(), run in bash. With `tmp`, its /tmp is swapped for that folder
  * so the test never makes anything in the real /tmp.
  */
-function controlSock(env: { runtime?: string; tmp?: string }): { out: string; err: string; status: number | null } {
+function controlSock(env: { runtime?: string; tmp?: string; vars?: Record<string, string> }): { out: string; err: string; status: number | null } {
   const script = fs.readFileSync(path.join(import.meta.dirname, "..", "..", "scripts", "vibeforge"), "utf8");
   let fn = /^control_sock\(\) \{\n[\s\S]*?^\}\n/m.exec(script)?.[0] ?? "";
   expect(fn).toContain('dir="/tmp/vibeforge-$(id -u)"');
   if (env.tmp) fn = fn.replace('dir="/tmp/vibeforge-', `dir="${env.tmp}/vibeforge-`);
   const result = spawnSync("bash", ["-c", `set -euo pipefail\n${fn}\ncontrol_sock`], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH, HOME: "/home/me", VIBEFORGE_DATA: data, ...(env.runtime ? { XDG_RUNTIME_DIR: env.runtime } : {}) },
+    env: { PATH: process.env.PATH, HOME: "/home/me", ...(env.vars ?? { VIBEFORGE_DATA: data }), ...(env.runtime ? { XDG_RUNTIME_DIR: env.runtime } : {}) },
   });
   return { out: result.stdout.trim(), err: result.stderr.trim(), status: result.status };
 }
@@ -51,6 +52,19 @@ describe("the control socket's path", () => {
     const tmp = tempDir();
     expect(controlSock({ tmp }).out).toBe(controlSocketPath(data, undefined, uid, tmp));
     expect(mode(fallbackSocketDir(uid, tmp))).toBe(0o700);
+  });
+
+  it("is the same in bash when XDG_DATA_HOME or HOME ends in a slash", () => {
+    const runtime = tempDir();
+    const cases: Array<Record<string, string>> = [{ XDG_DATA_HOME: "/home/me/.local/share/" }, { XDG_DATA_HOME: "/data//me" }, { HOME: "/home/me/" }];
+    for (const vars of cases) {
+      vi.stubEnv("HOME", vars.HOME ?? "/home/me");
+      try {
+        expect(controlSock({ runtime, vars }).out, JSON.stringify(vars)).toBe(controlSocketPath(defaultRoots(vars).dataRoot, runtime, uid));
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    }
   });
 
   it("makes the /tmp folder private, and closes up one of its own that was left open", () => {
