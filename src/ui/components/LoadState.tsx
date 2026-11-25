@@ -22,9 +22,9 @@ export function LoadFailed({ query, what }: { query: Pick<Query<unknown>, "error
     <div className="load-failed" role="alert">
       <Notice tone="bad" icon={AlertTriangle}>
         <div className="vstack" style={{ gap: 6 }}>
-          <strong>{t(sentence)}</strong>
-          <span className="selectable">{query.error}</span>
-          <span className="faint">{t(query.data === undefined ? "load.notEmpty" : "load.stale")}</span>
+          <strong className="load-failed-title">{t(sentence)}</strong>
+          <span className="load-failed-reason selectable">{query.error}</span>
+          <span className="load-failed-hint">{t(query.data === undefined ? "load.notEmpty" : "load.stale")}</span>
           <div>
             <Button size="sm" icon={RotateCcw} busy={busy} onClick={retry}>
               {t("common.tryAgain")}
