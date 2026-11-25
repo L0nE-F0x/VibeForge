@@ -80,6 +80,8 @@ export class SyncDesk {
   unpairWaitMs = 2500;
   /** Machines just unpaired here, and until when their still dialling in is not taken for a new request. */
   private readonly quiet = new Map<string, number>();
+  /** The name this machine last gave the engine and its notes. */
+  private named = "";
 
   constructor(
     private readonly dataRoot: string,
@@ -158,7 +160,8 @@ export class SyncDesk {
     const engine = this.engine;
     if (!engine) return;
     const state = this.stateFile.read();
-    await engine.setName(this.host.machineName());
+    this.named = this.host.machineName();
+    await engine.setName(this.named);
 
     const devices = await engine.devices();
     for (const machine of state.machines) {
@@ -434,6 +437,19 @@ export class SyncDesk {
   }
 
   // ------------------------------------------------------------------ machines
+
+  /** Settings changed: a new name for this machine goes to the engine and to the paired machines' notes. */
+  renamed(): Promise<void> {
+    return this.run(async () => {
+      const engine = this.engine;
+      const name = this.host.machineName();
+      if (!engine || name === this.named) return;
+      await engine.setName(name);
+      this.named = name;
+      this.publish();
+      this.host.changed();
+    });
+  }
 
   /** This machine's pairing code, for the other one to paste. */
   code(id: string): string {

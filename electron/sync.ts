@@ -144,7 +144,12 @@ export class Sync {
         this.error = null;
         return;
       }
-      if (this.engine || !fs.existsSync(this.binary())) return;
+      if (this.engine) {
+        // Already running: a new name for this machine still has to reach Syncthing and the paired machines.
+        void this.desk?.renamed().catch((error: unknown) => this.ctx.log.warn(`Sync could not pass on this machine's new name: ${describeError(error)}`));
+        return;
+      }
+      if (!fs.existsSync(this.binary())) return;
       const desk = this.makeDesk();
       try {
         const engine = await Syncthing.start({
