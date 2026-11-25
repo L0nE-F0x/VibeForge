@@ -20,6 +20,7 @@ npm run typecheck
 npm run lint         # Biome, bug-shaped rules only; nothing is reformatted
 npm run coverage     # the tests again, with a floor on src/core (CI runs this one)
 npm run build && npm run smoke   # the built app, driven over DevTools (SMOKE_HEADLESS=1: no window)
+npm run e2e          # the end-to-end scenarios in e2e/, on the built app (see below)
 ```
 
 ### Beside an installed VibeForge
@@ -44,6 +45,26 @@ VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data VIBEFORGE_PROFILE=$dev/pro
 The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
 
 A copy started on folders another VibeForge is already using (the same `VIBEFORGE_CONFIG` or `VIBEFORGE_DATA`, whatever its `--user-data-dir`) doesn't start: it says which folder is taken and exits.
+
+## End-to-end tests
+
+`e2e/` holds scenarios that start the built app and use it as a person would: they click buttons by their names, type with key events, and wait for what the window shows. `npm run e2e` runs them all after `npm run build`; `npx vitest run --config vitest.e2e.config.mts e2e/task-copy.e2e.ts` runs one file.
+
+- **Nothing of yours is touched.** Each scenario starts its own VibeForge with scratch config, data, home and Electron profile, `TZ=UTC`, English, a fixed window size, and no window on your screen (`--ozone-platform=headless`; `E2E_HEADLESS=0` opens a real window on the display that is set instead, which CI doesn't use and hasn't been tried). It runs beside an installed VibeForge. The window is driven over `--remote-debugging-pipe`, so no port is opened, and the window's requests to anywhere but this machine are refused and listed (`app.blockedRequests`).
+- **Stand-in CLIs.** `launchApp({ standins: { claude: {...} } })` puts a `claude` on the app's PATH that is `e2e/standins/standin.cjs`: as Viby's planner it answers with the plans you give it; in a terminal it prints, waits at a gate until the test calls `app.openGate(...)`, then edits files and exits. Its header comment has the format. The PATH holds nothing from your home, so your real CLIs never run.
+- **Waits are on conditions.** `app.waitFor(check, { what })` polls until the check is true. There are no fixed sleeps; a turn ends when the test opens its gate.
+- **When one fails,** its scratch folder is kept with `evidence/`: a screenshot, the page's HTML, the app's output, each live terminal's text and why it stopped. The folders go to `E2E_OUT` (default: `vibeforge-e2e` in your temporary folder); a passing scenario's folder is removed unless `E2E_KEEP=1`. Keep `TMPDIR` short: Chromium's lock socket lives there, and a path over about 100 characters stops the app at start.
+- **The driver** is `e2e/driver/app.ts`: `call` and `eval` reach VibeForge and the page, `click({ name, role, within })`, `key("Ctrl+Shift+D")`, `type(...)` and `go("Tasks")` act, `terminal(ptyId).waitForText(...)` reads a terminal, `restart()` quits and starts on the same profile, and `refuse([...])` makes the main process refuse the window's calls (with `mainProcess: true`), as a folder it can't read would.
+
+A new scenario should pass several runs in a row, alone and beside the others (`npm run e2e` runs two files at a time), before it goes in: a scenario that fails now and then costs more than it finds.
+
+## In CI
+
+`.github/workflows/ci.yml` runs every check on each pull request. The test steps run through `scripts/ci-test.mjs`, which writes JSON and JUnit reports (uploaded as `test-reports-*`). When a check fails, its evidence is uploaded with it: the smoke test's screenshot, page and logs, and each failed scenario's folder.
+
+A test that fails now and then for a reason outside the change goes in `tests/flaky.json`, with the cause and a link to where its fix is tracked. When the only failures in a run are tests on that list, CI runs those once more; if they pass, the job passes, with a warning on the run and a line in the job summary. Everything else that fails, fails. Each Monday, `flaky-report.yml` rewrites one issue labelled `flaky-tests` with the tests that failed that week and the jobs that only passed when re-run. Take an entry off the list once that issue has shown no retry of it for two weeks.
+
+`nightly.yml` runs each night on `main`, and on every push to a `release/` branch: the tests on arm64 and on Ubuntu 24.04 with the newest Node patches, the ready-made build packed and smoke-tested on x64 and arm64, and the build and tests after an `npm update`. A failed night opens or updates an issue labelled `nightly-failure`. To run it on a branch before tagging: `gh workflow run nightly.yml --ref <branch>`.
 
 ## Issues
 

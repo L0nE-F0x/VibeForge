@@ -1,0 +1,39 @@
+name: Flaky tests
+
+# Each Monday: every test that failed in CI or the nightly checks in the last week, which known
+# flakes (tests/flaky.json) were retried and passed, and which jobs only passed when someone
+# re-ran them. One issue labelled flaky-tests holds the table; it is rewritten each week
+# (scripts/flake-report.mjs). Run it by hand: gh workflow run flaky-report.yml
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flaky-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: weekly flaky-test report
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      # Node's own modules and the gh CLI on the runner: no npm ci.
+      - name: Write the report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/flake-report.mjs --days 7

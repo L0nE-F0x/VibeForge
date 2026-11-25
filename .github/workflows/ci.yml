@@ -21,14 +21,20 @@ concurrency:
 env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
+# Every test step runs through scripts/ci-test.mjs: JSON and JUnit reports in reports/, uploaded
+# as test-reports-*. A test listed in tests/flaky.json is retried once when it is the only
+# failure, and still reported: a warning, the job summary, and a test-failures-* record that the
+# weekly report (flaky-report.yml) reads. When something fails, its evidence is uploaded too: the
+# smoke test's screenshot, page and logs, and each failed end-to-end scenario's folder.
 jobs:
   # The terminal host and the build run on each person's own Node, so the tests run on every line
   # they may have: 22, 24, and 26 (the current LTS) with the coverage floors (vitest.config.mts),
   # which were measured there. Node 20.19, which the installer still accepts, is past its end of
-  # life, and vitest 5 doesn't run on it.
+  # life, and vitest 5 doesn't run on it. The two real Syncthings of sync-e2e take about a minute
+  # and a half, so they run once, in the next job, instead of on every version.
   test-node:
     name: test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -43,27 +49,78 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      # The pinned Syncthing (scripts/syncthing.json, checked against its SHA-256), so the tests
-      # sync two real instances with each other instead of skipping (tests/unit/sync-e2e.test.ts).
+      - name: Tests${{ matrix.node == 26 && ', with the coverage floors' || '' }}
+        run: node scripts/ci-test.mjs --label node-${{ matrix.node }} ${{ matrix.node == 26 && '--coverage' || '' }} -- --exclude tests/unit/sync-e2e.test.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-reports-node-${{ matrix.node }}-attempt-${{ github.run_attempt }}
+          path: reports/*-attempt-*
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-failures-node-${{ matrix.node }}-attempt-${{ github.run_attempt }}
+          path: reports/*-failures.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Two "machines" syncing through the pinned Syncthing (scripts/syncthing.json, checked against its
+  # SHA-256), so the test syncs two real instances instead of skipping (tests/unit/sync-e2e.test.ts).
+  sync-e2e:
+    name: test (sync, Node 26)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # Fetched once per pin: fetch-syncthing.mjs checks the copy it finds and fetches only if it's wrong.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/syncthing
+          key: syncthing-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/syncthing.json') }}
       - run: node scripts/fetch-syncthing.mjs
-      - run: npm run ${{ matrix.node == 26 && 'coverage' || 'test' }}
+      - name: Tests
+        run: node scripts/ci-test.mjs --label sync-e2e -- tests/unit/sync-e2e.test.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-reports-sync-e2e-attempt-${{ github.run_attempt }}
+          path: reports/*-attempt-*
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-failures-sync-e2e-attempt-${{ github.run_attempt }}
+          path: reports/*-failures.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   # The check main requires: one name, whichever Node versions run above.
   test:
     name: test
-    needs: test-node
+    needs: [test-node, sync-e2e]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - name: Every Node version passed
+      - name: Every Node version and the sync test passed
         env:
-          RESULT: ${{ needs.test-node.result }}
-        run: test "$RESULT" = success
+          NODE_RESULT: ${{ needs.test-node.result }}
+          SYNC_RESULT: ${{ needs.sync-e2e.result }}
+        run: test "$NODE_RESULT" = success && test "$SYNC_RESULT" = success
 
   lint:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,7 +148,7 @@ jobs:
 
   typecheck:
     name: typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,14 +159,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # The app, the Vite and Vitest configs, and scripts/*.mjs.
+      # The app, the end-to-end suite, the Vite and Vitest configs, and scripts/*.mjs.
       - run: npm run typecheck
 
-  # The built app, started under a virtual display: every view opens, the language switches,
-  # Ctrl+K works and a real shell answers, with no errors from the page (scripts/smoke.mjs).
-  # Then the release's ready-made build, packed, installed and smoke-tested the way release.yml
-  # does it (scripts/build-release.sh), so a tag is never the first time it runs. ubuntu-24.04 as
-  # in release.yml: node-pty links against the runner's glibc.
+  # The release's ready-made build, packed, installed and smoke-tested the way release.yml does it
+  # (scripts/build-release.sh), so a tag is never the first time it runs. That script exports the
+  # commit and runs npm ci and the build there, so this job needs neither of its own. ubuntu-24.04
+  # as in release.yml: node-pty links against the runner's glibc. The smoke test of the checkout's
+  # own build runs in the e2e job, beside the end-to-end scenarios.
   smoke:
     name: smoke
     runs-on: ubuntu-24.04
@@ -125,8 +182,76 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Electron's zip, downloaded once per version (scripts/ensure-electron.cjs looks here first).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Pack the ready-made build, install it and smoke-test the installed copy
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/evidence/smoke-installed
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh "$RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: smoke-evidence-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The built app, started under a virtual display: first the smoke test (every view opens, the
+  # language switches, Ctrl+K works and a real shell answers, with no errors from the page;
+  # scripts/smoke.mjs), then the end-to-end scenarios in e2e/, each on a scratch profile with
+  # stand-in CLIs (CONTRIBUTING.md, "End-to-end tests").
+  e2e:
+    name: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build
-      - run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/smoke.mjs
-      - name: Pack the ready-made build, install it and smoke-test the installed copy
-        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" scripts/build-release.sh "$RUNNER_TEMP/release"
+      - name: Smoke test of the build
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/evidence/smoke
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/smoke.mjs
+      - name: End-to-end scenarios
+        if: ${{ !cancelled() }}
+        env:
+          E2E_OUT: ${{ runner.temp }}/evidence/e2e
+        run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/ci-test.mjs --label e2e --config vitest.e2e.config.mts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-reports-e2e-attempt-${{ github.run_attempt }}
+          path: reports/*-attempt-*
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: test-failures-e2e-attempt-${{ github.run_attempt }}
+          path: reports/*-failures.json
+          if-no-files-found: ignore
+          retention-days: 30
+      # A passing scenario removes its folder and a passing smoke test leaves none, so anything here
+      # is from a failure, a known flake's first attempt included.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: e2e-evidence-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: ignore
+          retention-days: 14
