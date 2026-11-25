@@ -57,7 +57,7 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
     });
   const script = [
     // What the page's modules share (companion/js/state.js), and what api.js keeps to itself.
-    `const state = { base: "", token: "vf_test", view: "desk", ticket: 0, desk: null, session: null, orch: null, error: "", actionError: "", busy: false, orchDraft: "", plans: null, sessionQuery: { ptyId: "", runId: "" } };`,
+    `const state = { base: "", token: "vf_test", view: "desk", ticket: 0, desk: null, session: null, orch: null, error: "", actionError: "", busy: false, orchDraft: "", orchImages: [], plans: null, sessionQuery: { ptyId: "", runId: "" } };`,
     `const parts = {};`,
     `let timer = 0; let plansAt = ${opts.plans ? 0 : "Infinity"}; const PLANS_EVERY_MS = 60000; let updates = 0; let reloads = 0;`,
     `const t = (key) => key;`,
@@ -229,6 +229,21 @@ describe("the phone page's poll", () => {
     await vi.advanceTimersByTimeAsync(4200);
     expect(link.page.state().reloads).toBe(0);
     link.page.set({ orchDraft: "" });
+    await vi.advanceTimersByTimeAsync(2200);
+    expect(link.page.state().reloads).toBeGreaterThan(0);
+  });
+
+  it("never loads the page again over pictures waiting to go to Viby", async () => {
+    let version = "2.15.0";
+    const link = pagePoll(() => ({ ms: 50, body: { workspaces: [], version } }));
+    void link.page.refresh();
+    await vi.advanceTimersByTimeAsync(100);
+    version = "2.16.0";
+    // Picked with Attach: no box has focus and none has words in it, but a reload would lose them.
+    link.page.set({ orchImages: ["data:image/png;base64,iVBORw0KGgo="] });
+    await vi.advanceTimersByTimeAsync(4200);
+    expect(link.page.state().reloads).toBe(0);
+    link.page.set({ orchImages: [] });
     await vi.advanceTimersByTimeAsync(2200);
     expect(link.page.state().reloads).toBeGreaterThan(0);
   });
