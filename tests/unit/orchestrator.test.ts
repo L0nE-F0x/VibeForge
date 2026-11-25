@@ -815,6 +815,43 @@ describe("the Orchestrator in the service", () => {
     ctx.svc.close();
   });
 
+  it("keeps a plan made from what Viby read waiting when the planner returns it unchanged later (decision D1)", async () => {
+    const repo = gitRepo();
+    const fix = { kind: "start", engine: "argy", workspace: "shop", branch: "fix", prompt: "Do what the screen said." };
+    const ctx = withPlanner([
+      { say: "", steps: [{ kind: "inspect", prompt: "problems" }] },
+      { say: "I'll start Argy on it.", steps: [fix] },
+      // The next turn reads nothing, and the planner hands back the very same plan.
+      { say: "I'll start Argy on it.", steps: [fix] },
+      { say: "I'll start Argy on it.", steps: [fix] },
+      // Something else, asked straight out, still goes at once under Just go.
+      { say: "I'll start Argy on other.", steps: [{ ...fix, branch: "other", prompt: "Something else." }] },
+    ]);
+    ctx.svc.addWorkspace(repo);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+    await ctx.svc.orchestratorAsk("look at the problems and fix them");
+    const first = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(first).toMatchObject({ plan: "waiting", checks: [expect.anything()] });
+
+    await ctx.svc.orchestratorAsk("hmm, ok");
+    const again = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(again.checks).toBeUndefined();
+    expect(again).toMatchObject({ plan: "waiting", fromReading: true });
+    expect(ctx.svc.orchestratorView().turns.find((turn) => turn.id === first.id)?.plan).toBe("replaced");
+    // Carried again from the carried one.
+    await ctx.svc.orchestratorAsk("right");
+    expect(ctx.svc.orchestratorView().turns.at(-1)).toMatchObject({ plan: "waiting", fromReading: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(ctx.spawns).toHaveLength(0);
+
+    await ctx.svc.orchestratorAsk("start argy on other");
+    const other = ctx.svc.orchestratorView().turns.at(-1)!;
+    expect(other.fromReading).toBeUndefined();
+    await until(() => ctx.svc.orchestratorView().turns.find((turn) => turn.id === other.id)?.plan === "done");
+    expect(ctx.spawns.map((spawn) => path.basename(spawn.cwd))).toEqual(["other"]);
+    ctx.svc.close();
+  });
+
   it("skips a step chained after one that didn't carry out", async () => {
     const repo = gitRepo();
     const ctx = withPlanner([]);

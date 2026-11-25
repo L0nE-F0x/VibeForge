@@ -351,6 +351,11 @@ export function planKey(steps: readonly OrchestratorStep[]): string {
   );
 }
 
+/** Whether a plan came from what Viby read: in its own turn, or carried over from a plan that did (decision D1). */
+function madeFromReading(turn: OrchestratorTurn): boolean {
+  return Boolean(turn.checks?.length || turn.fromReading || turn.confirmed === "read");
+}
+
 export class OrchestratorDesk {
   private conversation: Conversation;
   private thinking: AbortController | null = null;
@@ -1132,9 +1137,20 @@ export class OrchestratorDesk {
     }
     await this.markDirty(steps);
     const inPlaceDirty = this.onCall ? await this.hasDirtyInPlace(steps) : false;
+    // The same steps as a waiting plan made from what Viby read are still made from it: returned
+    // unchanged in a later turn, they keep the mark rather than lose it (decision D1).
+    const key = planKey(steps);
+    const carried = this.conversation.turns.some((item) => item.plan === "waiting" && item.steps?.length && madeFromReading(item) && planKey(item.steps) === key);
     // A new plan takes the place of one still waiting for Go.
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
-    const answered = this.answer({ text: plan.say, ...(checks.length ? { checks } : {}), steps, plan: "waiting", ...(plan.hangup ? { hangup: true } : {}) });
+    const answered = this.answer({
+      text: plan.say,
+      ...(checks.length ? { checks } : {}),
+      ...(carried ? { fromReading: true } : {}),
+      steps,
+      plan: "waiting",
+      ...(plan.hangup ? { hangup: true } : {}),
+    });
     // Just go: at once, unless a step needs fixing, or would stop, apply or throw away someone's work.
     // Showing something or reading an answer out changes nothing, so a plan of only those goes at once either way.
     // In a voice call, safe steps (isolated branch copies, workspaces, tells, tasks, routines) also go at once.
@@ -1143,7 +1159,7 @@ export class OrchestratorDesk {
     const callSafe = Boolean(this.onCall) && !inPlaceDirty && steps.every((step) => safeInCall(step, checked));
     // Once Viby has read a screen, a file, a diff or a reply in this turn, what it read could be
     // steering the plan: only steps that just look go without Go (decision D1, 2026-11-25).
-    const readSomething = checks.length > 0;
+    const readSomething = checks.length > 0 || carried;
     const lookOnly = steps.every((step) => ONLY_LOOKS.includes(step.kind));
     if (ready && !unknownKinds.length && (lookOnly || (!readSomething && (callSafe || (mode === "go" && steps.every((step) => !holdsForGo(step, checked))))))) {
       void this.run(answered.id, true);
@@ -1165,7 +1181,7 @@ export class OrchestratorDesk {
     const steps = waiting.steps ?? [];
     let why: Exclude<PlanConfirmed, "ran"> | null = null;
     // What was read could be steering the planner's yes as much as the plan.
-    if (checks.length || waiting.checks?.length || waiting.confirmed === "read") why = "read";
+    if (checks.length || madeFromReading(waiting)) why = "read";
     else {
       await this.markDirty(steps);
       const context = withPlannedWorkspaces(await this.context(), steps);
@@ -1184,7 +1200,16 @@ export class OrchestratorDesk {
     }
     // The same plan again, newest, so a spoken "go" finds it; still waiting for the person's own Go.
     for (const item of this.conversation.turns) if (item.plan === "waiting") item.plan = "replaced";
-    this.answer({ text: en[CONFIRMED_KEY[why]], confirmed: why, ...(checks.length ? { checks } : {}), steps: structuredClone(steps), plan: "waiting", ...(hangup ? { hangup: true } : {}) });
+    const fromReading = why === "read" || madeFromReading(waiting);
+    this.answer({
+      text: en[CONFIRMED_KEY[why]],
+      confirmed: why,
+      ...(checks.length ? { checks } : {}),
+      ...(fromReading ? { fromReading: true } : {}),
+      steps: structuredClone(steps),
+      plan: "waiting",
+      ...(hangup ? { hangup: true } : {}),
+    });
     return true;
   }
 

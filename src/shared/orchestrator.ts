@@ -312,6 +312,11 @@ export interface OrchestratorTurn {
    * or a step needs something picked first ("fix").
    */
   confirmed?: PlanConfirmed;
+  /**
+   * The plan is the same as one still waiting that Viby made from what it read (a screen, a file, a
+   * diff or a reply): it waits for Go as that one did, though this turn read nothing (decision D1).
+   */
+  fromReading?: boolean;
   /** The CLI that gave this answer (an engine id), so its words keep its name after the planner changes. */
   by?: string;
   /** The answer went wrong. `detail` is what the CLI said, if anything. */
