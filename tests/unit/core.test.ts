@@ -672,6 +672,21 @@ describe("text helpers", () => {
     expect(timeAgo("2026-09-25T11:30:00Z", now, "de")).toBe("vor 30 Min.");
     expect(timeAgo("2026-09-24T11:30:00Z", now, "fr")).toBe("hier");
   });
+
+  it("says a time that rounds up to the next unit in that unit, not as 60 minutes or 24 hours", () => {
+    const now = Date.parse("2026-09-25T12:00:00Z");
+    // 59 min 40 s and 23 h 40 min ago, and as far ahead.
+    expect(timeAgo("2026-09-25T11:00:20Z", now)).toBe("1 hr ago");
+    expect(timeAgo("2026-09-24T12:20:00Z", now)).toBe("yesterday");
+    expect(timeAgo("2026-09-25T12:59:40Z", now)).toBe("in 1 hr");
+    expect(timeAgo("2026-09-26T11:40:00Z", now)).toBe("tomorrow");
+    expect(timeAgo("2026-09-25T11:00:20Z", now, "de")).toBe("vor 1 Std.");
+    expect(timeAgo("2026-09-24T12:20:00Z", now, "fr")).toBe("hier");
+    // Just short of rounding up, they stay in their own unit.
+    expect(timeAgo("2026-09-25T11:01:00Z", now)).toBe("59 min ago");
+    expect(timeAgo("2026-09-24T13:00:00Z", now)).toBe("23 hr ago");
+    expect(timeAgo("2026-09-25T11:01:00Z", now, "de")).toBe("vor 59 Min.");
+  });
 });
 
 describe("day headings", () => {

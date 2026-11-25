@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **"60 min ago" and "24 hr ago" read as "1 hr ago" and "yesterday".** A time just short of the next unit was rounded up but kept its old unit, in every language: a run from 59 minutes 40 seconds ago said 60 minutes, and one from 23 hours 40 minutes ago said 24 hours.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
