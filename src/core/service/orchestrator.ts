@@ -1122,7 +1122,7 @@ export class OrchestratorDesk {
     }
     // A yes to the plan that waits, with nothing new to do (W21 task 2).
     if (plan.confirmWaiting && waiting && !unknownKinds.length && (!steps.length || planKey(steps) === waitingSeen)) {
-      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup))) return;
+      if (await this.confirmWaiting(waiting, waitingSeen, checks, Boolean(plan.hangup), signal)) return;
       if (signal.aborted) return;
     }
     if (!steps.length) {
@@ -1159,8 +1159,8 @@ export class OrchestratorDesk {
    * still waiting, with why. False when the plan isn't the one the person answered any more: then
    * the answer goes on as any other.
    */
-  private async confirmWaiting(waiting: OrchestratorTurn, seen: string, checks: OrchestratorCheck[], hangup: boolean): Promise<boolean> {
-    const unchanged = () => waiting.plan === "waiting" && this.conversation.turns.includes(waiting) && Boolean(waiting.steps?.length) && planKey(waiting.steps ?? []) === seen;
+  private async confirmWaiting(waiting: OrchestratorTurn, seen: string, checks: OrchestratorCheck[], hangup: boolean, signal: AbortSignal): Promise<boolean> {
+    const unchanged = () => !signal.aborted && waiting.plan === "waiting" && this.conversation.turns.includes(waiting) && Boolean(waiting.steps?.length) && planKey(waiting.steps ?? []) === seen;
     if (!unchanged()) return false;
     const steps = waiting.steps ?? [];
     let why: Exclude<PlanConfirmed, "ran"> | null = null;
@@ -1173,7 +1173,7 @@ export class OrchestratorDesk {
       if (steps.some((step) => stepIssue(step, context))) why = "fix";
       else if (steps.some((step) => holdsForGo(step, context)) || (this.onCall && (inPlaceDirty || steps.some((step) => !safeInCall(step, context))))) why = "risky";
     }
-    // Go or Cancel pressed, or the card changed, while that was checked.
+    // Stopped, Go or Cancel pressed, or the card changed, while that was checked.
     if (!unchanged()) return false;
     if (!why) {
       if (hangup) waiting.hangup = true;
