@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A CLI started from a shell is recorded from its first line.** When `claude` (or another CLI) typed into a shell became a run, the output it printed in the moment recording began was missing from the run's transcript and scrollback: the transcript jumped from the screen it started on to a few dozen lines later. It now has every line.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

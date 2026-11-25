@@ -217,9 +217,18 @@ function startRecording(session, runDir) {
   // recording is still being written, leaves this one unpublished.
   const stopped = stopRecording(session);
   const seq = session.recSeq;
+  let held = false;
   return stopped
-    .then(() => captureSynced(session))
+    .then(() => {
+      // The output is held until the recording is published, as a snapshot holds it: what came
+      // while the mirror caught up, or while the screen was copied, would be in neither the screen
+      // the recording starts from nor the recording.
+      hold(session);
+      held = true;
+      return captureSynced(session);
+    })
     .then(
+      /** @returns {Promise<void>} */
       () =>
         new Promise((resolve) => {
           if (session.exited || sessions.get(session.id) !== session || session.recSeq !== seq) {
@@ -251,7 +260,10 @@ function startRecording(session, runDir) {
             resolve();
           });
         }),
-    );
+    )
+    .finally(() => {
+      if (held) unhold(session);
+    });
 }
 
 /**
