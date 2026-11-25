@@ -183,6 +183,8 @@ check "the old layout's spare copy is gone" test ! -e "$DEST.previous"
 # Its Restart runs its own Electron again: that now starts the current version's launcher.
 check "restarting the open $legacy_tag starts the current version's launcher" \
   same "$(as_person VIBEFORGE_LAUNCH=check "$DEST/node_modules/electron/dist/electron" "$DEST" --class=vibeforge --enable-wayland-ime)" current
+relaunch_helper="$(as_person VIBEFORGE_LAUNCH=check "$DEST/node_modules/electron/dist/electron" --type=relauncher --- "$DEST" 2>/dev/null || true)"
+check "Electron's relauncher helper does not route through the launcher" test "$relaunch_helper" != "current"
 check "its Electron still runs as Node for what it spawns" \
   same "$(as_person ELECTRON_RUN_AS_NODE=1 "$DEST/node_modules/electron/dist/electron" -p 'process.type ?? "node"')" node
 first_update="$(downloaded)"

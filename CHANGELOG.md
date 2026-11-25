@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Restarting after an update comes back right away on Home instead of stopping.** Updating from an install with its own Electron binary replaced that binary with a wrapper that caught Electron's internal `--type=relauncher` helper, so clicking **Restart** failed with a startup error notification and left VibeForge closed with no tray icon. The wrapper now hands Electron's own `--type=*` helpers straight to `electron.real`, the launcher's startup watcher closes inherited file descriptors, and restarting after an update brings the window straight to the front on **Home** while keeping where you left each other view.
+
 ## [3.8.0] - 2026-11-25
 
 **3.8.0: updates download about 2 MB and can be undone with Go back, terminals run on VibeForge's own Node and come back from a crash, and the first start ends with a CLI running in a folder of yours.**

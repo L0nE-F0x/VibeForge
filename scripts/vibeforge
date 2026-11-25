@@ -209,6 +209,11 @@ mkdir -p "$logdir" 2>/dev/null || logdir="${TMPDIR:-/tmp}"
 log="$logdir/launch.log"
 started=$$
 ( (
+  # Never hold inherited pipes or sockets (such as Electron's relauncher sync fd) open across exec.
+  for fd_path in /proc/self/fd/*; do
+    fd="${fd_path##*/}"
+    [[ "$fd" =~ ^[0-9]+$ ]] && ((fd > 2)) && eval "exec ${fd}>&-" 2>/dev/null || true
+  done
   for _ in $(seq "${VIBEFORGE_LAUNCH_WAIT:-50}"); do
     kill -0 "$started" 2>/dev/null || break
     sleep 0.1

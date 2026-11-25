@@ -21,7 +21,7 @@ import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton,
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
-import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, type ViewName } from "./state.js";
+import { ConfirmProvider, isRoute, landOnHomeAfterUpdate, NavProvider, ToastProvider, useNav, type ViewName } from "./state.js";
 import { overlayOpen } from "./overlays.js";
 import { numberedKeys, runShortcut, shortcutKeys, type ShortcutAction, type ShortcutIdIn } from "./shortcuts.js";
 import { CodeView } from "./views/Code.js";
@@ -145,9 +145,11 @@ function Shell() {
     });
     // The terminal host stopping is a problem to report: the notice stays, with the diagnostics and the bug form.
     const offCrash = on("host-crash", (message) => problem(translateNow("app.hostProblem"), coreText(message)));
-    // A host that failed before this page was listening (it starts alongside the window).
+    // A host that failed before this page was listening (it starts alongside the window), and
+    // landing back on Home when the profile just updated to a new version.
     void call("app.info")
       .then((info) => {
+        if (landOnHomeAfterUpdate(info.version)) go({ view: "home" });
         if (!info.hostRunning) problem(translateNow("app.hostProblem"), info.hostError ? coreText(info.hostError) : translateNow("app.hostDown"));
       })
       .catch(() => undefined);

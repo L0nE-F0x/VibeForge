@@ -152,19 +152,30 @@ export function rollbackCommand(kind: InstallKind, appRoot: string): string | nu
 }
 
 /**
- * How Restart starts VibeForge again. A version in versions/ restarts through the install folder's
- * current launcher, so after an update or Go back it is the version installed now that starts:
- * starting its own Electron with its own folder again would bring back the version it is. Null for
- * any other copy, which restarts as it started. `args` are the restart's arguments (relaunchArgs).
+ * How Restart starts VibeForge again. An installer copy (either in versions/ or at the install
+ * folder with `.vibeforge-installer`) restarts through the install folder's current launcher, so
+ * after an update or Go back it is the version installed now that starts: starting its own
+ * Electron with its own folder again would bring back the version it is. Null for any other copy,
+ * which restarts as it started. `args` are the restart's arguments (relaunchArgs).
  */
 export function restartVia(appRoot: string, args: readonly string[], exists: (file: string) => boolean): { execPath: string; args: string[] } | null {
-  if (!inVersions(appRoot)) return null;
+  const own = path.resolve(appRoot);
+  if (!inVersions(appRoot) && !exists(path.join(own, INSTALLER_MARK))) return null;
   const launcher = path.join(installRoot(appRoot), "current", "scripts", "vibeforge");
   if (!exists(launcher)) return null;
-  const own = path.resolve(appRoot);
   // The launcher adds these itself.
   const added = new Set(["--class=vibeforge", "--enable-wayland-ime"]);
   return { execPath: launcher, args: args.filter((arg) => !added.has(arg) && (arg.startsWith("-") || path.resolve(arg) !== own)) };
+}
+
+/** Where a restart starts from: the installer's current launcher when present, else this binary with `args`. */
+export function relaunchOptions(
+  appRoot: string,
+  execPath: string,
+  args: readonly string[],
+  exists: (file: string) => boolean,
+): { execPath: string; args: string[] } {
+  return restartVia(appRoot, args, exists) ?? { execPath, args: [...args] };
 }
 
 /** GitHub's list of releases for the "latest release" address the update check asks. */
