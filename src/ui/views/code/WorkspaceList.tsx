@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, FileDiff, FolderOpen, FolderPlus, FolderTree, GitBranch, Laptop, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { SyncShare, Workspace } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
 import { call, useAppInfo, useLive, useOrchestrator, useSync, useTasks, useWorkspaceStatus } from "../../api.js";
@@ -45,6 +45,7 @@ interface CopyReview {
  * Above it, a search, a composable filter/sort/group menu, active view pills, and Select to remove several.
  */
 export function WorkspaceList({
+  active,
   workspaces,
   currentId,
   onSelect,
@@ -52,6 +53,8 @@ export function WorkspaceList({
   onRemove,
   onBranch,
 }: {
+  /** Code is on screen. Hidden, the list doesn't ask git for each workspace's state every 30 s. */
+  active: boolean;
   workspaces: Workspace[];
   currentId: string | null;
   onSelect: (workspace: Workspace) => void;
@@ -65,8 +68,15 @@ export function WorkspaceList({
   const live = useLive().data ?? [];
   const attention = useAttention();
   const ptyAttention = usePtyAttention();
-  const workspaceStatus = useWorkspaceStatus();
+  const workspaceStatus = useWorkspaceStatus(active);
   const statuses = workspaceStatus.data;
+  // Back on screen: read it again at once rather than show what it was when Code was left.
+  const wasActive = useRef(active);
+  const reloadStatus = workspaceStatus.reload;
+  useEffect(() => {
+    if (active && !wasActive.current) void reloadStatus();
+    wasActive.current = active;
+  }, [active, reloadStatus]);
   const copies = useOrchestrator().data?.copies ?? [];
   const tasks = useTasks().data ?? [];
   const home = useAppInfo().data?.home ?? "";

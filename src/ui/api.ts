@@ -202,7 +202,8 @@ export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "wor
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"));
 // Runs git status in every workspace: only the list and finished runs change what it reports (the 30 s poll
 // catches edits). Sync, Viby and task events come many times a second and would keep git running back to back.
-export const useWorkspaceStatus = () => useQuery("workspace-status", ["workspaces", "runs"], () => call("workspaces.status"));
+// Not read at all while `shown` is false: Code stays mounted when another view is on screen.
+export const useWorkspaceStatus = (shown = true) => useQuery(shown ? "workspace-status" : null, ["workspaces", "runs"], () => call("workspaces.status"));
 export const useOrchestrator = () => useQuery("orchestrator", ["orchestrator", "settings", "engines", "workspaces"], () => call("orchestrator.get"));
 export const useInbox = () => useQuery("inbox", ["runs"], () => call("runs.inbox"));
 export const useLive = () => useQuery("live", ["live", "working"], () => call("live.list"));
