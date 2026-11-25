@@ -57,6 +57,7 @@ export class Segmenter {
   private talking = false;
   private voicedMs = 0;
   private quietMs = 0;
+  private deepQuietMs = 0;
   private readonly samples = new Float32Array(VAD_FRAME);
 
   constructor(private readonly opts: { silenceMs?: number; maxSeconds?: number; detector?: SpeechDetector | null } = {}) {
@@ -86,6 +87,7 @@ export class Segmenter {
     this.talking = false;
     this.voicedMs = 0;
     this.quietMs = 0;
+    this.deepQuietMs = 0;
     this.opts.detector?.reset();
   }
 
@@ -110,6 +112,7 @@ export class Segmenter {
     this.talking = false;
     this.voicedMs = 0;
     this.quietMs = 0;
+    this.deepQuietMs = 0;
     this.endpointer = this.fresh();
     return utterance;
   }
@@ -167,12 +170,18 @@ export class Segmenter {
       this.preroll = [];
       this.voicedMs = 0;
       this.quietMs = 0;
+      this.deepQuietMs = 0;
     }
     this.speech.push(frame);
     if (likely >= SPEECH_ON) {
       this.voicedMs += VAD_FRAME_MS;
       this.quietMs = 0;
-    } else if (likely < SPEECH_OFF) this.quietMs += VAD_FRAME_MS;
+      this.deepQuietMs = 0;
+    } else if (likely < SPEECH_OFF) {
+      this.quietMs += VAD_FRAME_MS;
+      if (likely < 0.08) this.deepQuietMs += VAD_FRAME_MS;
+      else this.deepQuietMs = 0;
+    }
     const said = this.voicedMs >= SPEECH_CONFIRM_MS;
     if (!said && this.quietMs >= BLIP_QUIET_MS) {
       // Never became speech: what was kept goes back to being the moment before the next thing said.
@@ -181,9 +190,15 @@ export class Segmenter {
       this.talking = false;
       this.voicedMs = 0;
       this.quietMs = 0;
+      this.deepQuietMs = 0;
       return;
     }
-    if ((said && this.quietMs >= this.silenceMs) || this.speech.length >= maxFrames) utterances.push(this.take(this.quietMs, VAD_FRAME_MS));
+    // Crisp short voice commands (< 2.1 s) that drop cleanly to deep silence finish 120 ms sooner
+    // than multi-clause thoughts unless an explicit silenceMs window was configured.
+    const crispDone = this.opts.silenceMs === undefined && said && this.voicedMs >= 320 && this.voicedMs <= 2100 && this.deepQuietMs >= 580;
+    if ((said && (this.quietMs >= this.silenceMs || crispDone)) || this.speech.length >= maxFrames) {
+      utterances.push(this.take(this.quietMs, VAD_FRAME_MS));
+    }
   }
 }
 

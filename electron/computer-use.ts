@@ -1,0 +1,567 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import type { WebContents } from "electron";
+import {
+  buildWtypeArgs,
+  matchDesktopWindow,
+  parseHyprctlClients,
+  parseHyprctlMonitors,
+  UINPUT_HELPER_SCRIPT,
+  type ComputerActionRequest,
+  type ComputerUseCapabilities,
+  type ComputerUseDriver,
+  type DesktopWindowInfo,
+  type ScreenshotResult,
+} from "../src/core/computer-use.js";
+import { whichBin } from "../src/core/engines.js";
+import {
+  describeComputerStep,
+  parseComputerCoordinates,
+  parseComputerDrag,
+  parseComputerScroll,
+  parseComputerWaitMs,
+  validateKeyCombo,
+  type ComputerSurface,
+} from "../src/shared/computer-use.js";
+
+const COMMAND_TIMEOUT_MS = 8000;
+const MAX_CAPTURE_FILES = 24;
+
+export interface WebContentsLike {
+  capturePage(): Promise<{ isEmpty(): boolean; toPNG(): Buffer; getSize(): { width: number; height: number } }>;
+  executeJavaScript<T = unknown>(code: string): Promise<T>;
+  sendInputEvent: WebContents["sendInputEvent"];
+  isDestroyed?: () => boolean;
+}
+
+export type ExecFileFn = (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+export interface ComputerDriverOptions {
+  dataRoot: string;
+  getAppWebContents: () => WebContentsLike | null;
+  getBrowserWebContents: () => WebContentsLike | null;
+  focusAppWindow?: () => void;
+  resolveBin?: (bin: string) => string | null;
+  execFileImpl?: ExecFileFn;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  uinputWritable?: () => boolean;
+}
+
+function defaultExecFile(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" }, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+    });
+  });
+}
+
+function defaultUinputWritable(): boolean {
+  try {
+    fs.accessSync("/dev/uinput", fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function capturePath(dataRoot: string): string {
+  const dir = path.join(dataRoot, "orchestrator", "captures");
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
+  try {
+    const existing = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith(".png"))
+      .sort();
+    while (existing.length >= MAX_CAPTURE_FILES) {
+      const oldest = existing.shift();
+      if (oldest) fs.rmSync(path.join(dir, oldest), { force: true });
+    }
+  } catch {
+    /* ignore cleanup errors */
+  }
+  return path.join(dir, `cap-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.png`);
+}
+
+function saveCapturePng(dataRoot: string, png: Buffer): string {
+  const outPath = capturePath(dataRoot);
+  fs.writeFileSync(outPath, png, { mode: 0o600 });
+  return outPath;
+}
+
+const DOM_SNAPSHOT_SCRIPT = `(() => {
+  const vw = window.innerWidth || 0;
+  const vh = window.innerHeight || 0;
+  const nodes = Array.from(document.querySelectorAll('button, a[href], input, textarea, select, [role="button"], [role="tab"], [role="menuitem"]'));
+  const items = [];
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.right < 0 || r.top > vh || r.left > vw) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
+    const label = (el.getAttribute("aria-label") || el.innerText || el.getAttribute("placeholder") || el.getAttribute("title") || el.tagName).replace(/\\s+/g, " ").trim().slice(0, 48);
+    items.push({ tag: el.tagName.toLowerCase(), label, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) });
+    if (items.length >= 35) break;
+  }
+  return { title: document.title || "", url: location.href || "", vw, vh, items };
+})()`;
+
+interface DomSnapshot {
+  title: string;
+  url: string;
+  vw: number;
+  vh: number;
+  items: Array<{ tag: string; label: string; x: number; y: number; w: number; h: number }>;
+}
+
+const ELECTRON_MODIFIER = {
+  ctrl: "control",
+  alt: "alt",
+  shift: "shift",
+  super: "meta",
+} as const;
+
+const ELECTRON_KEY_CODE: Record<string, string> = {
+  Return: "Return",
+  Escape: "Escape",
+  Tab: "Tab",
+  BackSpace: "Backspace",
+  Delete: "Delete",
+  space: "Space",
+  Up: "Up",
+  Down: "Down",
+  Left: "Left",
+  Right: "Right",
+  Home: "Home",
+  End: "End",
+  Prior: "PageUp",
+  Next: "PageDown",
+  Insert: "Insert",
+};
+
+/**
+ * Cross-platform controller for VibeForge's own Electron UI (`app`) and visible Browser Dock (`browser`).
+ */
+export class AppUiDriver {
+  constructor(private readonly opts: ComputerDriverOptions) {}
+
+  private targetContents(surface: "app" | "browser"): WebContentsLike {
+    const wc = surface === "app" ? this.opts.getAppWebContents() : this.opts.getBrowserWebContents();
+    if (!wc || wc.isDestroyed?.()) throw new Error("That view is not open right now.");
+    return wc;
+  }
+
+  async screenshot(surface: "app" | "browser"): Promise<ScreenshotResult> {
+    const wc = this.targetContents(surface);
+    const img = await wc.capturePage();
+    if (img.isEmpty()) throw new Error("That view is not open right now.");
+    const png = img.toPNG();
+    const size = img.getSize();
+    const outPath = saveCapturePng(this.opts.dataRoot, png);
+    const dom = (await wc.executeJavaScript<DomSnapshot>(DOM_SNAPSHOT_SCRIPT).catch(() => null)) ?? null;
+    const lines = [`Surface: ${surface} (${size.width}x${size.height})`, `Saved screenshot: ${outPath}`];
+    if (dom) {
+      if (dom.title || dom.url) lines.push(`Page: ${dom.title || "(untitled)"}${dom.url && dom.url.startsWith("http") ? ` — ${dom.url}` : ""}`);
+      if (dom.items.length) {
+        lines.push("Visible interactive elements (center coordinates):");
+        for (const item of dom.items) {
+          lines.push(`- [${item.tag}] "${item.label}" at (${item.x}, ${item.y}) [${item.w}x${item.h}]`);
+        }
+      }
+    }
+    return {
+      path: outPath,
+      width: size.width,
+      height: size.height,
+      surface,
+      summary: `Captured ${surface} (${size.width}x${size.height})`,
+      details: lines.join("\n"),
+    };
+  }
+
+  async act(req: ComputerActionRequest): Promise<string> {
+    if (req.surface !== "app" && req.surface !== "browser") throw new Error("Unsupported action.");
+    if (req.action === "screenshot") return (await this.screenshot(req.surface)).summary;
+    if (req.action === "wait") {
+      const ms = parseComputerWaitMs(req.prompt || req.target) ?? 500;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return `Waited ${ms}ms.`;
+    }
+    const wc = this.targetContents(req.surface);
+    if (req.surface === "app") this.opts.focusAppWindow?.();
+    if (req.action === "move" || req.action === "click" || req.action === "double-click" || req.action === "right-click") {
+      const coords = parseComputerCoordinates(req.target || req.prompt);
+      if (!coords) throw new Error("Unsupported action.");
+      wc.sendInputEvent({ type: "mouseMove", x: coords.x, y: coords.y });
+      if (req.action !== "move") {
+        const button = req.action === "right-click" ? "right" : "left";
+        const clickCount = req.action === "double-click" ? 2 : 1;
+        wc.sendInputEvent({ type: "mouseDown", x: coords.x, y: coords.y, button, clickCount });
+        wc.sendInputEvent({ type: "mouseUp", x: coords.x, y: coords.y, button, clickCount });
+      }
+      return describeComputerStep(req);
+    }
+    if (req.action === "drag") {
+      const drag = parseComputerDrag(req.target || req.prompt);
+      if (!drag) throw new Error("Unsupported action.");
+      wc.sendInputEvent({ type: "mouseMove", x: drag.fromX, y: drag.fromY });
+      wc.sendInputEvent({ type: "mouseDown", x: drag.fromX, y: drag.fromY, button: "left", clickCount: 1 });
+      wc.sendInputEvent({ type: "mouseMove", x: drag.toX, y: drag.toY, button: "left" });
+      wc.sendInputEvent({ type: "mouseUp", x: drag.toX, y: drag.toY, button: "left", clickCount: 1 });
+      return describeComputerStep(req);
+    }
+    if (req.action === "scroll") {
+      const scroll = parseComputerScroll(req.prompt || req.target);
+      if (!scroll) throw new Error("Unsupported action.");
+      const coords = parseComputerCoordinates(req.target) ?? { x: 200, y: 200 };
+      const px = scroll.amount * 80;
+      const deltaY = scroll.direction === "up" ? px : scroll.direction === "down" ? -px : 0;
+      const deltaX = scroll.direction === "left" ? px : scroll.direction === "right" ? -px : 0;
+      wc.sendInputEvent({ type: "mouseWheel", x: coords.x, y: coords.y, deltaX, deltaY });
+      return describeComputerStep(req);
+    }
+    if (req.action === "type") {
+      if (!req.prompt) throw new Error("Unsupported action.");
+      for (const ch of req.prompt) {
+        if (ch === "\n" || ch === "\r") {
+          wc.sendInputEvent({ type: "keyDown", keyCode: "Return" });
+          wc.sendInputEvent({ type: "keyUp", keyCode: "Return" });
+        } else {
+          wc.sendInputEvent({ type: "char", keyCode: ch });
+        }
+      }
+      return describeComputerStep(req);
+    }
+    if (req.action === "key") {
+      const combo = validateKeyCombo(req.prompt || req.target);
+      if (!combo) throw new Error("Unsupported action.");
+      const keyCode = ELECTRON_KEY_CODE[combo.key] ?? combo.key;
+      const modifiers = combo.modifiers.map((m) => ELECTRON_MODIFIER[m]);
+      wc.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+      wc.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+      return describeComputerStep(req);
+    }
+    throw new Error("Unsupported action.");
+  }
+}
+
+/**
+ * Hyprland (Wayland/Omarchy) desktop driver using `hyprctl`, `grim`, optional `tesseract`, `wtype`, and `/dev/uinput`.
+ */
+export class HyprlandWaylandDriver implements ComputerUseDriver {
+  private readonly appUi: AppUiDriver;
+  private readonly exec: ExecFileFn;
+  private readonly bin: (name: string) => string | null;
+  private readonly uinputOk: () => boolean;
+
+  constructor(private readonly opts: ComputerDriverOptions) {
+    this.appUi = new AppUiDriver(opts);
+    this.exec = opts.execFileImpl ?? defaultExecFile;
+    this.bin = opts.resolveBin ?? whichBin;
+    this.uinputOk = opts.uinputWritable ?? defaultUinputWritable;
+  }
+
+  async capabilities(): Promise<ComputerUseCapabilities> {
+    const hasHypr = Boolean(this.bin("hyprctl"));
+    const hasGrim = Boolean(this.bin("grim"));
+    const hasPointer = hasHypr && ((Boolean(this.bin("python3")) && this.uinputOk()) || Boolean(this.bin("ydotool")));
+    const hasKeyboard = Boolean(this.bin("wtype")) || Boolean(this.bin("ydotool"));
+    return {
+      platform: this.opts.platform ?? process.platform,
+      sessionType: "wayland",
+      compositor: "hyprland",
+      canScreenshot: hasGrim,
+      canListWindows: hasHypr,
+      canPointer: hasPointer,
+      canKeyboard: hasKeyboard,
+      canAppUi: Boolean(this.opts.getAppWebContents()),
+    };
+  }
+
+  async listWindows(): Promise<DesktopWindowInfo[]> {
+    const hyprctl = this.bin("hyprctl");
+    if (!hyprctl) return [];
+    const { stdout } = await this.exec(hyprctl, ["-j", "clients"]).catch(() => ({ stdout: "[]", stderr: "" }));
+    return parseHyprctlClients(stdout);
+  }
+
+  async screenshot(opts: { surface?: ComputerSurface; target?: string } = {}): Promise<ScreenshotResult> {
+    const surface = opts.surface ?? "desktop";
+    if (surface === "app" || surface === "browser") return this.appUi.screenshot(surface);
+    const grim = this.bin("grim");
+    const hyprctl = this.bin("hyprctl");
+    if (!grim) throw new Error("Desktop computer control is not available on this display session.");
+    const outPath = capturePath(this.opts.dataRoot);
+    const [windows, monitorsRaw] = await Promise.all([
+      this.listWindows(),
+      hyprctl ? this.exec(hyprctl, ["-j", "monitors"]).then((r) => r.stdout).catch(() => "[]") : Promise.resolve("[]"),
+    ]);
+    const monitors = parseHyprctlMonitors(monitorsRaw);
+    const targetWin = opts.target ? matchDesktopWindow(opts.target, windows) : null;
+    const args: string[] = [];
+    if (targetWin && targetWin.size[0] > 0 && targetWin.size[1] > 0) {
+      args.push("-g", `${targetWin.at[0]},${targetWin.at[1]} ${targetWin.size[0]}x${targetWin.size[1]}`);
+    } else {
+      const activeMon = monitors.find((m) => m.focused) ?? monitors[0];
+      if (monitors.length > 1 && activeMon) args.push("-o", activeMon.name);
+    }
+    args.push(outPath);
+    await this.exec(grim, args);
+    try {
+      fs.chmodSync(outPath, 0o600);
+    } catch {
+      /* ignore missing file in tests */
+    }
+    const tess = this.bin("tesseract");
+    let ocrText = "";
+    if (tess && fs.existsSync(outPath)) {
+      const ocr = await this.exec(tess, [outPath, "stdout", "--oem", "1", "-l", "eng"]).catch(() => ({ stdout: "", stderr: "" }));
+      ocrText = ocr.stdout.trim().slice(0, 1200);
+    }
+    const activeMon = monitors.find((m) => m.focused) ?? monitors[0];
+    const details = [
+      `Surface: desktop (Hyprland${targetWin ? ` — window "${targetWin.title}" [${targetWin.class}]` : ""})`,
+      ...(monitors.length ? [`Monitors: ${monitors.map((m) => `${m.name} (${m.width}x${m.height} @ ${m.x},${m.y}, scale ${m.scale}${m.focused ? ", focused" : ""})`).join("; ")}`] : []),
+      ...(windows.length
+        ? ["Open windows:", ...windows.slice(0, 15).map((w) => `- "${w.title || w.class}" [${w.class}] ws=${w.workspace} at (${w.at[0]},${w.at[1]}) size ${w.size[0]}x${w.size[1]}${w.focused ? " [focused]" : ""}`)]
+        : []),
+      `Saved screenshot: ${outPath}`,
+      ...(ocrText ? [`OCR text snippet:\n${ocrText}`] : []),
+    ].join("\n");
+    return {
+      path: outPath,
+      width: targetWin?.size[0] ?? activeMon?.width,
+      height: targetWin?.size[1] ?? activeMon?.height,
+      surface: "desktop",
+      summary: targetWin ? `Captured window "${targetWin.title}"` : `Captured desktop screen (${windows.length} window${windows.length === 1 ? "" : "s"})`,
+      details,
+    };
+  }
+
+  private async pointerOp(op: "click" | "double-click" | "right-click" | "scroll-v" | "scroll-h", arg?: number): Promise<void> {
+    const py = this.bin("python3");
+    if (py && this.uinputOk()) {
+      const pyArgs = ["-I", "-c", UINPUT_HELPER_SCRIPT, op, ...(arg !== undefined ? [String(arg)] : [])];
+      await this.exec(py, pyArgs);
+      return;
+    }
+    const ydo = this.bin("ydotool");
+    if (ydo) {
+      if (op === "click") await this.exec(ydo, ["click", "0xC0"]);
+      else if (op === "double-click") {
+        await this.exec(ydo, ["click", "0xC0"]);
+        await this.exec(ydo, ["click", "0xC0"]);
+      } else if (op === "right-click") await this.exec(ydo, ["click", "0xC1"]);
+      else if (op === "scroll-v" && arg !== undefined) await this.exec(ydo, ["mousemove", "-w", "--", "0", String(-arg)]);
+      else if (op === "scroll-h" && arg !== undefined) await this.exec(ydo, ["mousemove", "-w", "--", String(arg), "0"]);
+      return;
+    }
+    throw new Error("Desktop computer control is not available on this display session.");
+  }
+
+  async act(req: ComputerActionRequest): Promise<string> {
+    if (req.surface === "app" || req.surface === "browser") return this.appUi.act(req);
+    if (req.action === "screenshot") return (await this.screenshot({ surface: "desktop", target: req.target })).summary;
+    if (req.action === "windows") {
+      const wins = await this.listWindows();
+      return `${wins.length} window${wins.length === 1 ? "" : "s"} open.`;
+    }
+    if (req.action === "wait") {
+      const ms = parseComputerWaitMs(req.prompt || req.target) ?? 500;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return `Waited ${ms}ms.`;
+    }
+    const hyprctl = this.bin("hyprctl");
+    if (req.action === "focus-window") {
+      if (!hyprctl) throw new Error("Desktop computer control is not available on this display session.");
+      const windows = await this.listWindows();
+      const win = matchDesktopWindow(req.target || req.prompt, windows);
+      if (!win) throw new Error("No open window matched that name.");
+      await this.exec(hyprctl, ["dispatch", "focuswindow", `address:${win.address}`]);
+      return `Focused "${win.title || win.class}".`;
+    }
+    if (req.action === "move" || req.action === "click" || req.action === "double-click" || req.action === "right-click") {
+      if (!hyprctl) throw new Error("Desktop computer control is not available on this display session.");
+      const coords = parseComputerCoordinates(req.target || req.prompt);
+      if (!coords) throw new Error("Unsupported action.");
+      await this.exec(hyprctl, ["dispatch", "movecursor", String(coords.x), String(coords.y)]);
+      if (req.action !== "move") await this.pointerOp(req.action);
+      return describeComputerStep(req);
+    }
+    if (req.action === "scroll") {
+      const scroll = parseComputerScroll(req.prompt || req.target);
+      if (!scroll) throw new Error("Unsupported action.");
+      const coords = parseComputerCoordinates(req.target);
+      if (coords && hyprctl) await this.exec(hyprctl, ["dispatch", "movecursor", String(coords.x), String(coords.y)]);
+      const signed = scroll.direction === "up" || scroll.direction === "right" ? scroll.amount : -scroll.amount;
+      await this.pointerOp(scroll.direction === "left" || scroll.direction === "right" ? "scroll-h" : "scroll-v", signed);
+      return describeComputerStep(req);
+    }
+    if (req.action === "drag") {
+      const drag = parseComputerDrag(req.target || req.prompt);
+      if (!drag) throw new Error("Unsupported action.");
+      const ydo = this.bin("ydotool");
+      if (!ydo || !hyprctl) throw new Error("Desktop computer control is not available on this display session.");
+      await this.exec(hyprctl, ["dispatch", "movecursor", String(drag.fromX), String(drag.fromY)]);
+      await this.exec(ydo, ["click", "0x40"]);
+      await this.exec(hyprctl, ["dispatch", "movecursor", String(drag.toX), String(drag.toY)]);
+      await this.exec(ydo, ["click", "0x80"]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "type" || req.action === "key") {
+      const wtype = this.bin("wtype");
+      if (!wtype) throw new Error("Desktop computer control is not available on this display session.");
+      const args = buildWtypeArgs(req.action, req.action === "type" ? req.prompt : req.prompt || req.target);
+      if (!args) throw new Error("Unsupported action.");
+      await this.exec(wtype, args);
+      return describeComputerStep(req);
+    }
+    throw new Error("Unsupported action.");
+  }
+}
+
+/**
+ * X11 fallback driver when `DISPLAY` is active without Wayland (uses `import`/`scrot` + `xdotool`).
+ */
+export class X11Driver implements ComputerUseDriver {
+  private readonly appUi: AppUiDriver;
+  private readonly exec: ExecFileFn;
+  private readonly bin: (name: string) => string | null;
+
+  constructor(private readonly opts: ComputerDriverOptions) {
+    this.appUi = new AppUiDriver(opts);
+    this.exec = opts.execFileImpl ?? defaultExecFile;
+    this.bin = opts.resolveBin ?? whichBin;
+  }
+
+  async capabilities(): Promise<ComputerUseCapabilities> {
+    return {
+      platform: this.opts.platform ?? process.platform,
+      sessionType: "x11",
+      compositor: "x11",
+      canScreenshot: Boolean(this.bin("import") || this.bin("scrot")),
+      canListWindows: Boolean(this.bin("xdotool")),
+      canPointer: Boolean(this.bin("xdotool")),
+      canKeyboard: Boolean(this.bin("xdotool")),
+      canAppUi: Boolean(this.opts.getAppWebContents()),
+    };
+  }
+
+  async listWindows(): Promise<DesktopWindowInfo[]> {
+    const xdo = this.bin("xdotool");
+    if (!xdo) return [];
+    const { stdout } = await this.exec(xdo, ["search", "--onlyvisible", "--name", ".*"]).catch(() => ({ stdout: "", stderr: "" }));
+    const ids = stdout.split(/\r?\n/).filter(Boolean).slice(0, 15);
+    const wins: DesktopWindowInfo[] = [];
+    for (const id of ids) {
+      const title = await this.exec(xdo, ["getwindowname", id]).then((r) => r.stdout.trim()).catch(() => "");
+      wins.push({ address: id, class: "x11", title, workspace: "0", at: [0, 0], size: [0, 0], focused: false });
+    }
+    return wins;
+  }
+
+  async screenshot(opts: { surface?: ComputerSurface; target?: string } = {}): Promise<ScreenshotResult> {
+    const surface = opts.surface ?? "desktop";
+    if (surface === "app" || surface === "browser") return this.appUi.screenshot(surface);
+    const outPath = capturePath(this.opts.dataRoot);
+    const imp = this.bin("import");
+    const scrot = this.bin("scrot");
+    if (imp) await this.exec(imp, ["-window", "root", outPath]);
+    else if (scrot) await this.exec(scrot, [outPath]);
+    else throw new Error("Desktop computer control is not available on this display session.");
+    const wins = await this.listWindows();
+    return {
+      path: outPath,
+      surface: "desktop",
+      summary: `Captured X11 desktop (${wins.length} window${wins.length === 1 ? "" : "s"})`,
+      details: `Surface: desktop (X11)\nSaved screenshot: ${outPath}`,
+    };
+  }
+
+  async act(req: ComputerActionRequest): Promise<string> {
+    if (req.surface === "app" || req.surface === "browser") return this.appUi.act(req);
+    const xdo = this.bin("xdotool");
+    if (!xdo) throw new Error("Desktop computer control is not available on this display session.");
+    if (req.action === "focus-window") {
+      const wins = await this.listWindows();
+      const win = matchDesktopWindow(req.target || req.prompt, wins);
+      if (!win) throw new Error("No open window matched that name.");
+      await this.exec(xdo, ["windowactivate", win.address]);
+      return `Focused "${win.title}".`;
+    }
+    if (req.action === "move" || req.action === "click" || req.action === "double-click" || req.action === "right-click") {
+      const coords = parseComputerCoordinates(req.target || req.prompt);
+      if (!coords) throw new Error("Unsupported action.");
+      await this.exec(xdo, ["mousemove", "--sync", String(coords.x), String(coords.y)]);
+      if (req.action === "click") await this.exec(xdo, ["click", "1"]);
+      else if (req.action === "double-click") await this.exec(xdo, ["click", "--repeat", "2", "1"]);
+      else if (req.action === "right-click") await this.exec(xdo, ["click", "3"]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "type") {
+      await this.exec(xdo, ["type", "--clearmodifiers", "--", req.prompt]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "key") {
+      const combo = validateKeyCombo(req.prompt || req.target);
+      if (!combo) throw new Error("Unsupported action.");
+      const spec = [...combo.modifiers, combo.key].join("+");
+      await this.exec(xdo, ["key", "--clearmodifiers", spec]);
+      return describeComputerStep(req);
+    }
+    throw new Error("Desktop computer control is not available on this display session.");
+  }
+}
+
+/**
+ * Fallback driver when desktop automation tools are unsupported (e.g. non-X11/Hyprland sessions);
+ * still supports inspecting and driving VibeForge's own UI and Browser Dock.
+ */
+export class UnsupportedPlatformDriver implements ComputerUseDriver {
+  private readonly appUi: AppUiDriver;
+  constructor(private readonly opts: ComputerDriverOptions) {
+    this.appUi = new AppUiDriver(opts);
+  }
+
+  async capabilities(): Promise<ComputerUseCapabilities> {
+    return {
+      platform: this.opts.platform ?? process.platform,
+      sessionType: "other",
+      compositor: "none",
+      canScreenshot: Boolean(this.opts.getAppWebContents()),
+      canListWindows: false,
+      canPointer: false,
+      canKeyboard: false,
+      canAppUi: Boolean(this.opts.getAppWebContents()),
+    };
+  }
+
+  async listWindows(): Promise<DesktopWindowInfo[]> {
+    return [];
+  }
+
+  async screenshot(opts: { surface?: ComputerSurface } = {}): Promise<ScreenshotResult> {
+    if (opts.surface === "app" || opts.surface === "browser") return this.appUi.screenshot(opts.surface);
+    throw new Error("Desktop computer control is not available on this display session.");
+  }
+
+  async act(req: ComputerActionRequest): Promise<string> {
+    if (req.surface === "app" || req.surface === "browser") return this.appUi.act(req);
+    throw new Error("Desktop computer control is not available on this display session.");
+  }
+}
+
+export function createComputerUseDriver(opts: ComputerDriverOptions): ComputerUseDriver {
+  const env = opts.env ?? process.env;
+  const plat = opts.platform ?? process.platform;
+  if (plat === "linux" && env.HYPRLAND_INSTANCE_SIGNATURE && env.WAYLAND_DISPLAY) {
+    return new HyprlandWaylandDriver(opts);
+  }
+  if (plat === "linux" && env.DISPLAY && !env.WAYLAND_DISPLAY) {
+    return new X11Driver(opts);
+  }
+  return new UnsupportedPlatformDriver(opts);
+}

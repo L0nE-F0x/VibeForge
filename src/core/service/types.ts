@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ComputerUseDriver } from "../computer-use.js";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
 import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
@@ -74,8 +75,14 @@ export interface DeskHost {
     event:
       | { kind: "browser-open"; workspaceId: string; url: string }
       | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
-      | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" },
+      | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" | "focus-next" | "focus-prev" },
   ): void;
+  /** Open a local folder in the desktop file manager. */
+  openFolder?(folderPath: string): Promise<void>;
+  /** Copy plain/markdown text to the system clipboard. */
+  writeClipboard?(text: string): void;
+  /** Trigger an app update check and return a short summary. */
+  checkUpdates?(): Promise<string>;
   /** Formatted plan limits and token usage summary for Viby's `inspect` step. */
   quotas?(): Promise<string>;
   /** Live voice, STT and TTS status on this machine, for Viby's context and `inspect` step. */
@@ -102,6 +109,10 @@ export interface DeskHost {
   voiceStopDownload?(): void;
   /** Login autostart state and setter, for Viby's `settings` step. */
   autostart?: { get(): boolean; set(on: boolean): boolean };
+  /** Write a privacy-safe single-line Viby diagnostic event to the app log (never prompts or output). */
+  logDiagnostics?(line: string): void;
+  /** Desktop + app UI computer-use observation and control driver. */
+  computer?: ComputerUseDriver;
 }
 
 export interface DeskOptions {

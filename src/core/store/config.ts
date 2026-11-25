@@ -7,7 +7,7 @@ import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import type { WorkspaceFile } from "../workspaces.js";
-import type { EngineRow, LayoutNode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
+import type { ComputerUseGrant, EngineRow, LayoutNode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
@@ -40,6 +40,12 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "plan", model: "", projectsFolder: "" },
+    computerUse: {
+      on: false,
+      app: { see: true, pointer: true, keys: true },
+      browser: { see: true, pointer: true, keys: true },
+      desktop: { see: true, pointer: false, keys: false },
+    },
     sync: { enabled: false, name: "" },
   };
 }
@@ -216,6 +222,19 @@ export class Config {
           model: cleanModel(str(raw.orchestrator?.model)),
           projectsFolder: str(raw.orchestrator?.projectsFolder).trim().slice(0, 500),
           ...(/^[a-z]{2,12}$/.test(effort) ? { effort } : {}),
+        };
+      })(),
+      computerUse: (() => {
+        const grant = (value: unknown, fallback: ComputerUseGrant): ComputerUseGrant => {
+          const g = value && typeof value === "object" ? (value as Partial<ComputerUseGrant>) : {};
+          return { see: bool(g.see, fallback.see), pointer: bool(g.pointer, fallback.pointer), keys: bool(g.keys, fallback.keys) };
+        };
+        const cu = raw.computerUse;
+        return {
+          on: bool(cu?.on, defaults.computerUse.on),
+          app: grant(cu?.app, defaults.computerUse.app),
+          browser: grant(cu?.browser, defaults.computerUse.browser),
+          desktop: grant(cu?.desktop, defaults.computerUse.desktop),
         };
       })(),
       sync: {

@@ -25,7 +25,7 @@ import type {
 } from "../../shared/api.js";
 import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
 import { brainKind, CONFIRMED_KEY, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
-import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
+import { call, useAgents, useEngines, useLive, useOrchestrator, useRoutines, useSettings, useSkills, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { tipProps } from "../components/Tooltip.js";
@@ -63,6 +63,8 @@ function workingLineText(activity: OrchestratorActivity | null | undefined, t: T
       return t("orch.work.verify", { target });
     case "memory":
       return t("orch.work.memory", { target });
+    case "computer":
+      return t("orch.work.computer", { target });
     case "start":
       return t("orch.work.start", { target });
     case "workspace":
@@ -113,6 +115,9 @@ export function OrchestratorView() {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const agents = useAgents().data ?? [];
+  const skills = useSkills().data ?? [];
+  const routines = useRoutines().data ?? [];
   const callState = useCall();
   const toggleCall = useCallToggle();
   const sees = useSeesLine(t);
@@ -176,7 +181,17 @@ export function OrchestratorView() {
       autoFocus
       sendLabel={t("common.send")}
       voiceLabel={t("orch.title")}
-      voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
+      voiceWords={() =>
+        orchestratorVoiceWords(
+          workspaces.map((item) => item.name),
+          {
+            agents: agents.map((a) => a.name),
+            engines: engines.filter((e) => e.available).map((e) => e.label),
+            skills: skills.map((s) => s.name),
+            routines: routines.map((r) => r.name),
+          },
+        )
+      }
       draftKey={DRAFT_KEY}
       keepKey="orchestrator"
       waitingTurnId={waitingTurnId}
@@ -328,6 +343,9 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const agents = useAgents().data ?? [];
+  const skills = useSkills().data ?? [];
+  const routines = useRoutines().data ?? [];
   const callState = useCall();
   const sees = useSeesLine(t);
   const box = useRef<HTMLDivElement>(null);
@@ -372,7 +390,17 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
             autoFocus
             sendLabel={t("common.send")}
             voiceLabel={t("orch.title")}
-            voiceWords={() => orchestratorVoiceWords(workspaces.map((item) => item.name))}
+            voiceWords={() =>
+              orchestratorVoiceWords(
+                workspaces.map((item) => item.name),
+                {
+                  agents: agents.map((a) => a.name),
+                  engines: engines.filter((e) => e.available).map((e) => e.label),
+                  skills: skills.map((s) => s.name),
+                  routines: routines.map((r) => r.name),
+                },
+              )
+            }
             draftKey={DRAFT_KEY}
             keepKey="orchestrator"
             waitingTurnId={waitingTurnId}

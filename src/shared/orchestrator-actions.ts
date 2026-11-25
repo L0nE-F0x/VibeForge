@@ -367,7 +367,7 @@ export type TaskStepAction = "create" | "create-run" | "edit" | "delete" | "run"
 export type SkillAction = "create" | "edit" | "delete" | "attach" | "detach" | "set-agents";
 export type WorkspaceAction = "create" | "rename" | "remove" | "move";
 export type ChatAction = "create" | "send" | "continue" | "stop" | "rename" | "set-engine" | "delete";
-export type RunAction = "continue" | "stop" | "mark-reviewed" | "mark-unreviewed" | "mark-all-reviewed" | "handoff" | "tidy";
+export type RunAction = "continue" | "stop" | "mark-reviewed" | "mark-unreviewed" | "mark-all-reviewed" | "handoff" | "copy-markdown" | "tidy";
 export type TalkAction = "review" | "send-draft" | "stop" | "start-tasks";
 export type MemoryStepAction = "append" | "set" | "clear";
 
@@ -496,6 +496,7 @@ export function normalizeRunAction(rawAction: string | undefined): RunAction | n
   if (/^(?:markunreviewed|unreviewed|markunopened|unread)$/.test(key)) return "mark-unreviewed";
   if (/^(?:markallreviewed|reviewall|clearinbox|markallopened)$/.test(key)) return "mark-all-reviewed";
   if (/^(?:handoff|handover|delegate)$/.test(key)) return "handoff";
+  if (/^(?:copymarkdown|markdown|copyasmarkdown)$/.test(key)) return "copy-markdown";
   if (/^(?:tidy|cleanup|clean|prune|compress|maintain|tidystorage)$/.test(key)) return "tidy";
   return null;
 }

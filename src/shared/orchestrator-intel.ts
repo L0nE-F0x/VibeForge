@@ -279,8 +279,10 @@ export type WorkbenchAction =
   | { op: "browser-open"; url: string }
   | { op: "browser-cmd"; command: "reload" | "back" | "forward" | "stop" }
   | { op: "side"; tab: "files" | "browser" | "close" }
-  | { op: "pane"; action: "split-right" | "split-down" | "zoom" | "close" }
+  | { op: "pane"; action: "split-right" | "split-down" | "zoom" | "close" | "focus-next" | "focus-prev" }
   | { op: "diff"; target: string }
+  | { op: "open-folder" }
+  | { op: "check-updates" }
   | { op: "mark-reviewed" }
   | { op: "undo"; token?: string };
 
@@ -350,6 +352,10 @@ export function parseWorkbenchAction(input: { action?: string; prompt?: string; 
   if (/^(?:split[- ]?down|split[- ]?col|split[- ]?below)$/.test(lower)) return { op: "pane", action: "split-down" };
   if (/^(?:zoom|unzoom|maximize|restore|toggle[- ]?zoom)$/.test(lower)) return { op: "pane", action: "zoom" };
   if (/^(?:close[- ]?pane|close[- ]?terminal)$/.test(lower)) return { op: "pane", action: "close" };
+  if (/^(?:focus[- ]?next|next[- ]?pane|next[- ]?terminal|switch[- ]?pane)$/.test(lower)) return { op: "pane", action: "focus-next" };
+  if (/^(?:focus[- ]?prev|prev[- ]?pane|previous[- ]?pane|previous[- ]?terminal)$/.test(lower)) return { op: "pane", action: "focus-prev" };
+  if (/^(?:open[- ]?folder|reveal[- ]?folder|file[- ]?manager|show[- ]?in[- ]?files|xdg[- ]?open)$/.test(lower)) return { op: "open-folder" };
+  if (/^(?:check[- ]?updates|check[- ]?for[- ]?updates|updates[- ]?check)$/.test(lower)) return { op: "check-updates" };
   if (/^(?:diff|open[- ]?diff|show[- ]?diff|review)$/.test(lower)) {
     return target ? { op: "diff", target } : null;
   }

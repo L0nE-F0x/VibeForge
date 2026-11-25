@@ -4,7 +4,9 @@
 
 import type { EngineRow } from "../core/types.js";
 import { cleanModel, effortLevels } from "./launch-options.js";
+import { describeComputerGrants, type ComputerUseGrants } from "./computer-use.js";
 import { parseOptions } from "./orchestrator-actions.js";
+import { cleanQuery, fuzzyMatchName } from "./orchestrator-fuzzy.js";
 import { splitArgs } from "./text.js";
 import { MODEL_CATALOG, VOICE_CATALOG, type ModelChoice, type VoiceBackend, type VoiceChoice } from "./voice-catalog.js";
 
@@ -19,6 +21,8 @@ export interface PlanSettingsContext {
     /** Explicit reasoning effort in settings ("" when using the fast "low" default). */
     effort: string;
     projectsFolder: string;
+    /** What the person lets Viby see and do on the screen (Settings → Computer use). */
+    computer?: ComputerUseGrants;
     availablePlanners: Array<{
       id: string;
       label: string;
@@ -148,6 +152,7 @@ export function formatSettingsRules(settings: PlanSettingsContext, options?: { s
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
     `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, themeLimit).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px${app.terminalPassthrough ? ", terminalPassthrough=on" : ""}, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
+    `- ${describeComputerGrants(viby.computer)}`,
     ...(slim ? ['  (Use an `inspect` step with prompt "settings" or "voice" for full model/voice sizes, languages, and themes.)'] : []),
   ];
 }
@@ -162,6 +167,7 @@ export function settingsFingerprint(settings: PlanSettingsContext | undefined): 
     viby.model,
     viby.effort,
     viby.projectsFolder,
+    viby.computer ?? null,
     voice.ready,
     voice.activeModel,
     voice.pickedModel,
@@ -397,11 +403,13 @@ export interface SettingsValidationContext {
 }
 
 function matchEngine(query: string, engines: SettingsValidationContext["engines"]): SettingsValidationContext["engines"][number] | null {
-  const wanted = squash(query);
+  const cleaned = cleanQuery(query);
+  const wanted = squash(cleaned);
   if (!wanted) return null;
   return (
     engines.find((e) => squash(e.id) === wanted || squash(e.label) === wanted) ??
     engines.find((e) => squash(e.label).startsWith(wanted) || squash(e.id).startsWith(wanted)) ??
+    fuzzyMatchName(cleaned, engines, (e) => [e.id, e.label], true) ??
     null
   );
 }

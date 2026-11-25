@@ -688,3 +688,22 @@
   border: 1px solid var(--line);
   font-size: 12px;
 }
+
+/* Settings → Computer use: one row per place, one switch per thing Viby may do there. */
+.computer-use-grid {
+  border-collapse: collapse;
+  width: 100%;
+}
+.computer-use-grid th,
+.computer-use-grid td {
+  padding: 6px 10px 6px 0;
+  text-align: left;
+  font-weight: normal;
+}
+.computer-use-grid thead th {
+  color: var(--muted);
+  font-size: 12px;
+}
+.computer-use-grid tbody th {
+  white-space: nowrap;
+}

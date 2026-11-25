@@ -38,6 +38,8 @@ import type {
   Skill,
   AgentTalkSettings,
   OrchestratorSettings,
+  ComputerUseSettings,
+  ComputerUseGrant,
   SoundSettings,
   TalkState,
   TaskStatus,
@@ -138,6 +140,8 @@ export type {
   LibraryKind,
   AgentTalkSettings,
   OrchestratorSettings,
+  ComputerUseSettings,
+  ComputerUseGrant,
   SoundSettings,
   VoiceSettings,
   WorkspaceFile,
@@ -639,7 +643,7 @@ export interface TrayWaiter {
 export type CodeWorkbenchEvent =
   | { kind: "browser-open"; workspaceId: string; url: string }
   | { kind: "side"; workspaceId?: string; tab: "files" | "browser" | "close" }
-  | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" };
+  | { kind: "pane"; workspaceId?: string; action: "split-right" | "split-down" | "zoom" | "close" | "focus-next" | "focus-prev" };
 
 export interface DeskEvents {
   changed: Topic[];
