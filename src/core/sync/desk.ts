@@ -133,7 +133,8 @@ export class SyncDesk {
       this.library?.setMe(shortId(engine.id));
       await this.libraryPass(true);
       for (const share of this.stateFile.read().shares) {
-        if (isDirectory(share.path)) await this.handleCopies(share, walkCopies(share.path));
+        // One that can't sync just now takes nothing in.
+        if (isDirectory(share.path) && !this.missing.has(share.folderId)) await this.handleCopies(share, walkCopies(share.path));
       }
       this.host.changed();
     });
@@ -390,8 +391,8 @@ export class SyncDesk {
     }
     if (repo && gitSettled) {
       this.gitPending.delete(share.folderId);
-      await prepareRepo(share.path);
       try {
+        await prepareRepo(share.path);
         const rescue = await rescueRepo(share.path, slugify(this.host.machineName(), 24));
         for (const branch of rescue?.branches ?? []) fresh = this.conflicts.noteCommits(share.folderId, share.path, branch.branch, branch.saved, shortId(share.machineId));
         if (rescue) this.host.log(`Sync: both machines changed ${share.name}'s git history; ${rescue.branches.length} branch(es) kept aside, ${rescue.settled.length} file(s) put back, ${rescue.removed} copies removed`);
