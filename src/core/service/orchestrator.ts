@@ -2531,7 +2531,6 @@ export class OrchestratorDesk {
     const configRoot = this.core.options.configRoot;
     const file = vibyMemoryFile(configRoot);
     const hadFile = fs.existsSync(file);
-    const prev = hadFile ? readVibyMemory(configRoot) : "";
     if (action === "clear") {
       if (hadFile) {
         const bin = this.core.trash.stash([file]);
@@ -2544,6 +2543,8 @@ export class OrchestratorDesk {
       step.result = "Cleared Viby memory (~/.config/vibeforge/viby.md).";
       return;
     }
+    // Throws for one that is there but can't be read: a note or a replace mustn't take it for empty.
+    const prev = hadFile ? readVibyMemory(configRoot) : "";
     if (action === "set") {
       const text = step.prompt.trim();
       if (!text) throw new Error("Type something to save to memory.");

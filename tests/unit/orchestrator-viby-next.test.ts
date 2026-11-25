@@ -352,6 +352,41 @@ describe("Viby next-level capabilities", () => {
     expect(ctx.svc.orchestratorReadMemory()).toContain("Use strict TypeScript.");
   });
 
+  it.skipIf(process.getuid?.() === 0)("saves nothing over a viby.md it can't read, and says why", async () => {
+    const ctx = withPlanner([
+      { say: "Remembering.", steps: [{ kind: "memory", action: "append", prompt: "Prefer vitest." }] },
+      { say: "Replacing memory.", steps: [{ kind: "memory", action: "set", prompt: "Fresh rules only." }] },
+    ]);
+    ctx.svc.saveSettings({ orchestrator: { engine: "grok", mode: "go", model: "", projectsFolder: "" } });
+    const file = path.join(ctx.configRoot, "viby.md");
+    const written = "# Viby Memory\n\n- We use pnpm.\n- Never push on Fridays.\n";
+    fs.writeFileSync(file, written);
+    fs.chmodSync(file, 0o000);
+    try {
+      // The window's editor would open it empty, and Save would write that over the notes.
+      expect(() => ctx.svc.orchestratorReadMemory()).toThrow(/viby\.md: VibeForge isn't allowed to/);
+      // A note must not start a new memory over the one there, nor a replace (whose Undo would put back an empty one).
+      for (const ask of ["remember to prefer vitest", "replace memory with Fresh rules only"]) {
+        await ctx.svc.orchestratorAsk(ask);
+        await ctx.svc.orchestratorRun(ctx.svc.orchestratorView().turns.at(-1)!.id);
+        const step = ctx.svc.orchestratorView().turns.at(-1)?.steps?.[0];
+        expect(step?.state).toBe("failed");
+        expect(step?.error).toMatch(/viby\.md: VibeForge isn't allowed to/);
+      }
+    } finally {
+      fs.chmodSync(file, 0o600);
+    }
+    expect(fs.readFileSync(file, "utf8")).toBe(written);
+    // A planning turn still goes ahead without it.
+    fs.chmodSync(file, 0o000);
+    try {
+      await ctx.svc.orchestratorAsk("what is running?");
+      expect(ctx.svc.orchestratorView().turns.at(-1)?.text).toBe("Done.");
+    } finally {
+      fs.chmodSync(file, 0o600);
+    }
+  });
+
   it("archives, switches, renames, deletes, and undoes Viby conversation threads", async () => {
     const ctx = withPlanner([
       { say: "First thread answer.", steps: [] },
