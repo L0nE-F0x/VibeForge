@@ -12,6 +12,7 @@ import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { writerNames } from "../components/Occupancy.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { changesFor } from "../changes-text.js";
 import { scheduleText } from "../schedule-text.js";
 import { shortcutKeys } from "../shortcuts.js";
@@ -118,7 +119,8 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
       </div>
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 10, maxWidth: 980 }}>
-          {routines.loaded && list.length === 0 && (
+          <LoadFailed query={routines} />
+          {routines.loaded && !routines.error && list.length === 0 && (
             <Empty
               icon={CalendarClock}
               title={t("routines.empty.title")}

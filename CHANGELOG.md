@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-11-25
+
+**3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
+
+### Changed
+
+- **Speech models and voices are no longer stored twice.** Each download also left a copy in Chromium's web cache (`~/.config/VibeForge/Cache`), which nothing ever read again: 578 MB on one machine with a few models and voices. Downloads now skip that cache, and the copies already there are cleared once, the first time this version starts. Only that cache is cleared: sign-ins, saved pages and the browser dock's own data stay.
+- **Code doesn't check git in the background while you're elsewhere.** Code's workspace list ran `git status` in every workspace every 30 seconds while the window was open, even if you never opened Code: 6 runs a minute with three workspaces. It now checks only while Code is on screen, and checks again at once when you come back to it.
+- **Settings → Phone stops asking Tailscale while the window is hidden.** With the phone page on and Settings open, VibeForge ran `tailscale` every 4 seconds and read the page's state every 2, even with the window in the tray. Both now wait until the window shows again.
+- **Sounds no longer leave an audio stream open.** The first chime of a session opened a playback stream that stayed open, playing silence, until VibeForge quit. It now pauses as soon as a sound ends and closes after 30 seconds of quiet, and the next sound opens it again. Chromium's own audio process still stays once a sound has played (about 22 MB measured); that needs a separate change.
+
+### Fixed
+
+- **A terminal keeps the end of its output when its program finishes.** When a program printed a lot and ended while VibeForge was still catching up with it (a long build or test run, a big log), its last lines could be missing from the pane, from the run's saved screen and from its transcript. This happened most with Node 22, and also when the pane was opening or coming back into view at that moment. Those last lines could also show up ahead of the lines printed before them. Now every line arrives, in the order it was printed.
+- **A yes in your own words runs the plan that waits for Go, when nothing in it needs your Go itself.** Words the go list doesn't catch, like "alright, do the thing you said", go to Viby's planner. When it reads them as a yes to the waiting plan, VibeForge runs that plan as its card shows it, instead of putting up a new copy that waits again. A plan with a step that waits for Go even in Just go (stopping a CLI, a command that deletes, applying a copy), or one Viby made from what it read on a screen or in a file, still waits: Viby says why, and it runs when you say go or press Go. A yes never runs a plan that changed after you saw it.
+- **A list that couldn't be read says so, instead of looking empty.** When reading your agents, tasks, skills, routines, chats, runs, settings or a folder in Files fails, the view shows why, says nothing was deleted, and has **Try again**. Before, it said "No agents yet." or "Nothing queued.", or Settings stayed blank, which looked like your work was gone. A list that fails while you're in another view is named in a notice in the corner, with its own **Try again**. Settings shows a placeholder while it loads instead of a blank page.
+- **Discarding a task's copy has Undo, and no longer asks first.** **Discard copy** in a task now happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>, as deleting does and as Viby's copies already did. Undo brings back the copy's folder with its commits and uncommitted edits, and the task points at it again; the copy's branch is removed once the chance to undo has passed. When Viby discards a task's copy, its step has **Undo** too.
+
+### Security
+
+- **A plan Viby made from what it read keeps waiting for your Go when it comes back unchanged.** If Viby made a plan after reading a screen, file, diff or reply, and its planner handed back the same steps in a later turn that read nothing, the new copy no longer counted as made from what was read, so under Just go its steps could run without Go. The copy now waits for Go as the first one did.
+
 ## [3.7.0] - 2026-11-25
 
 **3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**
@@ -1123,7 +1145,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.1...HEAD
+[3.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.1
 [3.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.0
 [3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2
 [3.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.1

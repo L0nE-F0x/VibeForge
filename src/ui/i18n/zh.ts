@@ -869,8 +869,6 @@ export const zh: Catalog = {
   "tasks.applyNothing": "副本没有改动，已将其删除",
   "tasks.applyFailed": "无法应用改动",
   "tasks.discardCopy": "丢弃副本",
-  "tasks.discardCopyTitle": "丢弃“{title}”的副本？",
-  "tasks.discardCopyBody": "其 worktree 和分支连同其中的所有改动都会被删除。各次运行保存的差异会保留。",
   "tasks.discardFailed": "无法丢弃副本",
   "tasks.copyChip": "独立副本",
   "tasks.copyUntrusted": "此任务的副本指向 **{path}**，它不在 VibeForge 的 worktrees 文件夹中。VibeForge 不会应用、暂存或删除它。选择“忘记”可清除这条记录，文件夹保持原样。",
@@ -2063,4 +2061,29 @@ export const zh: Catalog = {
   "core.updateVerifyFailed": "无法验证此版本的 SHA-256 校验和（{detail}），VibeForge 拒绝运行安装脚本。",
   "orch.attachImage": "添加图片",
   "orch.removeImage": "移除图片",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "正在执行你同意的计划。",
+  "core.orchConfirmedRisky": "这个计划还没有执行：其中有一步会更改或停止某些东西，所以要等你说“执行”或按“执行”。",
+  "core.orchConfirmedRead": "这个计划还没有执行：它是根据我在屏幕或文件中读到的内容制定的，所以要等你说“执行”或按“执行”。",
+  "core.orchConfirmedFix": "这个计划还没有执行：卡片上有一步需要先选好某项。",
+
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
+  "load.agents": "无法读取你的智能体。",
+  "load.tasks": "无法读取你的任务。",
+  "load.skills": "无法读取你的技能。",
+  "load.routines": "无法读取你的例行任务。",
+  "load.workspaces": "无法读取你的工作区。",
+  "load.settings": "无法读取你的设置。",
+  "load.engines": "无法读取 CLI 列表。",
+  "load.chats": "无法读取你的聊天。",
+  "load.runs": "无法读取你的运行记录。",
+  "load.search": "无法搜索你的运行记录。",
+  "load.inbox": "无法读取待审查的运行。",
+  "load.viby": "无法读取 Viby 的对话和副本。",
+  "load.files": "无法读取这个文件夹。",
+  "load.other": "无法读取此页面的一部分。",
+  "load.notEmpty": "这并不代表这里什么都没有，只是没能读取。没有删除任何内容。",
+  "load.stale": "你看到的是上一次成功读取的内容。",
+  "tasks.copyDiscarded": "已丢弃“{title}”的副本",
 };

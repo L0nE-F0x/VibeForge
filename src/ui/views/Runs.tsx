@@ -6,6 +6,7 @@ import { call, useDebounced, useEngines, useInbox, useQuery } from "../api.js";
 import { activeFilterLabels, ListBar, NoMatch, useListOver, useListView, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { ORIGIN_KEY, RunDetail } from "../components/RunDetail.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { Button, Empty, Segmented, Skeleton } from "../components/ui.js";
 import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
 import { useAction, useConfirm, useNav, type Route, type RunFilter } from "../state.js";
@@ -31,9 +32,9 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   const inbox = useInbox();
   // All asks the core, which searches what runs said too; Review and Live are searched here.
   const typed = useDebounced(filter === "all" ? listView.query.trim() : "", 160);
-  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: ALL_RUNS }));
+  const all = useQuery("runs:all", ["runs", "live"], () => call("runs.list", { limit: ALL_RUNS }), { what: "load.runs" });
   // One entry per text typed: not kept once the search moves on.
-  const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false });
+  const found = useQuery(typed ? `runs:search:${typed}` : null, ["runs", "live"], () => call("runs.search", typed, 200), { keep: false, what: "load.search" });
   const searching = filter === "all" && typed !== "";
 
   useEffect(() => {
@@ -61,7 +62,10 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
   } else if (filter === "live") runs = (all.data ?? []).filter((run) => run.live);
   else runs = searching ? (found.data ?? []) : (all.data ?? []);
   const snippets = new Map(searching ? (found.data ?? []).map((hit) => [hit.id, hit.snippet]) : []);
-  const loaded = filter === "review" ? inbox.loaded : searching ? found.loaded : all.loaded;
+  const source = filter === "review" ? inbox : searching ? found : all;
+  const loaded = source.loaded;
+  // A list that couldn't be read says so, instead of "No runs yet".
+  const unreadable = source.error !== null && source.data === undefined;
 
   // ------------------------------------------------ search, filter, sort, select
   const collator = nameOrder(t.language);
@@ -229,7 +233,8 @@ export function RunsView({ route }: { route: Extract<Route, { view: "runs" }> })
         )}
         <div className="list-scroll list-compact" onKeyDown={selection.onKeyDown}>
           {!loaded && <Skeleton rows={6} />}
-          {loaded && runs.length === 0 && (
+          <LoadFailed query={source} />
+          {loaded && !unreadable && runs.length === 0 && (
             <div className="faint" style={{ padding: "14px 10px" }}>
               {searching ? t("runs.noMatch") : filter === "review" ? t("runs.waitingNone") : filter === "live" ? t("runs.runningNone") : t("runs.none")}
             </div>

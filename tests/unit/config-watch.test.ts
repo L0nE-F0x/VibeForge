@@ -35,65 +35,73 @@ describe("watching the config folder", () => {
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("hands on a burst of edits once, after they pause", async () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** Waits for `check`, however long a busy machine takes, up to `ms`. */
+  const until = async (check: () => boolean, ms = 10_000) => {
+    for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(20);
+  };
+
+  /** A folder being watched, once fs.watch has shown it reports (it can take a moment to start). */
+  async function watched(subfolder: string) {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-config-watch-"));
-    fs.mkdirSync(path.join(dir, "routines"));
+    fs.mkdirSync(path.join(dir, subfolder));
     const seen: Topic[][] = [];
     stop = watchConfig(dir, (topics) => seen.push(topics));
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    const until = async (check: () => boolean, ms: number) => {
-      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(20);
-    };
-    // fs.watch can take a moment to start reporting: an edit it hands on shows it has, however
-    // long a busy machine takes.
     for (let tries = 0; tries < 10 && !seen.length; tries += 1) {
       fs.writeFileSync(path.join(dir, "workspaces.json"), "{}");
       await until(() => seen.length > 0, 1000);
     }
     expect(seen.length).toBeGreaterThan(0);
+    await handedOn(seen);
     seen.length = 0;
+    return seen;
+  }
+
+  /**
+   * An edit of its own to viby.md, waited for until it's handed on. Changes are handed on in the
+   * order they happen, so by then anything changed before it has been handed on too, or never will
+   * be: a condition to wait on in place of a fixed sleep.
+   */
+  async function handedOn(seen: Topic[][]) {
+    const before = seen.length;
+    fs.writeFileSync(path.join(dir, "viby.md"), `${Date.now()} ${Math.random()}\n`);
+    await until(() => seen.slice(before).some((topics) => topics.includes("orchestrator")));
+    expect(seen.slice(before).flat(), "viby.md was handed on").toContain("orchestrator");
+  }
+
+  it("hands on a burst of edits once, after they pause", async () => {
+    const seen = await watched("routines");
     fs.writeFileSync(path.join(dir, "settings.json"), "{}");
     fs.writeFileSync(path.join(dir, "routines", "r.yaml"), "x: 1\n");
     fs.writeFileSync(path.join(dir, "settings.json.tmp"), "{}");
-    await until(() => seen.length > 0, 10_000);
-    // Twice the pause it waits for, so a second hand-on would have come by now.
-    await sleep(500);
-    expect(seen).toHaveLength(1);
+    await until(() => seen.length > 0);
+    // Written after the burst was handed on: had any of the burst come again, it would be before this.
+    await handedOn(seen);
+    expect(seen).toHaveLength(2);
     expect([...seen[0]].sort()).toEqual(["routines", "settings"]);
+    expect(seen[1]).toEqual(["orchestrator"]);
   });
 
   it("suppresses VibeForge's own atomic saves and noted deletes while still seeing external edits", async () => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-config-watch-"));
-    fs.mkdirSync(path.join(dir, "tasks"));
-    const seen: Topic[][] = [];
-    stop = watchConfig(dir, (topics) => seen.push(topics));
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    const until = async (check: () => boolean, ms: number) => {
-      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(20);
-    };
-    // Warm up watcher reliably before asserting suppression.
-    for (let tries = 0; tries < 10 && !seen.length; tries += 1) {
-      fs.writeFileSync(path.join(dir, "workspaces.json"), "{}");
-      await until(() => seen.length > 0, 1000);
-    }
-    expect(seen.length).toBeGreaterThan(0);
-    seen.length = 0;
-
+    const seen = await watched("tasks");
     writeJson(path.join(dir, "settings.json"), { notify: true });
     const ownTask = path.join(dir, "tasks", "t1.yaml");
     fs.writeFileSync(ownTask, "title: x\n");
-    await until(() => seen.length > 0, 5000);
+    await until(() => seen.flat().includes("tasks"));
+    expect(seen.flat()).not.toContain("settings");
+    await handedOn(seen);
     seen.length = 0;
 
     noteOwnDelete(ownTask);
     fs.rmSync(ownTask, { force: true });
     writeJson(path.join(dir, "settings.json"), { notify: false });
-    await sleep(450);
-    expect(seen).toEqual([]);
+    await handedOn(seen);
+    expect(seen).toEqual([["orchestrator"]]);
+    seen.length = 0;
 
     // An external hand-edit right after still triggers normally.
     fs.writeFileSync(path.join(dir, "settings.json"), '{"notify":true}\n');
-    await until(() => seen.length > 0, 5000);
+    await until(() => seen.flat().includes("settings"));
     expect(seen.flat()).toContain("settings");
   });
 

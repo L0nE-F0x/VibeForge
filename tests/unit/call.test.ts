@@ -209,6 +209,17 @@ describe("what Viby says in a call", () => {
     expect(spokenAnswer(turn({ problem: "timeout" }), lines)).toBe("That went wrong.");
   });
 
+  it("says in the person's language what became of a yes the planner heard", () => {
+    const said = { ...lines, confirmed: (why: string) => ({ ran: "Läuft.", risky: "Wartet auf dein Los.", read: "Aus Gelesenem: wartet auf dein Los.", fix: "Erst etwas wählen." })[why] ?? "" };
+    expect(spokenAnswer(turn({ text: "Running the plan you said yes to.", confirmed: "ran" }), said)).toBe("Läuft.");
+    // Put back still waiting: it says itself how it runs, with no second "say go".
+    expect(spokenAnswer(turn({ text: "That plan hasn't run yet…", confirmed: "risky", plan: "waiting", steps: [] }), said)).toBe("Wartet auf dein Los.");
+    expect(spokenAnswer(turn({ text: "That plan hasn't run yet…", confirmed: "read", plan: "waiting", steps: [] }), said)).toBe("Aus Gelesenem: wartet auf dein Los.");
+    expect(spokenAnswer(turn({ text: "That plan hasn't run yet…", confirmed: "fix", plan: "waiting", steps: [] }), said)).toBe("Erst etwas wählen. Say go, or cancel.");
+    // Without the words for it, the record's own.
+    expect(spokenAnswer(turn({ text: "Running the plan you said yes to.", confirmed: "ran" }), lines)).toBe("Running the plan you said yes to.");
+  });
+
   it("finds the plan a spoken go answers", () => {
     const waiting = turn({ text: "Plan.", plan: "waiting", steps: [] });
     expect(waitingPlan([turn({ plan: "done", steps: [] }), waiting, turn({ note })])).toBe(waiting);

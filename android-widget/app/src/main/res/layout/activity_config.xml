@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#09090B"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_vibeforge_mark" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:fontFamily="monospace"
+                android:text="VIBEFORGE WIDGET"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
+            android:text="Connects your home-screen widget to your computers over Tailscale, and opens the VibeForge phone page at what you tap. Pair once with the pairing code from Settings → Phone (or paste the pairing link): the widget gets a key of its own, kept only on this phone, and forgets the code."
+            android:textColor="#A1A1AA"
+            android:textSize="12.5sp" />
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/machine_tabs"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <Button
+                android:id="@+id/btn_paste_link"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="14dp"
+                android:backgroundTint="#27272A"
+                android:fontFamily="monospace"
+                android:paddingVertical="10dp"
+                android:text="PASTE PAIRING LINK / CODE"
+                android:textColor="#FCA311"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="NAME (optional)"
+                android:textColor="#A1A1AA"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/input_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_btn"
+                android:fontFamily="monospace"
+                android:hint="Desktop"
+                android:importantForAutofill="no"
+                android:inputType="textCapWords|textNoSuggestions"
+                android:padding="12dp"
+                android:singleLine="true"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#71717A"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:fontFamily="monospace"
+                android:text="ADDRESS (the computer's Tailscale name)"
+                android:textColor="#A1A1AA"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/input_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_btn"
+                android:fontFamily="monospace"
+                android:hint="apexforgelaptop"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:padding="12dp"
+                android:singleLine="true"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#71717A"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:fontFamily="monospace"
+                android:text="PAIRING CODE (Settings → Phone, used once)"
+                android:textColor="#A1A1AA"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/input_token"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_btn"
+                android:fontFamily="monospace"
+                android:hint="vf_…"
+                android:importantForAutofill="no"
+                android:inputType="textVisiblePassword|textNoSuggestions"
+                android:padding="12dp"
+                android:singleLine="true"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#71717A"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/config_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:fontFamily="monospace"
+                android:textColor="#FCA311"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btn_save"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:backgroundTint="#FF6B35"
+                android:fontFamily="monospace"
+                android:paddingVertical="12dp"
+                android:text="PAIR &amp; SHOW THIS COMPUTER"
+                android:textColor="#09090B"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_remove"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:backgroundTint="#27272A"
+                android:fontFamily="monospace"
+                android:paddingVertical="10dp"
+                android:text="REMOVE THIS COMPUTER"
+                android:textColor="#FF4D6D"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/btn_open_pwa"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:backgroundTint="#27272A"
+                android:fontFamily="monospace"
+                android:paddingVertical="10dp"
+                android:text="OPEN VIBEFORGE ON PHONE"
+                android:textColor="#FFFFFF" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
+            android:text="Tip: Place or resize the widget as a 1-row bar (4×1) so you can put apps and folders directly underneath it. Tapping ▾ slides the sessions, Viby &amp; plan limits tray down over them, and tapping ▴ or outside closes it back.\n\nPairing gives the widget its own key, listed in Settings → Phone as VibeForge widget, with Remove beside it. From then on the pairing code alone opens nothing but pairing: a phone browser that used only the code is asked to pair again, once.\n\nUpgrading? Installing a new APK updates in place and keeps your computers and the widget\'s keys.\n\nXiaomi HyperOS: Long-press VibeForge Widget → App info → Battery → No restrictions, so background refreshes stay instant."
+            android:textColor="#71717A"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+</ScrollView>

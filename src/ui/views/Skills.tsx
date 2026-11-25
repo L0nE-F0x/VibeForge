@@ -5,6 +5,7 @@ import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { matchesQuery, nameOrder, type ListSpec } from "../list-view.js";
@@ -42,7 +43,9 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
   const list = skills.data ?? [];
   const creating = route.skillId === "new";
   const selected = list.find((skill) => skill.id === route.skillId) ?? null;
-  useDropMissing(skills.loaded, Boolean(route.skillId) && !creating && !selected, { view: "skills" });
+  // A list that couldn't be read says so, and isn't taken for "no skills" (nor drops the one asked for).
+  const unreadable = skills.error !== null && skills.data === undefined;
+  useDropMissing(skills.loaded && !unreadable, Boolean(route.skillId) && !creating && !selected, { view: "skills" });
 
   useEffect(() => {
     if (!route.skillId && list.length) replace({ view: "skills", skillId: list[0].id });
@@ -126,7 +129,8 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
           }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
-          {skills.loaded && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
+          <LoadFailed query={skills} />
+          {skills.loaded && !unreadable && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
           {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
           {view.shown.map((skill) => (
             <button
@@ -149,7 +153,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
       </SidePanel>
       {creating || selected ? (
         <SkillEditor key={selected?.id ?? "new"} skill={creating ? null : selected} />
-      ) : (
+      ) : unreadable ? null : (
         <Empty
           icon={Sparkles}
           title={t("skills.empty.title")}

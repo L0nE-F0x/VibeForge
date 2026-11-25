@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 // plain bash. No model CLI is started.
 
 type Message = Record<string, unknown>;
+type Numbered = { last: number; partial: string; after: string | null };
 
 class Host {
   private readonly child: ChildProcessWithoutNullStreams;
@@ -20,6 +21,8 @@ class Host {
   readonly printed = new Map<string, number>();
   /** Terminals whose output is kept whole, with each batch's last number: see keep(). */
   readonly kept = new Map<string, Array<{ seq: number; data: string }>>();
+  /** Each terminal's output read as the lines 1, 2, 3…, checked as it arrives: see counted(). */
+  private readonly numbered = new Map<string, Numbered>();
   readonly ready: Promise<void>;
 
   constructor() {
@@ -36,6 +39,7 @@ class Host {
         else if (msg.event === "data") {
           this.printed.set(String(msg.ptyId), (this.printed.get(String(msg.ptyId)) ?? 0) + String(msg.data).length);
           this.kept.get(String(msg.ptyId))?.push({ seq: Number(msg.seq), data: String(msg.data) });
+          this.number(String(msg.ptyId), String(msg.data));
         }
         else this.events.push(msg);
       });
@@ -49,6 +53,37 @@ class Host {
       this.waiting.set(reqId, resolve);
       this.child.stdin.write(`${JSON.stringify({ ...body, reqId })}\n`);
     });
+  }
+
+  /**
+   * Every terminal's output is read as numbered lines (what `seq` prints) as it arrives, so a flood
+   * is checked for order without being kept. The first line that isn't the next number, or isn't a
+   * number at all, ends the count there.
+   */
+  private number(ptyId: string, data: string): void {
+    let state = this.numbered.get(ptyId);
+    if (!state) {
+      state = { last: 0, partial: "", after: null };
+      this.numbered.set(ptyId, state);
+    }
+    if (state.after !== null) return;
+    const lines = `${state.partial}${data}`.split("\r\n");
+    state.partial = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line !== String(state.last + 1)) {
+        state.after = line;
+        return;
+      }
+      state.last += 1;
+    }
+    // A pause in reading can split a line's "\r\n" between two pieces.
+    if (!/^\d*\r?$/.test(state.partial)) state.after = state.partial;
+  }
+
+  /** The last number of an unbroken 1, 2, 3… this terminal printed, and the line that came next. */
+  counted(ptyId: string): { last: number; after: string | null } {
+    const state = this.numbered.get(ptyId);
+    return { last: state?.last ?? 0, after: state ? (state.after ?? state.partial) : null };
   }
 
   /** Keep everything this terminal prints from now on. */
@@ -337,14 +372,31 @@ describe("pty host", () => {
   it("lets all of a held-back pane's output through to the end", async () => {
     const host = await startHost();
     const runDir = tempDir();
-    const size = 40_000_000;
-    const script = `head -c ${size} /dev/zero | tr '\\0' x; echo; echo FLOOD-END`;
+    // About 44 MB of numbered lines, so a lost or reordered piece shows as well as a short count.
+    const lines = 5_000_000;
+    const script = `seq 1 ${lines}; echo FLOOD-END`;
     const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", script], runDir })).ptyId);
     await host.hold(1500);
     await host.until(() => Boolean(host.exitOf(pty)), 30000);
-    // Every byte, with the pty's \r\n for each \n.
-    expect(host.printed.get(pty)).toBe(size + "\r\nFLOOD-END\r\n".length);
-    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toContain("FLOOD-END");
+    expect(host.counted(pty)).toEqual({ last: lines, after: "FLOOD-END" });
+    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toMatch(/\b5000000\r?\nFLOOD-END/);
+  }, 60000);
+
+  it("lets all of a pane's output through, in order, when it ends while its screen is being read", async () => {
+    const host = await startHost();
+    const runDir = tempDir();
+    const lines = 400_000;
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", `seq 1 ${lines}; echo SNAP-END`], runDir })).ptyId);
+    // Snapshots back to back, as panes mounting do: each holds the output while the mirror catches
+    // up, so the program ends during one of them, with its last output not read yet.
+    let snapshots = 0;
+    while (!host.exitOf(pty)) {
+      await host.request({ op: "snapshot", ptyId: pty });
+      snapshots += 1;
+    }
+    expect(snapshots).toBeGreaterThan(1);
+    expect(host.counted(pty)).toEqual({ last: lines, after: "SNAP-END" });
+    expect(fs.readFileSync(path.join(runDir, "transcript.txt"), "utf8")).toMatch(/\b400000\r?\nSNAP-END/);
   }, 60000);
 
   it("sends a snapshot whose screen holds exactly the output up to the number it reports", async () => {

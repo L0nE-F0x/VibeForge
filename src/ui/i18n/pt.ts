@@ -868,8 +868,6 @@ export const pt: Catalog = {
   "tasks.applyNothing": "A cópia não tinha mudanças e foi removida",
   "tasks.applyFailed": "Não foi possível aplicar as mudanças",
   "tasks.discardCopy": "Descartar cópia",
-  "tasks.discardCopyTitle": "Descartar a cópia de \"{title}\"?",
-  "tasks.discardCopyBody": "O worktree e o branch são removidos com todas as mudanças neles. As execuções mantêm seus diffs salvos.",
   "tasks.discardFailed": "Não foi possível descartar a cópia",
   "tasks.copyChip": "Cópia própria",
   "tasks.copyUntrusted": "A cópia desta tarefa aponta para **{path}**, que não está na pasta de worktrees do VibeForge. O VibeForge não vai aplicar, preparar nem apagar nada ali. Esqueça-a para limpar o registro; a pasta fica como está.",
@@ -2062,4 +2060,29 @@ export const pt: Catalog = {
   "core.updateVerifyFailed": "Não foi possível verificar a soma SHA-256 desta versão ({detail}), então o VibeForge recusou executar o instalador.",
   "orch.attachImage": "Anexar imagem",
   "orch.removeImage": "Remover imagem",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "Executando o plano que você aprovou.",
+  "core.orchConfirmedRisky": "Esse plano ainda não foi executado: um passo dele muda ou para algo, então ele espera você dizer vai ou clicar em Ir.",
+  "core.orchConfirmedRead": "Esse plano ainda não foi executado: eu o fiz a partir do que li numa tela ou num arquivo, então ele espera você dizer vai ou clicar em Ir.",
+  "core.orchConfirmedFix": "Esse plano ainda não foi executado: um passo no cartão dele precisa que algo seja escolhido antes.",
+
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
+  "load.agents": "Não foi possível ler seus agentes.",
+  "load.tasks": "Não foi possível ler suas tarefas.",
+  "load.skills": "Não foi possível ler suas skills.",
+  "load.routines": "Não foi possível ler suas rotinas.",
+  "load.workspaces": "Não foi possível ler seus espaços de trabalho.",
+  "load.settings": "Não foi possível ler seus ajustes.",
+  "load.engines": "Não foi possível ler a lista de CLIs.",
+  "load.chats": "Não foi possível ler seus chats.",
+  "load.runs": "Não foi possível ler suas execuções.",
+  "load.search": "Não foi possível buscar nas suas execuções.",
+  "load.inbox": "Não foi possível ler as execuções esperando revisão.",
+  "load.viby": "Não foi possível ler a conversa e as cópias do Viby.",
+  "load.files": "Não foi possível ler esta pasta.",
+  "load.other": "Não foi possível ler parte desta página.",
+  "load.notEmpty": "Isso não quer dizer que não há nada: não foi possível ler. Nada foi excluído.",
+  "load.stale": "O que você vê é da última leitura que funcionou.",
+  "tasks.copyDiscarded": "Cópia de \"{title}\" descartada",
 };

@@ -954,13 +954,13 @@ describe("runs", () => {
     expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
     expect(git(repo, "status", "--porcelain")).toBe("?? work.txt\n");
 
-    // The right path, already gone: discarding tidies the task's own branch and nothing else.
+    // The right path, already gone: discarding tidies the task's own branch, once Undo has passed, and nothing else.
     const third = ctx.svc.saveTask({ title: "Gone", agentId: agent.id, workspaceId: workspace.id, isolated: true });
     git(repo, "branch", `vibeforge/${third.id}`);
     pointAt(third.id, path.join(ctx.dataRoot, "worktrees", third.id));
     expect(ctx.svc.listTasks().find((item) => item.id === third.id)!.copyOwned).toBe(true);
     await ctx.svc.discardTaskCopy(third.id);
-    expect(git(repo, "branch", "--list", `vibeforge/${third.id}`).trim()).toBe("");
+    expect(git(repo, "branch", "--list", `vibeforge/${third.id}`).trim()).not.toBe("");
     expect(git(repo, "branch", "--list", "vibeforge/keep").trim()).not.toBe("");
     expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
 
@@ -986,7 +986,12 @@ describe("runs", () => {
     expect(fs.readFileSync(path.join(other, "a.txt"), "utf8")).toBe("theirs\n");
     expect(git(other, "status", "--porcelain")).toBe("");
     expect(git(other, "branch", "--list", `vibeforge/${fourth.id}`).trim()).not.toBe("");
-    ctx.svc.close();
+    // Closing ends every Undo: the task's own branch goes, the one in the other repository stays.
+    await ctx.svc.close();
+    expect(git(repo, "branch", "--list", `vibeforge/${third.id}`).trim()).toBe("");
+    expect(git(repo, "branch", "--list", "vibeforge/keep").trim()).not.toBe("");
+    expect(git(other, "branch", "--list", `vibeforge/${fourth.id}`).trim()).not.toBe("");
+    expect(fs.readFileSync(path.join(repo, "work.txt"), "utf8")).toBe("precious\n");
   });
 
   it("keeps a deleted task's copy through a prune while Undo is up, and tidies it once Undo has passed", async () => {
@@ -1030,6 +1035,122 @@ describe("runs", () => {
     await ctx.svc.close();
     expect(git(repo, "branch", "--list", `vibeforge/${other.id}`).trim()).toBe("");
     expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
+  });
+
+  it("discards a task's copy at once, and Undo brings back the copy with its commits and edits", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const viewOf = (id: string) => ctx.svc.listTasks().find((item) => item.id === id)!;
+    const task = ctx.svc.saveTask({ title: "Edit", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const copy = viewOf(task.id).copy!;
+    // The agent committed one change, left another uncommitted, and added a file.
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    git(copy.path, "commit", "-qam", "agent commit");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\nthree\n");
+    fs.writeFileSync(path.join(copy.path, "b.txt"), "new file\n");
+
+    const deleted = await ctx.svc.discardTaskCopy(task.id);
+    expect(deleted.undo).toBeTruthy();
+    expect(deleted.copyLeft).toBeUndefined();
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(viewOf(task.id).copy).toBeNull();
+    // The branch waits for the Undo, and so does the worktree, through a prune by another task's Execute and by hand.
+    expect(git(repo, "branch", "--list", `vibeforge/${task.id}`).trim()).not.toBe("");
+    const other = ctx.svc.saveTask({ title: "Other", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(other.id)).ptyId);
+    git(repo, "worktree", "prune");
+    expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${copy.path}\n`);
+
+    ctx.svc.undoDelete(deleted.undo);
+    expect(viewOf(task.id).copy).toEqual(copy);
+    await until(() => !git(repo, "worktree", "list", "--porcelain").includes("locked"));
+    expect(git(copy.path, "status", "--porcelain")).toBe(" M a.txt\n?? b.txt\n");
+    expect(git(copy.path, "log", "--format=%s", "-1").trim()).toBe("agent commit");
+    expect(await ctx.svc.applyTaskCopy(task.id)).toEqual({ files: ["a.txt", "b.txt"], conflicts: [], kept: [] });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\nthree\n");
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new file\n");
+
+    // Discarded, and the app closes before Undo has passed: the copy, its lock and its branch all go.
+    const otherCopy = viewOf(other.id).copy!;
+    await ctx.svc.discardTaskCopy(other.id);
+    expect(git(repo, "branch", "--list", `vibeforge/${other.id}`).trim()).not.toBe("");
+    await ctx.svc.close();
+    expect(git(repo, "branch", "--list", `vibeforge/${other.id}`).trim()).toBe("");
+    expect(git(repo, "worktree", "list", "--porcelain")).not.toContain(otherCopy.path);
+  });
+
+  it("keeps the copy a task made after a discard, and Undo then leaves it alone", async () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd, stdio: "pipe" }).toString();
+    const repo = tempDir();
+    git(repo, "init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, "add", "a.txt");
+    git(repo, "commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [repo] });
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const copyOf = (id: string) => ctx.svc.listTasks().find((item) => item.id === id)!.copy;
+    const task = ctx.svc.saveTask({ title: "Again", agentId: agent.id, workspaceId: workspace.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const first = copyOf(task.id)!;
+    fs.writeFileSync(path.join(first.path, "a.txt"), "first try\n");
+    git(first.path, "commit", "-qam", "first try");
+    const { undo } = await ctx.svc.discardTaskCopy(task.id);
+
+    // Execute again while the Undo is still up: a fresh copy in the same folder, on the same branch.
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const second = copyOf(task.id)!;
+    expect(second.path).toBe(first.path);
+    fs.writeFileSync(path.join(second.path, "a.txt"), "second try\n");
+    // The first try's commits weren't reset away: they wait on a branch of their own.
+    expect(git(repo, "branch", "--list", `vibeforge/${task.id}-saved-*`).trim()).not.toBe("");
+
+    ctx.svc.undoDelete(undo);
+    expect(copyOf(task.id)).toEqual(second);
+    expect(fs.readFileSync(path.join(second.path, "a.txt"), "utf8")).toBe("second try\n");
+    // Nor does the end of the Undo take the new copy's branch or folder.
+    await ctx.svc.close();
+    expect(git(repo, "branch", "--list", `vibeforge/${task.id}`).trim()).not.toBe("");
+    expect(git(second.path, "status", "--porcelain")).toBe(" M a.txt\n");
+  });
+
+  it("tidies a discarded copy's branch and worktree at startup after a crash during Undo, and keeps the task", async () => {
+    const repo = tempDir();
+    const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe" }).toString().trim();
+    git("init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "init");
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Worker", brief: "b", engine: "argy", places: [repo] });
+    const ws = ctx.svc.addWorkspace(repo).workspaces[0];
+    const task = ctx.svc.saveTask({ title: "Crash undo", body: "Edit.", agentId: agent.id, workspaceId: ws.id, isolated: true });
+    await ctx.exit(started(await ctx.svc.executeTask(task.id)).ptyId);
+    const copyPath = ctx.svc.listTasks()[0].copy!.path;
+    await ctx.svc.discardTaskCopy(task.id);
+
+    // Simulate process exit without running close(), as the deleted-task case above does.
+    const undoable = (ctx.svc as unknown as { undoable: Map<string, { timer: ReturnType<typeof setTimeout> }> }).undoable;
+    for (const entry of undoable.values()) clearTimeout(entry.timer);
+    undoable.clear();
+    ctx.svc.store.close();
+
+    const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
+    await next.svc.whenSettled();
+    expect(git("branch", "--list", `vibeforge/${task.id}`)).toBe("");
+    expect(git("worktree", "list", "--porcelain")).not.toContain(copyPath);
+    expect(next.svc.listTasks().find((item) => item.id === task.id)).toMatchObject({ title: "Crash undo", copy: null });
+    next.svc.close();
   });
 
   it("picks a task's copy back up, commits and all, when its folder was deleted by hand", async () => {

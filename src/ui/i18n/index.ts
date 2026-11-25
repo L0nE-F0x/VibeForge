@@ -155,7 +155,9 @@ function subscribe(listener: () => void): () => void {
 
 /** `t` for components; they re-render when the language changes. */
 export function useT(): Translator {
-  return useSyncExternalStore(subscribe, () => translatorFor(current));
+  // The same answer for a render outside the window (the component tests render to a string).
+  const snapshot = () => translatorFor(current);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /** `t` for code outside render (callbacks that raise toasts or confirmations). */

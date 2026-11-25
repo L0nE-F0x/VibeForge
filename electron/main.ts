@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { app, Menu, nativeImage, powerMonitor } from "electron";
+import { app, Menu, nativeImage, powerMonitor, session } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
@@ -17,6 +17,7 @@ import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
 import { debugSwitch, guardSession, guardWebContents, secondStartArgs, type GuardableWebContents } from "./guards.js";
 import { Dock } from "./dock.js";
+import { clearOldDownloadCopies } from "./download.js";
 import { deskHost, HostLifecycle } from "./host-lifecycle.js";
 import { answerTalk, registerIpc } from "./ipc.js";
 import { MainContext } from "./main-context.js";
@@ -253,6 +254,8 @@ if (!app.requestSingleInstanceLock()) {
     const hostReady = hostLife.start();
     await mainWindow.create();
     await hostReady;
+    // Earlier versions left a copy of every model and voice download in the HTTP cache; cleared once.
+    void clearOldDownloadCopies({ profile: app.getPath("userData"), clearCache: () => session.defaultSession.clearCache(), log });
     const stopThemeWatch = watchOmarchyTheme(refreshPalette);
     const stopConfigWatch = watchConfig(roots.configRoot, (topics) => {
       ctx.service?.emit(...topics);

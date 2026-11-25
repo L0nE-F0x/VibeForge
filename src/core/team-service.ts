@@ -423,7 +423,7 @@ export class TeamService extends ServiceCore {
     return this.tasks.applyCopy(id);
   }
 
-  discardTaskCopy(id: string): Promise<TaskView> {
+  discardTaskCopy(id: string): Promise<Deleted> {
     return this.tasks.discardCopy(id);
   }
 

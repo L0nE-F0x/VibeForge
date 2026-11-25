@@ -337,16 +337,49 @@ export class TaskDesk {
     return result;
   }
 
-  /** Throw a task's copy away, changes and all. A copy that isn't the task's own is only forgotten. */
-  async discardCopy(id: string): Promise<TaskView> {
+  /**
+   * Throw a task's copy away, changes and all, as deleting does: its folder waits in the trash
+   * and Undo puts it back, with the task pointing at it again. The branch goes once the chance
+   * to undo has passed. A copy that isn't the task's own is only forgotten, and Undo remembers it.
+   */
+  async discardCopy(id: string): Promise<Deleted> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (this.taskLive(task)) throw new Error("Stop the task before discarding its copy.");
-    if (task.copy && ownedCopyPath(this.owner(id), task.copy.path)) await removeCopy(task.copy, this.owner(id), await this.repoTrusted(task, task.copy));
-    const next = { ...(this.core.store.getTask(id) ?? task), copy: null, updatedAt: this.core.now().toISOString() };
-    this.core.store.writeTask(next);
+    const copy = task.copy;
+    const owned = copy ? ownedCopyPath(this.owner(id), copy.path) : null;
+    const trusted = copy && owned ? await this.repoTrusted(task, copy) : false;
+    // Locked first: a `git worktree prune` while Undo is up (another task's Execute runs one) would forget it.
+    const locked = copy && owned?.real && trusted ? await lockCopy(copy, this.owner(id)).catch(() => false) : false;
+    let bin: Bin;
+    try {
+      bin = this.core.trash.stash(owned?.real ? [owned.real] : [], copy && owned && trusted ? { kind: "copy", taskId: id, copy } : undefined);
+    } catch (error) {
+      if (copy && locked) await unlockCopy(copy, this.owner(id)).catch(() => undefined);
+      throw error;
+    }
+    this.core.store.writeTask({ ...(this.core.store.getTask(id) ?? task), copy: null, updatedAt: this.core.now().toISOString() });
     this.core.emit("tasks");
-    return this.taskView(next);
+    const deleted = this.core.keepForUndo(
+      bin,
+      (restored) => {
+        if (copy && locked) void unlockCopy(copy, this.owner(id)).catch(() => undefined);
+        const now = this.core.store.getTask(id);
+        // Only into a task that hasn't made a new copy since, and only once its folder is back.
+        const back = copy !== null && now !== null && !now.copy && (!owned?.real || restored.includes(owned.real));
+        if (back) this.core.store.writeTask({ ...now, copy, updatedAt: this.core.now().toISOString() });
+        // The task itself was deleted meanwhile: the folder that came back has no one to come back to.
+        else if (copy && owned && !now && restored.length) void removeCopy(copy, this.owner(id), trusted).catch(() => undefined);
+        this.core.emit("tasks");
+      },
+      copy && owned
+        ? () =>
+            // A copy made since (Execute again) owns that folder and branch now, and so does one
+            // still waiting in the trash for its own Undo.
+            this.core.store.getTask(id)?.copy || (owned.real && this.core.trash.holds(owned.real)) ? undefined : removeCopy(copy, this.owner(id), trusted).catch(() => undefined)
+        : undefined,
+    );
+    return copy && !owned ? { ...deleted, copyLeft: true } : deleted;
   }
 
   private taskLive(task: Task): boolean {

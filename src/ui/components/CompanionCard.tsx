@@ -7,6 +7,7 @@ type CompanionSettings = Settings["companion"];
 import { call, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction, useConfirm, useToast } from "../state.js";
+import { pollWhileShown } from "../visible-poll.js";
 import { Button, cx, Notice, TimeAgo, Toggle } from "./ui.js";
 
 const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
@@ -89,14 +90,13 @@ export function CompanionCard() {
           if (!gone) setReach(next);
         })
         .catch(() => undefined);
-    load();
-    look();
-    const timer = window.setInterval(load, 2000);
-    const slow = window.setInterval(look, 4000);
+    // Neither runs while the window is hidden: nobody is looking at the steps then.
+    const stopLoad = pollWhileShown(load, 2000);
+    const stopLook = pollWhileShown(look, 4000);
     return () => {
       gone = true;
-      window.clearInterval(timer);
-      window.clearInterval(slow);
+      stopLoad();
+      stopLook();
     };
   }, [settings?.companion.enabled, settings?.companion.port, settings?.companion.token]);
 

@@ -59,9 +59,15 @@ function companionDevices(value: unknown): CompanionDevice[] {
   return out.slice(0, 20);
 }
 
-/** A short name for a phone from its browser's User-Agent: "iPhone", "Android (Pixel 9)", "Firefox on Linux". */
+/**
+ * A short name for a phone from its browser's User-Agent: "iPhone", "Android (Pixel 9)", "Firefox on
+ * Linux". The Android home-screen widget says who it is ("VibeForgeWidget/2.1.0 (Android 15; Pixel 9)"),
+ * so Settings → Phone lists it apart from the same phone's browser: "VibeForge widget (Pixel 9)".
+ */
 export function deviceName(userAgent: string | undefined): string {
   const ua = userAgent ?? "";
+  const widget = /^VibeForgeWidget\/[^\s]*\s*\(Android[^;)]*(?:;\s*([^;)]+))?\)/.exec(ua);
+  if (widget) return `VibeForge widget (${widget[1]?.trim().slice(0, 30) || "Android"})`;
   const android = /Android[^;)]*;\s*([^;)]+?)(?:\s+Build|\))/.exec(ua);
   if (/iPhone/.test(ua)) return "iPhone";
   if (/iPad/.test(ua)) return "iPad";

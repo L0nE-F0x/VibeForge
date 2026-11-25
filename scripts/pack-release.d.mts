@@ -1,5 +1,6 @@
 // The lists scripts/pack-release.mjs packs by, for tests/unit/pack-release.test.ts.
 export declare const APP_FILES: string[];
+export declare const LEFT_OUT: string[];
 export declare const PACKAGES: Record<string, string[]>;
 export declare const ENTRIES: string[];
 export declare function ships(file: string): boolean;

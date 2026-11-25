@@ -1,5 +1,5 @@
 import { answerForms, CANCEL_WORDS, GO_WORDS, plainWords } from "../shared/plan-answer.js";
-import type { OrchestratorTurn, VibyWord } from "../shared/orchestrator.js";
+import type { OrchestratorTurn, PlanConfirmed, VibyWord } from "../shared/orchestrator.js";
 import { teammateSummary } from "../shared/orchestrator-intel.js";
 import { speakable } from "./replies.js";
 import { floatFrame, VAD_FRAME, VAD_FRAME_BYTES, VAD_FRAME_MS, type SpeechDetector } from "./vad.js";
@@ -337,6 +337,8 @@ export interface CallLines {
   planReady: string;
   /** The planner's answer went wrong. */
   problem: string;
+  /** The planner took what was said as a yes to the waiting plan: it runs, or still waits and why. */
+  confirmed?: (why: PlanConfirmed) => string;
 }
 
 /**
@@ -363,8 +365,9 @@ export function waitingPlan(turns: readonly OrchestratorTurn[]): OrchestratorTur
 /** An answer as it is said out loud: its words, and how to answer a plan that waits for Go. */
 export function spokenAnswer(turn: OrchestratorTurn, lines: CallLines): string {
   if (turn.problem) return lines.problem;
-  const text = turn.text.trim();
-  if (turn.plan === "waiting") return `${text || lines.planReady} ${lines.sayGo}`;
+  const text = ((turn.confirmed && lines.confirmed?.(turn.confirmed)) || turn.text).trim();
+  // A plan put back after a yes says itself how it runs: no "say go" after it.
+  if (turn.plan === "waiting") return (turn.confirmed === "risky" || turn.confirmed === "read") && text ? text : `${text || lines.planReady} ${lines.sayGo}`;
   return text;
 }
 

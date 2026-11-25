@@ -145,6 +145,83 @@ describe("query cache", () => {
   });
 });
 
+describe("reads that fail", () => {
+  const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  it("lists a named read that failed while someone reads it, and drops it once it reads again", async () => {
+    const cache = new QueryCache(describeError);
+    const agents = source([{ id: "a" }]);
+    agents.state.fail = "agents/a.yaml: bad indentation";
+    const entry = cache.entry("agents", ["agents"], agents.fetcher, { what: "load.agents" });
+    let heard = 0;
+    cache.onFailures(() => (heard += 1));
+    const stop = cache.subscribe(entry, () => undefined, ["agents"]);
+    await tick();
+    // Loaded, with nothing read: the window must not take this for "no agents".
+    expect(entry.snapshot).toMatchObject({ loaded: true, data: undefined, error: "agents/a.yaml: bad indentation" });
+    expect(cache.failures()).toEqual([{ key: "agents", what: "load.agents", error: "agents/a.yaml: bad indentation", stale: false }]);
+    expect(heard).toBe(1);
+    // The same failure again changes nothing anyone sees.
+    const listed = cache.failures();
+    await cache.load(entry);
+    expect(cache.failures()).toBe(listed);
+    expect(heard).toBe(1);
+
+    agents.state.fail = null;
+    await cache.retry();
+    expect(cache.failures()).toEqual([]);
+    expect(entry.snapshot).toMatchObject({ data: [{ id: "a" }], error: null });
+    expect(heard).toBe(2);
+
+    // A later read that fails keeps the data on screen, and says it is from before.
+    agents.state.fail = "host down";
+    await cache.load(entry);
+    expect(cache.failures()).toEqual([{ key: "agents", what: "load.agents", error: "host down", stale: true }]);
+    // Nobody reading: nothing to say.
+    stop();
+    expect(cache.failures()).toEqual([]);
+  });
+
+  it("leaves out reads without a name, and ones a view shows in place", async () => {
+    const cache = new QueryCache(describeError);
+    const plain = source(1);
+    plain.state.fail = "nope";
+    cache.subscribe(cache.entry("voice", ["voice"], plain.fetcher), () => undefined, ["voice"]);
+    const tasks = source([]);
+    tasks.state.fail = "tasks folder unreadable";
+    // A second reader that doesn't name the key doesn't take its name away.
+    cache.entry("tasks", ["tasks"], tasks.fetcher, { what: "load.tasks" });
+    const entry = cache.entry("tasks", ["tasks"], tasks.fetcher);
+    cache.subscribe(entry, () => undefined, ["tasks"]);
+    await tick();
+    expect(cache.failures().map((failure) => failure.key)).toEqual(["tasks"]);
+
+    const release = cache.showHere("tasks");
+    const again = cache.showHere("tasks");
+    expect(cache.failures()).toEqual([]);
+    release();
+    release();
+    expect(cache.failures()).toEqual([]);
+    again();
+    expect(cache.failures().map((failure) => failure.key)).toEqual(["tasks"]);
+  });
+
+  it("tries again only what failed and someone reads", async () => {
+    const cache = new QueryCache(describeError);
+    const good = source("fine");
+    const bad = source("later");
+    bad.state.fail = "down";
+    const unread = source("x");
+    unread.state.fail = "down";
+    cache.subscribe(cache.entry("good", ["runs"], good.fetcher, { what: "load.runs" }), () => undefined, ["runs"]);
+    cache.subscribe(cache.entry("bad", ["tasks"], bad.fetcher, { what: "load.tasks" }), () => undefined, ["tasks"]);
+    cache.subscribe(cache.entry("unread", ["skills"], unread.fetcher, { what: "load.skills" }), () => undefined, ["skills"])();
+    await tick();
+    await cache.retry();
+    expect([good.state.calls, bad.state.calls, unread.state.calls]).toEqual([1, 2, 1]);
+  });
+});
+
 describe("sameData", () => {
   it("compares what comes over IPC by value", () => {
     expect(sameData({ a: [1, { b: "x" }], c: null }, { a: [1, { b: "x" }], c: null })).toBe(true);

@@ -869,8 +869,6 @@ export const fr: Catalog = {
   "tasks.applyNothing": "La copie n'avait aucun changement, elle a été supprimée",
   "tasks.applyFailed": "Impossible d'appliquer les changements",
   "tasks.discardCopy": "Abandonner la copie",
-  "tasks.discardCopyTitle": "Abandonner la copie de « {title} » ?",
-  "tasks.discardCopyBody": "Son worktree et sa branche sont retirés avec tous leurs changements. Les exécutions gardent leurs diffs enregistrés.",
   "tasks.discardFailed": "Impossible d'abandonner la copie",
   "tasks.copyChip": "Copie à part",
   "tasks.copyUntrusted": "La copie de cette tâche pointe vers **{path}**, qui n'est pas dans le dossier des worktrees de VibeForge. VibeForge ne l'appliquera, ne l'indexera ni ne la supprimera. Oubliez-la pour effacer l'entrée ; le dossier reste tel quel.",
@@ -2063,4 +2061,29 @@ export const fr: Catalog = {
   "core.updateVerifyFailed": "Impossible de vérifier la somme SHA-256 de cette version ({detail}) ; VibeForge a refusé de lancer l'installeur.",
   "orch.attachImage": "Joindre une image",
   "orch.removeImage": "Retirer l'image",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "J'exécute le plan que vous avez accepté.",
+  "core.orchConfirmedRisky": "Ce plan n'a pas encore été exécuté : une de ses étapes modifie ou arrête quelque chose, il attend donc que vous disiez go ou appuyiez sur Go.",
+  "core.orchConfirmedRead": "Ce plan n'a pas encore été exécuté : je l'ai fait à partir de ce que j'ai lu sur un écran ou dans un fichier, il attend donc que vous disiez go ou appuyiez sur Go.",
+  "core.orchConfirmedFix": "Ce plan n'a pas encore été exécuté : une étape de sa carte demande d'abord un choix.",
+
+  // ---------------------------------------------------------------- lists that couldn't be read, and a task copy's Undo
+  "load.agents": "Impossible de lire vos agents.",
+  "load.tasks": "Impossible de lire vos tâches.",
+  "load.skills": "Impossible de lire vos skills.",
+  "load.routines": "Impossible de lire vos routines.",
+  "load.workspaces": "Impossible de lire vos espaces de travail.",
+  "load.settings": "Impossible de lire vos réglages.",
+  "load.engines": "Impossible de lire la liste des CLI.",
+  "load.chats": "Impossible de lire vos chats.",
+  "load.runs": "Impossible de lire vos exécutions.",
+  "load.search": "Impossible de chercher dans vos exécutions.",
+  "load.inbox": "Impossible de lire les exécutions à relire.",
+  "load.viby": "Impossible de lire la conversation et les copies de Viby.",
+  "load.files": "Impossible de lire ce dossier.",
+  "load.other": "Impossible de lire une partie de cette page.",
+  "load.notEmpty": "Cela ne veut pas dire qu'il n'y a rien : la lecture a échoué. Rien n'a été supprimé.",
+  "load.stale": "Ce que vous voyez vient de la dernière lecture réussie.",
+  "tasks.copyDiscarded": "Copie de « {title} » abandonnée",
 };

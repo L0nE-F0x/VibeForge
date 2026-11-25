@@ -6,6 +6,7 @@ import { call, useAppInfo, useChats, useEngines, useSettings } from "../api.js";
 import { activeFilterLabels, NoMatch, PickMark } from "../components/ListTools.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
+import { LoadFailed } from "../components/LoadState.js";
 import { Button, Chip, Input, ShortAgo, Skeleton } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { useAction, useConfirm, useDeleted, useDropMissing, useNav, type Route } from "../state.js";
@@ -28,7 +29,9 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   const [title, setTitle] = useState("");
   const skipBlurRef = useRef(false);
   const chat = all.find((item) => item.id === route.chatId) ?? null;
-  useDropMissing(chatList.loaded, Boolean(route.chatId) && !chat, { view: "chat" });
+  // A list that couldn't be read says so, and isn't taken for "no chats" (nor drops the one asked for).
+  const unreadable = chatList.error !== null && chatList.data === undefined;
+  useDropMissing(chatList.loaded && !unreadable, Boolean(route.chatId) && !chat, { view: "chat" });
   const { list, labels, bar, waiting, headingOf } = useChatList(CHAT_LIST, all, (gone) => {
     if (gone.some((item) => item.id === route.chatId)) go({ view: "chat" });
   });
@@ -101,7 +104,8 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
         {bar}
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           {!chatList.loaded && <Skeleton rows={5} />}
-          {chatList.loaded && all.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
+          <LoadFailed query={chatList} />
+          {chatList.loaded && !unreadable && all.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("chat.none")}</div>}
           {all.length > 0 && chats.length === 0 && <NoMatch hasQuery={list.hasQuery} filters={activeFilterLabels(list, labels)} onClear={list.clear} />}
           {chats.map((item, index) => {
             const heading = headingOf(item);

@@ -24,7 +24,7 @@ import type {
   OrchestratorView as View,
 } from "../../shared/api.js";
 import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
-import { brainKind, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
+import { brainKind, CONFIRMED_KEY, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
 import { call, useEngines, useLive, useOrchestrator, useSettings, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
@@ -962,7 +962,7 @@ function TurnView({
             {turn.detail && <span className="orch-detail mono">{turn.detail}</span>}
           </span>
         ) : (
-          turn.text && <SpokenText text={turn.text} active={revealLive} callState={callState} />
+          turn.text && <SpokenText text={turn.confirmed ? t(CONFIRMED_KEY[turn.confirmed]) : turn.text} active={revealLive} callState={callState} />
         )}
         {running && (
           <div className="viby-work-line">

@@ -2,7 +2,7 @@
 // Which page is on show: building it when the page changes, and bringing it up to date after a
 // poll or an action without touching what is being typed.
 
-import { refresh } from "./api.js";
+import { refresh, showComputer } from "./api.js";
 import { computersPage, scanCancel, updateComputers } from "./computers.js";
 import { deskPage, updateDesk } from "./desk.js";
 import { el } from "./dom.js";
@@ -10,7 +10,7 @@ import { homePage, pairPage } from "./home.js";
 import { maestroPage, updateMaestro } from "./maestro.js";
 import { micCancel } from "./mic.js";
 import { launchPage, sessionPage, updateLaunch, updateSession } from "./session.js";
-import { parts, setParts, state } from "./state.js";
+import { computers, parts, setParts, state } from "./state.js";
 import { t } from "./words.js";
 
 /** @typedef {import("./state.js").Parts} Parts */
@@ -111,6 +111,40 @@ export function listenHistory() {
     show();
     if (state.token) void refresh();
   });
+}
+
+/** The pages a link may name with `?view=`. */
+const LINK_VIEWS = /** @type {Record<string, View>} */ ({ desk: "desk", maestro: "maestro", viby: "maestro", home: "home", computers: "computers" });
+
+/**
+ * A link that opens the page at one place on the computer it came from: a session
+ * (`?ptyId=…&runId=…`), one of the Orchestrator's plans (`?turn=…`), or a page (`?view=desk`,
+ * `?view=maestro`). The Android widget opens these when something on it is tapped. Until the phone
+ * is paired with that computer the link stays in the address, and pairing follows it.
+ * Returns true when the link chose the page.
+ */
+export function followLink() {
+  if (typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  const ptyId = (url.searchParams.get("ptyId") || "").slice(0, 80);
+  const runId = (url.searchParams.get("runId") || "").slice(0, 200);
+  const turn = (url.searchParams.get("turn") || "").slice(0, 80);
+  const view = LINK_VIEWS[url.searchParams.get("view") || ""];
+  if (!ptyId && !runId && !turn && !view) return false;
+  // The link is about the computer this page came from, not another one this phone shows.
+  const home = computers()[0];
+  if (!home.token) return false;
+  window.history.replaceState(null, "", url.pathname);
+  if (state.base) showComputer("");
+  if (ptyId || runId) {
+    state.sessionQuery = { ptyId, runId };
+    state.session = null;
+    state.view = "session";
+  } else if (turn) {
+    state.focusTurn = turn;
+    state.view = "maestro";
+  } else state.view = view;
+  return true;
 }
 
 function page() {
