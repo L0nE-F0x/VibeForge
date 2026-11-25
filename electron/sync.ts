@@ -70,13 +70,15 @@ export class Sync {
       return ctx.service;
     };
     return {
+      // Strict reads: an agent or skill that is there but can't be read throws, so it is never taken
+      // for one deleted here and deleted on the other machines too.
       agents: () => service().listAgents(),
-      getAgent: (id) => service().store.getAgent(id),
+      getAgent: (id) => service().store.readAgent(id),
       saveAgent: (agent) => service().store.writeAgent(agent),
       readMemory: (id) => service().store.readMemory(id),
       writeMemory: (id, text) => service().store.writeMemory(id, text),
       skills: () => service().listSkills(),
-      getSkill: (id) => service().store.getSkill(id),
+      getSkill: (id) => service().store.readSkill(id),
       saveSkill: (skill) => service().store.writeSkill(skill),
       newId: (kind, name) => service().freeId(kind === "agent" ? "agents" : "skills", name, ""),
       // As a delete here: anything running as the agent stops, and it goes to the trash.

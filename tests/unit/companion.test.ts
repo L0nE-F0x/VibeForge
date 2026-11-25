@@ -407,7 +407,20 @@ describe("the phone page's words", () => {
     expect(de["orch.go"]).toBe("Los");
     expect(de["rail.orchestrator"]).toBe("Viby");
     expect(de["voice.listening"]).toBe("Hört zu");
-    const shared = ["rail.orchestrator", "common.cancel", "common.close", "common.notOnPath", "voice.listening", "voice.transcribing", "voice.empty.silent", "voice.empty.nothing"];
+    const shared = [
+      "rail.orchestrator",
+      "common.cancel",
+      "common.close",
+      "common.notOnPath",
+      "voice.listening",
+      "voice.transcribing",
+      "voice.empty.silent",
+      "voice.empty.nothing",
+      "core.orchConfirmedRan",
+      "core.orchConfirmedRisky",
+      "core.orchConfirmedRead",
+      "core.orchConfirmedFix",
+    ];
     expect(Object.keys(de).filter((key) => !/^(phone|plans|orch)\./.test(key)).sort()).toEqual([...shared].sort());
     expect((await phoneWords("en"))["phone.credit"]).toBe("Created by {name}");
     for (const language of ["de", "es", "fr", "pt", "ja", "zh"] as const) {

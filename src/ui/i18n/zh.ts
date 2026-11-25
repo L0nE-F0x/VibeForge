@@ -1727,6 +1727,22 @@ export const zh: Catalog = {
   "orch.issue.agent": "没有名为“{asked}”的智能体。",
   "core.orchWaitsTurn": "正在等待该文件夹中的 {names}；它安静下来后会自动开始。",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "无法读取 {name}",
+  "unreadable.saved": "VibeForge 先用上次正确读取时的副本继续，在文件能再次读取之前不会覆盖保存它。",
+  "unreadable.none": "VibeForge 没有它之前的副本，在文件能再次读取之前不会覆盖保存它。",
+  "unreadable.open": "打开文件",
+  "unreadable.restoreSaved": "使用保存的副本",
+  "unreadable.useSavedTip": "把这个文件移到 {name}.broken，并放回保存的副本",
+  "unreadable.moveAside": "移到一边",
+  "unreadable.moveAsideTip": "把这个文件移到 {name}.broken，让 VibeForge 重新建一个",
+  "unreadable.failed": "无法放回保存的副本",
+  "core.unreadableNotSaved": "无法读取 {name}（{error}），所以没有覆盖保存。",
+  "core.fileEmpty": "文件是空的。",
+  "core.fileNotList": "里面没有 JSON 对象或列表。",
+  "main.folderInUse": "另一个 VibeForge 正在使用 {folder}",
+  "main.folderInUseBody": "一个文件夹同一时间只能由一个 VibeForge 使用：两个会互相结束对方的终端、停止对方的 Sync，并把每个例程运行两次。请先关闭另一个，或者用它自己的文件夹（VIBEFORGE_CONFIG 和 VIBEFORGE_DATA）启动这一个。",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "同步",
   "sync.lead": "让你选中的工作区在另一台电脑上保持一致，比如笔记本和台式机之间。在你选择工作区之前，不会同步任何东西：在代码中右键点击一个工作区即可。文件通过你的本地网络或 Tailscale 直接从一台电脑传到另一台，不会去任何其他地方。",
@@ -2086,4 +2102,24 @@ export const zh: Catalog = {
   "load.notEmpty": "这并不代表这里什么都没有，只是没能读取。没有删除任何内容。",
   "load.stale": "你看到的是上一次成功读取的内容。",
   "tasks.copyDiscarded": "已丢弃“{title}”的副本",
+
+  // ---------------------------------------------------------------- files that couldn't be read, and removing a workspace with Undo
+  "core.readDenied": "无法读取 {path}：VibeForge 没有读取权限。请检查它的权限。",
+  "core.readNotYaml": "无法读取 {path}：它不是有效的 YAML（{detail}）。",
+  "core.readNoFields": "无法读取 {path}：其中没有任何字段。",
+  "core.readFailed": "无法读取 {path}：{detail}",
+  "core.workspaceTaken": "在此期间另一个工作区占用了它的位置，所以无法恢复。",
+  "load.memory": "无法读取这个智能体的记忆。",
+  "load.unreadable.agent.one": "有 {count} 个智能体无法读取，因此没有列出：",
+  "load.unreadable.agent.other": "有 {count} 个智能体无法读取，因此没有列出：",
+  "load.unreadable.skill.one": "有 {count} 个技能无法读取，因此没有列出：",
+  "load.unreadable.skill.other": "有 {count} 个技能无法读取，因此没有列出：",
+  "load.unreadable.routine.one": "有 {count} 个例行任务无法读取，因此没有列出：",
+  "load.unreadable.routine.other": "有 {count} 个例行任务无法读取，因此没有列出：",
+  "load.unreadable.task.one": "有 {count} 个任务无法读取，因此没有列出：",
+  "load.unreadable.task.other": "有 {count} 个任务无法读取，因此没有列出：",
+  "load.unreadableHint": "没有删除任何内容。文件能再次读取后，就会重新列出。",
+  "code.removedNamed": "已从 VibeForge 移除 {name}",
+  "code.removedMany.one": "已从 VibeForge 移除 {count} 个工作区",
+  "code.removedMany.other": "已从 VibeForge 移除 {count} 个工作区",
 };

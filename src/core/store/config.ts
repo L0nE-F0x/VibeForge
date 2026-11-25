@@ -8,7 +8,9 @@ import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import type { WorkspaceFile } from "../workspaces.js";
 import type { EngineRow, LayoutNode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
+import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
+import type { JsonFiles } from "./json-files.js";
 import type { ReadCache } from "./read-cache.js";
 import { cleanModel } from "../../shared/launch-options.js";
 import { DEFAULT_DICTATE_KEYS, normalizeDictateKeys } from "../../shared/dictation.js";
@@ -41,6 +43,21 @@ export function defaultSettings(): Settings {
     sync: { enabled: false, name: "" },
   };
 }
+
+/**
+ * settings.json's format, written into it as `"version"`. Raise it with a migration when a field
+ * changes meaning; a file a newer VibeForge wrote keeps its own number (see formatVersion).
+ */
+export const SETTINGS_VERSION = 1;
+
+/** Every field settings.json has in this version; anything else in the file is carried through a save. */
+const SETTINGS_SHAPE: Shape = (() => {
+  const shape = shapeOf(defaultSettings() as unknown as Record<string, unknown>);
+  // Fields that are only there when set.
+  (shape.orchestrator as Shape).effort = true;
+  shape.version = true;
+  return shape;
+})();
 
 /** A whole number from 0 to `max`; anything else is `fallback`. */
 function count(value: unknown, max: number, fallback: number): number {
@@ -117,15 +134,18 @@ function isLayoutNode(value: unknown, depth = 0): value is LayoutNode {
 
 /**
  * The JSON files in the config folder: settings.json (mode 0600), engines.json, workspaces.json and
- * one layouts/<workspace>.json per workspace. Settings and engines go through the read cache.
+ * one layouts/<workspace>.json per workspace. Settings, engines and workspaces go through the read
+ * cache, and through `files`: one that can't be read serves its last good copy, and is never saved over.
  */
 export class Config {
   private readonly configRoot: string;
   private readonly cache: ReadCache;
+  private readonly files: JsonFiles;
 
-  constructor(configRoot: string, cache: ReadCache) {
+  constructor(configRoot: string, cache: ReadCache, files: JsonFiles) {
     this.configRoot = configRoot;
     this.cache = cache;
+    this.files = files;
   }
 
   readSettings(): Settings {
@@ -135,14 +155,14 @@ export class Config {
   private loadSettings(): Settings {
     const file = path.join(this.configRoot, "settings.json");
     const defaults = defaultSettings();
-    const raw = readJson<Partial<Settings> | null>(file, null);
-    if (!raw) {
-      // Only a missing file is written. One that doesn't parse, say a hand edit half done, is left for its
-      // author, and moved aside to settings.json.broken if the app saves settings before it is fixed.
-      if (!fs.existsSync(file)) writeJson(file, defaults, { mode: 0o600 });
-      return defaults;
-    }
-    return this.normalizeSettings(raw, defaults);
+    const read = this.files.read(file);
+    if (read.state === "ok") return this.normalizeSettings(read.value as Partial<Settings>, defaults);
+    // One that can't be read (a hand edit half done, or a CLI writing it in place) serves the last copy
+    // that read correctly: falling back to defaults would turn Sync and the phone page off. It is left for
+    // its author, and the window says so (JsonFiles). Only a file that was never there starts as defaults.
+    if (read.saved) return this.normalizeSettings(read.saved as Partial<Settings>, defaults);
+    if (read.state === "missing") this.files.write(file, { version: SETTINGS_VERSION, ...defaults }, 0o600);
+    return defaults;
   }
 
   private normalizeSettings(raw: Partial<Settings>, defaults = defaultSettings()): Settings {
@@ -206,9 +226,12 @@ export class Config {
     };
   }
 
+  /** Save `settings`, keeping any field a newer VibeForge wrote that this one doesn't know. */
   writeSettings(settings: Settings): void {
     const file = path.join(this.configRoot, "settings.json");
-    writeJson(file, settings, { mode: 0o600 });
+    const raw = this.files.beforeWrite(file);
+    const known = { version: formatVersion(raw, SETTINGS_VERSION), ...settings } as Record<string, unknown>;
+    this.files.write(file, carryUnknown(known, raw, SETTINGS_SHAPE), 0o600);
     this.cache.put(file, this.normalizeSettings(settings));
   }
 
@@ -218,27 +241,28 @@ export class Config {
 
   private loadEngineRows(): EngineRow[] {
     const file = path.join(this.configRoot, "engines.json");
-    const raw = readJson<{ engines?: unknown; seedRevision?: unknown } | unknown[] | null>(file, null);
+    const read = this.files.read(file);
+    // As with settings.json, one that can't be read serves its last good copy (custom CLIs would vanish
+    // otherwise), and only a file that was never there is written.
+    const raw = (read.state === "ok" ? read.value : read.saved) as { engines?: unknown; seedRevision?: unknown } | unknown[] | undefined;
     if (!raw) {
-      // As with settings.json, only a missing file is written. One that doesn't parse, say a hand edit half done, is
-      // left for its author, and moved aside to engines.json.broken if the app saves engines before it is fixed.
       const seeded = seedEngines();
-      if (!fs.existsSync(file)) writeJson(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION });
+      if (read.state === "missing") this.files.write(file, { engines: seeded, seedRevision: ENGINE_SEED_REVISION }, 0o600);
       return seeded;
     }
     const saved = normalizeEngineRows(raw);
-    const revision = raw && !Array.isArray(raw) && typeof raw.seedRevision === "number" ? raw.seedRevision : 1;
+    const revision = !Array.isArray(raw) && typeof raw.seedRevision === "number" ? raw.seedRevision : 1;
     const merged = mergeEngineRows(saved, revision);
-    if (merged.changed) writeJson(file, { engines: merged.rows, seedRevision: merged.revision });
+    if (merged.changed && read.state === "ok") this.files.write(file, { engines: merged.rows, seedRevision: merged.revision }, 0o600);
     return merged.rows;
   }
 
   writeEngineRows(rows: EngineRow[]): void {
     const file = path.join(this.configRoot, "engines.json");
-    const raw = readJson<{ seedRevision?: unknown }>(file, {});
-    const revision = typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
+    const raw = this.files.beforeWrite(file) as { seedRevision?: unknown } | null;
+    const revision = raw && typeof raw.seedRevision === "number" ? raw.seedRevision : ENGINE_SEED_REVISION;
     const normalized = normalizeEngineRows(rows);
-    writeJson(file, { engines: normalized, seedRevision: revision });
+    this.files.write(file, { engines: normalized, seedRevision: revision }, 0o600);
     this.cache.put(file, normalized);
   }
 
@@ -246,7 +270,9 @@ export class Config {
     const file = path.join(this.configRoot, "workspaces.json");
     // Read for nearly everything (each task, run and terminal names its workspace): parsed once while it holds still.
     return this.cache.read(file, () => {
-      const raw = readJson<unknown>(file, null);
+      const read = this.files.read(file);
+      // One that can't be read lists the workspaces it held when it last read correctly.
+      const raw = (read.state === "ok" ? read.value : read.saved) ?? null;
       const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
       const workspaces = Array.isArray(list)
         ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
@@ -258,7 +284,8 @@ export class Config {
 
   writeWorkspaces(file: WorkspaceFile): void {
     const target = path.join(this.configRoot, "workspaces.json");
-    writeJson(target, file);
+    this.files.beforeWrite(target);
+    this.files.write(target, file, 0o600);
     const normalizedWorkspaces = (file.workspaces ?? []).map(normalizeWorkspace).filter((item): item is Workspace => item !== null);
     const last = file.lastWorkspaceId && normalizedWorkspaces.some((item) => item.id === file.lastWorkspaceId) ? file.lastWorkspaceId : (normalizedWorkspaces[0]?.id ?? null);
     this.cache.put(target, { workspaces: normalizedWorkspaces, lastWorkspaceId: last });

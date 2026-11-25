@@ -1726,6 +1726,22 @@ export const pt: Catalog = {
   "orch.issue.agent": "Nenhum agente chamado “{asked}”.",
   "core.orchWaitsTurn": "Esperando por {names} nessa pasta; começa sozinho quando ficar quieto.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "Não dá para ler {name}",
+  "unreadable.saved": "O VibeForge continua com a cópia da última vez que ele foi lido corretamente, e não salva nada por cima do arquivo até ele voltar a ser lido.",
+  "unreadable.none": "O VibeForge não tem uma cópia anterior dele, e não salva nada por cima do arquivo até ele voltar a ser lido.",
+  "unreadable.open": "Abrir arquivo",
+  "unreadable.restoreSaved": "Usar a cópia salva",
+  "unreadable.useSavedTip": "Move este arquivo para {name}.broken e põe a cópia salva de volta",
+  "unreadable.moveAside": "Tirar do caminho",
+  "unreadable.moveAsideTip": "Move este arquivo para {name}.broken, para o VibeForge começar um novo",
+  "unreadable.failed": "Não foi possível pôr a cópia salva de volta",
+  "core.unreadableNotSaved": "Não dá para ler {name} ({error}), então nada foi salvo por cima.",
+  "core.fileEmpty": "O arquivo está vazio.",
+  "core.fileNotList": "Ele não contém um objeto nem uma lista JSON.",
+  "main.folderInUse": "Outro VibeForge está usando {folder}",
+  "main.folderInUseBody": "Só um VibeForge pode usar uma pasta por vez: dois encerrariam os terminais um do outro, parariam o Sync um do outro e rodariam cada rotina duas vezes. Feche o outro primeiro, ou inicie este com pastas próprias (VIBEFORGE_CONFIG e VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Sincronização",
   "sync.lead": "Mantém os espaços de trabalho que você escolher iguais no seu outro computador, por exemplo um notebook e um desktop. Nada é sincronizado até você escolher um espaço de trabalho: clique com o botão direito em um deles em Código. Os arquivos vão direto de um computador para o outro, pela sua rede local ou pelo Tailscale, e para nenhum outro lugar.",
@@ -2085,4 +2101,24 @@ export const pt: Catalog = {
   "load.notEmpty": "Isso não quer dizer que não há nada: não foi possível ler. Nada foi excluído.",
   "load.stale": "O que você vê é da última leitura que funcionou.",
   "tasks.copyDiscarded": "Cópia de \"{title}\" descartada",
+
+  // ---------------------------------------------------------------- files that couldn't be read, and removing a workspace with Undo
+  "core.readDenied": "Não foi possível ler {path}: o VibeForge não tem permissão. Verifique as permissões.",
+  "core.readNotYaml": "Não foi possível ler {path}: não é um YAML válido ({detail}).",
+  "core.readNoFields": "Não foi possível ler {path}: ele não tem nenhum campo.",
+  "core.readFailed": "Não foi possível ler {path}: {detail}",
+  "core.workspaceTaken": "Outro espaço de trabalho ocupou o lugar dele nesse meio-tempo, então ele não pode voltar.",
+  "load.memory": "Não foi possível ler a memória deste agente.",
+  "load.unreadable.agent.one": "Não foi possível ler {count} agente, por isso ele não aparece na lista:",
+  "load.unreadable.agent.other": "Não foi possível ler {count} agentes, por isso eles não aparecem na lista:",
+  "load.unreadable.skill.one": "Não foi possível ler {count} skill, por isso ela não aparece na lista:",
+  "load.unreadable.skill.other": "Não foi possível ler {count} skills, por isso elas não aparecem na lista:",
+  "load.unreadable.routine.one": "Não foi possível ler {count} rotina, por isso ela não aparece na lista:",
+  "load.unreadable.routine.other": "Não foi possível ler {count} rotinas, por isso elas não aparecem na lista:",
+  "load.unreadable.task.one": "Não foi possível ler {count} tarefa, por isso ela não aparece na lista:",
+  "load.unreadable.task.other": "Não foi possível ler {count} tarefas, por isso elas não aparecem na lista:",
+  "load.unreadableHint": "Nada foi excluído. Quando o arquivo puder ser lido de novo, ele volta para a lista.",
+  "code.removedNamed": "{name} removido do VibeForge",
+  "code.removedMany.one": "{count} espaço de trabalho removido do VibeForge",
+  "code.removedMany.other": "{count} espaços de trabalho removidos do VibeForge",
 };

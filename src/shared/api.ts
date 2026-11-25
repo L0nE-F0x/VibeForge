@@ -41,6 +41,9 @@ import type {
   TalkState,
   TaskStatus,
   Topic,
+  UnreadableFile,
+  UnreadableItem,
+  LibraryKind,
   VoiceSettings,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
@@ -50,6 +53,7 @@ import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
+import type { Cue } from "./chimes.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 import type {
   Looking,
@@ -129,6 +133,8 @@ export type {
   TermSize,
   WorkspaceSummary,
   Topic,
+  UnreadableItem,
+  LibraryKind,
   AgentTalkSettings,
   OrchestratorSettings,
   SoundSettings,
@@ -142,7 +148,7 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
+export type { Workspace, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
 
 export interface AppInfo {
   version: string;
@@ -362,6 +368,8 @@ export interface DeskMethods {
   "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null; route?: unknown; always?: boolean; silent?: boolean }) => void;
   /** Omarchy's Do Not Disturb is on. */
   "app.doNotDisturb": () => boolean;
+  /** Plays a chime through pw-play at `volume` (0 to 1). False when this machine can't, and the window plays it itself. */
+  "app.chime": (name: Cue, volume: number) => boolean;
   /** "Start at login, in the tray": whether the autostart entry is there, and setting it. */
   "app.autostart": () => boolean;
   "app.setAutostart": (on: boolean) => boolean;
@@ -378,6 +386,10 @@ export interface DeskMethods {
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;
+  /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
+  "files.unreadable": () => UnreadableFile[];
+  /** Moves an unreadable file (one listed above) to `<name>.broken` and puts back its last good copy. */
+  "files.restoreSaved": (file: string) => void;
   /** Whether the phone page is listening, and why not when it failed to bind. */
   "companion.status": () => CompanionStatus;
   /** Where a phone can open the page, asked of this computer's Tailscale. Nothing is changed. */
@@ -390,7 +402,8 @@ export interface DeskMethods {
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */
   "workspaces.status": () => Record<string, WorkspaceSummary>;
   "workspaces.add": (folder: string) => WorkspaceFile;
-  "workspaces.remove": (id: string) => WorkspaceFile;
+  /** Takes a workspace out of VibeForge (its folder stays on disk), with Undo. Its terminals in Code stop. */
+  "workspaces.remove": (id: string) => Deleted;
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
   "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
@@ -402,6 +415,8 @@ export interface DeskMethods {
   "layouts.save": (workspaceId: string, layout: LayoutNode | null) => void;
   "files.list": (dir: string) => FileNode[];
 
+  /** The agent, skill, routine and task files the lists left out because they couldn't be read. */
+  "library.unreadable": () => UnreadableItem[];
   "agents.list": () => Agent[];
   "agents.save": (input: AgentInput) => Agent;
   "agents.delete": (id: string) => Deleted;

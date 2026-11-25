@@ -1727,6 +1727,22 @@ export const ja: Catalog = {
   "orch.issue.agent": "「{asked}」というエージェントはありません。",
   "core.orchWaitsTurn": "そのフォルダーで {names} を待っています。静かになったら自動で始まります。",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} を読み込めません",
+  "unreadable.saved": "VibeForge は最後に正しく読めたときのコピーで続けます。ファイルがまた読めるようになるまで、上書き保存はしません。",
+  "unreadable.none": "VibeForge にはこのファイルの以前のコピーがありません。ファイルがまた読めるようになるまで、上書き保存はしません。",
+  "unreadable.open": "ファイルを開く",
+  "unreadable.restoreSaved": "保存したコピーを使う",
+  "unreadable.useSavedTip": "このファイルを {name}.broken に移し、保存したコピーを戻します",
+  "unreadable.moveAside": "脇に移す",
+  "unreadable.moveAsideTip": "このファイルを {name}.broken に移し、VibeForge が新しく作り直します",
+  "unreadable.failed": "保存したコピーを戻せませんでした",
+  "core.unreadableNotSaved": "{name} を読み込めないため ({error})、上書き保存しませんでした。",
+  "core.fileEmpty": "ファイルが空です。",
+  "core.fileNotList": "JSON のオブジェクトやリストが入っていません。",
+  "main.folderInUse": "別の VibeForge が {folder} を使っています",
+  "main.folderInUseBody": "一つのフォルダーを同時に使える VibeForge は一つだけです。二つあると、互いのターミナルを終わらせ、互いの Sync を止め、ルーチンを二度ずつ実行してしまいます。先にもう一方を閉じるか、専用のフォルダー (VIBEFORGE_CONFIG と VIBEFORGE_DATA) でこちらを起動してください。",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "同期",
   "sync.lead": "選んだワークスペースを、ノートパソコンとデスクトップのような、もう一方のコンピュータでも同じ状態に保ちます。ワークスペースを選ぶまでは何も同期しません。コードでワークスペースを右クリックして選びます。ファイルはローカルネットワークか Tailscale を通って、コンピュータからコンピュータへ直接届き、ほかのどこにも送られません。",
@@ -2086,4 +2102,24 @@ export const ja: Catalog = {
   "load.notEmpty": "何もないのではなく、読み込めなかっただけです。何も削除されていません。",
   "load.stale": "表示しているのは、最後に読み込めたときの内容です。",
   "tasks.copyDiscarded": "「{title}」のコピーを破棄しました",
+
+  // ---------------------------------------------------------------- files that couldn't be read, and removing a workspace with Undo
+  "core.readDenied": "{path} を読み込めませんでした: VibeForge に読み取りの権限がありません。権限を確認してください。",
+  "core.readNotYaml": "{path} を読み込めませんでした: 正しい YAML ではありません ({detail})。",
+  "core.readNoFields": "{path} を読み込めませんでした: 項目が 1 つもありません。",
+  "core.readFailed": "{path} を読み込めませんでした: {detail}",
+  "core.workspaceTaken": "その間に別のワークスペースが同じ場所を使ったため、元に戻せません。",
+  "load.memory": "このエージェントのメモリーを読み込めませんでした。",
+  "load.unreadable.agent.one": "{count} 個のエージェントを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.agent.other": "{count} 個のエージェントを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.skill.one": "{count} 個のスキルを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.skill.other": "{count} 個のスキルを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.routine.one": "{count} 個のルーティンを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.routine.other": "{count} 個のルーティンを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.task.one": "{count} 個のタスクを読み込めなかったため、一覧に表示していません:",
+  "load.unreadable.task.other": "{count} 個のタスクを読み込めなかったため、一覧に表示していません:",
+  "load.unreadableHint": "何も削除されていません。ファイルを読み込めるようになれば、また一覧に表示されます。",
+  "code.removedNamed": "{name} を VibeForge から外しました",
+  "code.removedMany.one": "{count} 個のワークスペースを VibeForge から外しました",
+  "code.removedMany.other": "{count} 個のワークスペースを VibeForge から外しました",
 };

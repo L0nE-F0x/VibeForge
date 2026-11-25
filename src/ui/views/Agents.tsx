@@ -23,7 +23,7 @@ import { autosaveDue, oneLine } from "../autosave.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { SessionPane } from "../components/Session.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { LoadFailed } from "../components/LoadState.js";
+import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { Avatar, Button, Chip, Empty, Field, Input, Modal, Notice, SecretNote, Segmented, Select, StatusDot, Tabs, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { ListBar, NoMatch, PickMark, activeFilterLabels, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { matchesQuery, nameOrder, timeOf, type ListSpec } from "../list-view.js";
@@ -148,6 +148,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const deleted = useDeleted();
   const deletedMany = useDeletedMany();
   const agents = useAgents();
+  const unreadableFiles = useUnreadableOf("agent").length;
   const chats = useChats(undefined).data ?? [];
   const inbox = useInbox().data ?? [];
   const engines = useEngines().data ?? [];
@@ -284,7 +285,8 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           <LoadFailed query={agents} />
-          {agents.loaded && !unreadable && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
+          <UnreadableFiles kind="agent" reload={agents.reload} />
+          {agents.loaded && !unreadable && !unreadableFiles && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("agents.none")}</div>}
           {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
           {view.shown.map((agent) => {
             const live = chatLive(agent.id);
@@ -710,7 +712,7 @@ function BriefTab({ agent }: { agent: Agent }) {
 
 function MemoryTab({ agent }: { agent: Agent }) {
   const t = useT();
-  const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id));
+  const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id), { what: "load.memory" });
   const [text, setText] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
   const [save, saving] = useAction(async () => {
     await call("agents.writeMemory", agent.id, text ?? "");
@@ -718,7 +720,8 @@ function MemoryTab({ agent }: { agent: Agent }) {
   }, t("agents.memoryFailed"));
   const dirty = text !== null && text !== memory.data;
   useAutosave(text, dirty, !saving, () => void save());
-  if (text === null) return null;
+  // Never an empty editor for a memory that couldn't be read: saving that would write over it.
+  if (text === null) return <LoadFailed query={memory} />;
   return (
     <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.memoryStored")}`}>
       <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>

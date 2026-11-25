@@ -87,10 +87,20 @@ function setAsideBroken(file: string, options: WriteOptions): void {
   try {
     JSON.parse(text);
   } catch {
-    const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
-    fs.renameSync(file, aside);
-    fs.chmodSync(aside, options.mode ?? 0o600);
+    moveAside(file, options.mode);
   }
+}
+
+/**
+ * Move `file` to `<name>.broken` (or `<name>.broken-<time>` when one is already there, so an
+ * earlier one is kept), owner-only unless `mode` says otherwise. Returns where it went.
+ */
+export function moveAside(file: string, mode = 0o600): string {
+  const aside = fs.existsSync(`${file}.broken`) ? `${file}.broken-${Date.now()}` : `${file}.broken`;
+  noteOwnDelete(file);
+  fs.renameSync(file, aside);
+  fs.chmodSync(aside, mode);
+  return aside;
 }
 
 export function readText(file: string): string {

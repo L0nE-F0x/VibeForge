@@ -43,6 +43,8 @@ VIBEFORGE_CONFIG=$dev/config VIBEFORGE_DATA=$dev/data VIBEFORGE_PROFILE=$dev/pro
 
 The copy gets its own tray icon. Turn the phone page on in only one of them, since both would listen on port 4737.
 
+A copy started on folders another VibeForge is already using (the same `VIBEFORGE_CONFIG` or `VIBEFORGE_DATA`, whatever its `--user-data-dir`) doesn't start: it says which folder is taken and exits.
+
 ## Issues
 
 Use the [bug](https://github.com/L0nE-F0x/VibeForge/issues/new?template=bug_report.yml) and [feature](https://github.com/L0nE-F0x/VibeForge/issues/new?template=feature_request.yml) templates. **Help → Copy diagnostics** inside the app fills in versions and the end of VibeForge's own log. Read it and remove anything private before you paste.

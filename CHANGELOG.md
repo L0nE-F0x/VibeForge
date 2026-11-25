@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.7.2] - 2026-11-25
+
+**3.7.2: a settings file caught half-written no longer switches Sync or the phone page off, Sync no longer deletes what one machine can't read, folders that can't be read say so, removing a workspace has Undo, and chimes no longer keep an audio process running.**
+
+### Changed
+
+- **Sounds no longer start Chromium's audio process.** VibeForge's chimes now play through PipeWire's `pw-play`, as calls and dictation already do. Before, the first chime of a session started Chromium's audio process, which then stayed until VibeForge quit: about 22 MB of memory counted on its own (77 MB as `top` counts it). In a test run, 14 chimes left no audio process behind. A chime starts about 2 ms after the window asks for it, then waits on PipeWire's own 20 ms buffer. The seven chimes are written once to a `chimes` folder in VibeForge's data folder (228 KB, readable only by you). Chimes less than a quarter of a second apart now play as one. On a computer without PipeWire, the window plays them as before.
+
+### Fixed
+
+- **A settings file that can't be read no longer turns into defaults.** When `settings.json`, `engines.json`, `workspaces.json` or `chats.json` didn't parse (a CLI or an editor writing it in place, a hand edit half done, a file cut short), VibeForge went on as if it held the defaults: Sync stopped and the phone page closed until the next change, custom CLIs, workspaces or chats disappeared from the window, and the next save wrote defaults over the file. Now VibeForge keeps using the copy from the last time the file read correctly (kept beside it as `<name>.saved`), and Sync and the phone page stay as they were. A notice in the corner names the file and the error, with **Open file** and **Use the saved copy**, which moves the broken file to `<name>.broken` and puts the saved copy back (**Move it aside** when there is no saved copy). Nothing is saved over the file or moved aside until you choose; a save meanwhile is refused and says why. The notice goes away by itself once the file reads again.
+- **Saving settings or an agent keeps what a newer version wrote.** After going back to an earlier version, changing one setting rewrote `settings.json` with only the fields that version knew, so everything the newer one added was lost, and saving an agent did the same to its `agent.yaml`. Fields VibeForge doesn't know are now kept through a save. Both files also carry a `"version"` number now, for changes to their format later.
+- **Only one VibeForge runs on the same folders.** A second copy started with another `--user-data-dir` but the same config or data folder ended the first copy's runs, stopped its Syncthing every 30 seconds, ran each routine twice and lost chat changes. Now it doesn't start: it says which folder another VibeForge is using, and exits. A trial copy with folders of its own (`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`) still starts beside the installed one, and a copy that crashed leaves nothing behind that stops the next start.
+- **An agents, skills, routines or tasks folder that can't be read says so, instead of looking empty.** If VibeForge isn't allowed to read `~/.config/vibeforge/agents` (or the disk reports an error), Agents now shows "Couldn't read your agents." with the reason and **Try again**, where before it said "No agents yet." The same goes for skills, routines and tasks. A single file that can't be read, or that isn't valid YAML, is named above its list with why, and the rest of the list still shows. An agent's memory that can't be read shows an error instead of an empty editor, so nothing is saved over it. In the background, nothing takes such a file for deleted: Sync doesn't tell your other machines it was deleted or that its memory is empty, routines whose files can be read still start, run tidying removes nothing while a task can't be read, and Viby is told which lists it couldn't read. An agent whose memory or skill can't be read doesn't start, and the run says why.
+- **Removing a workspace in Code has Undo, and asks first only when a terminal would stop.** **Remove from VibeForge** now happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>, as deleting does. Undo puts the workspace back in its place in the list with its name, browser address and pane layout. It still asks first when terminals of Code's own are running there, because removing stops them and Undo can't start them again. Runs of agents, tasks and routines in the workspace keep going either way, its folder stays on disk, and a Sync share of the folder is untouched. When Viby removes a workspace, its step has **Undo** too.
+- **The phone page shows Viby's answer to a yes in the phone's language.** When Viby's planner takes what you said as a yes to a plan waiting for Go, Viby says that it's running the plan, or why the plan still waits. The desktop showed this in your language, but the phone page showed it in English. It now uses the phone page's language, like the rest of the page.
+
+### Security
+
+- **Sync no longer deletes your agents or skills on your other machines when this one can't read them.** If the agents or skills folder on one machine stayed unreadable for more than about 35 seconds (a permissions mistake, a failing disk), Sync took that as everything having been deleted and deleted them on the other machine too. Now an item that can't be read is left alone on both sides until it can be read again.
+
 ## [3.7.1] - 2026-11-25
 
 **3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
@@ -1145,7 +1166,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.2...HEAD
+[3.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.2
 [3.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.1
 [3.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.0
 [3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2

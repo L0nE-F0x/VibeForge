@@ -343,13 +343,13 @@ export class Call {
       "VibeForge",
       "Omarchy",
       "Hyprland",
-      ...service.listAgents().map((agent) => agent.name),
+      ...names(() => service.listAgents().map((agent) => agent.name)),
       ...service.listEngines().map((engine) => engine.label),
       ...orchestratorVoiceWords(workspaces.map((item) => item.name)),
       ...copies.map((copy) => copy.name),
-      ...(service.listTasks?.().slice(0, 15).map((task) => task.title) ?? []),
-      ...(service.listRoutines?.().map((routine) => routine.name) ?? []),
-      ...(service.listSkills?.().map((skill) => skill.name) ?? []),
+      ...names(() => service.listTasks?.().slice(0, 15).map((task) => task.title) ?? []),
+      ...names(() => service.listRoutines?.().map((routine) => routine.name) ?? []),
+      ...names(() => service.listSkills?.().map((skill) => skill.name) ?? []),
       ...files,
     ]);
   }
@@ -558,5 +558,14 @@ export class Call {
 
   dispose(): void {
     this.stop();
+  }
+}
+
+/** Words for whisper from a list that may not be readable just now (its view says so): none from it then. */
+function names(read: () => string[]): string[] {
+  try {
+    return read();
+  } catch {
+    return [];
   }
 }

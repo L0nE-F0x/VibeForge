@@ -459,6 +459,8 @@ export interface PlanContext {
   projectsFolder?: string;
   /** Viby's own durable plain-text memory (~/.config/vibeforge/viby.md). */
   memory?: string;
+  /** Agents, skills, routines or tasks that are there but couldn't be read, each as why: not missing, so not to be made again. */
+  unreadable?: string[];
   /** Viby's own settings, voice/STT models, and VibeForge configuration. */
   settings?: PlanSettingsContext;
 }

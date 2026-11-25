@@ -37,6 +37,18 @@ export interface Skill {
   body: string;
 }
 
+/** The four kinds of thing kept as files under agents/, skills/, routines/ and tasks/. */
+export type LibraryKind = "agent" | "skill" | "routine" | "task";
+
+/** One a list left out because its file is there but couldn't be read: named so it isn't taken for deleted. */
+export interface UnreadableItem {
+  kind: LibraryKind;
+  id: string;
+  file: string;
+  /** Why, as a sentence (English from the main process; the window translates it). */
+  error: string;
+}
+
 export interface Routine {
   id: string;
   name: string;
@@ -367,4 +379,18 @@ export type Topic =
   | "updates"
   | "voice"
   | "orchestrator"
-  | "sync";
+  | "sync"
+  /** Which of settings.json, engines.json, workspaces.json and chats.json can't be read (UnreadableFile). */
+  | "unreadable";
+
+/** settings.json, engines.json, workspaces.json or chats.json, there on disk but not readable. */
+export interface UnreadableFile {
+  /** Its full path. */
+  file: string;
+  /** Its name, as the window shows it. */
+  name: string;
+  /** Why it can't be read: the parser's words, or EMPTY_FILE / NOT_A_LIST (store/json-files.ts). */
+  error: string;
+  /** VibeForge has a copy from the last time it read correctly, and serves that meanwhile. */
+  saved: boolean;
+}

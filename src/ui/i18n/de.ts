@@ -1726,6 +1726,22 @@ export const de: Catalog = {
   "orch.issue.agent": "Kein Agent namens „{asked}“.",
   "core.orchWaitsTurn": "Wartet in diesem Ordner auf {names}; startet von selbst, sobald es dort ruhig ist.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} lässt sich nicht lesen",
+  "unreadable.saved": "VibeForge arbeitet mit der Kopie weiter, die zuletzt richtig gelesen wurde, und speichert nichts über die Datei, bis sie sich wieder lesen lässt.",
+  "unreadable.none": "VibeForge hat keine frühere Kopie davon und speichert nichts über die Datei, bis sie sich wieder lesen lässt.",
+  "unreadable.open": "Datei öffnen",
+  "unreadable.restoreSaved": "Gespeicherte Kopie nehmen",
+  "unreadable.useSavedTip": "Verschiebt diese Datei nach {name}.broken und legt die gespeicherte Kopie zurück",
+  "unreadable.moveAside": "Beiseitelegen",
+  "unreadable.moveAsideTip": "Verschiebt diese Datei nach {name}.broken, damit VibeForge eine neue anlegt",
+  "unreadable.failed": "Die gespeicherte Kopie ließ sich nicht zurücklegen",
+  "core.unreadableNotSaved": "{name} lässt sich nicht lesen ({error}), deshalb wurde nichts darüber gespeichert.",
+  "core.fileEmpty": "Die Datei ist leer.",
+  "core.fileNotList": "Sie enthält kein JSON-Objekt und keine JSON-Liste.",
+  "main.folderInUse": "Ein anderes VibeForge nutzt {folder}",
+  "main.folderInUseBody": "Nur ein VibeForge kann einen Ordner gleichzeitig nutzen: Zwei würden gegenseitig ihre Terminals beenden, ihr Sync stoppen und jede Routine doppelt ausführen. Schließe zuerst das andere, oder starte dieses mit eigenen Ordnern (VIBEFORGE_CONFIG und VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Synchronisierung",
   "sync.lead": "Hält die Arbeitsbereiche, die du auswählst, auf deinem anderen Rechner gleich, etwa auf Laptop und Desktop. Nichts wird synchronisiert, bis du einen Arbeitsbereich wählst: Rechtsklick auf einen in Code. Dateien gehen direkt von einem Rechner zum anderen, über dein lokales Netzwerk oder Tailscale, und nirgendwo sonst hin.",
@@ -2085,4 +2101,24 @@ export const de: Catalog = {
   "load.notEmpty": "Das heißt nicht, dass hier nichts ist: Es ließ sich nur nicht lesen. Gelöscht wurde nichts.",
   "load.stale": "Was du siehst, stammt vom letzten Lesen, das geklappt hat.",
   "tasks.copyDiscarded": "Kopie von „{title}“ verworfen",
+
+  // ---------------------------------------------------------------- files that couldn't be read, and removing a workspace with Undo
+  "core.readDenied": "{path} ließ sich nicht lesen: VibeForge hat keine Berechtigung dafür. Prüfe die Zugriffsrechte.",
+  "core.readNotYaml": "{path} ließ sich nicht lesen: Das ist kein gültiges YAML ({detail}).",
+  "core.readNoFields": "{path} ließ sich nicht lesen: Die Datei enthält keine Felder.",
+  "core.readFailed": "{path} ließ sich nicht lesen: {detail}",
+  "core.workspaceTaken": "Ein anderer Arbeitsbereich hat inzwischen seinen Platz eingenommen, deshalb kann er nicht zurückkommen.",
+  "load.memory": "Das Gedächtnis dieses Agenten ließ sich nicht lesen.",
+  "load.unreadable.agent.one": "{count} Agent ließ sich nicht lesen und fehlt deshalb in der Liste:",
+  "load.unreadable.agent.other": "{count} Agenten ließen sich nicht lesen und fehlen deshalb in der Liste:",
+  "load.unreadable.skill.one": "{count} Skill ließ sich nicht lesen und fehlt deshalb in der Liste:",
+  "load.unreadable.skill.other": "{count} Skills ließen sich nicht lesen und fehlen deshalb in der Liste:",
+  "load.unreadable.routine.one": "{count} Routine ließ sich nicht lesen und fehlt deshalb in der Liste:",
+  "load.unreadable.routine.other": "{count} Routinen ließen sich nicht lesen und fehlen deshalb in der Liste:",
+  "load.unreadable.task.one": "{count} Aufgabe ließ sich nicht lesen und fehlt deshalb in der Liste:",
+  "load.unreadable.task.other": "{count} Aufgaben ließen sich nicht lesen und fehlen deshalb in der Liste:",
+  "load.unreadableHint": "Gelöscht wurde nichts. Sobald sich die Datei wieder lesen lässt, steht sie wieder in der Liste.",
+  "code.removedNamed": "{name} aus VibeForge entfernt",
+  "code.removedMany.one": "{count} Arbeitsbereich aus VibeForge entfernt",
+  "code.removedMany.other": "{count} Arbeitsbereiche aus VibeForge entfernt",
 };

@@ -180,9 +180,10 @@ function actionsFor(wire: CompanionWire): CompanionActions {
       const workspaces = service.listWorkspaces().workspaces.map((item) => item.name);
       const prompt = vocabularyPrompt(
         orchestratorDictationWords({
-          agents: service.listAgents().map((agent) => agent.name),
-          routines: service.listRoutines().map((routine) => routine.name),
-          skills: service.listSkills().map((skill) => skill.name),
+          // A list that can't be read just now gives no words, rather than no hearing at all.
+          agents: wordsFrom(() => service.listAgents().map((agent) => agent.name)),
+          routines: wordsFrom(() => service.listRoutines().map((routine) => routine.name)),
+          skills: wordsFrom(() => service.listSkills().map((skill) => skill.name)),
           engines: service.listEngines().map((engine) => engine.label),
           workspaces,
         }),
@@ -385,4 +386,13 @@ async function sendTo(
   if (!input.runId || !service.findRun(input.runId)) throw new Error("That session has ended.");
   const result = await service.continueRun(input.runId, PHONE_SIZE, input.text);
   return { working: false, ptyId: result.ptyId, runId: result.runId };
+}
+
+/** Names from a list that may not be readable just now: none from it then. */
+function wordsFrom(read: () => string[]): string[] {
+  try {
+    return read();
+  } catch {
+    return [];
+  }
 }

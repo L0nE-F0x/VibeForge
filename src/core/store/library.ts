@@ -1,11 +1,14 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { parse, stringify } from "yaml";
+import { tildify } from "../../shared/text.js";
 import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
 import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
-import type { Agent, AgentTier, Routine, Schedule, Skill, Task, TaskStatus } from "../types.js";
+import type { Agent, AgentTier, LibraryKind, Routine, Schedule, Skill, Task, TaskStatus, UnreadableItem } from "../types.js";
+import { carryUnknown, formatVersion, type Shape } from "./carry.js";
 import { bool, str, strList, strOrNull } from "./fields.js";
 import type { ReadCache } from "./read-cache.js";
 
@@ -25,12 +28,102 @@ function yamlText(value: unknown): string {
   return stringify(value, { lineWidth: 0 });
 }
 
-function readYaml(file: string): unknown {
+/**
+ * A file or folder in the config folder that is there but couldn't be read (permissions, a disk
+ * error, YAML that doesn't parse): not one that is missing. Its message says which and why, in
+ * English the window translates (core.read* in the i18n files).
+ */
+export class UnreadableError extends Error {
+  constructor(
+    readonly file: string,
+    message: string,
+  ) {
+    // Named plain "Error", as Electron passes "<name>: <message>" to the window, which keeps the message.
+    super(message);
+  }
+}
+
+/**
+ * agent.yaml's format, written into it as `version`. Raise it with a migration when a field
+ * changes meaning; a file a newer VibeForge wrote keeps its own number (see formatVersion).
+ */
+export const AGENT_VERSION = 1;
+
+/** Every field agent.yaml has in this version; anything else in the file is carried through a save. */
+const AGENT_SHAPE: Shape = {
+  version: true,
+  // Retired: an agent once had a voice of its own. Named here, so a save drops it rather than carrying it.
+  voice: true,
+  ...({ id: true, name: true, engine: true, brief: true, memoryFile: true, places: true, skills: true, allowRoutines: true, goodAt: true, tier: true, createdAt: true, updatedAt: true } satisfies Record<keyof Agent, true>),
+};
+
+/** What an agent.yaml about to be saved over holds now, for the fields a newer version added; null when none. */
+function savedYaml(file: string): unknown {
   try {
-    return parse(fs.readFileSync(file, "utf8"));
+    return parse(fs.readFileSync(file, "utf8")) as unknown;
   } catch {
     return null;
   }
+}
+
+/** No such file or folder yet: the one failure that means "not there". */
+function isMissing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function shown(file: string): string {
+  return tildify(file, os.homedir());
+}
+
+/** Why reading `file` failed, as an UnreadableError. */
+export function unreadable(file: string, error: unknown): UnreadableError {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === "EACCES" || code === "EPERM") return new UnreadableError(file, `Couldn't read ${shown(file)}: VibeForge isn't allowed to. Check its permissions.`);
+  // Node's message names the call and the path again ("EIO: i/o error, read '/…'"): the reason is enough.
+  const detail = error instanceof Error ? error.message.replace(/, \w+(?: '[^']*')+$/, "") : String(error);
+  return new UnreadableError(file, `Couldn't read ${shown(file)}: ${detail}`);
+}
+
+/** A text file's contents; null when there is no such file. One that is there but can't be read throws. */
+function readText(file: string): string | null {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw unreadable(file, error);
+  }
+}
+
+/** A YAML file's fields; null when there is no such file. One that can't be read, doesn't parse or holds no fields throws. */
+function readYaml(file: string): Record<string, unknown> | null {
+  const text = readText(file);
+  if (text === null) return null;
+  let value: unknown;
+  try {
+    value = parse(text);
+  } catch (error) {
+    const detail = (error instanceof Error ? error.message : String(error)).split("\n")[0].trim().replace(/:$/, "");
+    throw new UnreadableError(file, `Couldn't read ${shown(file)}: it isn't valid YAML (${detail}).`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnreadableError(file, `Couldn't read ${shown(file)}: it doesn't hold any fields.`);
+  return value as Record<string, unknown>;
+}
+
+/** What `read` gives, or null for an item that is there but couldn't be read: for the many callers that only look something up. */
+function orNull<T>(read: () => T | null): T | null {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof UnreadableError) return null;
+    throw error;
+  }
+}
+
+/** The items of one kind that could be read, and the files that couldn't. */
+interface Scan<T> {
+  items: T[];
+  unreadable: UnreadableItem[];
 }
 
 /** A "good at" line: one line, short enough for a roster. */
@@ -133,6 +226,11 @@ function workingCopy(value: unknown): WorkingCopy | null {
 /**
  * What people write by hand in the config folder: agents/<id>/agent.yaml and memory.md,
  * skills/<id>/SKILL.md, routines/<id>.yaml and tasks/<id>.yaml. Agents go through the read cache.
+ *
+ * Reading tells "not there" from "there but unreadable". A list throws UnreadableError when its
+ * folder can't be read (one that doesn't exist yet is just empty), and leaves out a file it can't
+ * read, which `unreadableFiles` names. `read*` throws for an unreadable item; `get*` gives null
+ * for it, as for a missing one, for the callers that only look something up.
  */
 export class Library {
   private readonly configRoot: string;
@@ -156,43 +254,39 @@ export class Library {
   }
 
   listAgents(): Agent[] {
-    const root = path.join(this.configRoot, "agents");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getAgent(entry.name))
-      .filter((agent): agent is Agent => agent !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.scanAgents().items.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  getAgent(id: string): Agent | null {
+  /** The agent, or null when it isn't there. Throws UnreadableError when it is there but can't be read. */
+  readAgent(id: string): Agent | null {
     if (!isSafeId(id)) return null;
     const file = path.join(this.configRoot, "agents", id, "agent.yaml");
     return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
   }
 
+  /** As readAgent, with null for one that can't be read too. */
+  getAgent(id: string): Agent | null {
+    return orNull(() => this.readAgent(id));
+  }
+
+  /** Save `agent`, keeping any field a newer VibeForge wrote into its agent.yaml that this one doesn't know. */
   writeAgent(agent: Agent): void {
     const dir = path.join(this.configRoot, "agents", agent.id);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
     const memoryPath = path.join(dir, "memory.md");
     if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER, { mode: 0o600 });
-    writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
-    this.cache.forget(path.join(dir, "agent.yaml"));
+    const file = path.join(dir, "agent.yaml");
+    const raw = savedYaml(file);
+    const known = { version: formatVersion(raw, AGENT_VERSION), ...agent, memoryFile: "memory.md" };
+    writeFileAtomic(file, yamlText(carryUnknown(known, raw, AGENT_SHAPE)));
+    this.cache.forget(file);
   }
 
+  /** An agent's memory; empty when it has none yet. Throws UnreadableError when memory.md is there but can't be read. */
   readMemory(agentId: string): string {
     if (!isSafeId(agentId)) return "";
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "agents", agentId, "memory.md"), "utf8");
-    } catch {
-      return "";
-    }
+    return readText(path.join(this.configRoot, "agents", agentId, "memory.md")) ?? "";
   }
 
   writeMemory(agentId: string, text: string): void {
@@ -203,32 +297,24 @@ export class Library {
   // ---------------------------------------------------------------- skills
 
   listSkills(): Skill[] {
-    const root = path.join(this.configRoot, "skills");
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => this.getSkill(entry.name))
-      .filter((skill): skill is Skill => skill !== null)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.scanSkills().items.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  getSkill(id: string): Skill | null {
+  /** The skill, or null when it isn't there. Throws UnreadableError when it is there but can't be read. */
+  readSkill(id: string): Skill | null {
     const raw = this.readSkillRaw(id);
     return raw === null ? null : parseSkill(id, raw);
   }
 
+  /** As readSkill, with null for one that can't be read too. */
+  getSkill(id: string): Skill | null {
+    return orNull(() => this.readSkill(id));
+  }
+
+  /** SKILL.md as written; null when it isn't there. Throws UnreadableError when it is there but can't be read. */
   readSkillRaw(id: string): string | null {
     if (!isSafeId(id)) return null;
-    try {
-      return fs.readFileSync(path.join(this.configRoot, "skills", id, "SKILL.md"), "utf8");
-    } catch {
-      return null;
-    }
+    return readText(path.join(this.configRoot, "skills", id, "SKILL.md"));
   }
 
   writeSkill(skill: Skill): void {
@@ -255,13 +341,19 @@ export class Library {
   // ---------------------------------------------------------------- routines
 
   listRoutines(): Routine[] {
-    return this.listYaml("routines", (id, value) => normalizeRoutine(id, value)).sort((a, b) => a.name.localeCompare(b.name));
+    return this.scanRoutines().items.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  getRoutine(id: string): Routine | null {
+  /** The routine, or null when it isn't there. Throws UnreadableError when it is there but can't be read. */
+  readRoutine(id: string): Routine | null {
     if (!isSafeId(id)) return null;
     const file = path.join(this.configRoot, "routines", `${id}.yaml`);
     return this.cache.read(file, () => normalizeRoutine(id, readYaml(file)));
+  }
+
+  /** As readRoutine, with null for one that can't be read too. */
+  getRoutine(id: string): Routine | null {
+    return orNull(() => this.readRoutine(id));
   }
 
   writeRoutine(routine: Routine): void {
@@ -281,15 +373,20 @@ export class Library {
   // ---------------------------------------------------------------- tasks
 
   listTasks(): Task[] {
-    return this.listYaml("tasks", (id, value) => normalizeTask(id, value)).sort((a, b) =>
-      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
-    );
+    return this.scanTasks().items.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
   }
 
-  getTask(id: string): Task | null {
+  /** The task, or null when it isn't there. Throws UnreadableError when it is there but can't be read. */
+  readTask(id: string): Task | null {
     if (!isSafeId(id)) return null;
     const file = path.join(this.configRoot, "tasks", `${id}.yaml`);
+    // Parsed once while the file holds still: the task board asks for every task on each refresh.
     return this.cache.read(file, () => normalizeTask(id, readYaml(file)));
+  }
+
+  /** As readTask, with null for one that can't be read too. */
+  getTask(id: string): Task | null {
+    return orNull(() => this.readTask(id));
   }
 
   writeTask(task: Task): void {
@@ -306,23 +403,66 @@ export class Library {
     this.cache.forget(file);
   }
 
-  private listYaml<T>(folder: string, normalize: (id: string, value: unknown) => T | null): T[] {
-    let entries: string[] = [];
+  // ---------------------------------------------------------------- reading a whole folder
+
+  /**
+   * The files a list left out because they are there but couldn't be read, of every kind, so the
+   * window can name them. A folder that can't be read at all isn't here: its list throws instead.
+   */
+  unreadableItems(): UnreadableItem[] {
+    const scans = [() => this.scanAgents(), () => this.scanSkills(), () => this.scanRoutines(), () => this.scanTasks()];
+    return scans.flatMap((scan) => orNull(() => scan().unreadable) ?? []);
+  }
+
+  private scanAgents(): Scan<Agent> {
+    return this.collect("agent", this.folderIds("agents", "/"), (id) => this.readAgent(id));
+  }
+
+  private scanSkills(): Scan<Skill> {
+    return this.collect("skill", this.folderIds("skills", "/"), (id) => this.readSkill(id));
+  }
+
+  private scanRoutines(): Scan<Routine> {
+    return this.collect("routine", this.folderIds("routines", ".yaml"), (id) => this.readRoutine(id));
+  }
+
+  private scanTasks(): Scan<Task> {
+    return this.collect("task", this.folderIds("tasks", ".yaml"), (id) => this.readTask(id));
+  }
+
+  /**
+   * The ids in a library folder: its folders ("/") or its files ending in `extension`. None when the
+   * folder doesn't exist yet; UnreadableError when it is there but can't be read, so a list that
+   * couldn't be read never passes for an empty one.
+   */
+  private folderIds(folder: string, extension: "/" | ".yaml"): string[] {
+    const root = path.join(this.configRoot, folder);
+    let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(path.join(this.configRoot, folder));
-    } catch {
-      return [];
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch (error) {
+      if (isMissing(error)) return [];
+      throw unreadable(root, error);
     }
-    const items: T[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".yaml")) continue;
-      const id = entry.slice(0, -5);
-      if (!isSafeId(id)) continue;
-      const file = path.join(this.configRoot, folder, entry);
-      // Parsed once while the file holds still: the task board asks for every task on each refresh.
-      const item = this.cache.read(file, () => normalize(id, readYaml(file)));
-      if (item) items.push(item);
+    const ids =
+      extension === "/"
+        ? entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+        : entries.filter((entry) => entry.name.endsWith(extension)).map((entry) => entry.name.slice(0, -extension.length));
+    return ids.filter((id) => isSafeId(id));
+  }
+
+  /** Every item `read` finds, and each one that is there but couldn't be read. */
+  private collect<T>(kind: LibraryKind, ids: readonly string[], read: (id: string) => T | null): Scan<T> {
+    const scan: Scan<T> = { items: [], unreadable: [] };
+    for (const id of ids) {
+      try {
+        const item = read(id);
+        if (item) scan.items.push(item);
+      } catch (error) {
+        if (!(error instanceof UnreadableError)) throw error;
+        scan.unreadable.push({ kind, id, file: error.file, error: error.message });
+      }
     }
-    return items;
+    return scan;
   }
 }

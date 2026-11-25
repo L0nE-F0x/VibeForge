@@ -3,10 +3,10 @@ import { openBranchCheckout, readBranches, type BranchList } from "../branches.j
 import { isDirectory } from "../fsx.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
-import type { LayoutNode } from "../types.js";
+import type { LayoutNode, Workspace } from "../types.js";
 import { summarizeFolderGit } from "../vcs.js";
 import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
-import type { Launched, TermSize, WorkspaceSummary } from "./types.js";
+import type { Deleted, Launched, TermSize, WorkspaceSummary } from "./types.js";
 import type { ServiceCore } from "./core.js";
 
 const GIT_STATUS_CONCURRENCY = 6;
@@ -50,16 +50,50 @@ export class WorkspaceDesk {
     return next;
   }
 
-  async removeWorkspace(id: string): Promise<WorkspaceFile> {
-    for (const session of [...this.core.live.values()]) {
-      if (session.workspaceId === id && session.origin === "code") await this.core.killPty(session.ptyId);
-      else if (session.kind === "shell" && session.workspaceId === id) await this.core.killPty(session.ptyId);
-    }
+  /**
+   * Takes a workspace out of VibeForge, Undo-able. Its folder stays on disk. Its terminals in Code
+   * stop (that part can't be undone); runs of agents, tasks and routines there go on. Undo puts it
+   * back as it was: the same place in the list, name, browser address and pane layout. A Sync
+   * share follows the folder, not the workspace, so it is untouched either way.
+   */
+  async removeWorkspace(id: string): Promise<Deleted> {
+    const before = this.core.store.readWorkspaces();
+    const index = before.workspaces.findIndex((item) => item.id === id);
+    if (index < 0) throw new Error("That workspace is gone.");
+    const workspace = before.workspaces[index];
+    const layout = this.core.store.readLayout(id);
+    const wasCurrent = before.lastWorkspaceId === id;
+    await this.forgetWorkspace(id);
+    // Nothing moves to the trash: the folder stays, and the record and layout come back from here.
+    return this.core.keepForUndo(this.core.trash.stash([]), () => this.putBack(workspace, index, layout, wasCurrent));
+  }
+
+  /** Takes a workspace out for good, with no Undo: a copy's workspace once the copy is applied. */
+  async forgetWorkspace(id: string): Promise<WorkspaceFile> {
+    for (const session of this.codeTerminals(id)) await this.core.killPty(session.ptyId);
     const next = removeWorkspaceRecord(this.core.store.readWorkspaces(), id);
     this.core.store.writeWorkspaces(next);
     this.core.store.writeLayout(id, null);
     this.core.emit("workspaces", "tasks");
     return next;
+  }
+
+  /** What removing the workspace stops: Code's terminals and shells there. */
+  private codeTerminals(id: string) {
+    return [...this.core.live.values()].filter((session) => session.workspaceId === id && (session.origin === "code" || session.kind === "shell"));
+  }
+
+  /** A removed workspace back where it was, unless its folder or its id is a workspace again meanwhile. */
+  private putBack(workspace: Workspace, index: number, layout: LayoutNode | null, wasCurrent: boolean): void {
+    const now = this.core.store.readWorkspaces();
+    // Added again by hand meanwhile: it is back already.
+    if (now.workspaces.some((item) => path.resolve(item.path) === path.resolve(workspace.path))) return;
+    if (now.workspaces.some((item) => item.id === workspace.id)) throw new Error("Another workspace took this one's place meanwhile, so it can't come back.");
+    const workspaces = [...now.workspaces];
+    workspaces.splice(Math.min(index, workspaces.length), 0, workspace);
+    this.core.store.writeWorkspaces({ workspaces, lastWorkspaceId: wasCurrent || !now.lastWorkspaceId ? workspace.id : now.lastWorkspaceId });
+    if (layout && !this.core.store.readLayout(workspace.id)) this.core.store.writeLayout(workspace.id, layout);
+    this.core.emit("workspaces", "tasks");
   }
 
   selectWorkspace(id: string): void {

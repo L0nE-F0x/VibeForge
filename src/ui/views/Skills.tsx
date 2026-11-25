@@ -5,7 +5,7 @@ import type { Skill } from "../../shared/api.js";
 import { call, useAgents, useSkills } from "../api.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { SidePanel, StripItem } from "../components/SidePanel.js";
-import { LoadFailed } from "../components/LoadState.js";
+import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
 import { Button, Empty, Field, Input, Notice, SecretNote, TextArea, Toggle } from "../components/ui.js";
 import { matchesQuery, nameOrder, type ListSpec } from "../list-view.js";
@@ -37,6 +37,7 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
   const deleted = useDeleted();
   const deletedMany = useDeletedMany();
   const skills = useSkills();
+  const unreadableFiles = useUnreadableOf("skill").length;
   const agents = useAgents().data ?? [];
   const library = useLibrary().data;
   const syncReady = useSyncReady().ready;
@@ -130,7 +131,8 @@ export function SkillsView({ route }: { route: Extract<Route, { view: "skills" }
         />
         <div className="list-scroll" onKeyDown={selection.onKeyDown}>
           <LoadFailed query={skills} />
-          {skills.loaded && !unreadable && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
+          <UnreadableFiles kind="skill" reload={skills.reload} />
+          {skills.loaded && !unreadable && !unreadableFiles && list.length === 0 && <div className="faint" style={{ padding: "12px 10px" }}>{t("skills.none")}</div>}
           {list.length > 0 && view.shown.length === 0 && <NoMatch hasQuery={view.hasQuery} filters={activeFilterLabels(view, labels)} onClear={view.clear} />}
           {view.shown.map((skill) => (
             <button

@@ -11,7 +11,7 @@ import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
 import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
-import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, Workspace } from "../types.js";
+import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
 import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
@@ -61,6 +61,8 @@ export class ServiceCore {
   constructor(options: DeskOptions) {
     this.options = options;
     this.store = new Store(options.configRoot, options.dataRoot);
+    // A settings file that stops (or starts again) reading correctly: the window says so.
+    this.store.onUnreadableChange(() => this.emit("unreadable"));
     // Anything left in the trash was deleted in an earlier session, past its undo; settle any copy branches that didn't finish clearing.
     this.trash = new Trash(path.join(options.dataRoot, "trash"));
     const trashed = this.trash.empty();
@@ -181,6 +183,21 @@ export class ServiceCore {
     this.store.writeSettings(next);
     this.emit("settings");
     return this.store.readSettings();
+  }
+
+  /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
+  unreadableFiles(): UnreadableFile[] {
+    return this.store.unreadableFiles();
+  }
+
+  /**
+   * "Use the saved copy" for a file the window listed as unreadable: it moves to `<name>.broken`, and
+   * the copy from the last read that worked goes back in its place. Anything else is refused.
+   */
+  restoreSavedCopy(file: string): void {
+    if (!this.store.unreadableFiles().some((item) => item.file === file)) return;
+    this.store.restoreSavedCopy(file);
+    this.emit("unreadable", "settings", "engines", "agents", "routines", "tasks", "workspaces", "chats");
   }
 
   listEngines(): Engine[] {
@@ -335,8 +352,10 @@ export class ServiceCore {
   // ---------------------------------------------------------------- launching
 
   preambleFor(agent: Agent, prompt: string, priorTranscript: string | null = null, workingCopy: { path: string; of: string } | null = null): string {
+    // A skill or memory that is there but can't be read stops the start, with why, rather than
+    // starting the agent without it.
     const skills = agent.skills.flatMap((id) => {
-      const skill = this.store.getSkill(id);
+      const skill = this.store.readSkill(id);
       return skill ? [{ name: skill.name, body: skill.body }] : [];
     });
     return buildPreamble({
@@ -478,7 +497,11 @@ export class ServiceCore {
     if (input.chatId) {
       const chat = this.store.getChat(input.chatId);
       if (chat) {
-        this.store.writeChat({ ...chat, runIds: [...chat.runIds, id], cwd: input.cwd, updatedAt: meta.startedAt });
+        try {
+          this.store.writeChat({ ...chat, runIds: [...chat.runIds, id], cwd: input.cwd, updatedAt: meta.startedAt });
+        } catch {
+          // chats.json can't be read, so it isn't saved over (the window says so). The run has started and is in Runs.
+        }
       }
     }
     this.emit("runs", "live", "chats", "routines", "tasks");

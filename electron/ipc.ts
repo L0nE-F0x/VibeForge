@@ -5,6 +5,7 @@ import path from "node:path";
 import { app, clipboard, dialog, ipcMain, shell } from "electron";
 import { TalkRateLimiter, type TalkRequest } from "../src/core/control.js";
 import { listDir } from "../src/core/files.js";
+import { whichBin } from "../src/core/engines.js";
 import { describeError } from "../src/core/log.js";
 import { speakable } from "../src/core/replies.js";
 import { listThemes } from "../src/core/theme.js";
@@ -22,6 +23,7 @@ import type { Sync } from "./sync.js";
 import { isSyncMode } from "../src/core/sync/protocol.js";
 import { adoptShellPath, omarchyDoNotDisturb, openPath, osDescription } from "./system.js";
 import type { Call } from "./call.js";
+import { Chimes } from "./chimes.js";
 import type { TrayController } from "./tray-controller.js";
 import type { Updater } from "./updater.js";
 import type { Voice } from "./voice.js";
@@ -60,6 +62,16 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
   const s = ctx.svc;
   /** Where the last folder picked sits, so the next folder dialog opens there. */
   let pickedBeside: string | null = null;
+  /** The chimes' player, made with the first chime. */
+  let chimes: Chimes | null = null;
+  const chimePlayer = (): Chimes => {
+    if (!chimes) {
+      const made = new Chimes({ dir: path.join(roots.dataRoot, "chimes"), resolveBin: (bin) => whichBin(bin), log });
+      app.once("will-quit", () => made.dispose());
+      chimes = made;
+    }
+    return chimes;
+  };
   return {
     "app.info": () => ({
       version: app.getVersion(),
@@ -141,6 +153,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       }
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
+    "app.chime": (name, volume) => chimePlayer().play(name, volume),
     "app.autostart": () => tray.autostart,
     "app.setAutostart": (on) => {
       tray.setAutostart(on);
@@ -182,6 +195,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       if (patch.theme) refreshPalette();
       return next;
     },
+    "files.unreadable": () => s().unreadableFiles(),
+    "files.restoreSaved": (file) => s().restoreSavedCopy(file),
     "companion.status": () => companionStatus(),
     "companion.reach": async () => {
       const port = s().getSettings().companion.port;
@@ -208,6 +223,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "layouts.save": (id, layout) => s().saveLayout(id, layout),
     "files.list": (dir) => listDir(dir),
 
+    "library.unreadable": () => s().unreadableItems(),
     "agents.list": () => s().listAgents(),
     "agents.save": (input) => s().saveAgent(input),
     "agents.delete": (id) => s().deleteAgent(id),

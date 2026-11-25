@@ -2,14 +2,15 @@ import { ensureLayout } from "./layout.js";
 import type { RUN_FILES } from "./runs.js";
 import { Chats } from "./store/chats.js";
 import { Config } from "./store/config.js";
+import { JsonFiles } from "./store/json-files.js";
 import { Library } from "./store/library.js";
 import { ReadCache } from "./store/read-cache.js";
 import { RunIndex, type RunQuery } from "./store/run-index.js";
 import type { WorkspaceFile } from "./workspaces.js";
-import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task } from "./types.js";
+import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task, UnreadableFile, UnreadableItem } from "./types.js";
 
 export { defaultSettings } from "./store/config.js";
-export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument } from "./store/library.js";
+export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument, UnreadableError } from "./store/library.js";
 export { matchExpression, type RunQuery } from "./store/run-index.js";
 
 /**
@@ -24,6 +25,8 @@ export class Store {
   private readonly config: Config;
   private readonly library: Library;
   private readonly chats: Chats;
+  private readonly cache: ReadCache;
+  private readonly files = new JsonFiles();
 
   constructor(configRoot: string, dataRoot: string) {
     this.configRoot = configRoot;
@@ -31,13 +34,36 @@ export class Store {
     ensureLayout(configRoot, dataRoot);
     this.runs = new RunIndex(dataRoot);
     const cache = new ReadCache();
-    this.config = new Config(configRoot, cache);
+    this.cache = cache;
+    this.config = new Config(configRoot, cache, this.files);
     this.library = new Library(configRoot, cache);
-    this.chats = new Chats(dataRoot, cache);
+    this.chats = new Chats(dataRoot, cache, this.files);
   }
 
   close(): void {
     this.runs.close();
+  }
+
+  // ---------------------------------------------------------------- files that can't be read (store/json-files.ts)
+
+  /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
+  unreadableFiles(): UnreadableFile[] {
+    return this.files.list();
+  }
+
+  /** Hears when that list changes. */
+  onUnreadableChange(listener: () => void): () => void {
+    return this.files.onChange(listener);
+  }
+
+  /**
+   * The person chose to put back the copy from the last read that worked: the unreadable file is
+   * moved to `<name>.broken` first. False when it reads correctly by now (nothing was moved).
+   */
+  restoreSavedCopy(file: string): boolean {
+    const done = this.files.restoreSaved(file);
+    this.cache.forget(file);
+    return done;
   }
 
   // ---------------------------------------------------------------- runs (store/run-index.ts)
@@ -134,6 +160,10 @@ export class Store {
     return this.library.getAgent(id);
   }
 
+  readAgent(id: string): Agent | null {
+    return this.library.readAgent(id);
+  }
+
   writeAgent(agent: Agent): void {
     this.library.writeAgent(agent);
   }
@@ -152,6 +182,10 @@ export class Store {
 
   getSkill(id: string): Skill | null {
     return this.library.getSkill(id);
+  }
+
+  readSkill(id: string): Skill | null {
+    return this.library.readSkill(id);
   }
 
   readSkillRaw(id: string): string | null {
@@ -188,6 +222,10 @@ export class Store {
 
   listTasks(): Task[] {
     return this.library.listTasks();
+  }
+
+  unreadableItems(): UnreadableItem[] {
+    return this.library.unreadableItems();
   }
 
   getTask(id: string): Task | null {

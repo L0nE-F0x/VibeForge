@@ -4,7 +4,7 @@ import { setPtyInView } from "../attention.js";
 import type { TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useAppInfo, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { LiveTerminal } from "../components/Terminal.js";
-import { LoadFailed } from "../components/LoadState.js";
+import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
 import { Button, Chip, Field, Input, MenuButton, Notice, Select, Sheet, STATUS_KEY, StatusChip, TextArea, TimeAgo, Toggle } from "../components/ui.js";
 import { matchesQuery, nameOrder, runWentWrong, timeOf, type ListSpec } from "../list-view.js";
@@ -45,13 +45,15 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
   const deleted = useDeleted();
   const deletedMany = useDeletedMany();
   const tasks = useTasks();
+  const unreadableFiles = useUnreadableOf("task").length;
   const agents = useAgents().data ?? [];
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const [creating, setCreating] = useState(false);
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const list = tasks.data ?? [];
   // A board that couldn't be read says so above its columns, and its columns don't claim "Nothing queued".
-  const unreadable = tasks.error !== null && tasks.data === undefined;
+  // A list that couldn't be read, or that left some tasks out, doesn't say a column is empty.
+  const unreadable = (tasks.error !== null && tasks.data === undefined) || unreadableFiles > 0;
 
   // ------------------------------------------------ search, filter, sort, select
   const agentName = (task: TaskView) => agents.find((item) => item.id === task.agentId)?.name ?? "";
@@ -172,6 +174,7 @@ export function TasksView({ route }: { route: Extract<Route, { view: "tasks" }> 
         </div>
       )}
       <LoadFailed query={tasks} />
+      <UnreadableFiles kind="task" reload={tasks.reload} />
       <div className={`board${selection.selecting ? " picking" : ""}`} onKeyDown={selection.onKeyDown}>
         {COLUMNS.map((column) => {
           const items = view.shown.filter((task) => task.status === column.status);

@@ -24,7 +24,8 @@ export class LibraryDesk {
     if (!input.brief?.trim()) throw new Error("Write a brief for the agent.");
     const engineId = input.engine?.trim() ?? "";
     if (!engineId) throw new Error("Pick an engine.");
-    const existing = input.id ? this.core.store.getAgent(input.id) : null;
+    // One that is there but can't be read says so, rather than "no longer exists".
+    const existing = input.id ? this.core.store.readAgent(input.id) : null;
     if (input.id && !existing) throw new Error("That agent no longer exists.");
     if (!existing || existing.engine !== engineId) this.core.requireEngine(engineId);
     const places = normalizePlaces(input.places ?? []);
@@ -42,7 +43,7 @@ export class LibraryDesk {
       brief: input.brief.trimEnd(),
       memoryFile: "memory.md",
       places,
-      skills: input.skills ? input.skills.filter((id) => this.core.store.getSkill(id)) : (existing?.skills ?? []),
+      skills: input.skills ? input.skills.filter((id) => this.skillKept(id)) : (existing?.skills ?? []),
       allowRoutines: typeof input.allowRoutines === "boolean" ? input.allowRoutines : (existing?.allowRoutines ?? true),
       goodAt: typeof input.goodAt === "string" ? oneLine(input.goodAt) : (existing?.goodAt ?? ""),
       tier: input.tier === undefined ? (existing?.tier ?? "") : agentTier(input.tier),
@@ -52,6 +53,15 @@ export class LibraryDesk {
     this.core.store.writeAgent(agent);
     this.core.emit("agents", "routines", "tasks");
     return agent;
+  }
+
+  /** Whether an agent keeps a skill it is saved with: unless it is gone. One that can't be read is still there. */
+  private skillKept(id: string): boolean {
+    try {
+      return this.core.store.readSkill(id) !== null;
+    } catch {
+      return true;
+    }
   }
 
   /**

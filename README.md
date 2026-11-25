@@ -96,7 +96,7 @@ Plan limits are off until you turn them on in Settings → Usage and activity. V
 
 The graph on Home is your commits in your workspaces, read with git. If you'd rather see your GitHub contribution graph, pick **GitHub** in Settings → Usage and activity: VibeForge then asks GitHub for it through the `gh` CLI you're signed in to, at most every 30 minutes, and keeps no token. That's off until you choose it.
 
-It keeps your place. Each view reopens where you left it, the same agent, chat or task with its list scrolled where it was, including after a restart. A half-written message or an unsaved brief, task or skill waits for you until you send it, save it or press **Discard**. <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the logo at the top of the rail) jumps to any agent, chat, workspace, task, routine or skill by typing part of its name, to a task, routine or skill by something it says, or to a run by something it said. Deleting a chat, task, skill or routine, or discarding a task's copy, happens at once, with **Undo** on the toast (or <kbd>Ctrl</kbd>+<kbd>Z</kbd>) for a few seconds; only one that is still running asks first.
+It keeps your place. Each view reopens where you left it, the same agent, chat or task with its list scrolled where it was, including after a restart. A half-written message or an unsaved brief, task or skill waits for you until you send it, save it or press **Discard**. <kbd>Ctrl</kbd>+<kbd>K</kbd> (or the logo at the top of the rail) jumps to any agent, chat, workspace, task, routine or skill by typing part of its name, to a task, routine or skill by something it says, or to a run by something it said. Deleting a chat, task, skill or routine, discarding a task's copy, or removing a workspace from Code, happens at once, with **Undo** on the toast (or <kbd>Ctrl</kbd>+<kbd>Z</kbd>) for a few seconds; only one with something still running in it asks first.
 
 When an agent or CLI goes quiet while you're looking elsewhere, or sits on a question when it starts (trust this folder? sign in?), it glows until you look: its terminal and workspace in Code, the agent and its chat in Agents, a row under **Waiting for you** on Home, and a dot on the rail. Short tones, made on your machine, say the same: two soft knocks when it's your turn, a rising chime when a task, routine or typed CLI finishes, a lower one when it fails, and a chirp when dictation starts and stops. By default they play only while VibeForge is in the background, never while Omarchy's Do Not Disturb is on (voice aside), and each one can be turned off or previewed in **Settings → Sounds**.
 
@@ -244,6 +244,8 @@ Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, un
   routines/<id>.yaml
   tasks/<id>.yaml
   engines.json  settings.json  workspaces.json  layouts/
+  <file>.saved  <file>.broken   the last copy of a settings file that read correctly, kept while the file itself can't be read,
+                                and a broken one you chose to move aside (VibeForge says so in the window)
 ~/.local/share/vibeforge/
   runs/<stamp>_<slug>/          meta.json, preamble.md, terminal.ansi, transcript.txt, scrollback.txt, git.txt, diff.patch
                                 (the last two gzipped once the run has ended; Settings → Storage says how long runs are kept)
@@ -258,7 +260,7 @@ Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, un
 ~/.cache/vibeforge/             the launcher's build log (a git checkout that builds itself)
 ```
 
-Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
+Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. Only one VibeForge runs on the same folders at a time: a second one started on them says so and quits. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
 
 ## Keys
 

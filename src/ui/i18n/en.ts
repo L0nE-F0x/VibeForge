@@ -1739,6 +1739,22 @@ export const en = {
   "orch.issue.agent": "No agent called “{asked}”.",
   "core.orchWaitsTurn": "Waiting for {names} in that folder; it starts on its own once it's quiet.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} can't be read",
+  "unreadable.saved": "VibeForge goes on with the copy from when it last read correctly, and saves nothing over the file until it reads again.",
+  "unreadable.none": "VibeForge has no earlier copy of it, and saves nothing over the file until it reads again.",
+  "unreadable.open": "Open file",
+  "unreadable.restoreSaved": "Use the saved copy",
+  "unreadable.useSavedTip": "Moves this file to {name}.broken and puts the saved copy back",
+  "unreadable.moveAside": "Move it aside",
+  "unreadable.moveAsideTip": "Moves this file to {name}.broken, so VibeForge starts a new one",
+  "unreadable.failed": "Couldn't put the saved copy back",
+  "core.unreadableNotSaved": "{name} can't be read ({error}), so nothing was saved over it.",
+  "core.fileEmpty": "The file is empty.",
+  "core.fileNotList": "It doesn't hold a JSON object or list.",
+  "main.folderInUse": "Another VibeForge is using {folder}",
+  "main.folderInUseBody": "Only one VibeForge can use a folder at a time: two would end each other's terminals, stop each other's Sync and run each routine twice. Close the other one first, or start this one with folders of its own (VIBEFORGE_CONFIG and VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Sync",
   "sync.lead": "Keeps the workspaces you pick the same on your other machine, say a laptop and a desktop. Nothing syncs until you choose a workspace: right-click one in Code. Files go straight from one machine to the other, over your local network or Tailscale, and nowhere else.",
@@ -2098,4 +2114,24 @@ export const en = {
   "load.notEmpty": "This doesn't mean there's nothing here: it couldn't be read. Nothing was deleted.",
   "load.stale": "What you see is from the last read that worked.",
   "tasks.copyDiscarded": "Discarded the copy of \"{title}\"",
+
+  // ---------------------------------------------------------------- files that couldn't be read, and removing a workspace with Undo
+  "core.readDenied": "Couldn't read {path}: VibeForge isn't allowed to. Check its permissions.",
+  "core.readNotYaml": "Couldn't read {path}: it isn't valid YAML ({detail}).",
+  "core.readNoFields": "Couldn't read {path}: it doesn't hold any fields.",
+  "core.readFailed": "Couldn't read {path}: {detail}",
+  "core.workspaceTaken": "Another workspace took this one's place meanwhile, so it can't come back.",
+  "load.memory": "Couldn't read this agent's memory.",
+  "load.unreadable.agent.one": "{count} agent couldn't be read, so it isn't listed:",
+  "load.unreadable.agent.other": "{count} agents couldn't be read, so they aren't listed:",
+  "load.unreadable.skill.one": "{count} skill couldn't be read, so it isn't listed:",
+  "load.unreadable.skill.other": "{count} skills couldn't be read, so they aren't listed:",
+  "load.unreadable.routine.one": "{count} routine couldn't be read, so it isn't listed:",
+  "load.unreadable.routine.other": "{count} routines couldn't be read, so they aren't listed:",
+  "load.unreadable.task.one": "{count} task couldn't be read, so it isn't listed:",
+  "load.unreadable.task.other": "{count} tasks couldn't be read, so they aren't listed:",
+  "load.unreadableHint": "Nothing was deleted. Once the file can be read again, it is listed again.",
+  "code.removedNamed": "Removed {name} from VibeForge",
+  "code.removedMany.one": "Removed {count} workspace from VibeForge",
+  "code.removedMany.other": "Removed {count} workspaces from VibeForge",
 } as const;
