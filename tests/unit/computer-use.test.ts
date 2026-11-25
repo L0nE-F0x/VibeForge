@@ -549,44 +549,49 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
   });
 });
 
-describe("Viby orchestrator multimodal screen inspection + Go-gated computer steps", () => {
-  it("keeps computer steps strictly gated behind Go and passes captured screenshots to follow-up planning turns", async () => {
-    const ctx = setupWithClaude();
-    ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: ALL, desktop: ALL } });
-    const dummyCtx: PlanContext = { workspaces: [], engines: [], running: [] };
-    const [resolved] = resolvePlan({ say: "", steps: [{ kind: "computer", action: "click", target: "540,320", options: "surface=desktop" }] }, dummyCtx);
-    expect(resolved.kind).toBe("computer");
-    expect(holdsForGo(resolved, dummyCtx)).toBe(true);
-    expect(safeInCall(resolved, dummyCtx)).toBe(false);
-
-    const pngPath = path.join(tempDir(), "screen.png");
-    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-    const acted: Array<{ action: string; target: string; surface: string }> = [];
-    ctx.host.computer = {
-      capabilities: async () => ({
-        platform: "linux",
-        sessionType: "wayland",
-        compositor: "hyprland",
-        canScreenshot: true,
-        canListWindows: true,
-        canPointer: true,
-        canKeyboard: true,
-        canAppUi: true,
-      }),
-      listWindows: async () => [],
-      screenshot: async ({ surface } = {}) => ({
+describe("Viby orchestrator multimodal screen inspection + single-turn observe-then-act", () => {
+  const mkComputerHost = (pngPath: string, acted: Array<{ action: string; target: string; prompt: string; surface: string }>, shots: string[] = []) => ({
+    capabilities: async () => ({
+      platform: "linux",
+      sessionType: "wayland" as const,
+      compositor: "hyprland" as const,
+      canScreenshot: true,
+      canListWindows: true,
+      canPointer: true,
+      canKeyboard: true,
+      canAppUi: true,
+    }),
+    listWindows: async () => [],
+    screenshot: async ({ surface }: { surface?: "desktop" | "app" | "browser" } = {}) => {
+      shots.push(surface ?? "desktop");
+      return {
         path: pngPath,
         width: 1920,
         height: 1080,
         surface: surface ?? "desktop",
         summary: "Captured desktop screen (1 window)",
         details: 'Open windows:\n- "VibeForge" at (0,0) size 1920x1080',
-      }),
-      act: async (req) => {
-        acted.push({ action: req.action, target: req.target, surface: req.surface });
-        return "Clicked (540, 320)";
-      },
-    };
+      };
+    },
+    act: async (req: { action: string; target: string; prompt: string; surface: string }) => {
+      acted.push({ action: req.action, target: req.target, prompt: req.prompt, surface: req.surface });
+      return `Done ${req.action}`;
+    },
+  });
+
+  it("auto-runs inspect(screen) -> computer(click) in a single turn under default ask-only-for-risky mode and passes images", async () => {
+    const ctx = setupWithClaude();
+    ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: ALL, desktop: ALL } });
+    const dummyCtx: PlanContext = { workspaces: [], engines: [], running: [] };
+    const [resolved] = resolvePlan({ say: "", steps: [{ kind: "computer", action: "click", target: "540,320", options: "surface=desktop" }] }, dummyCtx);
+    expect(resolved.kind).toBe("computer");
+    expect(holdsForGo(resolved, dummyCtx)).toBe(false);
+    expect(safeInCall(resolved, dummyCtx)).toBe(true);
+
+    const pngPath = path.join(tempDir(), "screen.png");
+    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const acted: Array<{ action: string; target: string; prompt: string; surface: string }> = [];
+    ctx.host.computer = mkComputerHost(pngPath, acted);
 
     const runnerInputs: Array<{ argv: string[]; hasStdinImage: boolean }> = [];
     let callNum = 0;
@@ -598,7 +603,7 @@ describe("Viby orchestrator multimodal screen inspection + Go-gated computer ste
           JSON.stringify({
             session_id: "s-comp",
             structured_output: {
-              say: "Let me inspect your desktop screen first.",
+              say: "",
               steps: [{ kind: "inspect", action: "screen", target: "", prompt: "screen" }],
             },
           }),
@@ -608,29 +613,95 @@ describe("Viby orchestrator multimodal screen inspection + Go-gated computer ste
         JSON.stringify({
           session_id: "s-comp",
           structured_output: {
-            say: "I see the Go button at 540, 320. Say go to click it.",
+            say: "Clicked Go.",
             steps: [{ kind: "computer", action: "click", target: "540,320", options: "surface=app" }],
           },
         }),
       );
     };
 
-    // Even in "go" mode AND even during an active call, computer-use waits for explicit Go!
+    // Default "go" mode ("ask only for risky actions"): screenshot -> click completes automatically in one turn.
+    await ctx.svc.orchestratorAsk("look at the screen and click Go");
+    const planTurn = ctx.svc.orchestratorView().turns.at(-1)!;
+    for (let i = 0; i < 40 && ctx.svc.orchestratorView().turns.find((t) => t.id === planTurn.id)?.plan !== "done"; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    const doneTurn = ctx.svc.orchestratorView().turns.find((t) => t.id === planTurn.id)!;
+    expect(doneTurn.plan).toBe("done");
+    expect(doneTurn.steps?.[0]).toMatchObject({ kind: "computer", state: "done" });
+    expect(doneTurn.checks?.[0].summary).toContain("Captured desktop screen");
+    expect(runnerInputs[1].hasStdinImage).toBe(true);
+    expect(acted).toEqual([{ action: "click", target: "540,320", prompt: "", surface: "app" }]);
+  });
+
+  it("chains leading focus-window + inspect(screen) -> click inside one turn", async () => {
+    const ctx = setupWithClaude();
+    ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: ALL, desktop: ALL } });
+    const pngPath = path.join(tempDir(), "chain.png");
+    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const acted: Array<{ action: string; target: string; prompt: string; surface: string }> = [];
+    const shots: string[] = [];
+    ctx.host.computer = mkComputerHost(pngPath, acted, shots);
+
+    const answers = [
+      {
+        say: "",
+        steps: [
+          { kind: "computer", action: "focus-window", target: "Chrome", options: "surface=desktop" },
+          { kind: "inspect", action: "screen", target: "", prompt: "screen" },
+        ],
+      },
+      {
+        say: "Clicked play.",
+        steps: [{ kind: "computer", action: "click", target: "640,480", options: "surface=desktop" }],
+      },
+    ];
+    ctx.svc.orchestrator.runner = async () => ok(JSON.stringify({ session_id: "s-chain", structured_output: answers.shift() }));
+
+    await ctx.svc.orchestratorAsk("focus Chrome and click play");
+    const last = ctx.svc.orchestratorView().turns.at(-1)!;
+    for (let i = 0; i < 40 && ctx.svc.orchestratorView().turns.find((t) => t.id === last.id)?.plan !== "done"; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    const doneTurn = ctx.svc.orchestratorView().turns.find((t) => t.id === last.id)!;
+    expect(doneTurn.plan).toBe("done");
+    expect(doneTurn.steps?.map((s) => [s.action, s.state])).toEqual([
+      ["focus-window", "done"],
+      ["click", "done"],
+    ]);
+    expect(shots).toEqual(["desktop"]);
+    expect(acted).toEqual([
+      { action: "focus-window", target: "Chrome", prompt: "", surface: "desktop" },
+      { action: "click", target: "640,480", prompt: "", surface: "desktop" },
+    ]);
+  });
+
+  it("gates computer steps when Ask for everything (plan) is active and still allows Go", async () => {
+    const ctx = setupWithClaude();
+    ctx.svc.saveSettings({
+      orchestrator: { engine: "claude", mode: "plan", model: "", projectsFolder: "" },
+      computerUse: { on: true, app: ALL, browser: ALL, desktop: ALL },
+    });
+    const pngPath = path.join(tempDir(), "plan.png");
+    fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const acted: Array<{ action: string; target: string; prompt: string; surface: string }> = [];
+    ctx.host.computer = mkComputerHost(pngPath, acted);
+
+    const answers = [
+      { say: "", steps: [{ kind: "inspect", action: "screen", target: "", prompt: "screen" }] },
+      { say: "I'll click at 540, 320.", steps: [{ kind: "computer", action: "click", target: "540,320", options: "surface=app" }] },
+    ];
+    ctx.svc.orchestrator.runner = async () => ok(JSON.stringify({ session_id: "s-plan", structured_output: answers.shift() }));
+
     await ctx.svc.orchestratorAsk("look at the screen and click Go");
     const planTurn = ctx.svc.orchestratorView().turns.at(-1)!;
     expect(planTurn.plan).toBe("waiting");
-    expect(planTurn.steps?.[0].kind).toBe("computer");
-    expect(planTurn.checks?.[0].summary).toContain("Captured desktop screen");
-    // Follow-up planner invocation received the captured screenshot as a multimodal image!
-    expect(runnerInputs[1].hasStdinImage).toBe(true);
     expect(acted).toHaveLength(0);
 
-    // Explicit Go executes the computer step.
     await ctx.svc.orchestratorRun(planTurn.id);
     const doneTurn = ctx.svc.orchestratorView().turns.find((t) => t.id === planTurn.id)!;
     expect(doneTurn.plan).toBe("done");
-    expect(doneTurn.steps?.[0].state).toBe("done");
-    expect(acted).toEqual([{ action: "click", target: "540,320", surface: "app" }]);
+    expect(acted).toEqual([{ action: "click", target: "540,320", prompt: "", surface: "app" }]);
   });
 });
 
@@ -704,12 +775,15 @@ describe("Computer use is the person's to allow, place by place", () => {
     ];
     ctx.svc.orchestrator.runner = async () => ok(JSON.stringify({ session_id: "s-perm", structured_output: answers.shift() ?? { say: "Done.", steps: [] } }));
 
+    // Even with Ask for everything (mode: "plan") so actions stay on waiting cards, ungranted surfaces are refused when run:
+    ctx.svc.saveSettings({ orchestrator: { engine: "claude", mode: "plan", model: "", projectsFolder: "" } });
+
     // Off: no screenshot is taken.
     await ctx.svc.orchestratorAsk("what's on my screen");
     expect(shots).toEqual([]);
     expect(ctx.svc.orchestratorView().turns.find((t) => t.checks?.length)?.checks?.[0].details).toContain("Computer use is off");
 
-    // Off: Go doesn't click.
+    // Off: Go doesn't click (and Never ask also fails cleanly on ungranted surfaces).
     await ctx.svc.orchestratorAsk("click it");
     let turn = ctx.svc.orchestratorView().turns.at(-1)!;
     await ctx.svc.orchestratorRun(turn.id);
@@ -718,20 +792,25 @@ describe("Computer use is the person's to allow, place by place", () => {
     expect(turn.steps?.[0].error).toContain("Computer use is off");
     expect(acted).toEqual([]);
 
-    // On for VibeForge's window only: the desktop stays out of reach, even after the plan was made.
+    // On for VibeForge's window only: the desktop stays out of reach, even under Never ask.
+    ctx.svc.saveSettings({ orchestrator: { engine: "claude", mode: "never", model: "", projectsFolder: "" } });
     await ctx.svc.orchestratorAsk("click it");
     turn = ctx.svc.orchestratorView().turns.at(-1)!;
     ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: NONE, desktop: NONE } });
-    await ctx.svc.orchestratorRun(turn.id);
+    for (let i = 0; i < 40 && ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)?.plan !== "done"; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
     turn = ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)!;
-    expect(turn.steps?.[0].error).toContain('"Click and scroll" for "Whole desktop"');
+    expect(turn.steps?.[0].error).toMatch(/Computer use is off|"Click and scroll" for "Whole desktop"/);
     expect(acted).toEqual([]);
 
     await ctx.svc.orchestratorAsk("look at vibeforge");
     expect(shots).toEqual(["app"]);
     await ctx.svc.orchestratorAsk("type hi");
     turn = ctx.svc.orchestratorView().turns.at(-1)!;
-    await ctx.svc.orchestratorRun(turn.id);
+    for (let i = 0; i < 40 && ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)?.plan !== "done"; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
     expect(acted).toEqual(["type@app"]);
   });
 

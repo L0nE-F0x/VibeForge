@@ -186,6 +186,7 @@ describe("the phone page's Orchestrator routes", () => {
       await post("/api/orchestrator/step", { turnId: "t2", stepId: "s1", patch: { prompt: "Do it.", branch: "add-cart", state: "done", engineId: 4 } });
       await post("/api/orchestrator/remove", { turnId: "t2", stepId: "s1" });
       await post("/api/orchestrator/settings", { engine: "claude", mode: "go" });
+      await post("/api/orchestrator/settings", { mode: "never" });
       await post("/api/orchestrator/settings", { mode: "sometimes" });
       expect((await post("/api/orchestrator/go", {})).status).toBe(400);
       expect((await post("/api/orchestrator/step", { turnId: "t2" })).status).toBe(400);
@@ -201,6 +202,7 @@ describe("the phone page's Orchestrator routes", () => {
         ["step", "t2", "s1", { prompt: "Do it.", branch: "add-cart" }],
         ["remove", "t2", "s1"],
         ["settings", { engine: "claude", mode: "go" }],
+        ["settings", { mode: "never" }],
       ]);
     } finally {
       await http.close();
@@ -391,9 +393,9 @@ describe("the phone working the desktop's Orchestrator", () => {
 
     // The view's header: another planner starts on its own default model; one that can't plan is refused.
     phone.settings({ mode: "go" });
-    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "grok", mode: "go", model: "grok-4.7", projectsFolder: "" });
+    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "grok", mode: "go", model: "grok-4.7", projectsFolder: "", terse: true });
     phone.settings({ engine: "claude" });
-    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "claude", mode: "go", model: "", projectsFolder: "" });
+    expect(ctx.svc.getSettings().orchestrator).toEqual({ engine: "claude", mode: "go", model: "", projectsFolder: "", terse: true });
     expect(() => phone.settings({ engine: "argy" })).toThrow();
     expect(ctx.svc.getSettings().orchestrator.engine).toBe("claude");
 
@@ -401,5 +403,67 @@ describe("the phone working the desktop's Orchestrator", () => {
     expect(phone.view().turns).toEqual([]);
     expect(logged).toEqual([]);
     ctx.svc.close();
+  });
+
+  it("runs a waiting computer-use plan directly when phone ask receives go, yes, or do it", async () => {
+    for (const confirmPhrase of ["go", "Yes!", "do it"]) {
+      const ctx = setup();
+      const file = path.join(ctx.configRoot, "engines.json");
+      const rows = JSON.parse(fs.readFileSync(file, "utf8")) as { engines: unknown[] };
+      rows.engines.push({ id: "grok", label: "Grok Build", bin: "argy", args: [] });
+      fs.writeFileSync(file, JSON.stringify(rows));
+      const clicks: Array<{ action: string; target: string }> = [];
+      ctx.svc.saveSettings({
+        orchestrator: { engine: "grok", mode: "plan", model: "grok-4.7", projectsFolder: "", terse: true },
+        computerUse: {
+          on: true,
+          desktop: { see: true, pointer: true, keys: true },
+          app: { see: true, pointer: true, keys: true },
+          browser: { see: true, pointer: true, keys: true },
+        },
+      });
+      const pngPath = path.join(ctx.dataRoot, "screen.png");
+      fs.writeFileSync(pngPath, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      ctx.host.computer = {
+        capabilities: async () => ({
+          platform: "linux",
+          sessionType: "wayland",
+          compositor: "hyprland",
+          canScreenshot: true,
+          canListWindows: true,
+          canPointer: true,
+          canKeyboard: true,
+          canAppUi: true,
+        }),
+        listWindows: async () => [],
+        screenshot: async () => ({ path: pngPath, width: 1280, height: 720, surface: "desktop", summary: "Screen", details: "Desktop" }),
+        act: async (req) => {
+          clicks.push({ action: req.action, target: req.target });
+          return `Clicked ${req.target}`;
+        },
+      };
+      let askCalls = 0;
+      ctx.svc.orchestrator.runner = async () => {
+        askCalls += 1;
+        return {
+          code: 0,
+          stdout: JSON.stringify({ structuredOutput: { say: "I'll click Play.", steps: [{ kind: "computer", action: "click", target: "100,200", options: "surface=desktop" }] } }),
+          stderr: "",
+          timedOut: false,
+        };
+      };
+      const phone = orchestratorFor({ service: ctx.svc, canHear: () => true, log: () => {} });
+
+      phone.ask("click play");
+      expect(phone.view().thinking).toBe(true);
+      await until(() => !phone.view().thinking);
+      expect(phone.view().turns.at(-1)?.plan).toBe("waiting");
+
+      phone.ask(confirmPhrase);
+      await until(() => phone.view().turns.at(-1)?.plan === "done");
+      expect(askCalls).toBe(1);
+      expect(clicks).toEqual([{ action: "click", target: "100,200" }]);
+      await ctx.svc.close();
+    }
   });
 });

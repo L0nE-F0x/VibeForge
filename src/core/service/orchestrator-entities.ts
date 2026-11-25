@@ -802,12 +802,14 @@ export async function carryOutSettingsStep(deps: EntityStepDeps, step: Orchestra
     const nextEffort = nextRow?.bin !== undefined ? effortForModel({ id: nextRow.id, bin: nextRow.bin }, nextModel, keptEffort) : keptEffort;
     const nextMode = action.mode ?? current.mode;
     const nextProjectsFolder = action.projectsFolder !== undefined ? action.projectsFolder : current.projectsFolder;
+    const nextTerse = action.terse ?? (current.terse ?? true);
     deps.core.saveSettings({
       orchestrator: {
         engine: nextEngine,
         mode: nextMode,
         model: nextModel,
         projectsFolder: nextProjectsFolder,
+        terse: nextTerse,
         ...(nextEffort ? { effort: nextEffort } : {}),
       },
     });

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { effortForModel, effortLevels } from "../../shared/launch-options.js";
-import { canOrchestrate, plannerFor } from "../../shared/orchestrator.js";
+import { canOrchestrate, plannerFor, RISK_POLICY_GROUPS } from "../../shared/orchestrator.js";
 import { call, useEngines, useOrchestrator, useSettings } from "../api.js";
-import { useT } from "../i18n/index.js";
+import { type Key, useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import type { OrchestratorSettings } from "../../shared/api.js";
-import { Field, Input, Segmented, Select } from "./ui.js";
+import { Field, Input, Segmented, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
 
@@ -25,6 +25,8 @@ export function OrchestratorCard() {
   const selectedEngine = engines.find((engine) => engine.id === engineId);
   const levels = selectedEngine ? effortLevels(selectedEngine) : [];
   const currentEffort = engineId === current.engine ? (current.effort ?? "") : "";
+  const modeHint =
+    current.mode === "plan" ? t("orch.mode.planHint") : current.mode === "never" ? t("orch.mode.neverHint") : t("orch.mode.goHint");
   return (
     <div className="card vstack" style={{ gap: 14 }}>
       <div className="form-grid">
@@ -53,20 +55,45 @@ export function OrchestratorCard() {
             ))}
           </Select>
         </Field>
-        <Field label={t("orch.modeLabel")} hint={current.mode === "plan" ? t("orch.mode.planHint") : t("orch.mode.goHint")}>
+        <Field label={t("orch.modeLabel")} hint={modeHint}>
           <Segmented
             value={current.mode}
             options={[
               { value: "plan", label: t("orch.mode.plan") },
               { value: "go", label: t("orch.mode.go") },
+              { value: "never", label: t("orch.mode.never") },
             ]}
             onChange={(mode) => void save({ ...current, mode })}
           />
+        </Field>
+        <Field label={t("orch.terseLabel")} hint={t("orch.terseHint")}>
+          <Toggle checked={current.terse !== false} onChange={(terse) => void save({ ...current, terse })} />
         </Field>
         <Field label={t("orch.projectsFolder")} hint={t("orch.projectsFolderHint", { folder: view?.projectsFolder ?? "~/Projects" })}>
           <FolderInput value={current.projectsFolder} placeholder={view?.projectsFolder ?? "~/Projects"} onChange={(projectsFolder) => void save({ ...current, projectsFolder })} />
         </Field>
       </div>
+      <details className="orch-risk-details">
+        <summary>{t("orch.riskSummary")}</summary>
+        <div className="orch-risk-grid">
+          <div className="orch-risk-col">
+            <div className="orch-risk-title">{t("orch.riskLowTitle")}</div>
+            <ul className="orch-risk-list">
+              {RISK_POLICY_GROUPS.filter((item) => item.risk === "low").map((item) => (
+                <li key={item.key}>{t(item.key as Key)}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="orch-risk-col">
+            <div className="orch-risk-title">{t("orch.riskHighTitle")}</div>
+            <ul className="orch-risk-list">
+              {RISK_POLICY_GROUPS.filter((item) => item.risk === "high").map((item) => (
+                <li key={item.key}>{t(item.key as Key)}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

@@ -12,7 +12,7 @@ import {
   type PlanContext,
   type StepIssue,
 } from "./orchestrator.js";
-import type { LiveSession } from "./types.js";
+import type { LiveSession, OrchestratorMode } from "./types.js";
 
 // The Orchestrator as the phone page sees it: the desktop's own conversation and plans
 // (src/core/service/orchestrator.ts), with what the window works out for itself already done.
@@ -53,7 +53,7 @@ export interface PhoneRunning {
 export interface PhoneOrchestrator {
   engineId: string;
   engineReady: boolean;
-  mode: "plan" | "go";
+  mode: OrchestratorMode;
   thinking: boolean;
   activity?: OrchestratorActivity | null;
   /** Turns before the ones sent. */

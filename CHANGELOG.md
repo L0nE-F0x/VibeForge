@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-11-25
+
+**3.10.0: Talking to Viby feels direct — low-risk actions and screen steps run straight away, risky ones stay behind Go, spoken "go" works reliably, replies stay brief, and Viby can look and act in one turn.**
+
+### Added
+
+- **Three approval levels for Viby, plus a risk overview in Settings.** **Settings → Viby** (and the phone page, and Viby's own settings step) now offer **Ask for everything** (the previous default), **Ask only for risky actions** (the new default), and **Never ask**. A collapsible risk summary in Settings lists what runs straight away and what still waits for **Go**. Computer Use capability switches in **Settings → Computer use** remain enforced in every mode, including **Never ask**.
+- **Terse replies toggle.** **Settings → Viby → Terse replies** (on by default, also toggleable via Viby's settings) keeps Viby brief or silent when steps run automatically, reserving future-tense *"I'll …"* announcements for plans that wait for **Go**.
+
+### Changed
+
+- **Low-risk desktop, app, and browser actions run without a Go gate under the default mode.** Under **Ask only for risky actions**, reading/inspecting, switching workspaces, telling running CLIs, isolated branch starts, and allowed computer-use actions (`focus-window`, `click`, `double-click`, `right-click`, `move`, `drag`, `scroll`, `type`, `key`, `wait`) run straight away. Destructive or irreversible actions — deleting agents/skills/tasks/routines/chats/workspaces/runs, applying or discarding copies, editing code in place, replacing or clearing memory, stopping CLIs or sending Ctrl+C, unsafe shell commands, approval prompts, and broad or approval-loosening settings — still wait for **Go**.
+- **Observe-then-act chaining in a single turn.** Under **Ask only for risky actions**, Viby can inspect the screen or open windows (or focus a window and capture the screen) and immediately carry out the resulting low-risk computer action in the same turn instead of pausing between round trips.
+
+### Fixed
+
+- **Saying "go", "yes", or "do it" by voice reliably runs a waiting computer-use plan.** Expanded natural confirmation phrases and filler words (`planAnswer`), prevented headphones calls from dropping `"Go."` as an echo of `"Say go, or cancel."`, tightened short-turn silence timing, handled spoken confirmations synchronously on the phone companion, and updated `confirmWaiting` so confirmed waiting computer-use plans run immediately instead of replying *"That plan hasn't run yet… say go or press Go"*.
+
 ## [3.9.1] - 2026-11-25
 
 **3.9.1: Viby's desktop computer use works on Hyprland 0.56+ Lua configs and 1.25× scaled displays, with working keyboard/pointer fallbacks and full error messages.**
@@ -1238,7 +1256,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.9.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.10.0...HEAD
+[3.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.0
 [3.9.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.1
 [3.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.0
 [3.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.8.0

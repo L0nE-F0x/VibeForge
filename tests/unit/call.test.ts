@@ -747,6 +747,87 @@ describe("a call with Viby", () => {
     expect(byPlan.instance.get().on).toBe(false);
   });
 
+  it("confirms a waiting computer-use plan from spoken go, yes, do it, and natural variants", async () => {
+    for (const phrase of ["Go.", "Yes.", "Do it.", "Um, go.", "Go ahead and do it."]) {
+      const plan = turn({
+        text: "I'll click Play.",
+        plan: "waiting",
+        steps: [
+          {
+            id: "s1",
+            kind: "computer",
+            action: "click",
+            target: "100,200",
+            engineId: "",
+            workspaceId: "",
+            branch: "",
+            prompt: "",
+            asked: "",
+            state: "planned",
+            error: null,
+            ptyId: null,
+            openedWorkspaceId: null,
+          },
+        ],
+      });
+      const desk = call({ hears: ["click play", phrase], answer: (_text, list) => void list.push(plan) });
+      desk.instance.start();
+      await desk.say();
+      expect(desk.states.at(-1)?.waiting).toBe(true);
+      await desk.say();
+      expect(desk.ran).toEqual([plan.id]);
+      expect(desk.asked).toEqual(["click play"]);
+      expect(desk.spoken.at(-1)).toBe("Going.");
+    }
+  });
+
+  it("does not drop spoken go as an echo of 'Say go, or cancel.' in headphones mode and stays silent on terse running plans", async () => {
+    const plan = turn({
+      text: "I'll click Play.",
+      plan: "waiting",
+      steps: [
+        {
+          id: "s1",
+          kind: "computer",
+          action: "click",
+          target: "100,200",
+          engineId: "",
+          workspaceId: "",
+          branch: "",
+          prompt: "",
+          asked: "",
+          state: "planned",
+          error: null,
+          ptyId: null,
+          openedWorkspaceId: null,
+        },
+      ],
+    });
+    const headphones = call({
+      hears: ["click play", "Go."],
+      talkOver: "always",
+      cancelsEcho: true,
+      detects: true,
+      answer: (_text, list) => void list.push(plan),
+    });
+    headphones.instance.start();
+    await headphones.say();
+    expect(headphones.spoken).toEqual(["I'll click Play. Say go, or cancel."]);
+    // Headphones mode must not treat "Go." right after "Say go, or cancel." as an echo.
+    await headphones.say();
+    expect(headphones.ran).toEqual([plan.id]);
+    expect(headphones.asked).toEqual(["click play"]);
+    expect(headphones.spoken.at(-1)).toBe("Going.");
+
+    const terse = call({
+      hears: ["click play"],
+      answer: (_text, list) => void list.push(turn({ text: "", plan: "running", steps: [] })),
+    });
+    terse.instance.start();
+    await terse.say();
+    expect(terse.spoken).toEqual([]);
+  });
+
   it("lets the person barge in while Viby is still thinking", async () => {
     let releasePlan: (() => void) | null = null;
     let aborted = 0;

@@ -2,7 +2,7 @@
 // (src/core/orchestrator.ts), the window shows them and lets a person fix one before Go. No Node
 // here, so the window can check a step the same way the main process does.
 
-import type { EngineRow } from "../core/types.js";
+import type { EngineRow, OrchestratorMode } from "../core/types.js";
 import type { en } from "../ui/i18n/en.js";
 import { effortLevels } from "./launch-options.js";
 import {
@@ -32,6 +32,7 @@ export * from "./orchestrator-fuzzy.js";
 export * from "./orchestrator-intel.js";
 export * from "./orchestrator-reflex.js";
 export * from "./orchestrator-repair.js";
+export * from "./orchestrator-risk.js";
 export * from "./orchestrator-settings.js";
 
 /**
@@ -108,8 +109,8 @@ export const STEP_KINDS: readonly OrchestratorStepKind[] = [
   "computer",
 ];
 
-/** The steps that change or end someone's work: they wait for Go even when plans start at once. */
-export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard", "computer"];
+/** The steps that always require explicit approval unless Never ask is enabled. */
+export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
 
 /** The steps that change nothing: a plan made only of these goes at once, whatever Settings says. */
 export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read", "inspect"];
@@ -334,7 +335,7 @@ export interface OrchestratorView {
   /** The engine that plans, and whether it is on this machine. */
   engineId: string;
   engineReady: boolean;
-  mode: "plan" | "go";
+  mode: OrchestratorMode;
   /** Waiting for the planning CLI's answer. */
   thinking: boolean;
   /** What Viby is actively checking or carrying out right now, for the thin live status line. */

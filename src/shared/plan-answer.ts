@@ -16,7 +16,56 @@ export function plainWords(text: string): string {
 // In each language the window speaks. Whole things said, never words inside a longer sentence:
 // "go to the api workspace" is for Viby.
 export const GO_WORDS: readonly string[] = [
-  ...["go", "go ahead", "go on", "yes", "yes go", "yes please", "yeah", "yep", "do it", "run it", "ok", "okay", "ok go", "okay go", "confirm", "sure", "go for it"],
+  ...[
+    "go",
+    "go ahead",
+    "go on",
+    "go right ahead",
+    "go ahead and do it",
+    "go ahead click it",
+    "go ahead and click it",
+    "yes",
+    "yes go",
+    "yes please",
+    "yes do it",
+    "yes do that",
+    "yes run it",
+    "yes run that",
+    "yes click it",
+    "yeah",
+    "yeah do it",
+    "yeah run it",
+    "yep",
+    "yup",
+    "do it",
+    "do that",
+    "run it",
+    "run that",
+    "run the plan",
+    "do the plan",
+    "click it",
+    "ok",
+    "okay",
+    "ok go",
+    "okay go",
+    "ok do it",
+    "okay do it",
+    "confirm",
+    "approve",
+    "approved",
+    "proceed",
+    "execute",
+    "carry on",
+    "fire away",
+    "sure",
+    "go for it",
+    "lets go",
+    "lets do it",
+    "sounds good",
+    "looks good",
+    "uh huh",
+    "mhm",
+  ],
   ...["los", "leg los", "ja", "mach", "mach das", "mach es", "ausführen", "bestätigen"],
   ...["adelante", "sí", "si", "hazlo", "vale", "dale", "confirmar", "de acuerdo"],
   ...["vas-y", "oui", "fais-le", "d'accord", "allez", "confirmer"],
@@ -42,7 +91,7 @@ const MOST_WORDS = 8;
 
 // Said around the answer, not part of it: "I said go", "come on, go", "just do it now", "go already".
 const LEAD =
-  /^(?:(?:i said|i just said|i told you|like i said|come on|just|please|now|so|well|alright|all right|ok|okay|yes|yeah|yep|right|then|hey|viby|vibey|vibe|maestro|ich sagte|jetzt|bitte|ja|dije|ya|por favor|sí|jai dit|allez|sil te plaît|eu disse|agora|por favor)\s+)+/;
+  /^(?:(?:i said|i just said|i told you|like i said|come on|just|please|now|so|well|alright|all right|ok|okay|yes|yeah|yep|yup|sure|right|then|um|umm|uh|uhh|ah|oh|hey|viby|vibey|vibe|maestro|ich sagte|jetzt|bitte|ja|dije|ya|por favor|sí|jai dit|allez|sil te plaît|eu disse|agora|por favor)\s+)+/;
 const TAIL =
   /(?:\s+(?:now|right now|please|already|then|for me|thanks|thank you|i said|viby|vibey|vibe|maestro|jetzt|bitte|ya|por favor|maintenant|sil te plaît|agora))+$/;
 

@@ -32,7 +32,7 @@ export function maestroPage() {
   parts.orchTurnsKey = null;
   parts.planner = el("select", { class: "orch-planner", "aria-label": t("orch.planner"), onchange: () => void saveOrch({ engine: parts.planner.value }) });
   parts.plannerKey = null;
-  parts.modes = ["plan", "go"].map((mode) => el("button", { class: "seg", type: "button", "data-mode": mode, "aria-pressed": "false", onclick: () => void saveOrch({ mode }) }, t(`orch.mode.${mode}`)));
+  parts.modes = ["plan", "go", "never"].map((mode) => el("button", { class: "seg", type: "button", "data-mode": mode, "aria-pressed": "false", onclick: () => void saveOrch({ mode }) }, t(`orch.mode.${mode}`)));
   parts.threadsOpen = el(
     "button",
     {

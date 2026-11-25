@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { answerTo, callWord, echoes, phantom, quickNav, speechBegan, spokenAnswer, spokenWord, TALK_OVER_MS, waitingPlan } from "../src/core/call.js";
+import { answerTo, CALL_SILENCE_MS, callWord, echoes, phantom, quickNav, speechBegan, spokenAnswer, spokenWord, TALK_OVER_MS, waitingPlan } from "../src/core/call.js";
 import { describeError, type LogFile } from "../src/core/log.js";
 import type { MainText } from "../src/core/main-text.js";
 import { orchestratorVoiceWords } from "../src/core/orchestrator.js";
@@ -70,6 +70,8 @@ export class Call {
   private hangingUp = false;
   /** The person talked over Viby in this turn; the rest of what it had to say waits. */
   private interrupted = false;
+  /** Whether the most recent spoken utterance was cut off by talking over Viby. */
+  private lastSpokeInterrupted = false;
   /** Viby heard itself in this call: no more talking over it. */
   private heardItself = false;
   /** What Viby said lately and when, to know its own words when they come back through the microphone. */
@@ -165,7 +167,9 @@ export class Call {
     this.muted = false;
     this.earDeaf = false;
     this.hangingUp = false;
+    this.lastSpokeInterrupted = false;
     this.interrupted = false;
+    this.lastSpokeInterrupted = false;
     this.heardItself = false;
     this.spokenLately = [];
     this.liveHeard = "";
@@ -286,6 +290,7 @@ export class Call {
     this.muted = false;
     this.earDeaf = false;
     this.hangingUp = false;
+    this.lastSpokeInterrupted = false;
     this.liveHeard = "";
     this.peeking = false;
     this.speechStartedAt = 0;
@@ -363,6 +368,7 @@ export class Call {
     const live = () => epoch === this.epoch;
     this.busy = true;
     this.interrupted = false;
+    this.lastSpokeInterrupted = false;
     this.thinkingOpen = false;
     this.setDeaf(true);
     try {
@@ -396,8 +402,10 @@ export class Call {
       this.liveHeard = "";
       if (!live() || !dictation.text || phantom(dictation.text, dictation.seconds)) return;
       // Begun while Viby was still speaking: its own words coming back are not the person's.
-      const over = this.saidSince(speechBegan(heardAt, dictation.seconds));
-      if (over) {
+      // Use the crisp short silence window when Viby was not barged in on so immediate replies aren't clipped into echo.
+      const silenceMs = !this.lastSpokeInterrupted && dictation.seconds <= 2.5 ? 580 : CALL_SILENCE_MS;
+      const over = this.saidSince(speechBegan(heardAt, dictation.seconds, silenceMs));
+      if (over && this.mode !== "always") {
         const { echo, words } = echoes(dictation.text, over);
         if (echo) {
           this.opts.log.warn(`Call: heard Viby's own voice (${words} word${words === 1 ? "" : "s"}), not passed on`);
@@ -429,7 +437,7 @@ export class Call {
         await this.say(this.opts.words.say("call.cancelled"));
         return;
       }
-      if (service.orchestratorQuickAct) {
+      if (service.orchestratorQuickAct && !(word && !plan)) {
         const acted = await service.orchestratorQuickAct(dictation.text, this.opts.looking(), {
           going: this.opts.words.say("call.going"),
           cancelled: this.opts.words.say("call.cancelled"),
@@ -451,6 +459,7 @@ export class Call {
         }
       }
       this.hangingUp = false;
+      this.lastSpokeInterrupted = false;
       this.thinkingOpen = this.canTalkOver() && !this.muted;
       if (this.thinkingOpen) this.setDeaf(false);
       this.move("thinking");
@@ -467,6 +476,7 @@ export class Call {
           }));
       if (live() && this.hangingUp && !this.interrupted) {
         this.hangingUp = false;
+        this.lastSpokeInterrupted = false;
         this.stop();
       }
     });
@@ -512,6 +522,7 @@ export class Call {
   private interrupt(): void {
     this.interrupted = true;
     this.hangingUp = false;
+    this.lastSpokeInterrupted = false;
     this.opts.log.info("Call: talked over, Viby stopped");
     if (this.phase === "thinking") this.opts.service()?.orchestratorStopThinking?.(true);
     this.opts.voice.speaker.stop();
@@ -550,6 +561,7 @@ export class Call {
       await this.opts.voice.speaker.speak(line, voice);
     } finally {
       spoke.until = Date.now();
+      this.lastSpokeInterrupted = this.interrupted;
       this.speechStartedAt = 0;
       this.speechDurationMs = 0;
     }
