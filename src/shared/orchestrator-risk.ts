@@ -2,7 +2,7 @@
 // Pure and Node-free so the main process, Settings UI, and unit tests share one source of truth.
 
 import type { OrchestratorMode } from "../core/types.js";
-import { isReadOnlyComputerAction, normalizeComputerAction, type ComputerActionKind } from "./computer-use.js";
+import { isReadOnlyComputerAction, normalizeComputerAction, validateKeyCombo, type ComputerActionKind } from "./computer-use.js";
 import { isDestructiveStepAction, parseOptions } from "./orchestrator-actions.js";
 import { isFreeWaitingPrompt, isLoopbackUrl, isSafeShellCommand, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
 import { resolveSettingsStep } from "./orchestrator-settings.js";
@@ -34,8 +34,9 @@ export interface StepRiskAssessment {
 
 export interface ApprovalPolicyInput {
   mode: OrchestratorMode;
-  inCall?: boolean;
   fromReading?: boolean;
+  /** What the person said for this plan; typing and key shortcuts after a read must come from it. */
+  said?: string;
   inPlaceDirty?: boolean;
 }
 
@@ -78,6 +79,7 @@ export const RISK_POLICY_GROUPS: readonly RiskPolicyGroup[] = [
   { risk: "high", key: "orch.risk.high.stop" },
   { risk: "high", key: "orch.risk.high.settings" },
   { risk: "high", key: "orch.risk.high.outward" },
+  { risk: "high", key: "orch.risk.high.screen" },
 ];
 
 const RISK_ORDER: Record<StepRisk, number> = { read: 0, low: 1, high: 2 };
@@ -99,6 +101,42 @@ export function isLowRiskComputerStep(step: OrchestratorStep): boolean {
   if (step.kind !== "computer") return false;
   const action = normalizeComputerAction(step.action || step.prompt);
   return action !== null && (READ_ONLY_COMPUTER_ACTIONS.includes(action) || LOW_RISK_COMPUTER_ACTIONS.includes(action));
+}
+
+/** Lower-case words and numbers only, so "Type: Hello, world!" and "hello world" compare equal. */
+function plainWords(text: string): string {
+  return ` ${text.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+
+const MODIFIER_WORDS: Record<"ctrl" | "alt" | "shift" | "super", readonly string[]> = {
+  ctrl: ["ctrl", "control", "command", "cmd"],
+  alt: ["alt", "option"],
+  shift: ["shift"],
+  super: ["super", "windows", "win", "meta", "cmd", "command", "hyper", "mod"],
+};
+
+/**
+ * Whether a computer step, planned after Viby looked at the screen, is led by what the person said
+ * rather than by what Viby saw. Pointing, focusing and waiting only act where the person sent Viby,
+ * so they count. Typed text counts only when the person said those words; a key with ctrl, alt or
+ * super only when they named those keys. The screen can show Viby *where*, never *what*: a page
+ * saying "type this in your terminal" can't get it typed without Go.
+ */
+export function isPersonLedComputerStep(step: OrchestratorStep, said: string): boolean {
+  if (step.kind !== "computer") return false;
+  const action = normalizeComputerAction(step.action || step.prompt);
+  if (action === null) return false;
+  if (action === "type") {
+    const typed = plainWords(step.prompt ?? "");
+    return typed.trim().length > 0 && plainWords(said).includes(typed);
+  }
+  if (action === "key") {
+    const combo = validateKeyCombo(step.prompt || step.target);
+    if (!combo) return false;
+    const heard = plainWords(said);
+    return combo.modifiers.every((mod) => mod === "shift" || MODIFIER_WORDS[mod].some((word) => heard.includes(` ${word} `)));
+  }
+  return READ_ONLY_COMPUTER_ACTIONS.includes(action) || LOW_RISK_COMPUTER_ACTIONS.includes(action);
 }
 
 /**
@@ -313,7 +351,9 @@ export function shouldAutoRunPlan(steps: readonly OrchestratorStep[], context: P
   if (opts.inPlaceDirty) return false;
   if (steps.some((step) => isHighRiskStep(step, context))) return false;
   if (!opts.fromReading) return true;
-  // Screen/UI inspection -> low-risk computer-use actions run in one turn; other steps steered by
-  // inspected content (e.g. creating a workspace or coding CLI from untrusted output) keep decision D1.
-  return steps.every((step) => isReadOnlyStep(step) || isLowRiskComputerStep(step));
+  // Screen/UI inspection -> low-risk computer-use actions the person asked for run in one turn.
+  // What Viby read may say where to click, never what to type or which shortcut to press, and other
+  // steps steered by inspected content (a workspace, a coding CLI, ...) keep decision D1.
+  const said = opts.said ?? "";
+  return steps.every((step) => isReadOnlyStep(step) || (isLowRiskComputerStep(step) && isPersonLedComputerStep(step, said)));
 }
