@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **Speech models and voices are no longer stored twice.** Each download also left a copy in Chromium's web cache (`~/.config/VibeForge/Cache`), which nothing ever read again: 578 MB on one machine with a few models and voices. Downloads now skip that cache, and the copies already there are cleared once, the first time this version starts. Only that cache is cleared: sign-ins, saved pages and the browser dock's own data stay.
+- **Code doesn't check git in the background while you're elsewhere.** Code's workspace list ran `git status` in every workspace every 30 seconds while the window was open, even if you never opened Code: 6 runs a minute with three workspaces. It now checks only while Code is on screen, and checks again at once when you come back to it.
+- **Settings → Phone stops asking Tailscale while the window is hidden.** With the phone page on and Settings open, VibeForge ran `tailscale` every 4 seconds and read the page's state every 2, even with the window in the tray. Both now wait until the window shows again.
+- **Sounds no longer leave an audio stream open.** The first chime of a session opened a playback stream that stayed open, playing silence, until VibeForge quit. It now pauses as soon as a sound ends and closes after 30 seconds of quiet, and the next sound opens it again. Chromium's own audio process still stays once a sound has played (about 22 MB measured); that needs a separate change.
+
 ## [3.7.0] - 2026-11-25
 
 **3.7.0: more of Viby's steps wait for your Go, Sync can't be widened from the other machine, and each phone pairs with a key of its own.**
