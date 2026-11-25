@@ -18,9 +18,8 @@ const { Terminal } = require("@xterm/headless");
 const { SerializeAddon } = require("@xterm/addon-serialize");
 const { SCROLLBACK_LINES, attachCapture, captureWrite, captureSynced, captureFinish } = require("./terminal-capture.cjs");
 const { attachTail } = require("./pty-drain.cjs");
+const scrollback = require("./scrollback-file.cjs");
 
-const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
-const SCROLLBACK_SLACK_BYTES = 512 * 1024;
 const FLUSH_MS = 6;
 const PASTE_QUIET_MS = 700;
 const PASTE_FIRST_OUTPUT_MS = 3000;
@@ -49,14 +48,11 @@ const PAUSED_LOOK_MS = 15;
 /** @import { Capture, CaptureState } from "./terminal-capture.cjs" */
 /** @import { Tail } from "./pty-drain.cjs" */
 
+/** @import { ScrollbackSink } from "./scrollback-file.cjs" */
+
 /**
- * A run folder's terminal files and the mirror that writes them (see the scrollback file below).
- * @typedef {Capture & {
- *   runDir: string | null,
- *   scrollFd: number | null,
- *   scrollBytes: number,
- *   scrollFile: string | null,
- * }} Sink
+ * A run folder's terminal files and the mirror that writes them (scrollback-file.cjs keeps the raw output).
+ * @typedef {Capture & ScrollbackSink} Sink
  */
 
 /**
@@ -137,6 +133,9 @@ function log(...parts) {
   process.stderr.write(`${parts.join(" ")}\n`);
 }
 
+/** Trouble that repeats with every chunk (a full disk) goes in the log once a minute. */
+const say = scrollback.limitedLog(log);
+
 /** @param {unknown} error */
 function messageOf(error) {
   return error instanceof Error ? error.message : String(error);
@@ -164,64 +163,6 @@ function signalGroup(pid, signal) {
 // A session's own run folder and a recording inside a shell (below) both keep these files; each
 // is a "sink": { runDir, mirror, serializer, scrollFd, scrollBytes, scrollFile }.
 
-/** @param {Sink} sink */
-function openScrollback(sink) {
-  if (!sink.runDir) return;
-  const file = path.join(sink.runDir, "scrollback.txt");
-  try {
-    sink.scrollFd = fs.openSync(file, "a", 0o600);
-    fs.fchmodSync(sink.scrollFd, 0o600);
-    sink.scrollBytes = fs.fstatSync(sink.scrollFd).size;
-    sink.scrollFile = file;
-  } catch (error) {
-    log("scrollback:", messageOf(error));
-    sink.scrollFd = null;
-  }
-}
-
-/**
- * @param {Sink} sink
- * @param {string} data
- */
-function appendScrollback(sink, data) {
-  if (sink.scrollFd == null) return;
-  try {
-    const bytes = Buffer.from(data, "utf8");
-    fs.writeSync(sink.scrollFd, bytes);
-    sink.scrollBytes += bytes.length;
-    if (sink.scrollBytes > MAX_SCROLLBACK_BYTES + SCROLLBACK_SLACK_BYTES) trimScrollback(sink);
-  } catch (error) {
-    log("scrollback:", messageOf(error));
-  }
-}
-
-/**
- * Keep the last 2 MB. Trimming in 512 KB steps keeps the rewrite rare.
- * @param {Sink} sink
- */
-function trimScrollback(sink) {
-  const writing = sink.scrollFd;
-  const file = sink.scrollFile;
-  // openScrollback sets both, so this only stops the checker asking.
-  if (writing == null || file == null) return;
-  // Until it reopens, the file is closed: a failure below (the run folder deleted) stops the capture.
-  sink.scrollFd = null;
-  fs.closeSync(writing);
-  const size = fs.statSync(file).size;
-  const keep = Math.min(size, MAX_SCROLLBACK_BYTES);
-  const buffer = Buffer.alloc(keep);
-  const fd = fs.openSync(file, "r");
-  try {
-    fs.readSync(fd, buffer, 0, keep, size - keep);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.writeFileSync(file, buffer, { mode: 0o600 });
-  fs.chmodSync(file, 0o600);
-  sink.scrollFd = fs.openSync(file, "a", 0o600);
-  sink.scrollBytes = keep;
-}
-
 /**
  * The final screen and a text transcript, once the mirror has caught up; then the scrollback closes.
  * @param {Sink} sink
@@ -231,20 +172,21 @@ function closeSink(sink, done) {
   captureFinish(sink)
     .then((captured) => {
       if (sink.runDir) {
-        try {
-          const ansiPath = path.join(sink.runDir, "terminal.ansi");
-          const transcriptPath = path.join(sink.runDir, "transcript.txt");
-          fs.writeFileSync(ansiPath, captured.ansi, { mode: 0o600 });
-          fs.chmodSync(ansiPath, 0o600);
-          fs.writeFileSync(transcriptPath, captured.transcript, { mode: 0o600 });
-          fs.chmodSync(transcriptPath, 0o600);
-        } catch (error) {
-          log("artifacts:", messageOf(error));
+        // Each whole or not at all: a screen cut short would hide the scrollback the run falls back to.
+        for (const [name, text] of [
+          ["terminal.ansi", captured.ansi],
+          ["transcript.txt", captured.transcript],
+        ]) {
+          try {
+            scrollback.writeWhole(path.join(sink.runDir, name), text);
+          } catch (error) {
+            say("artifacts", messageOf(error));
+          }
         }
       }
     })
     .catch((error) => {
-      log("artifacts:", messageOf(error));
+      say("artifacts", messageOf(error));
     })
     .finally(() => {
       if (sink.scrollFd != null) {
@@ -304,7 +246,7 @@ function startRecording(session, runDir) {
               resolve();
               return;
             }
-            openScrollback(rec);
+            scrollback.openScrollback(rec, say);
             session.rec = rec;
             resolve();
           });
@@ -582,7 +524,7 @@ function spawnSession(msg) {
   const session = /** @type {Session} */ (fields);
   attachCapture(session);
   session.onDrain = () => relieve(session);
-  openScrollback(session);
+  scrollback.openScrollback(session, say);
   sessions.set(id, session);
 
   /** @param {string} data */
@@ -592,10 +534,10 @@ function spawnSession(msg) {
     session.batch.push(data);
     session.unsent += data.length;
     captureWrite(session, data);
-    appendScrollback(session, data);
+    scrollback.appendScrollback(session, data, say);
     if (session.rec) {
       captureWrite(session.rec, data);
-      appendScrollback(session.rec, data);
+      scrollback.appendScrollback(session.rec, data, say);
     }
     notePasteActivity(session);
     session.dirty = true;

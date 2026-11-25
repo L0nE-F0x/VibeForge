@@ -13,12 +13,56 @@ export interface Bin {
  * Where deleted things wait while their Undo is on screen. Deleting moves files here instead of
  * removing them, Undo moves them back, and the bin is emptied when the chance to undo has passed.
  * Emptying everything at start means a delete just before a crash stays deleted, as it was meant.
+ *
+ * A bin can hold a task's whole copy, node_modules and all: tens of thousands of files. Emptying
+ * renames it out of the way at once and removes it in the background, so neither the window's
+ * start nor a quit waits for it. What a quit cut short is removed at the next start.
  */
 export class Trash {
   /** The bins still waiting for their Undo, so a new thing doesn't take a deleted one's place. */
   private readonly open = new Map<string, Bin>();
+  /** The removals under way, one after another. */
+  private removing: Promise<void> = Promise.resolve();
+  private asides = 0;
 
   constructor(private readonly root: string) {}
+
+  /** Resolves once everything emptied so far is off the disk. */
+  whenEmptied(): Promise<void> {
+    return this.removing;
+  }
+
+  /** Rename `dir` beside the trash, where nothing looks, and remove it in the background. */
+  private discard(dir: string): void {
+    this.asides += 1;
+    const aside = `${this.root}.emptying-${process.pid}-${Date.now()}-${this.asides}`;
+    try {
+      fs.renameSync(dir, aside);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      // Not renamable (another disk would be odd here): removed where it is, still in the background.
+      this.later(dir);
+      return;
+    }
+    this.later(aside);
+  }
+
+  private later(dir: string): void {
+    this.removing = this.removing.then(() => fs.promises.rm(dir, { recursive: true, force: true })).catch(() => undefined);
+  }
+
+  /** What an earlier session renamed aside and didn't get to remove. */
+  private sweep(): void {
+    const parent = path.dirname(this.root);
+    const prefix = `${path.basename(this.root)}.emptying-`;
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(parent).filter((name) => name.startsWith(prefix));
+    } catch {
+      return;
+    }
+    for (const name of names) this.later(path.join(parent, name));
+  }
 
   /** Whether `file` was moved into a bin that can still be undone. */
   holds(file: string): boolean {
@@ -41,7 +85,8 @@ export class Trash {
     } catch {
       /* trash empty */
     }
-    fs.rmSync(this.root, { recursive: true, force: true });
+    this.sweep();
+    this.discard(this.root);
     this.open.clear();
     return settled;
   }
@@ -87,7 +132,7 @@ export class Trash {
   /** Delete a bin for good. */
   drop(bin: Bin): void {
     this.open.delete(bin.token);
-    fs.rmSync(path.join(this.root, bin.token), { recursive: true, force: true });
+    this.discard(path.join(this.root, bin.token));
   }
 }
 

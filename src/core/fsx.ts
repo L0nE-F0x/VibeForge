@@ -44,19 +44,50 @@ export function isUnchangedOwnWrite(file: string): boolean {
   return parent !== undefined && now - parent < 1000;
 }
 
-/** Write through a temp file and rename, so a crash never leaves half a YAML file behind. */
+/**
+ * Write through a temp file and rename, so a crash never leaves half a file behind. The temp file
+ * reaches the disk before it takes the name, and the folder after, so a power cut leaves the old
+ * file or the new one, never an empty one (about 10 ms on this machine's btrfs). A write that fails
+ * (a full disk) removes its temp file and leaves the old file as it was.
+ */
 export function writeFileAtomic(file: string, text: string, options: WriteOptions = {}): void {
   const mode = options.mode ?? 0o600;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
-  fs.writeFileSync(temp, text, { mode });
-  // The umask, or a temp file left by a crash, would otherwise decide.
-  fs.chmodSync(temp, mode);
-  fs.renameSync(temp, file);
+  const folder = path.dirname(file);
+  fs.mkdirSync(folder, { recursive: true });
+  const temp = path.join(folder, `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    const fd = fs.openSync(temp, "w", mode);
+    try {
+      fs.writeFileSync(fd, text);
+      // The umask, or a temp file left by a crash, would otherwise decide.
+      fs.fchmodSync(fd, mode);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(temp, file);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
+  syncFolder(folder);
   const full = path.resolve(file);
   ownDeletes.delete(full);
   const stamp = fileStampKey(full);
   if (stamp) rememberBounded(ownWriteStamps, full, stamp);
+}
+
+/** A rename is on disk once its folder is. A folder that can't be opened for this (some file systems) is left to the system. */
+function syncFolder(folder: string): void {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(folder, "r");
+    fs.fsyncSync(fd);
+  } catch {
+    /* best effort: the file itself is on disk */
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
 }
 
 export function readJson<T>(file: string, fallback: T): T {

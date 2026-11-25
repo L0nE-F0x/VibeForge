@@ -74,4 +74,29 @@ describe("trash", () => {
     trash.empty();
     expect(fs.existsSync(path.join(dir, "trash"))).toBe(false);
   });
+
+  it("empties without waiting for the files to go, and finishes what a quit cut short", async () => {
+    const dir = tempDir();
+    const trash = new Trash(path.join(dir, "trash"));
+    const copy = path.join(dir, "copy");
+    fs.mkdirSync(path.join(copy, "node_modules"), { recursive: true });
+    for (let file = 0; file < 200; file += 1) fs.writeFileSync(path.join(copy, "node_modules", `${file}.js`), "x");
+    trash.stash([copy]);
+    // Left by an earlier session that quit while removing.
+    fs.mkdirSync(path.join(dir, "trash.emptying-1-1-1", "old"), { recursive: true });
+    trash.empty();
+    // The trash is out of the way at once; its files go in the background.
+    expect(fs.existsSync(path.join(dir, "trash"))).toBe(false);
+    expect(fs.readdirSync(dir).filter((name) => name.startsWith("trash.emptying-")).length).toBe(2);
+    await trash.whenEmptied();
+    expect(fs.readdirSync(dir)).toEqual([]);
+    // A bin whose Undo has passed goes the same way.
+    const file = path.join(dir, "task.yaml");
+    fs.writeFileSync(file, "x\n");
+    const bin = trash.stash([file]);
+    trash.drop(bin);
+    expect(fs.existsSync(path.join(dir, "trash", bin.token))).toBe(false);
+    await trash.whenEmptied();
+    expect(fs.readdirSync(path.join(dir, "trash"))).toEqual([]);
+  });
 });
