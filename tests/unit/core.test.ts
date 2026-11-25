@@ -512,6 +512,25 @@ describe("store", () => {
     store.close();
   });
 
+  it("keeps the front matter it doesn't use when it saves a SKILL.md", () => {
+    const store = new Store(tempDir(), tempDir());
+    const file = path.join(store.configRoot, "skills", "release-notes", "SKILL.md");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // The Agent Skills format other CLIs read has more fields than a name and a description.
+    fs.writeFileSync(file, "---\nname: Release notes\ndescription: Old.\nallowed-tools: Bash(git log:*), Read\nlicense: MIT\nmetadata:\n  author: Ada\n---\n\nWrite them.\n");
+    const skill = store.getSkill("release-notes")!;
+    store.writeSkill({ ...skill, description: "Turn merged commits into notes.", body: "Write them well." });
+    expect(fs.readFileSync(file, "utf8")).toBe(
+      "---\nname: Release notes\ndescription: Turn merged commits into notes.\nallowed-tools: Bash(git log:*), Read\nlicense: MIT\nmetadata:\n  author: Ada\n---\n\nWrite them well.\n",
+    );
+    expect(store.getSkill("release-notes")).toEqual({ id: "release-notes", name: "Release notes", description: "Turn merged commits into notes.", body: "Write them well." });
+    // Front matter that doesn't parse has nothing to keep: the skill is written as it is now.
+    fs.writeFileSync(file, "---\nname: [unclosed\n---\n\nBody.\n");
+    store.writeSkill({ id: "release-notes", name: "Notes", description: "", body: "Body." });
+    expect(fs.readFileSync(file, "utf8")).toBe("---\nname: Notes\ndescription: \"\"\n---\n\nBody.\n");
+    store.close();
+  });
+
   it("seeds engines.json and settings.json on first read", () => {
     const store = new Store(tempDir(), tempDir());
     expect(store.readEngineRows().map((row) => row.id)).toContain("claude");

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Saving a skill keeps the rest of its front matter.** A `SKILL.md` can say more than its name and description: `allowed-tools`, `license` and `metadata` from the Agent Skills format other CLIs read, or anything you added by hand. Saving the skill in VibeForge, or a change to it arriving from your other machine, rewrote the front matter with only the name and description, so the rest was lost. It's kept now, as `agent.yaml` and `settings.json` already keep fields VibeForge doesn't know.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
