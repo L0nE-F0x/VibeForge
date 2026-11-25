@@ -26,8 +26,10 @@ import { inspectsQuotas, keySequenceFor, parseWorkbenchAction } from "./orchestr
 import { inspectsSettings, resolveSettingsStep, type PlanSettingsContext } from "./orchestrator-settings.js";
 
 export * from "./orchestrator-actions.js";
+export * from "./orchestrator-fuzzy.js";
 export * from "./orchestrator-intel.js";
 export * from "./orchestrator-reflex.js";
+export * from "./orchestrator-repair.js";
 export * from "./orchestrator-settings.js";
 
 /**
@@ -386,8 +388,26 @@ export const KNOWN_MODELS: Partial<Record<BrainKind, string[]>> = {
  * phone: workspace names are what gets misheard ("Star Ledger", "frontier-halls"), and a few words
  * every request has.
  */
-export function orchestratorVoiceWords(workspaces: readonly string[]): string[] {
-  return ["Viby", "Vibey", ...workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]), "branch", "workspace"];
+export function orchestratorVoiceWords(
+  workspaces: readonly string[],
+  extra?: { agents?: readonly string[]; engines?: readonly string[]; skills?: readonly string[]; routines?: readonly string[] },
+): string[] {
+  const wsWords = workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]);
+  if (!extra) return ["Viby", "Vibey", ...wsWords, "branch", "workspace"];
+  const all = [
+    "VibeForge",
+    "Omarchy",
+    "Hyprland",
+    ...(extra.agents ?? []),
+    ...(extra.engines ?? []),
+    ...(extra.skills ?? []),
+    ...(extra.routines ?? []),
+    "Viby",
+    "Vibey",
+    ...wsWords,
+  ];
+  const deduped = [...new Set(all.map((w) => w.trim()).filter(Boolean))];
+  return [...deduped, "branch", "workspace"];
 }
 
 export interface PlanContext {

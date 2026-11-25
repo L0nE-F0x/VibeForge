@@ -3,6 +3,7 @@
 // Pure and Node-free so desktop, voice calls, and phone companion share identical reflex logic.
 
 import { planAnswer } from "./plan-answer.js";
+import { cleanQuery, fuzzyMatchName } from "./orchestrator-fuzzy.js";
 import type { Looking, OrchestratorStepKind, PlanContext } from "./orchestrator.js";
 
 export interface ReflexRawStep {
@@ -76,8 +77,9 @@ const VIEW_ALIASES: Record<string, string> = {
   setting: "settings",
 };
 
-function findMatch<T>(query: string, items: readonly T[], nameOf: (item: T) => string[]): T | null {
-  const wanted = squash(query);
+function findMatch<T>(query: string, items: readonly T[], nameOf: (item: T) => string[], byWord = false): T | null {
+  const cleaned = cleanQuery(query);
+  const wanted = squash(cleaned);
   if (!wanted) return null;
   const exact = items.filter((item) => nameOf(item).some((n) => n && squash(n) === wanted));
   if (exact.length === 1) return exact[0];
@@ -89,7 +91,7 @@ function findMatch<T>(query: string, items: readonly T[], nameOf: (item: T) => s
     const contains = items.filter((item) => nameOf(item).some((n) => n && squash(n).includes(wanted)));
     if (contains.length === 1) return contains[0];
   }
-  return null;
+  return fuzzyMatchName(cleaned, items, nameOf, byWord);
 }
 
 function buildShowStep(rawTarget: string, context: PlanContext, looking?: Looking | null): { step: ReflexRawStep; label: string } | null {

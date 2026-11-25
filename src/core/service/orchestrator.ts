@@ -1030,6 +1030,22 @@ export class OrchestratorDesk {
         output = readBrainOutput(retried.stdout);
       }
     }
+    // If a planner exited cleanly with malformed/unparseable output, run one compact schema-repair retry before failing.
+    if (!signal.aborted && !run.timedOut && run.code === 0 && !output.error && !output.plan) {
+      const repairPrompt = [
+        this.recap(words),
+        "",
+        `(Your previous answer could not be parsed as valid plan JSON. Respond ONLY with a single JSON object matching {"say": string, "steps": [...]} for the person's request. Valid step kinds: ${STEP_KINDS.join(", ")}.)`,
+      ].join("\n");
+      const repaired = await turn(repairPrompt, context, true);
+      if (repaired && !signal.aborted && !repaired.timedOut && repaired.code === 0) {
+        const nextOut = readBrainOutput(repaired.stdout);
+        if (nextOut.plan) {
+          run = repaired;
+          output = nextOut;
+        }
+      }
+    }
     let { plan, text, sessionId, error } = output;
     const completed = !signal.aborted && !run.timedOut && Boolean(plan || (run.code === 0 && !error));
     // A first turn that didn't go through may still have left its session behind (Claude Code
@@ -1063,6 +1079,24 @@ export class OrchestratorDesk {
     let steps = resolvePlan(plan, currentContext);
     const droppedKinds = (rawSteps: NonNullable<typeof plan>["steps"]) => rawSteps.map((s) => s.kind).filter((k) => k && !(STEP_KINDS as readonly string[]).includes(k));
     let unknownKinds = droppedKinds(plan.steps);
+    // If every emitted step used an unknown kind, give the planner one repair turn naming the valid kinds.
+    if (!signal.aborted && unknownKinds.length && !steps.length) {
+      const repairPrompt = `Your previous plan used unsupported step kind(s): ${[...new Set(unknownKinds)].join(", ")}. Valid step kinds are ONLY: ${STEP_KINDS.join(", ")}. Rewrite the plan JSON for "${oneLine(words, 240)}" using only valid step kinds (or steps: [] with a clear explanation in say).`;
+      const repaired = await turn(repairPrompt, currentContext, false);
+      if (repaired && !signal.aborted && !repaired.timedOut && repaired.code === 0) {
+        const nextOut = readBrainOutput(repaired.stdout);
+        if (nextOut.sessionId) this.conversation.sessionId = nextOut.sessionId;
+        if (nextOut.plan) {
+          const nextSteps = resolvePlan(nextOut.plan, currentContext);
+          const nextUnknown = droppedKinds(nextOut.plan.steps);
+          if (!nextUnknown.length) {
+            plan = nextOut.plan;
+            steps = nextSteps;
+            unknownKinds = nextUnknown;
+          }
+        }
+      }
+    }
     const checks: OrchestratorCheck[] = [];
     const seenChecks = new Set<string>();
     const checkKey = (step: OrchestratorStep) => `${step.kind}:${step.action ?? ""}:${step.workspaceId}:${step.target}:${step.prompt}`;

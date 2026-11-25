@@ -181,7 +181,21 @@ export function VibyComposer({
             replaceStart,
           })),
       ];
-      return entries.filter((entry) => entry.label.slice(1).toLowerCase().includes(prefix)).slice(0, 7);
+      const cleanPrefix = prefix.replace(/[-_.]+/g, "");
+      return entries
+        .filter((entry) => {
+          const low = entry.label.slice(1).toLowerCase();
+          if (!cleanPrefix || low.includes(prefix)) return true;
+          // Also match initials/subsequence on `@vbf` -> `@VibeForge` or `@sl` -> `@Star Ledger`
+          let pos = 0;
+          for (const ch of cleanPrefix) {
+            const at = low.indexOf(ch, pos);
+            if (at < 0) return false;
+            pos = at + 1;
+          }
+          return true;
+        })
+        .slice(0, 7);
     }
     return [];
   }, [textState, menuHidden, waitingTurnId, workspaces, agents, engines]);

@@ -13,7 +13,9 @@ import { agyModelEffort, cleanModel, effortLevels } from "../shared/launch-optio
 import { isFreeWaitingPrompt } from "../shared/orchestrator-intel.js";
 import {
   brainKind,
+  cleanQuery,
   formatSettingsRules,
+  fuzzyMatchName,
   inspectsProblems,
   inspectsQuotas,
   inspectsSettings,
@@ -26,6 +28,7 @@ import {
   normalizeAgentAction,
   normalizeChatAction,
   normalizeMemoryAction,
+  normalizePlanCandidate,
   normalizeRoutineStepAction,
   normalizeRunAction,
   normalizeSkillAction,
@@ -37,6 +40,7 @@ import {
   parseTaskStatus,
   parseWorkbenchAction,
   plannedId,
+  repairJsonObjects,
   resolveSettingsStep,
   SHOW_VIEWS,
   STEP_KINDS,
@@ -388,9 +392,9 @@ export function orchestratorRules(context: PlanContext): string {
     : "Never pick an engine the person didn't ask for; if they didn't say which, ask.";
   return [
     "You are Viby (also called Vibey, Vibe, or Maestro; speech-to-text may write any of those, 'VIB', or 'I\\'ll be'), the person's conversational partner, personal orchestrator and main point of access inside VibeForge, a desktop app where they run several coding CLIs, saved agents, skills, chats, tasks and scheduled routines at once.",
-    "Whatever planning CLI runs you under the hood, you are always Viby. The person often talks to you in a live voice call, so expect dictation slips: misheard names ('Oh Marchy' = Omarchy, 'Hyperland' = Hyprland, homophones of workspace and agent names), missing punctuation, or spoken thoughts. Match names generously and infer intent smartly.",
+    "Whatever planning CLI runs you under the hood, you are always Viby. The person often talks to you in a live voice call or dictates quickly, so expect STT slips and homophones ('Oh Marchy' = Omarchy, 'Hyperland' = Hyprland, 'Cloud'/'Clawd' = Claude Code, 'Code X' = Codex, 'Grock' = Grok Build, 'Anti gravity' = Antigravity, 'Star Leger' = Star Ledger, 'Vibe Forje' = VibeForge) and typed `@mentions` (`@Workspace`). Strip `@` when matching and resolve entities generously against the lists below.",
     "You can do ANYTHING in VibeForge that the person can do with mouse and keyboard: create/edit/delete saved agents (including briefs, allowed folders, skills, memory, tier), skills (and attach/detach agents), scheduled routines (including schedules, attaching agents or tasks, enabling/pausing, running, cancelling waits), tasks (create on board, create & run, edit, change status, execute, continue, stop, apply/discard copies, hand off runs, delete), workspaces (create, rename, reorder, remove), chats (create, send, continue, stop, rename, switch CLI, delete), runs & storage, live agent-to-agent talk, settings, rail & custom CLIs, and deep-link navigation.",
-    "You are both a sharp, warm sounding board when the person wants to think or brainstorm out loud, and a decisive orchestrator when they want something done. You never write code, read files or use tools yourself; you turn actions into steps that VibeForge carries out, and you answer only in the JSON schema you were given.",
+    "You are both a sharp, warm sounding board when the person wants to think or brainstorm out loud, and a decisive orchestrator when they want something done. You never write code, read files or use tools yourself; output ONLY a valid JSON object matching the schema (no prose outside JSON), with `say` first and `steps` second.",
     "",
     "Steps:",
     "- start: open a coding CLI (or a saved VibeForge agent) in a workspace. Fields: engine (a CLI id, or agent name; leave empty only to use the default CLI when marked [default]), agent (optional explicit saved agent name/id, including one created earlier in this plan), workspace (a name below, or one a workspace step in this plan makes), prompt (the complete instruction for that CLI; empty when only opening it), branch (short kebab-case; by default works on a new branch in its own review copy), inPlace (true to work directly in the workspace folder with no copy), model and effort (only when asked).",
@@ -561,6 +565,15 @@ export function readBrainOutput(stdout: string): BrainOutput {
     const plan = asPlan(candidate);
     if (plan) return { plan, text, sessionId, error: "" };
   }
+  // Fallback repair pass: normalize wrapper envelopes/aliases and repair fenced/trailing-comma/multiline JSON.
+  const repairedCandidates: unknown[] = [...candidates];
+  for (const source of [text, outer ? stdout : ""]) {
+    if (source) repairedCandidates.push(...repairJsonObjects(source));
+  }
+  for (const candidate of repairedCandidates) {
+    const plan = asPlan(normalizePlanCandidate(candidate, STEP_KINDS));
+    if (plan) return { plan, text, sessionId, error: "" };
+  }
   return { plan: null, text, sessionId, error };
 }
 
@@ -688,26 +701,38 @@ const words = (value: string) => value.toLowerCase().split(/[^\p{L}\p{N}]+/u).fi
  * so it can't turn up inside another word.
  */
 export function matchName<T>(asked: string | undefined, items: readonly T[], names: (item: T) => string[], byWord = false): T | null {
-  const wanted = squash(asked ?? "");
+  const cleaned = cleanQuery(asked);
+  const wanted = squash(cleaned);
   if (!wanted) return null;
-  const spoken = words(asked ?? "");
+  const spoken = words(cleaned);
   const holds = (name: string) => (name.length >= 3 && wanted.includes(name)) || (wanted.length >= 3 && name.includes(wanted));
   // Every word of its name was said ("the Pi agent" is Pi), then any longer word of it ("GitHub Copilot").
   const said = (raw: string) => words(raw).every((word) => spoken.includes(word));
   const shares = (raw: string) => words(raw).some((word) => word.length >= 3 && spoken.includes(word));
-  const tests: Array<(name: string, raw: string) => boolean> = [
-    (name) => name === wanted,
-    (name) => name.startsWith(wanted),
-    (name) => holds(name),
-    ...(byWord ? [(_name: string, raw: string) => said(raw), (_name: string, raw: string) => shares(raw)] : []),
+  const tests: Array<{ fn: (name: string, raw: string) => boolean; breakTie?: boolean }> = [
+    { fn: (name) => name === wanted },
+    { fn: (name) => name.startsWith(wanted) },
+    { fn: (name) => holds(name) },
+    ...(byWord
+      ? [
+          { fn: (_name: string, raw: string) => said(raw) },
+          { fn: (_name: string, raw: string) => shares(raw), breakTie: true },
+        ]
+      : []),
   ];
-  for (const test of tests) {
-    const found = items.filter((item) => names(item).some((raw) => raw && test(squash(raw), raw)));
+  for (const { fn, breakTie } of tests) {
+    const found = items.filter((item) => names(item).some((raw) => raw && fn(squash(raw), raw)));
     if (found.length === 1) return found[0];
-    // Two that fit as well as each other: the person picks on the card.
-    if (found.length > 1) return null;
+    // Multi-word STT slips ("Star Leger" when both "Star Ledger" and "Star Map" exist) break ties via fuzzy/phonetic scoring.
+    if (found.length > 1) {
+      if (breakTie && spoken.length >= 2) {
+        const tieBroken = fuzzyMatchName(cleaned, found, names, true);
+        if (tieBroken) return tieBroken;
+      }
+      return null;
+    }
   }
-  return null;
+  return fuzzyMatchName(cleaned, items, names, byWord);
 }
 
 /**

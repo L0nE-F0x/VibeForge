@@ -5,6 +5,7 @@
 import type { EngineRow } from "../core/types.js";
 import { cleanModel, effortLevels } from "./launch-options.js";
 import { parseOptions } from "./orchestrator-actions.js";
+import { cleanQuery, fuzzyMatchName } from "./orchestrator-fuzzy.js";
 import { splitArgs } from "./text.js";
 import { MODEL_CATALOG, VOICE_CATALOG, type ModelChoice, type VoiceBackend, type VoiceChoice } from "./voice-catalog.js";
 
@@ -397,11 +398,13 @@ export interface SettingsValidationContext {
 }
 
 function matchEngine(query: string, engines: SettingsValidationContext["engines"]): SettingsValidationContext["engines"][number] | null {
-  const wanted = squash(query);
+  const cleaned = cleanQuery(query);
+  const wanted = squash(cleaned);
   if (!wanted) return null;
   return (
     engines.find((e) => squash(e.id) === wanted || squash(e.label) === wanted) ??
     engines.find((e) => squash(e.label).startsWith(wanted) || squash(e.id).startsWith(wanted)) ??
+    fuzzyMatchName(cleaned, engines, (e) => [e.id, e.label], true) ??
     null
   );
 }
