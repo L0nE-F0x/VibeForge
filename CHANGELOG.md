@@ -19,6 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 - **Removing a workspace in Code has Undo, and asks first only when a terminal would stop.** **Remove from VibeForge** now happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>, as deleting does. Undo puts the workspace back in its place in the list with its name, browser address and pane layout. It still asks first when terminals of Code's own are running there, because removing stops them and Undo can't start them again. Runs of agents, tasks and routines in the workspace keep going either way, its folder stays on disk, and a Sync share of the folder is untouched. When Viby removes a workspace, its step has **Undo** too.
 - **The phone page shows Viby's answer to a yes in the phone's language.** When Viby's planner takes what you said as a yes to a plan waiting for Go, Viby says that it's running the plan, or why the plan still waits. The desktop showed this in your language, but the phone page showed it in English. It now uses the phone page's language, like the rest of the page.
 
+### Security
+
+- **Sync no longer deletes your agents or skills on your other machines when this one can't read them.** If the agents or skills folder on one machine stayed unreadable for more than about 35 seconds (a permissions mistake, a failing disk), Sync took that as everything having been deleted and deleted them on the other machine too. Now an item that can't be read is left alone on both sides until it can be read again.
+
 ## [3.7.1] - 2026-11-25
 
 **3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
