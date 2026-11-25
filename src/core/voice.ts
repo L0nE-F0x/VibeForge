@@ -205,6 +205,36 @@ export function peakLoudness(pcm: Uint8Array): number {
   return peak;
 }
 
+/**
+ * Trim excess leading and trailing silence from 16 kHz mono s16le PCM while preserving `padMs`
+ * of context at either end so STT recognizers don't waste compute on long dead air.
+ */
+export function trimSilence(pcm: Buffer, padMs = 160): Buffer {
+  const alignedLen = pcm.length - (pcm.length % 2);
+  if (alignedLen < BYTES_PER_SECOND * 0.8) return pcm.subarray(0, alignedLen);
+  const frameBytes = (BYTES_PER_SECOND * 20) / 1000; // 20 ms = 640 bytes
+  const levels: number[] = [];
+  for (let at = 0; at < alignedLen; at += frameBytes) {
+    levels.push(rms(pcm, at, Math.min(alignedLen, at + frameBytes)));
+  }
+  const sorted = [...levels].sort((a, b) => a - b);
+  const floor = sorted[Math.floor(sorted.length * 0.15)] ?? 0;
+  const threshold = Math.max(SILENCE_RMS, floor * 2.5);
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < levels.length; i += 1) {
+    if (levels[i] >= threshold) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first < 0) return pcm.subarray(0, alignedLen);
+  const padFrames = Math.ceil(padMs / 20);
+  const start = Math.max(0, first - padFrames) * frameBytes;
+  const end = Math.min(alignedLen, (last + 1 + padFrames) * frameBytes);
+  return pcm.subarray(start, end);
+}
+
 /** A WAV file around raw 16 kHz mono s16le, for whisper. */
 export function wavFile(pcm: Uint8Array): Buffer {
   const header = Buffer.alloc(44);

@@ -89,7 +89,8 @@ function PendingStepSummary({ step }: { step: OrchestratorStep }) {
     step.kind === "run" ||
     step.kind === "talk" ||
     step.kind === "verify" ||
-    step.kind === "memory"
+    step.kind === "memory" ||
+    step.kind === "computer"
   ) {
     text = [t(otherStepKey(step)), step.asked || step.name || step.prompt].filter(Boolean).join(" · ");
   } else {

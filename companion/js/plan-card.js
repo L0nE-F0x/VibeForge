@@ -49,6 +49,7 @@ function otherStepKey(step) {
   if (step.kind === "inspect") return "orch.inspect";
   if (step.kind === "shell") return "orch.shell";
   if (step.kind === "verify") return "orch.verify";
+  if (step.kind === "computer") return "orch.computer";
   if (step.kind === "memory") return act === "clear" ? "orch.memoryClear" : act === "set" ? "orch.memorySet" : "orch.memoryAppend";
   if (step.kind === "key") return "orch.key";
   if (step.kind === "workbench") return "orch.workbench";
@@ -208,7 +209,8 @@ function stepNode(turn, step, editable) {
     step.kind === "chat" ||
     step.kind === "run" ||
     step.kind === "talk" ||
-    step.kind === "memory"
+    step.kind === "memory" ||
+    step.kind === "computer"
   ) {
     // A key step says which key goes in, not only where: "yes" and Ctrl+C read the same otherwise.
     const what =

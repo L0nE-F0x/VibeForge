@@ -11,7 +11,8 @@
 //     "turns": [{ "match": "regex", "say": ["line", ...], "files": { "path": "text" }, "gate": "name", "after": ["line"], "exit": 0 }]
 //   }
 //
-// A headless planning turn (`--print`, as VibeForge asks Claude Code to plan) answers with the
+// A headless planning turn (`--print`, as VibeForge asks Claude Code to plan; with `--input-format
+// stream-json`, one answer per message on stdin until it closes) answers with the
 // first plan whose `match` finds the person's words, in Claude Code's JSON result format. Any other
 // start is an interactive turn, the first whose `match` finds its arguments: it prints `say`; if
 // the turn has a `gate`, waits until the test opens it (<folder>/gates/<gate>); then writes `files`
@@ -45,10 +46,10 @@ function log(entry) {
 const matches = (pattern, text) => !pattern || new RegExp(pattern, "i").test(text);
 
 const planning = argv.includes("--print") || argv.includes("-p");
-if (planning) {
-  // Claude Code takes the message after "--"; the others take it as the value of -p.
-  const dash = argv.indexOf("--");
-  const said = dash >= 0 ? argv.slice(dash + 1).join(" ") : (argv[argv.indexOf("-p") + 1] ?? "");
+const streamed = planning && argv[argv.indexOf("--input-format") + 1] === "stream-json";
+
+/** Answers one planning message with the first plan whose `match` finds the person's words. */
+function answerPlan(said) {
   // The planner's message ends with what the person said; the desk before it names everything else.
   const tail = said.slice(-600);
   const plan = (script().plans ?? []).find((item) => matches(item.match, tail));
@@ -58,29 +59,56 @@ if (planning) {
   process.stdout.write(
     `${JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "", structured_output: structured, session_id: "00000000-0000-4000-8000-000000000001" })}\n`,
   );
-  process.exit(0);
 }
 
-const turn = (script().turns ?? []).find((item) => matches(item.match, argv.join(" "))) ?? {};
-log({ mode: "turn", turn: turn.match ?? null });
-const say = (lines) => {
-  for (const line of lines ?? []) process.stdout.write(`${line}\r\n`);
-};
-say(turn.say);
-const finish = () => {
-  for (const [file, text] of Object.entries(turn.files ?? {})) {
-    const target = path.resolve(process.cwd(), file);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, text);
-  }
-  say(turn.after);
-  log({ mode: "done", turn: turn.match ?? null });
-  process.exit(turn.exit ?? 0);
-};
-if (turn.gate) {
-  const gates = path.join(folder, "gates");
-  fs.mkdirSync(gates, { recursive: true });
-  fs.writeFileSync(path.join(gates, `${turn.gate}.waiting`), "");
-  const wait = () => (fs.existsSync(path.join(gates, turn.gate)) ? finish() : setTimeout(wait, 50));
-  wait();
-} else finish();
+if (streamed) {
+  // Viby's warm planner keeps Claude Code running and sends each message as a stream-json line on
+  // stdin, so this answers every one of them until stdin closes, the way Claude Code does.
+  let pending = "";
+  process.stdin.on("data", (chunk) => {
+    pending += chunk.toString();
+    for (let newline = pending.indexOf("\n"); newline >= 0; newline = pending.indexOf("\n")) {
+      const line = pending.slice(0, newline).trim();
+      pending = pending.slice(newline + 1);
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (message?.type !== "user") continue;
+      const content = message.message?.content;
+      answerPlan(typeof content === "string" ? content : (content ?? []).filter((part) => part.type === "text").map((part) => part.text).join("\n"));
+    }
+  });
+  process.stdin.on("end", () => process.exit(0));
+} else if (planning) {
+  // Claude Code takes the message after "--"; the others take it as the value of -p.
+  const dash = argv.indexOf("--");
+  answerPlan(dash >= 0 ? argv.slice(dash + 1).join(" ") : (argv[argv.indexOf("-p") + 1] ?? ""));
+  process.exit(0);
+} else {
+  const turn = (script().turns ?? []).find((item) => matches(item.match, argv.join(" "))) ?? {};
+  log({ mode: "turn", turn: turn.match ?? null });
+  const say = (lines) => {
+    for (const line of lines ?? []) process.stdout.write(`${line}\r\n`);
+  };
+  say(turn.say);
+  const finish = () => {
+    for (const [file, text] of Object.entries(turn.files ?? {})) {
+      const target = path.resolve(process.cwd(), file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, text);
+    }
+    say(turn.after);
+    log({ mode: "done", turn: turn.match ?? null });
+    process.exit(turn.exit ?? 0);
+  };
+  if (turn.gate) {
+    const gates = path.join(folder, "gates");
+    fs.mkdirSync(gates, { recursive: true });
+    fs.writeFileSync(path.join(gates, `${turn.gate}.waiting`), "");
+    const wait = () => (fs.existsSync(path.join(gates, turn.gate)) ? finish() : setTimeout(wait, 50));
+    wait();
+  } else finish();
+}

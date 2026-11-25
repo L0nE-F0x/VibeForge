@@ -24,10 +24,14 @@ import {
 } from "./orchestrator-actions.js";
 import { inspectsQuotas, keySequenceFor, parseWorkbenchAction } from "./orchestrator-intel.js";
 import { inspectsSettings, resolveSettingsStep, type PlanSettingsContext } from "./orchestrator-settings.js";
+import { computerStepIssue } from "./computer-use.js";
 
+export * from "./computer-use.js";
 export * from "./orchestrator-actions.js";
+export * from "./orchestrator-fuzzy.js";
 export * from "./orchestrator-intel.js";
 export * from "./orchestrator-reflex.js";
+export * from "./orchestrator-repair.js";
 export * from "./orchestrator-settings.js";
 
 /**
@@ -73,7 +77,8 @@ export type OrchestratorStepKind =
   | "run"
   | "talk"
   | "verify"
-  | "memory";
+  | "memory"
+  | "computer";
 
 /** Every kind of step, for checking what a planner wrote. */
 export const STEP_KINDS: readonly OrchestratorStepKind[] = [
@@ -100,10 +105,11 @@ export const STEP_KINDS: readonly OrchestratorStepKind[] = [
   "talk",
   "verify",
   "memory",
+  "computer",
 ];
 
 /** The steps that change or end someone's work: they wait for Go even when plans start at once. */
-export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard"];
+export const NEEDS_GO: readonly OrchestratorStepKind[] = ["stop", "apply", "discard", "computer"];
 
 /** The steps that change nothing: a plan made only of these goes at once, whatever Settings says. */
 export const ONLY_LOOKS: readonly OrchestratorStepKind[] = ["show", "read", "inspect"];
@@ -386,8 +392,26 @@ export const KNOWN_MODELS: Partial<Record<BrainKind, string[]>> = {
  * phone: workspace names are what gets misheard ("Star Ledger", "frontier-halls"), and a few words
  * every request has.
  */
-export function orchestratorVoiceWords(workspaces: readonly string[]): string[] {
-  return ["Viby", "Vibey", ...workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]), "branch", "workspace"];
+export function orchestratorVoiceWords(
+  workspaces: readonly string[],
+  extra?: { agents?: readonly string[]; engines?: readonly string[]; skills?: readonly string[]; routines?: readonly string[] },
+): string[] {
+  const wsWords = workspaces.flatMap((name) => [name, name.replace(/[-_.]+/g, " ")]);
+  if (!extra) return ["Viby", "Vibey", ...wsWords, "branch", "workspace"];
+  const all = [
+    "VibeForge",
+    "Omarchy",
+    "Hyprland",
+    ...(extra.agents ?? []),
+    ...(extra.engines ?? []),
+    ...(extra.skills ?? []),
+    ...(extra.routines ?? []),
+    "Viby",
+    "Vibey",
+    ...wsWords,
+  ];
+  const deduped = [...new Set(all.map((w) => w.trim()).filter(Boolean))];
+  return [...deduped, "branch", "workspace"];
 }
 
 export interface PlanContext {
@@ -596,6 +620,9 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
   if (step.kind === "lookup") {
     return step.prompt.trim() ? null : "prompt";
   }
+  if (step.kind === "computer") {
+    return computerStepIssue(step);
+  }
   if (step.kind === "inspect") {
     if (
       inspectsQuotas(step.prompt) ||
@@ -608,7 +635,12 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       inspectsProblems(step.target) ||
       step.action === "storage" ||
       step.action === "problems" ||
-      step.action === "diagnostics"
+      step.action === "diagnostics" ||
+      step.action === "screen" ||
+      step.action === "desktop" ||
+      step.action === "windows" ||
+      step.action === "app-ui" ||
+      step.action === "browser-ui"
     ) {
       return null;
     }
@@ -651,7 +683,7 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
   if (step.kind === "workbench") {
     const action = parseWorkbenchAction(step);
     if (!action) return "prompt";
-    if ((action.op === "branch" || action.op === "browser-open") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
+    if ((action.op === "branch" || action.op === "browser-open" || action.op === "open-folder") && !context.workspaces.some((item) => item.id === step.workspaceId)) return "workspace";
     return null;
   }
   if (step.kind === "agent") {

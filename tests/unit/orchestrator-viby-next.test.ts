@@ -441,22 +441,25 @@ describe("Viby next-level capabilities", () => {
 
     // Wait until both parallel wave CLIs have started and finished their start step
     await eventually(() => ctx.spawns.length === 2 && ctx.svc.orchestratorView().turns.at(-1)?.steps?.[1].state === "done");
-    // Keep pty-1 busy while settling pty-2: verify must still wait on pty-1 (wave join)
-    ctx.svc.onPtyActivity("pty-1", true);
-    ctx.svc.onPtyActivity("pty-2", true);
-    ctx.svc.onPtyActivity("pty-2", false);
+    // The two starts run in parallel, so either can get pty-1. The fix goes to the CLI of the last start step.
+    const fixer = ctx.svc.orchestratorView().turns.at(-1)!.steps![1].ptyId!;
+    const other = fixer === "pty-1" ? "pty-2" : "pty-1";
+    // Keep the other CLI busy while settling the fixer: verify must still wait on it (wave join)
+    ctx.svc.onPtyActivity(other, true);
+    ctx.svc.onPtyActivity(fixer, true);
+    ctx.svc.onPtyActivity(fixer, false);
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(verifyCalls).toBe(0);
 
-    // Settle pty-1 so verify attempt 1 runs, fails, and queues fix tail to pty-2
-    ctx.svc.onPtyActivity("pty-1", false);
+    // Settle the other CLI so verify attempt 1 runs, fails, and queues the fix tail to the fixer
+    ctx.svc.onPtyActivity(other, false);
     await eventually(() => verifyCalls === 1);
     nowMs += 6000;
-    await eventually(() => ctx.sent.some((m) => m.ptyId === "pty-2" && m.text.includes("FAIL src/auth.test.ts")));
+    await eventually(() => ctx.sent.some((m) => m.ptyId === fixer && m.text.includes("FAIL src/auth.test.ts")));
 
-    // Settle pty-2 after receiving the fix prompt so verify attempt 2 runs and passes
-    ctx.svc.onPtyActivity("pty-2", true);
-    ctx.svc.onPtyActivity("pty-2", false);
+    // Settle the fixer after receiving the fix prompt so verify attempt 2 runs and passes
+    ctx.svc.onPtyActivity(fixer, true);
+    ctx.svc.onPtyActivity(fixer, false);
     await running;
 
     expect(verifyCalls).toBe(2);

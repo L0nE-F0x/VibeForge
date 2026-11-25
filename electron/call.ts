@@ -370,8 +370,12 @@ export class Call {
       // Talked over, the rest waits for the next quiet moment.
       while (live() && this.pending.length && !this.interrupted) await this.say(this.pending.shift() ?? "");
     } catch (error) {
-      this.opts.log.warn(`Call: ${describeError(error).split("\n")[0]}`);
-      if (live()) this.said = error instanceof Error ? error.message : String(error);
+      const detail = describeError(error).split("\n")[0];
+      this.opts.log.warn(`Call: ${detail}`);
+      if (live()) {
+        this.said = this.opts.words.coreText(detail);
+        this.changed();
+      }
     } finally {
       if (live()) {
         this.busy = false;
