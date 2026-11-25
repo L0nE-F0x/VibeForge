@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Fixed
 
 - **A terminal keeps the end of its output when its program finishes.** When a program printed a lot and ended while VibeForge was still catching up with it (a long build or test run, a big log), its last lines could be missing from the pane, from the run's saved screen and from its transcript. This happened most with Node 22, and also when the pane was opening or coming back into view at that moment. Those last lines could also show up ahead of the lines printed before them. Now every line arrives, in the order it was printed.
+- **A yes in your own words runs the plan that waits for Go, when nothing in it needs your Go itself.** Words the go list doesn't catch, like "alright, do the thing you said", go to Viby's planner. When it reads them as a yes to the waiting plan, VibeForge runs that plan as its card shows it, instead of putting up a new copy that waits again. A plan with a step that waits for Go even in Just go (stopping a CLI, a command that deletes, applying a copy), or one Viby made from what it read on a screen or in a file, still waits: Viby says why, and it runs when you say go or press Go. A yes never runs a plan that changed after you saw it.
+
+### Security
+
+- **A plan Viby made from what it read keeps waiting for your Go when it comes back unchanged.** If Viby made a plan after reading a screen, file, diff or reply, and its planner handed back the same steps in a later turn that read nothing, the new copy no longer counted as made from what was read, so under Just go its steps could run without Go. The copy now waits for Go as the first one did.
 
 ## [3.7.0] - 2026-11-25
 

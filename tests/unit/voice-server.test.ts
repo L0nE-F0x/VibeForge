@@ -107,11 +107,13 @@ describe("whisper-cli, when there is no whisper-server", () => {
     const bin = tempDir();
     const saw = path.join(bin, "audio-path");
     const cli = path.join(bin, "whisper-cli");
-    // Writes down where its audio is, then takes its time.
-    fs.writeFileSync(cli, `#!/bin/sh\nwhile [ "$1" != "-f" ]; do shift; done\nprintf '%s' "$2" > ${JSON.stringify(saw)}\nexec sleep 30\n`, { mode: 0o755 });
+    // Writes down where its audio is, then takes its time. Written beside it and moved into place, so
+    // the test never reads the file between the shell making it and printf filling it.
+    fs.writeFileSync(cli, `#!/bin/sh\nwhile [ "$1" != "-f" ]; do shift; done\nprintf '%s' "$2" > ${JSON.stringify(`${saw}.part`)}\nmv ${JSON.stringify(`${saw}.part`)} ${JSON.stringify(saw)}\nexec sleep 30\n`, { mode: 0o755 });
     const { instance } = voice({ idleMs: 400, answerMs: 0, cliOnly: cli });
     const words = instance.transcribe(speech()).catch(() => null);
-    for (let tries = 0; tries < 100 && !fs.existsSync(saw); tries += 1) await sleep(20);
+    // A busy machine can take a while to start it.
+    for (const end = Date.now() + 15_000; !fs.existsSync(saw) && Date.now() < end; ) await sleep(20);
     const audio = fs.readFileSync(saw, "utf8");
     expect(fs.existsSync(audio)).toBe(true);
     instance.dispose();

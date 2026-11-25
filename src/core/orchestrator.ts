@@ -79,6 +79,7 @@ export const PLAN_SCHEMA = {
   properties: {
     say: { type: "string" },
     hangup: { type: "boolean" },
+    confirmWaiting: { type: "boolean" },
     steps: {
       type: "array",
       items: {
@@ -126,7 +127,7 @@ export const STRICT_PLAN_SCHEMA = {
     ...PLAN_SCHEMA.properties,
     steps: { ...PLAN_SCHEMA.properties.steps, items: { ...PLAN_SCHEMA.properties.steps.items, required: [...STEP_FIELDS] } },
   },
-  required: ["say", "steps", "hangup"],
+  required: ["say", "steps", "hangup", "confirmWaiting"],
 } as const;
 
 export interface BrainOptions {
@@ -433,7 +434,7 @@ export function orchestratorRules(context: PlanContext): string {
     "- Your turn ends as soon as you output JSON; nothing runs in the background after your answer unless it is in `steps`. Never say in `say` that you are searching, checking, looking up, creating, or starting something when `steps` is empty — emit the step instead.",
     "- `say` is spoken aloud like a sharp, warm human teammate on a phone call: one or two natural, conversational sentences in the person's language, using contractions ('I'll create your Reviewer agent and schedule the weekday audit.', 'Switched to VibeForge.'). No stiff filler, no markdown, and never an id such as pty-3: name items by their human names.",
     "- Your steps are shown as a card, and anything that changes something can wait for the person's Go before it runs (in Plan mode it always does). So unless every step only shows or reads, word `say` as what will happen ('I'll stop Claude Code in VibeForge, then start a fresh one.'), never as done or underway: no 'Done', 'Going', 'On it', 'Sorted' or 'I've…' for steps that haven't run.",
-    "- When a request starts with a note that your last plan is waiting for Go and hasn't run, nothing in it has happened yet. If the person is agreeing to it, thanking you or asking why it hasn't happened, return those same steps again, so the card stays in front of them, and say it runs as soon as they say go or press Go.",
+    "- When a request starts with a note that your last plan is waiting for Go and hasn't run, nothing in it has happened yet. If the person is saying yes to that plan as it stands, in any words ('alright, do the thing you said', 'yes, that one'), set top-level `confirmWaiting: true` with steps: [] and a short `say`; VibeForge then runs it or tells them why it still waits. If they are thanking you or asking why it hasn't happened, return those same steps again, so the card stays in front of them, and say it runs as soon as they say go or press Go. A question, a doubt, a change or thanks alone is not a yes: leave `confirmWaiting` false or omitted.",
     "",
     "Workspaces:",
     workspaces,
@@ -487,6 +488,8 @@ export interface RawPlan {
   say: string;
   steps: RawStep[];
   hangup?: boolean;
+  /** The person said yes to the plan that waits for Go. Whether it then runs is VibeForge's call (service/orchestrator.ts). */
+  confirmWaiting?: boolean;
 }
 
 /** What one planning turn printed: the plan, its words, the session it reported, and any error. */
@@ -664,6 +667,7 @@ function asPlan(value: unknown): RawPlan | null {
   return {
     say: trimmed ? (baseSay ? `${baseSay} (${trimNote})` : trimNote) : baseSay,
     ...(record.hangup === true ? { hangup: true } : {}),
+    ...(record.confirmWaiting === true ? { confirmWaiting: true } : {}),
     steps,
   };
 }

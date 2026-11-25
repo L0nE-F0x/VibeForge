@@ -2062,4 +2062,10 @@ export const es: Catalog = {
   "core.updateVerifyFailed": "No se pudo verificar la suma SHA-256 de esta versión ({detail}), así que VibeForge se negó a ejecutar el instalador.",
   "orch.attachImage": "Adjuntar imagen",
   "orch.removeImage": "Quitar imagen",
+
+  // ---------------------------------------------------------------- a yes Viby heard to a plan that waits
+  "core.orchConfirmedRan": "Ejecuto el plan al que dijiste que sí.",
+  "core.orchConfirmedRisky": "Ese plan aún no se ha ejecutado: uno de sus pasos cambia o detiene algo, así que espera a que digas adelante o pulses Adelante.",
+  "core.orchConfirmedRead": "Ese plan aún no se ha ejecutado: lo hice a partir de lo que leí en una pantalla o en un archivo, así que espera a que digas adelante o pulses Adelante.",
+  "core.orchConfirmedFix": "Ese plan aún no se ha ejecutado: en un paso de su tarjeta hay que elegir algo primero.",
 };
