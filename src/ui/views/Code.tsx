@@ -287,7 +287,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <WorkspaceList workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
+        <WorkspaceList active={active} workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
 
         {!current ? (
           <Empty

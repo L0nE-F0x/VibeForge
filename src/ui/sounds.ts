@@ -68,8 +68,10 @@ const PEAK = 0.22;
 /** Event sounds closer together than this are one moment; the first one plays. */
 const GAP_MS = 700;
 
+/** After the last sound ends the output is closed this long later. */
+export const CLOSE_AFTER_MS = 30_000;
+
 let settings: SoundSettings | null = null;
-let context: AudioContext | null = null;
 let lastEvent = 0;
 let quiet: { value: boolean; at: number } | null = null;
 
@@ -78,19 +80,105 @@ export function setSoundSettings(next: SoundSettings | undefined): void {
   settings = next ?? null;
 }
 
-function audio(): AudioContext | null {
-  try {
-    context ??= new AudioContext();
-    if (context.state === "suspended") void context.resume();
-    return context;
-  } catch {
-    return null;
+/** How long a sound waits for the output to start before its time is counted anyway. */
+const START_WAIT_MS = 3000;
+
+type Timers = { set: (run: () => void, ms: number) => ReturnType<typeof setTimeout>; clear: (timer: ReturnType<typeof setTimeout>) => void };
+
+/**
+ * The audio output, open only while it is needed. A chime opens it (or resumes it); when the last
+ * chime has ended it is suspended at once, and closed after CLOSE_AFTER_MS without another, so no
+ * playback stream sits open playing silence between sounds. The next chime makes a new one.
+ * (Chromium's audio service process stays once started either way: Electron 45 has no idle quit
+ * for it.) Tests hand in their own context and timers.
+ */
+export class SoundOutput {
+  private context: AudioContext | null = null;
+  /** Until the output is running again: a sound's length is counted from then. */
+  private ready: Promise<void> | null = null;
+  /** A suspend was asked for; its state may still read "running" until it lands. */
+  private suspending = false;
+  private playing = 0;
+  private closeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly make: () => AudioContext = () => new AudioContext(),
+    private readonly timers: Timers = { set: (run, ms) => setTimeout(run, ms), clear: (timer) => clearTimeout(timer) },
+  ) {}
+
+  /** The context to schedule a sound on, or null if there's no audio output at all. */
+  open(): AudioContext | null {
+    if (this.closeTimer) {
+      this.timers.clear(this.closeTimer);
+      this.closeTimer = null;
+    }
+    try {
+      if (!this.context || this.context.state === "closed") {
+        this.context = this.make();
+        this.suspending = false;
+      }
+      // Notes are timed on the context's own clock, which stands still while it is suspended, so a
+      // sound scheduled now starts as soon as the output runs: nothing is cut off.
+      if (this.suspending || this.context.state !== "running") {
+        this.suspending = false;
+        this.ready = this.context.resume().catch(() => undefined);
+      } else this.ready = null;
+      return this.context;
+    } catch {
+      this.context = null;
+      return null;
+    }
+  }
+
+  /** A sound was scheduled on the context `open` gave: `ms` after the output runs it has ended, and `done` runs. */
+  started(ms: number, done: () => void = () => undefined): void {
+    this.playing += 1;
+    let counted = false;
+    const count = () => {
+      if (counted) return;
+      counted = true;
+      this.timers.set(() => {
+        done();
+        this.ended();
+      }, ms);
+    };
+    if (!this.ready) {
+      count();
+      return;
+    }
+    void this.ready.then(count);
+    this.timers.set(count, START_WAIT_MS);
+  }
+
+  /** Whether an output is open now (running or suspended). */
+  get isOpen(): boolean {
+    return this.context !== null;
+  }
+
+  private ended(): void {
+    this.playing = Math.max(0, this.playing - 1);
+    if (this.playing || !this.context) return;
+    this.suspending = true;
+    void this.context.suspend().catch(() => undefined);
+    this.closeTimer = this.timers.set(() => this.close(), CLOSE_AFTER_MS);
+  }
+
+  private close(): void {
+    this.closeTimer = null;
+    if (this.playing || !this.context) return;
+    const gone = this.context;
+    this.context = null;
+    this.ready = null;
+    void gone.close().catch(() => undefined);
   }
 }
 
+const output = new SoundOutput();
+
 function play(shape: Note[], volume: number): void {
-  const ctx = audio();
-  if (!ctx || volume <= 0) return;
+  if (volume <= 0) return;
+  const ctx = output.open();
+  if (!ctx) return;
   const start = ctx.currentTime + 0.01;
   const master = ctx.createGain();
   master.gain.value = PEAK * volume;
@@ -112,7 +200,7 @@ function play(shape: Note[], volume: number): void {
     osc.stop(t1 + 0.02);
     end = Math.max(end, t1);
   }
-  setTimeout(() => master.disconnect(), (end - ctx.currentTime + 0.2) * 1000);
+  output.started((end - ctx.currentTime + 0.2) * 1000, () => master.disconnect());
 }
 
 /** Omarchy's Do Not Disturb, asked at most every few seconds. */

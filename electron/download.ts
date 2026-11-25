@@ -23,14 +23,44 @@ export interface DownloadOptions {
 }
 
 /**
+ * Electron's fetch without the session's cookies (a sign-in elsewhere is no business of a model
+ * download's) and without its HTTP cache: Chromium would otherwise keep a second copy of every
+ * model, voice and runtime archive in the profile's Cache folder, hundreds of megabytes nothing
+ * ever reads again. Electron 45 honours `no-store` (measured: three 20 MB downloads left 63 MB in
+ * Cache without it and nothing with it).
+ */
+export const fetchUncached = (url: string, init: { signal: AbortSignal }): Promise<Response> => net.fetch(url, { ...init, credentials: "omit", cache: "no-store" });
+
+/** The marker, in Chromium's profile folder beside the cache it describes, that says it was cleared. */
+export const CACHE_CLEARED_MARK = "vibeforge-download-cache-cleared";
+
+/**
+ * Once per profile: empties the default session's HTTP cache, where earlier versions left a
+ * copy of every download. Only the HTTP cache: cookies, storage and the browser dock's own
+ * `persist:dock` partition are untouched. The marker is written only after the clear succeeds, so
+ * a failure tries again on the next start. Resolves to whether it cleared the cache this time.
+ */
+export async function clearOldDownloadCopies(opts: { profile: string; clearCache: () => Promise<void>; log: { info(message: string): void; warn(message: string): void } }): Promise<boolean> {
+  const mark = path.join(opts.profile, CACHE_CLEARED_MARK);
+  if (fs.existsSync(mark)) return false;
+  try {
+    await opts.clearCache();
+    fs.writeFileSync(mark, `${new Date().toISOString()}\n`);
+    opts.log.info("Cleared the copies of earlier downloads from Chromium's HTTP cache");
+    return true;
+  } catch (error) {
+    opts.log.warn(`Could not clear the copies of earlier downloads from the HTTP cache: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+/**
  * Downloads files one after another into place, each through a .part file that is renamed at the
  * end and removed on failure or abort. A file is kept only with the size and SHA-256 it was
  * pinned to. `progress` gets the bytes so far and the total.
  */
 export async function downloadFiles(files: Download[], opts: DownloadOptions): Promise<number> {
-  // Without the session's cookies: the browser dock shares it, and a sign-in there is no business of
-  // a model download's.
-  const get = opts.fetch ?? ((url, init) => net.fetch(url, { ...init, credentials: "omit" }));
+  const get = opts.fetch ?? fetchUncached;
   const open = opts.open ?? ((file) => fs.createWriteStream(file));
   const total = files.reduce((sum, file) => sum + file.bytes, 0);
   let received = 0;
