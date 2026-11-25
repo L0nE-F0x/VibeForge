@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.9.1] - 2026-11-25
+
+**3.9.1: Viby's desktop computer use works on Hyprland 0.56+ Lua configs and 1.25× scaled displays, with working keyboard/pointer fallbacks and full error messages.**
+
+### Fixed
+
+- **Desktop window focusing and cursor movement work on Hyprland 0.56+ Lua configs.** `HyprlandWaylandDriver` now checks `hyprctl status` for `configProvider: lua` (and auto-retries in Lua mode if a legacy dispatch returns an `hl.dispatch` error), using `hl.dsp.focus(...)` and `hl.dsp.cursor.move(...)` when Lua is active. When focusing by window address reports not found, it falls back to regex-escaped `title:^...$` / `class:^...$` matching so titles containing `$` or brackets work reliably.
+- **Desktop `Super+<number>` workspace switching and `wtype` key combos work.** `Super+0`–`Super+9` now dispatch native Hyprland workspace switching (`workspace` / `hl.dsp.focus({ workspace })`) without needing a virtual keyboard tool. `buildWtypeArgs` maps `super` to `wtype`'s `logo` modifier and punctuation keys to XKB keysym names (`period`, `comma`, `slash`, `underscore`, `minus`), with ordered `wtype` → `ydotool` → `dotool` keyboard and `/dev/uinput` → `ydotool` → `dotool` pointer fallbacks.
+- **Desktop clicks, moves, drags, and scrolls account for display scaling.** Screenshot coordinates are converted to Hyprland logical coordinates using the active monitor's scale (for example, `1.25×` on a `2560×1440` display maps to `2048×1152`) and layout origin, with `coords=logical` available to pass unscaled coordinates directly.
+- **Computer-use failures show the full error and install hint.** Command failures preserve both `stderr` and `stdout`, missing-binary checks name the missing tool and suggest the system package manager command (plus `/dev/uinput` / `ydotoold` hints), and failed step chips in Viby wrap selectable multi-line text instead of truncating at 300px.
+
 ## [3.9.0] - 2026-11-25
 
 **3.9.0: Viby can look at and use the screen where you allow it, answers sooner with Claude Code, understands misheard names, and restarting after an update works again.**
@@ -1227,7 +1238,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.9.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.9.1...HEAD
+[3.9.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.1
 [3.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.0
 [3.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.8.0
 [3.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.2

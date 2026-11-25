@@ -2106,6 +2106,7 @@ export const de: Catalog = {
   "core.cuPlaceDesktop": "Ganzer Desktop",
   "core.orchComputerNoWindow": "Kein offenes Fenster stimmt mit diesem Namen überein.",
   "core.orchComputerNoSurface": "Diese Ansicht ist gerade nicht geöffnet.",
+  "core.orchComputerMissingTool": "Desktop-{action} fehlgeschlagen: {detail}. {hint}",
   "core.updateNoDigest": "Dieses Release hat keine geprüfte SHA-256-Prüfsumme von GitHub; VibeForge hat die Installation abgelehnt.",
   "core.updateVerifyFailed": "Die SHA-256-Prüfsumme dieses Releases konnte nicht geprüft werden ({detail}); VibeForge hat die Installation abgelehnt.",
   "orch.attachImage": "Bild anhängen",

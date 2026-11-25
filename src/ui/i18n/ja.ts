@@ -2107,6 +2107,7 @@ export const ja: Catalog = {
   "core.cuPlaceDesktop": "デスクトップ全体",
   "core.orchComputerNoWindow": "その名前に一致する開いたウィンドウが見つかりません。",
   "core.orchComputerNoSurface": "その画面は現在開いていません。",
+  "core.orchComputerMissingTool": "デスクトップ操作（{action}）に失敗しました: {detail}。{hint}",
   "core.updateNoDigest": "このリリースには GitHub の検証済み SHA-256 チェックサムがないため、VibeForge はインストーラーの実行を拒否しました。",
   "core.updateVerifyFailed": "このリリースの SHA-256 チェックサムを確認できなかったため（{detail}）、VibeForge はインストーラーの実行を拒否しました。",
   "orch.attachImage": "画像を添付",

@@ -133,14 +133,15 @@ function StepChip({ step }: { step: OrchestratorStep }) {
 
   if (step.state === "failed") {
     const label = step.name || (step.branch ? shortBranch(step.branch) : "") || workspace?.name || step.asked || step.kind;
+    const errorText = step.error ? coreText(step.error) : "";
     return (
-      <span className="viby-chip failed" {...tipProps(step.error ? coreText(step.error) : undefined)}>
+      <div className="viby-chip failed step-error selectable" {...tipProps(errorText || undefined)}>
         <CircleAlert size={11} />
-        <span className="truncate">
+        <span className="viby-chip-error">
           {label}
-          {step.error ? ` · ${coreText(step.error)}` : ""}
+          {errorText ? ` · ${errorText}` : ""}
         </span>
-      </span>
+      </div>
     );
   }
 

@@ -2119,6 +2119,7 @@ export const en = {
   "core.cuPlaceDesktop": "Whole desktop",
   "core.orchComputerNoWindow": "No open window matched that name.",
   "core.orchComputerNoSurface": "That view is not open right now.",
+  "core.orchComputerMissingTool": "Desktop {action} failed: {detail}. {hint}",
   "core.updateNoDigest": "This release has no verified SHA-256 checksum from GitHub, so VibeForge refused to run its installer.",
   "core.updateVerifyFailed": "Could not verify this release's SHA-256 checksum ({detail}), so VibeForge refused to run its installer.",
   "orch.attachImage": "Attach image",

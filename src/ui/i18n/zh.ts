@@ -2107,6 +2107,7 @@ export const zh: Catalog = {
   "core.cuPlaceDesktop": "整个桌面",
   "core.orchComputerNoWindow": "没有找到匹配该名称的已打开窗口。",
   "core.orchComputerNoSurface": "该视图当前未打开。",
+  "core.orchComputerMissingTool": "桌面操作（{action}）失败：{detail}。{hint}",
   "core.updateNoDigest": "此版本缺少 GitHub 验证的 SHA-256 校验和，VibeForge 拒绝运行安装脚本。",
   "core.updateVerifyFailed": "无法验证此版本的 SHA-256 校验和（{detail}），VibeForge 拒绝运行安装脚本。",
   "orch.attachImage": "添加图片",
