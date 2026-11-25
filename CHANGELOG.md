@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **Sounds no longer start Chromium's audio process.** VibeForge's chimes now play through PipeWire's `pw-play`, as calls and dictation already do. Before, the first chime of a session started Chromium's audio process, which then stayed until VibeForge quit: about 22 MB of memory counted on its own (77 MB as `top` counts it). In a test run, 14 chimes left no audio process behind. A chime starts about 2 ms after the window asks for it, then waits on PipeWire's own 20 ms buffer. The seven chimes are written once to a `chimes` folder in VibeForge's data folder (228 KB, readable only by you). Chimes less than a quarter of a second apart now play as one. On a computer without PipeWire, the window plays them as before.
+
+### Fixed
+
+- **The phone page shows Viby's answer to a yes in the phone's language.** When Viby's planner takes what you said as a yes to a plan waiting for Go, Viby says that it's running the plan, or why the plan still waits. The desktop showed this in your language, but the phone page showed it in English. It now uses the phone page's language, like the rest of the page.
+
 ## [3.7.1] - 2026-11-25
 
 **3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**

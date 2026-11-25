@@ -62,8 +62,16 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
   const s = ctx.svc;
   /** Where the last folder picked sits, so the next folder dialog opens there. */
   let pickedBeside: string | null = null;
-  const chimes = new Chimes({ dir: path.join(roots.dataRoot, "chimes"), resolveBin: (bin) => whichBin(bin), log });
-  app.once("will-quit", () => chimes.dispose());
+  /** The chimes' player, made with the first chime. */
+  let chimes: Chimes | null = null;
+  const chimePlayer = (): Chimes => {
+    if (!chimes) {
+      const made = new Chimes({ dir: path.join(roots.dataRoot, "chimes"), resolveBin: (bin) => whichBin(bin), log });
+      app.once("will-quit", () => made.dispose());
+      chimes = made;
+    }
+    return chimes;
+  };
   return {
     "app.info": () => ({
       version: app.getVersion(),
@@ -145,7 +153,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       }
     },
     "app.doNotDisturb": () => omarchyDoNotDisturb(),
-    "app.chime": (name, volume) => chimes.play(name, volume),
+    "app.chime": (name, volume) => chimePlayer().play(name, volume),
     "app.autostart": () => tray.autostart,
     "app.setAutostart": (on) => {
       tray.setAutostart(on);

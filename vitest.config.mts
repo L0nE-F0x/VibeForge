@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 // leaves code untested fails here instead of hiding in the total. Raise one when its tests improve;
 // a new file is held by its folder's total below.
 const floors: Record<string, number> = {
+  'electron/chimes.ts': 96,
   'src/core/activity.ts': 68,
   'src/core/agent-talk.ts': 99,
   'src/core/autostart.ts': 99,
@@ -74,11 +75,13 @@ const floors: Record<string, number> = {
   'src/core/workspaces.ts': 91,
   'src/core/worktrees.ts': 87,
   'src/shared/changes.ts': 99,
+  'src/shared/chimes.ts': 99,
   'src/shared/dictation.ts': 99,
   'src/shared/dock-url.ts': 99,
   'src/shared/orchestrator.ts': 99,
   'src/shared/pixel.ts': 91,
   'src/shared/text.ts': 75,
+  'src/ui/sounds.ts': 87,
 };
 
 export default defineConfig({
