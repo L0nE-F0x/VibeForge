@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **`vibeforge task` and `vibeforge tell` find an agent named in Japanese, Chinese, Cyrillic or emoji.** Every name with no letter a-z in it was matched by the same stand-in, so with two such agents, `vibeforge task レビュー "…"` could hand the task to テスト, a name that matched no agent still found one, and a message to one's CLI could be pasted into the other's. Names are now matched as written first, in any case and however an accented letter was typed.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

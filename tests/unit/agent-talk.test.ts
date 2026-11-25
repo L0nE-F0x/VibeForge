@@ -85,6 +85,28 @@ describe("who can be reached", () => {
     expect(resolveTarget("grok", "a", list)).toMatchObject({ ok: false, reason: "none" });
   });
 
+  it("finds an agent named in other letters by its name, not by the slug all such names share", () => {
+    const inJapanese: Names = { agent: (id) => (id === "a1" ? "レビュー" : id === "a2" ? "テスト" : null), engine: names.engine };
+    const list = reachable(
+      [
+        session({ ptyId: "a", agentId: "a1" }),
+        session({ ptyId: "b", agentId: "a2", startedAt: new Date(AT + 1000).toISOString() }),
+        session({ ptyId: "c", title: "Codex", startedAt: new Date(AT + 2000).toISOString() }),
+      ],
+      inJapanese,
+    );
+    // Both names slug to "item", so their handles are "item" and "item-2".
+    expect(list.map((item) => [item.ptyId, item.handle])).toEqual([
+      ["a", "item"],
+      ["b", "item-2"],
+      ["c", "codex"],
+    ]);
+    expect(resolveTarget("テスト", "c", list)).toMatchObject({ ok: true, to: { ptyId: "b" } });
+    expect(resolveTarget(" レビュー ", "c", list)).toMatchObject({ ok: true, to: { ptyId: "a" } });
+    expect(resolveTarget("審査", "c", list)).toMatchObject({ ok: false, reason: "none" });
+    expect(resolveTarget("item-2", "c", list)).toMatchObject({ ok: true, to: { ptyId: "b" } });
+  });
+
   it("labels a message with its sender and how to answer, and keeps keys out of it", () => {
     expect(messageText({ fromLabel: "Codex", fromHandle: "codex", text: "Look at a.ts", answer: "tell" })).toBe(
       '[Message from Codex, sent through VibeForge]\nLook at a.ts\n\n(To answer, run: vibeforge tell codex "your answer")',
@@ -766,6 +788,27 @@ describe("a review loop and handing out tasks", () => {
       expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: name, text: "Tidy", start: false })).toMatchObject({ ok: true });
     }
     expect(await ctx.svc.handTask({ fromPty: sender.ptyId, agent: "nobody", text: "x" })).toMatchObject({ ok: false, error: expect.stringContaining("Agents: vibeforge-github-repo-manager.") });
+    ctx.svc.close();
+  });
+
+  it("hands a task to the agent named in other letters, never to the first one whose name has no a-z", async () => {
+    const repo = gitRepo();
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(repo).workspaces[0];
+    const review = await ctx.svc.saveAgent({ name: "レビュー", brief: "b", engine: "argy", places: [repo] });
+    const test = await ctx.svc.saveAgent({ name: "テスト", brief: "b", engine: "argy", places: [repo] });
+    // "Ama\u0301lia" is Amália typed as a plain a and an accent.
+    const amalia = await ctx.svc.saveAgent({ name: "Amália", brief: "b", engine: "argy", places: [repo] });
+    const sender = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "pasty" });
+    const agentOf = async (agent: string) => {
+      const made = await ctx.svc.handTask({ fromPty: sender.ptyId, agent, text: "Tidy", start: false });
+      return made.ok ? ctx.svc.listTasks().find((task) => task.id === made.taskId)?.agentId : made.error;
+    };
+    expect(await agentOf("テスト")).toBe(test.id);
+    expect(await agentOf("レビュー")).toBe(review.id);
+    expect(await agentOf(test.id)).toBe(test.id);
+    expect(await agentOf("Ama\u0301lia")).toBe(amalia.id);
+    expect(await agentOf("存在しない")).toContain('No agent called "存在しない"');
     ctx.svc.close();
   });
 

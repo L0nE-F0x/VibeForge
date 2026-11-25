@@ -1,8 +1,8 @@
-import { cleanText, DEFAULT_WAIT_MS, taskReportText } from "../agent-talk.js";
+import { cleanText, DEFAULT_WAIT_MS, sameName, taskReportText } from "../agent-talk.js";
 import { isCodingCli } from "../checkout.js";
 import { cwdAllowed } from "../places.js";
 import { replyLogFor } from "../replies.js";
-import { slugify } from "../slug.js";
+import { hasSlug, slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
 import type { TalkState } from "../types.js";
 import { isGitRepo } from "../vcs.js";
@@ -438,12 +438,14 @@ export class HandedTasks {
 
 /**
  * The agent `vibeforge task` names: by id (what `vibeforge who` prints), by name, or by the
- * 24-letter cut of its name that `who` printed before 2.10.
+ * 24-letter cut of its name that `who` printed before 2.10. The name is tried as written before its
+ * slug: one in other letters (テスト) has only the slug every such name has.
  */
 export function findAgent<T extends { id: string; name: string }>(agents: readonly T[], wanted: string): T | null {
+  const named = agents.find((item) => item.id === wanted) ?? agents.find((item) => sameName(item.name, wanted));
+  if (named || !hasSlug(wanted)) return named ?? null;
   const slug = slugify(wanted, 48);
   return (
-    agents.find((item) => item.id === wanted) ??
     agents.find((item) => item.id === slug || slugify(item.name, 48) === slug) ??
     agents.find((item) => slugify(item.name, 24) === slug) ??
     null
