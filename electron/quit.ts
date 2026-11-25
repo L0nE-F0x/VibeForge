@@ -1,4 +1,4 @@
-import { app, dialog } from "electron";
+import { app, dialog, powerMonitor } from "electron";
 import { describeError } from "../src/core/log.js";
 import { stopCompanion } from "./companion.js";
 import { oneAtATime, settleWithin } from "./guards.js";
@@ -57,24 +57,38 @@ export class Quit {
     app.quit();
   }
 
+  /**
+   * The phone page, Syncthing and the terminals stop side by side, so a Syncthing slow to end no
+   * longer holds up the terminals writing their files; the core closes once all three are done.
+   */
   private async shutdown(): Promise<void> {
     const { ctx } = this;
     const { log } = ctx;
-    const stopped = await settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`));
-    if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
-    if (this.parts.sync) {
-      const ended = await settleWithin(this.parts.sync.stop(), SYNC_STOP_MS, (error) => log.warn(`Sync did not stop cleanly: ${describeError(error)}`));
-      if (!ended) log.warn("Sync did not stop in time; quitting without waiting for it");
-    }
+    const phone = settleWithin(stopCompanion(), COMPANION_STOP_MS, (error) => log.warn(`The phone page did not stop cleanly: ${describeError(error)}`)).then((stopped) => {
+      if (!stopped) log.warn("The phone page did not stop in time; quitting without waiting for it");
+    });
+    const sync = this.parts.sync
+      ? settleWithin(this.parts.sync.stop(), SYNC_STOP_MS, (error) => log.warn(`Sync did not stop cleanly: ${describeError(error)}`)).then((ended) => {
+          if (!ended) log.warn("Sync did not stop in time; quitting without waiting for it");
+        })
+      : Promise.resolve();
     this.parts.voice.dispose();
+    await Promise.all([phone, sync, this.stopTerminals()]);
     if (!ctx.service) return;
-    ctx.service.prepareShutdown();
-    await ctx.supervisor.shutdown(7000);
-    await Promise.race([ctx.service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
     ctx.service.shutdown();
     // A task deleted moments ago still has its copy's branch to drop: give git a moment for it.
     await Promise.race([ctx.service.close(), new Promise((resolve) => setTimeout(resolve, CLOSE_WAIT_MS))]);
     ctx.service = null;
+  }
+
+  /** Every terminal ends and writes its run files, and the core waits for what it records about them. */
+  private async stopTerminals(): Promise<void> {
+    const { ctx } = this;
+    const service = ctx.service;
+    if (!service) return;
+    service.prepareShutdown();
+    await ctx.supervisor.shutdown(7000);
+    await Promise.race([service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
   }
 
   /**
@@ -137,5 +151,18 @@ export class Quit {
     });
 
     app.on("window-all-closed", () => app.quit());
+
+    // A reboot or shutdown: the system is asked to wait (logind's delay, a few seconds) while
+    // VibeForge quits the usual way, so every terminal's run files are written first.
+    // powerMonitor can only be used once Electron is ready.
+    void app.whenReady().then(() =>
+      // Electron hands the listener an event to prevent, though its types say no argument.
+      powerMonitor.on("shutdown", ((event?: { preventDefault(): void }) => {
+        event?.preventDefault();
+        this.ctx.log.info("The system is shutting down; quitting so the terminals' files are written first");
+        this.ctx.quitting = true;
+        app.quit();
+      }) as () => void),
+    );
   }
 }

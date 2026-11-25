@@ -6,10 +6,32 @@
 # `.vibeforge-installer` mark) still updates through the installer.
 # VIBEFORGE_SKIP_BUILD=1 opens the last build without rebuilding.
 # VIBEFORGE_LAUNCH=check prints "build", "current", or "already-running" and exits.
+# `vibeforge --rollback`, `--uninstall` and `--purge-app` run the installer (scripts/install.sh).
+#
+# Started from the app launcher or at login (no terminal to show errors in), Electron's output goes
+# to ~/.cache/vibeforge/launch.log, and an Electron that is gone five seconds later with no
+# VibeForge open is reported with a desktop notification naming the last lines it wrote.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+# The real folder, never a link: an installer copy is versions/<version>/ in the install folder,
+# reached through its `current` link, and a running copy must keep its own files when that link
+# moves to the next version.
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd -P)"
+# The install folder the installer manages: the one above versions/, or this copy itself.
+INSTALL_ROOT="$ROOT"
+if [[ "$(basename "$(dirname "$ROOT")")" == versions && -e "$(dirname "$(dirname "$ROOT")")/.vibeforge-installer" ]]; then
+  INSTALL_ROOT="$(dirname "$(dirname "$ROOT")")"
+fi
 export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
+ELECTRON="$ROOT/node_modules/electron/dist/electron"
+
+# Node for the launcher's own small scripts: the system's when there is one (it starts quickest),
+# else Electron's own, started as plain Node. VibeForge itself needs no system Node.
+if command -v node >/dev/null 2>&1; then
+  NODE=(node)
+else
+  NODE=(env ELECTRON_RUN_AS_NODE=1 "$ELECTRON")
+fi
 
 # The path matches src/core/control.ts. One socket per data folder. Without XDG_RUNTIME_DIR it sits
 # in a /tmp folder only this user can enter; when someone else made that folder, there's no path.
@@ -37,8 +59,20 @@ control_sock() {
 # (tests/unit/launcher.test.ts checks).
 case "${1:-}" in
   tell | who | task | apply | help | --help | -h)
-    command -v node >/dev/null 2>&1 || { echo "vibeforge: node is not on PATH" >&2; exit 1; }
-    VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec node "$ROOT/scripts/talk.mjs" "$@"
+    [[ "${NODE[0]}" == node || -x "$ELECTRON" ]] || { echo "vibeforge: neither node nor VibeForge's Electron was found" >&2; exit 1; }
+    VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec "${NODE[@]}" "$ROOT/scripts/talk.mjs" "$@"
+    ;;
+esac
+
+# The installer's own options, for an installed copy: going back to the version before, or removing
+# VibeForge. Its install.sh is in every copy.
+case "${1:-}" in
+  --rollback | --uninstall | --purge-app)
+    [[ -f "$ROOT/scripts/install.sh" ]] || { echo "vibeforge: $ROOT has no scripts/install.sh" >&2; exit 1; }
+    if [[ -e "$ROOT/.vibeforge-installer" ]]; then
+      VIBEFORGE_HOME="$INSTALL_ROOT" exec bash "$ROOT/scripts/install.sh" "$1"
+    fi
+    exec bash "$ROOT/scripts/install.sh" "$1"
     ;;
 esac
 
@@ -54,7 +88,7 @@ if [[ "${1:-}" == --voice* ]]; then
     if command -v socat >/dev/null 2>&1; then
       printf 'voice %s\n' "$action" | socat - "UNIX-CONNECT:$sock" 2>/dev/null && exit 0
     else
-      node -e 'const s=require("net").connect(process.argv[1]);s.on("error",()=>process.exit(1));s.end("voice "+process.argv[2]+"\n")' "$sock" "$action" 2>/dev/null && exit 0
+      "${NODE[@]}" -e 'const s=require("net").connect(process.argv[1]);s.on("error",()=>process.exit(1));s.end("voice "+process.argv[2]+"\n")' "$sock" "$action" 2>/dev/null && exit 0
     fi
   fi
   # Not running: a press opens VibeForge; a release has nothing to stop.
@@ -75,21 +109,20 @@ note() {
 # How to put a missing part back: an installer copy has no source to build, so it installs again.
 put_back() {
   if [[ -e "$ROOT/.vibeforge-installer" ]]; then
-    printf 'Install VibeForge again: curl -fsSL https://vibe-forge.net/install | VIBEFORGE_HOME=%q bash' "$ROOT"
+    printf 'Install VibeForge again: curl -fsSL https://vibe-forge.net/install | VIBEFORGE_HOME=%q bash' "$INSTALL_ROOT"
   else
     printf 'In %s run: %s' "$ROOT" "$1"
   fi
 }
 
-[[ -x "$ROOT/node_modules/electron/dist/electron" ]] || fail "Electron is missing. $(put_back "npm install")"
-command -v node >/dev/null 2>&1 || fail "node is not on PATH; the terminal host needs it."
+[[ -x "$ELECTRON" ]] || fail "Electron is missing. $(put_back "npm install")"
 
 # A connect with no line is ignored by the control server. A stale socket file fails the connect.
 app_is_running() {
   local sock
   sock="$(control_sock)"
   [[ -S "$sock" ]] || return 1
-  node -e 'const s=require("net").connect(process.argv[1]); s.setTimeout(300); s.on("connect",()=>{s.end(); process.exit(0)}); s.on("timeout",()=>process.exit(1)); s.on("error",()=>process.exit(1));' "$sock"
+  "${NODE[@]}" -e 'const s=require("net").connect(process.argv[1]); s.setTimeout(300); s.on("connect",()=>{s.end(); process.exit(0)}); s.on("timeout",()=>process.exit(1)); s.on("error",()=>process.exit(1));' "$sock"
 }
 
 # True when this checkout should rebuild itself. Installer copies and
@@ -158,4 +191,33 @@ fi
 [[ -f "$ROOT/dist/index.html" && -f "$ROOT/dist-electron/main.js" ]] || fail "The app is not built. $(put_back "npm run build")"
 
 cd "$ROOT"
-exec "$ROOT/node_modules/electron/dist/electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"
+# Through its link into the install folder's runtime/, to the binary itself.
+electron="$(readlink -f "$ROOT/node_modules/electron/dist/electron")"
+
+# From a terminal, Electron takes it over, as always: its errors show there.
+if [[ -t 2 || "${VIBEFORGE_LAUNCH_WAIT:-}" == 0 ]]; then
+  exec "$electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"
+fi
+
+# From the app launcher or at login there is nowhere to see why a start failed. Electron still
+# replaces this script, so whatever started VibeForge (the desktop, a systemd unit) keeps the same
+# process, but its output goes to a log, and a watcher left behind looks after five seconds: if
+# Electron is gone and no VibeForge is open (a second start hands over to the open window and
+# exits), the start failed, and a notification says so with the last lines Electron wrote.
+logdir="${XDG_CACHE_HOME:-$HOME/.cache}/vibeforge"
+mkdir -p "$logdir" 2>/dev/null || logdir="${TMPDIR:-/tmp}"
+log="$logdir/launch.log"
+started=$$
+( (
+  for _ in $(seq "${VIBEFORGE_LAUNCH_WAIT:-50}"); do
+    kill -0 "$started" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$started" 2>/dev/null && exit 0
+  app_is_running && exit 0
+  last="$(grep -v -e '^[[:space:]]*$' -e '^VibeForge: ' "$log" 2>/dev/null | tail -n 3 | cut -c1-300 | tr '\n' ' ' || true)"
+  why="It stopped as it started. ${last:+Last lines: $last}Full output: $log"
+  printf 'VibeForge: %s\n' "$why" >>"$log"
+  fail "$why"
+) </dev/null >/dev/null 2>&1 & )
+exec "$electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@" </dev/null >"$log" 2>&1

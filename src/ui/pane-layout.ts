@@ -167,3 +167,23 @@ function formatAxis(pct: number, px: number): string {
 export function spanCss(span: AxisSpan): { start: string; size: string } {
   return { start: formatAxis(span.startPct, span.startPx), size: formatAxis(span.sizePct, span.sizePx) };
 }
+
+/** The terminal a pane showed: kept for the window's page only, so it outlives a reload but not a restart. */
+export type PaneTerminal = { ptyId: string; runId: string | null };
+
+/**
+ * After the page reloads (it crashed and came back), which panes get their terminal back: each
+ * pane whose remembered terminal is still running, and only one pane per terminal. The rest start
+ * as they would after a restart.
+ */
+export function reattachPanes(panes: readonly PaneNode[], remembered: Readonly<Record<string, PaneTerminal>>, running: ReadonlySet<string>): Map<string, PaneTerminal> {
+  const back = new Map<string, PaneTerminal>();
+  const taken = new Set<string>();
+  for (const pane of panes) {
+    const terminal = remembered[pane.id];
+    if (!terminal || !running.has(terminal.ptyId) || taken.has(terminal.ptyId)) continue;
+    taken.add(terminal.ptyId);
+    back.set(pane.id, terminal);
+  }
+  return back;
+}

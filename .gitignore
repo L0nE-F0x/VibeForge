@@ -25,3 +25,4 @@ android-widget/local.properties
 *.apk
 *.jks
 *.keystore
+reports/

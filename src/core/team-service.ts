@@ -174,7 +174,7 @@ export class TeamService extends ServiceCore {
     this.workspaces.saveLayout(workspaceId, layout);
   }
 
-  startShell(opts: { workspaceId?: string; cwd?: string } & TermSize): Promise<{ ptyId: string }> {
+  startShell(opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize): Promise<{ ptyId: string }> {
     return this.workspaces.startShell(opts);
   }
 
@@ -542,9 +542,9 @@ export class TeamService extends ServiceCore {
     if (!working) void this.messages.pump();
   }
 
-  override async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
+  override async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null, error: string | null = null): Promise<void> {
     const session = this.live.get(ptyId);
-    await super.onPtyExit(ptyId, exitCode, signal);
+    await super.onPtyExit(ptyId, exitCode, signal, error);
     // After the run is written, so what it changed is known.
     if (!this.closed) this.orchestrator.onExit(session);
   }

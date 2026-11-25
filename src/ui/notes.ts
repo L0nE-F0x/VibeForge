@@ -29,3 +29,10 @@ export function notesBlocks(markdown: string): NotesBlock[] {
   }
   return blocks;
 }
+
+/** What a release's notes lead with: their first bold sentence, else their first line. */
+export function headline(notes: string): string {
+  const bold = /\*\*(.+?)\*\*/s.exec(notes);
+  const text = bold ? bold[1] : (notes.split("\n").find((line) => line.trim()) ?? "");
+  return text.replace(/\s+/g, " ").replace(/^[-*#>\s]+/, "").trim().slice(0, 300);
+}

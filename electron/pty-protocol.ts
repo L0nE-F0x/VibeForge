@@ -1,6 +1,6 @@
 // The JSON lines between the window (electron/supervisor.ts) and the terminal host
 // (electron/pty-host.cjs, which reads these types through JSDoc), one object per line. Types
-// only: the host runs on the system Node without a build, so nothing here may exist at run time.
+// only: the host runs as plain JavaScript without a build, so nothing here may exist at run time.
 
 /** What the window asks the host, without the reqId the request adds. */
 export type PtyAsk =
@@ -93,7 +93,7 @@ export interface PtyActivity {
 
 /** What the host says on its own. "ready" comes first, once. */
 export type PtyEvent =
-  | { event: "ready"; pid: number }
+  | { event: "ready"; pid: number; node?: string; uv?: string }
   | ({ event: "data" } & PtyData)
   | ({ event: "exit" } & PtyExit)
   | ({ event: "program" } & PtyProgram)

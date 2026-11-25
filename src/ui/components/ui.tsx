@@ -816,6 +816,16 @@ export function Toasts() {
             <div className="grow">
               <div className="toast-title">{toast.title}</div>
               {toast.body && <div className="toast-body selectable">{toast.body}</div>}
+              {toast.note && <div className="toast-note">{toast.note}</div>}
+              {toast.more?.length ? (
+                <div className="toast-more">
+                  {toast.more.map((item) => (
+                    <Button key={item.label} size="sm" onClick={item.run}>
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
             </div>
             {toast.action && (
               <Button

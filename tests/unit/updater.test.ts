@@ -78,6 +78,39 @@ describe("the update check", () => {
     expect(seen).toEqual([null, "v2.16.0"]);
   });
 
+  it("reads the releases skipped since this version when an update is there, and carries on without them", async () => {
+    const asked: string[] = [];
+    const list = [
+      { tag_name: "v2.17.0", body: "**Newest.**" },
+      { tag_name: "v2.16.1", body: "**Fixed a thing.**" },
+      { tag_name: "v2.16.0", body: "**Added a thing.**" },
+      { tag_name: "v2.15.0", body: "**This one.**" },
+    ];
+    const check = updater({
+      fetch: async (url) => {
+        asked.push(url);
+        return url.endsWith("/latest") ? release("v2.17.0") : new Response(JSON.stringify(list));
+      },
+    });
+    const info = await check.check();
+    expect(asked).toEqual(["https://api.github.com/repos/x/y/releases/latest", "https://api.github.com/repos/x/y/releases?per_page=50"]);
+    expect(info.between.map((item) => item.version)).toEqual(["2.16.1", "2.16.0"]);
+    // Nothing newer: the list isn't asked for.
+    asked.length = 0;
+    await updater({ current: "2.17.0", fetch: async (url) => (asked.push(url), release("v2.17.0")) }).check();
+    expect(asked).toHaveLength(1);
+    // The list failing leaves the newest release and its notes.
+    const failing = await updater({ fetch: async (url) => (url.endsWith("/latest") ? release("v2.17.0") : new Response("", { status: 500 })) }).check();
+    expect(failing).toMatchObject({ available: true, error: null, between: [] });
+    const throwing = await updater({
+      fetch: async (url) => {
+        if (url.endsWith("/latest")) return release("v2.17.0");
+        throw new Error("offline");
+      },
+    }).check();
+    expect(throwing).toMatchObject({ available: true, error: null, between: [] });
+  });
+
   it("says when GitHub didn't answer in time", async () => {
     const slow = updater({
       fetch: async () => {

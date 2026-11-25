@@ -700,3 +700,30 @@
   background: var(--sel-fill);
   border-color: var(--sel-line);
 }
+
+/* After the first steps: a teammate and a quick chat, for when they're wanted. */
+.home-later {
+  display: grid;
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.home-later-label {
+  align-self: center;
+  padding-right: 6px;
+  font-size: var(--fs-xs);
+  color: var(--fg-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-later-item .meta {
+  white-space: normal;
+}
+
+/* The CLIs section is wrapped so the tour can light it; its heading keeps the gap above it. */
+.home-clis:not(:first-child) > .section-title:first-child {
+  margin-top: 22px;
+}

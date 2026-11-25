@@ -37,6 +37,11 @@ export class Sync {
     return process.env.VIBEFORGE_SYNCTHING || path.join(this.ctx.appRoot, "vendor", "syncthing", "syncthing");
   }
 
+  /** Where its Syncthing is and which version it carries, for Settings → This computer. */
+  engineInfo(): { path: string; version: string } {
+    return { path: this.binary(), version: this.engineVersion() };
+  }
+
   private get listen(): string {
     return process.env.VIBEFORGE_SYNC_LISTEN || `tcp://:${SYNC_PORT}`;
   }

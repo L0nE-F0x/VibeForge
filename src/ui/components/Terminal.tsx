@@ -283,10 +283,12 @@ interface LiveProps {
   onLink?: (url: string) => void;
   /** Ctrl+Shift+Enter: open a box for a longer message. Without it the key reaches the program. */
   onCompose?: () => void;
+  /** Everything sent to the program from the keyboard, as it goes. */
+  onInput?: (data: string) => void;
 }
 
 /** A terminal attached to a live PTY in the host. */
-export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus, onLink, onCompose }, ref) {
+export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveTerminal({ ptyId, active = true, autoFocus, onExit, onFocus, onLink, onCompose, onInput }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -297,6 +299,8 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
   const onLinkRef = useRef(onLink);
   const onComposeRef = useRef(onCompose);
   onComposeRef.current = onCompose;
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
   onExitRef.current = onExit;
   onFocusRef.current = onFocus;
   onLinkRef.current = onLink;
@@ -418,6 +422,7 @@ export const LiveTerminal = forwardRef<TerminalHandle, LiveProps>(function LiveT
     });
     const input = term.onData((data) => {
       notePtyInput(ptyId, data);
+      onInputRef.current?.(data);
       void call("pty.write", ptyId, data).catch(() => undefined);
     });
     const binary = term.onBinary((data) => void call("pty.write", ptyId, data).catch(() => undefined));
@@ -620,6 +625,9 @@ export function ReplayTerminal({ ansi, emptyText: given }: { ansi: string; empty
     };
     doFit();
     term.write(ansi || `\x1b[2m${emptyText}\x1b[0m`, () => {
+      // A screen replaced mid-write (a run that just ended) is already disposed: xterm then throws
+      // on scrollToBottom, found by e2e/task-copy.e2e.ts.
+      if (disposed) return;
       term.write("\x1b[?25l");
       term.scrollToBottom();
     });

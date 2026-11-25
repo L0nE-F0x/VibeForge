@@ -414,3 +414,42 @@
   font: 12px/1.6 var(--font-mono);
   white-space: pre-wrap;
 }
+
+/* The short tour: where files are kept, the guided start and its buttons. */
+.tour-places {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.tour-place {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tour-place .mono {
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.tour-try {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tour-card p.tour-more,
+.tour-hero p.tour-more {
+  color: var(--fg-3);
+  font-size: var(--fs-sm);
+}
+
+.tour-card p.tour-failed {
+  color: var(--red);
+  font-size: var(--fs-sm);
+}

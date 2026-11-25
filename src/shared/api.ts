@@ -1,5 +1,6 @@
 // The contract between the renderer and the main process. The renderer calls
 // `call("agents.list")`; the main process implements every key of DeskMethods.
+import type { ComputerFacts } from "./computer.js";
 import type { FileNode } from "../core/files.js";
 import type { RunQuery } from "../core/store.js";
 import type {
@@ -158,6 +159,8 @@ export interface AppInfo {
   hostRunning: boolean;
   /** Why the terminal host isn't running, when it failed to start or kept crashing. */
   hostError: string | null;
+  /** The Node and libuv the terminal host runs on (Electron's own), once it has started. */
+  hostRuntime: { node: string; uv: string } | null;
   electron: string;
   chrome: string;
   node: string;
@@ -168,7 +171,21 @@ export interface AppInfo {
   install: InstallKind;
   /** VibeForge's own log (events and errors; never prompts or terminal output). */
   logFile: string;
+  /** Errors nothing was there to handle, in the main process and the terminal host, since VibeForge started. */
+  unexpectedErrors: number;
 }
+
+/**
+ * Something the main process tells the person, said once. The page words it (app.notice.*): a
+ * window that crashed and was reloaded, terminals cut off by the terminal host stopping, a host
+ * that stopped answering, and errors nothing handled.
+ */
+export type DeskNotice =
+  | { id: "window-reloaded"; reason: string }
+  | { id: "host-stopped"; terminals: number; runIds: string[] }
+  | { id: "host-stalled" }
+  | { id: "host-answering" }
+  | { id: "errors"; count: number };
 
 export interface UpdateInfo {
   current: string;
@@ -181,6 +198,13 @@ export interface UpdateInfo {
   install: InstallKind;
   /** What "Update now" runs in a terminal; null when this copy updates some other way. */
   command: string | null;
+  /**
+   * The releases between this version and the newest, newest first, so someone who skipped some
+   * reads what each changed. Empty when none were skipped or the list couldn't be read.
+   */
+  between: Release[];
+  /** The version installed before this one, still on disk, that Go back returns to; null when there is none. */
+  goBack: { version: string; command: string } | null;
 }
 
 export type VoicePhase = "idle" | "recording" | "transcribing";
@@ -337,12 +361,16 @@ export interface DockState {
 
 export interface DeskMethods {
   "app.info": () => AppInfo;
+  /** What the main process had to say while no page was listening (a window that crashed and came back); taking them marks the page as listening. */
+  "app.notices": () => DeskNotice[];
   "app.palette": () => Palette;
   /** Every theme Settings can pin, and the desktop's own. */
   "app.themes": () => ThemeList;
   "app.openPath": (target: string) => void;
   "app.openExternal": (url: string) => void;
   "app.pickFolder": (title?: string) => string | null;
+  /** What VibeForge depends on, looked for now: Settings → This computer and Copy diagnostics. */
+  "app.computer": () => ComputerFacts;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
   "app.restart": () => void;
@@ -383,6 +411,8 @@ export interface DeskMethods {
   "updates.check": () => UpdateInfo;
   /** Starts the update command in a terminal. */
   "updates.run": (size?: TermSize) => { ptyId: string };
+  /** Starts Go back (the installer's --rollback) in a terminal. */
+  "updates.rollback": (size?: TermSize) => { ptyId: string };
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;
@@ -464,7 +494,8 @@ export interface DeskMethods {
   "chats.continue": (id: string, size?: TermSize) => SendResult;
   "chats.stop": (id: string) => void;
 
-  "code.shell": (opts: { workspaceId?: string; cwd?: string } & TermSize) => { ptyId: string };
+  /** A shell in the workspace; `command` is typed at its prompt with Enter once the shell is ready (a CLI the person clicked to start). */
+  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize) => { ptyId: string };
   "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
 
   "runs.list": (query?: RunQuery) => RunView[];
@@ -628,6 +659,7 @@ export interface DeskEvents {
   /** A run ended: for the finished and failed sounds. */
   "run-finished": RunEnded;
   "host-crash": string;
+  notice: DeskNotice;
   voice: VoiceState;
   /** A call with Viby began, moved on or ended; many times a second while it listens, for the meter. */
   call: CallState;

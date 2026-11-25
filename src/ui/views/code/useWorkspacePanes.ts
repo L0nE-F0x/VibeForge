@@ -3,7 +3,7 @@ import type { Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../
 import { call } from "../../api.js";
 import { estimateTermSize, type TerminalHandle } from "../../components/Terminal.js";
 import { useT } from "../../i18n/index.js";
-import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode } from "../../pane-layout.js";
+import { movePane, panesOf, placeSession, reattachPanes, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode, type PaneTerminal } from "../../pane-layout.js";
 import { useConfirm, useNav, useToast, type Route } from "../../state.js";
 
 // Code's panes: each workspace's pane tree, what runs in each pane, which one has focus, and the
@@ -14,6 +14,28 @@ export interface Runtime {
   runId: string | null;
   state: "idle" | "starting" | "live" | "exited";
   exitText: string | null;
+  /** A shell the person just opened and hasn't typed into yet: its pane shows the CLIs to start. */
+  fresh?: boolean;
+}
+
+/** Where each pane's terminal is remembered for this window: sessionStorage outlives a reload of the page, not a restart. */
+const PANE_TERMINALS = "vibeforge:pane-terminals";
+
+function rememberedTerminals(): Record<string, PaneTerminal> {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(PANE_TERMINALS) ?? "{}");
+    return saved && typeof saved === "object" ? (saved as Record<string, PaneTerminal>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Terminals started outside Code that should still get a pane there, as Maestro's do: runs continued after the terminal host stopped. */
+const toPlace = new Set<string>();
+
+/** Give this terminal a pane in its workspace once it is live: the idle pane of the same CLI, else a new one. */
+export function placeInCode(ptyId: string): void {
+  toPlace.add(ptyId);
 }
 
 export const newPaneId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -84,6 +106,22 @@ export function useWorkspacePanes({
   /** Workspaces loaded in the background before Code opened, whose saved shells still wait to start. */
   const unstartedShells = useRef(new Set<string>());
 
+  // What the page before this one left, read before the effect below writes this page's (empty) list.
+  const remembered = useRef<Record<string, PaneTerminal> | null>(null);
+  if (remembered.current === null) remembered.current = rememberedTerminals();
+  // A CLI the Orchestrator started gets a pane once; a terminal put back after a reload counts as placed.
+  const placed = useRef(new Set<string>());
+  // Each live pane's terminal, so a page that crashed and was reloaded puts them back (reattachPanes).
+  useEffect(() => {
+    const live: Record<string, PaneTerminal> = {};
+    for (const [paneId, state] of Object.entries(runtime)) if (state.state === "live" && state.ptyId) live[paneId] = { ptyId: state.ptyId, runId: state.runId };
+    try {
+      sessionStorage.setItem(PANE_TERMINALS, JSON.stringify(live));
+    } catch {
+      /* no storage: a reload starts the panes' shells afresh, as a restart does */
+    }
+  }, [runtime]);
+
   const patchRuntime = useCallback(
     (paneId: string, patch: Partial<Runtime>) => {
       setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
@@ -101,10 +139,10 @@ export function useWorkspacePanes({
 
   /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
   const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}): Promise<string | null> => {
+    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean; fresh?: boolean; command?: string } = {}): Promise<string | null> => {
       if (starting.current.has(pane.id)) return null;
       starting.current.add(pane.id);
-      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
+      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null, fresh: pane.launch.type === "shell" && !opts.command && Boolean(opts.fresh) });
       // Measure after React has laid the new pane out. A window on a hidden workspace gets no
       // frames, so don't wait on one forever.
       await new Promise((resolve) => {
@@ -120,7 +158,7 @@ export function useWorkspacePanes({
       try {
         const started =
           pane.launch.type === "shell"
-            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...size })), runId: null }
+            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...(opts.command ? { command: opts.command } : {}), ...size })), runId: null }
             : await call("code.engine", {
                 workspaceId: workspace.id,
                 engineId: pane.launch.engineId,
@@ -152,9 +190,11 @@ export function useWorkspacePanes({
       if (workspace.id in layoutsRef.current) return Promise.resolve(layoutsRef.current[workspace.id] ?? null);
       const inflight = loadingLayouts.current.get(workspace.id);
       if (inflight) return inflight;
-      const promise = call("layouts.get", workspace.id)
-        .catch(() => null)
-        .then((saved) => {
+      const left = remembered.current ?? {};
+      // Only a page that was reloaded remembers terminals; it asks which of them still run.
+      const running = Object.keys(left).length ? call("live.list").then((live) => new Set(live.map((item) => item.ptyId))) : Promise.resolve(new Set<string>());
+      const promise = Promise.all([call("layouts.get", workspace.id).catch(() => null), running.catch(() => new Set<string>())])
+        .then(([saved, stillRunning]) => {
           loadingLayouts.current.delete(workspace.id);
           if (!workspacesRef.current.some((item) => item.id === workspace.id)) return null;
           if (!(workspace.id in layoutsRef.current)) {
@@ -162,9 +202,16 @@ export function useWorkspacePanes({
             const panes = saved ? panesOf(saved) : [];
             const first = panes[0];
             if (first) setFocus((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] ?? first.id }));
+            // Terminals that went on running while the page was away go back in their panes.
+            const back = reattachPanes(panes, left, stillRunning);
+            for (const [paneId, terminal] of back) {
+              placed.current.add(terminal.ptyId);
+              patchRuntime(paneId, { ...terminal, state: "live", exitText: null });
+            }
+            const fresh = panes.filter((pane) => pane.launch.type === "shell" && !back.has(pane.id));
             if (openedRef.current) {
-              for (const pane of panes) if (pane.launch.type === "shell") void startPane(workspace, pane);
-            } else if (panes.some((pane) => pane.launch.type === "shell")) {
+              for (const pane of fresh) void startPane(workspace, pane);
+            } else if (fresh.length) {
               unstartedShells.current.add(workspace.id);
             }
           }
@@ -173,7 +220,7 @@ export function useWorkspacePanes({
       loadingLayouts.current.set(workspace.id, promise);
       return promise;
     },
-    [layoutsRef, setLayouts, setFocus, startPane],
+    [layoutsRef, setLayouts, setFocus, startPane, patchRuntime],
   );
 
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
@@ -197,8 +244,7 @@ export function useWorkspacePanes({
   }
 
   // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
-  // not Code is on screen, so it is there when the person goes to look. Each one once.
-  const placed = useRef(new Set<string>());
+  // not Code is on screen, so it is there when the person goes to look. Each one once (`placed`).
 
   /**
    * Give `ptyId` a pane in `workspace`, or reuse the one that already holds it: an idle pane of
@@ -268,7 +314,8 @@ export function useWorkspacePanes({
 
   useEffect(() => {
     for (const session of live) {
-      if (!session.orchestrated || !session.workspaceId || placed.current.has(session.ptyId)) continue;
+      if (!(session.orchestrated || toPlace.has(session.ptyId)) || !session.workspaceId || placed.current.has(session.ptyId)) continue;
+      toPlace.delete(session.ptyId);
       const workspace = workspaces.find((item) => item.id === session.workspaceId);
       if (!workspace) continue;
       placed.current.add(session.ptyId);
@@ -288,23 +335,23 @@ export function useWorkspacePanes({
     // Only new sessions matter; the rest is read through refs.
   }, [live, workspaces, loadWorkspaceLayout]);
 
-  /** The first pane of a workspace whose panes were all closed. */
-  function openFirst(workspace: Workspace, launch: PaneLaunch) {
+  /** The first pane of a workspace whose panes were all closed. A shell opened here is a fresh one. */
+  function openFirst(workspace: Workspace, launch: PaneLaunch, opts: { command?: string } = {}): Promise<string | null> {
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, pane);
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
+    return startPane(workspace, pane, { fresh: true, ...opts });
   }
 
-  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch) {
+  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch, opts: { command?: string } = {}): Promise<string | null> {
     const layout = layoutsRef.current[workspace.id];
-    if (!layout) return;
+    if (!layout) return Promise.resolve(null);
     const existing = panesOf(layout).find((pane) => pane.id === paneId);
-    if (!existing) return;
+    if (!existing) return Promise.resolve(null);
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir, ratio: 0.5, a: existing, b: pane }));
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
+    return startPane(workspace, pane, { fresh: true, ...opts });
   }
 
   async function closePane(workspace: Workspace, pane: PaneNode) {
@@ -345,14 +392,26 @@ export function useWorkspacePanes({
     if (!layout) return;
     const next: PaneNode = { ...pane, launch };
     updateLayout(workspace.id, replacePane(layout, pane.id, next));
-    void startPane(workspace, next, opts);
+    void startPane(workspace, next, { ...opts, fresh: true });
+  }
+
+  /**
+   * A new shell in the workspace with `command` typed into it and Enter pressed, because the
+   * person clicked to start that CLI: beside the focused pane, or the first one. Its terminal's id.
+   */
+  async function startCommand(workspace: Workspace, command: string | null): Promise<string | null> {
+    const layout = await loadWorkspaceLayout(workspace);
+    const opts = command ? { command } : {};
+    if (!layout) return openFirst(workspace, { type: "shell" }, opts);
+    const at = focusRef.current[workspace.id] ?? panesOf(layout)[0].id;
+    return splitPane(workspace, at, "row", { type: "shell" }, opts);
   }
 
   /** A new shell beside the focused pane, or the first one in an empty workspace. */
   function newTerminal(workspace: Workspace, dir: "row" | "col") {
     const layout = layoutsRef.current[workspace.id];
-    if (layout === null) openFirst(workspace, { type: "shell" });
-    else if (layout) splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
+    if (layout === null) void openFirst(workspace, { type: "shell" });
+    else if (layout) void splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
   }
 
   /** Review with a new CLI here: `engineId` in a new pane beside `paneId`; its terminal once it runs. */
@@ -426,6 +485,7 @@ export function useWorkspacePanes({
     newTerminal,
     closePane,
     launchHere,
+    startCommand,
     startReviewer,
     toggleZoom,
     focusPane,

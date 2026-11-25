@@ -5,22 +5,23 @@ import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, useOrchestrator, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
 import { useAttention, useChatAttention, usePtyInView, useWorkspaceInView, type Attention } from "./attention.js";
-import { HelpPopover, SHOW_SHORTCUTS_EVENT, ShortcutsModal } from "./components/Help.js";
+import { HelpPopover, ProblemActions, SHOW_SHORTCUTS_EVENT, ShortcutsModal, useProblemNotice } from "./components/Help.js";
 import { TOGGLE_PANEL_EVENT } from "./components/SidePanel.js";
 import { TooltipLayer, tipProps } from "./components/Tooltip.js";
-import { START_TOUR_EVENT, Tour } from "./components/Tour.js";
+import { START_TOUR_EVENT, Tour, tourOf, type TourKind } from "./components/Tour.js";
 import { WhichOneSheet } from "./components/WhichOne.js";
 import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Update.js";
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
+import { MainNotices } from "./notices.js";
 import { CallBar, TOGGLE_CALL_EVENT, VibyRailButton } from "./call.js";
 import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
 import { applyLanguageSetting, t as translateNow, useT } from "./i18n/index.js";
 import { coreText } from "./core-text.js";
 import { PINNED, railViews, type RailView } from "./rail.js";
-import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, useToast, type ViewName } from "./state.js";
+import { ConfirmProvider, isRoute, NavProvider, ToastProvider, useNav, type ViewName } from "./state.js";
 import { overlayOpen } from "./overlays.js";
 import { numberedKeys, runShortcut, shortcutKeys, type ShortcutAction, type ShortcutIdIn } from "./shortcuts.js";
 import { CodeView } from "./views/Code.js";
@@ -74,7 +75,7 @@ function Shell() {
   useEffect(() => {
     if (route.view === "orchestrator") setOrchestrator(false);
   }, [route.view]);
-  const { push } = useToast();
+  const problem = useProblemNotice();
   const workspaces = useWorkspaces().data?.workspaces ?? [];
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
@@ -142,11 +143,12 @@ function Shell() {
     const offRoute = on("open-route", ({ route }) => {
       if (isRoute(route)) go(route);
     });
-    const offCrash = on("host-crash", (message) => push("error", translateNow("app.hostProblem"), coreText(message)));
+    // The terminal host stopping is a problem to report: the notice stays, with the diagnostics and the bug form.
+    const offCrash = on("host-crash", (message) => problem(translateNow("app.hostProblem"), coreText(message)));
     // A host that failed before this page was listening (it starts alongside the window).
     void call("app.info")
       .then((info) => {
-        if (!info.hostRunning) push("error", translateNow("app.hostProblem"), info.hostError ? coreText(info.hostError) : translateNow("app.hostDown"));
+        if (!info.hostRunning) problem(translateNow("app.hostProblem"), info.hostError ? coreText(info.hostError) : translateNow("app.hostDown"));
       })
       .catch(() => undefined);
     return () => {
@@ -162,7 +164,7 @@ function Shell() {
       offWorkspace();
       offCrash();
     };
-  }, [go, open, back, forward, push]);
+  }, [go, open, back, forward, problem]);
 
   // Viby is told where you are, so "this one" and "here" mean the terminal and workspace in front.
   const workspaceInView = useWorkspaceInView();
@@ -178,6 +180,7 @@ function Shell() {
       <VoiceLayer />
       <CallBar />
       <SessionWatch />
+      <MainNotices />
       {switcher && <Switcher onClose={() => setSwitcher(false)} />}
       {orchestrator && <OrchestratorBar onClose={closeOrchestrator} />}
       <Rail />
@@ -207,7 +210,7 @@ function Shell() {
 function Guides() {
   const settings = useSettings().data;
   const appPath = useAppInfo().data?.appPath ?? "";
-  const [tour, setTour] = useState(false);
+  const [tour, setTour] = useState<TourKind | null>(null);
   const [shortcuts, setShortcuts] = useState(false);
   const [update, setUpdate] = useState(false);
   const autoOpened = useRef(false);
@@ -217,13 +220,13 @@ function Guides() {
   useEffect(() => {
     if (!settings || autoOpened.current) return;
     autoOpened.current = true;
-    if (!settings.tourDone) setTour(true);
+    if (!settings.tourDone) setTour("short");
   }, [settings]);
 
   useEffect(() => {
-    const start = () => {
+    const start = (event: Event) => {
       setShortcuts(false);
-      setTour(true);
+      setTour(tourOf(event));
     };
     const keys = () => setShortcuts((open) => !open);
     const showUpdate = () => setUpdate(true);
@@ -238,14 +241,14 @@ function Guides() {
   }, []);
 
   const closeTour = useCallback(() => {
-    setTour(false);
+    setTour(null);
     void call("settings.save", { tourDone: true });
   }, []);
   const closeShortcuts = useCallback(() => setShortcuts(false), []);
 
   return (
     <>
-      {tour && <Tour onClose={closeTour} />}
+      {tour && <Tour key={tour} kind={tour} onClose={closeTour} />}
       {shortcuts && !tour && <ShortcutsModal onClose={closeShortcuts} />}
       {!tour && <WhichOneSheet />}
       {update && !tour && <UpdateSheet appPath={appPath} onClose={() => setUpdate(false)} />}
@@ -538,9 +541,12 @@ class CrashBoundary extends Component<{ children: ReactNode }, { error: Error | 
           icon={Activity}
           title={translateNow("crash.title")}
           actions={
-            <Button variant="primary" onClick={() => this.setState({ error: null })}>
-              {translateNow("common.tryAgain")}
-            </Button>
+            <>
+              <Button variant="primary" onClick={() => this.setState({ error: null })}>
+                {translateNow("common.tryAgain")}
+              </Button>
+              <ProblemActions detail={this.state.error.message} />
+            </>
           }
         >
           <span className="mono selectable">{this.state.error.message}</span>

@@ -289,3 +289,51 @@
   font-size: 9.5px;
   font-weight: 700;
 }
+
+/* "Recording this session": a CLI in this pane is being kept as a run. */
+.pane-run-link.is-recording {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 2;
+  color: var(--fg-2);
+}
+
+.pane-run-link .rec-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--red);
+  animation: rec-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-run-link .rec-dot {
+    animation: none;
+  }
+}
+
+/* Above a fresh shell: the CLIs found, one click each. It goes at the first keystroke. */
+.pane-hint {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--fill);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+}
+
+.pane-hint-text {
+  margin-right: 4px;
+}

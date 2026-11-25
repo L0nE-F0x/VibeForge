@@ -8,6 +8,10 @@
 //
 // SMOKE_HEADLESS=1 starts it without a window. SMOKE_ATTACH=1 drives a window someone else started (with VIBEFORGE_DEBUG=1 and the port in
 // SMOKE_PORT), for a desktop where a new window shouldn't appear in front of you.
+//
+// When a check fails, the scratch profile is kept and the evidence goes to SMOKE_ARTIFACTS (or the
+// profile's evidence/ folder): a screenshot, the page's HTML, the problems, the app's whole output
+// and VibeForge's own log. CI uploads that folder.
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -172,6 +176,9 @@ async function connectPipe() {
   if (!app) throw new Error("App process missing.");
   pipeOut = /** @type {import("node:stream").Writable} */ (app.stdio[3]);
   pipeIn = /** @type {import("node:stream").Readable} */ (app.stdio[4]);
+  // An app that dies resets the pipe: that is a failure to report, not a crash of this script.
+  pipeIn.on("error", () => undefined);
+  pipeOut.on("error", () => undefined);
   let buf = Buffer.alloc(0);
   pipeIn.on("data", (chunk) => {
     buf = Buffer.concat([buf, chunk]);
@@ -217,6 +224,34 @@ async function until(expression, what, timeoutMs = 8000) {
 }
 
 const call = (method, ...params) => page(`window.vibeforge.call(${JSON.stringify(method)}, ...${JSON.stringify(params)})`, 20_000);
+
+/** Where a failed run's evidence goes. */
+const evidence = process.env.SMOKE_ARTIFACTS ? path.resolve(process.env.SMOKE_ARTIFACTS) : path.join(scratch, "evidence");
+
+/** What the window showed when a check failed: a screenshot and its HTML. Best effort: it may be gone. */
+async function keepWindowEvidence() {
+  fs.mkdirSync(evidence, { recursive: true });
+  try {
+    const { data } = /** @type {{ data: string }} */ (await send("Page.captureScreenshot", { format: "png" }, 5000));
+    fs.writeFileSync(path.join(evidence, "screenshot.png"), Buffer.from(data, "base64"));
+  } catch {
+    /* no window to take */
+  }
+  try {
+    fs.writeFileSync(path.join(evidence, "page.html"), String(await page("document.documentElement.outerHTML", 5000)));
+  } catch {
+    /* no page to read */
+  }
+}
+
+/** The rest, once the app has gone: the problems, everything it printed, and its own log. */
+function keepEvidence() {
+  fs.mkdirSync(evidence, { recursive: true });
+  fs.writeFileSync(path.join(evidence, "problems.txt"), `${failures.join("\n")}\n`);
+  fs.writeFileSync(path.join(evidence, "app-output.log"), appOutput);
+  const logs = path.join(scratch, "data", "logs");
+  if (fs.existsSync(logs)) fs.cpSync(logs, path.join(evidence, "vibeforge-logs"), { recursive: true });
+}
 
 async function key(keyName, code, modifiers = 0) {
   for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: keyName, code, modifiers, windowsVirtualKeyCode: keyName.length === 1 ? keyName.toUpperCase().charCodeAt(0) : 0 });
@@ -329,6 +364,7 @@ try {
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 } finally {
+  if (failures.length) await keepWindowEvidence();
   socket?.close();
   pipeOut?.destroy();
   pipeIn?.destroy();
@@ -337,11 +373,15 @@ try {
     for (let tries = 0; tries < 50 && !exited; tries += 1) await sleep(100);
     if (!exited) app.kill("SIGKILL");
   }
-  fs.rmSync(scratch, { recursive: true, force: true });
+  if (failures.length) keepEvidence();
+  // A failed run's profile stays, for a look at what the app wrote; its browser cache doesn't.
+  else fs.rmSync(scratch, { recursive: true, force: true });
+  if (failures.length) fs.rmSync(path.join(scratch, "profile"), { recursive: true, force: true });
 }
 if (failures.length) {
   console.log(`\n${failures.length} problem${failures.length === 1 ? "" : "s"}.`);
   if (process.env.CI) console.log(`\nApp output:\n${appOutput.slice(-4000)}`);
+  console.log(`\nEvidence: ${evidence}\nThe scratch profile: ${scratch}`);
   code = 1;
 } else console.log("\nSmoke test passed.");
 process.exit(code);

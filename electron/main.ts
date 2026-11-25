@@ -11,7 +11,7 @@ import { MainText } from "../src/core/main-text.js";
 import { TeamService } from "../src/core/team-service.js";
 import { iconColors, iconPng, refreshLauncherIcons } from "../src/core/brand-icon.js";
 import { resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
-import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
+import { INSTALLER_MARK, installKind, RELEASES_URL, restartVia, updateCommand } from "../src/core/updates.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
 import { tildify } from "../src/shared/text.js";
 import { syncCompanion } from "./companion.js";
@@ -32,6 +32,7 @@ import { adoptShellPath, osDescription, settleWorkingDir } from "./system.js";
 import { Call } from "./call.js";
 import { Disposables, startSchedules } from "./timers.js";
 import { TrayController } from "./tray-controller.js";
+import { UnexpectedErrors } from "./unexpected.js";
 import { Updater } from "./updater.js";
 import { companionWire, makeVoice } from "./voice-phone.js";
 import { MainWindow } from "./window.js";
@@ -46,11 +47,17 @@ ensureLayout(roots.configRoot, roots.dataRoot);
 const log = new LogFile(path.join(roots.dataRoot, "logs", "vibeforge.log"));
 settleWorkingDir(log);
 
+// Logged, counted and told (unexpected.ts): VibeForge carries on, but something may be half done.
+const unexpected = new UnexpectedErrors();
 process.on("uncaughtException", (error) => {
   console.error(error);
   log.error(`Uncaught error in the main process: ${describeError(error)}`);
+  unexpected.add();
 });
-process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in the main process: ${describeError(reason)}`));
+process.on("unhandledRejection", (reason) => {
+  log.error(`Unhandled rejection in the main process: ${describeError(reason)}`);
+  unexpected.add();
+});
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
@@ -94,6 +101,7 @@ const ctx = new MainContext({
   appRoot,
   install: copyInstall,
   palette: resolvePalette("omarchy"),
+  unexpected,
 });
 const { send, focusWindow, install } = ctx;
 ownWebContents = () => ctx.win?.webContents ?? null;
@@ -209,7 +217,11 @@ if (!app.requestSingleInstanceLock()) {
     // Started again while this copy is on its way out (a CLI taking its seconds to end): the new
     // start lost the lock to this one, so come back once this one has gone.
     if (ctx.quitting) {
-      if (!voiceArg(argv)) app.relaunch({ execPath: process.execPath, args: secondStartArgs(process.argv, argv) });
+      // Through the install's current launcher, so an update installed meanwhile is the one that starts.
+      if (!voiceArg(argv)) {
+        const args = secondStartArgs(process.argv, argv);
+        app.relaunch(restartVia(appRoot, args, fs.existsSync) ?? { execPath: process.execPath, args });
+      }
       return;
     }
     const action = voiceArg(argv);

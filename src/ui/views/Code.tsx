@@ -8,6 +8,7 @@ import type { TalkTarget } from "../components/TalkMenu.js";
 import { tipProps } from "../components/Tooltip.js";
 import { shellNumber } from "../components/WorkspaceState.js";
 import { Button, Empty } from "../components/ui.js";
+import { cliCommand, START_CLI_EVENT, type StartCliDetail } from "../first-run.js";
 import { useT } from "../i18n/index.js";
 import { panesOf, type PaneNode } from "../pane-layout.js";
 import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useNav, useToast, type Route } from "../state.js";
@@ -234,7 +235,31 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     openLink: (workspace, url) => side.openInBrowser(workspace.id, url),
     draft: (toPty) => focusPty(toPty),
     newReviewer: (workspace, pane, engineId) => panes.startReviewer(workspace, pane.id, engineId),
+    typed: (paneId) => panes.patchRuntime(paneId, { fresh: false }),
   });
+
+  // The tour's last step and Home's "Run a CLI": a new shell in that workspace with the CLI typed
+  // into it, because the person clicked that CLI. It answers with the terminal's id.
+  const latestStart = useRef({ workspaces, engines, panes });
+  latestStart.current = { workspaces, engines, panes };
+  useEffect(() => {
+    const onStart = (event: Event) => {
+      const { workspaceId, engineId, done } = (event as CustomEvent<StartCliDetail>).detail;
+      const { workspaces: list, engines: found, panes: p } = latestStart.current;
+      const workspace = list.find((item) => item.id === workspaceId);
+      const engine = engineId ? found.find((item) => item.id === engineId && item.available) : null;
+      if (!workspace || (engineId && !engine)) {
+        done(null);
+        return;
+      }
+      setOpened(true);
+      setCurrentId(workspace.id);
+      void call("workspaces.select", workspace.id).catch(() => undefined);
+      void p.startCommand(workspace, engine ? cliCommand(engine) : null).then(done, () => done(null));
+    };
+    window.addEventListener(START_CLI_EVENT, onStart);
+    return () => window.removeEventListener(START_CLI_EVENT, onStart);
+  }, []);
 
   // ---------------------------------------------------------------- workspaces
 

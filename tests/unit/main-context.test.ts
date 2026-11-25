@@ -70,3 +70,29 @@ describe("the main process's shared context", () => {
     expect(plain.done).toEqual(["show", "focus"]);
   });
 });
+
+describe("notices from the main process", () => {
+  it("waits for a page to take them, then sends new ones as they happen", () => {
+    const ctx = context();
+    const { win, sent } = fakeWindow();
+    ctx.win = win;
+    // Before the page has asked (it is loading, or crashed): kept, one of each kind, the newest.
+    ctx.notice({ id: "errors", count: 1 });
+    ctx.notice({ id: "window-reloaded", reason: "crashed" });
+    ctx.notice({ id: "errors", count: 2 });
+    expect(sent).toEqual([]);
+    expect(ctx.takeNotices()).toEqual([
+      { id: "window-reloaded", reason: "crashed" },
+      { id: "errors", count: 2 },
+    ]);
+    ctx.notice({ id: "host-stalled" });
+    expect(sent).toEqual([["vf:notice", { id: "host-stalled" }]]);
+    expect(ctx.takeNotices()).toEqual([]);
+    // The page went: the next notice waits for the one that loads.
+    ctx.pageGone();
+    ctx.notice({ id: "host-answering" });
+    expect(sent).toHaveLength(1);
+    expect(ctx.takeNotices()).toEqual([{ id: "host-answering" }]);
+  });
+});
+
