@@ -6,8 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-11-25
+
+**3.9.0: Viby can look at and use the screen where you allow it, answers sooner with Claude Code, understands misheard names, and restarting after an update works again.**
+
+### Added
+
+- **Viby can look at the screen, and click, scroll or type, where you allow it.** **Settings → Computer use** is off until you turn it on. Then each of three places has its own switches for **See**, **Click and scroll** and **Type and press keys**: VibeForge's own window, the browser in Code, and the whole desktop, which starts at See only. With See on, Viby can take a screenshot of that place to plan from (on the desktop, also list the open windows and, with `tesseract` installed, read the screen's text); the screenshot goes to the CLI that plans for Viby. Every click, scroll or key waits for **Go**, in Just go and on a call too. Only you change these switches: Viby can't, even if asked, and is told what is allowed so it doesn't plan the rest. Each action is checked when it runs, so a switch turned off after the plan was made still stops it, and the plan card says which switch to turn on. On the desktop it needs Hyprland with `grim`, `wtype`, and `ydotool` or write access to `/dev/uinput`; on X11, `xdotool` and `import` or `scrot`.
+- **New quick commands in Viby.** `/diagnostics` shows how Viby's last turns went: how long finding context, planning and carrying out took, and what failed. `/trust` answers the folder-trust question of the CLI you're looking at, or of the only one asking. *"Pause routine nightly"* and *"switch theme to tokyo night"* happen at once, without the planner.
+- **Viby can do a few more things you'd click.** Open a workspace's folder in your file manager, step to the next or previous pane in Code, check for updates, and copy a run as Markdown.
+
+### Changed
+
+- **Viby answers sooner with Claude Code planning.** Claude Code now stays running between your messages for two minutes, so the next message doesn't wait for it to start again. The other planners still start for each message.
+- **On a call, Viby's sentences come without gaps.** The next sentence is made while the one before is spoken, and each voice's settings are read once instead of for every sentence. The silence before and after what you say is cut before it goes to the speech model.
+- **Several CLIs in one plan start at the same time.** Starting two CLIs in different copies used to make the first copy, start the first CLI, then do the same for the second. They now start side by side, and a check after them waits for all of them.
+- **A name heard a little wrong still finds what you meant.** *"Grock"*, *"Cloud Code"*, *"Anti gravity"*, *"Star Leger"* or *"VibeForje"* now match Grok, Claude Code, Antigravity, Star Ledger and VibeForge, in the plan and in quick commands. When two names could fit, Viby asks instead of guessing. An `@` name picked in the box is matched without the `@`.
+- **"It" and "there" mean what you were just talking about.** A follow-up such as *"run the tests there"* or *"pause that routine"* now reaches the planner with the workspace, CLI or routine named in the last few turns, also when you stay on Viby's tab.
+
 ### Fixed
 
+- **Asking Viby right after stopping it works.** A message sent while a stopped answer was still winding down was refused with "Viby is still answering". It now waits for that to finish and goes through.
+- **A step that waits for a CLI waits for its question to be answered too.** When a CLI paused on a question (trust this folder? run this command?), a later step waiting for it, such as running the tests, could start as if the CLI had finished. It now waits until the question is answered and the CLI is done, up to a limit.
+- **A planner answer that comes back garbled gets one more try.** Before, Viby said it couldn't read the plan. It now accepts the usual slips (a code fence around the JSON, a trailing comma, another name for a field) and, if it still can't read it, asks the planner once more before saying so.
+- **A call says when a turn fails.** An error while Viby handled something you said on a call was kept out of sight; the call now shows it.
 - **Restarting after an update comes back right away on Home instead of stopping.** Updating from an install with its own Electron binary replaced that binary with a wrapper that caught Electron's internal `--type=relauncher` helper, so clicking **Restart** failed with a startup error notification and left VibeForge closed with no tray icon. The wrapper now hands Electron's own `--type=*` helpers straight to `electron.real`, the launcher's startup watcher closes inherited file descriptors, and restarting after an update brings the window straight to the front on **Home** while keeping where you left each other view.
 
 ## [3.8.0] - 2026-11-25
@@ -1205,7 +1227,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.0
 [3.8.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.8.0
 [3.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.2
 [3.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.1

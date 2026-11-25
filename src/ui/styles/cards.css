@@ -689,7 +689,7 @@
   font-size: 12px;
 }
 
-/* Settings → Viby → Computer use: one row per place, one switch per thing Viby may do there. */
+/* Settings → Computer use: one row per place, one switch per thing Viby may do there. */
 .computer-use-grid {
   border-collapse: collapse;
   width: 100%;

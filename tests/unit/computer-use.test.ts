@@ -35,6 +35,7 @@ import {
   validateKeyCombo,
   type PlanContext,
 } from "../../src/core/orchestrator.js";
+import { matchCoreText } from "../../src/ui/core-match.js";
 import { setup, tempDir } from "./fixtures/service-harness.js";
 
 const ok = (stdout: string) => ({ code: 0, stdout, stderr: "", timedOut: false });
@@ -361,13 +362,17 @@ describe("Computer use is the person's to allow, place by place", () => {
     const some = { on: true, app: ALL, browser: { see: true, pointer: false, keys: false }, desktop: NONE };
     expect(computerUseBlocked(some, "app", "keys")).toBeNull();
     expect(computerUseBlocked(some, "browser", "see")).toBeNull();
-    expect(computerUseBlocked(some, "browser", "pointer")).toContain("click or scroll in the Browser in Code");
-    expect(computerUseBlocked(some, "desktop", "see")).toContain("look at the desktop");
+    expect(computerUseBlocked(some, "browser", "pointer")).toContain('turn on "Click and scroll" for "Browser in Code"');
+    expect(computerUseBlocked(some, "desktop", "see")).toContain('"See" for "Whole desktop"');
     // Waiting needs no grant, but still needs computer use on.
     expect(computerUseBlocked(some, "desktop", computerGrantFor("wait"))).toBeNull();
     expect(computerGrantFor("focus-window")).toBe("pointer");
     expect(computerGrantFor("windows")).toBe("see");
     expect(computerGrantFor("key")).toBe("keys");
+    // The window shows these in the person's language, the switch names included.
+    const named = matchCoreText(computerUseBlocked(some, "desktop", "pointer")!, (value) => matchCoreText(value)?.key ?? value);
+    expect(named).toEqual({ key: "core.computerNotAllowed", vars: { grant: "core.cuGrantPointer", place: "core.cuPlaceDesktop" } });
+    expect(matchCoreText(computerUseBlocked(off, "app", "see")!)?.key).toBe("core.computerOff");
     expect(describeComputerGrants(off)).toContain("OFF");
     expect(describeComputerGrants(some)).toContain("browser: see; desktop: nothing");
   });
@@ -412,7 +417,7 @@ describe("Computer use is the person's to allow, place by place", () => {
     ctx.svc.saveSettings({ computerUse: { on: true, app: ALL, browser: NONE, desktop: NONE } });
     await ctx.svc.orchestratorRun(turn.id);
     turn = ctx.svc.orchestratorView().turns.find((t) => t.id === turn.id)!;
-    expect(turn.steps?.[0].error).toContain("isn't allowed to click or scroll in the desktop");
+    expect(turn.steps?.[0].error).toContain('"Click and scroll" for "Whole desktop"');
     expect(acted).toEqual([]);
 
     await ctx.svc.orchestratorAsk("look at vibeforge");

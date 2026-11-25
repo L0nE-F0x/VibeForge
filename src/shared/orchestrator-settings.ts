@@ -21,7 +21,7 @@ export interface PlanSettingsContext {
     /** Explicit reasoning effort in settings ("" when using the fast "low" default). */
     effort: string;
     projectsFolder: string;
-    /** What the person lets Viby see and do on the screen (Settings → Viby → Computer use). */
+    /** What the person lets Viby see and do on the screen (Settings → Computer use). */
     computer?: ComputerUseGrants;
     availablePlanners: Array<{
       id: string;

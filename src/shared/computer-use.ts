@@ -241,7 +241,7 @@ export function computerGrantFor(action: ComputerActionKind): ComputerGrantKind 
   return "pointer";
 }
 
-/** The person's computer-use settings, as Settings → Viby → Computer use keeps them. */
+/** The person's computer-use settings, as Settings → Computer use keeps them. */
 export interface ComputerUseGrants {
   on: boolean;
   app: Record<ComputerGrantKind, boolean>;
@@ -249,28 +249,32 @@ export interface ComputerUseGrants {
   desktop: Record<ComputerGrantKind, boolean>;
 }
 
-const SURFACE_WORDS: Record<ComputerSurface, string> = { app: "VibeForge's window", browser: "the Browser in Code", desktop: "the desktop" };
-const GRANT_WORDS: Record<ComputerGrantKind, string> = { see: "look at", pointer: "click or scroll in", keys: "type or press keys in" };
+// The grid's own labels in Settings → Computer use, so the message names the switch to turn on.
+// Each has a `core.*` key, and the window shows the message in the person's language.
+const SURFACE_LABELS: Record<ComputerSurface, string> = { app: "VibeForge's window", browser: "Browser in Code", desktop: "Whole desktop" };
+const GRANT_LABELS: Record<ComputerGrantKind, string> = { see: "See", pointer: "Click and scroll", keys: "Type and press keys" };
 
 /**
- * Why Viby may not do this, or null when it may. Only a person turns these on, in Settings → Viby →
+ * Why Viby may not do this, or null when it may. Only a person turns these on, in Settings →
  * Computer use: Viby can't change them itself.
  */
 export function computerUseBlocked(grants: ComputerUseGrants | undefined, surface: ComputerSurface, grant: ComputerGrantKind | null): string | null {
-  if (!grants?.on) return "Computer use is off. A person can turn it on in Settings → Viby → Computer use.";
-  if (grant && !grants[surface][grant]) return `Viby isn't allowed to ${GRANT_WORDS[grant]} ${SURFACE_WORDS[surface]}. A person can allow it in Settings → Viby → Computer use.`;
+  if (!grants?.on) return "Computer use is off. A person can turn it on in Settings → Computer use.";
+  if (grant && !grants[surface][grant]) {
+    return `Viby isn't allowed to do that. In Settings → Computer use, a person can turn on "${GRANT_LABELS[grant]}" for "${SURFACE_LABELS[surface]}".`;
+  }
   return null;
 }
 
 /** One line for the planner: what it may do on the screen right now. */
 export function describeComputerGrants(grants: ComputerUseGrants | undefined): string {
   if (!grants?.on) {
-    return "Computer use: OFF. Don't plan `computer` steps or screen/windows/app-ui/browser-ui inspects; if the person asks for one, say a person can turn it on in Settings → Viby → Computer use. You can't change this setting yourself.";
+    return "Computer use: OFF. Don't plan `computer` steps or screen/windows/app-ui/browser-ui inspects; if the person asks for one, say a person can turn it on in Settings → Computer use. You can't change this setting yourself.";
   }
   const place = (surface: ComputerSurface) => {
     const g = grants[surface];
     const allowed = [g.see ? "see" : "", g.pointer ? "click/scroll" : "", g.keys ? "type/keys" : ""].filter(Boolean);
     return `${surface}: ${allowed.length ? allowed.join(", ") : "nothing"}`;
   };
-  return `Computer use allowed by the person (only they change it, in Settings → Viby → Computer use; you can't): ${place("app")}; ${place("browser")}; ${place("desktop")}. Plan only what is allowed; if they ask for more, say where they can allow it.`;
+  return `Computer use allowed by the person (only they change it, in Settings → Computer use; you can't): ${place("app")}; ${place("browser")}; ${place("desktop")}. Plan only what is allowed; if they ask for more, say where they can allow it.`;
 }

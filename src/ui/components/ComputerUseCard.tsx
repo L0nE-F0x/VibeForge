@@ -8,7 +8,7 @@ const PLACES = ["app", "browser", "desktop"] as const;
 const GRANTS = ["see", "pointer", "keys"] as const;
 
 /**
- * Settings → Viby → Computer use: whether Viby may look at and use the screen, and for each place
+ * Settings → Computer use: whether Viby may look at and use the screen, and for each place
  * (VibeForge's window, the Browser in Code, the whole desktop) whether it may see it, click and
  * scroll in it, or type in it. Only this card changes these: Viby's own settings steps can't.
  */
