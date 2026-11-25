@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **"At 9 every night" makes a routine for 21:00, as "every night at 9" does.** Viby read an evening or night hour without am/pm as after noon only when the time came last, so a routine asked for "at 9 every night" or "7:30 every evening" ran in the morning.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

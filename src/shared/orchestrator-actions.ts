@@ -246,6 +246,14 @@ function parseDowPhrase(phrase: string): string | null {
 }
 
 /**
+ * "every evening at 7", "at 9 every night": an hour from 1 to 11 said without am/pm, beside an
+ * evening or a night, is after noon, whichever comes first.
+ */
+function eveningHour(hour: number, days: string, clock: string): number {
+  return /\b(?:evening|night)\b/.test(days) && !/[ap]\.?m\.?/i.test(clock) && hour >= 1 && hour <= 11 ? hour + 12 : hour;
+}
+
+/**
  * Turns a 5-field cron expression, an interval ("every 30 minutes", "2h", "60"), or a spoken
  * schedule phrase ("weekdays at 9am", "daily at 18:00", "every Monday at 10am") into VibeForge's
  * `Schedule`, or null when invalid or unclear.
@@ -310,12 +318,7 @@ export function parseRoutineSchedule(raw: string | undefined): Schedule | null {
     if (clock) {
       const dow = parseDowPhrase(left);
       if (dow) {
-        // "every evening at 7" / "every night at 9" without am/pm implies PM when hour is 1..11.
-        let hour = clock.hour;
-        if (/\b(?:evening|night)\b/.test(left) && !/[ap]\.?m\.?/i.test(right) && hour >= 1 && hour <= 11) {
-          hour += 12;
-        }
-        return { kind: "cron", expr: `${clock.minute} ${hour} * * ${dow}` };
+        return { kind: "cron", expr: `${clock.minute} ${eveningHour(clock.hour, left, right)} * * ${dow}` };
       }
     }
   }
@@ -325,7 +328,7 @@ export function parseRoutineSchedule(raw: string | undefined): Schedule | null {
     const clock = parseClockTime(leadingAt[1]);
     if (clock) {
       const dow = parseDowPhrase(leadingAt[2] ?? "");
-      if (dow) return { kind: "cron", expr: `${clock.minute} ${clock.hour} * * ${dow}` };
+      if (dow) return { kind: "cron", expr: `${clock.minute} ${eveningHour(clock.hour, leadingAt[2] ?? "", leadingAt[1])} * * ${dow}` };
     }
   }
 
@@ -334,7 +337,7 @@ export function parseRoutineSchedule(raw: string | undefined): Schedule | null {
   if (timeFirst) {
     const clock = parseClockTime(timeFirst[1]);
     const dow = parseDowPhrase(timeFirst[2]);
-    if (clock && dow) return { kind: "cron", expr: `${clock.minute} ${clock.hour} * * ${dow}` };
+    if (clock && dow) return { kind: "cron", expr: `${clock.minute} ${eveningHour(clock.hour, timeFirst[2], timeFirst[1])} * * ${dow}` };
   }
 
   // Named day(s) with no time -> default 9:00
