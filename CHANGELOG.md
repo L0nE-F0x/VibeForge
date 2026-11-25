@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A <kbd>Ctrl</kbd> shortcut you name in German runs straight away after Viby looks.** Under **Ask only for risky actions**, "drück Strg+L" (or "Steuerung L" on a call) after a look at the screen waited for **Go**, because only the English names counted as naming <kbd>Ctrl</kbd>. Strg is the key's name on German keyboards and in VibeForge's German window, so it now counts the same as "Ctrl".
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

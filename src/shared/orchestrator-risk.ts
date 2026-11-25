@@ -108,8 +108,9 @@ function plainWords(text: string): string {
   return ` ${text.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
 }
 
+// German keyboards (and the German window) call Ctrl "Strg", said "Steuerung".
 const MODIFIER_WORDS: Record<"ctrl" | "alt" | "shift" | "super", readonly string[]> = {
-  ctrl: ["ctrl", "control", "command", "cmd"],
+  ctrl: ["ctrl", "control", "command", "cmd", "strg", "steuerung"],
   alt: ["alt", "option"],
   shift: ["shift"],
   super: ["super", "windows", "win", "meta", "cmd", "command", "hyper", "mod"],
