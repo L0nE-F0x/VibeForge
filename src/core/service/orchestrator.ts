@@ -133,7 +133,7 @@ import {
   tildify,
   uncommitted,
 } from "./orchestrator-utils.js";
-import type { LiveSession, Settings } from "../types.js";
+import type { LiveSession, Settings, Task } from "../types.js";
 import { cleanModel, effortLevels, takesModel } from "../../shared/launch-options.js";
 import type { RoutineDesk } from "./routines.js";
 import type { RunDesk } from "./runs.js";
@@ -599,9 +599,19 @@ export class OrchestratorDesk {
           };
         }),
     );
-    const rawAgents = this.core.store.listAgents();
+    // A list that can't be read is left out and named, so Viby doesn't take it for empty and make it all again.
+    const unreadable: string[] = this.core.store.unreadableFiles().map((file) => file.error);
+    const readable = <T>(read: () => T[]): T[] => {
+      try {
+        return read();
+      } catch (error) {
+        unreadable.push(error instanceof Error ? error.message : String(error));
+        return [];
+      }
+    };
+    const rawAgents = readable(() => this.core.store.listAgents());
     const agentNames = new Map(rawAgents.map((item) => [item.id, item.name]));
-    const rawSkills = this.core.store.listSkills();
+    const rawSkills = readable(() => this.core.store.listSkills());
     const skillNames = new Map(rawSkills.map((item) => [item.id, item.name]));
     const agents = rawAgents.map((item) => ({
       id: item.id,
@@ -622,7 +632,7 @@ export class OrchestratorDesk {
         ...(attached.length ? { agents: attached } : {}),
       };
     });
-    const rawTasks = this.tasks ? this.tasks.listTasks() : this.core.store.listTasks().map((t) => ({ ...t, waiting: null }));
+    const rawTasks = readable<Task & { waiting: unknown }>(() => (this.tasks ? this.tasks.listTasks() : this.core.store.listTasks().map((t) => ({ ...t, waiting: null }))));
     const tasks = rawTasks.slice(0, 25).map((item) => ({
       id: item.id,
       title: item.title,
@@ -635,7 +645,7 @@ export class OrchestratorDesk {
       ...(item.copy ? { hasCopy: true } : {}),
       ...(item.waiting ? { waiting: true } : {}),
     }));
-    const routines = (this.routines ? this.routines.listRoutines() : []).map((item) => ({
+    const routines = readable(() => (this.routines ? this.routines.listRoutines() : [])).map((item) => ({
       id: item.id,
       name: item.name,
       schedule: item.description,
@@ -686,6 +696,7 @@ export class OrchestratorDesk {
       ...(chats.length ? { chats } : {}),
       ...(runs.length ? { runs } : {}),
       ...(memory ? { memory } : {}),
+      ...(unreadable.length ? { unreadable } : {}),
       projectsFolder: this.projectsFolder(),
       settings: this.buildSettingsContext(allSettings, rows),
     };

@@ -12,7 +12,7 @@ import { useSaveShortcut } from "./Agents.js";
 import { useT, type Key } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { writerNames } from "../components/Occupancy.js";
-import { LoadFailed } from "../components/LoadState.js";
+import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { changesFor } from "../changes-text.js";
 import { scheduleText } from "../schedule-text.js";
 import { shortcutKeys } from "../shortcuts.js";
@@ -40,6 +40,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
   const deleted = useDeleted();
   const deletedMany = useDeletedMany();
   const routines = useRoutines();
+  const unreadableFiles = useUnreadableOf("routine").length;
   const agents = useAgents().data ?? [];
   const [editing, setEditing] = useState<RoutineView | "new" | null>(null);
   const list = routines.data ?? [];
@@ -120,7 +121,8 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
       <div className="page-body">
         <div className="vstack page-narrow" style={{ gap: 10, maxWidth: 980 }}>
           <LoadFailed query={routines} />
-          {routines.loaded && !routines.error && list.length === 0 && (
+          <UnreadableFiles kind="routine" reload={routines.reload} />
+          {routines.loaded && !routines.error && !unreadableFiles && list.length === 0 && (
             <Empty
               icon={CalendarClock}
               title={t("routines.empty.title")}

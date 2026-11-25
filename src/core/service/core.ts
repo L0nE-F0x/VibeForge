@@ -335,8 +335,10 @@ export class ServiceCore {
   // ---------------------------------------------------------------- launching
 
   preambleFor(agent: Agent, prompt: string, priorTranscript: string | null = null, workingCopy: { path: string; of: string } | null = null): string {
+    // A skill or memory that is there but can't be read stops the start, with why, rather than
+    // starting the agent without it.
     const skills = agent.skills.flatMap((id) => {
-      const skill = this.store.getSkill(id);
+      const skill = this.store.readSkill(id);
       return skill ? [{ name: skill.name, body: skill.body }] : [];
     });
     return buildPreamble({

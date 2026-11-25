@@ -1,5 +1,7 @@
 import { AlertTriangle, RotateCcw } from "lucide-react";
-import { useLoadShownHere, type Query } from "../api.js";
+import type { LibraryKind, UnreadableFile } from "../../shared/api.js";
+import { useLoadShownHere, useUnreadable, type Query } from "../api.js";
+import { coreText } from "../core-text.js";
 import { useT, type Key } from "../i18n/index.js";
 import { Button, Notice, useRetry } from "./ui.js";
 
@@ -25,6 +27,49 @@ export function LoadFailed({ query, what }: { query: Pick<Query<unknown>, "error
           <strong className="load-failed-title">{t(sentence)}</strong>
           <span className="load-failed-reason selectable">{query.error}</span>
           <span className="load-failed-hint">{t(query.data === undefined ? "load.notEmpty" : "load.stale")}</span>
+          <div>
+            <Button size="sm" icon={RotateCcw} busy={busy} onClick={retry}>
+              {t("common.tryAgain")}
+            </Button>
+          </div>
+        </div>
+      </Notice>
+    </div>
+  );
+}
+
+/** The files of one kind the lists left out because they couldn't be read: a list with some isn't "empty". */
+export function useUnreadableOf(kind: LibraryKind) {
+  const data = useUnreadable().data;
+  return (data ?? []).filter((file) => file.kind === kind);
+}
+
+/**
+ * Above a list: the files it left out because they are there but couldn't be read, each with why,
+ * so one that is missing from the list isn't taken for deleted. Nothing while every file reads.
+ */
+export function UnreadableFiles({ kind, reload }: { kind: LibraryKind; reload: () => Promise<void> }) {
+  const unreadable = useUnreadable();
+  const files = useUnreadableOf(kind);
+  return <UnreadableNotice kind={kind} files={files} reload={() => Promise.all([unreadable.reload(), reload()]).then(() => undefined)} />;
+}
+
+/** The notice itself, for the files given. */
+export function UnreadableNotice({ kind, files, reload }: { kind: LibraryKind; files: readonly UnreadableFile[]; reload: () => Promise<void> }) {
+  const t = useT();
+  const [retry, busy] = useRetry(reload);
+  if (!files.length) return null;
+  return (
+    <div className="load-failed" role="status">
+      <Notice tone="warn" icon={AlertTriangle}>
+        <div className="vstack" style={{ gap: 6 }}>
+          <strong className="load-failed-title">{t.count(`load.unreadable.${kind}`, files.length)}</strong>
+          {files.map((file) => (
+            <span key={file.file} className="load-failed-reason selectable">
+              {coreText(file.error)}
+            </span>
+          ))}
+          <span className="load-failed-hint">{t("load.unreadableHint")}</span>
           <div>
             <Button size="sm" icon={RotateCcw} busy={busy} onClick={retry}>
               {t("common.tryAgain")}

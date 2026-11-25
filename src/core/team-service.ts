@@ -12,7 +12,7 @@ import { OrchestratorDesk } from "./service/orchestrator.js";
 import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
-import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus } from "./types.js";
+import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus, UnreadableFile } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
@@ -106,6 +106,11 @@ export class TeamService extends ServiceCore {
     return this.library.listSkills();
   }
 
+  /** The agent, skill, routine and task files the lists left out because they couldn't be read. */
+  unreadableFiles(): UnreadableFile[] {
+    return this.store.unreadableFiles();
+  }
+
   saveSkill(input: SkillInput): Skill {
     return this.library.saveSkill(input);
   }
@@ -132,7 +137,7 @@ export class TeamService extends ServiceCore {
     return this.workspaces.addWorkspace(folder);
   }
 
-  removeWorkspace(id: string): Promise<WorkspaceFile> {
+  removeWorkspace(id: string): Promise<Deleted> {
     return this.workspaces.removeWorkspace(id);
   }
 

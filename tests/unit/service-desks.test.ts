@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { agentIn, INTERVAL, setup, started, tempDir, until } from "./fixtures/service-harness.js";
 
@@ -28,11 +30,67 @@ describe("workspaces", () => {
     const code = await ctx.svc.startEngine({ workspaceId: workspace.id, engineId: "argy" });
     ctx.svc.saveLayout(workspace.id, { kind: "pane", id: "a", launch: { type: "shell" } });
     expect(ctx.svc.getLayout(workspace.id)).not.toBeNull();
-    const left = await ctx.svc.removeWorkspace(workspace.id);
-    expect(left.workspaces).toEqual([]);
+    const removed = await ctx.svc.removeWorkspace(workspace.id);
+    expect(removed.undo).toEqual(expect.any(String));
+    expect(ctx.svc.listWorkspaces().workspaces).toEqual([]);
     expect(ctx.killed).toContain(code.ptyId);
     expect(ctx.svc.getLayout(workspace.id)).toBeNull();
     await until(() => ctx.ended.length === 1);
+    await expect(ctx.svc.removeWorkspace(workspace.id)).rejects.toThrow("That workspace is gone.");
+    ctx.svc.close();
+  });
+
+  it("puts a removed workspace back as it was on Undo: its place, name, browser, layout and selection", async () => {
+    const ctx = setup();
+    const [second, third] = [tempDir(), tempDir()];
+    ctx.svc.addWorkspace(ctx.place);
+    ctx.svc.addWorkspace(second);
+    const [first, middle, last] = ctx.svc.addWorkspace(third).workspaces;
+    ctx.svc.updateWorkspace(middle.id, { name: "Middle one", dockUrl: "http://localhost:5173" });
+    ctx.svc.selectWorkspace(middle.id);
+    const layout = { kind: "split", dir: "row", ratio: 0.4, a: { kind: "pane", id: "a", launch: { type: "shell" } }, b: { kind: "pane", id: "b", launch: { type: "engine", engineId: "argy" } } } as const;
+    ctx.svc.saveLayout(middle.id, layout);
+    const before = ctx.svc.listWorkspaces();
+    const removed = await ctx.svc.removeWorkspace(middle.id);
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.id)).toEqual([first.id, last.id]);
+    expect(ctx.svc.listWorkspaces().lastWorkspaceId).not.toBe(middle.id);
+    ctx.svc.undoDelete(removed.undo);
+    expect(ctx.svc.listWorkspaces()).toEqual(before);
+    expect(ctx.svc.getLayout(middle.id)).toEqual(layout);
+    expect(() => ctx.svc.undoDelete(removed.undo)).toThrow("It is too late to undo that.");
+    ctx.svc.close();
+  });
+
+  it("leaves a task's run in the workspace going when it is removed, and the task finds it again on Undo", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const agent = await agentIn(ctx);
+    const task = ctx.svc.saveTask({ title: "Tidy", body: "Tidy up.", agentId: agent.id, workspaceId: workspace.id });
+    const run = started(await ctx.svc.executeTask(task.id));
+    const removed = await ctx.svc.removeWorkspace(workspace.id);
+    expect(ctx.killed).not.toContain(run.ptyId);
+    expect(ctx.svc.listTasks()[0].blocker).toBe("missing-workspace");
+    ctx.svc.undoDelete(removed.undo);
+    expect(ctx.svc.listTasks()[0].blocker).toBeNull();
+    expect(ctx.svc.listLive().some((session) => session.ptyId === run.ptyId)).toBe(true);
+    ctx.svc.close();
+  });
+
+  it("doesn't bring a workspace back over one that took its id, and doesn't add its folder twice", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.removeWorkspace(workspace.id);
+    // The same folder added again by hand: Undo has nothing left to do.
+    ctx.svc.addWorkspace(ctx.place);
+    ctx.svc.undoDelete(first.undo);
+    expect(ctx.svc.listWorkspaces().workspaces).toHaveLength(1);
+    // Another folder of the same name took the id meanwhile: Undo says it can't.
+    const second = await ctx.svc.removeWorkspace(workspace.id);
+    const twin = path.join(tempDir(), path.basename(ctx.place));
+    fs.mkdirSync(twin);
+    expect(ctx.svc.addWorkspace(twin).workspaces[0].id).toBe(workspace.id);
+    expect(() => ctx.svc.undoDelete(second.undo)).toThrow("Another workspace took this one's place meanwhile, so it can't come back.");
+    expect(ctx.svc.listWorkspaces().workspaces.map((item) => item.path)).toEqual([twin]);
     ctx.svc.close();
   });
 });

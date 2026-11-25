@@ -233,7 +233,10 @@ export class RunDesk {
     const rule = this.core.store.readSettings().keepRuns;
     const keep = new Set<string>(this.inbox().map((run) => run.id));
     for (const chat of this.core.store.listChats()) if (chat.runIds.length) keep.add(chat.runIds[chat.runIds.length - 1]);
+    // A tasks folder that can't be read throws here, before anything is removed. A task file that
+    // can't be read would leave its run unguarded, so nothing is removed this time.
     for (const task of this.core.store.listTasks()) if (task.runIds.length) keep.add(task.runIds[task.runIds.length - 1]);
+    if (this.core.store.unreadableFiles().some((file) => file.kind === "task")) return result;
     // Only a size limit needs every run's size; otherwise only the runs removed are measured.
     const candidates: Array<{ run: RunMeta; bytes: number }> = [];
     for (const run of runs) candidates.push({ run, bytes: rule.maxMb > 0 ? await this.runBytes(run) : 0 });

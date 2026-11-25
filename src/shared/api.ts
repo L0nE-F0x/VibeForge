@@ -41,6 +41,8 @@ import type {
   TalkState,
   TaskStatus,
   Topic,
+  UnreadableFile,
+  LibraryKind,
   VoiceSettings,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
@@ -129,6 +131,8 @@ export type {
   TermSize,
   WorkspaceSummary,
   Topic,
+  UnreadableFile,
+  LibraryKind,
   AgentTalkSettings,
   OrchestratorSettings,
   SoundSettings,
@@ -390,7 +394,8 @@ export interface DeskMethods {
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */
   "workspaces.status": () => Record<string, WorkspaceSummary>;
   "workspaces.add": (folder: string) => WorkspaceFile;
-  "workspaces.remove": (id: string) => WorkspaceFile;
+  /** Takes a workspace out of VibeForge (its folder stays on disk), with Undo. Its terminals in Code stop. */
+  "workspaces.remove": (id: string) => Deleted;
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
   "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
@@ -402,6 +407,8 @@ export interface DeskMethods {
   "layouts.save": (workspaceId: string, layout: LayoutNode | null) => void;
   "files.list": (dir: string) => FileNode[];
 
+  /** The agent, skill, routine and task files the lists left out because they couldn't be read. */
+  "library.unreadable": () => UnreadableFile[];
   "agents.list": () => Agent[];
   "agents.save": (input: AgentInput) => Agent;
   "agents.delete": (id: string) => Deleted;

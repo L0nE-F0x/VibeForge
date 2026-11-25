@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agents, skills, routines or tasks folder that can't be read says so, instead of looking empty.** If VibeForge isn't allowed to read `~/.config/vibeforge/agents` (or the disk reports an error), Agents now shows "Couldn't read your agents." with the reason and **Try again**, where before it said "No agents yet." The same goes for skills, routines and tasks. A single file that can't be read, or that isn't valid YAML, is named above its list with why, and the rest of the list still shows. An agent's memory that can't be read shows an error instead of an empty editor, so nothing is saved over it. In the background, nothing takes such a file for deleted: Sync doesn't tell your other machines it was deleted or that its memory is empty, routines whose files can be read still start, run tidying removes nothing while a task can't be read, and Viby is told which lists it couldn't read. An agent whose memory or skill can't be read doesn't start, and the run says why.
+- **Removing a workspace in Code has Undo, and asks first only when a terminal would stop.** **Remove from VibeForge** now happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>, as deleting does. Undo puts the workspace back in its place in the list with its name, browser address and pane layout. It still asks first when terminals of Code's own are running there, because removing stops them and Undo can't start them again. Runs of agents, tasks and routines in the workspace keep going either way, its folder stays on disk, and a Sync share of the folder is untouched. When Viby removes a workspace, its step has **Undo** too.
+
 ## [3.7.1] - 2026-11-25
 
 **3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
