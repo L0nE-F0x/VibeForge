@@ -220,11 +220,15 @@ export function resolveLocalReflex(
       };
     }
     if (cmd === "trust" && !arg) {
+      // The question of the CLI in front when it asks one, else of the only one asking. A CLI that
+      // asks nothing would take the Enter as sending what is typed in its prompt.
       const waitingClis = context.running.filter((r) => Boolean(r.waiting));
+      const inFront = looking?.ptyId ? context.running.find((r) => r.id === looking.ptyId) : undefined;
       const cli =
-        (looking?.ptyId ? context.running.find((r) => r.id === looking.ptyId) : undefined) ??
+        (inFront?.waiting ? inFront : undefined) ??
         (waitingClis.length === 1 ? waitingClis[0] : undefined) ??
-        (context.running.length === 1 ? context.running[0] : undefined);
+        // None shows a question it was recognised by: the one in front, or the only one running.
+        (waitingClis.length === 0 ? (inFront ?? (context.running.length === 1 ? context.running[0] : undefined)) : undefined);
       if (cli) {
         return {
           kind: "steps",

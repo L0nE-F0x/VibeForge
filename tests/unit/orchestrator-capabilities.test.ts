@@ -203,6 +203,23 @@ describe("Viby expanded 0ms reflexes and safety gates", () => {
       ],
     };
     expect(resolveLocalReflex("/trust", twoRunning)).toBeNull();
+    // Looking at a CLI that asks nothing while another asks (a CLI Viby just started in a new copy
+    // asks whether to trust that folder): the Enter goes to the one asking. In the pane in front it
+    // would send whatever is typed in that CLI's prompt, and the question would stay.
+    const oneAsking: PlanContext = {
+      ...context,
+      running: [twoRunning.running[0], { ...twoRunning.running[1], waiting: "Do you trust the files in this folder?" }],
+    };
+    expect(resolveLocalReflex("/trust", oneAsking, { view: "code", ptyId: "pty-1" })).toMatchObject({
+      kind: "steps",
+      tag: "trust",
+      rawSteps: [{ kind: "key", target: "pty-2", prompt: "enter" }],
+    });
+    // The one in front is asking too: it is the one answered.
+    const bothAsking: PlanContext = { ...context, running: oneAsking.running.map((cli) => ({ ...cli, waiting: "Do you trust the files in this folder?" })) };
+    expect(resolveLocalReflex("/trust", bothAsking, { view: "code", ptyId: "pty-1" })).toMatchObject({ rawSteps: [{ target: "pty-1" }] });
+    // Nothing shows a question: the CLI in front, as before (one asking may not have been recognised).
+    expect(resolveLocalReflex("/trust", twoRunning, { view: "code", ptyId: "pty-2" })).toMatchObject({ rawSteps: [{ target: "pty-2" }] });
 
     // Service end-to-end execution of quickAct reflexes
     const ctxSvc = setupWithClaude();
