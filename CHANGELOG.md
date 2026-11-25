@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dollar signs in a prompt reach the CLI as you wrote them.** A task, routine or chat whose first message went to the CLI on its command line lost some of them: `$$` became `$`, `$'` and `` $` `` vanished, and `$&` turned into `{prompt}`. Shell snippets such as `echo $$` and `$$…$$` maths were changed before the CLI read them.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
