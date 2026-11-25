@@ -20,13 +20,13 @@
 # scripts/publish-android-widget.sh points these at each new one.
 [[redirects]]
   from = "/widget.apk"
-  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.1.0/vibeforge-widget.apk"
+  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.2.1/vibeforge-widget.apk"
   status = 302
   force = true
 
 [[redirects]]
   from = "/widget.apk.sha256"
-  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.1.0/vibeforge-widget.apk.sha256"
+  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.2.1/vibeforge-widget.apk.sha256"
   status = 302
   force = true
 
