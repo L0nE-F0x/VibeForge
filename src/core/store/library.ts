@@ -131,6 +131,19 @@ export function oneLine(text: string, max = 160): string {
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+/**
+ * An on/off field of a YAML file written by hand. The parser follows YAML 1.2, which reads `no`,
+ * `off`, `yes` and `on` as text, while YAML 1.1, which many tools still follow, reads them as
+ * false and true. As text they fell back to the default, so `enabled: no` turned a routine on.
+ */
+function flag(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "string") {
+    if (/^(?:yes|on)$/i.test(value)) return true;
+    if (/^(?:no|off)$/i.test(value)) return false;
+  }
+  return bool(value, fallback);
+}
+
 export function agentTier(value: unknown): AgentTier {
   return value === "fast" || value === "everyday" || value === "strong" ? value : "";
 }
@@ -146,7 +159,7 @@ function normalizeAgent(id: string, value: unknown): Agent | null {
     memoryFile: "memory.md",
     places: strList(record.places),
     skills: strList(record.skills),
-    allowRoutines: bool(record.allowRoutines, true),
+    allowRoutines: flag(record.allowRoutines, true),
     goodAt: oneLine(str(record.goodAt)),
     tier: agentTier(record.tier),
     createdAt: str(record.createdAt),
@@ -183,13 +196,13 @@ function normalizeRoutine(id: string, value: unknown): Routine | null {
     id,
     name: str(record.name) || id,
     agentId: str(record.agentId),
-    enabled: bool(record.enabled, true),
+    enabled: flag(record.enabled, true),
     schedule: schedule(record.schedule),
     prompt: str(record.prompt),
-    notify: bool(record.notify, true),
+    notify: flag(record.notify, true),
     lastFiredAt: strOrNull(record.lastFiredAt),
     lastMissedAt: strOrNull(record.lastMissedAt),
-    shareCheckout: record.shareCheckout === true,
+    shareCheckout: flag(record.shareCheckout, false),
   };
 }
 
@@ -205,9 +218,9 @@ function normalizeTask(id: string, value: unknown): Task | null {
     agentId: strOrNull(record.agentId),
     workspaceId: strOrNull(record.workspaceId),
     runIds: strList(record.runIds),
-    isolated: record.isolated === true,
+    isolated: flag(record.isolated, false),
     copy: workingCopy(record.copy),
-    shareCheckout: record.shareCheckout === true,
+    shareCheckout: flag(record.shareCheckout, false),
     sourceRunId: strOrNull(record.sourceRunId),
     askedBy: strOrNull(record.askedBy),
     createdAt: str(record.createdAt),

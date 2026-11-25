@@ -512,6 +512,24 @@ describe("store", () => {
     store.close();
   });
 
+  it("reads yes and no, on and off, in a hand-written agent, routine or task as the switch they name", () => {
+    const store = new Store(tempDir(), tempDir());
+    const write = (file: string, text: string) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+    };
+    write(path.join(store.configRoot, "agents", "atlas", "agent.yaml"), "name: Atlas\nengine: claude\nbrief: Help.\nallowRoutines: no\n");
+    write(path.join(store.configRoot, "routines", "nightly.yaml"), "name: Nightly\nagentId: atlas\nenabled: no\nnotify: off\nshareCheckout: yes\nschedule:\n  kind: every\n  minutes: 60\nprompt: Check.\n");
+    write(path.join(store.configRoot, "tasks", "lamp.yaml"), "title: Lamp\nisolated: yes\nshareCheckout: On\n");
+    expect(store.getAgent("atlas")?.allowRoutines).toBe(false);
+    expect(store.getRoutine("nightly")).toMatchObject({ enabled: false, notify: false, shareCheckout: true });
+    expect(store.getTask("lamp")).toMatchObject({ isolated: true, shareCheckout: true });
+    // Anything else that isn't true or false is still the default.
+    write(path.join(store.configRoot, "routines", "nightly.yaml"), "name: Nightly\nenabled: nope\nnotify: 0\n");
+    expect(store.getRoutine("nightly")).toMatchObject({ enabled: true, notify: true, shareCheckout: false });
+    store.close();
+  });
+
   it("seeds engines.json and settings.json on first read", () => {
     const store = new Store(tempDir(), tempDir());
     expect(store.readEngineRows().map((row) => row.id)).toContain("claude");

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **`enabled: no` in a routine you wrote by hand pauses it.** VibeForge reads YAML the 1.2 way, where `no`, `off`, `yes` and `on` are words rather than true or false, so a routine with `enabled: no` ran on schedule, `allowRoutines: no` on an agent still let routines start it, and `isolated: yes` on a task ran it in your own checkout. They now mean what they say in a routine's, agent's or task's on/off fields, as `true` and `false` always did.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
