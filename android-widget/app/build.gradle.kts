@@ -62,8 +62,8 @@ android {
         applicationId = "net.vibeforge.widget"
         minSdk = 28
         targetSdk = 35
-        versionCode = 8
-        versionName = "2.2.0"
+        versionCode = 9
+        versionName = "2.2.1"
 
         buildConfigField("String", "DEFAULT_URL", escapeBuildConfig(defaultUrl))
     }

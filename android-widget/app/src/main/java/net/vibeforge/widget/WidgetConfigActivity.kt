@@ -398,8 +398,11 @@ class WidgetConfigActivity : Activity() {
                 Result.failure(e)
             } catch (e: IllegalStateException) {
                 Result.failure(e)
-            } catch (_: Exception) {
-                Result.failure(IllegalStateException("Couldn't reach that computer. Is VibeForge running there with Settings → Phone on, and is Tailscale connected on this phone?"))
+            } catch (e: Exception) {
+                // Say what actually went wrong too: "couldn't reach" alone hid a DNS failure from a
+                // network one from a certificate one.
+                val why = listOfNotNull(e.javaClass.simpleName, e.message?.take(160)).joinToString(": ")
+                Result.failure(IllegalStateException("Couldn't reach that computer. Is VibeForge running there with Settings → Phone on, and is Tailscale connected on this phone?\n($why)"))
             }
             val machine = outcome.getOrNull()
             val ok = machine != null && VibeForgeApi.refreshMachine(applicationContext, machine, timeoutMs = 8_000)
