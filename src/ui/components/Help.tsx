@@ -27,6 +27,7 @@ export function environmentText(info: AppInfo | undefined, engines: Engine[]): s
     `VibeForge ${info?.version ?? "?"}`,
     `System: ${info?.os ?? "?"}`,
     `Electron ${info?.electron ?? "?"} · Chromium ${info?.chrome ?? "?"} · Node ${info?.node ?? "?"}`,
+    `Terminal host: ${info?.hostRuntime ? `Node ${info.hostRuntime.node}, libuv ${info.hostRuntime.uv}` : info?.hostRunning ? "running" : "not running"}`,
     `CLIs on PATH: ${found.length ? found.join(", ") : "none"}`,
   ].join("\n");
 }
@@ -51,6 +52,7 @@ export async function diagnosticsText(info: AppInfo | undefined, engines: Engine
     "",
     environmentText(info, engines),
     `Install: ${info?.install ?? "?"} copy at ${info?.appPath ?? "?"}`,
+    `Unexpected errors since start: ${info?.unexpectedErrors ?? "?"}`,
     settings
       ? `Settings: theme ${settings.theme}, language ${settings.language}, shell ${settings.defaultShell}, default engine ${settings.defaultEngine}, update checks ${settings.checkUpdates ? "on" : "off"}`
       : "Settings: not loaded",

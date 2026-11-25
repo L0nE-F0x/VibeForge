@@ -3,7 +3,7 @@ import type { Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../
 import { call } from "../../api.js";
 import { estimateTermSize, type TerminalHandle } from "../../components/Terminal.js";
 import { useT } from "../../i18n/index.js";
-import { movePane, panesOf, placeSession, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode } from "../../pane-layout.js";
+import { movePane, panesOf, placeSession, reattachPanes, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode, type PaneTerminal } from "../../pane-layout.js";
 import { useConfirm, useNav, useToast, type Route } from "../../state.js";
 
 // Code's panes: each workspace's pane tree, what runs in each pane, which one has focus, and the
@@ -14,6 +14,26 @@ export interface Runtime {
   runId: string | null;
   state: "idle" | "starting" | "live" | "exited";
   exitText: string | null;
+}
+
+/** Where each pane's terminal is remembered for this window: sessionStorage outlives a reload of the page, not a restart. */
+const PANE_TERMINALS = "vibeforge:pane-terminals";
+
+function rememberedTerminals(): Record<string, PaneTerminal> {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(PANE_TERMINALS) ?? "{}");
+    return saved && typeof saved === "object" ? (saved as Record<string, PaneTerminal>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Terminals started outside Code that should still get a pane there, as Maestro's do: runs continued after the terminal host stopped. */
+const toPlace = new Set<string>();
+
+/** Give this terminal a pane in its workspace once it is live: the idle pane of the same CLI, else a new one. */
+export function placeInCode(ptyId: string): void {
+  toPlace.add(ptyId);
 }
 
 export const newPaneId = () => `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -84,6 +104,22 @@ export function useWorkspacePanes({
   /** Workspaces loaded in the background before Code opened, whose saved shells still wait to start. */
   const unstartedShells = useRef(new Set<string>());
 
+  // What the page before this one left, read before the effect below writes this page's (empty) list.
+  const remembered = useRef<Record<string, PaneTerminal> | null>(null);
+  if (remembered.current === null) remembered.current = rememberedTerminals();
+  // A CLI the Orchestrator started gets a pane once; a terminal put back after a reload counts as placed.
+  const placed = useRef(new Set<string>());
+  // Each live pane's terminal, so a page that crashed and was reloaded puts them back (reattachPanes).
+  useEffect(() => {
+    const live: Record<string, PaneTerminal> = {};
+    for (const [paneId, state] of Object.entries(runtime)) if (state.state === "live" && state.ptyId) live[paneId] = { ptyId: state.ptyId, runId: state.runId };
+    try {
+      sessionStorage.setItem(PANE_TERMINALS, JSON.stringify(live));
+    } catch {
+      /* no storage: a reload starts the panes' shells afresh, as a restart does */
+    }
+  }, [runtime]);
+
   const patchRuntime = useCallback(
     (paneId: string, patch: Partial<Runtime>) => {
       setRuntime((prev) => ({ ...prev, [paneId]: { ...(prev[paneId] ?? { ptyId: null, runId: null, state: "idle", exitText: null }), ...patch } }));
@@ -152,9 +188,11 @@ export function useWorkspacePanes({
       if (workspace.id in layoutsRef.current) return Promise.resolve(layoutsRef.current[workspace.id] ?? null);
       const inflight = loadingLayouts.current.get(workspace.id);
       if (inflight) return inflight;
-      const promise = call("layouts.get", workspace.id)
-        .catch(() => null)
-        .then((saved) => {
+      const left = remembered.current ?? {};
+      // Only a page that was reloaded remembers terminals; it asks which of them still run.
+      const running = Object.keys(left).length ? call("live.list").then((live) => new Set(live.map((item) => item.ptyId))) : Promise.resolve(new Set<string>());
+      const promise = Promise.all([call("layouts.get", workspace.id).catch(() => null), running.catch(() => new Set<string>())])
+        .then(([saved, stillRunning]) => {
           loadingLayouts.current.delete(workspace.id);
           if (!workspacesRef.current.some((item) => item.id === workspace.id)) return null;
           if (!(workspace.id in layoutsRef.current)) {
@@ -162,9 +200,16 @@ export function useWorkspacePanes({
             const panes = saved ? panesOf(saved) : [];
             const first = panes[0];
             if (first) setFocus((prev) => ({ ...prev, [workspace.id]: prev[workspace.id] ?? first.id }));
+            // Terminals that went on running while the page was away go back in their panes.
+            const back = reattachPanes(panes, left, stillRunning);
+            for (const [paneId, terminal] of back) {
+              placed.current.add(terminal.ptyId);
+              patchRuntime(paneId, { ...terminal, state: "live", exitText: null });
+            }
+            const fresh = panes.filter((pane) => pane.launch.type === "shell" && !back.has(pane.id));
             if (openedRef.current) {
-              for (const pane of panes) if (pane.launch.type === "shell") void startPane(workspace, pane);
-            } else if (panes.some((pane) => pane.launch.type === "shell")) {
+              for (const pane of fresh) void startPane(workspace, pane);
+            } else if (fresh.length) {
               unstartedShells.current.add(workspace.id);
             }
           }
@@ -173,7 +218,7 @@ export function useWorkspacePanes({
       loadingLayouts.current.set(workspace.id, promise);
       return promise;
     },
-    [layoutsRef, setLayouts, setFocus, startPane],
+    [layoutsRef, setLayouts, setFocus, startPane, patchRuntime],
   );
 
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
@@ -197,8 +242,7 @@ export function useWorkspacePanes({
   }
 
   // A CLI the Orchestrator started gets a pane in its workspace (the new branch's), whether or
-  // not Code is on screen, so it is there when the person goes to look. Each one once.
-  const placed = useRef(new Set<string>());
+  // not Code is on screen, so it is there when the person goes to look. Each one once (`placed`).
 
   /**
    * Give `ptyId` a pane in `workspace`, or reuse the one that already holds it: an idle pane of
@@ -268,7 +312,8 @@ export function useWorkspacePanes({
 
   useEffect(() => {
     for (const session of live) {
-      if (!session.orchestrated || !session.workspaceId || placed.current.has(session.ptyId)) continue;
+      if (!(session.orchestrated || toPlace.has(session.ptyId)) || !session.workspaceId || placed.current.has(session.ptyId)) continue;
+      toPlace.delete(session.ptyId);
       const workspace = workspaces.find((item) => item.id === session.workspaceId);
       if (!workspace) continue;
       placed.current.add(session.ptyId);

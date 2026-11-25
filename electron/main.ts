@@ -32,6 +32,7 @@ import { adoptShellPath, osDescription, settleWorkingDir } from "./system.js";
 import { Call } from "./call.js";
 import { Disposables, startSchedules } from "./timers.js";
 import { TrayController } from "./tray-controller.js";
+import { UnexpectedErrors } from "./unexpected.js";
 import { Updater } from "./updater.js";
 import { companionWire, makeVoice } from "./voice-phone.js";
 import { MainWindow } from "./window.js";
@@ -46,11 +47,17 @@ ensureLayout(roots.configRoot, roots.dataRoot);
 const log = new LogFile(path.join(roots.dataRoot, "logs", "vibeforge.log"));
 settleWorkingDir(log);
 
+// Logged, counted and told (unexpected.ts): VibeForge carries on, but something may be half done.
+const unexpected = new UnexpectedErrors();
 process.on("uncaughtException", (error) => {
   console.error(error);
   log.error(`Uncaught error in the main process: ${describeError(error)}`);
+  unexpected.add();
 });
-process.on("unhandledRejection", (reason) => log.warn(`Unhandled rejection in the main process: ${describeError(reason)}`));
+process.on("unhandledRejection", (reason) => {
+  log.error(`Unhandled rejection in the main process: ${describeError(reason)}`);
+  unexpected.add();
+});
 
 app.setName("VibeForge");
 app.setAppUserModelId(APP_ID);
@@ -94,6 +101,7 @@ const ctx = new MainContext({
   appRoot,
   install: copyInstall,
   palette: resolvePalette("omarchy"),
+  unexpected,
 });
 const { send, focusWindow, install } = ctx;
 ownWebContents = () => ctx.win?.webContents ?? null;

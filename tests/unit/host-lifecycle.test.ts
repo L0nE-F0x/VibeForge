@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrashCount, HostLifecycle, terminalEnv } from "../../electron/host-lifecycle.js";
+import { CrashCount, HOST_STOPPED, HostLifecycle, terminalEnv } from "../../electron/host-lifecycle.js";
 import { MainContext } from "../../electron/main-context.js";
 import { LogFile } from "../../src/core/log.js";
 
@@ -24,6 +24,7 @@ function fakeSupervisor() {
     onActivity: new Set<(event: unknown) => void>(),
     onCrash: new Set<(message: string) => void>(),
     onStderr: new Set<(line: string) => void>(),
+    onStall: new Set<(stalled: boolean) => void>(),
     starts: [] as NodeJS.ProcessEnv[],
     fail: null as string | null,
     async start(_root: string, env: NodeJS.ProcessEnv) {
@@ -32,6 +33,9 @@ function fakeSupervisor() {
     },
     crash(message: string) {
       for (const handler of this.onCrash) handler(message);
+    },
+    stall(stalled: boolean) {
+      for (const handler of this.onStall) handler(stalled);
     },
   };
 }
@@ -50,12 +54,16 @@ function setUp() {
   });
   const sent: unknown[][] = [];
   Object.assign(ctx, { send: (event: string, payload: unknown) => sent.push([event, payload]) });
-  const ended: Array<[string, number | null, number | null]> = [];
-  const live = [{ ptyId: "p1" }, { ptyId: "p2" }];
+  const ended: Array<[string, number | null, number | null, string | null]> = [];
+  // A run, and a shell that isn't recording one.
+  const live = [
+    { ptyId: "p1", runId: "run-1" },
+    { ptyId: "p2", runId: null },
+  ];
   ctx.service = {
     listLive: () => live,
-    onPtyExit: async (ptyId: string, code: number | null, signal: number | null) => {
-      ended.push([ptyId, code, signal]);
+    onPtyExit: async (ptyId: string, code: number | null, signal: number | null, error: string | null = null) => {
+      ended.push([ptyId, code, signal, error]);
     },
   } as never;
   const life = new HostLifecycle(ctx, {
@@ -88,7 +96,7 @@ describe("the terminal host's lifecycle", () => {
 
   it("keeps why the host didn't start, for a page that loads later", async () => {
     const { supervisor, life, sent, lines } = setUp();
-    supervisor.fail = "VibeForge needs Node on PATH to run terminals (node was not found).";
+    supervisor.fail = "The terminal host did not start within 10 seconds.";
     const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await life.start();
     quiet.mockRestore();
@@ -108,27 +116,27 @@ describe("the terminal host's lifecycle", () => {
     expect(lines()).toEqual(["INFO  Terminal p1 ended (exit code 0)", "INFO  Terminal p2 ended (signal 9)"]);
     expect(sent.map(([event]) => event)).toEqual(["pty-exit", "pty-exit"]);
     expect(ended).toEqual([
-      ["p1", 0, null],
-      ["p2", null, 9],
+      ["p1", 0, null, null],
+      ["p2", null, 9, null],
     ]);
   });
 
-  it("records every terminal as ended when the host crashes, then brings it back a second later", async () => {
+  it("records every terminal as cut off when the host crashes, says so once, then brings it back a second later", async () => {
     vi.useFakeTimers();
-    const { supervisor, sent, ended, lines } = setUp();
+    const { supervisor, ctx, sent, ended, lines } = setUp();
     supervisor.crash("The terminal host stopped (SIGKILL).");
     expect(ended).toEqual([
-      ["p1", null, null],
-      ["p2", null, null],
+      ["p1", null, null, HOST_STOPPED],
+      ["p2", null, null, HOST_STOPPED],
     ]);
     expect(lines()).toContain("INFO  Terminal p1 ended (the terminal host stopped)");
     expect(lines()).toContain("INFO  Terminal p2 ended (the terminal host stopped)");
-    // The page hears each terminal end, so no pane goes on looking live, then the crash.
+    // The page hears each terminal end, so no pane goes on looking live, then one notice with the runs to continue.
     expect(sent).toEqual([
       ["pty-exit", { ptyId: "p1", exitCode: null, signal: null }],
       ["pty-exit", { ptyId: "p2", exitCode: null, signal: null }],
-      ["host-crash", "The terminal host stopped (SIGKILL)."],
     ]);
+    expect(ctx.takeNotices()).toEqual([{ id: "host-stopped", terminals: 2, runIds: ["run-1"] }]);
     expect(lines()).toContain("ERROR The terminal host stopped (SIGKILL).");
     expect(lines().join("\n")).not.toContain("stopped: The terminal host stopped");
     expect(supervisor.starts).toHaveLength(0);
@@ -138,7 +146,7 @@ describe("the terminal host's lifecycle", () => {
 
   it("leaves the host down once a quit has begun, even one that starts within that second", async () => {
     vi.useFakeTimers();
-    const { supervisor, ctx, sent } = setUp();
+    const { supervisor, ctx } = setUp();
     supervisor.crash("gone");
     ctx.quitting = true;
     await vi.advanceTimersByTimeAsync(2000);
@@ -146,8 +154,8 @@ describe("the terminal host's lifecycle", () => {
     supervisor.crash("gone again");
     await vi.advanceTimersByTimeAsync(2000);
     expect(supervisor.starts).toHaveLength(0);
-    // The page hears about the first crash only: the second came during the quit.
-    expect(sent.filter(([event]) => event === "host-crash")).toEqual([["host-crash", "gone"]]);
+    // The person hears about the first crash only: the second came during the quit.
+    expect(ctx.takeNotices().map((notice) => notice.id)).toEqual(["host-stopped"]);
   });
 
   it("stops bringing back a host that crashed more than three times in five minutes", async () => {
@@ -175,6 +183,25 @@ describe("what the terminal host says on stderr", () => {
     expect(logged[0]).toBe("WARN  Terminal host: scrollback: ENOSPC 0");
     expect(logged).toHaveLength(21);
     expect(logged.at(-1)).toContain("more on stderr this minute");
+  });
+});
+
+describe("a terminal host that stops answering, or errs", () => {
+  it("says it stalled, and that it answers again, without ending it", () => {
+    const { supervisor, ctx, lines } = setUp();
+    supervisor.stall(true);
+    supervisor.stall(false);
+    expect(ctx.takeNotices()).toEqual([{ id: "host-stalled" }, { id: "host-answering" }]);
+    expect(lines()).toContain("WARN  The terminal host is not answering; its terminals may not respond");
+    expect(lines()).toContain("INFO  The terminal host is answering again");
+  });
+
+  it("counts an error the host caught on its own, and tells the person", () => {
+    const { supervisor, ctx } = setUp();
+    for (const handler of supervisor.onStderr) handler("pty-host uncaught: TypeError: x is not a function");
+    for (const handler of supervisor.onStderr) handler("    at handle (pty-host.cjs:10:3)");
+    expect(ctx.unexpected.count).toBe(1);
+    expect(ctx.takeNotices()).toEqual([{ id: "errors", count: 1 }]);
   });
 });
 

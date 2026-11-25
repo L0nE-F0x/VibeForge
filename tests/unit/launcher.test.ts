@@ -74,11 +74,11 @@ afterAll(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-function launch(args: string[], app = "app"): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function launch(args: string[], app = "app", PATH = `${path.join(dir, "bin")}:${path.dirname(process.execPath)}:/usr/bin:/bin`): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn("bash", [path.join(dir, app, "scripts", "vibeforge"), ...args], {
+    const child = spawn("/bin/bash", [path.join(dir, app, "scripts", "vibeforge"), ...args], {
       env: {
-        PATH: `${path.join(dir, "bin")}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        PATH,
         HOME: path.join(dir, "home"),
         VIBEFORGE_SOCKET: socket,
         // Even a fall-through never builds or opens a window.
@@ -128,6 +128,28 @@ describe("the vibeforge launcher", () => {
     expect(result.stderr).toContain("VibeForge: Electron is missing");
     expect(result.stderr).toContain("npm install");
     expect(result.code).toBe(1);
+  });
+
+  it("talks through Electron's own Node when the system has none", async () => {
+    const copy = path.join(dir, "no node");
+    fs.mkdirSync(path.join(copy, "scripts"), { recursive: true });
+    for (const file of ["vibeforge", "talk.mjs"]) fs.copyFileSync(path.join(dir, "app", "scripts", file), path.join(copy, "scripts", file));
+    // A stand-in Electron that is only Node when started as Node.
+    const electron = path.join(copy, "node_modules", "electron", "dist", "electron");
+    fs.mkdirSync(path.dirname(electron), { recursive: true });
+    fs.writeFileSync(electron, `#!/bin/sh\n[ "$ELECTRON_RUN_AS_NODE" = 1 ] || exit 9\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
+    // A PATH with what the launcher uses, and no node.
+    const tools = path.join(dir, "no-node-bin");
+    fs.mkdirSync(tools, { recursive: true });
+    for (const tool of ["env", "dirname", "readlink", "sha1sum", "cut", "id", "stat", "mkdir", "chmod", "notify-send"]) {
+      const found = [path.join(dir, "bin"), "/usr/bin", "/bin"].map((folder) => path.join(folder, tool)).find((file) => fs.existsSync(file));
+      if (found && !fs.existsSync(path.join(tools, tool))) fs.symlinkSync(found, path.join(tools, tool));
+    }
+    requests.length = 0;
+    const result = await launch(["who"], "no node", tools);
+    expect(result.stderr).toBe("");
+    expect(requests.map((request) => request.op)).toEqual(["who"]);
+    expect(result.code).toBe(0);
   });
 
   it("tells an installer copy, which has no source to build, to install again", async () => {

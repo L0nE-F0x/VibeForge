@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config';
 // a new file is held by its folder's total below.
 const floors: Record<string, number> = {
   'electron/chimes.ts': 96,
+  'electron/page-recovery.ts': 99,
+  'electron/scrollback-file.cjs': 93,
+  'electron/unexpected.ts': 99,
   'src/core/activity.ts': 68,
   'src/core/agent-talk.ts': 99,
   'src/core/autostart.ts': 99,
@@ -18,7 +21,7 @@ const floors: Record<string, number> = {
   'src/core/engines.ts': 97,
   'src/core/files.ts': 85,
   'src/core/folder-lock.ts': 96,
-  'src/core/fsx.ts': 96,
+  'src/core/fsx.ts': 97,
   'src/core/handoff.ts': 99,
   'src/core/layout.ts': 99,
   'src/core/log.ts': 94,
@@ -70,7 +73,7 @@ const floors: Record<string, number> = {
   'src/core/team-service.ts': 89,
   'src/core/theme.ts': 88,
   'src/core/themes-bundled.ts': 99,
-  'src/core/trash.ts': 77,
+  'src/core/trash.ts': 87,
   'src/core/updates.ts': 98,
   'src/core/usage.ts': 92,
   'src/core/vcs.ts': 89,

@@ -510,7 +510,8 @@ export class ServiceCore {
 
   // ---------------------------------------------------------------- exits
 
-  async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null): Promise<void> {
+  /** A terminal ended. `error` says why when it wasn't the program's own doing (the terminal host stopped). */
+  async onPtyExit(ptyId: string, exitCode: number | null, signal: number | null, error: string | null = null): Promise<void> {
     const session = this.live.get(ptyId);
     this.live.delete(ptyId);
     this.ptyTokens.delete(ptyId);
@@ -523,7 +524,7 @@ export class ServiceCore {
       }
       this.ptyByRun.delete(session.runId);
       const run = this.store.getRun(session.runId);
-      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited" });
+      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited", ...(error ? { error } : {}) });
       this.finishing.add(done);
       try {
         await done;
@@ -539,7 +540,7 @@ export class ServiceCore {
 
   async finishRun(
     runId: string,
-    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped" },
+    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped"; error?: string },
   ): Promise<void> {
     if (this.closed) return;
     const run = this.store.getRun(runId);
@@ -562,6 +563,7 @@ export class ServiceCore {
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       endedAt: this.now().toISOString(),
+      ...(outcome.error ? { error: outcome.error } : {}),
       changes: (before !== undefined && before === git) || untouched ? "No changes" : summarizeSnapshot(git),
     });
     this.indexText(finished);

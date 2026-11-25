@@ -4,7 +4,7 @@
 // program ends, three things could leave its last output unread or out of order:
 // - libuv 1.51 (Node 22.23) ends the stream when the pty hangs up right after a short read, with
 //   the kernel's last bytes still unread. libuv 1.52 (Node 24 and 26) fixed it. The terminal host
-//   runs on the person's own Node, so it may be either.
+//   now runs on Electron's own Node (24), but VIBEFORGE_NODE can still put it on another.
 // - node-pty destroys the stream 200 ms after the program exits, with whatever is still in it, so
 //   a pane that was held back at that moment (flow control, or a snapshot) lost its tail.
 // - Reading the pty before the piece already waiting in the stream put the tail ahead of it.

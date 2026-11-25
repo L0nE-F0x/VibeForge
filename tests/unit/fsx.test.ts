@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readJson, writeFileAtomic, writeJson } from "../../src/core/fsx.js";
 
 describe("JSON files", () => {
@@ -57,3 +57,41 @@ describe("JSON files", () => {
     expect(mode(plain)).toBe(0o644);
   });
 });
+
+describe("writing a file", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("puts it on disk before it takes the name, and its folder after", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-fsx-"));
+    const file = path.join(dir, "settings.json");
+    const steps: string[] = [];
+    const fsync = fs.fsyncSync;
+    const rename = fs.renameSync;
+    vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+      steps.push(fs.fstatSync(fd).isDirectory() ? "sync folder" : "sync file");
+      fsync(fd);
+    });
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      steps.push("rename");
+      rename(from, to);
+    });
+    writeFileAtomic(file, "{}\n");
+    expect(steps).toEqual(["sync file", "rename", "sync folder"]);
+    expect(fs.readFileSync(file, "utf8")).toBe("{}\n");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("leaves no temp file behind, and the old file as it was, when the write fails", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-fsx-"));
+    const file = path.join(dir, "chats.json");
+    fs.writeFileSync(file, "old\n");
+    vi.spyOn(fs, "renameSync").mockImplementation(() => {
+      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    });
+    expect(() => writeFileAtomic(file, "new\n")).toThrow("ENOSPC");
+    expect(fs.readdirSync(dir)).toEqual(["chats.json"]);
+    expect(fs.readFileSync(file, "utf8")).toBe("old\n");
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+

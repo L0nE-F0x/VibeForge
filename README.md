@@ -120,7 +120,7 @@ Anything with a command line. The defaults know how to hand a first prompt to **
 ## How it works
 
 ```
-React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (system Node)
+React UI ──IPC──▶ Electron main ──JSON lines──▶ PTY host (Electron's Node)
                   agents, chats, tasks,          node-pty + a headless xterm per
                   routines, runs, scheduler      terminal → your CLIs
 ```
