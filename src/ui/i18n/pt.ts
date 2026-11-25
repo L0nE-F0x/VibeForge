@@ -2267,7 +2267,7 @@ export const pt: Catalog = {
   "first.computer.label.tray": "Bandeja do sistema",
   "first.computer.label.desktop": "Área de trabalho",
   "first.computer.off.git": "Sem git, as execuções não guardam diff, e as tarefas e o Viby não podem trabalhar em cópias próprias.",
-  "first.computer.off.node": "Sem Node, nenhum terminal consegue iniciar.",
+  "first.computer.off.node": "O VibeForge não precisa dele: os terminais e o comando vibeforge rodam no Node do próprio Electron. Ele só é necessário para compilar o VibeForge a partir do código-fonte.",
   "first.computer.off.speech": "Sem whisper.cpp nem sherpa-onnx, o ditado e as chamadas com o Viby não funcionam. Ajustes → Voz pode baixar o sherpa-onnx.",
   "first.computer.off.piper": "Sem Piper, o Viby responde só em texto.",
   "first.computer.off.pipewire": "Sem o pw-record do PipeWire, o ditado grava com parec ou arecord se houver um, e uma chamada não consegue cancelar o eco.",

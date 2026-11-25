@@ -5,6 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { probeComputer } from "../../electron/computer.js";
 import type { Engine } from "../../src/core/types.js";
 import { COMPUTER_PARTS, computerText, desktopName, installLine, packageManagerOf, parseVersion } from "../../src/shared/computer.js";
+import { de } from "../../src/ui/i18n/de.js";
+import { en } from "../../src/ui/i18n/en.js";
+import { es } from "../../src/ui/i18n/es.js";
+import { fr } from "../../src/ui/i18n/fr.js";
+import { ja } from "../../src/ui/i18n/ja.js";
+import { pt } from "../../src/ui/i18n/pt.js";
+import { zh } from "../../src/ui/i18n/zh.js";
 
 const made: string[] = [];
 afterEach(() => {
@@ -59,6 +66,14 @@ describe("This computer", () => {
     expect(installLine("tailscale", "pacman")).toBe("sudo pacman -S tailscale");
     expect(installLine("tailscale", "apt")).toBe("curl -fsSL https://tailscale.com/install.sh | sh");
     for (const part of ["syncthing", "tray", "desktop"] as const) expect(installLine(part, "pacman")).toBeNull();
+  });
+
+  it("says a missing Node stops nothing: the terminals and the vibeforge command run on Electron's own", () => {
+    // The terminal host runs on Electron started as plain Node (hostRuntime in electron/supervisor.ts),
+    // and scripts/vibeforge falls back to it, so only building VibeForge from source needs one.
+    for (const [code, words] of Object.entries({ en, de, es, fr, pt, ja, zh })) {
+      expect(words["first.computer.off.node"], code).toContain("Electron");
+    }
   });
 
   it("looks for each part, asks each found program its version, and lists them for diagnostics", async () => {
