@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A malformed request to the phone page gets a clean refusal.** A request whose body was the JSON word `null` made the phone page answer with a server error (before pairing) or a raw JavaScript message (after). It now says the request was invalid, like any other bad body.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
