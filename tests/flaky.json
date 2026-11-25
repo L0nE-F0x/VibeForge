@@ -1,0 +1,19 @@
+{
+  "about": "Tests known to fail now and then for a reason outside the change being tested. CI (scripts/ci-test.mjs) retries one of these once when it is the only kind of failure, and still reports it: a warning on the run, a line in the job summary, and the weekly flaky-test issue. Every entry names its cause and where the fix is tracked. Remove an entry once the weekly report has shown no retry of it for two weeks. 'file' is the test file, 'test' its full name as vitest prints it (describe blocks and title, joined by ' > '), 'node' limits it to one Node major version.",
+  "flaky": [
+    {
+      "file": "tests/pty.test.ts",
+      "test": "pty host > lets all of a held-back pane's output through to the end",
+      "node": "22",
+      "reason": "Node 22 bundles libuv 1.51, which fakes an end of file on a pty while output is still buffered; the host's drain at exit (PR #137, in 3.7.1) is meant to cover it, and CI hasn't yet shown two clean weeks on Node 22",
+      "link": "https://github.com/L0nE-F0x/VibeForge/pull/137"
+    },
+    {
+      "file": "e2e/runs.e2e.ts",
+      "test": "a CLI that floods its terminal and exits keeps its last line on screen and in the transcript",
+      "node": "22",
+      "reason": "The same Node 22 libuv end-of-output loss as the pty host test above, seen from the window: run end to end, it hasn't yet had a CI run on Node 22",
+      "link": "https://github.com/L0nE-F0x/VibeForge/pull/137"
+    }
+  ]
+}
