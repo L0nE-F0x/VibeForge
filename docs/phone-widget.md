@@ -49,14 +49,28 @@ With the Android SDK, `apksigner verify --print-certs vibeforge-widget.apk` show
 
 ## Pair it
 
-1. In the setup screen, type your computer's address (its Tailscale name, like `desktop`, or the whole address) and the pairing code from **Settings → Phone** on that computer. You can also copy the pairing link there and tap **Paste pairing link**.
+Scan the QR code. Nothing to type.
+
+1. On your computer, open **Settings → Phone** and tap **Show QR code** (beside the address, under "Open it on your phone").
+2. In the widget's setup screen, tap **Scan the QR code**. The first time, Android asks to let the widget use the camera: allow it.
+3. Point the phone at the QR code. The widget reads it, says which computer it found and pairs straight away.
+
+The camera is only asked for when you tap Scan. The code is read on the phone itself, without Google Play Services, so it works on phones without Google too, and the picture never leaves the phone. A QR code that isn't a VibeForge pairing link is refused: the widget says so and keeps looking, and sends nothing anywhere.
+
+**Typing it in instead.** If you'd rather not use the camera, or the phone has none, tap **Type the address and code instead**:
+
+1. Type your computer's address (its Tailscale name, like `desktop`, or the whole address) and the pairing code from **Settings → Phone** on that computer. You can also copy the pairing link there and tap **Paste pairing link**.
 2. Tap **Pair & show this computer**.
+
+If you said no to the camera, the setup screen offers typing. To scan after all, tap Scan again; if Android no longer asks, turn the camera on in the phone's **Settings → Apps → VibeForge Widget → Permissions → Camera**.
 
 The widget sends the code to your computer once and gets a key of its own. It keeps only that key, encrypted with the phone's Android Keystore, and forgets the code. Your computer lists it in **Settings → Phone → Paired phones** as "VibeForge widget (your phone's model)".
 
 Once any phone has paired with a key, the pairing code alone no longer opens the phone page; it only pairs. A phone browser that was using the code from before will ask to pair again, once.
 
-If the widget says your computer no longer takes its key, it was removed in Settings → Phone, or **New code** signed every phone out. Open the widget's setup (⚙) and pair again.
+If the widget says your computer no longer takes its key, it was removed in Settings → Phone, or **New code** signed every phone out. Open the widget's setup (⚙), tap **Scan the QR code** and scan it again: the widget pairs that computer again in its place.
+
+To add another computer, open the setup (⚙) and scan the QR code in that computer's Settings → Phone. A computer the widget doesn't have yet is added beside the others; switch between them in the tray.
 
 ## Updates
 
