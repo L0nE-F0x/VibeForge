@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 const netFetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
 vi.mock("electron", () => ({ net: { fetch: (url: string, init: RequestInit) => netFetch(url, init) } }));
 
-const { downloadFiles } = await import("../../electron/download.js");
+const { CACHE_CLEARED_MARK, clearOldDownloadCopies, downloadFiles } = await import("../../electron/download.js");
 const { SHERPA_PIN } = await import("../../src/core/sherpa.js");
 const { DISTIL_SMALL_EN_COMMIT, MODEL_CATALOG, modelFiles, modelUrl, PIPER_COMMIT, VOICE_CATALOG, voiceUrls, WHISPER_COMMIT } = await import("../../src/core/voice.js");
 
@@ -117,6 +117,14 @@ describe("downloading models and voices", () => {
     expect(netFetch.mock.calls[0][1].credentials).toBe("omit");
   });
 
+  it("keeps no second copy in Chromium's HTTP cache", async () => {
+    const dir = tempDir();
+    netFetch.mockClear();
+    netFetch.mockResolvedValue(response(1000));
+    await downloadFiles([pinned("https://example.test/a.bin", path.join(dir, "a.bin"), 1000)], options());
+    expect(netFetch.mock.calls[0][1].cache).toBe("no-store");
+  });
+
   it("names the host and its answer when the server refuses", async () => {
     const work = downloadFiles([pinned("https://huggingface.co/x.bin", path.join(tempDir(), "x.bin"), 2)], options({ fetch: async () => new Response("no", { status: 404, statusText: "Not Found" }) }));
     await expect(work).rejects.toThrow("huggingface.co answered 404 Not Found");
@@ -177,5 +185,29 @@ describe("downloading models and voices", () => {
 
     const topHashes = [...MODEL_CATALOG.map((item) => item.sha256), ...voicePins.map((item) => item.pin.sha256), ...Object.values(SHERPA_PIN.builds).map((b) => b.sha256)];
     expect(new Set(topHashes).size).toBe(topHashes.length);
+  });
+});
+
+describe("clearing the copies earlier versions left in the HTTP cache", () => {
+  const log = () => ({ info: vi.fn(), warn: vi.fn() });
+
+  it("clears once and remembers it in the profile folder", async () => {
+    const profile = tempDir();
+    const clearCache = vi.fn(async () => undefined);
+    expect(await clearOldDownloadCopies({ profile, clearCache, log: log() })).toBe(true);
+    expect(fs.existsSync(path.join(profile, CACHE_CLEARED_MARK))).toBe(true);
+    expect(await clearOldDownloadCopies({ profile, clearCache, log: log() })).toBe(false);
+    expect(clearCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries again on the next start when clearing fails", async () => {
+    const profile = tempDir();
+    const notes = log();
+    expect(await clearOldDownloadCopies({ profile, clearCache: async () => Promise.reject(new Error("busy")), log: notes })).toBe(false);
+    expect(notes.warn).toHaveBeenCalledWith(expect.stringContaining("busy"));
+    expect(fs.existsSync(path.join(profile, CACHE_CLEARED_MARK))).toBe(false);
+    const clearCache = vi.fn(async () => undefined);
+    expect(await clearOldDownloadCopies({ profile, clearCache, log: log() })).toBe(true);
+    expect(clearCache).toHaveBeenCalledTimes(1);
   });
 });
