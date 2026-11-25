@@ -142,6 +142,8 @@ export class MainWindow {
     const { ctx } = this;
     const { log, words } = ctx;
     const recovery = new PageRecovery();
+    /** The question about a hung page, while it is up. */
+    let hung: AbortController | null = null;
     // Notices wait for the page that loads next.
     win.webContents.on("did-start-loading", () => ctx.pageGone());
     win.webContents.on("render-process-gone", (_event, details) => {
@@ -180,7 +182,6 @@ export class MainWindow {
         win.webContents.reload();
       });
     });
-    let hung: AbortController | null = null;
     win.on("unresponsive", () => {
       if (hung || ctx.quitting) return;
       log.warn("The window's page is not responding");
