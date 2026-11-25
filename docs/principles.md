@@ -39,7 +39,7 @@ Anything that goes over the network stays off until you turn it on:
 
 ## Undo instead of "are you sure?"
 
-Deleting an agent, chat, task, skill or routine, or discarding a copy, happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>. VibeForge asks first only when something still running would be stopped, or work would be lost for good. A task that finds its folder busy waits its turn and starts on its own, instead of refusing.
+Deleting an agent, chat, task, skill or routine, discarding a copy, or removing a workspace from VibeForge happens at once, with **Undo** on the toast and <kbd>Ctrl</kbd>+<kbd>Z</kbd>. VibeForge asks first only when something still running would be stopped, or work would be lost for good. A task that finds its folder busy waits its turn and starts on its own, instead of refusing.
 
 ## One engine per agent
 

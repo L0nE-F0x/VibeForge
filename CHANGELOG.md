@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.7.2] - 2026-11-25
+
+**3.7.2: a settings file caught half-written no longer switches Sync or the phone page off, Sync no longer deletes what one machine can't read, folders that can't be read say so, removing a workspace has Undo, and chimes no longer keep an audio process running.**
+
 ### Changed
 
 - **Sounds no longer start Chromium's audio process.** VibeForge's chimes now play through PipeWire's `pw-play`, as calls and dictation already do. Before, the first chime of a session started Chromium's audio process, which then stayed until VibeForge quit: about 22 MB of memory counted on its own (77 MB as `top` counts it). In a test run, 14 chimes left no audio process behind. A chime starts about 2 ms after the window asks for it, then waits on PipeWire's own 20 ms buffer. The seven chimes are written once to a `chimes` folder in VibeForge's data folder (228 KB, readable only by you). Chimes less than a quarter of a second apart now play as one. On a computer without PipeWire, the window plays them as before.
@@ -1162,7 +1166,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.2...HEAD
+[3.7.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.2
 [3.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.1
 [3.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.0
 [3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2

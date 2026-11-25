@@ -244,6 +244,8 @@ Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, un
   routines/<id>.yaml
   tasks/<id>.yaml
   engines.json  settings.json  workspaces.json  layouts/
+  <file>.saved  <file>.broken   the last copy of a settings file that read correctly, kept while the file itself can't be read,
+                                and a broken one you chose to move aside (VibeForge says so in the window)
 ~/.local/share/vibeforge/
   runs/<stamp>_<slug>/          meta.json, preamble.md, terminal.ansi, transcript.txt, scrollback.txt, git.txt, diff.patch
                                 (the last two gzipped once the run has ended; Settings → Storage says how long runs are kept)
@@ -258,7 +260,7 @@ Underneath it is [Syncthing](https://syncthing.net), which VibeForge carries, un
 ~/.cache/vibeforge/             the launcher's build log (a git checkout that builds itself)
 ```
 
-Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
+Override the roots with `VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`. Only one VibeForge runs on the same folders at a time: a second one started on them says so and quits. VibeForge's own log is `~/.local/share/vibeforge/logs/vibeforge.log`: what the app did and what went wrong, never prompts or terminal output. **Help → Copy diagnostics** puts your versions, a few settings and its last 200 lines on the clipboard for a bug report.
 
 ## Keys
 
