@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Builds the Android widget signed with its release key and adds it to a GitHub release, as
-# vibeforge-widget.apk with vibeforge-widget.apk.sha256 beside it (docs/phone-widget.md). The key stays
-# on this computer: only the signed APK goes up. The website links
-# https://github.com/L0nE-F0x/VibeForge/releases/latest/download/vibeforge-widget.apk, and release.yml
-# carries the APK on to each later release, so give the latest release's tag.
+# Builds the Android widget signed with its release key and publishes it as a GitHub release of its
+# own, `widget-v<versionName>`, holding vibeforge-widget.apk and vibeforge-widget.apk.sha256
+# (docs/phone-widget.md). The key stays on this computer: only the signed APK goes up.
 #
-#   scripts/publish-android-widget.sh v3.7.0              build, check, upload
-#   scripts/publish-android-widget.sh v3.7.0 --no-upload  build and check only
+# The repository's releases are immutable: nothing can be added to one once it is published, so the
+# APK can't ride along on an app release afterwards. Its own release is never marked latest, so the
+# installer and the in-app Update, which take the latest release, never see it. The website links
+# https://vibe-forge.net/widget.apk, a redirect in netlify.toml that this script points at the new
+# release: commit that change and it goes live when main deploys.
 #
-# It stops before uploading when the APK is signed with anything but the widget's release key (its
+#   scripts/publish-android-widget.sh              build, check, publish, point the redirect
+#   scripts/publish-android-widget.sh --no-upload  build and check only
+#
+# It stops before publishing when the APK is signed with anything but the widget's release key (its
 # certificate's SHA-256 is below): a phone only installs an update over the widget when both are
 # signed with the same key, so one signed with a debug key would strand everyone who installed it.
 set -euo pipefail
@@ -16,13 +20,8 @@ set -euo pipefail
 RELEASE_CERT_SHA256="08ed1b36762ccf3347c2bc86232b353e7af9d6a00ada0b4253d5618aab7ffc16"
 REPO="L0nE-F0x/VibeForge"
 
-TAG="${1:-}"
 UPLOAD=1
-if [ "${2:-}" = "--no-upload" ]; then UPLOAD=0; elif [ -n "${2:-}" ]; then echo "Unknown option: $2" >&2; exit 2; fi
-if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-  echo "Usage: $0 <tag, like v3.7.0> [--no-upload]" >&2
-  exit 2
-fi
+if [ "${1:-}" = "--no-upload" ]; then UPLOAD=0; elif [ -n "${1:-}" ]; then echo "Usage: $0 [--no-upload]" >&2; exit 2; fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK_ROOT="${ANDROID_HOME:-$HOME/.local/share/android-sdk}"
@@ -41,8 +40,15 @@ if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
   exit 1
 fi
 
-if [ "$UPLOAD" = 1 ]; then
-  gh release view "$TAG" --repo "$REPO" --json tagName >/dev/null || { echo "There is no release $TAG on $REPO." >&2; exit 1; }
+VERSION="$(sed -n 's/^ *versionName *= *"\([^"]*\)".*/\1/p' "$ROOT/android-widget/app/build.gradle.kts" | head -n 1)"
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Couldn't read versionName from android-widget/app/build.gradle.kts." >&2
+  exit 1
+fi
+TAG="widget-v$VERSION"
+if [ "$UPLOAD" = 1 ] && gh release view "$TAG" --repo "$REPO" --json tagName >/dev/null 2>&1; then
+  echo "$TAG is already published, and releases can't be changed: raise versionName (and versionCode) first." >&2
+  exit 1
 fi
 
 # A build for everyone: no address of this computer's tailnet baked in (android-widget/app/build.gradle.kts).
@@ -67,5 +73,23 @@ if [ "$UPLOAD" = 0 ]; then
   echo "Checked, not uploaded: $APK"
   exit 0
 fi
-(cd "$OUT" && gh release upload "$TAG" vibeforge-widget.apk vibeforge-widget.apk.sha256 --repo "$REPO" --clobber)
-echo "Uploaded to $TAG: https://github.com/$REPO/releases/download/$TAG/vibeforge-widget.apk"
+NOTES="$(mktemp)"
+trap 'rm -f "$NOTES"' EXIT
+cat > "$NOTES" <<NOTES
+The Android home-screen widget for VibeForge, version $VERSION. This is not a release of the desktop app: VibeForge's own releases are the \`vX.Y.Z\` ones.
+
+It shows what your CLIs and Viby are doing on your computer, with Go, Cancel and quick replies, and opens VibeForge's phone page where you tap. It needs VibeForge 3.6.3 or newer running on your computer with Settings → Phone turned on, your phone able to reach that phone page (for example over Tailscale), and Android 9 or newer.
+
+It isn't in the Play Store. Check the download with \`sha256sum -c vibeforge-widget.apk.sha256\`. It is signed with the certificate whose SHA-256 is \`$RELEASE_CERT_SHA256\`, like every version, so a newer one installs over an older one.
+
+How to install, check, update and remove it: [docs/phone-widget.md](https://github.com/$REPO/blob/main/docs/phone-widget.md)
+NOTES
+# Files given to create, not uploaded after: a published release can't take more files.
+(cd "$OUT" && gh release create "$TAG" vibeforge-widget.apk vibeforge-widget.apk.sha256 --repo "$REPO" \
+  --target main --title "VibeForge Android widget $VERSION" --notes-file "$NOTES" --latest=false)
+echo "Published $TAG: https://github.com/$REPO/releases/download/$TAG/vibeforge-widget.apk"
+
+# Point vibe-forge.net/widget.apk (and its .sha256) at the new release.
+sed -i -E "s#releases/download/widget-v[0-9]+\.[0-9]+\.[0-9]+/#releases/download/$TAG/#" "$ROOT/netlify.toml"
+grep -q "releases/download/$TAG/vibeforge-widget.apk" "$ROOT/netlify.toml" || { echo "netlify.toml's widget redirect wasn't found: point it at $TAG by hand." >&2; exit 1; }
+echo "netlify.toml now sends /widget.apk to $TAG. Commit it; the site sends people there once main deploys."

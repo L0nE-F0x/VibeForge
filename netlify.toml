@@ -15,6 +15,21 @@
   status = 302
   force = true
 
+# The Android widget's APK and its checksum live on a GitHub release of their own (widget-vX.Y.Z,
+# never the latest), since an app release can't take files once published.
+# scripts/publish-android-widget.sh points these at each new one.
+[[redirects]]
+  from = "/widget.apk"
+  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.1.0/vibeforge-widget.apk"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/widget.apk.sha256"
+  to = "https://github.com/L0nE-F0x/VibeForge/releases/download/widget-v2.1.0/vibeforge-widget.apk.sha256"
+  status = 302
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]
