@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readJson, writeJson } from "../fsx.js";
+import { JsonFiles } from "./json-files.js";
 import type { ReadCache } from "./read-cache.js";
 import { isSafeId } from "../slug.js";
 import type { ChatRecord } from "../types.js";
@@ -25,13 +25,18 @@ function normalizeChat(value: unknown): ChatRecord | null {
   };
 }
 
-/** The chats, kept together in `<data>/chats.json`: each one's agent, engine, folder and runs. */
+/**
+ * The chats, kept together in `<data>/chats.json`: each one's agent, engine, folder and runs. A
+ * chats.json that can't be read lists the chats it held when it last read correctly, and isn't
+ * saved over (JsonFiles).
+ */
 export class Chats {
   private readonly dataRoot: string;
 
   constructor(
     dataRoot: string,
     private readonly cache?: ReadCache,
+    private readonly files = new JsonFiles(),
   ) {
     this.dataRoot = dataRoot;
   }
@@ -42,7 +47,8 @@ export class Chats {
 
   listChats(): ChatRecord[] {
     const load = () => {
-      const raw = readJson<unknown>(this.chatFile(), null);
+      const read = this.files.read(this.chatFile());
+      const raw = (read.state === "ok" ? read.value : read.saved) ?? null;
       const list = Array.isArray(raw) ? raw : (raw as { chats?: unknown } | null)?.chats;
       if (!Array.isArray(list)) return [];
       return list
@@ -58,14 +64,16 @@ export class Chats {
   }
 
   writeChat(chat: ChatRecord): void {
+    this.files.beforeWrite(this.chatFile());
     const chats = this.listChats().filter((item) => item.id !== chat.id);
     chats.push(chat);
-    writeJson(this.chatFile(), { chats });
+    this.files.write(this.chatFile(), { chats });
     this.cache?.forget(this.chatFile());
   }
 
   deleteChat(id: string): void {
-    writeJson(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
+    this.files.beforeWrite(this.chatFile());
+    this.files.write(this.chatFile(), { chats: this.listChats().filter((chat) => chat.id !== id) });
     this.cache?.forget(this.chatFile());
   }
 }

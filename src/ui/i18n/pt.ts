@@ -1726,6 +1726,22 @@ export const pt: Catalog = {
   "orch.issue.agent": "Nenhum agente chamado “{asked}”.",
   "core.orchWaitsTurn": "Esperando por {names} nessa pasta; começa sozinho quando ficar quieto.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "Não dá para ler {name}",
+  "unreadable.saved": "O VibeForge continua com a cópia da última vez que ele foi lido corretamente, e não salva nada por cima do arquivo até ele voltar a ser lido.",
+  "unreadable.none": "O VibeForge não tem uma cópia anterior dele, e não salva nada por cima do arquivo até ele voltar a ser lido.",
+  "unreadable.open": "Abrir arquivo",
+  "unreadable.restoreSaved": "Usar a cópia salva",
+  "unreadable.useSavedTip": "Move este arquivo para {name}.broken e põe a cópia salva de volta",
+  "unreadable.moveAside": "Tirar do caminho",
+  "unreadable.moveAsideTip": "Move este arquivo para {name}.broken, para o VibeForge começar um novo",
+  "unreadable.failed": "Não foi possível pôr a cópia salva de volta",
+  "core.unreadableNotSaved": "Não dá para ler {name} ({error}), então nada foi salvo por cima.",
+  "core.fileEmpty": "O arquivo está vazio.",
+  "core.fileNotList": "Ele não contém um objeto nem uma lista JSON.",
+  "main.folderInUse": "Outro VibeForge está usando {folder}",
+  "main.folderInUseBody": "Só um VibeForge pode usar uma pasta por vez: dois encerrariam os terminais um do outro, parariam o Sync um do outro e rodariam cada rotina duas vezes. Feche o outro primeiro, ou inicie este com pastas próprias (VIBEFORGE_CONFIG e VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Sincronização",
   "sync.lead": "Mantém os espaços de trabalho que você escolher iguais no seu outro computador, por exemplo um notebook e um desktop. Nada é sincronizado até você escolher um espaço de trabalho: clique com o botão direito em um deles em Código. Os arquivos vão direto de um computador para o outro, pela sua rede local ou pelo Tailscale, e para nenhum outro lugar.",

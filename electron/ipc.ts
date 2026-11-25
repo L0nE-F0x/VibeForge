@@ -182,6 +182,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       if (patch.theme) refreshPalette();
       return next;
     },
+    "files.unreadable": () => s().unreadableFiles(),
+    "files.restoreSaved": (file) => s().restoreSavedCopy(file),
     "companion.status": () => companionStatus(),
     "companion.reach": async () => {
       const port = s().getSettings().companion.port;

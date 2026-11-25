@@ -41,6 +41,7 @@ import type {
   TalkState,
   TaskStatus,
   Topic,
+  UnreadableFile,
   VoiceSettings,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
@@ -142,7 +143,7 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, RunOrigin, RunStatus, PaneLaunch } from "../core/types.js";
+export type { Workspace, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
 
 export interface AppInfo {
   version: string;
@@ -378,6 +379,10 @@ export interface DeskMethods {
 
   "settings.get": () => Settings;
   "settings.save": (patch: Partial<Settings>) => Settings;
+  /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
+  "files.unreadable": () => UnreadableFile[];
+  /** Moves an unreadable file (one listed above) to `<name>.broken` and puts back its last good copy. */
+  "files.restoreSaved": (file: string) => void;
   /** Whether the phone page is listening, and why not when it failed to bind. */
   "companion.status": () => CompanionStatus;
   /** Where a phone can open the page, asked of this computer's Tailscale. Nothing is changed. */

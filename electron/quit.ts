@@ -95,6 +95,28 @@ export class Quit {
     app.exit(1);
   }
 
+  /**
+   * Another VibeForge holds this copy's config or data folder (core/folder-lock.ts): say which, and
+   * exit before anything is started. Nothing of the other copy's is touched.
+   */
+  async folderInUse(folder: string): Promise<void> {
+    const { log, words } = this.ctx;
+    log.warn(`Another VibeForge is using ${folder}; this copy is not starting`);
+    try {
+      // Settings belong to the other copy: the desktop's language, then.
+      await words.use("system", app.getLocale());
+    } catch {
+      /* English, then */
+    }
+    const title = words.say("main.folderInUse", { folder });
+    const body = words.say("main.folderInUseBody");
+    // Said where it was started from too, for a copy started from a terminal or a script.
+    console.error(`${title}\n${body}`);
+    // A window-less copy (--ozone-platform=headless, as the smoke test runs) can't show a dialog: Chromium stops on one.
+    if (app.commandLine.getSwitchValue("ozone-platform") !== "headless") dialog.showErrorBox(title, body);
+    app.exit(1);
+  }
+
   /** Every quit sets the flag, then waits for the shutdown before Electron goes. */
   handleEvents(): void {
     app.on("before-quit", () => {

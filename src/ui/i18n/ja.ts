@@ -1727,6 +1727,22 @@ export const ja: Catalog = {
   "orch.issue.agent": "「{asked}」というエージェントはありません。",
   "core.orchWaitsTurn": "そのフォルダーで {names} を待っています。静かになったら自動で始まります。",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} を読み込めません",
+  "unreadable.saved": "VibeForge は最後に正しく読めたときのコピーで続けます。ファイルがまた読めるようになるまで、上書き保存はしません。",
+  "unreadable.none": "VibeForge にはこのファイルの以前のコピーがありません。ファイルがまた読めるようになるまで、上書き保存はしません。",
+  "unreadable.open": "ファイルを開く",
+  "unreadable.restoreSaved": "保存したコピーを使う",
+  "unreadable.useSavedTip": "このファイルを {name}.broken に移し、保存したコピーを戻します",
+  "unreadable.moveAside": "脇に移す",
+  "unreadable.moveAsideTip": "このファイルを {name}.broken に移し、VibeForge が新しく作り直します",
+  "unreadable.failed": "保存したコピーを戻せませんでした",
+  "core.unreadableNotSaved": "{name} を読み込めないため ({error})、上書き保存しませんでした。",
+  "core.fileEmpty": "ファイルが空です。",
+  "core.fileNotList": "JSON のオブジェクトやリストが入っていません。",
+  "main.folderInUse": "別の VibeForge が {folder} を使っています",
+  "main.folderInUseBody": "一つのフォルダーを同時に使える VibeForge は一つだけです。二つあると、互いのターミナルを終わらせ、互いの Sync を止め、ルーチンを二度ずつ実行してしまいます。先にもう一方を閉じるか、専用のフォルダー (VIBEFORGE_CONFIG と VIBEFORGE_DATA) でこちらを起動してください。",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "同期",
   "sync.lead": "選んだワークスペースを、ノートパソコンとデスクトップのような、もう一方のコンピュータでも同じ状態に保ちます。ワークスペースを選ぶまでは何も同期しません。コードでワークスペースを右クリックして選びます。ファイルはローカルネットワークか Tailscale を通って、コンピュータからコンピュータへ直接届き、ほかのどこにも送られません。",

@@ -6,6 +6,7 @@ import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
 import type { Agent, AgentTier, Routine, Schedule, Skill, Task, TaskStatus } from "../types.js";
+import { carryUnknown, formatVersion, type Shape } from "./carry.js";
 import { bool, str, strList, strOrNull } from "./fields.js";
 import type { ReadCache } from "./read-cache.js";
 
@@ -28,6 +29,29 @@ function yamlText(value: unknown): string {
 function readYaml(file: string): unknown {
   try {
     return parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * agent.yaml's format, written into it as `version`. Raise it with a migration when a field
+ * changes meaning; a file a newer VibeForge wrote keeps its own number (see formatVersion).
+ */
+export const AGENT_VERSION = 1;
+
+/** Every field agent.yaml has in this version; anything else in the file is carried through a save. */
+const AGENT_SHAPE: Shape = {
+  version: true,
+  // Retired: an agent once had a voice of its own. Named here, so a save drops it rather than carrying it.
+  voice: true,
+  ...({ id: true, name: true, engine: true, brief: true, memoryFile: true, places: true, skills: true, allowRoutines: true, goodAt: true, tier: true, createdAt: true, updatedAt: true } satisfies Record<keyof Agent, true>),
+};
+
+/** What an agent.yaml about to be saved over holds now, for the fields a newer version added; null when none. */
+function savedYaml(file: string): unknown {
+  try {
+    return parse(fs.readFileSync(file, "utf8")) as unknown;
   } catch {
     return null;
   }
@@ -176,14 +200,18 @@ export class Library {
     return this.cache.read(file, () => normalizeAgent(id, readYaml(file)));
   }
 
+  /** Save `agent`, keeping any field a newer VibeForge wrote into its agent.yaml that this one doesn't know. */
   writeAgent(agent: Agent): void {
     const dir = path.join(this.configRoot, "agents", agent.id);
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
     const memoryPath = path.join(dir, "memory.md");
     if (!fs.existsSync(memoryPath)) fs.writeFileSync(memoryPath, MEMORY_STARTER, { mode: 0o600 });
-    writeFileAtomic(path.join(dir, "agent.yaml"), yamlText({ ...agent, memoryFile: "memory.md" }));
-    this.cache.forget(path.join(dir, "agent.yaml"));
+    const file = path.join(dir, "agent.yaml");
+    const raw = savedYaml(file);
+    const known = { version: formatVersion(raw, AGENT_VERSION), ...agent, memoryFile: "memory.md" };
+    writeFileAtomic(file, yamlText(carryUnknown(known, raw, AGENT_SHAPE)));
+    this.cache.forget(file);
   }
 
   readMemory(agentId: string): string {

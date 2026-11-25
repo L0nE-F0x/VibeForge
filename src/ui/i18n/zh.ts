@@ -1727,6 +1727,22 @@ export const zh: Catalog = {
   "orch.issue.agent": "没有名为“{asked}”的智能体。",
   "core.orchWaitsTurn": "正在等待该文件夹中的 {names}；它安静下来后会自动开始。",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "无法读取 {name}",
+  "unreadable.saved": "VibeForge 先用上次正确读取时的副本继续，在文件能再次读取之前不会覆盖保存它。",
+  "unreadable.none": "VibeForge 没有它之前的副本，在文件能再次读取之前不会覆盖保存它。",
+  "unreadable.open": "打开文件",
+  "unreadable.restoreSaved": "使用保存的副本",
+  "unreadable.useSavedTip": "把这个文件移到 {name}.broken，并放回保存的副本",
+  "unreadable.moveAside": "移到一边",
+  "unreadable.moveAsideTip": "把这个文件移到 {name}.broken，让 VibeForge 重新建一个",
+  "unreadable.failed": "无法放回保存的副本",
+  "core.unreadableNotSaved": "无法读取 {name}（{error}），所以没有覆盖保存。",
+  "core.fileEmpty": "文件是空的。",
+  "core.fileNotList": "里面没有 JSON 对象或列表。",
+  "main.folderInUse": "另一个 VibeForge 正在使用 {folder}",
+  "main.folderInUseBody": "一个文件夹同一时间只能由一个 VibeForge 使用：两个会互相结束对方的终端、停止对方的 Sync，并把每个例程运行两次。请先关闭另一个，或者用它自己的文件夹（VIBEFORGE_CONFIG 和 VIBEFORGE_DATA）启动这一个。",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "同步",
   "sync.lead": "让你选中的工作区在另一台电脑上保持一致，比如笔记本和台式机之间。在你选择工作区之前，不会同步任何东西：在代码中右键点击一个工作区即可。文件通过你的本地网络或 Tailscale 直接从一台电脑传到另一台，不会去任何其他地方。",

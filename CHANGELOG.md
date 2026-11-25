@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A settings file that can't be read no longer turns into defaults.** When `settings.json`, `engines.json`, `workspaces.json` or `chats.json` didn't parse (a CLI or an editor writing it in place, a hand edit half done, a file cut short), VibeForge went on as if it held the defaults: Sync stopped and the phone page closed until the next change, custom CLIs, workspaces or chats disappeared from the window, and the next save wrote defaults over the file. Now VibeForge keeps using the copy from the last time the file read correctly (kept beside it as `<name>.saved`), and Sync and the phone page stay as they were. A notice in the corner names the file and the error, with **Open file** and **Use the saved copy**, which moves the broken file to `<name>.broken` and puts the saved copy back (**Move it aside** when there is no saved copy). Nothing is saved over the file or moved aside until you choose; a save meanwhile is refused and says why. The notice goes away by itself once the file reads again.
+- **Saving settings or an agent keeps what a newer version wrote.** After going back to an earlier version, changing one setting rewrote `settings.json` with only the fields that version knew, so everything the newer one added was lost, and saving an agent did the same to its `agent.yaml`. Fields VibeForge doesn't know are now kept through a save. Both files also carry a `"version"` number now, for changes to their format later.
+- **Only one VibeForge runs on the same folders.** A second copy started with another `--user-data-dir` but the same config or data folder ended the first copy's runs, stopped its Syncthing every 30 seconds, ran each routine twice and lost chat changes. Now it doesn't start: it says which folder another VibeForge is using, and exits. A trial copy with folders of its own (`VIBEFORGE_CONFIG` and `VIBEFORGE_DATA`) still starts beside the installed one, and a copy that crashed leaves nothing behind that stops the next start.
+
 ## [3.7.1] - 2026-11-25
 
 **3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
