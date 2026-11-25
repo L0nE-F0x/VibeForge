@@ -8,7 +8,13 @@ import {
   X11Driver,
   type WebContentsLike,
 } from "../../electron/computer-use.js";
-import { buildWtypeArgs, matchDesktopWindow, parseHyprctlClients, parseHyprctlMonitors } from "../../src/core/computer-use.js";
+import {
+  buildWtypeArgs,
+  matchDesktopWindow,
+  parseHyprctlClients,
+  parseHyprctlMonitors,
+  UINPUT_HELPER_SCRIPT,
+} from "../../src/core/computer-use.js";
 import {
   computerStepIssue,
   describeComputerStep,
@@ -120,6 +126,9 @@ describe("Computer-use shared parsers and validation", () => {
     expect(buildWtypeArgs("type", "hello; rm -rf /")).toEqual(["--", "hello; rm -rf /"]);
     expect(buildWtypeArgs("key", "Ctrl+Shift+T")).toEqual(["-M", "ctrl", "-M", "shift", "-k", "t", "-m", "shift", "-m", "ctrl"]);
     expect(buildWtypeArgs("key", "invalid;key")).toBeNull();
+    expect(UINPUT_HELPER_SCRIPT).toContain('struct.pack("=HHHH80sI"');
+    expect(UINPUT_HELPER_SCRIPT).toContain('struct.pack("=qqHHi"');
+    expect(UINPUT_HELPER_SCRIPT).not.toContain("HHHHi64sI");
   });
 });
 

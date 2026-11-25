@@ -179,13 +179,13 @@ try:
         fcntl.ioctl(fd, UI_SET_KEYBIT, k)
     for r in (REL_X, REL_Y, REL_HWHEEL, REL_WHEEL):
         fcntl.ioctl(fd, UI_SET_RELBIT, r)
-    setup = struct.pack("HHHHi64sI", 0x03, 0x1234, 0x5678, 1, 0, b"vibeforge-pointer", 0)
+    setup = struct.pack("=HHHH80sI", 0x03, 0x1234, 0x5678, 1, b"vibeforge-pointer", 0)
     fcntl.ioctl(fd, UI_DEV_SETUP, setup)
     fcntl.ioctl(fd, UI_DEV_CREATE)
     time.sleep(0.06)
 
     def emit(t, c, v):
-        os.write(fd, struct.pack("qqHHi", 0, 0, t, c, v))
+        os.write(fd, struct.pack("=qqHHi", 0, 0, t, c, v))
     def syn():
         emit(EV_SYN, 0, 0)
 
