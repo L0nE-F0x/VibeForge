@@ -178,6 +178,7 @@ export function ThreadsButton() {
                           onChange={(event) => setDraftTitle(event.target.value)}
                           autoFocus
                           onKeyDown={(event) => {
+                            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                             if (event.key === "Enter") void commitRename(item.id);
                             else if (event.key === "Escape") setEditingId(null);
                           }}

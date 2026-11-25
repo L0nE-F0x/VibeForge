@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Confirming a word with an input method no longer finishes a rename.** Renaming a chat, a workspace or a Viby thread saved the title at the Enter that confirmed the word being composed (Japanese, Chinese, Korean and other input methods), so a title could be saved half typed. Enter finishes the rename once the word is confirmed, as in the other text fields.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
