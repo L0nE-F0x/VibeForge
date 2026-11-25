@@ -270,6 +270,8 @@ function call(opts: {
   voiced?: boolean;
   talkBack?: boolean;
   answer?: (text: string, turns: OrchestratorTurn[]) => void;
+  /** What running a plan does, beside being counted in `ran`. */
+  run?: (id: string) => void;
   /** Settings' word on talking over Viby, and what the microphone can do. */
   talkOver?: "auto" | "always" | "never";
   detects?: boolean;
@@ -353,7 +355,10 @@ function call(opts: {
       turns.push(turn({ from: "you", text }));
       (opts.answer ?? ((_text, list) => void list.push(turn({ text: "Two are running." }))))(text, turns);
     },
-    orchestratorRun: async (id: string) => void ran.push(id),
+    orchestratorRun: async (id: string) => {
+      ran.push(id);
+      opts.run?.(id);
+    },
     orchestratorCancel: (id: string) => void cancelled.push(id),
     getSettings: () => ({ voice: { talkBack, talkOver } }),
     listAgents: () => [{ name: "Atlas" }],
@@ -745,6 +750,23 @@ describe("a call with Viby", () => {
     await byPlan.say();
     expect(byPlan.spoken).toEqual(["On it — talk soon!"]);
     expect(byPlan.instance.get().on).toBe(false);
+  });
+
+  it("hangs up after saying going, when the plan a spoken go ran asked to end the call", async () => {
+    const plan = turn({ text: "I'll open Tasks, then hang up.", plan: "waiting", steps: [], hangup: true });
+    // The plan only opens a view: it is done, and asks to end the call, while Viby still says "Going."
+    const desk = call({ hears: ["open tasks, then hang up", "Go."], slowSpeech: true, answer: (_text, turns) => void turns.push(plan), run: () => desk.word({ kind: "hangup" }) });
+    desk.instance.start();
+    desk.hear();
+    await until(() => desk.isSpeaking());
+    desk.finishSpeaking();
+    await until(() => desk.instance.get().phase === "listening");
+    desk.hear();
+    await until(() => desk.isSpeaking() && desk.ran.length === 1);
+    expect(desk.spoken.at(-1)).toBe("Going.");
+    desk.finishSpeaking();
+    await until(() => !desk.instance.get().on);
+    expect(desk.isOpen()).toBe(false);
   });
 
   it("confirms a waiting computer-use plan from spoken go, yes, do it, and natural variants", async () => {

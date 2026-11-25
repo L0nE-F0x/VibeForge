@@ -373,6 +373,13 @@ export class Call {
     this.setDeaf(true);
     try {
       await work(live);
+      // A plan that asked to end the call while Viby was busy (saying "Going." after a spoken go, or
+      // its own answer) ends it now that Viby has said its piece, unless someone talked over it.
+      if (live() && this.hangingUp && !this.interrupted) {
+        this.hangingUp = false;
+        this.lastSpokeInterrupted = false;
+        this.stop();
+      }
       // Talked over, the rest waits for the next quiet moment.
       while (live() && this.pending.length && !this.interrupted) await this.say(this.pending.shift() ?? "");
     } catch (error) {
@@ -474,11 +481,6 @@ export class Call {
             problem: this.opts.words.say("call.problem"),
             confirmed: (why) => this.opts.words.say(CONFIRMED_KEY[why]),
           }));
-      if (live() && this.hangingUp && !this.interrupted) {
-        this.hangingUp = false;
-        this.lastSpokeInterrupted = false;
-        this.stop();
-      }
     });
   }
 
