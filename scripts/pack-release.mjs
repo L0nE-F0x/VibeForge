@@ -37,8 +37,21 @@ const root = path.resolve(import.meta.dirname, "..");
  */
 export const APP_FILES = ["package.json", "LICENSE", "dist", "dist-electron", "companion", "resources", "scripts", "electron/*.cjs", "vendor/syncthing"];
 
+/**
+ * Left out of those folders: the Android widget's build and publish scripts, which only the one building the
+ * widget runs (from a checkout, with the Android SDK), and any Android package. The widget is
+ * installed on its own, never from inside the app.
+ */
+export const LEFT_OUT = ["scripts/build-android-widget.sh", "scripts/publish-android-widget.sh"];
+
+/** @param {string} file */
+function leftOut(file) {
+  return LEFT_OUT.includes(file) || file.endsWith(".apk");
+}
+
 /** True when the archive holds `file` (a path in the checkout), itself or inside a folder it ships. */
 export function ships(file) {
+  if (leftOut(file)) return false;
   return APP_FILES.some((item) => {
     if (item.includes("*")) {
       const [dir, ext] = item.split("/*");
@@ -249,6 +262,9 @@ async function main(out) {
   for (const file of fs.readdirSync(path.join(stage, "node_modules"), { recursive: true, encoding: "utf8" })) {
     if (file.startsWith(`electron${path.sep}`)) continue;
     if (file.endsWith(".map") || file.endsWith(".test.js")) fs.rmSync(path.join(stage, "node_modules", file));
+  }
+  for (const file of fs.readdirSync(stage, { recursive: true, encoding: "utf8" })) {
+    if (leftOut(file.split(path.sep).join("/"))) fs.rmSync(path.join(stage, file));
   }
   // The app's Update runs the installer for a copy with this mark (src/core/updates.ts).
   fs.writeFileSync(path.join(stage, ".vibeforge-installer"), "");

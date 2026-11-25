@@ -16,7 +16,7 @@
 import { refresh } from "./js/api.js";
 import { listenForInstall, offerInstall } from "./js/install.js";
 import { pairFromLink } from "./js/home.js";
-import { listenHistory, show } from "./js/pages.js";
+import { followLink, listenHistory, show } from "./js/pages.js";
 import { openSession } from "./js/session.js";
 import { state, TEXT_KEY } from "./js/state.js";
 import { loadWords } from "./js/words.js";
@@ -82,6 +82,8 @@ void loadWords()
   // A link from Settings → Phone pairs the phone before the first page shows.
   .then(() => pairFromLink())
   .then(() => {
+    // A link from the Android widget opens the page at what was tapped: a session, a plan, Viby.
+    followLink();
     show();
     listenHistory();
     offerInstall();

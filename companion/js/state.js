@@ -128,6 +128,7 @@ const token = shown.token;
  * @property {PhoneOrchestrator | null} orch The Orchestrator as the page last read it (GET /api/orchestrator).
  * @property {string} orchDraft What is typed or dictated for the Orchestrator, kept while the page shows something else.
  * @property {string[]} orchImages Pasted or picked image data URLs queued with the next Orchestrator message.
+ * @property {string} focusTurn A plan a link asked to see (`?turn=`): brought into view once the Orchestrator shows it.
  */
 
 /** @type {State} */
@@ -147,6 +148,7 @@ export const state = {
   orch: null,
   orchDraft: "",
   orchImages: [],
+  focusTurn: "",
 };
 
 /**

@@ -8,7 +8,7 @@ import { wordmark } from "./art.js";
 import { forgetSeen } from "./buzz.js";
 import { computerChip, severalComputers } from "./computers.js";
 import { codeField, el, sheet } from "./dom.js";
-import { setView, update } from "./pages.js";
+import { followLink, setView, update } from "./pages.js";
 import { BUZZ_KEY, buzzShownOn, COMPUTER_KEY, computerLabel, computers, PLANS_KEY, parts, plansOpen, saveComputer, state, TEXT_KEY, TUCK_KEY, textLarge, tuckFinished } from "./state.js";
 import { t } from "./words.js";
 
@@ -71,7 +71,8 @@ async function pair(code) {
     state.token = key;
     state.busy = false;
     forgetSeen();
-    setView("home");
+    // Opened from a link (the Android widget's): paired, the page goes where the link said.
+    setView(followLink() ? state.view : "home");
   } catch (err) {
     state.error = err.message;
     state.busy = false;

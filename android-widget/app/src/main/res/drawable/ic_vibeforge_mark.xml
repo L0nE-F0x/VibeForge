@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp"
+    android:height="22dp"
+    android:viewportWidth="11"
+    android:viewportHeight="11">
+    <!-- Shade 0 (top spark: y=0..2) -->
+    <path
+        android:fillColor="#FFD07B"
+        android:pathData="M5,0h1v1h-1z M4,1h3v1h-3z M5,2h1v1h-1z" />
+    <!-- Shade 1 (upper V: y=3..4) -->
+    <path
+        android:fillColor="#FCA311"
+        android:pathData="M0,3h2v2h-2z M9,3h2v2h-2z" />
+    <!-- Shade 2 (mid V: y=5..7) -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M1,5h2v2h-2z M8,5h2v2h-2z M2,7h2v1h-2z M7,7h2v1h-2z" />
+    <!-- Shade 3 (base V: y=8..10) -->
+    <path
+        android:fillColor="#9A3E1D"
+        android:pathData="M2,8h2v1h-2z M7,8h2v1h-2z M3,9h2v1h-2z M6,9h2v1h-2z M4,10h3v1h-3z" />
+</vector>

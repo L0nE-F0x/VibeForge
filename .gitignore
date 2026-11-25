@@ -16,3 +16,12 @@ vendor/
 *.broken
 *.broken-*
 .tmp*
+# The Android widget's build: what gradle makes, its local settings (SDK path, signing), and any APK
+android-widget/.gradle/
+android-widget/.kotlin/
+android-widget/build/
+android-widget/app/build/
+android-widget/local.properties
+*.apk
+*.jks
+*.keystore

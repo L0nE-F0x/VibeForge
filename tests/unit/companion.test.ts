@@ -552,4 +552,12 @@ describe("phones paired with keys of their own (decision D18)", () => {
     expect(deviceName("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36")).toBe("Chrome on Linux");
     expect(deviceName("curl/8.0")).toBe("A browser");
   });
+
+  it("names the Android widget apart from the same phone's browser", () => {
+    expect(deviceName("VibeForgeWidget/2.1.0 (Android 15; Pixel 9)")).toBe("VibeForge widget (Pixel 9)");
+    expect(deviceName("VibeForgeWidget/2.1.0 (Android 15)")).toBe("VibeForge widget (Android)");
+    expect(deviceName("Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")).toBe("Android (Pixel 9)");
+    // Only at the start: a browser can't be named a widget by a word inside its User-Agent.
+    expect(deviceName("Mozilla/5.0 (Linux; Android 15) VibeForgeWidget/2.1.0 (Android 15; Pixel 9)")).not.toMatch(/^VibeForge widget/);
+  });
 });

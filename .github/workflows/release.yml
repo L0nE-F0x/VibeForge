@@ -201,3 +201,37 @@ jobs:
           fi
           gh release create "$GITHUB_REF_NAME" "${files[@]}" \
             --title "VibeForge ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag "${kind[@]}"
+      # The Android widget's APK is not built here: scripts/publish-android-widget.sh signs it on the
+      # founder's computer (its key never comes to GitHub) and adds it to a release. The website links
+      # releases/latest/download/vibeforge-widget.apk, so a release that becomes the latest gets the
+      # one the release before it carried, checked against its .sha256, and that link keeps working.
+      # Nothing here removes it; a release with no widget before it is left without one.
+      - name: Carry the Android widget forward
+        run: |
+          latest="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          if [ "$latest" != "$GITHUB_REF_NAME" ]; then
+            echo "$GITHUB_REF_NAME is not the latest release; the widget stays where it is."
+            exit 0
+          fi
+          has_widget() { gh release view "$1" --json assets --jq '.assets[].name' | grep -qx vibeforge-widget.apk; }
+          if has_widget "$GITHUB_REF_NAME"; then
+            echo "$GITHUB_REF_NAME already carries the widget."
+            exit 0
+          fi
+          from=""
+          for tag in $(gh release list --exclude-drafts --exclude-pre-releases --limit 50 --json tagName --jq '.[].tagName'); do
+            if [ "$tag" != "$GITHUB_REF_NAME" ] && has_widget "$tag"; then
+              from="$tag"
+              break
+            fi
+          done
+          if [ -z "$from" ]; then
+            echo "No earlier release carries the Android widget."
+            exit 0
+          fi
+          mkdir -p widget
+          cd widget
+          gh release download "$from" --pattern vibeforge-widget.apk --pattern vibeforge-widget.apk.sha256
+          sha256sum --check vibeforge-widget.apk.sha256
+          gh release upload "$GITHUB_REF_NAME" vibeforge-widget.apk vibeforge-widget.apk.sha256
+          echo "Carried the widget from $from to $GITHUB_REF_NAME."
