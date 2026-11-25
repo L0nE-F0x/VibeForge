@@ -162,7 +162,9 @@ export function copyBranch(taskId: string): string {
 /** The repository's top folder, or null when `folder` isn't inside one. */
 export async function repoRoot(folder: string): Promise<string | null> {
   const run = await git(["rev-parse", "--show-toplevel"], folder);
-  return run.code === 0 && run.stdout.trim() ? path.resolve(run.stdout.trim()) : null;
+  // Only the line break git ends with comes off: a folder's own name can end in a space.
+  const top = run.stdout.replace(/\n$/, "");
+  return run.code === 0 && top ? path.resolve(top) : null;
 }
 
 /**

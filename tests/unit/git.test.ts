@@ -150,3 +150,28 @@ describe("hardened git runner", () => {
     expect(fs.existsSync(pwnExtDiff)).toBe(false);
   });
 });
+
+describe("a repository whose folder name ends in a space", () => {
+  it("is used where it is: its saved diff, its branches and a task's copy of it", async () => {
+    const repo = path.join(makeTempDir(), "demo ");
+    fs.mkdirSync(repo);
+    sysGit(repo, "init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(repo, "a.txt"), "hello\n");
+    sysGit(repo, "add", "a.txt");
+    sysGit(repo, "commit", "-qm", "initial");
+    fs.writeFileSync(path.join(repo, "a.txt"), "changed\n");
+    fs.writeFileSync(path.join(repo, "new.txt"), "new\n");
+
+    const diff = await diffSince(repo, null);
+    expect(diff).toContain("+changed");
+    expect(diff).toContain("+++ b/new.txt");
+    expect((await readBranches(repo)).repo).toBe(repo);
+
+    const dataRoot = path.join(path.dirname(repo), "data");
+    const copy = await createCopy(repo, path.join(dataRoot, "worktrees", "task-1"), "vibeforge/task-1");
+    expect(copy.repo).toBe(repo);
+    expect(fs.readFileSync(path.join(copy.path, "a.txt"), "utf8")).toBe("hello\n");
+    await removeCopy(copy, { dataRoot, taskId: "task-1" });
+    expect(sysGit(repo, "branch", "--list", "vibeforge/*")).toBe("");
+  });
+});

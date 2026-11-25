@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A project whose folder name ends in a space works with git again.** VibeForge read the repository's folder from git with the space cut off, so a run there saved an empty diff for review, and a task or Viby couldn't make its own copy ("needs at least one commit in the workspace").
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

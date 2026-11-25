@@ -146,7 +146,8 @@ export async function readBranches(folder: string): Promise<BranchList> {
     }
     return a.name.localeCompare(b.name);
   });
-  return { repo: path.resolve(top.stdout.trim()), current, branches };
+  // Only the line break git ends with comes off: a folder's own name can end in a space.
+  return { repo: path.resolve(top.stdout.replace(/\n$/, "")), current, branches };
 }
 
 /**

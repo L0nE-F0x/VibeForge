@@ -49,7 +49,8 @@ export async function gitHead(cwd: string, timeoutMs = 3000): Promise<string | n
  */
 async function topLevel(cwd: string, timeoutMs: number): Promise<string | null> {
   const result = await execGit(["rev-parse", "--show-toplevel"], cwd, timeoutMs);
-  const top = result.stdout.trim();
+  // Only the line break git ends with comes off: a folder's own name can end in a space.
+  const top = result.stdout.replace(/\n$/, "");
   return result.code === 0 && top ? path.resolve(top) : null;
 }
 
