@@ -4,6 +4,16 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * The first `max` UTF-16 units of `text`, one fewer when the cut would split an emoji (or another
+ * character written as two units): half of one shows as �, and is saved as one.
+ */
+export function cutText(text: string, max: number): string {
+  const end = Math.max(0, max);
+  const last = text.charCodeAt(end - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end);
+}
+
 export function initials(name: string): string {
   const words = name.trim().split(/[\s_-]+/).filter(Boolean);
   if (words.length === 0) return "?";

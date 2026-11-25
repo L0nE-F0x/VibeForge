@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A title cut short no longer ends in a broken emoji.** Chat titles, Viby's conversation titles, tasks handed out with `vibeforge task` and **Hand off** tasks are cut to fit; when the cut fell inside an emoji, half of it was kept, which shows as � and was saved that way. The cut now goes before the emoji.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

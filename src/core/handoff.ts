@@ -2,6 +2,8 @@
 // The task body is the packet: who did what, which files changed, how it ended, and where the full
 // record is. Pure; the task service reads the run and saves the task.
 
+import { cutText } from "../shared/text.js";
+
 /** The longest a packet gets, so the task file stays something a person can read and edit. */
 export const HANDOFF_MAX = 8_000;
 /** How much of the end of the transcript is quoted: how it went, not how it started. */
@@ -27,7 +29,7 @@ export interface HandoffInput {
 }
 
 export function handoffTitle(title: string): string {
-  const clipped = title.length > 70 ? `${title.slice(0, 69).trimEnd()}…` : title;
+  const clipped = title.length > 70 ? `${cutText(title, 69).trimEnd()}…` : title;
   return `Hand off: ${clipped}`;
 }
 

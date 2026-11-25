@@ -5,6 +5,7 @@ import { replyLogFor } from "../replies.js";
 import { slugify } from "../slug.js";
 import { createTask } from "../tasks.js";
 import type { TalkState } from "../types.js";
+import { cutText } from "../../shared/text.js";
 import { isGitRepo } from "../vcs.js";
 import { copyPatch, patchFiles } from "../worktrees.js";
 import type { ServiceCore } from "./core.js";
@@ -454,7 +455,7 @@ export function findAgent<T extends { id: string; name: string }>(agents: readon
 export function taskTitle(line: string, max = 80): string {
   const text = line.replace(/\s+/g, " ").trim();
   if (text.length <= max) return text;
-  const cut = text.slice(0, max - 1);
+  const cut = cutText(text, max - 1);
   // A word that ends right at the cut stays; one cut in half goes.
   const whole = /[\s,;:.!?]/.test(text[cut.length]);
   const space = cut.lastIndexOf(" ");
