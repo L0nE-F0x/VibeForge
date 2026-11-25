@@ -322,3 +322,46 @@ describe("Go on a plan card from the phone", () => {
     expect(page.state).toMatchObject({ busy: false, actionError: "That plan has already been carried out." });
   });
 });
+
+describe("a plan card's boxes, typed through an input method", () => {
+  /** The card's name and branch boxes (plan-card.js), with nodes that only keep their listeners. */
+  function boxes() {
+    const script = [
+      `const sent = []; let blurs = 0;`,
+      `function el(tag, attrs, ...children) { const node = { tag, value: "", children, listeners: {}, addEventListener(type, run) { (this.listeners[type] ||= []).push(run); }, blur() { blurs += 1; for (const run of this.listeners.blur || []) run(); } }; return node; }`,
+      `function glyph() { return null; }`,
+      `const t = (key) => key;`,
+      `function currentStep() { return ""; }`,
+      `function editStep(turn, step, patch) { sent.push(patch); }`,
+      pick("plan-card.js", "textField"),
+      pick("plan-card.js", "branchField"),
+      `globalThis.page = { name: () => textField({ id: "t" }, { id: "s" }, "name", "", "Name").children[0], branch: () => branchField({ id: "t" }, { id: "s" }, "").children.find((node) => node && node.tag === "input"), sent, blurs: () => blurs };`,
+    ].join("\n");
+    const context = vm.createContext({});
+    vm.runInContext(script, context);
+    return context.page as { name(): FakeBox; branch(): FakeBox; sent: Array<Record<string, string>>; blurs(): number };
+  }
+  type FakeBox = { value: string; listeners: Record<string, Array<(event: unknown) => void>> };
+  /** Enter, as a phone's keyboard sends it: picking a word the input method offered, or Enter itself. */
+  function enter(box: FakeBox, patch: { isComposing: boolean; keyCode: number }) {
+    for (const run of box.listeners.keydown ?? []) run({ key: "Enter", ...patch, preventDefault() {} });
+  }
+
+  it("keeps the box open while Enter only picks the input method's word, and leaves it on Enter itself", () => {
+    for (const which of ["name", "branch"] as const) {
+      const page = boxes();
+      const box = page[which]();
+      box.value = "とうきょう";
+      // Chrome and Firefox: Enter while the word is still being put together.
+      enter(box, { isComposing: true, keyCode: 229 });
+      // Safari: the word is in, and the Enter that put it there still comes as 229.
+      box.value = "東京";
+      enter(box, { isComposing: false, keyCode: 229 });
+      expect(page.blurs(), which).toBe(0);
+      expect(page.sent, which).toEqual([]);
+      enter(box, { isComposing: false, keyCode: 13 });
+      expect(page.blurs(), which).toBe(1);
+      expect(page.sent, which).toEqual([{ [which]: "東京" }]);
+    }
+  });
+});

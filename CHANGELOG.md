@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Typing Japanese or Chinese into a plan card on the phone.** In a waiting plan's new-workspace name, folder or branch box, the Enter that picks a word your keyboard offered also closed the box and sent what was there so far, so a name of several words meant tapping back in for each one. That Enter now only picks the word, as on the desktop's card; Enter itself still finishes the box.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
