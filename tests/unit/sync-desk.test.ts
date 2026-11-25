@@ -265,6 +265,32 @@ describe("sync desk", () => {
     expect(fs.readFileSync(path.join(branch.path, ".stignore"), "utf8")).toContain("(?d).git");
   });
 
+  it("keeps Syncthing's own files out of git status when only the files sync", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { a } = await paired();
+    const site = workspace(a, "Site");
+    const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, stdio: "pipe" }).toString().trim();
+    git(site.path, "init", "-q", "-b", "main");
+    git(site.path, "add", "-A");
+    git(site.path, "commit", "-qm", "base");
+    await a.desk.share(site.id, B, { mode: "two", filesOnly: true });
+    // What Syncthing puts in a folder it syncs.
+    const marker = (folder: string) => {
+      fs.mkdirSync(path.join(folder, ".stfolder"), { recursive: true });
+      fs.writeFileSync(path.join(folder, ".stfolder", "syncthing-folder-1a2b3c.txt"), "marker\n");
+    };
+    marker(site.path);
+    expect(git(site.path, "status", "--porcelain")).toBe("");
+
+    // A branch opened beside its repository always syncs files only; its exclude file is the repository's.
+    const side = path.join(a.home, "Projects", "site-side");
+    git(site.path, "worktree", "add", "-q", "-b", "side", side);
+    a.workspaces.push({ id: "side", name: "Side", path: side, dockUrl: "" });
+    await a.desk.share("side", B, { mode: "two", filesOnly: false });
+    marker(side);
+    expect(git(side, "status", "--porcelain")).toBe("");
+  });
+
   it("follows a change of direction, tells what runs here, and ends on both machines", async () => {
     const { a, b } = await paired();
     const site = workspace(a, "Site");

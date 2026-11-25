@@ -4,7 +4,7 @@ import { isDirectory } from "../fsx.js";
 import { slugify } from "../slug.js";
 import type { LiveSession, Workspace } from "../types.js";
 import { ConflictStore, copiesIn, walkCopies, type ConflictRecord, type FoundCopy } from "./conflicts.js";
-import { inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo, type MergeResult } from "./git-rescue.js";
+import { hideSyncFiles, inHistory, mergeSaved, prepareRepo, repoKind, rescueRepo, type MergeResult } from "./git-rescue.js";
 import { DELETE_GRACE_MS, LibrarySync, type ItemKind, type LibraryHost, type LibraryView, type Peer } from "./library.js";
 import { buildLink, readLink, safeHint, settleWithLink, writeLink, type LinkOffer } from "./link.js";
 import { deviceId, dialAddress, folderType, hostPort, ignoreLines, isOurFolder, linkFolderId, mergeIgnoreFile, newFolderId, pairingCode, parsePairingCode, shortId, SYNC_PORT, withoutIgnoreBlock, type SyncMode } from "./protocol.js";
@@ -184,6 +184,7 @@ export class SyncDesk {
       const after = mergeIgnoreFile(before, ignoreLines({ filesOnly: share.filesOnly }));
       if (after !== before) fs.writeFileSync(ignoreFile, after);
       if (!share.filesOnly) await prepareRepo(share.path);
+      else await hideSyncFiles(share.path);
       wanted.set(share.folderId, { id: share.folderId, label: share.name, path: share.path, type: folderType(share.mode), devices: [share.machineId], watchDelay: this.workspaceDelay });
     }
 
