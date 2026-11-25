@@ -26,6 +26,31 @@ describe("the files a diff touches", () => {
     ]);
   });
 
+  it("counts a changed line that starts with dashes or pluses, which only headers do before a hunk", () => {
+    const text = [
+      "diff --git a/README.md b/README.md",
+      "index 1111111..2222222 100644",
+      "--- a/README.md",
+      "+++ b/README.md",
+      "@@ -1,4 +1,4 @@",
+      " # Title",
+      "----",
+      "+===",
+      "--- a comment",
+      "+++counter;",
+      "diff --git a/b.sql b/b.sql",
+      "--- a/b.sql",
+      "+++ b/b.sql",
+      "@@ -1 +1 @@",
+      "--- old",
+      "+++ new",
+    ].join("\n");
+    expect(diffFiles(text)).toEqual([
+      { path: "README.md", added: 2, removed: 2, line: 0 },
+      { path: "b.sql", added: 1, removed: 1, line: 10 },
+    ]);
+  });
+
   it("has nothing to list for an empty diff", () => {
     expect(diffFiles("")).toEqual([]);
   });
