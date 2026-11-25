@@ -11,7 +11,7 @@ import { setView } from "./pages.js";
 import { pendingSteps, planCard, sizePrompts } from "./plan-card.js";
 import { openSession } from "./session.js";
 import { parts, state } from "./state.js";
-import { stateLabel, t, tCount } from "./words.js";
+import { stateLabel, t, tCount, words } from "./words.js";
 
 /** @typedef {import("./state.js").PhoneOrchestrator} PhoneOrchestrator */
 /** @typedef {import("./state.js").PhoneTurn} PhoneTurn */
@@ -444,6 +444,19 @@ async function fillTurnImage(name, wrap) {
   );
 }
 
+/** The words for a yes the planner heard (`confirmed` on a turn), as the desktop says them: CONFIRMED_KEY in src/shared/orchestrator.ts. */
+const CONFIRMED_KEY = { ran: "core.orchConfirmedRan", risky: "core.orchConfirmedRisky", read: "core.orchConfirmedRead", fix: "core.orchConfirmedFix" };
+
+/**
+ * What Viby said in a turn. A sentence VibeForge wrote itself, rather than the planner, is shown in
+ * the phone's language; the English it was saved in stands in when the computer sent no such word.
+ * @param {PhoneTurn} turn
+ */
+function saidText(turn) {
+  const key = turn.confirmed ? CONFIRMED_KEY[turn.confirmed] : undefined;
+  return (key && words[key]) || turn.text;
+}
+
 /** @param {PhoneTurn} turn */
 function turnNode(turn) {
   if (turn.from === "you") {
@@ -459,7 +472,7 @@ function turnNode(turn) {
   const said = turn.problem
     ? el("div", { class: "orch-problem-text" }, el("span", {}, t(`orch.problem.${turn.problem}`, { engine: label })), turn.detail ? el("span", { class: "orch-detail" }, turn.detail) : null)
     : turn.text
-      ? el("span", { class: "orch-said" }, turn.text)
+      ? el("span", { class: "orch-said" }, saidText(turn))
       : null;
   const checks = turn.checks?.length ? el("div", { class: "orch-checks" }, turn.checks.map((check) => checkNode(check))) : null;
   return el("div", { class: "orch-turn from-vibeforge" }, whoMark(), el("div", { class: "orch-body" }, said, checks, turn.steps ? planCard(turn) : null));

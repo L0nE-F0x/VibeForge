@@ -53,6 +53,7 @@ import type { Activity } from "../core/activity.js";
 import type { VoiceAction } from "../core/control.js";
 import type { ModelChoice, SpeechPhase, VoiceChoice } from "../core/voice.js";
 import type { BranchList } from "../core/branches.js";
+import type { Cue } from "./chimes.js";
 import type { WorkspaceFile } from "../core/workspaces.js";
 import type {
   Looking,
@@ -367,6 +368,8 @@ export interface DeskMethods {
   "app.notify": (note: { title: string; body: string; workspaceId?: string | null; chatId?: string | null; agentId?: string | null; route?: unknown; always?: boolean; silent?: boolean }) => void;
   /** Omarchy's Do Not Disturb is on. */
   "app.doNotDisturb": () => boolean;
+  /** Plays a chime through pw-play at `volume` (0 to 1). False when this machine can't, and the window plays it itself. */
+  "app.chime": (name: Cue, volume: number) => boolean;
   /** "Start at login, in the tray": whether the autostart entry is there, and setting it. */
   "app.autostart": () => boolean;
   "app.setAutostart": (on: boolean) => boolean;
