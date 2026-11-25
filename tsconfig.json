@@ -19,5 +19,5 @@
     "resolveJsonModule": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src/core", "src/shared", "src/ui", "electron", "tests"]
+  "include": ["src/core", "src/shared", "src/ui", "electron", "tests", "e2e"]
 }

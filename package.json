@@ -38,6 +38,7 @@
     "lint": "biome lint",
     "postinstall": "node scripts/ensure-electron.cjs",
     "smoke": "node scripts/smoke.mjs",
+    "e2e": "vitest run --config vitest.e2e.config.mts",
     "release-notes": "node scripts/release-notes.mjs"
   },
   "dependencies": {
