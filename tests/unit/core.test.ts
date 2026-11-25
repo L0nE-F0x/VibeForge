@@ -16,7 +16,11 @@ import { BUNDLED_THEMES } from "../../src/core/themes-bundled.js";
 import type { RunMeta } from "../../src/core/types.js";
 import { diffSince, dirtyFiles, gitHead, leaveOutUntouched, NEW_FILE_LIMIT, snapshotGit, summarizeSnapshot } from "../../src/core/vcs.js";
 import { addWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord } from "../../src/core/workspaces.js";
-import { dayHeading, dayKey, fireTime, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
+import { handoffTitle } from "../../src/core/handoff.js";
+import { taskTitle } from "../../src/core/service/messages.js";
+import { oneLine } from "../../src/core/service/orchestrator-utils.js";
+import { titleFromPrompt } from "../../src/core/service/types.js";
+import { cutText, dayHeading, dayKey, fireTime, joinArgs, shellQuote, splitArgs, timeAgo } from "../../src/shared/text.js";
 
 function tempDir(prefix = "vibeforge-core-"): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -671,6 +675,21 @@ describe("text helpers", () => {
     expect(timeAgo("2026-09-25T12:00:15Z", now)).toBe("just now");
     expect(timeAgo("2026-09-25T11:30:00Z", now, "de")).toBe("vor 30 Min.");
     expect(timeAgo("2026-09-24T11:30:00Z", now, "fr")).toBe("hier");
+  });
+
+  it("cuts titles between characters, never between the two halves of an emoji", () => {
+    // A lone half of a pair, which shows as � and is saved as one.
+    const broken = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    expect(cutText("ab🚀cd", 3)).toBe("ab");
+    expect(cutText("ab🚀cd", 4)).toBe("ab🚀");
+    expect(cutText("abc", 9)).toBe("abc");
+    const said = (at: number) => `${"x".repeat(at)}${"🚀".repeat(60)} and then some more words`;
+    for (let at = 0; at < 4; at += 1) {
+      for (const title of [titleFromPrompt(said(at)), oneLine(said(at), 56), taskTitle(said(at)), handoffTitle(said(at))]) {
+        expect(title, JSON.stringify(title)).not.toMatch(broken);
+        expect(title.endsWith("…")).toBe(true);
+      }
+    }
   });
 });
 

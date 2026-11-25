@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { cutText } from "../../shared/text.js";
 import { runGit } from "../git.js";
 import type { OrchestratorStep, PlanContext } from "../orchestrator.js";
 import type { ApplyResult } from "../worktrees.js";
@@ -34,7 +35,7 @@ export function realInside(parent: string, child: string): string | null {
 
 export function oneLine(text: string, max: number): string {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+  return line.length > max ? `${cutText(line, max - 1).trimEnd()}…` : line;
 }
 
 export function gitIn(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {

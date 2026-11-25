@@ -1,4 +1,5 @@
 import path from "node:path";
+import { cutText } from "../../shared/text.js";
 import type { ComputerUseDriver } from "../computer-use.js";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
@@ -282,7 +283,7 @@ export function normalizePlaces(places: readonly string[]): string[] {
 export function titleFromPrompt(text: string): string {
   const line = text.trim().split("\n").find((item) => item.trim()) ?? "Chat";
   const clean = line.replace(/\s+/g, " ").trim();
-  return clean.length > 48 ? `${clean.slice(0, 47).trimEnd()}…` : clean;
+  return clean.length > 48 ? `${cutText(clean, 47).trimEnd()}…` : clean;
 }
 
 export const DEFAULT_CHAT_TITLE = "New chat";
