@@ -341,8 +341,12 @@ latest_release_tag() {
   LATEST_TAG=""
   [[ -n "$RELEASES" ]] || return 0
   command -v curl >/dev/null 2>&1 || die "curl is missing. Install it with: $(pkg_hint curl)"
-  local out status=0 code url
-  out=$(curl -sS "${PROTO[@]}" -o /dev/null -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
+  local out status=0 code url body
+  # The answer's body goes to a file of its own, not /dev/null: on Ubuntu 24.04 (curl 8.5) this check
+  # failed with curl error 23 when its output was /dev/null and --retry was on.
+  body="$(mktemp "${TMPDIR:-/tmp}/vibeforge-latest.XXXXXX")" || die "Couldn't make a temporary file in ${TMPDIR:-/tmp}."
+  out=$(curl -sS "${PROTO[@]}" -o "$body" -w '%{http_code} %{redirect_url}' --retry 2 --connect-timeout 20 --max-time 60 "$RELEASES/latest") || status=$?
+  rm -f "$body"
   ((status == 0)) || die "Could not reach GitHub to find the latest release (curl error $status). Check the network, then run this again."
   code="${out%% *}"
   url="${out#* }"
