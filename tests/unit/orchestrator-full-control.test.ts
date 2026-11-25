@@ -79,6 +79,11 @@ describe("full-app control parsers and validators", () => {
     expect(parseRoutineSchedule("weekends at 11am")).toEqual({ kind: "cron", expr: "0 11 * * 0,6" });
     expect(parseRoutineSchedule("daily at noon")).toEqual({ kind: "cron", expr: "0 12 * * *" });
     expect(parseRoutineSchedule("daily at midnight")).toEqual({ kind: "cron", expr: "0 0 * * *" });
+    // An evening or night hour with no am/pm is after noon, whichever way round it is said.
+    expect(parseRoutineSchedule("every night at 9")).toEqual({ kind: "cron", expr: "0 21 * * *" });
+    expect(parseRoutineSchedule("at 9 every night")).toEqual({ kind: "cron", expr: "0 21 * * *" });
+    expect(parseRoutineSchedule("7:30 every evening")).toEqual({ kind: "cron", expr: "30 19 * * *" });
+    expect(parseRoutineSchedule("at 9am every night")).toEqual({ kind: "cron", expr: "0 9 * * *" });
     expect(formatScheduleBrief({ kind: "every", minutes: 90 })).toBe("every 90 minutes");
     expect(formatScheduleBrief({ kind: "every", minutes: 120 })).toBe("every 2 hours");
     expect(formatScheduleBrief({ kind: "cron", expr: "0 9 * * 1-5" })).toBe("0 9 * * 1-5");
