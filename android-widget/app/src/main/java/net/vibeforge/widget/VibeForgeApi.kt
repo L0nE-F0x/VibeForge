@@ -124,10 +124,10 @@ object VibeForgeApi {
         "VibeForgeWidget/${BuildConfig.VERSION_NAME} (Android $release${if (model.isNotEmpty()) "; $model" else ""})"
     }
 
-    private const val NOT_SET_UP = "Tap ⚙ to add your computer and pair with its code from Settings → Phone."
+    private const val NOT_SET_UP = "Tap ⚙ to add your computer: scan the QR code in its Settings → Phone."
 
     private fun notPaired(machine: Machine) =
-        "Not paired with ${machine.name}. Tap ⚙ and pair with the code from Settings → Phone."
+        "Not paired with ${machine.name}. Tap ⚙ and scan the QR code in its Settings → Phone."
 
     /** What the widget says once a computer stops taking its key. */
     fun keyRejectedText(name: String) =

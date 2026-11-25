@@ -62,8 +62,8 @@ android {
         applicationId = "net.vibeforge.widget"
         minSdk = 28
         targetSdk = 35
-        versionCode = 7
-        versionName = "2.1.0"
+        versionCode = 8
+        versionName = "2.2.0"
 
         buildConfigField("String", "DEFAULT_URL", escapeBuildConfig(defaultUrl))
     }
@@ -89,7 +89,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 drops what is never called (most of the Kotlin library and ZXing): the APK stays small.
+            // Nothing is renamed; see proguard-rules.pro.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (releaseStore != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
@@ -105,5 +108,10 @@ android {
 }
 
 dependencies {
-    // Pure Android framework (RemoteViews + HttpURLConnection + org.json + Android Keystore) keeps the APK tiny and fast.
+    // Otherwise pure Android framework (RemoteViews + HttpURLConnection + org.json + Android Keystore) keeps the APK tiny and fast.
+    // The one library: ZXing's QR reader with its camera view (Apache-2.0), for Scan in the setup screen.
+    // It decodes on the phone itself, with no Google Play Services, so a de-Googled phone pairs the same way.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
+    testImplementation("junit:junit:4.13.2")
 }
