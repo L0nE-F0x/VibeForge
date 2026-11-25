@@ -389,6 +389,33 @@ describe("sync desk", () => {
     expect((await a.desk.view()).shares).toEqual([]);
   });
 
+  it.skipIf(process.getuid?.() === 0)("keeps syncing the other workspaces when one's folder can't be written", async () => {
+    const { a } = await paired();
+    const site = workspace(a, "Site");
+    const docs = workspace(a, "Docs");
+    await a.desk.share(site.id, B, { mode: "two", filesOnly: false });
+    // Its ignore file gone and the folder read-only (a read-only mount, a permissions mistake).
+    fs.rmSync(path.join(site.path, ".stignore"));
+    fs.chmodSync(site.path, 0o555);
+    try {
+      await a.desk.share(docs.id, B, { mode: "two", filesOnly: false });
+      a.desk.detach();
+      await a.desk.attach(a.engine);
+      const shares = (await a.desk.view()).shares;
+      expect(shares.find((share) => share.workspaceId === "site")?.state).toBe("error");
+      expect(shares.find((share) => share.workspaceId === "docs")?.state).not.toBe("error");
+      // Not handed to Syncthing without its ignore lines; the other one is.
+      expect(a.engine.foldersNow.map((folder) => folder.path)).toEqual([path.join(a.dataRoot, "sync", "link", shortId(B)), docs.path]);
+    } finally {
+      fs.chmodSync(site.path, 0o755);
+    }
+    // Writable again: it syncs again at the next look.
+    a.desk.detach();
+    await a.desk.attach(a.engine);
+    expect(fs.readFileSync(path.join(site.path, ".stignore"), "utf8")).toContain("(?d)node_modules");
+    expect(a.engine.foldersNow.map((folder) => folder.path).sort()).toEqual([path.join(a.dataRoot, "sync", "link", shortId(B)), docs.path, site.path].sort());
+  });
+
   it("unpairs the other machine too, with a last note", async () => {
     const { a, b } = await paired();
     const site = workspace(a, "Site");

@@ -74,7 +74,7 @@ export class SyncDesk {
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly told = new Set<string>();
   private live: Record<string, string[]> = {};
-  /** Shares whose folder is missing here. */
+  /** Shares whose folder is missing here, or can't be written to. */
   private readonly missing = new Set<string>();
   /** How long unpairing waits for its last note to reach a machine that is connected. Tests shorten it. */
   unpairWaitMs = 2500;
@@ -179,11 +179,19 @@ export class SyncDesk {
         this.missing.add(share.folderId);
         continue;
       }
-      const ignoreFile = path.join(share.path, ".stignore");
-      const before = fs.existsSync(ignoreFile) ? fs.readFileSync(ignoreFile, "utf8") : "";
-      const after = mergeIgnoreFile(before, ignoreLines({ filesOnly: share.filesOnly }));
-      if (after !== before) fs.writeFileSync(ignoreFile, after);
-      if (!share.filesOnly) await prepareRepo(share.path);
+      try {
+        const ignoreFile = path.join(share.path, ".stignore");
+        const before = fs.existsSync(ignoreFile) ? fs.readFileSync(ignoreFile, "utf8") : "";
+        const after = mergeIgnoreFile(before, ignoreLines({ filesOnly: share.filesOnly }));
+        if (after !== before) fs.writeFileSync(ignoreFile, after);
+        if (!share.filesOnly) await prepareRepo(share.path);
+      } catch (error) {
+        // A folder that can't be written to (read-only, a permissions mistake) doesn't sync without
+        // its ignore lines, and doesn't stop the others: it shows as an error until it can be.
+        this.missing.add(share.folderId);
+        this.host.log(`Sync: could not prepare ${share.name} to sync: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
       wanted.set(share.folderId, { id: share.folderId, label: share.name, path: share.path, type: folderType(share.mode), devices: [share.machineId], watchDelay: this.workspaceDelay });
     }
 
