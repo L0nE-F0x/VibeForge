@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { fetchSyncthing, mark, parseSums, pinned, present, RELEASE_KEY, sourceNote, verifiedSums } from "../../scripts/fetch-syncthing.mjs";
-import { APP_FILES, ENTRIES, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
+import { APP_FILES, ENTRIES, LEFT_OUT, PACKAGES, provided, ships, specifiers } from "../../scripts/pack-release.mjs";
 
 // scripts/pack-release.mjs packs a list of files, not the whole checkout. These keep the list in
 // step with what the app reads from its folder at runtime, so a change that loads something new
@@ -27,6 +27,11 @@ describe("the ready-made build's file list", () => {
     expect(shipped("companion/js/new-module.js")).toBe(true);
     expect(shipped("electron/pty-host.cjs")).toBe(true);
     expect(shipped("electron/main.ts")).toBe(false);
+    // The Android widget is installed on its own: neither a built one nor its build script ships.
+    expect(shipped("scripts/build-android-widget.sh")).toBe(false);
+    expect(shipped("companion/vibeforge-widget.apk")).toBe(false);
+    expect(shipped("scripts/talk.mjs")).toBe(true);
+    expect(LEFT_OUT.every((file) => fs.existsSync(path.join(repo, file)))).toBe(true);
     expect(ENTRIES).toEqual(expect.arrayContaining(["electron/pty-host.cjs", "electron/terminal-capture.cjs", "scripts/talk.mjs"]));
   });
 

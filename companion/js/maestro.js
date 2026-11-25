@@ -186,6 +186,16 @@ export function updateMaestro() {
     parts.orchTurnsKey = key;
     if (parts.stickTurns && !editingIn(parts.turns)) parts.turns.scrollTop = parts.turns.scrollHeight;
   }
+  // A link asked for one plan (the Android widget's waiting plan): it is brought into view once,
+  // and the conversation stays there instead of following its end. A plan that has gone is let be.
+  if (state.focusTurn) {
+    const wanted = parts.orchTurns.get(state.focusTurn)?.node;
+    state.focusTurn = "";
+    if (wanted) {
+      parts.stickTurns = false;
+      wanted.scrollIntoView({ block: "start" });
+    }
+  }
 }
 
 /** @param {import("./state.js").Sheet} targetSheet */

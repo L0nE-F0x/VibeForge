@@ -37,6 +37,7 @@ describe("pairing from the phone", () => {
       `function forget() { throw new Error("pairing never forgets"); }`,
       `function forgetSeen() {}`,
       `function setView(next) { state.view = next; }`,
+      `function followLink() { return false; }`,
       `const seen = new Map();`,
       ...["POLL_TIMEOUT_MS", "GATEWAY_DOWN", "call", "checkCode", "keyFrom"].map((name) => pick("api.js", name)),
       pick("home.js", "shownComputer"),
@@ -125,6 +126,73 @@ describe("pairing from the phone", () => {
     expect(JSON.parse(stored.get("vibeforge-computers") ?? "[]")).toEqual([{ url: laptop, token: "vf_laptop", name: "Laptop" }]);
     // The desktop's own code is untouched.
     expect(stored.get("vibeforge-phone")).toBe("vf_desktop");
+  });
+});
+
+describe("a link that opens the phone page at one place (the Android widget's)", () => {
+  type LinkState = { base: string; token: string; view: string; focusTurn: string; sessionQuery: { ptyId: string; runId: string }; session: unknown };
+
+  /** The page's own followLink(), on a page opened at `href`, with what the phone keeps. */
+  function opened(href: string, kept: Record<string, string> = {}, base = "") {
+    const script = [
+      `const state = { base: ${JSON.stringify(base)}, token: "", view: "home", focusTurn: "", sessionQuery: { ptyId: "", runId: "" }, session: {} };`,
+      ...["TOKEN_KEY", "NAME_KEY", "COMPUTERS_KEY", "otherComputers", "computers"].map((name) => pick("state.js", name)),
+      `const switched = [];`,
+      `function showComputer(url) { switched.push(url); state.base = url; }`,
+      pick("pages.js", "LINK_VIEWS"),
+      pick("pages.js", "followLink"),
+      `globalThis.page = { followLink, state, switched };`,
+    ].join("\n");
+    const stored = new Map<string, string>(Object.entries(kept));
+    const localStorage = { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) };
+    const address = { href };
+    const window = { location: address, history: { replaceState: (_s: unknown, _t: string, to: string) => (address.href = new URL(to, address.href).href) } };
+    const context = vm.createContext({ window, localStorage, URL });
+    vm.runInContext(script, context);
+    return { page: context.page as { followLink(): boolean; state: LinkState; switched: string[] }, address };
+  }
+
+  const home = "https://desktop.tail1234.ts.net";
+  const paired = { "vibeforge-phone": `vfd_${"ab".repeat(24)}` };
+
+  it("opens the plan waiting for Go in the Orchestrator, and takes the link out of the address", () => {
+    const { page, address } = opened(`${home}/?view=maestro&turn=t42`, paired);
+    expect(page.followLink()).toBe(true);
+    expect(page.state).toMatchObject({ view: "maestro", focusTurn: "t42" });
+    expect(address.href).toBe(`${home}/`);
+  });
+
+  it("opens a session, the Orchestrator or the desk", () => {
+    const session = opened(`${home}/?ptyId=p7&runId=r9`, paired);
+    expect(session.page.followLink()).toBe(true);
+    expect(session.page.state).toMatchObject({ view: "session", sessionQuery: { ptyId: "p7", runId: "r9" }, session: null });
+    for (const [view, page] of [["maestro", "maestro"], ["viby", "maestro"], ["desk", "desk"]]) {
+      const link = opened(`${home}/?view=${view}`, paired);
+      expect(link.page.followLink(), view).toBe(true);
+      expect(link.page.state.view, view).toBe(page);
+    }
+  });
+
+  it("waits for pairing: unpaired, the link stays in the address for pair() to follow", () => {
+    const { page, address } = opened(`${home}/?view=maestro&turn=t42`);
+    expect(page.followLink()).toBe(false);
+    expect(page.state).toMatchObject({ view: "home", focusTurn: "" });
+    expect(address.href).toBe(`${home}/?view=maestro&turn=t42`);
+  });
+
+  it("is about the computer the page came from, even while the phone shows another", () => {
+    const { page } = opened(`${home}/?view=desk`, paired, "https://laptop.tail1234.ts.net");
+    expect(page.followLink()).toBe(true);
+    expect(page.switched).toEqual([""]);
+    expect(page.state).toMatchObject({ base: "", view: "desk" });
+  });
+
+  it("leaves a page with no link, or a view it doesn't know, as it was", () => {
+    for (const href of [`${home}/`, `${home}/?view=widget`, `${home}/?view=pair`]) {
+      const { page } = opened(href, paired);
+      expect(page.followLink(), href).toBe(false);
+      expect(page.state.view, href).toBe("home");
+    }
   });
 });
 

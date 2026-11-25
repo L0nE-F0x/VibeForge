@@ -286,6 +286,116 @@ describe("each phone pairs with a key of its own (decision D18)", () => {
     }
   });
 
+  it("pairs the Android widget once, then answers everything it asks with its key alone", async () => {
+    const token = newCompanionToken();
+    const root = tempDir();
+    // A build copied beside the page is not handed out: the widget is installed another way.
+    fs.writeFileSync(path.join(root, "vibeforge-widget.apk"), "not served");
+    const devices: CompanionDevice[] = [];
+    const run = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    const sent: Array<{ ptyId: string; text: string }> = [];
+    const server = await startCompanionHttp({
+      port: 0,
+      token,
+      root,
+      icon: null,
+      computer: () => "desktop",
+      actions: actions({
+        desk: () => ({ nudges: ["Keep going."], agents: [], engines: [], workspaces: [] }),
+        plans: async () => ({ providers: [], checkedAt: "2026-11-25T00:00:00.000Z" }),
+        send: async (input) => {
+          sent.push({ ptyId: input.ptyId, text: input.text });
+          return { working: false, ptyId: input.ptyId, runId: "r" };
+        },
+        orchestrator: {
+          view: () => ({ turns: [{ id: "t1", from: "vibeforge", text: "", plan: "waiting", steps: [] }], running: [], thinking: false }),
+          run,
+          cancel,
+        } as unknown as CompanionActions["orchestrator"],
+      }),
+      devices: {
+        find: (key) => deviceFor(devices, key),
+        count: () => devices.length,
+        add: (name) => {
+          const key = newDeviceKey();
+          devices.push({ id: `w${devices.length}abcdef`, hash: deviceKeyHash(key), name, addedAt: "" });
+          return key;
+        },
+      },
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    const agent = "VibeForgeWidget/2.1.0 (Android 15; Pixel 9)";
+    const get = (route: string, key: string, more: Record<string, string> = {}) =>
+      fetch(`${base}${route}`, { headers: { Authorization: `Bearer ${key}`, "User-Agent": agent, ...more } });
+    const post = (route: string, key: string, body: unknown) =>
+      fetch(`${base}${route}`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "User-Agent": agent }, body: JSON.stringify(body) });
+    try {
+      // The setup screen: the address and the pairing code, once.
+      const paired = await fetch(`${base}/api/pair`, { method: "POST", headers: { "Content-Type": "application/json", "User-Agent": agent }, body: JSON.stringify({ token }) });
+      expect(paired.status).toBe(200);
+      const answer = (await paired.json()) as { ok: boolean; computer: string; key: string };
+      expect(answer).toMatchObject({ ok: true, computer: "desktop" });
+      expect(answer.key).toMatch(/^vfd_[0-9a-f]{48}$/);
+      // Settings → Phone lists it by what it is, with Remove beside it.
+      expect(devices.map((device) => device.name)).toEqual(["VibeForge widget (Pixel 9)"]);
+      const key = answer.key;
+
+      // What the widget reads: the desk, plan limits, the Orchestrator, and a session's screen.
+      for (const route of ["/api/desk", "/api/plans", "/api/orchestrator", "/api/session?ptyId=p&runId="]) {
+        expect((await get(route, key)).status, route).toBe(200);
+        // The code it was paired with opens none of it now, nor does asking with nothing.
+        expect((await get(route, token)).status, route).toBe(401);
+        expect((await fetch(`${base}${route}`)).status, route).toBe(401);
+      }
+      // It polls with the ETag of its last answer, and is told nothing changed.
+      const desk = await get("/api/desk", key);
+      const etag = desk.headers.get("etag") ?? "";
+      expect(etag).not.toBe("");
+      expect((await get("/api/desk", key, { "If-None-Match": etag })).status).toBe(304);
+
+      // What it does: a nudge to a session, and Go or Cancel on the plan waiting.
+      expect((await post("/api/send", key, { ptyId: "p", runId: "", text: "Keep going.", force: false })).status).toBe(200);
+      expect(sent).toEqual([{ ptyId: "p", text: "Keep going." }]);
+      expect((await post("/api/orchestrator/go", key, { turnId: "t1" })).status).toBe(200);
+      expect(run).toHaveBeenCalledWith("t1");
+      expect((await post("/api/orchestrator/cancel", key, { turnId: "t1" })).status).toBe(200);
+      expect(cancel).toHaveBeenCalledWith("t1");
+      expect((await post("/api/orchestrator/go", token, { turnId: "t1" })).status).toBe(401);
+      expect(run).toHaveBeenCalledTimes(1);
+
+      // Nothing was added for the widget alone: no page, no feed, no download.
+      for (const route of ["/widget", "/api/widget", "/vibeforge-widget.apk", "/js/widget.js"]) expect((await get(route, key)).status, route).toBe(404);
+
+      // Removed in Settings → Phone: every request is refused, and the widget says to pair again.
+      devices.length = 0;
+      devices.push({ id: "other0000", hash: deviceKeyHash(newDeviceKey()), name: "Other", addedAt: "" });
+      const removed = await get("/api/desk", key);
+      expect(removed.status).toBe(401);
+      expect(((await removed.json()) as { error: string }).error).not.toBe("");
+      expect((await post("/api/send", key, { ptyId: "p", text: "Keep going." })).status).toBe(401);
+      expect(sent).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("lets the widget keep the code as its key on a computer that hands out no keys", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({ port: 0, token, root: tempDir(), icon: null, actions: actions() });
+    const base = `http://127.0.0.1:${server.port}`;
+    try {
+      const paired = await fetch(`${base}/api/pair`, { method: "POST", headers: { "User-Agent": "VibeForgeWidget/2.1.0 (Android 15; Pixel 9)" }, body: JSON.stringify({ token }) });
+      expect(paired.status).toBe(200);
+      expect(await paired.json()).not.toHaveProperty("key");
+      expect((await fetch(`${base}/api/desk`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(200);
+      // A wrong code is refused as wrong, not as a key that stopped working.
+      expect((await fetch(`${base}/api/pair`, { method: "POST", body: JSON.stringify({ token: newCompanionToken() }) })).status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("names a phone from its browser", () => {
     expect(deviceName("Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A) AppleWebKit/537.36 Chrome/131 Mobile Safari/537.36")).toBe("Android (Pixel 9)");
     expect(deviceName("Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0")).toBe("Firefox on Linux");
