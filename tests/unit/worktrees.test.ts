@@ -444,6 +444,25 @@ describe("applying a copy that was already merged", () => {
     expect(read(repo, "new.txt")).toBe("hello\n");
   });
 
+  it("fetches the upstream of a branch that has a tag of the same name", async () => {
+    const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES });
+    // Git's short name for the branch becomes heads/main once a tag is called main too.
+    git(repo, "tag", "main");
+    write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    git(copy.path, "commit", "-qam", "feat: update a");
+    git(copy.path, "push", "-q", "origin", copy.branch);
+    git(github, "fetch", "-q", "origin", copy.branch);
+    git(github, "merge", "--squash", "-q", "FETCH_HEAD");
+    git(github, "commit", "-qm", "feat: update a (#1)");
+    git(github, "push", "-q", "origin", "main");
+    const mergedSha = git(github, "rev-parse", "HEAD").trim();
+
+    const result = await apply(copy, owner);
+    expect(result.pulled).toEqual({ branch: "main", upstream: "origin/main" });
+    expect(git(repo, "rev-parse", "HEAD").trim()).toBe(mergedSha);
+    expect(git(repo, "status", "--porcelain")).toBe("");
+  });
+
   it("fast-forwards cleanly after a regular merge commit even when another PR landed on top", async () => {
     const { repo, github, copy, owner } = await remoteRepoWithCopy({ "a.txt": LINES, "other.txt": "before\n" });
     write(copy.path, "a.txt", LINES.replace("five", "FIVE"));

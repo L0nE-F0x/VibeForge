@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Apply fast-forwards a branch that has a tag of the same name.** When a copy's commits were already merged on GitHub, Apply fetches the branch's upstream and fast-forwards to it. On a branch that shares its name with a tag it skipped the fetch, so it pasted the copy's changes back as uncommitted edits on top of a branch that was about to have them anyway.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

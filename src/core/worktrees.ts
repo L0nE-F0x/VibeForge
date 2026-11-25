@@ -605,7 +605,9 @@ async function tryPullMerged(copy: WorkingCopy, theirs: string, theirsCommit: st
   if (!isCommitId(baseTree.stdout.trim()) || theirs === baseTree.stdout.trim()) return null;
   if (copyHeadTree.stdout.trim() !== theirs) return null;
 
-  const branch = (await git(["symbolic-ref", "--quiet", "--short", "HEAD"], repo)).stdout.trim();
+  // The full name, not `--short`: a branch that shares its name with a tag is shortened to heads/<name>.
+  const headRef = (await git(["symbolic-ref", "--quiet", "HEAD"], repo)).stdout.trim();
+  const branch = headRef.startsWith("refs/heads/") ? headRef.slice("refs/heads/".length) : "";
   if (!branch) return null;
   const head = (await git(["rev-parse", "--verify", "-q", "HEAD"], repo)).stdout.trim();
   if (!isCommitId(head)) return null;
