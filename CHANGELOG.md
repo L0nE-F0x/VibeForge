@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A folder you write as `~/…` in `agent.yaml` or `workspaces.json` is your home folder.** VibeForge shows allowed folders and workspaces from home, as `~/Projects/shop`, but one written that way by hand was read as a folder named `~`: the agent was outside its own folder everywhere, so its tasks couldn't start, and saving it in the window said the folder doesn't exist. The workspace showed as gone. A leading `~` now means this machine's home.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
