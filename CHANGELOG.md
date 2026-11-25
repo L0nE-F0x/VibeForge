@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Viby's memory is never saved over when it can't be read.** A `viby.md` that is there but can't be read (its permissions, a disk error) was taken for an empty one: the memory editor opened blank and its **Save** wrote over the notes, a note Viby added started a new memory in place of the old one, and replacing the memory left an **Undo** that put back nothing. Now the editor and those steps say the file can't be read and leave it as it is, and Viby plans without it meanwhile.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

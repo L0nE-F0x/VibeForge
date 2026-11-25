@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { readJson, readText, writeFileAtomic, writeJson } from "../fsx.js";
+import { readJson, writeFileAtomic, writeJson } from "../fsx.js";
 import type { OrchestratorThreadSummary, OrchestratorTurn } from "../orchestrator.js";
 import { isSafeId } from "../slug.js";
+import { unreadable } from "../store/library.js";
 import type { ServiceCore } from "./core.js";
 import { oneLine } from "./orchestrator-utils.js";
 import type { Deleted } from "./types.js";
@@ -138,12 +139,27 @@ export function vibyMemoryFile(configRoot: string): string {
   return path.join(configRoot, "viby.md");
 }
 
+/**
+ * viby.md as written; empty when there is none yet. Throws UnreadableError when it is there but
+ * can't be read: taken for empty, the editor opened blank and a note or a replace was saved over it.
+ */
 export function readVibyMemory(configRoot: string): string {
-  return readText(vibyMemoryFile(configRoot));
+  const file = vibyMemoryFile(configRoot);
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw unreadable(file, error);
+  }
 }
 
+/** What a planning turn is told of viby.md. One that can't be read leaves it out rather than stopping Viby; its editor says why. */
 export function boundedVibyMemory(configRoot: string): string {
-  return readVibyMemory(configRoot).trim().slice(0, MEMORY_LIMIT);
+  try {
+    return readVibyMemory(configRoot).trim().slice(0, MEMORY_LIMIT);
+  } catch {
+    return "";
+  }
 }
 
 export function writeVibyMemory(configRoot: string, text: string): void {
