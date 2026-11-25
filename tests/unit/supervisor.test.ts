@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PtySupervisor } from "../../electron/supervisor.js";
+import { hostRuntime, PtySupervisor } from "../../electron/supervisor.js";
 
 // The window's side of the terminal host's JSON lines, against a stand-in host. tests/pty.test.ts
 // drives the real one.
@@ -71,5 +71,35 @@ describe("the terminal host's client", () => {
     expect(Date.now() - started).toBeLessThan(2000);
     expect(supervisor.running).toBe(false);
     await expect(supervisor.snapshot("p1")).rejects.toThrow("not running");
+  });
+});
+
+describe("what the terminal host runs on", () => {
+  it("is Electron's own binary started as Node, so no system Node is needed", () => {
+    const env = { PATH: "/usr/bin", HOME: "/home/x" };
+    expect(hostRuntime(env, { execPath: "/opt/vf/electron", electron: "45.3.2" })).toEqual({
+      command: "/opt/vf/electron",
+      env: { PATH: "/usr/bin", HOME: "/home/x", ELECTRON_RUN_AS_NODE: "1" },
+    });
+    // The terminals' own environment is left as it was.
+    expect(env).toEqual({ PATH: "/usr/bin", HOME: "/home/x" });
+  });
+
+  it("is the Node VIBEFORGE_NODE names, when it names one, and the running Node outside Electron", () => {
+    expect(hostRuntime({ PATH: "/usr/bin" }, { execPath: "/opt/vf/electron", electron: "45.3.2", override: "/usr/bin/node" })).toEqual({ command: "/usr/bin/node", env: { PATH: "/usr/bin" } });
+    expect(hostRuntime({ PATH: "/usr/bin" }, { execPath: "/usr/bin/node" })).toEqual({ command: "/usr/bin/node", env: { PATH: "/usr/bin" } });
+  });
+
+  it("knows which Node and libuv the host said it runs on", async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-supervisor-"));
+    fs.mkdirSync(path.join(dir, "electron"));
+    fs.writeFileSync(
+      path.join(dir, "electron", "pty-host.cjs"),
+      `process.stdout.write(JSON.stringify({ event: "ready", pid: process.pid, node: process.versions.node, uv: process.versions.uv }) + "\\n"); process.stdin.on("end", () => process.exit(0)); process.stdin.resume();`,
+    );
+    vi.stubEnv("VIBEFORGE_NODE", process.execPath);
+    supervisor = new PtySupervisor();
+    await supervisor.start(dir, { ...process.env });
+    expect(supervisor.runtime).toEqual({ node: process.versions.node, uv: process.versions.uv });
   });
 });

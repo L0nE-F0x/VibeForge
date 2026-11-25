@@ -1,8 +1,13 @@
 // @ts-check
 "use strict";
-// VibeForge PTY host. Electron starts this with the system Node because node-pty is built
-// for that Node. It owns every terminal: the process, a headless mirror of its screen, and
-// the terminal files in the run folder. It speaks JSON lines on stdin and stdout.
+// VibeForge PTY host. Electron starts this on its own Node (ELECTRON_RUN_AS_NODE: Electron's
+// binary run as plain Node), which loads node-pty's Node-API addon like any Node does. It owns
+// every terminal: the process, a headless mirror of its screen, and the terminal files in the run
+// folder. It speaks JSON lines on stdin and stdout.
+
+// The switch that made Electron's binary start as Node is the host's alone: a terminal that kept
+// it would start any Electron app run there (VS Code, VibeForge itself) as plain Node instead.
+delete process.env.ELECTRON_RUN_AS_NODE;
 
 const fs = require("fs");
 const path = require("path");
@@ -1044,4 +1049,5 @@ process.on("SIGINT", () => {
 });
 process.on("uncaughtException", (error) => log("pty-host uncaught:", error && error.stack ? error.stack : String(error)));
 
-send({ event: "ready", pid: process.pid });
+// Which Node and libuv the host runs on, for the log: libuv 1.51 (Node 22) loses a program's last output.
+send({ event: "ready", pid: process.pid, node: process.versions.node, uv: process.versions.uv });

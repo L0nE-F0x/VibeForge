@@ -80,6 +80,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       home: os.homedir(),
       hostRunning: supervisor.running,
       hostError: supervisor.running ? null : host.error,
+      hostRuntime: supervisor.running ? supervisor.runtime : null,
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,

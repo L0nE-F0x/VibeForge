@@ -27,6 +27,7 @@ export function environmentText(info: AppInfo | undefined, engines: Engine[]): s
     `VibeForge ${info?.version ?? "?"}`,
     `System: ${info?.os ?? "?"}`,
     `Electron ${info?.electron ?? "?"} · Chromium ${info?.chrome ?? "?"} · Node ${info?.node ?? "?"}`,
+    `Terminal host: ${info?.hostRuntime ? `Node ${info.hostRuntime.node}, libuv ${info.hostRuntime.uv}` : info?.hostRunning ? "running" : "not running"}`,
     `CLIs on PATH: ${found.length ? found.join(", ") : "none"}`,
   ].join("\n");
 }

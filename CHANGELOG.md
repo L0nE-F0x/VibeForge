@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **Terminals run on the Node that comes with VibeForge, not on yours.** VibeForge's terminal host, the process that owns every terminal, used to run on the Node installed on your computer. On Node 22, a program that ended while its pane was behind could lose the last few kilobytes of its output (3.7.1 worked around that). The host now runs on Electron's own Node (24.22, with the libuv release that fixed that bug), so which Node you have, or whether you have one at all, no longer matters to the terminals. `vibeforge tell` and the other `vibeforge` commands use your Node if there is one and Electron's otherwise. Copy diagnostics says which Node and libuv the terminal host runs on. In a test, the idle host used about 5 MB more memory than on Node 26.
+
 ## [3.7.2] - 2026-11-25
 
 **3.7.2: a settings file caught half-written no longer switches Sync or the phone page off, Sync no longer deletes what one machine can't read, folders that can't be read say so, removing a workspace has Undo, and chimes no longer keep an audio process running.**

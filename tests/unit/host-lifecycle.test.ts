@@ -88,7 +88,7 @@ describe("the terminal host's lifecycle", () => {
 
   it("keeps why the host didn't start, for a page that loads later", async () => {
     const { supervisor, life, sent, lines } = setUp();
-    supervisor.fail = "VibeForge needs Node on PATH to run terminals (node was not found).";
+    supervisor.fail = "The terminal host did not start within 10 seconds.";
     const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await life.start();
     quiet.mockRestore();

@@ -186,6 +186,8 @@ export class HostLifecycle {
     try {
       await this.ctx.supervisor.start(this.ctx.appRoot, terminalEnv(this.ctx, this.parts.voice.controlSocket));
       this.hostError = null;
+      const runtime = this.ctx.supervisor.runtime;
+      if (runtime) this.ctx.log.info(`Terminal host started on Node ${runtime.node} (libuv ${runtime.uv})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);

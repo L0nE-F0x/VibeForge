@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
+import { hostRuntime } from "../electron/supervisor.js";
 
 // Drives the shipped PTY host (electron/pty-host.cjs) over its JSON-lines protocol with
 // plain bash. No model CLI is started.
@@ -23,18 +24,19 @@ class Host {
   readonly kept = new Map<string, Array<{ seq: number; data: string }>>();
   /** Each terminal's output read as the lines 1, 2, 3…, checked as it arrives: see counted(). */
   private readonly numbered = new Map<string, Numbered>();
-  readonly ready: Promise<void>;
+  readonly ready: Promise<Message>;
 
-  constructor() {
-    this.child = spawn(process.execPath, [path.join(__dirname, "..", "electron", "pty-host.cjs")], {
-      env: { ...process.env, PS1: "$ ", HISTFILE: "/dev/null" },
-    });
+  /** On the Node running the tests, unless told what to run the host on (see hostRuntime). */
+  constructor(runtime?: { command: string; env: NodeJS.ProcessEnv }) {
+    const env = { ...process.env, PS1: "$ ", HISTFILE: "/dev/null" };
+    const { command, env: hostEnv } = runtime ?? { command: process.execPath, env };
+    this.child = spawn(command, [path.join(__dirname, "..", "electron", "pty-host.cjs")], { env: { ...env, ...hostEnv } });
     const lines = readline.createInterface({ input: this.child.stdout });
     this.lines = lines;
     this.ready = new Promise((resolve) => {
       lines.on("line", (line) => {
         const msg = JSON.parse(line) as Message;
-        if (msg.event === "ready") resolve();
+        if (msg.event === "ready") resolve(msg);
         if (typeof msg.reqId === "string") this.waiting.get(msg.reqId)?.(msg);
         else if (msg.event === "data") {
           this.printed.set(String(msg.ptyId), (this.printed.get(String(msg.ptyId)) ?? 0) + String(msg.data).length);
@@ -141,8 +143,8 @@ class Host {
 }
 
 const hosts: Host[] = [];
-async function startHost(): Promise<Host> {
-  const host = new Host();
+async function startHost(runtime?: { command: string; env: NodeJS.ProcessEnv }): Promise<Host> {
+  const host = new Host(runtime);
   hosts.push(host);
   await host.ready;
   return host;
@@ -172,7 +174,33 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Electron's own binary, which VibeForge runs the host on; absent where Electron isn't installed. */
+function electronBinary(): string | null {
+  try {
+    const found = require("electron") as unknown;
+    return typeof found === "string" && fs.existsSync(found) ? found : null;
+  } catch {
+    return null;
+  }
+}
+
 describe("pty host", () => {
+  it.skipIf(!electronBinary())("runs on Electron's own Node, and its terminals don't inherit the switch that made it Node", async () => {
+    const runtime = hostRuntime({ ...process.env }, { execPath: electronBinary()!, electron: "45" });
+    expect(runtime.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    const host = new Host(runtime);
+    hosts.push(host);
+    const ready = await host.ready;
+    // Electron 45's Node 24, whose libuv (1.52) keeps a program's last output that 1.51 loses.
+    expect(Number(String(ready.node).split(".")[0])).toBeGreaterThanOrEqual(24);
+    const [major, minor] = String(ready.uv).split(".").map(Number);
+    expect(major * 100 + minor).toBeGreaterThanOrEqual(152);
+    const pty = String((await host.request({ op: "spawn", cwd: tempDir(), argv: ["/bin/bash", "--norc", "--noprofile", "-c", 'seq 1 3000; echo "switch=[$ELECTRON_RUN_AS_NODE]"'] })).ptyId);
+    await host.until(() => host.exitOf(pty) !== undefined);
+    // Every line, in order, then the switch, empty: VS Code started in this terminal starts as VS Code.
+    expect(host.counted(pty)).toEqual({ last: 3000, after: "switch=[]" });
+  });
+
   it("keeps two terminals in their own folders and their input apart", async () => {
     const host = await startHost();
     const [a, b] = [tempDir(), tempDir()];

@@ -10,6 +10,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH:-/usr/bin:/bin}"
+ELECTRON="$ROOT/node_modules/electron/dist/electron"
+
+# Node for the launcher's own small scripts: the system's when there is one (it starts quickest),
+# else Electron's own, started as plain Node. VibeForge itself needs no system Node.
+if command -v node >/dev/null 2>&1; then
+  NODE=(node)
+else
+  NODE=(env ELECTRON_RUN_AS_NODE=1 "$ELECTRON")
+fi
 
 # The path matches src/core/control.ts. One socket per data folder. Without XDG_RUNTIME_DIR it sits
 # in a /tmp folder only this user can enter; when someone else made that folder, there's no path.
@@ -37,8 +46,8 @@ control_sock() {
 # (tests/unit/launcher.test.ts checks).
 case "${1:-}" in
   tell | who | task | apply | help | --help | -h)
-    command -v node >/dev/null 2>&1 || { echo "vibeforge: node is not on PATH" >&2; exit 1; }
-    VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec node "$ROOT/scripts/talk.mjs" "$@"
+    [[ "${NODE[0]}" == node || -x "$ELECTRON" ]] || { echo "vibeforge: neither node nor VibeForge's Electron was found" >&2; exit 1; }
+    VIBEFORGE_SOCKET="${VIBEFORGE_SOCKET:-$(control_sock)}" exec "${NODE[@]}" "$ROOT/scripts/talk.mjs" "$@"
     ;;
 esac
 
@@ -54,7 +63,7 @@ if [[ "${1:-}" == --voice* ]]; then
     if command -v socat >/dev/null 2>&1; then
       printf 'voice %s\n' "$action" | socat - "UNIX-CONNECT:$sock" 2>/dev/null && exit 0
     else
-      node -e 'const s=require("net").connect(process.argv[1]);s.on("error",()=>process.exit(1));s.end("voice "+process.argv[2]+"\n")' "$sock" "$action" 2>/dev/null && exit 0
+      "${NODE[@]}" -e 'const s=require("net").connect(process.argv[1]);s.on("error",()=>process.exit(1));s.end("voice "+process.argv[2]+"\n")' "$sock" "$action" 2>/dev/null && exit 0
     fi
   fi
   # Not running: a press opens VibeForge; a release has nothing to stop.
@@ -81,15 +90,14 @@ put_back() {
   fi
 }
 
-[[ -x "$ROOT/node_modules/electron/dist/electron" ]] || fail "Electron is missing. $(put_back "npm install")"
-command -v node >/dev/null 2>&1 || fail "node is not on PATH; the terminal host needs it."
+[[ -x "$ELECTRON" ]] || fail "Electron is missing. $(put_back "npm install")"
 
 # A connect with no line is ignored by the control server. A stale socket file fails the connect.
 app_is_running() {
   local sock
   sock="$(control_sock)"
   [[ -S "$sock" ]] || return 1
-  node -e 'const s=require("net").connect(process.argv[1]); s.setTimeout(300); s.on("connect",()=>{s.end(); process.exit(0)}); s.on("timeout",()=>process.exit(1)); s.on("error",()=>process.exit(1));' "$sock"
+  "${NODE[@]}" -e 'const s=require("net").connect(process.argv[1]); s.setTimeout(300); s.on("connect",()=>{s.end(); process.exit(0)}); s.on("timeout",()=>process.exit(1)); s.on("error",()=>process.exit(1));' "$sock"
 }
 
 # True when this checkout should rebuild itself. Installer copies and
@@ -158,4 +166,4 @@ fi
 [[ -f "$ROOT/dist/index.html" && -f "$ROOT/dist-electron/main.js" ]] || fail "The app is not built. $(put_back "npm run build")"
 
 cd "$ROOT"
-exec "$ROOT/node_modules/electron/dist/electron" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"
+exec "$ELECTRON" "$ROOT" --class=vibeforge --enable-wayland-ime "$@"

@@ -93,7 +93,7 @@ export interface PtyActivity {
 
 /** What the host says on its own. "ready" comes first, once. */
 export type PtyEvent =
-  | { event: "ready"; pid: number }
+  | { event: "ready"; pid: number; node?: string; uv?: string }
   | ({ event: "data" } & PtyData)
   | ({ event: "exit" } & PtyExit)
   | ({ event: "program" } & PtyProgram)

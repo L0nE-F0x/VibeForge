@@ -1,7 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
-import { whichBin } from "../src/core/engines.js";
 import type { PtyActivity, PtyAnswers, PtyAsk, PtyData, PtyExit, PtyLine, PtyOp, PtyProgram, PtySnapshot } from "./pty-protocol.js";
 
 // The messages themselves are in pty-protocol.ts, which the host's JSDoc reads too.
@@ -13,8 +12,23 @@ type Waiter = { resolve: (answer: PtyAnswers[PtyOp]) => void; reject: (error: Er
 const STDERR_LINES = 20;
 
 /**
- * Client for electron/pty-host.cjs. The host runs on the system Node, the one node-pty is
- * built for, and owns every terminal.
+ * What the terminal host runs on. In VibeForge that is Electron's own binary started as plain Node
+ * (ELECTRON_RUN_AS_NODE), so no system Node is needed, and its libuv (1.52 with Electron 45's
+ * Node 24) is not 1.51, which loses a program's last output when it ends while the host is behind.
+ * node-pty's addon is Node-API, so it loads on any Node, this one included. VIBEFORGE_NODE names
+ * another Node instead, to try the host on it; outside Electron (the tests) it is the Node running.
+ */
+export function hostRuntime(
+  env: NodeJS.ProcessEnv,
+  self: { execPath: string; electron?: string; override?: string } = { execPath: process.execPath, electron: process.versions.electron, override: process.env.VIBEFORGE_NODE },
+): { command: string; env: NodeJS.ProcessEnv } {
+  if (self.override) return { command: self.override, env };
+  if (self.electron) return { command: self.execPath, env: { ...env, ELECTRON_RUN_AS_NODE: "1" } };
+  return { command: self.execPath, env };
+}
+
+/**
+ * Client for electron/pty-host.cjs, which owns every terminal. It runs on what hostRuntime says.
  */
 export class PtySupervisor {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -31,12 +45,15 @@ export class PtySupervisor {
   /** The host's last stderr lines, for the reason a start failed. */
   private stderrTail: string[] = [];
 
+  /** The Node and libuv the running host said it is on, for the log and Copy diagnostics. */
+  runtime: { node: string; uv: string } | null = null;
+
   async start(appRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
-    const node = process.env.VIBEFORGE_NODE || whichBin("node", env.PATH ?? "");
-    if (!node) throw new Error("VibeForge needs Node on PATH to run terminals (node was not found).");
+    const runtime = hostRuntime(env);
     const script = path.join(appRoot, "electron", "pty-host.cjs");
     this.stopping = false;
-    const child = spawn(node, [script], { cwd: appRoot, env, stdio: ["pipe", "pipe", "pipe"] });
+    this.runtime = null;
+    const child = spawn(runtime.command, [script], { cwd: appRoot, env: runtime.env, stdio: ["pipe", "pipe", "pipe"] });
     child.stdin.on("error", () => undefined);
     this.child = child;
     this.stderrTail = [];
@@ -70,6 +87,12 @@ export class PtySupervisor {
       lines.on("line", (line) => {
         if (line.startsWith('{"event":"ready"')) {
           clearTimeout(timer);
+          try {
+            const said = JSON.parse(line) as { node?: unknown; uv?: unknown };
+            if (typeof said.node === "string" && typeof said.uv === "string") this.runtime = { node: said.node, uv: said.uv };
+          } catch {
+            /* a ready line is all start needs */
+          }
           resolve();
           return;
         }
