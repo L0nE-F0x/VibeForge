@@ -92,6 +92,21 @@ describe("opening a folder in the file manager", () => {
     expect(opened("  /home/me/a folder with spaces  ").runs).toEqual([["xdg-open", ["/home/me/a folder with spaces"]]]);
   });
 
+  it("keeps the space a file or folder name ends in", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-open-"));
+    try {
+      const folder = path.join(dir, "demo ");
+      const file = path.join(dir, "notes.txt ");
+      fs.mkdirSync(folder);
+      fs.mkdirSync(path.join(dir, "demo"));
+      fs.writeFileSync(file, "x");
+      expect(opened(folder).runs).toEqual([["xdg-open", [folder]]]);
+      expect(opened(file).runs).toEqual([["xdg-open", [file]]]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("opens nothing that isn't an absolute path, so nothing reaches xdg-open as an option", () => {
     for (const target of ["", "   ", "--help", "-x", "relative/folder", "~/projects", "/bad\0path", 42 as unknown as string]) {
       expect(opened(target).runs, JSON.stringify(target)).toEqual([]);

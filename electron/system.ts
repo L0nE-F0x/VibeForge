@@ -62,10 +62,11 @@ const launch: Launch = (command, args) => spawn(command, args, { stdio: "ignore"
  * Opens a file or folder in the desktop's app for it: a folder in the file manager. Only an absolute
  * path goes through, so it always starts with "/" and can't be read as an option. It is passed
  * without "--": xdg-open takes no options before a path and refuses "--" ("unexpected option"),
- * which left every Open folder button doing nothing from 3.3.0 to 3.5.0.
+ * which left every Open folder button doing nothing from 3.3.0 to 3.5.0. A path that is there goes
+ * as it is: a name can end in a space, and trimmed it would open some other file or none.
  */
 export function openPath(target: string, start: Launch = launch): void {
-  const clean = typeof target === "string" ? target.trim() : "";
+  const clean = typeof target === "string" ? (fs.existsSync(target) ? target : target.trim()) : "";
   if (!clean || clean.includes("\0") || !path.isAbsolute(clean)) return;
   const child = start("xdg-open", [clean]);
   child.on("error", () => undefined);
