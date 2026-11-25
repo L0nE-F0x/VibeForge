@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Renaming this machine in Settings → Sync reaches your other machine.** While sync was on, a new name showed in Settings here but not on the paired machine, which kept the old one until something else changed, such as a share or a restart. It is now sent as soon as it is saved.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
