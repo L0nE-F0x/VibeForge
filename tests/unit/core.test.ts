@@ -123,6 +123,9 @@ describe("engines", () => {
     const long = planLaunch(claude, "/bin/claude", { prompt: huge, promptFile: "/runs/1/preamble.md" });
     expect(long.argv[1]).toContain("/runs/1/preamble.md");
     expect(long.pasteInput).toBeNull();
+    // Dollar signs are the prompt's own text, not replacement patterns.
+    const dollars = "Print $$ and $HOME, solve $$x^2$$, split on $'\\n', keep $& and $` and $1";
+    expect(planLaunch(claude, "/bin/claude", { prompt: dollars }).argv).toEqual(["/bin/claude", dollars]);
   });
 
   it("adds instructions where a CLI takes them, before the words that resume a session", () => {

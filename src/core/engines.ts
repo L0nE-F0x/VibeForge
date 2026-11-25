@@ -327,7 +327,8 @@ export function planLaunch(
   }
   const promptArgs = text.startsWith("-") && endsPositional(row.promptArgs) ? [...row.promptArgs.slice(0, -1), "--", "{prompt}"] : row.promptArgs;
   return {
-    argv: [...argv, ...promptArgs.map((arg) => arg.replaceAll("{prompt}", text))],
+    // A function, so `$$`, `$&` and `$'` in the prompt stay as written rather than read as replacement patterns.
+    argv: [...argv, ...promptArgs.map((arg) => arg.replaceAll("{prompt}", () => text))],
     recordArgv: [...record, ...promptArgs],
     pasteInput: null,
   };
