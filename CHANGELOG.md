@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-11-25
+
+**3.7.1: a terminal keeps the end of its output, lists that can't be read say so, discarding a task's copy has Undo, and downloads are no longer stored twice.**
+
 ### Changed
 
 - **Speech models and voices are no longer stored twice.** Each download also left a copy in Chromium's web cache (`~/.config/VibeForge/Cache`), which nothing ever read again: 578 MB on one machine with a few models and voices. Downloads now skip that cache, and the copies already there are cleared once, the first time this version starts. Only that cache is cleared: sign-ins, saved pages and the browser dock's own data stay.
@@ -1141,7 +1145,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.7.1...HEAD
+[3.7.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.1
 [3.7.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.7.0
 [3.6.2]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.2
 [3.6.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.6.1
