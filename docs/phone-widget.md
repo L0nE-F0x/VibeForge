@@ -22,10 +22,9 @@ It only shows what the phone page shows, and only while it can reach your comput
 
 ## Download and check it
 
-Download `vibeforge-widget.apk` from the latest release:
-https://github.com/L0nE-F0x/VibeForge/releases/latest/download/vibeforge-widget.apk
+Download it from https://vibe-forge.net/widget.apk, which leads to the newest widget release on GitHub. The widget has releases of its own, named `widget-vX.Y.Z` and kept apart from the app's `vX.Y.Z` ones: [all releases](https://github.com/L0nE-F0x/VibeForge/releases).
 
-Each release that carries it also has `vibeforge-widget.apk.sha256`. To check that the file is the one published, compare its SHA-256 with that file. On a computer:
+Beside the APK is `vibeforge-widget.apk.sha256` (also at https://vibe-forge.net/widget.apk.sha256). To check that the file is the one published, compare its SHA-256 with that file. On a computer:
 
 ```sh
 sha256sum --check vibeforge-widget.apk.sha256
