@@ -547,6 +547,11 @@ svg.mark {
   justify-content: center;
 }
 
+/* Buttons inside a feature card line up with its text. */
+.card-copy .cta {
+  justify-content: flex-start;
+}
+
 /* ------------------------------------------------------------------ hero */
 
 .hero {
