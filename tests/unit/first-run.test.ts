@@ -1,4 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { allocateRunDir, normalizeRun } from "../../src/core/runs.js";
+import { Store } from "../../src/core/store.js";
+import type { RunMeta } from "../../src/core/types.js";
 import { cliCommand, firstSteps, firstStepsDone, isTyping, showShellHint, START_CLI_EVENT, startCliIn, type StartCliDetail } from "../../src/ui/first-run.js";
 import { issueUrl } from "../../src/ui/components/Help.js";
 import { tourOf } from "../../src/ui/components/Tour.js";
@@ -35,6 +41,26 @@ describe("the first ten minutes", () => {
     expect(firstStepsDone(read)).toBe(true);
     // A run opened somewhere without a workspace still leaves "Open a folder" to do.
     expect(firstStepsDone(firstSteps({ workspaces: 0, runs: [{ openedAt: "2026-11-25T10:00:00.000Z" }] }))).toBe(false);
+  });
+
+  it("keeps a run opened once as reviewed, however many unopened runs came after it", () => {
+    // Each CLI session in Code is recorded as a run, and most are never opened in Runs: after a day
+    // of work the run that was opened is far behind the newest ones.
+    const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vf-first-runs-"));
+    const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), "vf-first-config-")), dataRoot);
+    for (let n = 0; n < 25; n += 1) {
+      const startedAt = new Date(Date.UTC(2026, 10, 25, 9, n));
+      const { id, dir } = allocateRunDir(dataRoot, startedAt, `Session ${n + 1}`);
+      const run = normalizeRun({ id, dir, origin: "code", status: "exited", startedAt: startedAt.toISOString(), title: `Session ${n + 1}` }) as RunMeta;
+      // The first one is the run the person opened, the third step of the first ten minutes.
+      store.saveRun(n === 0 ? { ...run, openedAt: "2026-11-25T09:01:00.000Z" } : run);
+    }
+    // What Home reads: the newest runs, and the newest one that was opened.
+    const home = [...store.queryRuns({ limit: 20 }), ...store.queryRuns({ opened: true, limit: 1 })];
+    expect(firstSteps({ workspaces: 1, runs: home }).map((step) => step.done)).toEqual([true, true, true]);
+    expect(store.queryRuns({ opened: true }).map((run) => run.title)).toEqual(["Session 1"]);
+    store.close();
+    fs.rmSync(dataRoot, { recursive: true, force: true });
   });
 
   it("shows the hint only over a fresh live shell with nothing in its foreground", () => {

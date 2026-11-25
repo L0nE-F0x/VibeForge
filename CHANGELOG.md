@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Home's first steps stay gone once you have done them.** They are marked done from what is on disk, but "Review the run" looked for an opened run among the newest 20 only. Every CLI session in Code is recorded as a run, and most are never opened, so after a day's work the three steps came back on Home with "Review the run" to do again. A run opened once now counts however many came after it.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
