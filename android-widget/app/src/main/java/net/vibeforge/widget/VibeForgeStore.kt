@@ -228,6 +228,12 @@ object VibeForgeStore {
         return getMachines(context).firstOrNull { it.id == kept.id }
     }
 
+    /** Whether a computer's name is the one it gave itself (or its address's), not one typed in here. */
+    fun isAutoNamed(context: Context, id: String): Boolean {
+        val machine = readKept(context).firstOrNull { it.id == id } ?: return true
+        return prefs(context).getBoolean(keyFor(KEY_AUTO_NAMED, id), false) || machine.name == defaultName(machine.url)
+    }
+
     /**
      * The computer no longer takes this widget's key (removed in Settings → Phone): it is let go, with
      * what that computer last said (it would show sessions as running that nobody can see now), and

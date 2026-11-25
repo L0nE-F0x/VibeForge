@@ -3,4 +3,8 @@
     <string name="app_name">VibeForge Widget</string>
     <string name="widget_name">VibeForge Dashboard</string>
     <string name="widget_description">Live coding sessions, waiting prompts, and plan limits from your computer.</string>
+    <string name="scan_title">Point the camera at the QR code in Settings → Phone on your computer.</string>
+    <string name="scan_hint">On the computer: Settings → Phone → Show QR code. The picture is read on this phone and never leaves it.</string>
+    <string name="scan_wrong_code">That QR code isn\'t a VibeForge pairing link. Point at the one in Settings → Phone (Show QR code).</string>
+    <string name="scan_cancel">CANCEL · TYPE IT IN INSTEAD</string>
 </resources>
