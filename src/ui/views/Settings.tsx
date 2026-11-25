@@ -516,7 +516,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
             <div className="hstack wrap" style={{ gap: 8 }}>
-              <Button icon={Compass} onClick={startTour} tip={t("settings.replayTourTip")}>
+              <Button icon={Compass} onClick={() => startTour("full")} tip={t("settings.replayTourTip")}>
                 {t("settings.replayTour")}
               </Button>
               <Button icon={Keyboard} kbd={shortcutKeys("app.shortcuts")} tip={t("settings.shortcutsTip")} onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>

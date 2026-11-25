@@ -464,7 +464,8 @@ export interface DeskMethods {
   "chats.continue": (id: string, size?: TermSize) => SendResult;
   "chats.stop": (id: string) => void;
 
-  "code.shell": (opts: { workspaceId?: string; cwd?: string } & TermSize) => { ptyId: string };
+  /** A shell in the workspace; `command` is typed at its prompt with Enter once the shell is ready (a CLI the person clicked to start). */
+  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize) => { ptyId: string };
   "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
 
   "runs.list": (query?: RunQuery) => RunView[];

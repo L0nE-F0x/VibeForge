@@ -220,10 +220,19 @@ export interface Toast {
   title: string;
   body?: string;
   action?: ToastAction;
+  /** More buttons, under the text; Ctrl+Z never runs these. */
+  more?: ToastAction[];
+  /** A line under the text saying what the buttons are for. */
+  note?: string;
+  /** Stays until closed, for a problem the person may want to report. */
+  stay?: boolean;
 }
 
+/** What a toast can carry besides its one action. */
+export type ToastExtra = Pick<Toast, "more" | "note" | "stay">;
+
 interface Toaster {
-  push: (kind: ToastKind, title: string, body?: string, action?: ToastAction) => void;
+  push: (kind: ToastKind, title: string, body?: string, action?: ToastAction, extra?: ToastExtra) => void;
   dismiss: (id: number) => void;
   fail: (error: unknown, title?: string) => void;
 }
@@ -238,12 +247,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const seq = useRef(0);
   const dismiss = useCallback((id: number) => setToasts((prev) => prev.filter((toast) => toast.id !== id)), []);
   const push = useCallback(
-    (kind: ToastKind, title: string, body?: string, action?: ToastAction) => {
+    (kind: ToastKind, title: string, body?: string, action?: ToastAction, extra?: ToastExtra) => {
       seq.current += 1;
       const id = seq.current;
-      setToasts((prev) => [...prev.slice(-4), { id, kind, title, body, action }]);
-      // A toast with a button stays long enough to reach it.
-      setTimeout(() => dismiss(id), kind === "error" ? 9000 : action ? 9000 : 4500);
+      setToasts((prev) => [...prev.slice(-4), { id, kind, title, body, action, ...extra }]);
+      // A toast with a button stays long enough to reach it; a problem to report stays until closed.
+      if (!extra?.stay) setTimeout(() => dismiss(id), kind === "error" ? 9000 : action ? 9000 : 4500);
     },
     [dismiss],
   );

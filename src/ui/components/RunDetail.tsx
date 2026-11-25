@@ -13,6 +13,7 @@ import {
   Info,
   ListRestart,
   MoreHorizontal,
+  RefreshCw,
   RotateCcw,
   ScrollText,
   Square,
@@ -93,6 +94,30 @@ function Elapsed({ start, end }: { start: string; end: string | null }) {
 function Ticking({ start }: { start: string }) {
   const now = useNow(1000);
   return <>{duration(start, null, now)}</>;
+}
+
+/**
+ * While the CLI is still open, its transcript isn't written yet: what the terminal shows now, as
+ * text, read when the tab opens and again on Refresh.
+ */
+function TranscriptSoFar({ ptyId }: { ptyId: string }) {
+  const t = useT();
+  const [text, setText] = useState<string | null>(null);
+  const [read, reading] = useAction(async () => setText((await call("pty.snapshot", ptyId)).plain), t("first.run.soFarFailed"));
+  useEffect(() => {
+    void read();
+  }, [read]);
+  return (
+    <>
+      <Notice icon={Info}>{t("first.run.soFar")}</Notice>
+      <div className="hstack">
+        <Button size="sm" icon={RefreshCw} busy={reading} onClick={() => void read()}>
+          {t("common.refresh")}
+        </Button>
+      </div>
+      {text !== null && <pre className="pre">{text.trim() ? text : t("first.run.soFarEmpty")}</pre>}
+    </>
+  );
 }
 
 function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null, t: Translator): string {
@@ -366,6 +391,8 @@ export function RunDetail({
               </div>
               <pre className="pre">{files.transcript}</pre>
             </>
+          ) : run.status === "running" && run.live && run.ptyId ? (
+            <TranscriptSoFar ptyId={run.ptyId} />
           ) : (
             <Notice>{run.status === "running" ? t("run.transcriptLater") : t("run.noTranscript")}</Notice>
           )}

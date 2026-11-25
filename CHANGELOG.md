@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Changed
+
+- **The welcome tour is six steps and ends with a CLI running in a folder of yours.** It used to walk 17 steps and called itself a two-minute tour. It now shows the coding CLIs found on your PATH, Code, tasks and their copies, Viby, and where your files are kept, then asks for a project folder and starts the CLI you pick in a terminal there: VibeForge types the command and presses Enter, and the last card points at that terminal. **Help → Take the tour** replays it. The tour of every view is still there, under **Help → Tour of every view** and Settings → Help.
+- **Home's first steps lead to a first run.** They were "Open a workspace", "Name a teammate" and "Ask something quick". Now they are **Open a folder**, **Run a CLI** (which names the CLIs found and starts one in a terminal in your folder) and **Review the run**. Each is marked done from what is on disk (a workspace, a recorded run, a run you opened), and the steps go once all three are done. Naming a teammate and a quick chat sit under **Later** until you have an agent.
+
+### Added
+
+- **A terminal you just opened in Code lists the CLIs found.** Above its prompt it says "Type a CLI to start it, or pick one:" with a button for each CLI on your PATH. A button types that CLI's command and presses Enter. The line goes at your first keystroke. Terminals brought back from last time don't show it.
+- **A pane's title bar says "Recording this session" while its CLI runs.** It replaces the small "run" link while the CLI is open, and opens the run so far in Runs: the live terminal, the changes since the CLI started, and, on Transcript, the text at the end of its terminal with **Refresh** (the full transcript is still saved when the CLI ends). Before, Transcript said only that it would be written later.
+- **A problem in the window says what to do next.** When the terminal host stops or doesn't start, its notice now stays until you close it and has **Copy diagnostics** and **Report a bug**, with a line saying to paste the diagnostics into the form's Diagnostics field. Report a bug opens the GitHub form with what the notice said already in it. A view that hits a problem has the same two buttons beside **Try again**. Nothing is sent from the app.
+
 ## [3.7.2] - 2026-11-25
 
 **3.7.2: a settings file caught half-written no longer switches Sync or the phone page off, Sync no longer deletes what one machine can't read, folders that can't be read say so, removing a workspace has Undo, and chimes no longer keep an audio process running.**
