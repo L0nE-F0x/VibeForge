@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **The phone shows each computer's own plan limits.** With more than one computer on the phone, picking another while the first was still working out its plan limits could put the first computer's limits on the second one's desk, and they stayed there for up to a minute. Limits that arrive after a switch are now dropped, and the computer on show answers for its own.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
