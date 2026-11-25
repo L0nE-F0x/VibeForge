@@ -1739,6 +1739,22 @@ export const en = {
   "orch.issue.agent": "No agent called “{asked}”.",
   "core.orchWaitsTurn": "Waiting for {names} in that folder; it starts on its own once it's quiet.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} can't be read",
+  "unreadable.saved": "VibeForge goes on with the copy from when it last read correctly, and saves nothing over the file until it reads again.",
+  "unreadable.none": "VibeForge has no earlier copy of it, and saves nothing over the file until it reads again.",
+  "unreadable.open": "Open file",
+  "unreadable.restoreSaved": "Use the saved copy",
+  "unreadable.useSavedTip": "Moves this file to {name}.broken and puts the saved copy back",
+  "unreadable.moveAside": "Move it aside",
+  "unreadable.moveAsideTip": "Moves this file to {name}.broken, so VibeForge starts a new one",
+  "unreadable.failed": "Couldn't put the saved copy back",
+  "core.unreadableNotSaved": "{name} can't be read ({error}), so nothing was saved over it.",
+  "core.fileEmpty": "The file is empty.",
+  "core.fileNotList": "It doesn't hold a JSON object or list.",
+  "main.folderInUse": "Another VibeForge is using {folder}",
+  "main.folderInUseBody": "Only one VibeForge can use a folder at a time: two would end each other's terminals, stop each other's Sync and run each routine twice. Close the other one first, or start this one with folders of its own (VIBEFORGE_CONFIG and VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Sync",
   "sync.lead": "Keeps the workspaces you pick the same on your other machine, say a laptop and a desktop. Nothing syncs until you choose a workspace: right-click one in Code. Files go straight from one machine to the other, over your local network or Tailscale, and nowhere else.",

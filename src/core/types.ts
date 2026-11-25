@@ -367,4 +367,18 @@ export type Topic =
   | "updates"
   | "voice"
   | "orchestrator"
-  | "sync";
+  | "sync"
+  /** Which of settings.json, engines.json, workspaces.json and chats.json can't be read (UnreadableFile). */
+  | "unreadable";
+
+/** settings.json, engines.json, workspaces.json or chats.json, there on disk but not readable. */
+export interface UnreadableFile {
+  /** Its full path. */
+  file: string;
+  /** Its name, as the window shows it. */
+  name: string;
+  /** Why it can't be read: the parser's words, or EMPTY_FILE / NOT_A_LIST (store/json-files.ts). */
+  error: string;
+  /** VibeForge has a copy from the last time it read correctly, and serves that meanwhile. */
+  saved: boolean;
+}

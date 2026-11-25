@@ -159,7 +159,11 @@ export class ChatDesk {
     const livePty = lastId ? this.core.ptyByRun.get(lastId) : undefined;
     if (lastId && livePty) {
       await this.core.options.host.send(livePty, text);
-      this.core.store.writeChat({ ...chat, updatedAt: this.core.now().toISOString() });
+      try {
+        this.core.store.writeChat({ ...chat, updatedAt: this.core.now().toISOString() });
+      } catch {
+        // chats.json can't be read, so it isn't saved over (the window says so). The text has gone in all the same.
+      }
       this.core.emit("chats");
       return { chatId: chat.id, runId: lastId, ptyId: livePty, started: false, note: null };
     }

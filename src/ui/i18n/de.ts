@@ -1726,6 +1726,22 @@ export const de: Catalog = {
   "orch.issue.agent": "Kein Agent namens „{asked}“.",
   "core.orchWaitsTurn": "Wartet in diesem Ordner auf {names}; startet von selbst, sobald es dort ruhig ist.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "{name} lässt sich nicht lesen",
+  "unreadable.saved": "VibeForge arbeitet mit der Kopie weiter, die zuletzt richtig gelesen wurde, und speichert nichts über die Datei, bis sie sich wieder lesen lässt.",
+  "unreadable.none": "VibeForge hat keine frühere Kopie davon und speichert nichts über die Datei, bis sie sich wieder lesen lässt.",
+  "unreadable.open": "Datei öffnen",
+  "unreadable.restoreSaved": "Gespeicherte Kopie nehmen",
+  "unreadable.useSavedTip": "Verschiebt diese Datei nach {name}.broken und legt die gespeicherte Kopie zurück",
+  "unreadable.moveAside": "Beiseitelegen",
+  "unreadable.moveAsideTip": "Verschiebt diese Datei nach {name}.broken, damit VibeForge eine neue anlegt",
+  "unreadable.failed": "Die gespeicherte Kopie ließ sich nicht zurücklegen",
+  "core.unreadableNotSaved": "{name} lässt sich nicht lesen ({error}), deshalb wurde nichts darüber gespeichert.",
+  "core.fileEmpty": "Die Datei ist leer.",
+  "core.fileNotList": "Sie enthält kein JSON-Objekt und keine JSON-Liste.",
+  "main.folderInUse": "Ein anderes VibeForge nutzt {folder}",
+  "main.folderInUseBody": "Nur ein VibeForge kann einen Ordner gleichzeitig nutzen: Zwei würden gegenseitig ihre Terminals beenden, ihr Sync stoppen und jede Routine doppelt ausführen. Schließe zuerst das andere, oder starte dieses mit eigenen Ordnern (VIBEFORGE_CONFIG und VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Synchronisierung",
   "sync.lead": "Hält die Arbeitsbereiche, die du auswählst, auf deinem anderen Rechner gleich, etwa auf Laptop und Desktop. Nichts wird synchronisiert, bis du einen Arbeitsbereich wählst: Rechtsklick auf einen in Code. Dateien gehen direkt von einem Rechner zum anderen, über dein lokales Netzwerk oder Tailscale, und nirgendwo sonst hin.",

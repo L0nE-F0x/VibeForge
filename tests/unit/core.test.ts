@@ -620,7 +620,7 @@ describe("store", () => {
     store.close();
   });
 
-  it("leaves an engines.json that doesn't parse alone, reads the seeded engines meanwhile, and sets it aside only on a save", () => {
+  it("leaves an engines.json that doesn't parse alone, reads the seeded engines meanwhile, and sets it aside only when asked", () => {
     const store = new Store(tempDir(), tempDir());
     const file = path.join(store.configRoot, "engines.json");
     const halfEdited = '{ "engines": [ { "id": "claude", "label": "Mine",\n';
@@ -629,7 +629,10 @@ describe("store", () => {
     expect(store.readEngineRows().map((row) => row.id)).toEqual(seeded);
     expect(fs.readFileSync(file, "utf8")).toBe(halfEdited);
     expect(fs.existsSync(`${file}.broken`)).toBe(false);
-    store.writeEngineRows(store.readEngineRows());
+    // A save doesn't set it aside on its own any more: it is refused, and the window offers Move it aside.
+    expect(() => store.writeEngineRows(store.readEngineRows())).toThrow(/can't be read/);
+    expect(fs.existsSync(`${file}.broken`)).toBe(false);
+    expect(store.restoreSavedCopy(file)).toBe(true);
     expect(fs.readFileSync(`${file}.broken`, "utf8")).toBe(halfEdited);
     expect(store.readEngineRows().map((row) => row.id)).toEqual(seeded);
     store.close();

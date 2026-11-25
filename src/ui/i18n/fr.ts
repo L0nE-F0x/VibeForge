@@ -1727,6 +1727,22 @@ export const fr: Catalog = {
   "orch.issue.agent": "Aucun agent nommé « {asked} ».",
   "core.orchWaitsTurn": "En attente de {names} dans ce dossier ; démarre tout seul dès que c’est calme.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "Impossible de lire {name}",
+  "unreadable.saved": "VibeForge continue avec la copie de la dernière lecture réussie, et n'enregistre rien par-dessus le fichier tant qu'il ne se lit pas de nouveau.",
+  "unreadable.none": "VibeForge n'en a pas de copie antérieure, et n'enregistre rien par-dessus le fichier tant qu'il ne se lit pas de nouveau.",
+  "unreadable.open": "Ouvrir le fichier",
+  "unreadable.restoreSaved": "Utiliser la copie enregistrée",
+  "unreadable.useSavedTip": "Déplace ce fichier vers {name}.broken et remet la copie enregistrée",
+  "unreadable.moveAside": "Le mettre de côté",
+  "unreadable.moveAsideTip": "Déplace ce fichier vers {name}.broken, pour que VibeForge en commence un nouveau",
+  "unreadable.failed": "Impossible de remettre la copie enregistrée",
+  "core.unreadableNotSaved": "Impossible de lire {name} ({error}), donc rien n'a été enregistré par-dessus.",
+  "core.fileEmpty": "Le fichier est vide.",
+  "core.fileNotList": "Il ne contient ni objet ni liste JSON.",
+  "main.folderInUse": "Un autre VibeForge utilise {folder}",
+  "main.folderInUseBody": "Un seul VibeForge peut utiliser un dossier à la fois : deux fermeraient les terminaux l'un de l'autre, arrêteraient la Sync de l'autre et lanceraient chaque routine deux fois. Ferme d'abord l'autre, ou démarre celui-ci avec ses propres dossiers (VIBEFORGE_CONFIG et VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Synchronisation",
   "sync.lead": "Garde les espaces de travail que vous choisissez identiques sur votre autre ordinateur, par exemple un portable et un fixe. Rien n'est synchronisé tant que vous n'avez pas choisi un espace de travail : faites un clic droit sur l'un d'eux dans Code. Les fichiers vont directement d'un ordinateur à l'autre, par votre réseau local ou par Tailscale, et nulle part ailleurs.",

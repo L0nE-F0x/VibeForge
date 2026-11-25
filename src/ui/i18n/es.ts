@@ -1726,6 +1726,22 @@ export const es: Catalog = {
   "orch.issue.agent": "No hay ningún agente llamado «{asked}».",
   "core.orchWaitsTurn": "Esperando a {names} en esa carpeta; empieza solo cuando quede en silencio.",
 
+  // ---------------------------------------------------------------- a settings file that can't be read, and one VibeForge per folder
+  "unreadable.title": "No se puede leer {name}",
+  "unreadable.saved": "VibeForge sigue con la copia de la última vez que se leyó bien, y no guarda nada encima del archivo hasta que vuelva a leerse.",
+  "unreadable.none": "VibeForge no tiene una copia anterior, y no guarda nada encima del archivo hasta que vuelva a leerse.",
+  "unreadable.open": "Abrir archivo",
+  "unreadable.restoreSaved": "Usar la copia guardada",
+  "unreadable.useSavedTip": "Mueve este archivo a {name}.broken y vuelve a poner la copia guardada",
+  "unreadable.moveAside": "Apartarlo",
+  "unreadable.moveAsideTip": "Mueve este archivo a {name}.broken para que VibeForge empiece uno nuevo",
+  "unreadable.failed": "No se pudo volver a poner la copia guardada",
+  "core.unreadableNotSaved": "No se puede leer {name} ({error}), así que no se guardó nada encima.",
+  "core.fileEmpty": "El archivo está vacío.",
+  "core.fileNotList": "No contiene un objeto ni una lista JSON.",
+  "main.folderInUse": "Otro VibeForge está usando {folder}",
+  "main.folderInUseBody": "Solo un VibeForge puede usar una carpeta a la vez: dos cerrarían los terminales del otro, pararían su Sync y ejecutarían cada rutina dos veces. Cierra primero el otro, o inicia este con carpetas propias (VIBEFORGE_CONFIG y VIBEFORGE_DATA).",
+
   // ---------------------------------------------------------------- sync between machines
   "sync.title": "Sincronización",
   "sync.lead": "Mantiene iguales en tu otro equipo los espacios de trabajo que elijas, por ejemplo entre un portátil y uno de sobremesa. Nada se sincroniza hasta que eliges un espacio de trabajo: haz clic derecho en uno en Código. Los archivos van directamente de un equipo al otro, por tu red local o por Tailscale, y a ningún otro sitio.",

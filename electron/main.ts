@@ -5,6 +5,7 @@ import { app, Menu, nativeImage, powerMonitor, session } from "electron";
 import { HIDDEN_ARG } from "../src/core/autostart.js";
 import { voiceArg } from "../src/core/control.js";
 import { defaultRoots, ensureLayout } from "../src/core/layout.js";
+import { holdFolders } from "../src/core/folder-lock.js";
 import { describeError, LogFile } from "../src/core/log.js";
 import { MainText } from "../src/core/main-text.js";
 import { TeamService } from "../src/core/team-service.js";
@@ -12,6 +13,7 @@ import { iconColors, iconPng, refreshLauncherIcons } from "../src/core/brand-ico
 import { resolvePalette, watchOmarchyTheme } from "../src/core/theme.js";
 import { INSTALLER_MARK, installKind, RELEASES_URL, updateCommand } from "../src/core/updates.js";
 import { savedDockUrl } from "../src/shared/dock-url.js";
+import { tildify } from "../src/shared/text.js";
 import { syncCompanion } from "./companion.js";
 import { watchConfig } from "./config-watch.js";
 import { listenControl } from "./control.js";
@@ -217,6 +219,14 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    // One VibeForge per folder: a copy with another profile on the same folders stops here, before
+    // it could settle the other copy's runs as ended or start a second Syncthing on the same data.
+    const hold = await holdFolders([roots.dataRoot, roots.configRoot]).catch((error: unknown) => {
+      log.warn(`Could not hold the config and data folders for this copy: ${describeError(error)}`);
+      return null;
+    });
+    if (hold && !hold.ok) return quit.folderInUse(tildify(hold.folder, os.homedir()));
+    if (hold) app.once("quit", hold.release);
     log.info(`VibeForge ${app.getVersion()} starting · Electron ${process.versions.electron} · ${osDescription()} · ${install} copy at ${ctx.appRoot}`);
     Menu.setApplicationMenu(null);
     await adoptShellPath(log);

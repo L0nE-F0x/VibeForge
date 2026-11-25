@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, Info, KeyRound, Loader2, RotateCcw, X, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, FileText, Info, KeyRound, Loader2, RotateCcw, X, XCircle, type LucideIcon } from "lucide-react";
 import {
   Children,
   cloneElement,
@@ -20,14 +20,15 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import type { RunStatus } from "../../shared/api.js";
+import type { RunStatus, UnreadableFile } from "../../shared/api.js";
 import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
-import { retryFailedLoads, useLoadFailures, useNow } from "../api.js";
+import { call, retryFailedLoads, useLoadFailures, useNow, useUnreadableFiles } from "../api.js";
+import { coreText } from "../core-text.js";
 import { sameBox, toastRight, type Box } from "../floating.js";
 import { useT, type Key } from "../i18n/index.js";
 import { pushOverlay, returnFocus } from "../overlays.js";
-import { useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
+import { useAction, useConfirmState, useDockArea, useLayer, useOverlay, useToast, useToastList } from "../state.js";
 import { shortcutKeys } from "../shortcuts.js";
 import { tipProps } from "./Tooltip.js";
 
@@ -692,6 +693,7 @@ export function MenuButton({ items, children, ...button }: Omit<ButtonProps, "on
 }
 
 const TOAST_EDGE = 16;
+const NO_FILES: ReadonlyArray<UnreadableFile> = [];
 
 /** Try again, busy while it reads. A read that fails again keeps its error on screen, so nothing more is said. */
 export function useRetry(reload: () => Promise<void>): [() => void, boolean] {
@@ -740,10 +742,49 @@ function LoadProblems() {
   );
 }
 
+/**
+ * settings.json, engines.json, workspaces.json or chats.json that can't be read: which, why, and
+ * what VibeForge does meanwhile, with Open file and Use the saved copy (Move it aside when it has
+ * none). Nothing is moved until the person chooses; it goes away once the file reads again.
+ */
+function UnreadableFiles({ files }: { files: ReadonlyArray<UnreadableFile> }) {
+  const t = useT();
+  const [restoreSaved, busy] = useAction((file: string) => call("files.restoreSaved", file), t("unreadable.failed"));
+  return (
+    <>
+      {files.map((item) => (
+        <div key={item.file} className="toast error" role="alert">
+          <AlertTriangle size={16} className="toast-icon" />
+          <div className="grow vstack" style={{ gap: 4 }}>
+            <div className="toast-title">{t("unreadable.title", { name: item.name })}</div>
+            <div className="toast-body selectable">{coreText(item.error)}</div>
+            <div className="toast-body">{t(item.saved ? "unreadable.saved" : "unreadable.none")}</div>
+            <div className="hstack" style={{ gap: 6, flexWrap: "wrap" }}>
+              <Button size="sm" icon={FileText} onClick={() => void call("app.openPath", item.file)}>
+                {t("unreadable.open")}
+              </Button>
+              <Button
+                size="sm"
+                icon={RotateCcw}
+                busy={busy}
+                tip={t(item.saved ? "unreadable.useSavedTip" : "unreadable.moveAsideTip", { name: item.name })}
+                onClick={() => void restoreSaved(item.file)}
+              >
+                {t(item.saved ? "unreadable.restoreSaved" : "unreadable.moveAside")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function Toasts() {
   const t = useT();
   const toasts = useToastList();
   const failures = useLoadFailures();
+  const unreadable = useUnreadableFiles().data ?? NO_FILES;
   const { dismiss } = useToast();
   const dock = useDockArea();
   const ref = useRef<HTMLDivElement>(null);
@@ -751,7 +792,7 @@ export function Toasts() {
   const [place, setPlace] = useState<{ right: number; box: Box | null }>({ right: TOAST_EDGE, box: null });
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node || (toasts.length === 0 && failures.length === 0)) {
+    if (!node || (toasts.length === 0 && failures.length === 0 && unreadable.length === 0)) {
       setPlace((prev) => (prev.box ? { right: TOAST_EDGE, box: null } : prev));
       return;
     }
@@ -760,11 +801,12 @@ export function Toasts() {
     const right = toastRight(stack, view, dock, TOAST_EDGE);
     const box = { left: view.width - right - stack.width, top: view.height - TOAST_EDGE - stack.height, right: view.width - right, bottom: view.height - TOAST_EDGE };
     setPlace((prev) => (prev.right === right && sameBox(prev.box, box) ? prev : { right, box }));
-  }, [toasts, failures, dock]);
+  }, [toasts, failures, unreadable, dock]);
   // With no room beside the dock, the stack lands on it and the dock steps aside.
   useLayer(place.box);
   return createPortal(
     <div ref={ref} className="toasts" aria-live="polite" style={place.right !== TOAST_EDGE ? { right: place.right } : undefined}>
+      <UnreadableFiles files={unreadable} />
       <LoadProblems />
       {toasts.map((toast) => {
         const Icon = toast.kind === "error" ? XCircle : toast.kind === "success" ? CheckCircle2 : Info;
