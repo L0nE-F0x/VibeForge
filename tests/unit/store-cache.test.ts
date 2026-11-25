@@ -69,9 +69,17 @@ describe("store read cache", () => {
     const { store, files } = settledStore();
     expect(store.getAgent("ada")?.name).toBe("Ada");
     const before = fs.statSync(files.agent);
-    fs.writeFileSync(files.agent, fs.readFileSync(files.agent, "utf8").replace("name: Ada", "name: Bob"));
-    fs.utimesSync(files.agent, before.atime, before.mtime);
+    const edited = fs.readFileSync(files.agent, "utf8").replace("name: Ada", "name: Bob");
+    // With the size and the modified time put back, only the change time can tell. A kernel stamps
+    // it from a clock that ticks every few milliseconds (older ones, and a busy machine, more
+    // coarsely still), so an edit in the same tick as settle()'s would leave the stamp as it was.
+    // A person's edit comes later than that; wait for the tick the way the next edit would.
+    do {
+      fs.writeFileSync(files.agent, edited);
+      fs.utimesSync(files.agent, before.atime, before.mtime);
+    } while (fs.statSync(files.agent).ctimeMs === before.ctimeMs);
     expect(fs.statSync(files.agent).size).toBe(before.size);
+    expect(fs.statSync(files.agent).mtimeMs).toBe(before.mtimeMs);
     expect(store.getAgent("ada")?.name).toBe("Bob");
 
     expect(store.readSettings().notify).toBe(true);
