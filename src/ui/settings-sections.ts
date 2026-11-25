@@ -1,4 +1,4 @@
-import { Activity, AudioLines, Bell, Download, FolderOpen, HardDrive, Laptop, LifeBuoy, MessagesSquare, Mic, PanelLeft, Palette, Power, Smartphone, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
+import { Activity, AudioLines, Bell, Cpu, Download, FolderOpen, HardDrive, Laptop, LifeBuoy, MessagesSquare, Mic, PanelLeft, Palette, Power, Smartphone, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
 import type { Key } from "./i18n/index.js";
 
 /**
@@ -20,6 +20,7 @@ export const SETTINGS_SECTIONS = [
   { id: "sounds", icon: Volume2, label: "sounds.title" },
   { id: "usage", icon: Activity, label: "settings.insights" },
   { id: "engines", icon: SquareTerminal, label: "settings.engines" },
+  { id: "computer", icon: Cpu, label: "first.computer.title" },
   { id: "files", icon: FolderOpen, label: "settings.files" },
   { id: "storage", icon: HardDrive, label: "storage.title" },
   { id: "updates", icon: Download, label: "updates.title" },

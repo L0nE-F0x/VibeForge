@@ -636,3 +636,55 @@
   gap: 8px;
   align-items: flex-start;
 }
+
+/* Settings → This computer: one row per part, a check or a cross, and for a missing one why it matters. */
+.computer-group {
+  margin-top: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.computer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.computer-row:last-child {
+  border-bottom: 0;
+}
+
+.computer-mark {
+  flex: none;
+  margin-top: 2px;
+  color: var(--red);
+}
+
+.computer-mark.ok {
+  color: var(--green);
+}
+
+.computer-name {
+  flex: none;
+  min-width: 140px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.computer-off {
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+.computer-install code {
+  padding: 2px 8px;
+  background: var(--bg-dark);
+  border: 1px solid var(--line);
+  font-size: 12px;
+}

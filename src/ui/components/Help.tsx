@@ -1,5 +1,7 @@
-import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, RefreshCw, ScrollText, Stethoscope } from "lucide-react";
+import { BookOpen, Bug, Compass, Download, Globe, Keyboard, Lightbulb, Map as MapIcon, RefreshCw, ScrollText, Stethoscope } from "lucide-react";
+import { useCallback, useRef } from "react";
 import type { AppInfo, Engine, Settings } from "../../shared/api.js";
+import { computerText } from "../../shared/computer.js";
 import type { DictateButton } from "../../shared/dictation.js";
 import { call, useAppInfo, useEngines, useSettings, useUpdate } from "../api.js";
 import { useT, type Key } from "../i18n/index.js";
@@ -10,7 +12,7 @@ import { startTour } from "./Tour.js";
 import { showUpdate } from "./Update.js";
 import { useUpdated } from "../update-state.js";
 import { showWhichOne, WhichOneIcon } from "./WhichOne.js";
-import { Menu, Modal, Popover, type MenuItem } from "./ui.js";
+import { Button, Menu, Modal, Popover, type MenuItem } from "./ui.js";
 
 // Help lives in the rail: the tour, the shortcut sheet, updates, and a way to reach the project.
 // Bug reports and ideas open a GitHub issue form with the version details filled in; nothing
@@ -32,10 +34,12 @@ export function environmentText(info: AppInfo | undefined, engines: Engine[]): s
   ].join("\n");
 }
 
-export function issueUrl(kind: "bug" | "feature", info: AppInfo | undefined, engines: Engine[]): string {
+/** The bug form on GitHub, or the idea form; `happened` fills in the bug form's first field (what the window said). */
+export function issueUrl(kind: "bug" | "feature", info: AppInfo | undefined, engines: Engine[], happened?: string): string {
   const params = new URLSearchParams();
   if (kind === "bug") {
     params.set("template", "bug_report.yml");
+    if (happened) params.set("what-happened", `VibeForge showed:\n\n${happened}\n\nWhat I was doing:\n`);
     params.set("version", info?.version ?? "");
     params.set("environment", environmentText(info, engines));
   } else {
@@ -46,7 +50,7 @@ export function issueUrl(kind: "bug" | "feature", info: AppInfo | undefined, eng
 
 /** Versions, a few settings and the end of VibeForge's own log, in English for the bug report. */
 export async function diagnosticsText(info: AppInfo | undefined, engines: Engine[], settings: Settings | undefined): Promise<string> {
-  const lines = await call("app.logTail", 200);
+  const [lines, computer] = await Promise.all([call("app.logTail", 200), call("app.computer").catch(() => null)]);
   return [
     "VibeForge diagnostics",
     "",
@@ -57,6 +61,7 @@ export async function diagnosticsText(info: AppInfo | undefined, engines: Engine
       ? `Settings: theme ${settings.theme}, language ${settings.language}, shell ${settings.defaultShell}, default engine ${settings.defaultEngine}, update checks ${settings.checkUpdates ? "on" : "off"}`
       : "Settings: not loaded",
     "",
+    ...(computer ? [...computerText(computer), ""] : []),
     `Last ${lines.length} log lines (${info?.logFile ?? "?"}):`,
     "```",
     ...lines,
@@ -83,6 +88,61 @@ export function useCopyDiagnostics(): () => Promise<void> {
 
 function open(url: string): void {
   void call("app.openExternal", url);
+}
+
+/**
+ * A problem in the window, as a notice that stays until closed and says what to do next: copy the
+ * diagnostics, then report a bug with them. Nothing is sent from the app; the form opens in the browser.
+ */
+export function useProblemNotice(): (title: string, detail: string) => void {
+  const t = useT();
+  const info = useAppInfo().data;
+  const engines = useEngines().data ?? [];
+  const settings = useSettings().data;
+  const { push, fail } = useToast();
+  // Read when a button is pressed, so a notice raised before the app info loaded still copies it.
+  const latest = useRef({ t, info, engines, settings });
+  latest.current = { t, info, engines, settings };
+  return useCallback(
+    (title: string, detail: string) => {
+      const words = latest.current.t;
+      push("error", title, detail, undefined, {
+        stay: true,
+        note: words("first.problem.note"),
+        more: [
+          {
+            label: words("diagnostics.copy"),
+            run: () => {
+              const now = latest.current;
+              void diagnosticsText(now.info, now.engines, now.settings)
+                .then((text) => call("app.copyText", text))
+                .then(() => push("success", now.t("diagnostics.copied"), now.t("diagnostics.copiedBody")), (error: unknown) => fail(error));
+            },
+          },
+          { label: words("help.bug"), run: () => open(issueUrl("bug", latest.current.info, latest.current.engines, detail ? `${title}\n${detail}` : title)) },
+        ],
+      });
+    },
+    [push, fail],
+  );
+}
+
+/** The same two ways forward, as buttons: under a view that hit a problem. */
+export function ProblemActions({ detail }: { detail: string }) {
+  const t = useT();
+  const info = useAppInfo().data;
+  const engines = useEngines().data ?? [];
+  const copyDiagnostics = useCopyDiagnostics();
+  return (
+    <>
+      <Button icon={Stethoscope} onClick={() => void copyDiagnostics()}>
+        {t("diagnostics.copy")}
+      </Button>
+      <Button icon={Bug} onClick={() => open(issueUrl("bug", info, engines, `${t("crash.title")}\n${detail}`))}>
+        {t("help.bug")}
+      </Button>
+    </>
+  );
 }
 
 /** "Created by ApexForge", linking to the ApexForge site in the browser. */
@@ -120,7 +180,8 @@ export function HelpPopover({ anchor, onClose }: { anchor: HTMLElement; onClose:
   const updated = useUpdated();
   const items: Array<MenuItem | "sep"> = [
     ...(waiting ? ([{ label: updated ? t("updates.finishTitle") : t("help.updateTo", { version: waiting }), icon: Download, accent: true, onSelect: showUpdate }, "sep"] as Array<MenuItem | "sep">) : []),
-    { label: t("help.tour"), icon: Compass, onSelect: startTour },
+    { label: t("help.tour"), icon: Compass, onSelect: () => startTour("short") },
+    { label: t("first.help.fullTour"), icon: MapIcon, onSelect: () => startTour("full") },
     { label: t("whichOne.title"), icon: WhichOneIcon, onSelect: showWhichOne },
     { label: t("help.shortcuts"), icon: Keyboard, hint: shortcutKeys("app.shortcuts"), onSelect: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
     "sep",

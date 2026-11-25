@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -7,6 +7,7 @@ import { Credit, environmentText, issueUrl, SHOW_SHORTCUTS_EVENT, useCopyDiagnos
 import { checkedAt, installText, showUpdate, updateStatus } from "../components/Update.js";
 import { LANGUAGES, systemLanguageName } from "../i18n/index.js";
 import { startTour } from "../components/Tour.js";
+import { ComputerCard } from "../components/ComputerCard.js";
 import { CompanionCard } from "../components/CompanionCard.js";
 import { SyncCard } from "../components/SyncCard.js";
 import { SoundsCard } from "../components/SoundsCard.js";
@@ -447,6 +448,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
             )}
           </div>
 
+          <div className="section-title" id="settings-computer">
+            <Cpu size={13} /> {t("first.computer.title")}
+          </div>
+          <ComputerCard />
+
           <div className="section-title" id="settings-files">
             <FolderOpen size={13} /> {t("settings.files")}
           </div>
@@ -516,7 +522,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
           </div>
           <div className="card vstack" style={{ gap: 14 }}>
             <div className="hstack wrap" style={{ gap: 8 }}>
-              <Button icon={Compass} onClick={startTour} tip={t("settings.replayTourTip")}>
+              <Button icon={Compass} onClick={() => startTour("full")} tip={t("settings.replayTourTip")}>
                 {t("settings.replayTour")}
               </Button>
               <Button icon={Keyboard} kbd={shortcutKeys("app.shortcuts")} tip={t("settings.shortcutsTip")} onClick={() => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT))}>

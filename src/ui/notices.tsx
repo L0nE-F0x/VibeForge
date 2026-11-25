@@ -66,7 +66,7 @@ export function MainNotices() {
               }
             : undefined,
           // It says what was cut off and offers Continue all: it stays until it is closed.
-          { sticky: true },
+          { stay: true },
         );
       }
     };

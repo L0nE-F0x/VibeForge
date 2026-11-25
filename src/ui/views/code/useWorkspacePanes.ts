@@ -14,6 +14,8 @@ export interface Runtime {
   runId: string | null;
   state: "idle" | "starting" | "live" | "exited";
   exitText: string | null;
+  /** A shell the person just opened and hasn't typed into yet: its pane shows the CLIs to start. */
+  fresh?: boolean;
 }
 
 /** Where each pane's terminal is remembered for this window: sessionStorage outlives a reload of the page, not a restart. */
@@ -137,10 +139,10 @@ export function useWorkspacePanes({
 
   /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
   const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean } = {}): Promise<string | null> => {
+    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean; fresh?: boolean; command?: string } = {}): Promise<string | null> => {
       if (starting.current.has(pane.id)) return null;
       starting.current.add(pane.id);
-      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null });
+      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null, fresh: pane.launch.type === "shell" && !opts.command && Boolean(opts.fresh) });
       // Measure after React has laid the new pane out. A window on a hidden workspace gets no
       // frames, so don't wait on one forever.
       await new Promise((resolve) => {
@@ -156,7 +158,7 @@ export function useWorkspacePanes({
       try {
         const started =
           pane.launch.type === "shell"
-            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...size })), runId: null }
+            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...(opts.command ? { command: opts.command } : {}), ...size })), runId: null }
             : await call("code.engine", {
                 workspaceId: workspace.id,
                 engineId: pane.launch.engineId,
@@ -333,23 +335,23 @@ export function useWorkspacePanes({
     // Only new sessions matter; the rest is read through refs.
   }, [live, workspaces, loadWorkspaceLayout]);
 
-  /** The first pane of a workspace whose panes were all closed. */
-  function openFirst(workspace: Workspace, launch: PaneLaunch) {
+  /** The first pane of a workspace whose panes were all closed. A shell opened here is a fresh one. */
+  function openFirst(workspace: Workspace, launch: PaneLaunch, opts: { command?: string } = {}): Promise<string | null> {
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, pane);
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
+    return startPane(workspace, pane, { fresh: true, ...opts });
   }
 
-  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch) {
+  function splitPane(workspace: Workspace, paneId: string, dir: "row" | "col", launch: PaneLaunch, opts: { command?: string } = {}): Promise<string | null> {
     const layout = layoutsRef.current[workspace.id];
-    if (!layout) return;
+    if (!layout) return Promise.resolve(null);
     const existing = panesOf(layout).find((pane) => pane.id === paneId);
-    if (!existing) return;
+    if (!existing) return Promise.resolve(null);
     const pane: PaneNode = { kind: "pane", id: newPaneId(), launch };
     updateLayout(workspace.id, replacePane(layout, paneId, { kind: "split", dir, ratio: 0.5, a: existing, b: pane }));
     setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
-    void startPane(workspace, pane);
+    return startPane(workspace, pane, { fresh: true, ...opts });
   }
 
   async function closePane(workspace: Workspace, pane: PaneNode) {
@@ -390,14 +392,26 @@ export function useWorkspacePanes({
     if (!layout) return;
     const next: PaneNode = { ...pane, launch };
     updateLayout(workspace.id, replacePane(layout, pane.id, next));
-    void startPane(workspace, next, opts);
+    void startPane(workspace, next, { ...opts, fresh: true });
+  }
+
+  /**
+   * A new shell in the workspace with `command` typed into it and Enter pressed, because the
+   * person clicked to start that CLI: beside the focused pane, or the first one. Its terminal's id.
+   */
+  async function startCommand(workspace: Workspace, command: string | null): Promise<string | null> {
+    const layout = await loadWorkspaceLayout(workspace);
+    const opts = command ? { command } : {};
+    if (!layout) return openFirst(workspace, { type: "shell" }, opts);
+    const at = focusRef.current[workspace.id] ?? panesOf(layout)[0].id;
+    return splitPane(workspace, at, "row", { type: "shell" }, opts);
   }
 
   /** A new shell beside the focused pane, or the first one in an empty workspace. */
   function newTerminal(workspace: Workspace, dir: "row" | "col") {
     const layout = layoutsRef.current[workspace.id];
-    if (layout === null) openFirst(workspace, { type: "shell" });
-    else if (layout) splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
+    if (layout === null) void openFirst(workspace, { type: "shell" });
+    else if (layout) void splitPane(workspace, focusRef.current[workspace.id] ?? panesOf(layout)[0].id, dir, { type: "shell" });
   }
 
   /** Review with a new CLI here: `engineId` in a new pane beside `paneId`; its terminal once it runs. */
@@ -471,6 +485,7 @@ export function useWorkspacePanes({
     newTerminal,
     closePane,
     launchHere,
+    startCommand,
     startReviewer,
     toggleZoom,
     focusPane,

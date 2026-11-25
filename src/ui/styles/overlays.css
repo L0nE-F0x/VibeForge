@@ -317,3 +317,18 @@ button.rail-logo:focus-visible {
 .list-label.menu-label:first-child {
   padding-top: 4px;
 }
+
+/* A problem to report: what the two buttons are for, then the buttons. */
+.toast-note {
+  margin-top: 6px;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.toast-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}

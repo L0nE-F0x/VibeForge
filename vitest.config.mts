@@ -8,6 +8,7 @@ const floors: Record<string, number> = {
   'electron/page-recovery.ts': 99,
   'electron/scrollback-file.cjs': 93,
   'electron/unexpected.ts': 99,
+  'electron/computer.ts': 86,
   'src/core/activity.ts': 68,
   'src/core/agent-talk.ts': 99,
   'src/core/autostart.ts': 99,
@@ -82,11 +83,13 @@ const floors: Record<string, number> = {
   'src/core/worktrees.ts': 87,
   'src/shared/changes.ts': 99,
   'src/shared/chimes.ts': 99,
+  'src/shared/computer.ts': 99,
   'src/shared/dictation.ts': 99,
   'src/shared/dock-url.ts': 99,
   'src/shared/orchestrator.ts': 99,
   'src/shared/pixel.ts': 91,
   'src/shared/text.ts': 75,
+  'src/ui/first-run.ts': 99,
   'src/ui/sounds.ts': 87,
 };
 

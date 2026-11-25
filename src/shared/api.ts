@@ -1,5 +1,6 @@
 // The contract between the renderer and the main process. The renderer calls
 // `call("agents.list")`; the main process implements every key of DeskMethods.
+import type { ComputerFacts } from "./computer.js";
 import type { FileNode } from "../core/files.js";
 import type { RunQuery } from "../core/store.js";
 import type {
@@ -361,6 +362,8 @@ export interface DeskMethods {
   "app.openPath": (target: string) => void;
   "app.openExternal": (url: string) => void;
   "app.pickFolder": (title?: string) => string | null;
+  /** What VibeForge depends on, looked for now: Settings → This computer and Copy diagnostics. */
+  "app.computer": () => ComputerFacts;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
   "app.restart": () => void;
@@ -482,7 +485,8 @@ export interface DeskMethods {
   "chats.continue": (id: string, size?: TermSize) => SendResult;
   "chats.stop": (id: string) => void;
 
-  "code.shell": (opts: { workspaceId?: string; cwd?: string } & TermSize) => { ptyId: string };
+  /** A shell in the workspace; `command` is typed at its prompt with Enter once the shell is ready (a CLI the person clicked to start). */
+  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize) => { ptyId: string };
   "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
 
   "runs.list": (query?: RunQuery) => RunView[];

@@ -1,4 +1,4 @@
-import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBranch, History, Hourglass, KanbanSquare, MessagesSquare, Settings, SquareTerminal, TerminalSquare } from "lucide-react";
+import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBranch, History, Hourglass, KanbanSquare, MessagesSquare, Play, Settings, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
@@ -18,6 +18,7 @@ import { Rich } from "../i18n/Rich.js";
 import { routeForMark, useAction, useNav } from "../state.js";
 import { railKey, type RailView } from "../rail.js";
 import { changesFor } from "../changes-text.js";
+import { firstSteps, firstStepsDone, startCliIn } from "../first-run.js";
 import { scheduleText } from "../schedule-text.js";
 
 const DAYS = 14;
@@ -113,13 +114,17 @@ export function HomeView() {
   const live = useLive().data ?? [];
   const routines = useRoutines().data ?? [];
   const agents = useAgents().data ?? [];
-  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const workspaceFile = useWorkspaces().data;
+  const workspaces = workspaceFile?.workspaces ?? [];
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const since = useMemo(() => new Date(Date.now() - DAYS * 86_400_000).toISOString(), []);
   // Only the last two weeks, for the bars; new runs reload it, so the 30-second refresh is off.
   const recent = useQuery("home-activity", ["runs"], () => call("runs.list", { since, limit: 2000 }), { poll: false }).data ?? [];
   const [markAll, marking] = useAction(() => call("runs.markAllOpened"));
+  // The newest runs of any age, for the first steps: one recorded, and one opened.
+  const latestRuns = useQuery("home-first-runs", ["runs"], () => call("runs.list", { limit: 20 }), { poll: false }).data;
+  const settings = useSettings().data;
 
   const time = (iso: string) => fireTime(iso, t.language, now);
   const upcoming = routines
@@ -133,8 +138,42 @@ export function HomeView() {
   const greeting = t(hour < 5 ? "home.greeting.night" : hour < 12 ? "home.greeting.morning" : hour < 18 ? "home.greeting.afternoon" : "home.greeting.evening");
   const date = new Date(now).toLocaleDateString(t.language, { weekday: "short", day: "numeric", month: "short" });
   const clock = new Date(now).toLocaleTimeString(t.language, { hour: "2-digit", minute: "2-digit" });
-  const onboarding = agents.length === 0 || workspaces.length === 0;
-  const rail = useSettings().data?.rail;
+  const steps = firstSteps({ workspaces: workspaces.length, runs: latestRuns ?? [] });
+  // Until the runs are read, the steps wait rather than flash in front of someone who has done them.
+  const onboarding = latestRuns !== undefined && !firstStepsDone(steps);
+  const rail = settings?.rail;
+  // The CLI the "Run a CLI" step starts: the default one when it is here, else the first found.
+  const firstCli = available.find((engine) => engine.id === settings?.defaultEngine) ?? available[0] ?? null;
+  const lastWorkspace = workspaces.find((item) => item.id === workspaceFile?.lastWorkspaceId) ?? workspaces.at(-1) ?? null;
+  const runCli = () => {
+    if (!lastWorkspace) {
+      go({ view: "code" });
+      return;
+    }
+    if (!firstCli) {
+      go({ view: "settings", section: "engines" });
+      return;
+    }
+    go({ view: "code", workspaceId: lastWorkspace.id });
+    void startCliIn(lastWorkspace.id, firstCli.id);
+  };
+  const stepText = {
+    folder: { title: t("first.home.folder.title"), body: t("home.setup.workspace.body"), go: t("home.setup.workspace.go"), icon: FolderPlus, onClick: () => go({ view: "code" }) },
+    cli: {
+      title: t("first.home.cli.title"),
+      body: available.length ? t("first.home.cli.found", { list: available.map((engine) => engine.label).join(", ") }) : t("first.home.cli.none"),
+      go: !lastWorkspace ? t("first.home.cli.folderFirst") : firstCli ? t("first.home.cli.go", { cli: firstCli.label }) : t("orch.openSettings"),
+      icon: Play,
+      onClick: runCli,
+    },
+    review: {
+      title: t("first.home.review.title"),
+      body: t("first.home.review.body"),
+      go: t("first.home.review.go"),
+      icon: History,
+      onClick: () => go(latestRuns?.[0] ? { view: "runs", runId: latestRuns[0].id } : { view: "runs" }),
+    },
+  } as const;
   const keyFor = (view: RailView) => {
     const key = railKey(rail, view);
     return key ? <kbd>{key.replace("+", " ")}</kbd> : null;
@@ -237,22 +276,39 @@ export function HomeView() {
 
           {onboarding && (
             <div className="home-steps">
-              {(
-                [
-                  { key: "workspace", done: workspaces.length > 0, icon: FolderPlus, onClick: () => go({ view: "code" }) },
-                  { key: "agent", done: agents.length > 0, icon: Bot, onClick: () => go({ view: "agents" }) },
-                  { key: "chat", done: false, icon: MessagesSquare, onClick: () => go({ view: "chat" }) },
-                ] as const
-              ).map((step, index) => (
-                <button key={step.key} type="button" className={`home-step${step.done ? " done" : ""}`} onClick={step.onClick}>
-                  <span className="num">
-                    0{index + 1} {step.done ? `· ${t("home.setup.done")}` : ""}
-                  </span>
-                  <h3>{t(`home.setup.${step.key}.title`)}</h3>
-                  <p>{t(`home.setup.${step.key}.body`)}</p>
-                  <span className="go">{t(`home.setup.${step.key}.go`)} →</span>
-                </button>
-              ))}
+              {steps.map((step, index) => {
+                const text = stepText[step.key];
+                return (
+                  <button key={step.key} type="button" className={`home-step${step.done ? " done" : ""}`} onClick={text.onClick}>
+                    <span className="num">
+                      0{index + 1} {step.done ? `· ${t("home.setup.done")}` : ""}
+                    </span>
+                    <h3>{text.title}</h3>
+                    <p>{text.body}</p>
+                    <span className="go">{text.go} →</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/* A teammate and a quick chat come after a first result, not before it. */}
+          {agents.length === 0 && (
+            <div className="home-later">
+              <span className="home-later-label">{t("first.home.later")}</span>
+              <button type="button" className="run-row home-later-item" onClick={() => go({ view: "agents" })}>
+                <Bot size={14} className="accent-text" />
+                <span className="vstack grow" style={{ gap: 1 }}>
+                  <span className="title">{t("home.setup.agent.title")}</span>
+                  <span className="meta">{t("home.setup.agent.body")}</span>
+                </span>
+              </button>
+              <button type="button" className="run-row home-later-item" onClick={() => go({ view: "chat" })}>
+                <MessagesSquare size={14} className="accent-text" />
+                <span className="vstack grow" style={{ gap: 1 }}>
+                  <span className="title">{t("home.setup.chat.title")}</span>
+                  <span className="meta">{t("home.setup.chat.body")}</span>
+                </span>
+              </button>
             </div>
           )}
 
@@ -432,6 +488,7 @@ export function HomeView() {
                 </div>
               )}
 
+              <div className="home-clis">
               <div className="section-title">
                 <SquareTerminal size={13} /> {t("home.clis.title")}
                 <span className="grow" />
@@ -456,6 +513,7 @@ export function HomeView() {
                   ))}
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>

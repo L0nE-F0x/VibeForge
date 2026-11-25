@@ -1,12 +1,14 @@
 import { GripVertical, Maximize2, Minimize2, Play, RotateCcw, TerminalSquare, X } from "lucide-react";
 import { memo, useRef, useState } from "react";
 import type { Engine, PaneLaunch, TalkState, Workspace } from "../../../shared/api.js";
+import { call } from "../../api.js";
 import { LiveTerminal, type TerminalHandle } from "../../components/Terminal.js";
 import { TalkButton, TalkChip, type TalkTarget } from "../../components/TalkMenu.js";
 import { tipProps } from "../../components/Tooltip.js";
 import { Button } from "../../components/ui.js";
 import { useT } from "../../i18n/index.js";
 import type { DropZone, PaneNode } from "../../pane-layout.js";
+import { cliCommand, isTyping, showShellHint } from "../../first-run.js";
 import { shortcutKeys } from "../../shortcuts.js";
 import type { Runtime } from "./useWorkspacePanes.js";
 
@@ -43,6 +45,8 @@ export interface PaneActions {
   openLink: (workspace: Workspace, url: string) => void;
   draft: (toPty: string) => void;
   newReviewer: (workspace: Workspace, pane: PaneNode, engineId: string) => Promise<string | null>;
+  /** The person typed into a fresh shell, or started a CLI from its hint: the hint goes. */
+  typed: (paneId: string) => void;
 }
 
 interface PaneProps {
@@ -127,6 +131,17 @@ export const PaneView = memo(function PaneView({
   const onStart = (launch: PaneLaunch, continueSession?: boolean) => actions.start(workspace, pane, launch, continueSession);
   const onClose = () => actions.close(workspace, pane);
   const onZoom = () => actions.zoom(workspace, pane);
+  // A CLI is being recorded while it runs: one this pane started, or one typed into its shell.
+  const recording = state === "live" && Boolean(runId) && (pane.launch.type === "engine" || Boolean(program));
+  const hint = showShellHint({ shell: pane.launch.type === "shell", fresh: Boolean(runtime?.fresh), live: state === "live", program });
+  const found = hint ? engines.filter((item) => item.available) : [];
+  const startFromHint = (item: Engine) => {
+    const ptyId = runtime?.ptyId;
+    if (!ptyId) return;
+    actions.typed(pane.id);
+    void call("pty.send", ptyId, cliCommand(item)).catch(() => undefined);
+    terminalRef.current?.focus();
+  };
 
   return (
     <div className={`pane${focused ? " focused" : ""}${zoomed ? " is-zoomed" : ""}${dragging === pane.id ? " is-dragging" : ""}`} data-pane={pane.id} onMouseDown={onFocus}>
@@ -163,11 +178,16 @@ export const PaneView = memo(function PaneView({
             {t("occupancy.alsoHere", { names: alsoHere.join(", ") })}
           </span>
         )}
-        {runId && (
+        {runId && recording ? (
+          <button type="button" className="pane-run-link is-recording" onClick={() => actions.review(runId)} {...tipProps(t("first.recordingTip"))}>
+            <span className="rec-dot" aria-hidden />
+            <span className="truncate">{t("first.recording")}</span>
+          </button>
+        ) : runId ? (
           <button type="button" className="pane-run-link" onClick={() => actions.review(runId)} {...tipProps(t("pane.openRun"))}>
             {t("pane.run")}
           </button>
-        )}
+        ) : null}
         {zoomed && <span className="chip accent">{t("pane.maximized")}</span>}
         {talk && runtime?.ptyId && <TalkChip ptyId={runtime.ptyId} talk={talk} />}
         <span className="grow" />
@@ -218,6 +238,16 @@ export const PaneView = memo(function PaneView({
       )}
       {runtime?.ptyId && state !== "idle" ? (
         <>
+          {hint && (
+            <div className="pane-hint">
+              <span className="pane-hint-text">{found.length ? t("first.hint.pick") : t("first.hint.none")}</span>
+              {found.map((item) => (
+                <Button key={item.id} size="sm" icon={Play} tip={t("first.hint.tip", { command: cliCommand(item) })} onClick={() => startFromHint(item)}>
+                  {item.label}
+                </Button>
+              ))}
+            </div>
+          )}
           <LiveTerminal
             key={runtime.ptyId}
             ref={(handle) => {
@@ -229,6 +259,9 @@ export const PaneView = memo(function PaneView({
             autoFocus={focused}
             onFocus={onFocus}
             onLink={(url) => actions.openLink(workspace, url)}
+            onInput={(data) => {
+              if (runtime?.fresh && isTyping(data)) actions.typed(pane.id);
+            }}
             onExit={(info) => actions.exited(pane.id, info.signal ? t("pane.exitSignal", { signal: info.signal }) : t("pane.exitCode", { code: info.exitCode ?? "?" }))}
           />
           {state === "exited" && (
