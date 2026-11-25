@@ -51,30 +51,33 @@ const isTab = (value: unknown): value is Tab => TABS.includes(value as Tab);
 export const DiffView = memo(function DiffView({ text }: { text: string }) {
   const t = useT();
   const all = useMemo(() => text.split("\n"), [text]);
-  const rows = useMemo(
-    () =>
-      (all.length > DIFF_CAP ? all.slice(0, DIFF_CAP) : all).map((line, index) => {
-        const kind = line.startsWith("diff --git")
-          ? "file"
-          : line.startsWith("#")
-            ? "meta"
-            : line.startsWith("@@")
-              ? "hunk"
-              : line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode")
-                ? "meta"
-                : line.startsWith("+")
-                  ? "add"
-                  : line.startsWith("-")
-                    ? "del"
-                    : "";
-        return (
-          <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
-            {line || " "}
-          </div>
-        );
-      }),
-    [all],
-  );
+  const rows = useMemo(() => {
+    // Inside a hunk a line that starts "---" or "+++" is a changed line (a removed "---" rule, say),
+    // not a file header: the headers come before the first "@@".
+    let inHunk = false;
+    return (all.length > DIFF_CAP ? all.slice(0, DIFF_CAP) : all).map((line, index) => {
+      if (line.startsWith("diff --git")) inHunk = false;
+      else if (line.startsWith("@@")) inHunk = true;
+      const kind = line.startsWith("diff --git")
+        ? "file"
+        : line.startsWith("#")
+          ? "meta"
+          : line.startsWith("@@")
+            ? "hunk"
+            : !inHunk && (line.startsWith("+++") || line.startsWith("---") || line.startsWith("index ") || line.startsWith("new file mode"))
+              ? "meta"
+              : line.startsWith("+")
+                ? "add"
+                : line.startsWith("-")
+                  ? "del"
+                  : "";
+      return (
+        <div key={index} className={kind} data-line={kind === "file" ? index : undefined}>
+          {line || " "}
+        </div>
+      );
+    });
+  }, [all]);
   if (!text.trim()) return <Notice>{t("run.noDiff")}</Notice>;
   return (
     <>

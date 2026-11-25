@@ -2,6 +2,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Button, Field, Input, Select, TextArea, splitHint } from "../../src/ui/components/ui.js";
 import { VibySprite } from "../../src/ui/components/Pixel.js";
+import { DiffView } from "../../src/ui/components/RunDetail.js";
+
+describe("DiffView", () => {
+  it("shows a changed line that starts with dashes or pluses as a change, and the file headers as meta", () => {
+    const html = renderToStaticMarkup(<DiffView text={["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "----", "+++counter;"].join("\n")} />);
+    expect(html).toContain('<div class="meta">--- a/x</div>');
+    expect(html).toContain('<div class="meta">+++ b/x</div>');
+    expect(html).toContain('<div class="del">----</div>');
+    expect(html).toContain('<div class="add">+++counter;</div>');
+  });
+});
 
 describe("UI primitives", () => {
   it("associates Field label htmlFor with child Input, Select, and TextArea controls", () => {

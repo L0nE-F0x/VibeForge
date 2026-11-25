@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A changed line that starts with dashes or pluses is a change in every diff.** Deleting a Markdown rule (`---`) or a SQL, Lua or Haskell `-- comment`, or adding `++counter;`, was drawn as a grey file header in a run's changes, a copy's diff and Sync, and left out of the file's added and removed counts in the first two. Only the lines before a file's first hunk are headers now.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
