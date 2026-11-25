@@ -7,10 +7,10 @@ import { Library } from "./store/library.js";
 import { ReadCache } from "./store/read-cache.js";
 import { RunIndex, type RunQuery } from "./store/run-index.js";
 import type { WorkspaceFile } from "./workspaces.js";
-import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task, UnreadableFile } from "./types.js";
+import type { Agent, ChatRecord, EngineRow, LayoutNode, Routine, RunMeta, Settings, Skill, Task, UnreadableFile, UnreadableItem } from "./types.js";
 
 export { defaultSettings } from "./store/config.js";
-export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument } from "./store/library.js";
+export { agentTier, MEMORY_STARTER, oneLine, parseSkill, skillDocument, UnreadableError } from "./store/library.js";
 export { matchExpression, type RunQuery } from "./store/run-index.js";
 
 /**
@@ -160,6 +160,10 @@ export class Store {
     return this.library.getAgent(id);
   }
 
+  readAgent(id: string): Agent | null {
+    return this.library.readAgent(id);
+  }
+
   writeAgent(agent: Agent): void {
     this.library.writeAgent(agent);
   }
@@ -178,6 +182,10 @@ export class Store {
 
   getSkill(id: string): Skill | null {
     return this.library.getSkill(id);
+  }
+
+  readSkill(id: string): Skill | null {
+    return this.library.readSkill(id);
   }
 
   readSkillRaw(id: string): string | null {
@@ -214,6 +222,10 @@ export class Store {
 
   listTasks(): Task[] {
     return this.library.listTasks();
+  }
+
+  unreadableItems(): UnreadableItem[] {
+    return this.library.unreadableItems();
   }
 
   getTask(id: string): Task | null {

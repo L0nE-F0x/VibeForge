@@ -37,6 +37,18 @@ export interface Skill {
   body: string;
 }
 
+/** The four kinds of thing kept as files under agents/, skills/, routines/ and tasks/. */
+export type LibraryKind = "agent" | "skill" | "routine" | "task";
+
+/** One a list left out because its file is there but couldn't be read: named so it isn't taken for deleted. */
+export interface UnreadableItem {
+  kind: LibraryKind;
+  id: string;
+  file: string;
+  /** Why, as a sentence (English from the main process; the window translates it). */
+  error: string;
+}
+
 export interface Routine {
   id: string;
   name: string;

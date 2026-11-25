@@ -119,7 +119,8 @@ export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: Orchestr
     return;
   }
   if (action === "remove") {
-    await deps.workspaces.removeWorkspace(ws.id);
+    const deleted = await deps.workspaces.removeWorkspace(ws.id);
+    step.undo = deleted.undo;
     step.result = `Removed workspace ${ws.name}.`;
     return;
   }

@@ -87,6 +87,11 @@ export interface LibraryRecord {
 /** What the library needs from the app: the agents' and skills' own files, and the CLIs set up here. */
 export interface LibraryHost {
   agents(): Agent[];
+  /**
+   * Null only when the agent isn't here. One that is there but can't be read (permissions, a disk
+   * error, a hand edit that doesn't parse) throws, as getSkill and readMemory do: Sync must never
+   * take it for deleted.
+   */
   getAgent(id: string): Agent | null;
   /** Saves the agent as it is (no checks: its folders may not all be here). */
   saveAgent(agent: Agent): void;
@@ -317,10 +322,25 @@ export class LibrarySync {
     const out = new Map<string, string[]>();
     for (const entry of this.all("agent")) {
       if (this.state(entry) !== "on" || !entry.localId) continue;
-      const agent = this.host.getAgent(entry.localId);
-      for (const skill of agent?.skills ?? []) out.set(skill, [...(out.get(skill) ?? []), agent?.name ?? entry.localId]);
+      let skills: string[];
+      let name: string;
+      try {
+        const agent = this.host.getAgent(entry.localId);
+        skills = agent?.skills ?? [];
+        name = agent?.name ?? entry.localId;
+      } catch {
+        // Can't be read just now: the skills it last synced with are still the ones it carries.
+        skills = ((entry.sections.skills?.value as string[] | undefined) ?? []).map((syncId) => this.entries.get(syncId)?.localId ?? "").filter(Boolean);
+        name = String(entry.sections.name?.value ?? entry.localId);
+      }
+      for (const skill of skills) out.set(skill, [...(out.get(skill) ?? []), name]);
     }
     return out;
+  }
+
+  /** Says once per look that an item was left alone because it couldn't be read. */
+  private leftAlone(entry: Entry, error: unknown): void {
+    this.host.log(`Sync: left ${entry.kind} ${entry.localId} alone this time: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   private syncing(entry: Entry, carried = this.carried()): boolean {
@@ -458,11 +478,26 @@ export class LibrarySync {
     let changed = false;
     let recheck = false;
     // Skills a synced agent carries get their sync id first, so they go out with it.
-    for (const entry of this.all("agent")) if (this.state(entry) === "on" && entry.localId) this.read(entry, "skills");
+    for (const entry of this.all("agent")) {
+      if (this.state(entry) !== "on" || !entry.localId) continue;
+      try {
+        this.read(entry, "skills");
+      } catch {
+        /* can't be read just now: said below, where it is left alone */
+      }
+    }
     const carried = this.carried();
     for (const entry of this.all()) {
       let dirty = false;
-      if (entry.localId && !this.exists(entry)) {
+      let gone: boolean;
+      try {
+        gone = Boolean(entry.localId) && !this.exists(entry);
+      } catch (error) {
+        // There but unreadable: neither deleted nor changed, as far as this machine can tell.
+        this.leftAlone(entry, error);
+        continue;
+      }
+      if (gone) {
         const since = this.missingSince.get(entry.syncId) ?? this.now().getTime();
         this.missingSince.set(entry.syncId, since);
         if (this.now().getTime() - since < DELETE_GRACE_MS) {
@@ -477,9 +512,17 @@ export class LibrarySync {
         }
       } else this.missingSince.delete(entry.syncId);
       if (entry.localId && this.syncing(entry, carried)) {
-        for (const name of sectionsOf(entry.kind)) {
-          if (name === "state") continue;
-          const value = this.read(entry, name);
+        // Every part read before any is noted, so one that can't be read leaves the item as it was.
+        let parts: Array<[SectionName, unknown]>;
+        try {
+          parts = sectionsOf(entry.kind)
+            .filter((name) => name !== "state")
+            .map((name) => [name, this.read(entry, name)]);
+        } catch (error) {
+          this.leftAlone(entry, error);
+          continue;
+        }
+        for (const [name, value] of parts) {
           if (value === undefined) continue;
           if (entry.sections[name]?.hash === hashValue(value)) continue;
           this.localChange(entry, name, value);
@@ -506,9 +549,16 @@ export class LibrarySync {
     const touched = new Set<ItemKind>();
     for (const entry of this.all("agent")) {
       if (!entry.localId || this.state(entry) !== "on") continue;
-      const agent = this.host.getAgent(entry.localId);
-      if (!agent) continue;
-      const next = this.localAgent(entry, agent);
+      let agent: Agent | null;
+      let next: Agent;
+      try {
+        agent = this.host.getAgent(entry.localId);
+        if (!agent) continue;
+        next = this.localAgent(entry, agent);
+      } catch (error) {
+        this.leftAlone(entry, error);
+        continue;
+      }
       if (JSON.stringify(next) !== JSON.stringify(agent)) {
         this.host.saveAgent(next);
         this.save(entry);
@@ -859,7 +909,14 @@ export class LibrarySync {
         continue;
       }
       if (item.on) {
-        const agent = this.host.getAgent(entry.localId);
+        let agent: Agent | null = null;
+        try {
+          agent = this.host.getAgent(entry.localId);
+        } catch {
+          // Can't be read just now: the Agents view says so; nothing here to point at.
+          out.agents[entry.localId] = item;
+          continue;
+        }
         for (const place of (entry.sections.places?.value as PortablePlace[] | undefined) ?? []) {
           const at = entry.placeAt[place.key];
           if (!at || !agent?.places.includes(at)) item.waiting.push({ key: place.key, label: placeLabel(place), folderId: place.folderId });

@@ -210,6 +210,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "layouts.save": (id, layout) => s().saveLayout(id, layout),
     "files.list": (dir) => listDir(dir),
 
+    "library.unreadable": () => s().unreadableItems(),
     "agents.list": () => s().listAgents(),
     "agents.save": (input) => s().saveAgent(input),
     "agents.delete": (id) => s().deleteAgent(id),

@@ -136,12 +136,13 @@ function machine(id: string, name: string): Machine {
   const m = { id, name, home, data, store, workspaces: [] as Workspace[], engines: [{ id: "claude", label: "Claude Code", bin: "claude", available: true }] as LocalEngine[], arrived: [] as string[] } as Machine;
   const host: LibraryHost = {
     agents: () => store.listAgents(),
-    getAgent: (agentId) => store.getAgent(agentId),
+    // As electron/sync.ts: one that is there but can't be read throws, rather than passing for deleted.
+    getAgent: (agentId) => store.readAgent(agentId),
     saveAgent: (agent) => store.writeAgent(agent),
     readMemory: (agentId) => store.readMemory(agentId),
     writeMemory: (agentId, text) => store.writeMemory(agentId, text),
     skills: () => store.listSkills(),
-    getSkill: (skillId) => store.getSkill(skillId),
+    getSkill: (skillId) => store.readSkill(skillId),
     saveSkill: (skill) => store.writeSkill(skill),
     newId: (kind, label) => store.uniqueId(path.join(config, kind === "agent" ? "agents" : "skills"), label, ""),
     remove: async (kind, itemId) => fs.rmSync(path.join(config, kind === "agent" ? "agents" : "skills", itemId), { recursive: true, force: true }),
@@ -354,6 +355,43 @@ describe("two machines", () => {
     expect(b.store.getAgent("kept")).not.toBeNull();
     expect(a.store.listAgents().map((item) => item.name)).toContain("Kept");
     expect(a.store.readMemory(a.store.listAgents().find((item) => item.name === "Kept")?.id ?? "")).toBe("- changed on the desktop\n");
+  });
+
+  it.skipIf(process.getuid?.() === 0)("never tells a delete, or an emptied memory, for an agent that is there but can't be read", async () => {
+    const a = machine(A, "Laptop");
+    const b = machine(B, "Desktop");
+    agent(a, { name: "Locked" });
+    agent(a, { name: "Fine" });
+    a.store.writeMemory("locked", "- keep me\n");
+    turnOn(a, "agent", "locked");
+    turnOn(a, "agent", "fine");
+    await settle(a, b);
+    const agents = path.join(a.store.configRoot, "agents");
+    // The whole agents folder, past the time a delete waits for its Undo.
+    fs.chmodSync(agents, 0o000);
+    try {
+      await settle(a, b);
+      clock += DELETE_GRACE_MS;
+      await settle(a, b);
+    } finally {
+      fs.chmodSync(agents, 0o700);
+    }
+    expect(b.store.getAgent("locked")).not.toBeNull();
+    expect(b.store.getAgent("fine")).not.toBeNull();
+    // Only the memory file: what it says isn't sent as nothing.
+    const memory = path.join(agents, "locked", "memory.md");
+    fs.chmodSync(memory, 0o000);
+    try {
+      a.store.writeAgent({ ...a.store.getAgent("locked")!, brief: "Changed while the memory was locked." });
+      await settle(a, b);
+    } finally {
+      fs.chmodSync(memory, 0o600);
+    }
+    expect(b.store.readMemory("locked")).toBe("- keep me\n");
+    // Readable again, it syncs as before, the change made meanwhile too.
+    await settle(a, b);
+    expect(b.store.getAgent("locked")?.brief).toBe("Changed while the memory was locked.");
+    expect(a.store.getAgent("locked")).not.toBeNull();
   });
 
   it("joins a same-named agent with the same brief instead of making a second one", async () => {

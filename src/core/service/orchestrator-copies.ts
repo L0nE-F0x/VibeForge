@@ -151,7 +151,7 @@ export class MaestroCopies {
       }
       await removeCopy(copy, this.owner(copy.id));
       this.forget(copy);
-      if (copy.openedWorkspaceId && this.core.workspaceById(copy.openedWorkspaceId)) await this.workspaces.removeWorkspace(copy.openedWorkspaceId);
+      if (copy.openedWorkspaceId && this.core.workspaceById(copy.openedWorkspaceId)) await this.workspaces.forgetWorkspace(copy.openedWorkspaceId);
       else if (result.pulled) this.core.emit("workspaces");
       this.settled(copy, "applied");
       return result;

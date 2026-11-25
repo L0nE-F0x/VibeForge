@@ -454,6 +454,9 @@ export function orchestratorRules(context: PlanContext): string {
     ...(chats ? ["", "Chats:", chats] : []),
     ...(runs ? ["", "Recent runs:", runs] : []),
     ...(context.memory?.trim() ? ["", "Your saved memory (~/.config/vibeforge/viby.md):", context.memory.trim()] : []),
+    ...(context.unreadable?.length
+      ? ["", "Couldn't be read, so left out above (they still exist: don't make them again, and tell the person if they ask about them):", ...context.unreadable.map((line) => `- ${line}`)]
+      : []),
     ...(context.settings ? ["", "Your settings & VibeForge configuration:", ...formatSettingsRules(context.settings, { slim: true })] : []),
   ].join("\n");
 }

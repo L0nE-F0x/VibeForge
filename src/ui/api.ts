@@ -233,6 +233,8 @@ export const useTasks = () => useQuery("tasks", ["tasks", "runs", "agents", "wor
 export const useWorkspaces = () => useQuery("workspaces", ["workspaces"], () => call("workspaces.list"), { what: "load.workspaces" });
 /** settings.json, engines.json, workspaces.json or chats.json that can't be read right now (the window lists them). */
 export const useUnreadableFiles = () => useQuery("unreadable", ["unreadable"], () => call("files.unreadable"));
+// The agents, skills, routines and tasks those lists left out because they couldn't be read (LoadState's UnreadableFiles names them).
+export const useUnreadableItems = () => useQuery("unreadable-items", ["agents", "skills", "routines", "tasks"], () => call("library.unreadable"));
 // Runs git status in every workspace: only the list and finished runs change what it reports (the 30 s poll
 // catches edits). Sync, Viby and task events come many times a second and would keep git running back to back.
 // Not read at all while `shown` is false: Code stays mounted when another view is on screen.

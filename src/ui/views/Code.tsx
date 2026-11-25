@@ -10,7 +10,7 @@ import { shellNumber } from "../components/WorkspaceState.js";
 import { Button, Empty } from "../components/ui.js";
 import { useT } from "../i18n/index.js";
 import { panesOf, type PaneNode } from "../pane-layout.js";
-import { useAction, useConfirm, useNav, useToast, type Route } from "../state.js";
+import { deleteEach, useAction, useConfirm, useDeleted, useDeletedMany, useNav, useToast, type Route } from "../state.js";
 import { shortcutKeys } from "../shortcuts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { BranchDialog } from "./BranchDialog.js";
@@ -42,6 +42,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const { go } = useNav();
   const { push } = useToast();
   const confirm = useConfirm();
+  const deleted = useDeleted();
+  const deletedMany = useDeletedMany();
   const file = useWorkspaces();
   const engines = useEngines().data ?? [];
   const agents = useAgents().data ?? [];
@@ -246,25 +248,36 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     }
   }, t("code.addFailed"));
 
-  /** Removes one workspace, or several picked in the list, after one question. True once they're gone. */
+  /**
+   * Removes one workspace, or several picked in the list, at once, with Undo on the toast. Only
+   * terminals of Code's own there would stop, and that can't be undone, so then it asks first.
+   * True once they're gone.
+   */
   const [removeWorkspaces] = useAction(async (picked: Workspace[]) => {
     if (!picked.length) return false;
     const ids = new Set(picked.map((workspace) => workspace.id));
-    const running = live.filter((session) => session.workspaceId && ids.has(session.workspaceId)).length;
-    const ok = await confirm({
-      title: picked.length === 1 ? t("code.removeTitle", { name: picked[0].name }) : t.count("code.removeManyTitle", picked.length),
-      body: [picked.length === 1 ? t("code.removeBody") : t("code.removeManyBody"), running ? t.count("code.removeRunning", running) : ""].filter(Boolean).join(" "),
-      confirm: picked.length === 1 ? t("code.removeConfirm") : t.count("code.removeManyConfirm", picked.length),
-      danger: true,
-    });
-    if (!ok) return false;
-    for (const workspace of picked) {
-      await call("workspaces.remove", workspace.id);
+    // What removing stops, as the main process counts it: Code's terminals and shells. Agents', tasks' and routines' runs go on.
+    const running = live.filter((session) => session.workspaceId && ids.has(session.workspaceId) && (session.origin === "code" || session.kind === "shell")).length;
+    if (running) {
+      const ok = await confirm({
+        title: picked.length === 1 ? t("code.removeTitle", { name: picked[0].name }) : t.count("code.removeManyTitle", picked.length),
+        body: [picked.length === 1 ? t("code.removeBody") : t("code.removeManyBody"), t.count("code.removeRunning", running)].join(" "),
+        confirm: picked.length === 1 ? t("code.removeConfirm") : t.count("code.removeManyConfirm", picked.length),
+        danger: true,
+      });
+      if (!ok) return false;
+    }
+    const { gone, deleted: undo, error } = await deleteEach(picked, async (workspace) => {
+      const result = await call("workspaces.remove", workspace.id);
       await call("dock.release", workspace.id).catch(() => undefined);
       side.forgetDock(workspace.id);
       panes.forget(workspace.id);
       if (currentId === workspace.id) setCurrentId(null);
-    }
+      return result;
+    });
+    if (gone.length === 1) deleted(t("code.removedNamed", { name: gone[0].name }), undo[0]);
+    else deletedMany(t.count("code.removedMany", gone.length), undo);
+    if (error) throw error;
     return true;
   }, t("code.removeFailed"));
 
