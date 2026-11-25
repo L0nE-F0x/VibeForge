@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CrashCount, HOST_STOPPED, HostLifecycle, terminalEnv } from "../../electron/host-lifecycle.js";
+import { CrashCount, deskHost, HOST_STOPPED, HostLifecycle, terminalEnv } from "../../electron/host-lifecycle.js";
 import { MainContext } from "../../electron/main-context.js";
 import { LogFile } from "../../src/core/log.js";
 
@@ -221,5 +221,19 @@ describe("what every terminal starts with", () => {
     fs.symlinkSync("/elsewhere/vibeforge", path.join(bin, "vibeforge"));
     terminalEnv(ctx, "/run/vf.sock");
     expect(fs.readlinkSync(path.join(bin, "vibeforge"))).toBe(script);
+  });
+});
+
+describe("Viby checking for updates", () => {
+  it("says what the check found, and fails when it couldn't check", async () => {
+    const { ctx } = setUp();
+    let info = { current: "3.10.1", latest: { version: "3.11.0" }, available: true, error: null as string | null };
+    const host = deskHost(ctx, (() => undefined) as never, { updater: () => ({ check: async () => info }) as never });
+    // It said "Checked for updates." each time: with a newer version out, and when GitHub didn't answer.
+    await expect(host.checkUpdates?.()).resolves.toBe("VibeForge 3.11.0 is available. You have 3.10.1.");
+    info = { ...info, latest: { version: "3.10.1" }, available: false };
+    await expect(host.checkUpdates?.()).resolves.toBe("You have the newest version, 3.10.1.");
+    info = { ...info, error: "GitHub did not answer in time." };
+    await expect(host.checkUpdates?.()).rejects.toThrow("GitHub did not answer in time.");
   });
 });

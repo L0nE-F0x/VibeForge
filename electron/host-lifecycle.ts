@@ -85,9 +85,12 @@ export function deskHost(
     ...(extras?.computer ? { computer: extras.computer } : {}),
     ...(extras?.updater
       ? {
+          // What the check found, as the update dialog puts it; a check that failed fails the step with the reason it gives.
           checkUpdates: async () => {
-            await extras.updater!().check();
-            return "Checked for updates.";
+            const info = await extras.updater!().check();
+            if (info.error) throw new Error(info.error);
+            if (info.available && info.latest) return `VibeForge ${info.latest.version} is available. You have ${info.current}.`;
+            return info.latest ? `You have the newest version, ${info.current}.` : `No releases have been published yet. You have ${info.current}.`;
           },
         }
       : {}),

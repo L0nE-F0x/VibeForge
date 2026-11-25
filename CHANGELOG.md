@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Asking Viby to check for updates says what it found.** It answered "Checked for updates." every time: when a newer version was out, and when GitHub didn't answer. It now says that version X is available, or that you have the newest, and a check that couldn't reach GitHub shows as a failed step with the reason, as **Settings → Updates** does.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
