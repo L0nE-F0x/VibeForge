@@ -2268,7 +2268,7 @@ export const zh: Catalog = {
   "first.computer.label.tray": "托盘宿主",
   "first.computer.label.desktop": "桌面",
   "first.computer.off.git": "没有 git，运行不会保留差异，任务和 Viby 也无法在自己的副本中工作。",
-  "first.computer.off.node": "没有 Node，任何终端都无法启动。",
+  "first.computer.off.node": "VibeForge 不需要它：终端和 vibeforge 命令都运行在 Electron 自带的 Node 上。只有从源码构建 VibeForge 时才需要。",
   "first.computer.off.speech": "没有 whisper.cpp 或 sherpa-onnx，听写和与 Viby 通话都无法使用。设置 → 语音 可以下载 sherpa-onnx。",
   "first.computer.off.piper": "没有 Piper，Viby 只用文字回答。",
   "first.computer.off.pipewire": "没有 PipeWire 的 pw-record，听写会在有 parec 或 arecord 时用它们录音，通话也无法消除回声。",

@@ -2267,7 +2267,7 @@ export const de: Catalog = {
   "first.computer.label.tray": "Tray-Host",
   "first.computer.label.desktop": "Desktop",
   "first.computer.off.git": "Ohne git behalten Läufe keinen Diff, und Aufgaben und Viby können nicht in eigenen Kopien arbeiten.",
-  "first.computer.off.node": "Ohne Node kann kein Terminal starten.",
+  "first.computer.off.node": "VibeForge braucht es nicht: Seine Terminals und der Befehl vibeforge laufen auf Electrons eigenem Node. Nur wer VibeForge aus dem Quellcode baut, braucht es.",
   "first.computer.off.speech": "Ohne whisper.cpp oder sherpa-onnx funktionieren Diktat und Anrufe mit Viby nicht. Einstellungen → Sprache kann sherpa-onnx herunterladen.",
   "first.computer.off.piper": "Ohne Piper antwortet Viby nur als Text.",
   "first.computer.off.pipewire": "Ohne pw-record von PipeWire nimmt das Diktat mit parec oder arecord auf, wenn eins da ist, und ein Anruf kann kein Echo unterdrücken.",

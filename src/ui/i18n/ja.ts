@@ -2268,7 +2268,7 @@ export const ja: Catalog = {
   "first.computer.label.tray": "トレイのホスト",
   "first.computer.label.desktop": "デスクトップ",
   "first.computer.off.git": "git がないと、実行に差分が残らず、タスクや Viby が専用のコピーで作業できません。",
-  "first.computer.off.node": "Node がないと、ターミナルを起動できません。",
+  "first.computer.off.node": "VibeForge には不要です。ターミナルと vibeforge コマンドは Electron 自身の Node で動きます。必要なのは VibeForge をソースからビルドするときだけです。",
   "first.computer.off.speech": "whisper.cpp も sherpa-onnx もないと、音声入力と Viby との通話が使えません。設定 → 音声 で sherpa-onnx をダウンロードできます。",
   "first.computer.off.piper": "Piper がないと、Viby はテキストでだけ答えます。",
   "first.computer.off.pipewire": "PipeWire の pw-record がないと、音声入力は parec か arecord があればそれで録音し、通話ではエコーを消せません。",

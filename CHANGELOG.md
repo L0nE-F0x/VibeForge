@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Settings → This computer no longer says terminals need Node.** On a computer without Node, the Node line said "Without Node, no terminal can start." Since 3.8.0 the terminals run on Electron's own Node, and the `vibeforge` command uses it when there is no other, so nothing stops working. It now says so, in all seven languages: only building VibeForge from source needs Node.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

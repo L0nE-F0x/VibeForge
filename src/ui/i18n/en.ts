@@ -2280,7 +2280,7 @@ export const en = {
   "first.computer.label.tray": "Tray host",
   "first.computer.label.desktop": "Desktop",
   "first.computer.off.git": "Without git, runs keep no diff, and tasks and Viby can't work in copies of their own.",
-  "first.computer.off.node": "Without Node, no terminal can start.",
+  "first.computer.off.node": "VibeForge doesn't need it: its terminals and the vibeforge command run on Electron's own Node. Only building VibeForge from source does.",
   "first.computer.off.speech": "Without whisper.cpp or sherpa-onnx, dictation and calls with Viby don't work. Settings → Voice can download sherpa-onnx.",
   "first.computer.off.piper": "Without Piper, Viby answers in text only.",
   "first.computer.off.pipewire": "Without PipeWire's pw-record, dictation records with parec or arecord when one is here, and a call can't cancel echo.",
