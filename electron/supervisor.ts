@@ -6,10 +6,32 @@ import type { PtyActivity, PtyAnswers, PtyAsk, PtyData, PtyExit, PtyLine, PtyOp,
 // The messages themselves are in pty-protocol.ts, which the host's JSDoc reads too.
 export type { PtyActivity, PtyData, PtyExit, PtyProgram, PtySnapshot } from "./pty-protocol.js";
 
-type Waiter = { resolve: (answer: PtyAnswers[PtyOp]) => void; reject: (error: Error) => void };
+type Waiter = { resolve: (answer: PtyAnswers[PtyOp]) => void; reject: (error: Error) => void; timer: NodeJS.Timeout | undefined };
 
 /** How many of the host's last stderr lines are kept to say why it stopped. */
 const STDERR_LINES = 20;
+
+/**
+ * How long a request waits for the host's answer. A screen read waits for the mirror to catch up
+ * with the output, and stopping a recording for its files, so those get longer.
+ */
+export const REQUEST_TIMEOUT_MS: Record<PtyOp, number> = {
+  spawn: 5000,
+  write: 5000,
+  send: 5000,
+  resize: 5000,
+  kill: 5000,
+  foreground: 5000,
+  list: 5000,
+  snapshot: 30_000,
+  screen: 30_000,
+  record: 30_000,
+  // A quit gives the host its own time (shutdown below).
+  shutdown: 0,
+};
+
+/** How often the host is asked whether it is still answering, and how long it may take. */
+export const PING_MS = 10_000;
 
 /**
  * What the terminal host runs on. In VibeForge that is Electron's own binary started as plain Node
@@ -40,6 +62,20 @@ export class PtySupervisor {
   readonly onProgram = new Set<(event: PtyProgram) => void>();
   readonly onActivity = new Set<(event: PtyActivity) => void>();
   readonly onCrash = new Set<(message: string) => void>();
+  /** The host stopped answering (true), or answers again (false). */
+  readonly onStall = new Set<(stalled: boolean) => void>();
+  private pinger: NodeJS.Timeout | null = null;
+  /** When the ask still unanswered went out. */
+  private pingSent: number | null = null;
+  private stalled = false;
+  private readonly timeouts: Record<PtyOp, number>;
+  private readonly pingMs: number;
+
+  /** Shorter waits than the defaults, for tests. */
+  constructor(options: { timeouts?: Partial<Record<PtyOp, number>>; pingMs?: number } = {}) {
+    this.timeouts = { ...REQUEST_TIMEOUT_MS, ...options.timeouts };
+    this.pingMs = options.pingMs ?? PING_MS;
+  }
   /** Each line the host writes to stderr: why node-pty failed to load, a full disk, an uncaught error. */
   readonly onStderr = new Set<(line: string) => void>();
   /** The host's last stderr lines, for the reason a start failed. */
@@ -114,7 +150,9 @@ export class PtySupervisor {
     child.on("exit", (code, signal) => {
       if (this.child !== child) return;
       this.child = null;
+      this.stopPinging();
       for (const [id, waiter] of this.waiting) {
+        clearTimeout(waiter.timer);
         waiter.reject(new Error("The terminal host stopped."));
         this.waiting.delete(id);
       }
@@ -122,6 +160,49 @@ export class PtySupervisor {
     });
     await ready;
     started = true;
+    this.startPinging(child);
+  }
+
+  /**
+   * Every PING_MS the host is asked for its terminal list, the cheapest question it answers. One
+   * not answered by the next ask is a stall: the host is alive but stuck, and every terminal with it.
+   * A stuck host is left running: ending it would end every terminal, which is the person's call.
+   */
+  private startPinging(child: ChildProcessWithoutNullStreams): void {
+    this.stopPinging();
+    this.pinger = setInterval(() => {
+      if (this.child !== child) return this.stopPinging();
+      if (this.pingSent !== null) {
+        // After this turn's reads: an answer that came in while the main process was busy counts.
+        if (!this.stalled)
+          setImmediate(() => {
+            if (this.child !== child || this.pingSent === null || this.stalled) return;
+            this.stalled = true;
+            for (const handler of this.onStall) handler(true);
+          });
+        return;
+      }
+      this.pingSent = Date.now();
+      this.request({ op: "list" }, 0).then(
+        () => {
+          this.pingSent = null;
+          if (!this.stalled) return;
+          this.stalled = false;
+          for (const handler of this.onStall) handler(false);
+        },
+        () => {
+          this.pingSent = null;
+        },
+      );
+    }, this.pingMs);
+    this.pinger.unref?.();
+  }
+
+  private stopPinging(): void {
+    if (this.pinger) clearInterval(this.pinger);
+    this.pinger = null;
+    this.pingSent = null;
+    this.stalled = false;
   }
 
   get running(): boolean {
@@ -142,6 +223,7 @@ export class PtySupervisor {
       const waiter = this.waiting.get(msg.reqId);
       if (!waiter) return;
       this.waiting.delete(msg.reqId);
+      clearTimeout(waiter.timer);
       if (msg.ok === false) waiter.reject(new Error(String(msg.error || "Terminal request failed.")));
       else waiter.resolve(msg);
       return;
@@ -174,13 +256,21 @@ export class PtySupervisor {
     }
   }
 
-  private request<A extends PtyAsk>(ask: A): Promise<PtyAnswers[A["op"]]> {
+  /** Asks the host; gives up after `timeoutMs` (0: waits as long as the host lives). */
+  private request<A extends PtyAsk>(ask: A, timeoutMs = this.timeouts[ask.op]): Promise<PtyAnswers[A["op"]]> {
     const child = this.child;
     if (!child) return Promise.reject(new Error("The terminal host is not running. Restart VibeForge."));
     this.seq += 1;
     const reqId = `r${this.seq}`;
     return new Promise((resolve, reject) => {
-      this.waiting.set(reqId, { resolve: resolve as Waiter["resolve"], reject });
+      // An answer that comes after this is dropped: its waiter is gone.
+      const timer = timeoutMs
+        ? setTimeout(() => {
+            if (this.waiting.delete(reqId)) reject(new Error("The terminal host did not answer in time."));
+          }, timeoutMs)
+        : undefined;
+      timer?.unref?.();
+      this.waiting.set(reqId, { resolve: resolve as Waiter["resolve"], reject, timer });
       child.stdin.write(`${JSON.stringify({ ...ask, reqId })}\n`);
     });
   }
@@ -241,6 +331,7 @@ export class PtySupervisor {
     const child = this.child;
     if (!child) return;
     this.stopping = true;
+    this.stopPinging();
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     try {
       await Promise.race([this.request({ op: "shutdown" }), new Promise((resolve) => setTimeout(resolve, timeoutMs))]);

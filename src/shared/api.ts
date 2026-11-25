@@ -170,7 +170,21 @@ export interface AppInfo {
   install: InstallKind;
   /** VibeForge's own log (events and errors; never prompts or terminal output). */
   logFile: string;
+  /** Errors nothing was there to handle, in the main process and the terminal host, since VibeForge started. */
+  unexpectedErrors: number;
 }
+
+/**
+ * Something the main process tells the person, said once. The page words it (app.notice.*): a
+ * window that crashed and was reloaded, terminals cut off by the terminal host stopping, a host
+ * that stopped answering, and errors nothing handled.
+ */
+export type DeskNotice =
+  | { id: "window-reloaded"; reason: string }
+  | { id: "host-stopped"; terminals: number; runIds: string[] }
+  | { id: "host-stalled" }
+  | { id: "host-answering" }
+  | { id: "errors"; count: number };
 
 export interface UpdateInfo {
   current: string;
@@ -339,6 +353,8 @@ export interface DockState {
 
 export interface DeskMethods {
   "app.info": () => AppInfo;
+  /** What the main process had to say while no page was listening (a window that crashed and came back); taking them marks the page as listening. */
+  "app.notices": () => DeskNotice[];
   "app.palette": () => Palette;
   /** Every theme Settings can pin, and the desktop's own. */
   "app.themes": () => ThemeList;
@@ -630,6 +646,7 @@ export interface DeskEvents {
   /** A run ended: for the finished and failed sounds. */
   "run-finished": RunEnded;
   "host-crash": string;
+  notice: DeskNotice;
   voice: VoiceState;
   /** A call with Viby began, moved on or ended; many times a second while it listens, for the meter. */
   call: CallState;

@@ -14,6 +14,7 @@ import { RestartToFinish, SHOW_UPDATE_EVENT, UpdateSheet } from "./components/Up
 import { isStaleChunk, markUpdated, preloadWhenIdle } from "./update-state.js";
 import { OPEN_SWITCHER_EVENT, Switcher } from "./components/Switcher.js";
 import { SessionWatch } from "./watch.js";
+import { MainNotices } from "./notices.js";
 import { CallBar, TOGGLE_CALL_EVENT, VibyRailButton } from "./call.js";
 import { mouseDictateButton, VoiceLayer } from "./voice.js";
 import { Button, ConfirmDialog, Empty, Logo, Menu, Popover, Segmented, Skeleton, Toasts } from "./components/ui.js";
@@ -178,6 +179,7 @@ function Shell() {
       <VoiceLayer />
       <CallBar />
       <SessionWatch />
+      <MainNotices />
       {switcher && <Switcher onClose={() => setSwitcher(false)} />}
       {orchestrator && <OrchestratorBar onClose={closeOrchestrator} />}
       <Rail />

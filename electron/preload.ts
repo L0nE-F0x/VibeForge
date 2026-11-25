@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
-const EVENTS = new Set(["changed", "pty-data", "pty-exit", "palette", "dock", "open-run", "open-workspace", "open-chat", "open-route", "open-view", "open-switcher", "code-workbench", "run-finished", "host-crash", "voice", "voice-command", "call"]);
+const EVENTS = new Set(["changed", "pty-data", "pty-exit", "palette", "dock", "open-run", "open-workspace", "open-chat", "open-route", "open-view", "open-switcher", "code-workbench", "run-finished", "host-crash", "notice", "voice", "voice-command", "call"]);
 
 contextBridge.exposeInMainWorld("vibeforge", {
   call(method: string, ...args: unknown[]): Promise<unknown> {

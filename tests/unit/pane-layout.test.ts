@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutNode } from "../../src/shared/api.js";
-import { computeSplitLayout, movePane, panesOf, placeSession, removePane, setRatioAt, spanCss, unzoomForFocus } from "../../src/ui/pane-layout.js";
+import { computeSplitLayout, movePane, panesOf, placeSession, reattachPanes, removePane, setRatioAt, spanCss, unzoomForFocus, type PaneNode } from "../../src/ui/pane-layout.js";
 
 const pane = (id: string): LayoutNode => ({ kind: "pane", id, launch: { type: "shell" } });
 const split = (dir: "row" | "col", a: LayoutNode, b: LayoutNode, ratio = 0.5): LayoutNode => ({ kind: "split", dir, ratio, a, b });
@@ -128,5 +128,22 @@ describe("placing a CLI started outside Code", () => {
     // Swapping panes keeps the exact same pane IDs in computeSplitLayout output.
     const swapped = movePane(layout, "a", "c", "center");
     expect(computeSplitLayout(swapped, 10).panes.map((p) => p.pane.id).sort()).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("panes after the page reloads", () => {
+  const pane = (id: string): PaneNode => ({ kind: "pane", id, launch: { type: "shell" } });
+
+  it("get back the terminals that still run, one pane each", () => {
+    const remembered = { a: { ptyId: "t1", runId: null }, b: { ptyId: "t2", runId: "r2" }, c: { ptyId: "gone", runId: null }, d: { ptyId: "t1", runId: null } };
+    const back = reattachPanes([pane("a"), pane("b"), pane("c"), pane("d"), pane("e")], remembered, new Set(["t1", "t2"]));
+    expect([...back]).toEqual([
+      ["a", { ptyId: "t1", runId: null }],
+      ["b", { ptyId: "t2", runId: "r2" }],
+    ]);
+  });
+
+  it("start afresh after a restart, when nothing is remembered", () => {
+    expect(reattachPanes([pane("a")], {}, new Set(["t1"])).size).toBe(0);
   });
 });

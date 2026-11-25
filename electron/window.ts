@@ -1,10 +1,11 @@
 import path from "node:path";
-import { app, BrowserWindow, nativeImage, session, shell } from "electron";
+import { app, BrowserWindow, dialog, nativeImage, session, shell } from "electron";
 import { PageErrors } from "../src/core/log.js";
 import type { Dock } from "./dock.js";
-import { guardSession, guardWebContents, isAppPage } from "./guards.js";
+import { guardSession, guardWebContents, isAppPage, relaunchArgs } from "./guards.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
+import { PageRecovery } from "./page-recovery.js";
 import type { Quit } from "./quit.js";
 import type { TrayController } from "./tray-controller.js";
 
@@ -123,12 +124,89 @@ export class MainWindow {
         log.warn(`Could not close the browser dock's pages: ${error instanceof Error ? error.message : String(error)}`);
       }
     });
-    win.webContents.on("render-process-gone", (_event, details) => log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`));
+    this.recoverPage(win);
     win.webContents.on("console-message", (event) => {
       if (event.level === "error") pageErrors.report(`${event.message}${event.sourceId ? ` (${path.basename(event.sourceId)}:${event.lineNumber})` : ""}`);
     });
     const page = ctx.page;
     if (page.devUrl) await win.loadURL(page.devUrl);
     else await win.loadFile(page.file);
+  }
+
+  /**
+   * A page that stops is reloaded, up to PAGE_RELOADS times in five minutes; the terminals go on
+   * meanwhile and each pane re-attaches when the page is back. Past that, the person chooses. A page
+   * that hangs gets Reload offered, which ends the hung page and so takes the same way back.
+   */
+  private recoverPage(win: BrowserWindow): void {
+    const { ctx } = this;
+    const { log, words } = ctx;
+    const recovery = new PageRecovery();
+    // Notices wait for the page that loads next.
+    win.webContents.on("did-start-loading", () => ctx.pageGone());
+    win.webContents.on("render-process-gone", (_event, details) => {
+      log.error(`The window's page stopped: ${details.reason} (exit code ${details.exitCode})`);
+      ctx.pageGone();
+      hung?.abort();
+      if (ctx.quitting || win.isDestroyed()) return;
+      const step = recovery.gone(details.reason);
+      if (step === "ignore") return;
+      if (step === "reload") {
+        log.info("Reloading the window's page; the terminals go on running");
+        ctx.notice({ id: "window-reloaded", reason: details.reason });
+        win.webContents.reload();
+        return;
+      }
+      log.warn("The window's page keeps stopping; asking before reloading again");
+      const options: Electron.MessageBoxOptions = {
+        type: "error",
+        title: "VibeForge",
+        message: words.say("main.windowKeepsStopping"),
+        detail: words.say("main.windowKeepsStoppingBody"),
+        buttons: [words.say("main.windowReload"), words.say("main.windowRestart")],
+        defaultId: 0,
+        cancelId: 0,
+      };
+      void dialog.showMessageBox(win, options).then(({ response }) => {
+        if (win.isDestroyed() || ctx.quitting) return;
+        if (response === 1) {
+          log.info("Restarting, after the window's page kept stopping");
+          app.relaunch({ execPath: process.execPath, args: relaunchArgs(process.argv) });
+          ctx.quitting = true;
+          app.quit();
+          return;
+        }
+        ctx.notice({ id: "window-reloaded", reason: details.reason });
+        win.webContents.reload();
+      });
+    });
+    let hung: AbortController | null = null;
+    win.on("unresponsive", () => {
+      if (hung || ctx.quitting) return;
+      log.warn("The window's page is not responding");
+      const asking = new AbortController();
+      hung = asking;
+      const options: Electron.MessageBoxOptions = {
+        type: "warning",
+        title: "VibeForge",
+        message: words.say("main.windowHung"),
+        detail: words.say("main.windowHungBody"),
+        buttons: [words.say("main.windowReload"), words.say("main.windowWait")],
+        defaultId: 1,
+        cancelId: 1,
+        signal: asking.signal,
+      };
+      void dialog.showMessageBox(win, options).then(({ response }) => {
+        if (hung === asking) hung = null;
+        // Ending the hung page is what lets it reload: render-process-gone above does that.
+        if (response === 0 && !asking.signal.aborted && !win.isDestroyed()) win.webContents.forcefullyCrashRenderer();
+      });
+    });
+    win.on("responsive", () => {
+      if (!hung) return;
+      log.info("The window's page is responding again");
+      hung.abort();
+      hung = null;
+    });
   }
 }

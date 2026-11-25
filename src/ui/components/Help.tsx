@@ -52,6 +52,7 @@ export async function diagnosticsText(info: AppInfo | undefined, engines: Engine
     "",
     environmentText(info, engines),
     `Install: ${info?.install ?? "?"} copy at ${info?.appPath ?? "?"}`,
+    `Unexpected errors since start: ${info?.unexpectedErrors ?? "?"}`,
     settings
       ? `Settings: theme ${settings.theme}, language ${settings.language}, shell ${settings.defaultShell}, default engine ${settings.defaultEngine}, update checks ${settings.checkUpdates ? "on" : "off"}`
       : "Settings: not loaded",

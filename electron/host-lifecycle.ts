@@ -152,6 +152,12 @@ export function terminalEnv(ctx: MainContext, controlSocket: string): NodeJS.Pro
   return env;
 }
 
+/** What a run cut off by the terminal host stopping says about how it ended (core.hostStoppedRun). */
+export const HOST_STOPPED = "The terminal host stopped, so this terminal was cut off. Continue picks the CLI's session up where it left off.";
+
+/** How the host's own uncaught-error handler starts its line (pty-host.cjs). */
+const HOST_UNCAUGHT = "pty-host uncaught:";
+
 /** Lines of the host's stderr logged in a minute. */
 const STDERR_PER_MINUTE = 20;
 
@@ -206,6 +212,7 @@ export class HostLifecycle {
     let said = 0;
     let since = 0;
     supervisor.onStderr.add((line) => {
+      if (line.startsWith(HOST_UNCAUGHT)) ctx.unexpected.add();
       const now = Date.now();
       if (now - since > 60_000) {
         since = now;
@@ -225,18 +232,26 @@ export class HostLifecycle {
       ctx.service?.onPtyProgram(event.ptyId, event.argv, event.cwd);
     });
     supervisor.onActivity.add((event) => ctx.service?.onPtyActivity(event.ptyId, event.working));
+    supervisor.onStall.add((stalled) => {
+      if (stalled) log.warn("The terminal host is not answering; its terminals may not respond");
+      else log.info("The terminal host is answering again");
+      ctx.notice({ id: stalled ? "host-stalled" : "host-answering" });
+    });
     supervisor.onCrash.add((message) => {
       // The supervisor's message already says so: "The terminal host stopped (SIGKILL)."
       log.error(message);
       // Every terminal died with the host. Record them, then bring the host back.
-      for (const session of ctx.service?.listLive() ?? []) {
+      const live = ctx.service?.listLive() ?? [];
+      for (const session of live) {
         log.info(`Terminal ${session.ptyId} ended (the terminal host stopped)`);
         // The page too, or an open pane goes on looking live while every key typed there is lost.
         send("pty-exit", { ptyId: session.ptyId, exitCode: null, signal: null });
-        this.ended(session.ptyId, null, null);
+        this.ended(session.ptyId, null, null, HOST_STOPPED);
       }
       // Once quitting has begun the host stays down: a new one would start halfway through the quit.
       if (ctx.quitting) return;
+      // Said once for them all, with Continue for the runs among them.
+      ctx.notice({ id: "host-stopped", terminals: live.length, runIds: live.flatMap((session) => (session.runId ? [session.runId] : [])) });
       const count = this.crashes.add(Date.now());
       if (count > 3) {
         log.error("The terminal host keeps stopping; it stays off until VibeForge restarts");
@@ -244,7 +259,6 @@ export class HostLifecycle {
         send("host-crash", this.hostError);
         return;
       }
-      send("host-crash", message);
       setTimeout(() => {
         if (!ctx.quitting) void this.start();
       }, 1000);
@@ -252,7 +266,7 @@ export class HostLifecycle {
   }
 
   /** A terminal is over, however it ended: the core records it. */
-  private ended(ptyId: string, exitCode: number | null, signal: number | null): void {
-    void this.ctx.service?.onPtyExit(ptyId, exitCode, signal);
+  private ended(ptyId: string, exitCode: number | null, signal: number | null, error: string | null = null): void {
+    void this.ctx.service?.onPtyExit(ptyId, exitCode, signal, error);
   }
 }

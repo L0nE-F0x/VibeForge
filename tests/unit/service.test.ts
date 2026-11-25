@@ -100,6 +100,20 @@ describe("chats", () => {
     ctx.svc.close();
   });
 
+  it("says a run was cut off when the terminal host stopped under it, and Continue picks it up", async () => {
+    const ctx = setup();
+    const agent = await agentIn(ctx);
+    const chat = ctx.svc.createChat({ agentId: agent.id });
+    const first = await ctx.svc.sendChat(chat.id, "Write the notes");
+    const cutOff = "The terminal host stopped, so this terminal was cut off. Continue picks the CLI's session up where it left off.";
+    await ctx.svc.onPtyExit(first.ptyId, null, null, cutOff);
+    expect(ctx.svc.getRun(first.runId).run).toMatchObject({ status: "exited", exitCode: null, error: cutOff });
+    const next = await ctx.svc.continueRun(first.runId);
+    expect(next.chatId).toBe(chat.id);
+    expect(ctx.spawns.at(-1)?.argv).toEqual(["/usr/bin/argy", "--flag", "--continue"]);
+    ctx.svc.close();
+  });
+
   it("reopens the exact session the CLI printed on exit", async () => {
     const ctx = setup();
     const chat = ctx.svc.createChat({ engine: "argy" });

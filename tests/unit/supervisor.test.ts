@@ -103,3 +103,58 @@ describe("what the terminal host runs on", () => {
     expect(supervisor.runtime).toEqual({ node: process.versions.node, uv: process.versions.uv });
   });
 });
+
+/** A stand-in host that is stuck between SIGUSR1s (it answers what it was asked once unstuck), and never answers \`write\`. */
+const SLOW = `
+const readline = require("readline");
+const out = (line) => process.stdout.write(line + "\\n");
+let stuck = false;
+let asked = [];
+const answer = (msg) => out(JSON.stringify({ reqId: msg.reqId, ok: true, ptys: [] }));
+process.on("SIGUSR1", () => {
+  stuck = !stuck;
+  if (!stuck) asked.splice(0).forEach(answer);
+});
+out(JSON.stringify({ event: "ready", pid: process.pid }));
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.op === "list") stuck ? asked.push(msg) : answer(msg);
+  if (msg.op === "snapshot") setTimeout(() => out(JSON.stringify({ reqId: msg.reqId, ok: true, ansi: "late", seq: 1, cols: 1, rows: 1, alive: true })), 300);
+});
+process.stdin.on("end", () => process.exit(0));
+`;
+
+describe("a terminal host that stops answering", () => {
+  async function startSlow(options: ConstructorParameters<typeof PtySupervisor>[0]) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-supervisor-"));
+    fs.mkdirSync(path.join(dir, "electron"));
+    fs.writeFileSync(path.join(dir, "electron", "pty-host.cjs"), SLOW);
+    vi.stubEnv("VIBEFORGE_NODE", process.execPath);
+    supervisor = new PtySupervisor(options);
+    await supervisor.start(dir, { ...process.env });
+    return supervisor;
+  }
+
+  it("gives up on a request after its time, instead of waiting for ever", async () => {
+    const host = await startSlow({ timeouts: { write: 200, snapshot: 1000 } });
+    const started = Date.now();
+    await expect(host.write("p1", "x")).rejects.toThrow("The terminal host did not answer in time.");
+    expect(Date.now() - started).toBeLessThan(1000);
+    // A snapshot has longer, and an answer within it arrives.
+    expect((await host.snapshot("p1")).ansi).toBe("late");
+  });
+
+  it("says when the host stops answering, and when it answers again, without ending it", async () => {
+    const host = await startSlow({ pingMs: 100 });
+    const heard: boolean[] = [];
+    host.onStall.add((stalled) => heard.push(stalled));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(heard).toEqual([]);
+    const pid = (host as unknown as { child: { pid: number } }).child.pid;
+    process.kill(pid, "SIGUSR1");
+    await vi.waitFor(() => expect(heard).toEqual([true]), { timeout: 2000 });
+    expect(host.running).toBe(true);
+    process.kill(pid, "SIGUSR1");
+    await vi.waitFor(() => expect(heard).toEqual([true, false]), { timeout: 2000 });
+  });
+});
