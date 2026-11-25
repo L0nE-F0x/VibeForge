@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **A branch with the same name as a tag opens.** **Open branch** listed such a branch as `heads/<name>`, and choosing it said there was no branch by that name. The folder's own branch showed the same way and wasn't marked as the one it is on. Branches are now listed and opened by their own names.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

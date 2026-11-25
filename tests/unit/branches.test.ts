@@ -105,6 +105,21 @@ describe("a second checkout", () => {
     expect(await readBranches(plain)).toEqual({ repo: null, current: null, branches: [] });
   });
 
+  it("lists and opens a branch by its own name when a tag has the same name", async () => {
+    const dir = repoOnFeature();
+    git(dir, "branch", "release");
+    git(dir, "tag", "release");
+    git(dir, "tag", "feat/phone-companion");
+    const list = await readBranches(dir);
+    // Git's short names turn both into heads/… to tell them from the tags.
+    expect(list.current).toBe("feat/phone-companion");
+    expect(list.branches.map((branch) => branch.name)).toEqual(["feat/phone-companion", "main", "release"]);
+    expect(list.branches[0].checkout).toBe(dir);
+    const opened = await openBranchCheckout(dir, "release");
+    expect(git(opened.path, "branch", "--show-current").trim()).toBe("release");
+    await expect(openBranchCheckout(dir, "feat/phone-companion")).rejects.toThrow("This folder is already on feat/phone-companion.");
+  });
+
   it("adds the checkout as its own workspace and leaves the first folder's branch", async () => {
     const dir = repoOnFeature();
     const svc = service();

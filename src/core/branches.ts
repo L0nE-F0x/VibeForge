@@ -107,6 +107,16 @@ function checkoutDir(main: string, branch: string): string {
   return target;
 }
 
+/**
+ * The branch `folder` is on, by its full name; null when detached. Not `rev-parse --abbrev-ref`:
+ * git's short names turn a branch that shares its name with a tag into `heads/<name>`.
+ */
+async function currentBranch(folder: string): Promise<string | null> {
+  const head = await git(["symbolic-ref", "--quiet", "HEAD"], folder);
+  const ref = head.code === 0 ? head.stdout.trim() : "";
+  return ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : null;
+}
+
 async function canonicalBranch(cwd: string, name: string): Promise<string> {
   const check = await git(["check-ref-format", "--branch", name], cwd);
   if (check.code === 127) throw new Error("git was not found on PATH.");
@@ -121,16 +131,16 @@ export async function readBranches(folder: string): Promise<BranchList> {
   const top = await git(["rev-parse", "--show-toplevel"], folder);
   if (top.code === 127) throw new Error("git was not found on PATH.");
   if (top.code !== 0 || !top.stdout.trim()) return { repo: null, current: null, branches: [] };
-  const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], folder);
-  const current = head.code === 0 && head.stdout.trim() && head.stdout.trim() !== "HEAD" ? head.stdout.trim() : null;
-  const refs = await git(["for-each-ref", "--format=%(refname:short)\t%(objectname:short)", "refs/heads"], folder);
+  const current = await currentBranch(folder);
+  const refs = await git(["for-each-ref", "--format=%(refname)\t%(objectname:short)", "refs/heads"], folder);
   if (refs.code !== 0) throw readFailure(refs);
   const trees = await worktrees(folder);
   const checkedOut = new Map(trees.flatMap((row) => (row.branch ? [[row.branch, row.path] as const] : [])));
   const branches: BranchInfo[] = [];
   for (const line of refs.stdout.split("\n")) {
     if (!line.trim()) continue;
-    const [name, commit = ""] = line.split("\t");
+    const [ref, commit = ""] = line.split("\t");
+    const name = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : "";
     if (!name) continue;
     const checkout = checkedOut.get(name) ?? null;
     branches.push({ name, commit, checkout: checkout && isDirectory(checkout) ? checkout : null, current: name === current });
@@ -167,8 +177,7 @@ export async function openBranchCheckout(folder: string, branch: string): Promis
 }
 
 async function addCheckout(folder: string, main: string, branch: string): Promise<OpenedCheckout> {
-  const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], folder);
-  if (head.code === 0 && head.stdout.trim() === branch) throw new Error(`This folder is already on ${branch}.`);
+  if ((await currentBranch(folder)) === branch) throw new Error(`This folder is already on ${branch}.`);
   let trees = await worktrees(folder);
   let found = trees.find((row) => row.branch === branch);
   if (found && !isDirectory(found.path)) {
