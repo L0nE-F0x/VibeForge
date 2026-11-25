@@ -249,8 +249,11 @@ async function poll() {
 
 /** Plan limits, read on their own: the desk shows them when they arrive. */
 async function loadPlans() {
+  // Another computer picked while these were on their way: they are the one before's plans, not its.
+  const base = state.base;
   try {
     const answer = await call("/api/plans", { timeout: POLL_TIMEOUT_MS });
+    if (base !== state.base) return;
     state.plans = answer.plans ?? null;
     if (state.view === "desk") update();
   } catch {

@@ -68,10 +68,15 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
     `function update() { updates += 1; }`,
     `function wordsLoaded() { return true; }`,
     `function loadWords() { return Promise.resolve(true); }`,
+    // What showComputer reaches for beyond api.js: the computers this phone keeps, and what it lets go of on the way.
+    `const COMPUTER_KEY = "vibeforge-computer"; const localStorage = { setItem() {} };`,
+    `function computers() { return [{ url: "", token: "vf_test", name: "" }, { url: "https://laptop.tail1234.ts.net", token: "vfd_laptop", name: "" }]; }`,
+    `function micCancel() {}`,
+    `function forgetSeen() {}`,
     ...["POLL_MS", "POLL_SLOWEST_MS", "POLL_TIMEOUT_MS", "GATEWAY_DOWN", "seen", "RELOADED_KEY"].map((name) => line("const", name)),
     ...["polling", "pollAgain", "pollFailures", "version"].map((name) => line("let", name)),
-    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "ownVersion", "reloadOnce", "withBusy"].map(pick),
-    `globalThis.page = { refresh, withBusy, state: () => ({ desk: state.desk, plans: state.plans, error: state.error, actionError: state.actionError, pollFailures, updates, reloads }), setView(next) { state.view = next; show(); void refresh(); }, set(patch) { Object.assign(state, patch); } };`,
+    ...["call", "refresh", "poll", "schedule", "loadPlans", "pageIdle", "checkVersion", "ownVersion", "reloadOnce", "withBusy", "showComputer"].map(pick),
+    `globalThis.page = { refresh, withBusy, showComputer, state: () => ({ desk: state.desk, plans: state.plans, error: state.error, actionError: state.actionError, pollFailures, updates, reloads }), setView(next) { state.view = next; show(); void refresh(); }, set(patch) { Object.assign(state, patch); } };`,
   ].join("\n");
   const context = vm.createContext({
     window: {
@@ -86,6 +91,7 @@ function pagePoll(answer: (route: string, headers: Record<string, string>) => An
   const handle = context.page as {
     refresh(): Promise<void>;
     withBusy(task: () => Promise<unknown>): Promise<unknown>;
+    showComputer(url: string): void;
     setView(view: string): void;
     set(patch: Record<string, unknown>): void;
     state(): { desk: unknown; plans: unknown; error: string; actionError: string; pollFailures: number; updates: number; reloads: number };
@@ -190,6 +196,24 @@ describe("the phone page's poll", () => {
     expect(link.fetches.filter((seen) => seen.route === "/api/desk").length).toBeGreaterThanOrEqual(3);
     await vi.advanceTimersByTimeAsync(8000);
     expect(link.page.state().plans).toEqual({ providers: [] });
+  });
+
+  it("never shows one computer's plan limits on another's desk when they arrive after a switch", async () => {
+    const plans = (from: string) => ({ plans: { providers: [{ id: "claude", percent: from === "desktop" ? 91 : 12 }], checkedAt: from } });
+    const link = pagePoll(
+      (route) => (route === "/api/plans" ? { ms: 8000, body: plans("desktop") } : route.endsWith("/api/plans") ? { ms: 100, body: plans("laptop") } : { ms: 50 }),
+      { plans: true },
+    );
+    void link.page.refresh();
+    await vi.advanceTimersByTimeAsync(500);
+    // The desktop is still working out its plan limits when the laptop is picked.
+    link.page.showComputer("https://laptop.tail1234.ts.net");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(link.page.state().plans).toEqual(plans("laptop").plans);
+    // The desktop's answer, late: it is the desktop's, and the laptop is on show.
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(link.fetches.filter((seen) => seen.route === "/api/plans" && !seen.aborted)).toHaveLength(1);
+    expect(link.page.state().plans).toEqual(plans("laptop").plans);
   });
 
   it("reads a proxy's answer that isn't the computer's (VibeForge closed behind Tailscale Serve) as offline, and backs off", async () => {
