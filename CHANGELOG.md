@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **The phone page recovers from an answer that broke off on the way.** When the phone changed networks halfway through the desk's answer (Wi-Fi to mobile data, a tunnel), the page kept the broken answer as if it were the desk and asked again with its tag, so the computer kept saying nothing had changed: the desk stayed empty or showed an error until something on the computer moved. Now the page says the computer is offline for that moment and the next poll shows the desk again.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**

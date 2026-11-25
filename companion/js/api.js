@@ -75,6 +75,10 @@ export async function call(path, options = {}) {
     window.clearTimeout(limit);
   }
   if (!response.ok && (!ours || GATEWAY_DOWN.includes(response.status))) throw Object.assign(new Error(t("phone.offline")), { offline: true });
+  // A read whose answer broke off on the way (the phone changed networks halfway through) wasn't
+  // heard either. What arrived is not the desk, and it is never kept under the answer's tag: the
+  // computer would say "nothing changed" to every poll after, and the page would keep the broken one.
+  if (!ours && method === "GET") throw Object.assign(new Error(t("phone.offline")), { offline: true });
   if (response.status === 401 && path !== "/api/pair") {
     // Its code no longer works. Only for the computer still on show: the answer of one switched away from changes nothing.
     if (own && base === state.base) forget();
