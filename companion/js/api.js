@@ -260,12 +260,13 @@ async function loadPlans() {
 
 /**
  * Nothing on the page would be lost by building it again: no box has focus or words in it, no
- * action is on its way, and the mic isn't listening or being heard.
+ * pictures wait to go to the Orchestrator, no action is on its way, and the mic isn't listening or
+ * being heard.
  */
 export function pageIdle() {
   const focused = typeof document === "undefined" ? null : document.activeElement;
   if (focused && /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName)) return false;
-  if (state.busy || state.orchDraft.trim()) return false;
+  if (state.busy || state.orchDraft.trim() || state.orchImages.length) return false;
   for (const box of [parts.prompt, parts.box]) if (box?.isConnected && box.value.trim()) return false;
   const phase = parts.mic?.dataset.phase;
   return !phase || phase === "idle";

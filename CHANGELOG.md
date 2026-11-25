@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pictures waiting to go to Viby on the phone survive an update of the computer.** After the computer updated, the phone page loaded itself again once nothing was being typed, and pictures picked with Attach (or pasted, once the box was left) but not sent yet counted as nothing: they were gone. The page now waits until they are sent or taken off, as it does for words in the box.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
