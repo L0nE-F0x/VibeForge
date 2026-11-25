@@ -331,6 +331,8 @@ function textField(turn, step, key, value, label) {
   const input = el("input", { class: "orch-branch-input", "data-field": key, autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: label, "aria-label": label });
   input.value = value;
   input.addEventListener("keydown", (event) => {
+    // An Enter that only picks the word an input method offered (Japanese, Chinese) leaves the box open, as on the desktop's card.
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter") {
       event.preventDefault();
       input.blur();
@@ -353,6 +355,7 @@ function branchField(turn, step, value) {
   const input = el("input", { class: "orch-branch-input", "data-field": "branch", autocapitalize: "off", autocorrect: "off", spellcheck: "false", placeholder: t("orch.noBranch"), "aria-label": t("orch.branch") });
   input.value = value;
   input.addEventListener("keydown", (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter") {
       event.preventDefault();
       input.blur();
