@@ -12,19 +12,23 @@ import { placeInCode } from "./views/code/useWorkspacePanes.js";
 // crashed, say) are taken when this one loads.
 
 export function MainNotices() {
-  const { push, fail } = useToast();
+  const { push, dismiss, fail } = useToast();
   const copyDiagnostics = useCopyDiagnostics();
   // The newest, for the listeners set up once below.
   const copy = useRef(copyDiagnostics);
   copy.current = copyDiagnostics;
 
   useEffect(() => {
+    // The "isn't answering" toast on screen, cleared when the host answers again.
+    let stalled: number | null = null;
     const show = (notice: DeskNotice) => {
       if (notice.id === "window-reloaded") {
         push("info", t("app.notice.windowReloaded"), t("app.notice.windowReloadedBody"));
       } else if (notice.id === "host-stalled") {
-        push("error", t("app.notice.hostStalled"), t("app.notice.hostStalledBody"));
+        stalled = push("error", t("app.notice.hostStalled"), t("app.notice.hostStalledBody"));
       } else if (notice.id === "host-answering") {
+        if (stalled !== null) dismiss(stalled);
+        stalled = null;
         push("success", t("app.notice.hostAnswering"));
       } else if (notice.id === "errors") {
         push("error", t("app.notice.errors"), t.count("app.notice.errorsBody", notice.count), {
@@ -61,6 +65,8 @@ export function MainNotices() {
                   })(),
               }
             : undefined,
+          // It says what was cut off and offers Continue all: it stays until it is closed.
+          { sticky: true },
         );
       }
     };
@@ -69,7 +75,7 @@ export function MainNotices() {
       .then((missed) => missed.forEach(show))
       .catch(() => undefined);
     return off;
-  }, [push, fail]);
+  }, [push, dismiss, fail]);
 
   return null;
 }

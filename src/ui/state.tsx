@@ -222,8 +222,14 @@ export interface Toast {
   action?: ToastAction;
 }
 
+/** `sticky`: stays until it is closed (or dismissed by its id), for one that mustn't be missed. */
+export interface ToastOptions {
+  sticky?: boolean;
+}
+
 interface Toaster {
-  push: (kind: ToastKind, title: string, body?: string, action?: ToastAction) => void;
+  /** Shows a toast; its id, for dismiss. */
+  push: (kind: ToastKind, title: string, body?: string, action?: ToastAction, options?: ToastOptions) => number;
   dismiss: (id: number) => void;
   fail: (error: unknown, title?: string) => void;
 }
@@ -238,12 +244,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const seq = useRef(0);
   const dismiss = useCallback((id: number) => setToasts((prev) => prev.filter((toast) => toast.id !== id)), []);
   const push = useCallback(
-    (kind: ToastKind, title: string, body?: string, action?: ToastAction) => {
+    (kind: ToastKind, title: string, body?: string, action?: ToastAction, options?: ToastOptions) => {
       seq.current += 1;
       const id = seq.current;
       setToasts((prev) => [...prev.slice(-4), { id, kind, title, body, action }]);
       // A toast with a button stays long enough to reach it.
-      setTimeout(() => dismiss(id), kind === "error" ? 9000 : action ? 9000 : 4500);
+      if (!options?.sticky) setTimeout(() => dismiss(id), kind === "error" ? 9000 : action ? 9000 : 4500);
+      return id;
     },
     [dismiss],
   );
