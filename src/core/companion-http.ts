@@ -208,11 +208,16 @@ async function readRaw(req: http.IncomingMessage, max: number, keep = max): Prom
 async function readBody(req: http.IncomingMessage, max = BODY_MAX): Promise<unknown> {
   const raw = await readRaw(req, max);
   if (raw.length === 0) return {};
+  let parsed: unknown;
   try {
-    return JSON.parse(raw.toString("utf8")) as unknown;
+    parsed = JSON.parse(raw.toString("utf8"));
   } catch {
     throw new CompanionHttpError("phone.error.invalid", 400);
   }
+  // `null` is valid JSON, but every route reads fields off the body: it would throw a TypeError (a 500
+  // before pairing, a JavaScript message on the phone's banner after).
+  if (parsed === null) throw new CompanionHttpError("phone.error.invalid", 400);
+  return parsed;
 }
 
 /** A step's fields as the phone sent them: known keys, strings only, each kept to a sensible length. */

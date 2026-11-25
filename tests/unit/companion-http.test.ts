@@ -782,6 +782,22 @@ describe("what the phone page sends over a slow link", () => {
     }
   });
 
+  it("answers a body of JSON null as an invalid request, before pairing and after", async () => {
+    const token = newCompanionToken();
+    const server = await startCompanionHttp({ port: 0, token, root: tempDir(), icon: null, actions: actions() });
+    try {
+      const base = `http://127.0.0.1:${server.port}`;
+      const unpaired = await fetch(`${base}/api/pair`, { method: "POST", body: "null" });
+      expect(unpaired.status).toBe(400);
+      const paired = await fetch(`${base}/api/send`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: "null" });
+      expect(paired.status).toBe(400);
+      // The phone's own sentence, not a JavaScript error message.
+      expect(((await paired.json()) as { error: string }).error).not.toMatch(/properties of null/);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("accepts image attachments on /api/orchestrator/ask and serves /api/orchestrator/image", async () => {
     const TINY_PNG = "data:image/png;base64," + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
     const asked: Array<{ text: string; images?: string[] }> = [];
