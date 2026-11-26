@@ -127,6 +127,30 @@ describe("Viby diagnostics telemetry and inspect diagnostics", () => {
   });
 });
 
+describe("Viby's own diagnostics, only when asked for", () => {
+  it("reads a skill whose name mentions diagnostics instead of answering with Viby's metrics", async () => {
+    const ctx = setupWithClaude();
+    await ctx.svc.saveSkill({ name: "Read TypeScript diagnostics", description: "Type errors", body: "Run tsc --noEmit and list each error." });
+    let calls = 0;
+    ctx.svc.orchestrator.runner = async () => {
+      calls += 1;
+      return ok(
+        JSON.stringify({
+          session_id: "s-skill",
+          structured_output:
+            calls === 1
+              ? { say: "Reading the skill.", steps: [{ kind: "inspect", action: "skill", target: "Read TypeScript diagnostics" }] }
+              : { say: "It runs tsc.", steps: [] },
+        }),
+      );
+    };
+    await ctx.svc.orchestratorAsk("what does my TypeScript diagnostics skill do?");
+    const check = ctx.svc.orchestratorView().turns.at(-1)?.checks?.[0];
+    expect(check?.details).toContain("Run tsc --noEmit");
+    expect(check?.details).not.toContain("Viby diagnostics");
+  });
+});
+
 describe("Viby reliability: barge-in cleanup race, chained PTY prompt guards, and call errors", () => {
   it("awaits unwinding an aborted turn on immediate barge-in ask while rejecting concurrent un-stopped asks", async () => {
     const ctx = setupWithClaude();

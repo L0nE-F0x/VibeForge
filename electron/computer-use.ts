@@ -345,6 +345,8 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
   private readonly bin: (name: string) => string | null;
   private readonly uinputOk: () => boolean;
   private hyprMode: HyprConfigProvider | null = null;
+  /** The window the last desktop screenshot was cut down to, or null when it showed a whole monitor. */
+  private lastCrop: { address: string; at: [number, number] } | null = null;
 
   constructor(private readonly opts: ComputerDriverOptions) {
     this.appUi = new AppUiDriver(opts);
@@ -398,22 +400,33 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
     return parseHyprctlMonitors(stdout);
   }
 
-  private async activeMonitor(hyprctl: string | null): Promise<DesktopMonitorInfo | null> {
+  /**
+   * Where the last desktop screenshot sits on the desktop, so a position read off it can be turned
+   * into a desktop position: the active monitor, or, for a screenshot of one window, that window's
+   * top-left corner where it is now, at the scale of the monitor it is on.
+   */
+  private async shotFrame(hyprctl: string | null): Promise<Pick<DesktopMonitorInfo, "x" | "y" | "scale"> | null> {
     const monitors = await this.listMonitors(hyprctl);
-    return monitors.find((m) => m.focused) ?? monitors[0] ?? null;
+    const active = monitors.find((m) => m.focused) ?? monitors[0] ?? null;
+    const crop = this.lastCrop;
+    if (!crop) return active;
+    const win = (await this.listWindows()).find((w) => w.address === crop.address);
+    const [x, y] = win?.at ?? crop.at;
+    const mon = monitors.find((m) => x >= m.x && y >= m.y && x < m.x + m.width / (m.scale || 1) && y < m.y + m.height / (m.scale || 1)) ?? active;
+    return { x, y, scale: mon?.scale ?? 1 };
   }
 
   private async toLogicalCoords(
     hyprctl: string | null,
     coords: { x: number; y: number },
     options?: string,
-    monOverride?: DesktopMonitorInfo | null,
+    frameOverride?: Pick<DesktopMonitorInfo, "x" | "y" | "scale"> | null,
   ): Promise<{ x: number; y: number }> {
     if (parseOptions(options).str("coords")?.toLowerCase() === "logical") {
       return { x: Math.round(coords.x), y: Math.round(coords.y) };
     }
-    const mon = monOverride !== undefined ? monOverride : await this.activeMonitor(hyprctl);
-    return screenshotToLogicalCoords(coords, mon);
+    const frame = frameOverride !== undefined ? frameOverride : await this.shotFrame(hyprctl);
+    return screenshotToLogicalCoords(coords, frame);
   }
 
   async capabilities(): Promise<ComputerUseCapabilities> {
@@ -451,8 +464,9 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
     const activeMon = monitors.find((m) => m.focused) ?? monitors[0] ?? null;
     const targetWin = opts.target ? matchDesktopWindow(opts.target, windows) : null;
     const args: string[] = [];
-    if (targetWin && targetWin.size[0] > 0 && targetWin.size[1] > 0) {
-      args.push("-g", `${targetWin.at[0]},${targetWin.at[1]} ${targetWin.size[0]}x${targetWin.size[1]}`);
+    const cropWin = targetWin && targetWin.size[0] > 0 && targetWin.size[1] > 0 ? targetWin : null;
+    if (cropWin) {
+      args.push("-g", `${cropWin.at[0]},${cropWin.at[1]} ${cropWin.size[0]}x${cropWin.size[1]}`);
     } else if (monitors.length > 1 && activeMon) {
       args.push("-o", activeMon.name);
     }
@@ -462,6 +476,8 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
     } catch (err) {
       throw wrapExecError(grim, args, err);
     }
+    // Positions read off this screenshot are measured from its top-left corner, so later clicks start there.
+    this.lastCrop = cropWin ? { address: cropWin.address, at: [cropWin.at[0], cropWin.at[1]] } : null;
     try {
       fs.chmodSync(outPath, 0o600);
     } catch {
@@ -474,6 +490,7 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
       ocrText = ocr.stdout.trim().slice(0, 1200);
     }
     const scale = activeMon?.scale ?? 1;
+    const cropScale = cropWin ? ((await this.shotFrame(hyprctl))?.scale ?? 1) : 1;
     const details = [
       `Surface: desktop (Hyprland${targetWin ? ` — window "${targetWin.title}" [${targetWin.class}]` : ""})`,
       ...(monitors.length
@@ -486,7 +503,11 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
               .join("; ")}`,
           ]
         : []),
-      ...(activeMon && scale !== 1
+      ...(cropWin
+        ? [
+            `Coordinates: this screenshot shows only that window, so positions in it are measured from the window's top-left corner${cropScale !== 1 ? ` (scale ${cropScale})` : ""}; desktop click/move/drag/scroll coordinates read from it are automatically converted to where the window is on the desktop.`,
+          ]
+        : activeMon && scale !== 1
         ? [
             `Coordinate scaling: screenshot is ${activeMon.width}x${activeMon.height} (scale ${scale}); desktop click/move/drag/scroll coordinates are automatically converted to Hyprland logical space (${Math.round(activeMon.width / scale)}x${Math.round(activeMon.height / scale)}).`,
           ]
@@ -689,9 +710,9 @@ export class HyprlandWaylandDriver implements ComputerUseDriver {
       if (!ydo && !dotool) {
         throw missingToolError("drag", 'missing binary "ydotool" or "dotool"', installHintFor(["ydotool"], this.pkgMgr()));
       }
-      const mon = await this.activeMonitor(hyprctl);
-      const from = await this.toLogicalCoords(hyprctl, { x: drag.fromX, y: drag.fromY }, req.options, mon);
-      const to = await this.toLogicalCoords(hyprctl, { x: drag.toX, y: drag.toY }, req.options, mon);
+      const frame = await this.shotFrame(hyprctl);
+      const from = await this.toLogicalCoords(hyprctl, { x: drag.fromX, y: drag.fromY }, req.options, frame);
+      const to = await this.toLogicalCoords(hyprctl, { x: drag.toX, y: drag.toY }, req.options, frame);
       const failures: string[] = [];
       if (ydo) {
         try {
@@ -795,6 +816,16 @@ export class X11Driver implements ComputerUseDriver {
 
   async act(req: ComputerActionRequest): Promise<string> {
     if (req.surface === "app" || req.surface === "browser") return this.appUi.act(req);
+    if (req.action === "screenshot") return (await this.screenshot({ surface: "desktop" })).summary;
+    if (req.action === "windows") {
+      const wins = await this.listWindows();
+      return `${wins.length} window${wins.length === 1 ? "" : "s"} open.`;
+    }
+    if (req.action === "wait") {
+      const ms = parseComputerWaitMs(req.prompt || req.target) ?? 500;
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return `Waited ${ms}ms.`;
+    }
     const xdo = this.bin("xdotool");
     if (!xdo) {
       const pkgMgr = packageManagerOf((b) => Boolean(this.bin(b)));
@@ -814,6 +845,25 @@ export class X11Driver implements ComputerUseDriver {
       if (req.action === "click") await this.exec(xdo, ["click", "1"]);
       else if (req.action === "double-click") await this.exec(xdo, ["click", "--repeat", "2", "1"]);
       else if (req.action === "right-click") await this.exec(xdo, ["click", "3"]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "scroll") {
+      const scroll = parseComputerScroll(req.prompt || req.target);
+      if (!scroll) throw new Error("Unsupported action.");
+      const coords = parseComputerCoordinates(req.target);
+      if (coords) await this.exec(xdo, ["mousemove", "--sync", String(coords.x), String(coords.y)]);
+      // X's wheel is buttons 4 (up), 5 (down), 6 (left) and 7 (right).
+      const button = { up: "4", down: "5", left: "6", right: "7" }[scroll.direction];
+      await this.exec(xdo, ["click", "--repeat", String(scroll.amount), button]);
+      return describeComputerStep(req);
+    }
+    if (req.action === "drag") {
+      const drag = parseComputerDrag(req.target || req.prompt);
+      if (!drag) throw new Error("Unsupported action.");
+      await this.exec(xdo, ["mousemove", "--sync", String(drag.fromX), String(drag.fromY)]);
+      await this.exec(xdo, ["mousedown", "1"]);
+      await this.exec(xdo, ["mousemove", "--sync", String(drag.toX), String(drag.toY)]);
+      await this.exec(xdo, ["mouseup", "1"]);
       return describeComputerStep(req);
     }
     if (req.action === "type") {

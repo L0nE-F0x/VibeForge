@@ -92,7 +92,10 @@ export async function inspectOrchestratorStep(deps: InspectDeps, step: Orchestra
     };
   }
 
-  if (step.action === "diagnostics" || /\bdiagnostics?\b/i.test(`${step.prompt} ${step.target}`)) {
+  // Asked for as that ("diagnostics", "viby diagnostics"), as inspectsProblems reads it: a skill, a
+  // run or a CLI's screen that only mentions diagnostics ("the TypeScript diagnostics") is read as itself.
+  const asksForDiagnostics = (text: string) => /^(?:viby\s+)?diagnostics?\b/i.test(text.trim());
+  if (step.action === "diagnostics" || asksForDiagnostics(step.prompt) || asksForDiagnostics(step.target)) {
     const diag = deps.diagnostics?.() ?? "No Viby diagnostics recorded yet.";
     const problems = await inspectProblems(deps);
     return {
