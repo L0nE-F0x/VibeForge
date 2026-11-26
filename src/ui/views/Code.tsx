@@ -53,6 +53,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const talkOn = settings?.agentTalk.on ?? false;
   const home = useAppInfo().data?.home ?? "";
   const workspaces = useMemo(() => file.data?.workspaces ?? [], [file.data]);
+  const categories = useMemo(() => file.data?.categories ?? [], [file.data]);
 
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [dragPane, setDragPane] = useState<string | null>(null);
@@ -272,10 +273,10 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
 
   // ---------------------------------------------------------------- workspaces
 
-  const [addWorkspace] = useAction(async () => {
+  const [addWorkspace] = useAction(async (categoryId?: string | null) => {
     const folder = await call("app.pickFolder", t("code.empty.action"));
     if (!folder) return;
-    const next = await call("workspaces.add", folder);
+    const next = await call("workspaces.add", folder, categoryId ?? null);
     if (next.lastWorkspaceId) {
       setCurrentId(next.lastWorkspaceId);
       void call("workspaces.select", next.lastWorkspaceId);
@@ -334,7 +335,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <WorkspaceList active={active} workspaces={workspaces} currentId={currentId} onSelect={select} onAdd={() => void addWorkspace()} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
+        <WorkspaceList active={active} workspaces={workspaces} categories={categories} currentId={currentId} onSelect={select} onAdd={(categoryId) => void addWorkspace(categoryId)} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
 
         {!current ? (
           <Empty

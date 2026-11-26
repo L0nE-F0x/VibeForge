@@ -12,7 +12,7 @@ import { OrchestratorDesk } from "./service/orchestrator.js";
 import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
-import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus, UnreadableItem } from "./types.js";
+import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus, UnreadableItem, WorkspaceCategory } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
@@ -133,8 +133,8 @@ export class TeamService extends ServiceCore {
     return this.workspaces.summarizeWorkspaces();
   }
 
-  addWorkspace(folder: string): WorkspaceFile {
-    return this.workspaces.addWorkspace(folder);
+  addWorkspace(folder: string, categoryId?: string | null): WorkspaceFile {
+    return this.workspaces.addWorkspace(folder, categoryId);
   }
 
   removeWorkspace(id: string): Promise<Deleted> {
@@ -149,8 +149,28 @@ export class TeamService extends ServiceCore {
     return this.workspaces.moveWorkspace(id, toIndex);
   }
 
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }): WorkspaceFile {
     return this.workspaces.updateWorkspace(id, patch);
+  }
+
+  addCategory(name: string): { file: WorkspaceFile; category: WorkspaceCategory } {
+    return this.workspaces.addCategory(name);
+  }
+
+  renameCategory(id: string, name: string): WorkspaceFile {
+    return this.workspaces.renameCategory(id, name);
+  }
+
+  moveCategory(id: string, toIndex: number): WorkspaceFile {
+    return this.workspaces.moveCategory(id, toIndex);
+  }
+
+  deleteCategory(id: string): Deleted {
+    return this.workspaces.deleteCategory(id);
+  }
+
+  setWorkspaceCategory(workspaceIds: string[], categoryId: string, on: boolean): WorkspaceFile {
+    return this.workspaces.setWorkspaceCategory(workspaceIds, categoryId, on);
   }
 
   /** A folder as a workspace of its own, without making it the one Code shows (a workspace another machine synced here). */

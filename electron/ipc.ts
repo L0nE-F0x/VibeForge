@@ -233,11 +233,21 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "workspaces.list": () => s().listWorkspaces(),
     "workspaces.status": () => s().summarizeWorkspaces(),
-    "workspaces.add": (folder) => s().addWorkspace(folder),
+    "workspaces.add": (folder, categoryId) => s().addWorkspace(folder, typeof categoryId === "string" ? categoryId : null),
     "workspaces.remove": (id) => s().removeWorkspace(id),
     "workspaces.select": (id) => s().selectWorkspace(id),
     "workspaces.move": (id, toIndex) => s().moveWorkspace(id, toIndex),
     "workspaces.update": (id, patch) => s().updateWorkspace(id, patch),
+    "workspaces.addCategory": (name) => s().addCategory(String(name ?? "")),
+    "workspaces.renameCategory": (id, name) => s().renameCategory(String(id ?? ""), String(name ?? "")),
+    "workspaces.moveCategory": (id, toIndex) => s().moveCategory(String(id ?? ""), Number(toIndex) || 0),
+    "workspaces.deleteCategory": (id) => s().deleteCategory(String(id ?? "")),
+    "workspaces.setCategory": (workspaceIds, categoryId, on) =>
+      s().setWorkspaceCategory(
+        Array.isArray(workspaceIds) ? workspaceIds.filter((item): item is string => typeof item === "string") : [],
+        String(categoryId ?? ""),
+        on === true,
+      ),
     "workspaces.branches": (id) => s().listBranches(id),
     "workspaces.openBranch": (id, branch) => s().openBranch(id, branch),
     "layouts.get": (id) => s().getLayout(id),

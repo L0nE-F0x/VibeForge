@@ -176,6 +176,7 @@ export function ListTools({
   viewTip,
   filterCount,
   chips,
+  belowSearch,
   selecting,
   onSelecting,
   selectTip,
@@ -198,6 +199,8 @@ export function ListTools({
   /** How many filters are on, shown on the menu button. */
   filterCount: number;
   chips: ViewChip[];
+  /** Optional bar placed directly underneath the search bar (e.g. workspace category tabs). */
+  belowSearch?: ReactNode;
   selecting: boolean;
   onSelecting: (on: boolean) => void;
   /** What Select is for here: "Select several to delete at once". */
@@ -267,6 +270,7 @@ export function ListTools({
           onClick={() => onSelecting(!selecting)}
         />
       </div>
+      {belowSearch}
       {chips.length > 0 && (
         <div className="list-active-view">
           {chips.map((chip) => (

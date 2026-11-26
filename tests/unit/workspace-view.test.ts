@@ -5,12 +5,15 @@ import {
   groupWorkspaces,
   isDefaultWorkspaceView,
   leafFolder,
+  loadWorkspaceCategory,
   loadWorkspaceView,
   matchesSearch,
   parentFolder,
+  saveWorkspaceCategory,
   saveWorkspaceView,
   toggleFilter,
   viewWorkspaces,
+  workspacesInCategory,
   type WorkspaceFacts,
   type WorkspaceView,
 } from "../../src/ui/workspace-view.js";
@@ -181,5 +184,34 @@ describe("workspace list view", () => {
     // Corrupt JSON falls back cleanly.
     store.set("vf.workspaces.view", "{bad");
     expect(loadWorkspaceView()).toEqual(DEFAULT_WORKSPACE_VIEW);
+  });
+
+  it("narrows workspaces by category tab, composes with search/sort/group, and persists the selected tab", () => {
+    const tagged: Array<WorkspaceFacts & { categories?: string[] }> = [
+      { ...list[0], categories: ["work"] },
+      { ...list[1], categories: ["work", "clients"] },
+      { ...list[2], categories: ["games"] },
+      { ...list[3] },
+    ];
+    expect(names(workspacesInCategory(tagged, null))).toEqual(["vibeforge", "Atlas", "site-2", "site-10"]);
+    const workOnly = workspacesInCategory(tagged, "work");
+    expect(names(workOnly)).toEqual(["vibeforge", "Atlas"]);
+    expect(names(viewWorkspaces(workOnly, same, view({ sort: "name" }), "at", "en"))).toEqual(["Atlas"]);
+
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, val: string) => store.set(key, val),
+        removeItem: (key: string) => store.delete(key),
+      },
+    });
+    expect(loadWorkspaceCategory()).toBeNull();
+    saveWorkspaceCategory("games");
+    expect(loadWorkspaceCategory()).toBe("games");
+    saveWorkspaceCategory(null);
+    expect(loadWorkspaceCategory()).toBeNull();
   });
 });

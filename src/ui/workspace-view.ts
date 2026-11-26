@@ -23,6 +23,7 @@ export const FILTERS: readonly WorkspaceFilter[] = ["open", "working", "waiting"
 export const SORTS: readonly WorkspaceSort[] = ["manual", "name", "parent", "recent", "changes"];
 export const DEFAULT_WORKSPACE_VIEW: WorkspaceView = { filters: [], sort: "manual", group: "none" };
 const VIEW_KEY = "vf.workspaces.view";
+const CATEGORY_KEY = "vf.workspaces.category";
 
 /** What the list knows of a workspace to sort, group, filter and search it. */
 export interface WorkspaceFacts {
@@ -226,6 +227,30 @@ export function loadWorkspaceView(): WorkspaceView {
 export function saveWorkspaceView(view: WorkspaceView): void {
   try {
     localStorage.setItem(VIEW_KEY, JSON.stringify(view));
+  } catch {
+    // A blocked store only means the pick isn't remembered.
+  }
+}
+
+/** Narrow workspaces to one custom category tab; null/empty returns all workspaces. */
+export function workspacesInCategory<T extends { categories?: readonly string[] }>(items: readonly T[], categoryId: string | null): T[] {
+  if (!categoryId) return [...items];
+  return items.filter((item) => Boolean(item.categories?.includes(categoryId)));
+}
+
+export function loadWorkspaceCategory(): string | null {
+  try {
+    const raw = localStorage.getItem(CATEGORY_KEY);
+    return raw && raw.trim() ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorkspaceCategory(categoryId: string | null): void {
+  try {
+    if (categoryId) localStorage.setItem(CATEGORY_KEY, categoryId);
+    else localStorage.removeItem(CATEGORY_KEY);
   } catch {
     // A blocked store only means the pick isn't remembered.
   }
