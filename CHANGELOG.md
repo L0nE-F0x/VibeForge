@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-11-26
+
+**3.11.0: Category tabs under the search bar in Code let you split workspaces into Work, Personal, Games or any tabs you like, Viby's clicks land where it saw things in a single-window screenshot, and X11 desktops get scroll, drag and wait.**
+
 ### Added
 
 - **Category tabs under the search bar in Code.** Split a long workspace list into tabs of your own (**Work**, **Personal**, **Games**, **Clients** or anything else) beside a permanent **All** tab that always shows every workspace with its count. Add as many tabs as you like, click or scroll along them with side-pointing `<` and `>` arrows (or the mouse wheel and arrow keys), rename a tab inline (double-click, <kbd>F2</kbd> or its `⋯` menu), move tabs left or right, and delete any tab with **Undo** — deleting a tab never removes or touches the workspaces in it. Put a workspace in one or several tabs by dragging it onto a tab (hold <kbd>Alt</kbd> on a category tab to copy instead of move), from its `⋯` → **Categories** menu, or for several at once with **Select → Category**, and search, filter, sort, group and reorder within whichever tab you're viewing.
@@ -1279,7 +1283,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.10.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.11.0...HEAD
+[3.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.11.0
 [3.10.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.1
 [3.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.0
 [3.9.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.9.1
