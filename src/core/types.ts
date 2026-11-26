@@ -317,11 +317,18 @@ export interface VoiceSettings {
 
 export type TalkOver = "auto" | "always" | "never";
 
+export interface WorkspaceCategory {
+  id: string;
+  name: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   path: string;
   dockUrl: string;
+  /** Custom category tab ids this workspace belongs to; omitted when in none (still shown in All). */
+  categories?: string[];
 }
 
 export interface ChatRecord {

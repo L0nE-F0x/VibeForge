@@ -666,6 +666,159 @@
   padding: 2px 2px;
 }
 
+/* Workspace category tabs directly under the search bar (WorkspaceTabs.tsx). */
+.ws-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.ws-tabs-track {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.ws-tabs-track::-webkit-scrollbar {
+  display: none;
+}
+
+.ws-tab {
+  position: relative;
+  flex: none;
+  max-width: 148px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-weight: 560;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ws-tab:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+}
+
+.ws-tab:focus-visible {
+  outline: none;
+  color: var(--accent-2);
+  border-color: var(--focus-line);
+  background: var(--focus-fill);
+}
+
+.ws-tab[aria-selected="true"] {
+  color: var(--fg);
+  background: var(--sel-fill);
+  border-color: var(--sel-line);
+}
+
+.ws-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+}
+
+.ws-tab.is-drop-target {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.ws-tab-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  flex: none;
+}
+
+.ws-tab[aria-selected="true"] .ws-tab-count {
+  color: var(--fg-2);
+}
+
+.ws-tab-more {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -3px;
+  color: var(--fg-3);
+  flex: none;
+}
+
+.ws-tab-more:hover {
+  color: var(--accent);
+}
+
+.ws-tab-arrow,
+.ws-tab-add {
+  flex: none;
+  height: 24px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-xs);
+  font-weight: 560;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ws-tab-add.is-labeled {
+  padding: 0 7px;
+  border-color: var(--line);
+  background: var(--fill);
+}
+
+.ws-tab-arrow:not(:disabled):hover,
+.ws-tab-add:hover {
+  color: var(--accent);
+  background: var(--hover-fill);
+  border-color: var(--hover-line);
+}
+
+.ws-tab-arrow:focus-visible,
+.ws-tab-add:focus-visible {
+  outline: none;
+  color: var(--accent-2);
+  border-color: var(--focus-line);
+  background: var(--focus-fill);
+}
+
+.ws-tab-input {
+  flex: none;
+  width: 112px;
+  height: 24px;
+  padding: 2px 6px;
+  font-size: var(--fs-xs);
+}
+
+.ws-tab-input.is-new {
+  width: 120px;
+}
+
 .rail-setting {
   display: flex;
   align-items: center;

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Added
+
+- **Category tabs under the search bar in Code.** Split a long workspace list into tabs of your own (**Work**, **Personal**, **Games**, **Clients** or anything else) beside a permanent **All** tab that always shows every workspace with its count. Add as many tabs as you like, click or scroll along them with side-pointing `<` and `>` arrows (or the mouse wheel and arrow keys), rename a tab inline (double-click, <kbd>F2</kbd> or its `⋯` menu), move tabs left or right, and delete any tab with **Undo** — deleting a tab never removes or touches the workspaces in it. Put a workspace in one or several tabs by dragging it onto a tab (hold <kbd>Alt</kbd> on a category tab to copy instead of move), from its `⋯` → **Categories** menu, or for several at once with **Select → Category**, and search, filter, sort, group and reorder within whichever tab you're viewing.
+
 ### Fixed
 
 - **After a screenshot of one window, Viby clicks where it saw things.** On Hyprland, when Viby looked at just one window, it then measured clicks, scrolls and drags from the corner of the screen instead of the corner of that window, so they missed by however far the window was from the top-left. They now land where Viby saw them, even if the window has moved since, and at the right size on a monitor with different scaling.

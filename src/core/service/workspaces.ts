@@ -3,9 +3,21 @@ import { openBranchCheckout, readBranches, type BranchList } from "../branches.j
 import { isDirectory } from "../fsx.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
-import type { LayoutNode, Workspace } from "../types.js";
+import type { LayoutNode, Workspace, WorkspaceCategory } from "../types.js";
 import { summarizeFolderGit } from "../vcs.js";
-import { addWorkspaceRecord, moveWorkspaceRecord, removeWorkspaceRecord, selectWorkspaceRecord, updateWorkspaceRecord, type WorkspaceFile } from "../workspaces.js";
+import {
+  addCategoryRecord,
+  addWorkspaceRecord,
+  moveCategoryRecord,
+  moveWorkspaceRecord,
+  removeCategoryRecord,
+  removeWorkspaceRecord,
+  renameCategoryRecord,
+  selectWorkspaceRecord,
+  setWorkspaceCategoryRecord,
+  updateWorkspaceRecord,
+  type WorkspaceFile,
+} from "../workspaces.js";
 import type { Deleted, Launched, TermSize, WorkspaceSummary } from "./types.js";
 import type { ServiceCore } from "./core.js";
 
@@ -42,9 +54,9 @@ export class WorkspaceDesk {
     return out;
   }
 
-  addWorkspace(folder: string): WorkspaceFile {
+  addWorkspace(folder: string, categoryId?: string | null): WorkspaceFile {
     if (!isDirectory(folder)) throw new Error("Choose a folder that exists.");
-    const next = addWorkspaceRecord(this.core.store.readWorkspaces(), folder);
+    const next = addWorkspaceRecord(this.core.store.readWorkspaces(), folder, categoryId);
     this.core.store.writeWorkspaces(next);
     this.core.emit("workspaces");
     return next;
@@ -89,10 +101,18 @@ export class WorkspaceDesk {
     // Added again by hand meanwhile: it is back already.
     if (now.workspaces.some((item) => path.resolve(item.path) === path.resolve(workspace.path))) return;
     if (now.workspaces.some((item) => item.id === workspace.id)) throw new Error("Another workspace took this one's place meanwhile, so it can't come back.");
+    const valid = new Set((now.categories ?? []).map((cat) => cat.id));
+    const keptCats = (workspace.categories ?? []).filter((catId) => valid.has(catId));
+    const { categories: _dropped, ...base } = workspace;
+    const restored: Workspace = keptCats.length ? { ...base, categories: keptCats } : base;
     const workspaces = [...now.workspaces];
-    workspaces.splice(Math.min(index, workspaces.length), 0, workspace);
-    this.core.store.writeWorkspaces({ workspaces, lastWorkspaceId: wasCurrent || !now.lastWorkspaceId ? workspace.id : now.lastWorkspaceId });
-    if (layout && !this.core.store.readLayout(workspace.id)) this.core.store.writeLayout(workspace.id, layout);
+    workspaces.splice(Math.min(index, workspaces.length), 0, restored);
+    this.core.store.writeWorkspaces({
+      workspaces,
+      lastWorkspaceId: wasCurrent || !now.lastWorkspaceId ? restored.id : now.lastWorkspaceId,
+      ...(now.categories?.length ? { categories: now.categories } : {}),
+    });
+    if (layout && !this.core.store.readLayout(restored.id)) this.core.store.writeLayout(restored.id, layout);
     this.core.emit("workspaces", "tasks");
   }
 
@@ -150,15 +170,69 @@ export class WorkspaceDesk {
     return workspace;
   }
 
-  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string }): WorkspaceFile {
-    const clean: { name?: string; dockUrl?: string } = {};
+  updateWorkspace(id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }): WorkspaceFile {
+    const clean: { name?: string; dockUrl?: string; categories?: string[] } = {};
     if (typeof patch.name === "string" && patch.name.trim()) clean.name = patch.name.trim();
     if (typeof patch.dockUrl === "string") {
       const url = patch.dockUrl.trim();
       if (url && !/^https?:\/\//i.test(url)) throw new Error("Enter a full URL, starting with http:// or https://");
       clean.dockUrl = url;
     }
+    if (Array.isArray(patch.categories)) {
+      clean.categories = patch.categories.filter((item): item is string => typeof item === "string");
+    }
     const next = updateWorkspaceRecord(this.core.store.readWorkspaces(), id, clean);
+    this.core.store.writeWorkspaces(next);
+    this.core.emit("workspaces");
+    return next;
+  }
+
+  addCategory(name: string): { file: WorkspaceFile; category: WorkspaceCategory } {
+    const res = addCategoryRecord(this.core.store.readWorkspaces(), String(name ?? ""));
+    this.core.store.writeWorkspaces(res.file);
+    this.core.emit("workspaces");
+    return res;
+  }
+
+  renameCategory(id: string, name: string): WorkspaceFile {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) throw new Error("Enter a category name.");
+    const next = renameCategoryRecord(this.core.store.readWorkspaces(), id, trimmed);
+    this.core.store.writeWorkspaces(next);
+    this.core.emit("workspaces");
+    return next;
+  }
+
+  moveCategory(id: string, toIndex: number): WorkspaceFile {
+    const next = moveCategoryRecord(this.core.store.readWorkspaces(), id, Number(toIndex) || 0);
+    this.core.store.writeWorkspaces(next);
+    this.core.emit("workspaces");
+    return next;
+  }
+
+  deleteCategory(id: string): Deleted {
+    const before = this.core.store.readWorkspaces();
+    const index = (before.categories ?? []).findIndex((cat) => cat.id === id);
+    if (index < 0) throw new Error("That category is gone.");
+    const category = before.categories![index];
+    const memberIds = before.workspaces.filter((ws) => ws.categories?.includes(id)).map((ws) => ws.id);
+    this.core.store.writeWorkspaces(removeCategoryRecord(before, id));
+    this.core.emit("workspaces");
+    return this.core.keepForUndo(this.core.trash.stash([]), () => this.putBackCategory(category, index, memberIds));
+  }
+
+  private putBackCategory(category: WorkspaceCategory, index: number, memberIds: readonly string[]): void {
+    const now = this.core.store.readWorkspaces();
+    if (now.categories?.some((cat) => cat.id === category.id)) return;
+    const categories = [...(now.categories ?? [])];
+    categories.splice(Math.min(index, categories.length), 0, category);
+    const restored = setWorkspaceCategoryRecord({ ...now, categories }, memberIds, category.id, true);
+    this.core.store.writeWorkspaces(restored);
+    this.core.emit("workspaces");
+  }
+
+  setWorkspaceCategory(workspaceIds: string[], categoryId: string, on: boolean): WorkspaceFile {
+    const next = setWorkspaceCategoryRecord(this.core.store.readWorkspaces(), workspaceIds, categoryId, Boolean(on));
     this.core.store.writeWorkspaces(next);
     this.core.emit("workspaces");
     return next;

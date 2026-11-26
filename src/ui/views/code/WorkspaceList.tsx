@@ -1,14 +1,14 @@
-import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, FileDiff, FolderOpen, FolderPlus, FolderTree, GitBranch, Laptop, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, FileDiff, FolderOpen, FolderPlus, FolderTree, GitBranch, Laptop, MoreHorizontal, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
-import type { SyncShare, Workspace } from "../../../shared/api.js";
+import type { SyncShare, Workspace, WorkspaceCategory } from "../../../shared/api.js";
 import { tildify } from "../../../shared/text.js";
 import { call, useAppInfo, useLive, useOrchestrator, useSync, useTasks, useWorkspaceStatus } from "../../api.js";
 import { useAttention, usePtyAttention } from "../../attention.js";
-import { ListTools, NoMatch, PickMark, useSelection, viewMenu, viewTipText, toolsWanted, type ViewChip } from "../../components/ListTools.js";
+import { ListTools, NoMatch, PickMark, useSelection, viewMenu, viewTipText, type ViewChip } from "../../components/ListTools.js";
 import { SidePanel, StripItem } from "../../components/SidePanel.js";
 import { SyncNotices } from "../../components/SyncNotices.js";
 import { tipProps } from "../../components/Tooltip.js";
-import { Button, Input, Menu, MenuButton, Modal, Popover, type MenuItem } from "../../components/ui.js";
+import { Button, Input, Menu, MenuButton, Modal, Popover, type MenuEntry, type MenuItem } from "../../components/ui.js";
 import { workspaceMark, WorkspaceState } from "../../components/WorkspaceState.js";
 import { useT } from "../../i18n/index.js";
 import { useAction, useNav } from "../../state.js";
@@ -21,19 +21,22 @@ import {
   groupWorkspaces,
   isDefaultWorkspaceView,
   leafFolder,
+  loadWorkspaceCategory,
   loadWorkspaceView,
+  matchesSearch,
   SORTS,
+  saveWorkspaceCategory,
   saveWorkspaceView,
   toggleFilter,
   viewWorkspaces,
+  workspacesInCategory,
   type WorkspaceFacts,
   type WorkspaceFilter,
   type WorkspaceSort,
   type WorkspaceView,
 } from "../../workspace-view.js";
 import { shareLine, SyncDialog } from "./SyncDialog.js";
-
-const WORKSPACE_MIME = "application/x-vibeforge-workspace";
+import { WORKSPACE_MIME, WorkspaceTabs } from "./WorkspaceTabs.js";
 
 interface CopyReview {
   name: string;
@@ -42,11 +45,12 @@ interface CopyReview {
 
 /**
  * Code's list of workspaces: pick one, drag to reorder, double-click or F2 to rename, ⋯ for the rest.
- * Above it, a search, a composable filter/sort/group menu, active view pills, and Select to remove several.
+ * Above it, a search, category tabs, a composable filter/sort/group menu, active view pills, and Select.
  */
 export function WorkspaceList({
   active,
   workspaces,
+  categories,
   currentId,
   onSelect,
   onAdd,
@@ -56,9 +60,10 @@ export function WorkspaceList({
   /** Code is on screen. Hidden, the list doesn't ask git for each workspace's state every 30 s. */
   active: boolean;
   workspaces: Workspace[];
+  categories: readonly WorkspaceCategory[];
   currentId: string | null;
   onSelect: (workspace: Workspace) => void;
-  onAdd: () => void;
+  onAdd: (categoryId?: string | null) => void;
   /** Remove these (one, or several picked), after asking; true once they're gone. */
   onRemove: (workspaces: Workspace[]) => Promise<boolean>;
   /** Open a branch of it beside it, as its own workspace. */
@@ -115,6 +120,19 @@ export function WorkspaceList({
     await call("workspaces.move", id, toIndex);
   }, t("code.moveFailed"));
 
+  const [toggleCategory] = useAction(async (ids: string[], categoryId: string, on: boolean) => {
+    await call("workspaces.setCategory", ids, categoryId, on);
+  }, t("code.categoryAddFailed"));
+
+  const [moveWorkspaceCategory] = useAction(async (workspace: Workspace, targetCategoryId: string, fromCategoryId: string | null) => {
+    if (fromCategoryId && fromCategoryId !== targetCategoryId) {
+      const nextCats = [...(workspace.categories ?? []).filter((id) => id !== fromCategoryId), targetCategoryId];
+      await call("workspaces.update", workspace.id, { categories: nextCats });
+    } else {
+      await call("workspaces.setCategory", [workspace.id], targetCategoryId, true);
+    }
+  }, t("code.categoryAddFailed"));
+
   const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
 
@@ -149,7 +167,33 @@ export function WorkspaceList({
     return latest;
   };
 
-  // ------------------------------------------------ search, filter, sort, group, select
+  // ------------------------------------------------ categories, search, filter, sort, group, select
+  const [activeCategoryState, setActiveCategoryState] = useState<string | null>(loadWorkspaceCategory);
+  const currentCategory = activeCategoryState ? (categories.find((cat) => cat.id === activeCategoryState) ?? null) : null;
+  const activeCategory = currentCategory?.id ?? null;
+  const selectCategory = (categoryId: string | null) => {
+    setActiveCategoryState(categoryId);
+    saveWorkspaceCategory(categoryId);
+  };
+  const [createTabRequest, setCreateTabRequest] = useState<{ key: number; workspaceIds: string[] } | null>(null);
+  const createSeq = useRef(0);
+  const requestNewCategory = (workspaceIds: string[]) => {
+    createSeq.current += 1;
+    setCreateTabRequest({ key: createSeq.current, workspaceIds });
+  };
+  // When another view or shortcut switches to a workspace outside the current category tab, reveal its tab or All.
+  const prevCurrentId = useRef<string | null>(currentId);
+  useEffect(() => {
+    const prev = prevCurrentId.current;
+    prevCurrentId.current = currentId;
+    if (!prev || !currentId || currentId === prev || !activeCategory) return;
+    const target = workspaces.find((item) => item.id === currentId);
+    if (target && !target.categories?.includes(activeCategory)) {
+      const firstKnown = target.categories?.find((id) => categories.some((cat) => cat.id === id)) ?? null;
+      selectCategory(firstKnown);
+    }
+  }, [currentId, activeCategory, workspaces, categories]);
+
   const [query, setQuery] = useState("");
   const [view, setViewState] = useState<WorkspaceView>(loadWorkspaceView);
   const setView = (next: Partial<WorkspaceView>) => {
@@ -183,20 +227,22 @@ export function WorkspaceList({
     return computed;
   };
 
+  const tabWorkspaces = workspacesInCategory(workspaces, activeCategory);
   const hasQuery = query.trim() !== "";
   const hasFilters = view.filters.length > 0;
   const narrowed = hasQuery || hasFilters;
   const viewChanged = !isDefaultWorkspaceView(view);
-  const groups = groupWorkspaces(workspaces, facts, view, query, t.language);
+  const groups = groupWorkspaces(tabWorkspaces, facts, view, query, t.language);
   const shown = groups.flatMap((group) => group.items);
   const selection = useSelection(shown, (workspace) => workspace.id);
   const selecting = selection.selecting;
-  const counts = filterCounts(workspaces, facts, view.filters, query);
+  const counts = filterCounts(tabWorkspaces, facts, view.filters, query);
   // Folded to its strip there is no search or filter to see, so the strip only follows the sort and grouping.
-  const stripped = view.sort === "manual" && view.group === "none" ? workspaces : viewWorkspaces(workspaces, facts, { ...view, filters: [] }, "", t.language);
-  // Dragging moves a workspace in your own order, so it's there only while the list shows all of it flat that way.
-  const canDrag = !narrowed && view.sort === "manual" && view.group === "none" && !selecting;
-  // Only what is on screen gets removed: a pick that a new search hid stays picked but out of it.
+  const stripped = view.sort === "manual" && view.group === "none" ? tabWorkspaces : viewWorkspaces(tabWorkspaces, facts, { ...view, filters: [] }, "", t.language);
+  // Reordering changes your manual order when flat/unfiltered; dragging onto a category tab works anytime outside Select.
+  const canReorder = !narrowed && view.sort === "manual" && view.group === "none" && !selecting;
+  const canDrag = (canReorder || categories.length > 0) && !selecting;
+  // Only what is on screen gets removed or categorized: a pick that a new search hid stays picked but out of it.
   const picked = selection.picked;
   const toggle = selection.toggle;
   const removePicked = async () => {
@@ -206,6 +252,12 @@ export function WorkspaceList({
     } finally {
       setRemoving(false);
     }
+  };
+  const handleDropToCategory = (workspaceId: string, targetCategoryId: string) => {
+    setDragWorkspace(null);
+    const workspace = workspaces.find((item) => item.id === workspaceId);
+    if (!workspace) return;
+    void moveWorkspaceCategory(workspace, targetCategoryId, activeCategory);
   };
 
   const filterLabels: Record<WorkspaceFilter, string> = {
@@ -263,7 +315,7 @@ export function WorkspaceList({
     t,
     [...view.filters.map((filter) => filterLabels[filter]), view.sort !== "manual" ? sortLabels[view.sort] : "", view.group === "parent" ? t("code.group.parent") : ""].filter(Boolean),
   );
-  const showTools = toolsWanted(workspaces.length, narrowed, viewChanged, selecting);
+  const showTools = workspaces.length > 0 || categories.length > 0 || narrowed || viewChanged || selecting;
 
   const emptyMessage =
     !hasQuery && view.filters.length === 1
@@ -272,13 +324,42 @@ export function WorkspaceList({
         ? t("code.noMatchFilters")
         : t("code.noMatch");
 
-  const workspaceItems = (workspace: Workspace): Array<MenuItem | "sep"> => [
+  const workspaceItems = (workspace: Workspace): MenuEntry[] => [
     { label: t("code.openFolder"), icon: FolderOpen, onSelect: () => void call("app.openPath", workspace.path) },
     { label: t("code.openBranch"), icon: GitBranch, onSelect: () => onBranch(workspace) },
     ...syncItems(workspace),
     { label: t("common.rename"), icon: Pencil, onSelect: () => startRename(workspace.id) },
     "sep",
+    { heading: t("code.categoriesHeading") },
+    ...categories.map((category): MenuItem => {
+      const member = Boolean(workspace.categories?.includes(category.id));
+      return {
+        label: category.name,
+        role: "menuitemcheckbox",
+        checked: member,
+        keepOpen: true,
+        onSelect: () => void toggleCategory([workspace.id], category.id, !member),
+      };
+    }),
+    { label: t("code.categoryNewMenu"), icon: Plus, onSelect: () => requestNewCategory([workspace.id]) },
+    "sep",
     { label: t("code.removeWorkspace"), icon: Trash2, danger: true, onSelect: () => void onRemove([workspace]) },
+  ];
+
+  const pickedIds = picked.map((workspace) => workspace.id);
+  const pickedCategoryItems: MenuEntry[] = [
+    ...categories.map((category): MenuItem => {
+      const allIn = picked.length > 0 && picked.every((workspace) => workspace.categories?.includes(category.id));
+      return {
+        label: category.name,
+        role: "menuitemcheckbox",
+        checked: allIn,
+        keepOpen: true,
+        onSelect: () => void toggleCategory(pickedIds, category.id, !allIn),
+      };
+    }),
+    ...(categories.length ? ["sep" as const] : []),
+    { label: t("code.categoryNewMenu"), icon: Plus, onSelect: () => requestNewCategory(pickedIds) },
   ];
 
   let flatIndex = -1;
@@ -290,13 +371,13 @@ export function WorkspaceList({
         title={t("code.workspaces")}
         defaultWidth={250}
         actions={
-          <Button size="sm" icon={FolderPlus} onClick={onAdd} tip={t("code.addTip")}>
+          <Button size="sm" icon={FolderPlus} onClick={() => onAdd(activeCategory)} tip={t("code.addTip")}>
             {t("code.add")}
           </Button>
         }
         strip={
           <>
-            <StripItem label={t("code.addStrip")} onClick={onAdd}>
+            <StripItem label={t("code.addStrip")} onClick={() => onAdd(activeCategory)}>
               <FolderPlus size={16} />
             </StripItem>
             {asks > 0 && (
@@ -325,21 +406,40 @@ export function WorkspaceList({
             onQuery={setQuery}
             placeholder={t("code.search")}
             shown={shown.length}
-            total={workspaces.length}
+            total={tabWorkspaces.length}
             menu={viewItems}
             changed={viewChanged}
             viewTip={viewTip}
             filterCount={view.filters.length}
             chips={chips}
+            belowSearch={
+              <WorkspaceTabs
+                categories={categories}
+                workspaces={workspaces}
+                activeCategory={activeCategory}
+                onSelect={selectCategory}
+                createRequest={createTabRequest}
+                onCreatedFor={() => {
+                  if (selecting) selection.setSelecting(false);
+                }}
+                draggingWorkspace={Boolean(dragWorkspace)}
+                onDropWorkspace={handleDropToCategory}
+              />
+            }
             selecting={selecting}
             onSelecting={selection.setSelecting}
             selectTip={t("code.selectTip")}
             picked={picked.length}
             onPickAll={selection.pickAll}
             actions={
-              <Button size="sm" variant="danger" icon={Trash2} busy={removing} disabled={!picked.length} onClick={() => void removePicked()} tip={t("code.removeSelectedTip")}>
-                {t("code.removeSelected")}
-              </Button>
+              <>
+                <MenuButton size="sm" icon={Tag} disabled={!picked.length} tip={t("code.categorizeSelectedTip")} items={pickedCategoryItems}>
+                  {t("code.categorizeSelected")}
+                </MenuButton>
+                <Button size="sm" variant="danger" icon={Trash2} busy={removing} disabled={!picked.length} onClick={() => void removePicked()} tip={t("code.removeSelectedTip")}>
+                  {t("code.removeSelected")}
+                </Button>
+              </>
             }
           />
         )}
@@ -349,17 +449,39 @@ export function WorkspaceList({
               {t("code.addEmpty")}
             </div>
           )}
+          {workspaces.length > 0 && tabWorkspaces.length === 0 && currentCategory && (
+            <div className="vstack faint list-no-match">
+              <span>{t("code.categoryEmpty", { name: currentCategory.name })}</span>
+              <div className="hstack" style={{ gap: 6, flexWrap: "wrap" }}>
+                <Button size="sm" onClick={() => selectCategory(null)}>
+                  {t("code.categoryShowAll")}
+                </Button>
+                <Button size="sm" icon={FolderPlus} onClick={() => onAdd(activeCategory)}>
+                  {t("code.add")}
+                </Button>
+              </div>
+            </div>
+          )}
           {/* Before git has answered every workspace looks clean and branchless: no "nothing matches" (or a button that drops the saved filter) yet. */}
-          {workspaces.length > 0 && shown.length === 0 && workspaceStatus.loaded && (
-            <NoMatch
-              hasQuery={hasQuery}
-              filters={view.filters.map((filter) => filterLabels[filter])}
-              message={emptyMessage}
-              onClear={() => {
-                if (hasQuery) setQuery("");
-                if (hasFilters) setView({ filters: [] });
-              }}
-            />
+          {tabWorkspaces.length > 0 && shown.length === 0 && workspaceStatus.loaded && (
+            <>
+              <NoMatch
+                hasQuery={hasQuery}
+                filters={view.filters.map((filter) => filterLabels[filter])}
+                message={emptyMessage}
+                onClear={() => {
+                  if (hasQuery) setQuery("");
+                  if (hasFilters) setView({ filters: [] });
+                }}
+              />
+              {activeCategory !== null && hasQuery && workspaces.some((item) => matchesSearch(query, facts(item))) && (
+                <div style={{ padding: "0 10px 8px" }}>
+                  <Button size="sm" onClick={() => selectCategory(null)}>
+                    {t("code.searchAllTabs")}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
           {groups.map((group) => (
             <Fragment key={group.folder || "__all__"}>
@@ -382,7 +504,7 @@ export function WorkspaceList({
                       : (known.branch ?? leaf)
                     : known.path;
                 const isPicked = selection.isPicked(workspace.id);
-                const over = dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
+                const over = canReorder && dragWorkspace && dragWorkspace.id !== workspace.id ? dragWorkspace.over : null;
                 return (
                   <div
                     key={workspace.id}
@@ -418,7 +540,7 @@ export function WorkspaceList({
                     }}
                     onDragEnd={() => setDragWorkspace(null)}
                     onDragOver={(event) => {
-                      if (!dragWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
+                      if (!canReorder || !dragWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "move";
                       const rect = event.currentTarget.getBoundingClientRect();
@@ -429,10 +551,17 @@ export function WorkspaceList({
                       event.preventDefault();
                       const drag = dragWorkspace;
                       setDragWorkspace(null);
-                      if (!drag || drag.over === null) return;
+                      const dropAt = drag?.over ?? null;
+                      if (!canReorder || !drag || dropAt === null) return;
                       const from = workspaces.findIndex((item) => item.id === drag.id);
-                      const to = drag.over > from ? drag.over - 1 : drag.over;
-                      if (from >= 0 && to !== from) void moveWorkspace(drag.id, to);
+                      const anchor =
+                        dropAt < shown.length
+                          ? workspaces.findIndex((item) => item.id === shown[dropAt].id)
+                          : shown.length > 0
+                            ? workspaces.findIndex((item) => item.id === shown[shown.length - 1].id) + 1
+                            : workspaces.length;
+                      const to = anchor > from ? anchor - 1 : anchor;
+                      if (from >= 0 && anchor >= 0 && to !== from) void moveWorkspace(drag.id, to);
                     }}
                   >
                     {selecting ? <PickMark picked={isPicked} /> : <FolderOpen size={15} className="accent-text" style={{ flex: "none" }} />}

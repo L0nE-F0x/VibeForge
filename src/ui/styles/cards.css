@@ -627,6 +627,7 @@
 
 .list-picking {
   gap: 4px;
+  flex-wrap: wrap;
   font-size: var(--fs-sm);
   min-width: 0;
 }

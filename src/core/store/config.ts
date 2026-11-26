@@ -6,8 +6,8 @@ import { ENGINE_SEED_REVISION, mergeEngineRows, normalizeEngineRows, seedEngines
 import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
-import type { WorkspaceFile } from "../workspaces.js";
-import type { ComputerUseGrant, EngineRow, LayoutNode, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace } from "../types.js";
+import { cleanCategoryName, type WorkspaceFile } from "../workspaces.js";
+import type { ComputerUseGrant, EngineRow, LayoutNode, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
@@ -111,13 +111,54 @@ function normalizeVoiceSettings(value: unknown, defaults: VoiceSettings): VoiceS
   };
 }
 
-function normalizeWorkspace(value: unknown): Workspace | null {
+function normalizeCategories(value: unknown): WorkspaceCategory[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: WorkspaceCategory[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const id = str(record.id);
+    const name = cleanCategoryName(str(record.name));
+    if (!isSafeId(id) || id === "all" || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name });
+  }
+  return out;
+}
+
+function normalizeWorkspace(value: unknown, validCategories?: ReadonlySet<string>): Workspace | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const id = str(record.id);
   const folder = str(record.path);
   if (!isSafeId(id) || !folder) return null;
-  return { id, name: str(record.name) || path.basename(folder) || id, path: folder, dockUrl: str(record.dockUrl) };
+  const rawCats = Array.isArray(record.categories) ? record.categories : [];
+  const categories: string[] = [];
+  for (const item of rawCats) {
+    if (typeof item !== "string" || !isSafeId(item) || (validCategories && !validCategories.has(item)) || categories.includes(item)) continue;
+    categories.push(item);
+  }
+  return {
+    id,
+    name: str(record.name) || path.basename(folder) || id,
+    path: folder,
+    dockUrl: str(record.dockUrl),
+    ...(categories.length ? { categories } : {}),
+  };
+}
+
+function normalizeWorkspaceFile(raw: unknown): WorkspaceFile {
+  const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { workspaces?: unknown; lastWorkspaceId?: unknown; categories?: unknown }) : null;
+  const categories = normalizeCategories(obj?.categories);
+  const validCategories = new Set(categories.map((cat) => cat.id));
+  const list = Array.isArray(raw) ? raw : obj?.workspaces;
+  const workspaces = Array.isArray(list)
+    ? list.map((item) => normalizeWorkspace(item, validCategories)).filter((item): item is Workspace => item !== null)
+    : [];
+  const last = strOrNull(obj?.lastWorkspaceId);
+  const lastWorkspaceId = last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null);
+  return { workspaces, lastWorkspaceId, ...(categories.length ? { categories } : {}) };
 }
 
 function isLayoutNode(value: unknown, depth = 0): value is LayoutNode {
@@ -302,22 +343,16 @@ export class Config {
       const read = this.files.read(file);
       // One that can't be read lists the workspaces it held when it last read correctly.
       const raw = (read.state === "ok" ? read.value : read.saved) ?? null;
-      const list = Array.isArray(raw) ? raw : (raw as { workspaces?: unknown } | null)?.workspaces;
-      const workspaces = Array.isArray(list)
-        ? list.map(normalizeWorkspace).filter((item): item is Workspace => item !== null)
-        : [];
-      const last = strOrNull((raw as { lastWorkspaceId?: unknown } | null)?.lastWorkspaceId);
-      return { workspaces, lastWorkspaceId: last && workspaces.some((item) => item.id === last) ? last : (workspaces[0]?.id ?? null) };
+      return normalizeWorkspaceFile(raw);
     });
   }
 
   writeWorkspaces(file: WorkspaceFile): void {
     const target = path.join(this.configRoot, "workspaces.json");
     this.files.beforeWrite(target);
-    this.files.write(target, file, 0o600);
-    const normalizedWorkspaces = (file.workspaces ?? []).map(normalizeWorkspace).filter((item): item is Workspace => item !== null);
-    const last = file.lastWorkspaceId && normalizedWorkspaces.some((item) => item.id === file.lastWorkspaceId) ? file.lastWorkspaceId : (normalizedWorkspaces[0]?.id ?? null);
-    this.cache.put(target, { workspaces: normalizedWorkspaces, lastWorkspaceId: last });
+    const normalized = normalizeWorkspaceFile(file);
+    this.files.write(target, normalized, 0o600);
+    this.cache.put(target, normalized);
   }
 
   readLayout(workspaceId: string): LayoutNode | null {

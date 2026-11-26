@@ -49,6 +49,7 @@ import type {
   UnreadableItem,
   LibraryKind,
   VoiceSettings,
+  WorkspaceCategory,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
 import type { UsageSummary } from "../core/usage.js";
@@ -155,7 +156,7 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
+export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
 
 export interface AppInfo {
   version: string;
@@ -437,12 +438,18 @@ export interface DeskMethods {
   "workspaces.list": () => WorkspaceFile;
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */
   "workspaces.status": () => Record<string, WorkspaceSummary>;
-  "workspaces.add": (folder: string) => WorkspaceFile;
+  "workspaces.add": (folder: string, categoryId?: string | null) => WorkspaceFile;
   /** Takes a workspace out of VibeForge (its folder stays on disk), with Undo. Its terminals in Code stop. */
   "workspaces.remove": (id: string) => Deleted;
   "workspaces.select": (id: string) => void;
   "workspaces.move": (id: string, toIndex: number) => WorkspaceFile;
-  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string }) => WorkspaceFile;
+  "workspaces.update": (id: string, patch: { name?: string; dockUrl?: string; categories?: string[] }) => WorkspaceFile;
+  "workspaces.addCategory": (name: string) => { file: WorkspaceFile; category: WorkspaceCategory };
+  "workspaces.renameCategory": (id: string, name: string) => WorkspaceFile;
+  "workspaces.moveCategory": (id: string, toIndex: number) => WorkspaceFile;
+  /** Deletes a category tab while keeping every workspace intact (Undo brings the tab and assignments back). */
+  "workspaces.deleteCategory": (id: string) => Deleted;
+  "workspaces.setCategory": (workspaceIds: string[], categoryId: string, on: boolean) => WorkspaceFile;
   /** Local branches of a workspace's repository. An empty repo means the folder is not one. */
   "workspaces.branches": (id: string) => BranchList;
   /** Check a branch out beside this workspace. The workspace folder stays on its current branch. */
