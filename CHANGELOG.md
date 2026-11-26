@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+### Fixed
+
+- **After a screenshot of one window, Viby clicks where it saw things.** On Hyprland, when Viby looked at just one window, it then measured clicks, scrolls and drags from the corner of the screen instead of the corner of that window, so they missed by however far the window was from the top-left. They now land where Viby saw them, even if the window has moved since, and at the right size on a monitor with different scaling.
+- **Viby can scroll, drag and wait on an X11 desktop.** On X11 (not Wayland), Viby could only focus windows, click, type and press keys there. Scrolling, dragging, waiting, and taking a screenshot or listing windows as a step failed with "Desktop computer control is not available on this display session", even with xdotool installed. Thanks to Fred Nix ([#205](https://github.com/L0nE-F0x/VibeForge/issues/205)).
+- **Looking at something that mentions "diagnostics" shows that thing.** Since 3.9.0, looking at a skill, a run or a CLI's screen whose name or request merely contained the word "diagnostics" (a skill called "Read TypeScript diagnostics", say) showed Viby's own diagnostics instead. Viby's diagnostics now come up only when you ask for them. Thanks to Fred Nix ([#205](https://github.com/L0nE-F0x/VibeForge/issues/205)).
+- The 3.9.0 notes below said a later step waits for a CLI's question to be answered. It doesn't: Viby shows that the CLI is asking and skips the steps that were waiting on it, so nothing runs against a CLI that's stuck. The note now says so.
+
 ## [3.10.1] - 2026-11-25
 
 **3.10.1: What Viby sees on the screen tells it where to click, never what to type.**
@@ -68,7 +75,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 ### Fixed
 
 - **Asking Viby right after stopping it works.** A message sent while a stopped answer was still winding down was refused with "Viby is still answering". It now waits for that to finish and goes through.
-- **A step that waits for a CLI waits for its question to be answered too.** When a CLI paused on a question (trust this folder? run this command?), a later step waiting for it, such as running the tests, could start as if the CLI had finished. It now waits until the question is answered and the CLI is done, up to a limit.
+- **A step that waits for a CLI no longer starts while the CLI is asking a question.** When a CLI paused on a question (trust this folder? run this command?), a later step waiting for it, such as running the tests, could start as if the CLI had finished. Now Viby shows that the CLI is asking and skips the steps that were waiting on it. A CLI that stays busy is also given up on after a limit.
 - **A planner answer that comes back garbled gets one more try.** Before, Viby said it couldn't read the plan. It now accepts the usual slips (a code fence around the JSON, a trailing comma, another name for a field) and, if it still can't read it, asks the planner once more before saying so.
 - **A call says when a turn fails.** An error while Viby handled something you said on a call was kept out of sight; the call now shows it.
 - **Restarting after an update comes back right away on Home instead of stopping.** Updating from an install with its own Electron binary replaced that binary with a wrapper that caught Electron's internal `--type=relauncher` helper, so clicking **Restart** failed with a startup error notification and left VibeForge closed with no tray icon. The wrapper now hands Electron's own `--type=*` helpers straight to `electron.real`, the launcher's startup watcher closes inherited file descriptors, and restarting after an update brings the window straight to the front on **Home** while keeping where you left each other view.
