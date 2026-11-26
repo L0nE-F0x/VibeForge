@@ -318,7 +318,8 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
     await driver.act({ action: "key", surface: "desktop", target: "", prompt: "Ctrl+L" });
 
     expect(calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args.join(" ") === "dispatch focuswindow address:0x12")).toBe(true);
-    expect(calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args.join(" ") === "dispatch movecursor 250 180")).toBe(true);
+    // The last screenshot showed only "Docs" (at 10,20), so 250,180 in it is 260,200 on the desktop.
+    expect(calls.some((c) => c.file === "/usr/bin/hyprctl" && c.args.join(" ") === "dispatch movecursor 260 200")).toBe(true);
     expect(calls.some((c) => c.file === "/usr/bin/python3" && c.args[0] === "-I" && c.args[3] === "click")).toBe(true);
     expect(calls.some((c) => c.file === "/usr/bin/python3" && c.args[0] === "-I" && c.args[3] === "scroll-v" && c.args[4] === "-2")).toBe(true);
     expect(calls.some((c) => c.file === "/usr/bin/wtype" && c.args[0] === "--" && c.args[1] === "hello")).toBe(true);
@@ -510,6 +511,55 @@ describe("Computer-use Electron drivers (Hyprland, X11, AppUI, Fallback)", () =>
     await expect(driver.act({ action: "type", surface: "desktop", target: "", prompt: "hello" })).rejects.toThrow(
       /wtype, ydotool, dotool.*sudo pacman -S wtype/,
     );
+  });
+
+  it("clicks where Viby saw it after a screenshot of one window, wherever that window is", async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const bins = new Set(["hyprctl", "grim", "wtype", "python3"]);
+    let docsAt: [number, number] = [2148, 120];
+    const driver = new HyprlandWaylandDriver({
+      dataRoot: tempDir(),
+      getAppWebContents: () => null,
+      getBrowserWebContents: () => null,
+      resolveBin: (b) => (bins.has(b) ? `/usr/bin/${b}` : null),
+      uinputWritable: () => true,
+      execFileImpl: async (file, args) => {
+        calls.push({ file, args });
+        if (file.endsWith("hyprctl") && args[1] === "clients") {
+          return {
+            stdout: JSON.stringify([{ address: "0x77", class: "firefox", title: "Docs", workspace: { name: "2" }, at: docsAt, size: [800, 600], focusHistoryID: 0 }]),
+            stderr: "",
+          };
+        }
+        if (file.endsWith("hyprctl") && args[1] === "monitors") {
+          // Left: 1920x1080 at scale 1. Right: 2560x1440 at scale 1.25 (2048x1152 logical), starting at x 2048.
+          return {
+            stdout: JSON.stringify([
+              { name: "eDP-1", width: 1920, height: 1080, x: 0, y: 0, scale: 1, focused: true },
+              { name: "DP-1", width: 2560, height: 1440, x: 2048, y: 0, scale: 1.25, focused: false },
+            ]),
+            stderr: "",
+          };
+        }
+        if (file.endsWith("grim")) fs.writeFileSync(args[args.length - 1], pngStub);
+        return { stdout: "", stderr: "" };
+      },
+    });
+    const moves = () => calls.filter((c) => c.args[0] === "dispatch" && c.args[1] === "movecursor").map((c) => c.args.slice(2).join(","));
+
+    const shot = await driver.screenshot({ surface: "desktop", target: "Docs" });
+    expect(shot.details).toContain("measured from the window's top-left corner (scale 1.25)");
+    // 500,250 in a 1.25x picture of the window is 400,200 inside it, so 2548,320 on the desktop.
+    await driver.act({ action: "click", surface: "desktop", target: "500,250", prompt: "" });
+    // The window moved after the screenshot: the click follows it.
+    docsAt = [2248, 220];
+    await driver.act({ action: "click", surface: "desktop", target: "500,250", prompt: "" });
+    // Explicit desktop coordinates are left alone.
+    await driver.act({ action: "click", surface: "desktop", target: "30,40", prompt: "", options: "coords=logical" });
+    // A whole-screen screenshot measures from the monitor again.
+    await driver.screenshot({ surface: "desktop" });
+    await driver.act({ action: "click", surface: "desktop", target: "500,250", prompt: "" });
+    expect(moves()).toEqual(["2548,320", "2648,420", "30,40", "500,250"]);
   });
 
   it("waits, scrolls, drags and lists windows on X11 too, with xdotool", async () => {
