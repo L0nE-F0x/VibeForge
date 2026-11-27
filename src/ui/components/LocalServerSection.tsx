@@ -1,4 +1,4 @@
-import { AlertTriangle, FolderOpen, Play, Square } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, FolderOpen, Play, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { LocalServerView, LocalSettings, SettingsPatch } from "../../shared/api.js";
 import { LOCAL_SERVER_PORTS, normalizeLocalUrl, type LocalServerProblem } from "../../shared/local.js";
@@ -62,6 +62,7 @@ export function LocalServerSection({ local, save }: { local: LocalSettings; save
   const query = useQuery<LocalServerView>("local-server", ["localServer", "settings"], () => call("local.server"));
   const view = query.data;
   const [showLog, setShowLog] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
   const server = local.server;
   const saveServer = (patch: Partial<LocalServerSettings>) => save({ server: { ...server, ...patch } });
 
@@ -87,14 +88,51 @@ export function LocalServerSection({ local, save }: { local: LocalSettings; save
   const found = view?.found;
   const lines = state?.log ?? [];
 
+  const advancedOpen = advanced || problem === "noProgram" || problem === "badArgs";
+  const shownCommand = up ? state?.shown : (view?.plan?.shown ?? state?.shown);
+
   return (
     <div className="vstack" style={{ gap: 12 }}>
-      <div className="vstack" style={{ gap: 2 }}>
-        <strong>{t("local.server.title")}</strong>
-        <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
-          {t("local.server.intro")}
-        </span>
-      </div>
+      {server.kind && (
+        <div className="vstack" style={{ gap: 8 }}>
+          <div className="hstack wrap" style={{ gap: 8 }}>
+            <Chip tone={status === "running" ? "ok" : status === "failed" ? "bad" : status === "stopped" ? undefined : "info"}>
+              {t(`local.server.status.${status}` as Key)}
+            </Chip>
+            {up || status === "stopping" ? (
+              <Button size="sm" icon={Square} busy={stopping || status === "stopping"} onClick={() => void stop()}>
+                {t("local.server.stop")}
+              </Button>
+            ) : (
+              <Button size="sm" variant="primary" icon={Play} busy={starting} disabled={Boolean(view?.problem)} onClick={() => void start()}>
+                {t("local.server.start")}
+              </Button>
+            )}
+            {up && state?.url && (
+              <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
+                {t("local.server.answersAt", { url: state.url })}
+              </span>
+            )}
+            {lines.length > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => setShowLog((open) => !open)}>
+                {showLog ? t("local.server.hideLog") : t("local.server.showLog")}
+              </Button>
+            )}
+          </div>
+
+          {problem && (
+            <Notice tone={view?.problem ? "warn" : "bad"} icon={AlertTriangle}>
+              {t(PROBLEM[problem], { detail: state?.detail ?? "", url: state?.url ?? view?.plan?.url ?? "" })}
+            </Notice>
+          )}
+
+          {showLog && lines.length > 0 && (
+            <pre className="pre selectable" style={{ maxHeight: 260, overflow: "auto" }}>
+              {lines.slice(-SHOWN_LINES).join("\n")}
+            </pre>
+          )}
+        </div>
+      )}
 
       <div className="form-grid">
         <Field label={t("local.server.kind")} hint={t("local.server.kindHint")}>
@@ -114,77 +152,56 @@ export function LocalServerSection({ local, save }: { local: LocalSettings; save
         </Field>
 
         {server.kind === "llamacpp" && (
-          <>
-            <Field label={t("local.server.models")} hint={t("local.server.modelsHint")}>
-              <div className="hstack" style={{ gap: 6 }}>
-                <SavedInput className="mono grow" value={server.models} placeholder="~/AI/models" onSave={(models) => void saveServer({ models })} />
-                <Button icon={FolderOpen} onClick={() => void pickModels()}>
-                  {t("local.server.choose")}
-                </Button>
-              </div>
-            </Field>
-            <Field label={t("local.server.program")} hint={t("local.server.programHint")}>
-              <SavedInput className="mono" value={server.program} placeholder="llama-server" onSave={(program) => void saveServer({ program })} />
-            </Field>
-            <Field label={t("local.server.presets")} hint={t("local.server.presetsHint")}>
-              <SavedInput className="mono" value={server.presets} placeholder="~/AI/models/models.ini" onSave={(presets) => void saveServer({ presets })} />
-            </Field>
-            <Field label={t("local.server.extraArgs")} hint={t("local.server.extraArgsHint")}>
-              <SavedInput className="mono" value={server.extraArgs} placeholder="-ngl 99 -fa on -c 65536 --jinja" onSave={(extraArgs) => void saveServer({ extraArgs })} />
-            </Field>
-          </>
+          <Field label={t("local.server.models")} hint={t("local.server.modelsHint")}>
+            <div className="hstack" style={{ gap: 6 }}>
+              <SavedInput className="mono grow" value={server.models} placeholder="~/AI/models" onSave={(models) => void saveServer({ models })} />
+              <Button icon={FolderOpen} onClick={() => void pickModels()}>
+                {t("local.server.choose")}
+              </Button>
+            </div>
+          </Field>
         )}
 
         {server.kind === "command" && (
-          <Field label={t("local.server.command")} hint={t("local.server.commandHint")}>
-            <SavedInput className="mono" value={server.command} placeholder="~/AI/run-bonsai.sh" onSave={(command) => void saveServer({ command })} />
-          </Field>
+          <>
+            <Field label={t("local.server.command")} hint={t("local.server.commandHint")}>
+              <SavedInput className="mono" value={server.command} placeholder="~/AI/run-bonsai.sh" onSave={(command) => void saveServer({ command })} />
+            </Field>
+            <Field label={t("local.server.commandUrl")} hint={t("local.server.commandUrlHint")}>
+              <SavedInput className="mono" value={local.url} placeholder="http://127.0.0.1:8080" onSave={(url) => void save({ url: normalizeLocalUrl(url) || url })} />
+            </Field>
+          </>
         )}
       </div>
 
       {server.kind && (
-        <div className="vstack" style={{ gap: 8 }}>
-          <div className="hstack wrap" style={{ gap: 8 }}>
-            <Chip tone={status === "running" ? "ok" : status === "failed" ? "bad" : status === "stopped" ? undefined : "info"}>
-              {t(`local.server.status.${status}` as Key)}
-            </Chip>
-            {up || status === "stopping" ? (
-              <Button size="sm" icon={Square} busy={stopping || status === "stopping"} onClick={() => void stop()}>
-                {t("local.server.stop")}
-              </Button>
-            ) : (
-              <Button size="sm" variant="primary" icon={Play} busy={starting} disabled={Boolean(view?.problem)} onClick={() => void start()}>
-                {t("local.server.start")}
-              </Button>
-            )}
-            {up && state?.url && (
-              <span className="faint mono" style={{ fontSize: "var(--fs-sm)" }}>
-                {state.url}
-              </span>
-            )}
-            {lines.length > 0 && (
-              <Button size="sm" variant="ghost" onClick={() => setShowLog((open) => !open)}>
-                {showLog ? t("local.server.hideLog") : t("local.server.showLog")}
-              </Button>
-            )}
+        <div className="vstack" style={{ gap: 10 }}>
+          <div>
+            <Button size="sm" variant="ghost" icon={advancedOpen ? ChevronDown : ChevronRight} onClick={() => setAdvanced((open) => !open)}>
+              {t("local.server.advanced")}
+            </Button>
           </div>
-
-          {(state?.shown ?? view?.plan?.shown) && (
-            <span className="faint mono" style={{ fontSize: "var(--fs-xs)", wordBreak: "break-all" }}>
-              $ {up ? state?.shown : (view?.plan?.shown ?? state?.shown)}
-            </span>
-          )}
-
-          {problem && (
-            <Notice tone={view?.problem ? "warn" : "bad"} icon={AlertTriangle}>
-              {t(PROBLEM[problem], { detail: state?.detail ?? "", url: state?.url ?? view?.plan?.url ?? "" })}
-            </Notice>
-          )}
-
-          {showLog && lines.length > 0 && (
-            <pre className="pre selectable" style={{ maxHeight: 260, overflow: "auto" }}>
-              {lines.slice(-SHOWN_LINES).join("\n")}
-            </pre>
+          {advancedOpen && (
+            <>
+              {server.kind === "llamacpp" && (
+                <div className="form-grid">
+                  <Field label={t("local.server.program")} hint={t("local.server.programHint")}>
+                    <SavedInput className="mono" value={server.program} placeholder="llama-server" onSave={(program) => void saveServer({ program })} />
+                  </Field>
+                  <Field label={t("local.server.presets")} hint={t("local.server.presetsHint")}>
+                    <SavedInput className="mono" value={server.presets} placeholder="~/AI/models/models.ini" onSave={(presets) => void saveServer({ presets })} />
+                  </Field>
+                  <Field label={t("local.server.extraArgs")} hint={t("local.server.extraArgsHint")}>
+                    <SavedInput className="mono" value={server.extraArgs} placeholder="-c 32768 -t 16" onSave={(extraArgs) => void saveServer({ extraArgs })} />
+                  </Field>
+                </div>
+              )}
+              {shownCommand && (
+                <span className="faint mono" style={{ fontSize: "var(--fs-xs)", wordBreak: "break-all" }}>
+                  $ {shownCommand}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}

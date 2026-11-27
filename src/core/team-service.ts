@@ -58,7 +58,7 @@ export class TeamService extends ServiceCore {
     });
     // Opened in Local mode with "Start with Local mode" on: the server comes up with VibeForge.
     const settings = this.store.readSettings();
-    if (settings.local.server.withLocalMode && this.wantsLocalServer(settings)) queueMicrotask(() => void this.localServerStart().catch(() => undefined));
+    if (settings.local.server.managed && settings.local.server.withLocalMode && this.wantsLocalServer(settings)) queueMicrotask(() => void this.localServerStart().catch(() => undefined));
   }
 
   /** A task's Execute or a routine's Run now, saved while it waited, with its start again; null once it's gone. */
@@ -118,7 +118,12 @@ export class TeamService extends ServiceCore {
 
   /** "Start with Local mode": the server comes up as Local mode turns on, and goes as it turns off. */
   private followLocalMode(before: Settings, after: Settings): void {
-    if (!after.local.server.withLocalMode) return;
+    // Switched to a server that is already running (or elsewhere): the one VibeForge started goes.
+    if (before.local.server.managed && !after.local.server.managed) {
+      void this.localServer.stop();
+      return;
+    }
+    if (!after.local.server.managed || !after.local.server.withLocalMode) return;
     const wanted = this.wantsLocalServer(after);
     if (wanted === this.wantsLocalServer(before)) return;
     if (wanted) void this.localServerStart().catch(() => undefined);

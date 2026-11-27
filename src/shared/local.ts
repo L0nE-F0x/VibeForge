@@ -220,7 +220,7 @@ export const LOCAL_SERVER_PORTS: Record<LocalServerLaunch, number> = {
 export const LOCAL_SERVER_KINDS: readonly LocalServerLaunch[] = ["llamacpp", "ollama", "lmstudio", "command"] as const;
 
 export function defaultLocalServer(): LocalServerSettings {
-  return { kind: "", program: "", models: "", presets: "", extraArgs: "", command: "", withLocalMode: false };
+  return { managed: false, kind: "", program: "", models: "", presets: "", extraArgs: "", command: "", withLocalMode: false };
 }
 
 /** One line of at most `max` characters, or "". */
@@ -234,6 +234,8 @@ export function normalizeLocalServer(raw: Partial<LocalServerSettings> | null | 
   const value = raw && typeof raw === "object" ? raw : {};
   const kind = LOCAL_SERVER_KINDS.includes(value.kind as LocalServerLaunch) ? (value.kind as LocalServerLaunch) : "";
   return {
+    // Saved before 3.15.1 had this choice: a server picked to run means VibeForge starts it.
+    managed: typeof value.managed === "boolean" ? value.managed : Boolean(kind),
     kind,
     program: oneLine(value.program, 1000),
     models: oneLine(value.models, 1000),

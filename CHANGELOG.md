@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.15.1] - 2026-11-27
+
+**3.15.1: Settings → Local AI is easier to follow: it asks where your model runs, and shows only what that answer needs.**
+
+### Changed
+
+- **Where does your model run?** Settings → Local AI now starts with one question: **VibeForge starts it** shows the server with **Start** / **Stop** and its settings, and **Already running, or on another machine** shows the server address, **Connect** and the servers found on this computer. If you set up a server to run in 3.15.0, you're already on **VibeForge starts it**. Switching to the other answer stops the server VibeForge started.
+- **Status first, power-user settings folded away.** The server's status and **Start** / **Stop** sit at the top. The `llama-server` program, the settings per model, **More options** and the exact command are under **Advanced**, which opens by itself when one of them is the problem.
+- **Setup first, switches last.** The page now reads top to bottom: where the model runs, then **Model and coding tool**, then **Switching to Local** with **Use Local mode** and **Also switch saved Agents to Local**. While VibeForge's server is stopped, the Model list says to start it to see its models, instead of an error about an unreachable server.
+- **Your own command says where it answers.** With **My own command** picked, the address its server answers at sits right beside the command.
+
 ## [3.15.0] - 2026-11-27
 
 **3.15.0: Start and stop your local AI server from Settings → Local AI, with every model in a folder listed in the Model picker.**
@@ -1332,7 +1343,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.15.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.15.1...HEAD
+[3.15.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.1
 [3.15.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.0
 [3.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.14.0
 [3.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.13.0
