@@ -21,13 +21,12 @@ import {
   groupWorkspaces,
   isDefaultWorkspaceView,
   leafFolder,
-  loadWorkspaceCategory,
   loadWorkspaceView,
   matchesSearch,
   SORTS,
-  saveWorkspaceCategory,
   saveWorkspaceView,
   toggleFilter,
+  useWorkspaceCategory,
   viewWorkspaces,
   workspacesInCategory,
   type WorkspaceFacts,
@@ -36,7 +35,7 @@ import {
   type WorkspaceView,
 } from "../../workspace-view.js";
 import { shareLine, SyncDialog } from "./SyncDialog.js";
-import { WORKSPACE_MIME, WorkspaceTabs } from "./WorkspaceTabs.js";
+import { dropWorkspaceOnCategory, WORKSPACE_MIME, WorkspaceTabs } from "./WorkspaceTabs.js";
 
 interface CopyReview {
   name: string;
@@ -124,14 +123,12 @@ export function WorkspaceList({
     await call("workspaces.setCategory", ids, categoryId, on);
   }, t("code.categoryAddFailed"));
 
-  const [moveWorkspaceCategory] = useAction(async (workspace: Workspace, targetCategoryId: string, fromCategoryId: string | null) => {
-    if (fromCategoryId && fromCategoryId !== targetCategoryId) {
-      const nextCats = [...(workspace.categories ?? []).filter((id) => id !== fromCategoryId), targetCategoryId];
-      await call("workspaces.update", workspace.id, { categories: nextCats });
-    } else {
-      await call("workspaces.setCategory", [workspace.id], targetCategoryId, true);
-    }
-  }, t("code.categoryAddFailed"));
+  const [moveWorkspaceCategory] = useAction(
+    async (workspace: Workspace, targetCategoryId: string, fromCategoryId: string | null, copy: boolean = false) => {
+      await dropWorkspaceOnCategory(workspace, targetCategoryId, fromCategoryId, copy);
+    },
+    t("code.categoryAddFailed"),
+  );
 
   const liveCount = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
@@ -168,13 +165,7 @@ export function WorkspaceList({
   };
 
   // ------------------------------------------------ categories, search, filter, sort, group, select
-  const [activeCategoryState, setActiveCategoryState] = useState<string | null>(loadWorkspaceCategory);
-  const currentCategory = activeCategoryState ? (categories.find((cat) => cat.id === activeCategoryState) ?? null) : null;
-  const activeCategory = currentCategory?.id ?? null;
-  const selectCategory = (categoryId: string | null) => {
-    setActiveCategoryState(categoryId);
-    saveWorkspaceCategory(categoryId);
-  };
+  const { currentCategory, activeCategory, selectCategory } = useWorkspaceCategory(categories);
   const [createTabRequest, setCreateTabRequest] = useState<{ key: number; workspaceIds: string[] } | null>(null);
   const createSeq = useRef(0);
   const requestNewCategory = (workspaceIds: string[]) => {
@@ -253,11 +244,11 @@ export function WorkspaceList({
       setRemoving(false);
     }
   };
-  const handleDropToCategory = (workspaceId: string, targetCategoryId: string) => {
+  const handleDropToCategory = (workspaceId: string, targetCategoryId: string, copy = false) => {
     setDragWorkspace(null);
     const workspace = workspaces.find((item) => item.id === workspaceId);
     if (!workspace) return;
-    void moveWorkspaceCategory(workspace, targetCategoryId, activeCategory);
+    void moveWorkspaceCategory(workspace, targetCategoryId, activeCategory, copy);
   };
 
   const filterLabels: Record<WorkspaceFilter, string> = {
