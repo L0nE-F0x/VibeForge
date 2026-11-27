@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Store } from "../../src/core/store.js";
 import type { LocalSettings, OrchestratorSettings } from "../../src/core/types.js";
-import { localModeRoutesViby, migrateVibyRoute, vibyLocalModel, vibyPlanner, vibyPlannerPatch } from "../../src/shared/local.js";
+import { defaultLocalServer, localModeRoutesViby, migrateVibyRoute, vibyLocalModel, vibyPlanner, vibyPlannerPatch } from "../../src/shared/local.js";
 import { classifyStepRisk } from "../../src/shared/orchestrator-risk.js";
 import { formatSettingsRules, resolveSettingsStep, type PlanSettingsContext } from "../../src/shared/orchestrator-settings.js";
 import type { OrchestratorStep } from "../../src/shared/orchestrator.js";
@@ -28,6 +28,7 @@ function local(over: Partial<LocalSettings> = {}): LocalSettings {
     model: "qwen3:27b",
     vibyModel: "",
     harness: "auto",
+    server: defaultLocalServer(),
     ...over,
   };
 }

@@ -78,6 +78,8 @@ export class Quit {
     ctx.service.shutdown();
     // A task deleted moments ago still has its copy's branch to drop: give git a moment for it.
     await Promise.race([ctx.service.close(), new Promise((resolve) => setTimeout(resolve, CLOSE_WAIT_MS))]);
+    // A Local AI server still ending is told once more on the way out, without waiting.
+    ctx.service.disposeLocalServer();
     ctx.service = null;
   }
 

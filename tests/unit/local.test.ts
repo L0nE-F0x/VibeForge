@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { LOCAL_SPAWN_ENV_KEYS } from "../../src/shared/local.js";
+import { LOCAL_SPAWN_ENV_KEYS, defaultLocalServer } from "../../src/shared/local.js";
 import {
   anthropicBaseUrl,
   buildLocalBrainMessages,
@@ -65,6 +65,7 @@ const baseLocal: LocalSettings = {
   model: "bonsai-2.5-27b",
   vibyModel: "",
   harness: "auto",
+  server: defaultLocalServer(),
 };
 
 describe("local URL, model, and think-tag helpers", () => {

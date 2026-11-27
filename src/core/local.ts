@@ -102,6 +102,18 @@ function positiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : null;
 }
 
+/** The --ctx-size (or -c) in a router-mode model's options, when it has a positive one. */
+function routedContext(args: unknown): number | null {
+  if (!Array.isArray(args)) return null;
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if (args[i] === "--ctx-size" || args[i] === "-c") {
+      const n = Number(args[i + 1]);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    }
+  }
+  return null;
+}
+
 async function fetchJsonSafe(
   targetUrl: string,
   timeoutMs: number,
@@ -234,13 +246,18 @@ export async function probeLocalServer(
     const id = cleanLocalModel(typeof m.id === "string" ? m.id : "");
     if (!id) continue;
     const meta = m.meta && typeof m.meta === "object" ? (m.meta as Record<string, unknown>) : null;
+    // llama-server's router mode (--models-dir) says per model whether it is loaded, and the
+    // options it runs it with: its --ctx-size is the window in use, not the model's largest.
+    const routed = m.status && typeof m.status === "object" ? (m.status as { value?: unknown; args?: unknown }) : null;
     const ctx =
+      routedContext(routed?.args) ??
       positiveInt(m.context_length) ??
       positiveInt(m.max_context_length) ??
       positiveInt(meta?.n_ctx_train) ??
       null;
     upsert({
       id,
+      ...(routed?.value === "loaded" ? { loaded: true } : {}),
       contextLength: ctx,
     });
   }
@@ -258,7 +275,10 @@ export async function probeLocalServer(
         ? path.basename(propsObj.model_path)
         : "",
   );
-  if (propsAlias && byId.size === 0) {
+  // A router's /props names no model of its own ("llama-server"): its models are the list above.
+  if (propsObj?.role === "router") {
+    /* nothing to add */
+  } else if (propsAlias && byId.size === 0) {
     upsert({ id: propsAlias, loaded: true, contextLength: propsCtx });
   } else if (propsCtx && byId.size === 1) {
     const [only] = [...byId.values()];

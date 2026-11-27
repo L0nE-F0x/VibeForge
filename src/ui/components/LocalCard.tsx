@@ -1,11 +1,12 @@
-import { AlertTriangle, Check, Copy, Laptop, Network, Plug, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Laptop, Network, Plug, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LocalHarness, LocalRuntimeStatus, LocalServerProbe, LocalSettings } from "../../shared/api.js";
+import type { LocalHarness, LocalRuntimeStatus, LocalServerProbe, LocalSettings, SettingsPatch } from "../../shared/api.js";
 import { LOCAL_PRESETS, cleanLocalModel, isLocalConfigured, isLoopbackLocalUrl, normalizeLocalUrl } from "../../shared/local.js";
 import { call, useEngines, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import { vibyUse } from "../viby-route.js";
+import { LocalServerSection } from "./LocalServerSection.js";
 import { Button, Chip, Field, Input, Notice, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
@@ -38,10 +39,9 @@ export function LocalCard() {
   const [urlInput, setUrlInput] = useState("");
   const [typingModel, setTypingModel] = useState(false);
   const [modelInput, setModelInput] = useState("");
-  const [copiedTip, setCopiedTip] = useState<"ollama" | "llama" | null>(null);
   const skipModelBlurRef = useRef(false);
 
-  const [save] = useAction(async (local: Partial<LocalSettings>) => call("settings.save", { local }), t("settings.saveFailed"));
+  const [save] = useAction(async (local: NonNullable<SettingsPatch["local"]>) => call("settings.save", { local }), t("settings.saveFailed"));
 
   const currentUrl = settings?.local.url ?? "";
   const [checkStatus, checking] = useAction(
@@ -126,13 +126,6 @@ export function LocalCard() {
   const normalizedConfigured = normalizeLocalUrl(local.url);
   const showLoopback = Boolean(normalizedConfigured) && isLoopbackLocalUrl(normalizedConfigured);
   const resolvedHarness = local.harness === "auto" ? (status?.harnesses.find((h) => h.available)?.id ?? null) : local.harness;
-
-  const copyCommand = (kind: "ollama" | "llama", command: string) => {
-    void navigator.clipboard?.writeText(command).then(() => {
-      setCopiedTip(kind);
-      setTimeout(() => setCopiedTip((prev) => (prev === kind ? null : prev)), 1500);
-    });
-  };
 
   return (
     <div className="card vstack" style={{ gap: 14 }}>
@@ -360,31 +353,8 @@ export function LocalCard() {
             </Field>
           </div>
 
-          {!detectedServers.length && !activeProbe?.reachable && (status?.binaries.ollama || status?.binaries.llamaServer) && (
-            <div className="vstack" style={{ gap: 6 }}>
-              {status.binaries.ollama && (
-                <div className="hstack wrap" style={{ gap: 8, fontSize: "var(--fs-sm)" }}>
-                  <span className="faint grow mono">{t("local.startTipOllama")}</span>
-                  <Button size="sm" variant="ghost" icon={copiedTip === "ollama" ? Check : Copy} onClick={() => copyCommand("ollama", "ollama serve")}>
-                    {copiedTip === "ollama" ? t("local.copied") : t("local.copyTip")}
-                  </Button>
-                </div>
-              )}
-              {status.binaries.llamaServer && (
-                <div className="hstack wrap" style={{ gap: 8, fontSize: "var(--fs-sm)" }}>
-                  <span className="faint grow mono">{t("local.startTipLlama")}</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    icon={copiedTip === "llama" ? Check : Copy}
-                    onClick={() => copyCommand("llama", "llama-server -m your-model.gguf --port 8080 -ngl 99")}
-                  >
-                    {copiedTip === "llama" ? t("local.copied") : t("local.copyTip")}
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+          <div style={{ borderTop: "1px solid var(--line)" }} />
+          <LocalServerSection local={local} save={save} />
 
           {effectiveContext !== null && effectiveContext < MIN_COMFORTABLE_CONTEXT && (
             <Notice tone="warn" icon={AlertTriangle}>

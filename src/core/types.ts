@@ -167,6 +167,28 @@ export interface LocalSettings {
   vibyModel: string;
   /** Installed coding CLI that drives local coding sessions. */
   harness: LocalHarness;
+  /** How VibeForge starts and stops a server on this computer (Settings → Local AI → Run a server). */
+  server: LocalServerSettings;
+}
+
+/** The kinds of server VibeForge can start: three it knows, or a command line of your own. */
+export type LocalServerLaunch = "llamacpp" | "ollama" | "lmstudio" | "command";
+
+export interface LocalServerSettings {
+  /** What to start; "" until one is picked (the card then suggests what is installed). */
+  kind: LocalServerLaunch | "";
+  /** llama.cpp: the llama-server program, or a script that runs it; "" finds llama-server on PATH. */
+  program: string;
+  /** llama.cpp: a folder of models (one .gguf or one subfolder per model), or a single .gguf file. */
+  models: string;
+  /** llama.cpp: an optional presets .ini with settings per model (llama-server --models-preset). */
+  presets: string;
+  /** llama.cpp: more options for llama-server, as you would type them after it. */
+  extraArgs: string;
+  /** "command": the line VibeForge runs in a shell, such as a launch script of your own. */
+  command: string;
+  /** Start it when Local mode turns on (and when VibeForge opens in Local mode), stop it when Local mode turns off. */
+  withLocalMode: boolean;
 }
 
 export interface Settings {
@@ -455,6 +477,8 @@ export type Topic =
   | "voice"
   | "orchestrator"
   | "sync"
+  /** The Local AI server VibeForge starts: starting, running, stopped, or what it printed. */
+  | "localServer"
   /** Which of settings.json, engines.json, workspaces.json and chats.json can't be read (UnreadableFile). */
   | "unreadable";
 

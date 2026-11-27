@@ -9,7 +9,12 @@ import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
-import { detectLocalRuntimes, probeLocalServer, type LocalRuntimeStatus, type LocalServerProbe } from "./local.js";
+import os from "node:os";
+import path from "node:path";
+import { detectLocalRuntimes, probeLocalServer, LOCAL_ENGINE_ID, normalizeLocalUrl, type LocalRuntimeStatus, type LocalServerProbe } from "./local.js";
+import { LocalServerRunner } from "./local-server.js";
+import { localServerPlan, localServerWanted, type LocalServerView } from "../shared/local.js";
+import type { Settings } from "./types.js";
 import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
@@ -38,10 +43,22 @@ export class TeamService extends ServiceCore {
   private readonly messages = new MessageDesk(this, this.tasks);
   readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages, this.tasks, this.routines, this.runs, this.library, this.chats);
 
+  /** The Local AI server started from Settings → Local AI → Run a server. */
+  private readonly localServer: LocalServerRunner;
+
   constructor(options: DeskOptions) {
     super(options);
     // What was waiting for its folder when VibeForge last closed waits again.
     this.turns.restore((saved) => this.resumeWait(saved));
+    this.localServer = new LocalServerRunner({
+      logFile: path.join(options.dataRoot, "logs", "local-server.log"),
+      probe: async (url) => (await probeLocalServer(url, { timeoutMs: 1000 })).reachable,
+      onChange: () => this.emit("localServer"),
+      onReady: (url) => void this.localServerReady(url),
+    });
+    // Opened in Local mode with "Start with Local mode" on: the server comes up with VibeForge.
+    const settings = this.store.readSettings();
+    if (settings.local.server.withLocalMode && this.wantsLocalServer(settings)) queueMicrotask(() => void this.localServerStart().catch(() => undefined));
   }
 
   /** A task's Execute or a routine's Run now, saved while it waited, with its start again; null once it's gone. */
@@ -67,6 +84,8 @@ export class TeamService extends ServiceCore {
   override prepareShutdown(): void {
     // The CLIs are about to end, which frees their folders: nothing waiting should start now.
     this.turns.hold();
+    // The Local AI server VibeForge started ends with it (it holds the GPU's memory).
+    void this.localServer.stop();
     super.prepareShutdown();
   }
 
@@ -74,7 +93,81 @@ export class TeamService extends ServiceCore {
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
-    return super.close();
+    const stopped = this.localServer.stop().then(() => undefined);
+    return Promise.all([super.close(), stopped]).then(() => undefined);
+  }
+
+  /** A close that couldn't wait: the server is told to end on the way out. */
+  disposeLocalServer(): void {
+    this.localServer.dispose();
+  }
+
+  // ---------------------------------------------------------------- settings
+
+  override saveSettings(patch: Parameters<ServiceCore["saveSettings"]>[0]): Settings {
+    const before = this.store.readSettings();
+    const next = super.saveSettings(patch);
+    if (patch.local || patch.orchestrator) this.followLocalMode(before, next);
+    return next;
+  }
+
+  /** Local mode wants the server: Local AI on, and in Local mode or with Viby planning on Local. */
+  private wantsLocalServer(settings: Settings): boolean {
+    return localServerWanted(settings.local, settings.orchestrator.engine === LOCAL_ENGINE_ID);
+  }
+
+  /** "Start with Local mode": the server comes up as Local mode turns on, and goes as it turns off. */
+  private followLocalMode(before: Settings, after: Settings): void {
+    if (!after.local.server.withLocalMode) return;
+    const wanted = this.wantsLocalServer(after);
+    if (wanted === this.wantsLocalServer(before)) return;
+    if (wanted) void this.localServerStart().catch(() => undefined);
+    else void this.localServer.stop();
+  }
+
+  // ---------------------------------------------------------------- the Local AI server VibeForge runs
+
+  localServerView(): LocalServerView {
+    const local = this.store.readSettings().local;
+    const resolve = this.options.host.resolveBin;
+    const worked = localServerPlan(local.server, local.url, resolve, os.homedir());
+    return {
+      state: this.localServer.view(),
+      plan: worked.plan,
+      problem: worked.problem,
+      found: {
+        llamacpp: Boolean(resolve("llama-server")),
+        ollama: Boolean(resolve("ollama")),
+        lmstudio: Boolean(resolve("lms") ?? resolve(path.join(os.homedir(), ".lmstudio", "bin", "lms"))),
+      },
+    };
+  }
+
+  async localServerStart(): Promise<LocalServerView> {
+    const local = this.store.readSettings().local;
+    const worked = localServerPlan(local.server, local.url, this.options.host.resolveBin, os.homedir());
+    if (worked.plan) await this.localServer.start(worked.plan);
+    else this.localServer.refuse(worked.problem);
+    return this.localServerView();
+  }
+
+  async localServerStop(): Promise<LocalServerView> {
+    await this.localServer.stop();
+    return this.localServerView();
+  }
+
+  /** It answers: Local AI points at it, and its models are listed in the pickers. */
+  private async localServerReady(url: string): Promise<void> {
+    const local = this.store.readSettings().local;
+    if (normalizeLocalUrl(local.url) !== url || !local.enabled) this.saveSettings({ local: { enabled: true, url } });
+    const probe = await probeLocalServer(url).catch(() => null);
+    if (!probe?.reachable) return;
+    const current = this.store.readSettings().local;
+    const ids = probe.models.map((m) => m.id);
+    // A model picked that this server doesn't have: its first one, so Local mode can start at once.
+    if (ids.length && (!current.model || !ids.includes(current.model))) this.saveSettings({ local: { model: probe.models.find((m) => m.loaded)?.id ?? ids[0] } });
+    if (this.recordLocalProbe(probe)) this.emit("orchestrator");
+    this.emit("settings");
   }
 
   // ---------------------------------------------------------------- library

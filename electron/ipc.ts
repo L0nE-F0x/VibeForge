@@ -232,6 +232,9 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "engines.save": (rows) => s().saveEngines(rows),
     "local.status": (url) => s().localStatus(url),
     "local.probe": (url) => s().localProbe(url),
+    "local.server": () => s().localServerView(),
+    "local.serverStart": () => s().localServerStart(),
+    "local.serverStop": () => s().localServerStop(),
 
     "workspaces.list": () => s().listWorkspaces(),
     "workspaces.status": () => s().summarizeWorkspaces(),

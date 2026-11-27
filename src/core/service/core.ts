@@ -3,7 +3,7 @@ import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, type ConcreteLocalHarness, type LocalServerProbe } from "../local.js";
-import { normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
+import { normalizeLocalServer, normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -185,7 +185,7 @@ export class ServiceCore {
   saveSettings(
     patch: Partial<Omit<Settings, "companion" | "local">> & {
       companion?: Partial<Settings["companion"]>;
-      local?: Partial<Settings["local"]>;
+      local?: Partial<Omit<Settings["local"], "server">> & { server?: Partial<Settings["local"]["server"]> };
     },
   ): Settings {
     const current = this.store.readSettings();
@@ -200,7 +200,9 @@ export class ServiceCore {
     }
     if (localPatch) {
       // Viby's own route (local.viby) stays as it was saved: switching coding to Local or back never moves Viby.
-      next.local = { ...current.local, ...localPatch, viby: normalizeVibyRoute(localPatch.viby) ?? current.local.viby };
+      // A partial server patch keeps the rest of how the server starts.
+      const server = localPatch.server ? normalizeLocalServer({ ...current.local.server, ...localPatch.server }) : current.local.server;
+      next.local = { ...current.local, ...localPatch, server, viby: normalizeVibyRoute(localPatch.viby) ?? current.local.viby };
     }
     this.store.writeSettings(next);
     if (localPatch) {

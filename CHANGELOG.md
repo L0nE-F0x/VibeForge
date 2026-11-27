@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.15.0] - 2026-11-27
+
+**3.15.0: Start and stop your local AI server from Settings → Local AI, with every model in a folder listed in the Model picker.**
+
+### Added
+
+- **Run a server.** **Settings → Local AI** has a new **Run a server** section that starts `llama.cpp`, Ollama, LM Studio or a command of your own (such as a launch script you already have) with **Start**, and ends it with **Stop**. It shows whether the server is starting, running or stopped, the exact command it runs, and **Show output** for what the server printed. Once the server answers, VibeForge connects to it and picks one of its models, so Local mode can start straight away.
+- **A whole folder of models with llama.cpp.** Point **Run a server** at a models folder with one subfolder (or `.gguf` file) per model, and VibeForge runs `llama-server` in router mode: every model in the folder shows up in the Model picker, and the one you use is loaded when it's first needed, one at a time. You can give it your own build of `llama-server` or a script that runs it, a presets `.ini` with settings for each model (context size, sampling, how much stays in RAM), and options for every model.
+- **Start with Local mode.** Turn it on and the server starts when you switch to Local (or open VibeForge in Local mode) and stops when you switch back to Cloud.
+
+### Changed
+
+- **The server VibeForge started stops when VibeForge quits,** so it never keeps your graphics card's memory, and it listens on `127.0.0.1` only unless your own options say otherwise. If something already answers at the address, VibeForge says so instead of starting a second server.
+- **Settings → Local AI reads llama.cpp's router mode.** It marks which model is loaded and shows the context size each model is set to run with, rather than the largest the model supports. This replaces the "copy this command" hints for starting Ollama or `llama.cpp`.
+
 ## [3.14.0] - 2026-11-27
 
 **3.14.0: Home's Workspaces section now shares the same category tabs as Code, with live filtering, workspace drops, and drag-to-reorder tabs.**
@@ -1317,7 +1332,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.14.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.15.0...HEAD
+[3.15.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.0
 [3.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.14.0
 [3.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.13.0
 [3.12.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.12.0
