@@ -350,6 +350,8 @@ export interface OrchestratorView {
   threads?: OrchestratorThreadSummary[];
   /** Whether ~/.config/vibeforge/viby.md currently holds non-empty memory. */
   hasMemory?: boolean;
+  /** Set when Local Viby is active and the server's reported context window is smaller than the rules need. */
+  localContextWarning?: { contextLength: number; neededTokens: number } | null;
 }
 
 /** The engines that can plan: the ones with a headless turn, structured output and a way to turn tools off. */

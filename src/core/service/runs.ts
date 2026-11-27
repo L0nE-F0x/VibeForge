@@ -130,8 +130,9 @@ export class RunDesk {
       const launched = await this.tasks.continueTask(run.taskId, size, followUp);
       return { ...launched, chatId: null, taskId: run.taskId };
     }
-    const engine = this.core.requireEngine(run.engine);
-    const resume = this.core.resumePlan(engine.row, run);
+    const target = this.core.resolveLaunchTarget({ engineId: run.engine, model: run.localModel });
+    const engine = this.core.requireEngine(target.engineId, { model: target.model });
+    const resume = this.core.resumePlan(engine, run, run.cwd);
     const nativeContinue = resume.native;
     const agent = run.agentId ? this.core.store.getAgent(run.agentId) : null;
     const prior = nativeContinue ? null : this.core.transcriptPath(run);

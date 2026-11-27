@@ -84,12 +84,18 @@ const HARNESS_FALLBACKS: Record<ConcreteLocalHarness, EngineRow> = {
   codex: { id: "codex", label: "Codex", bin: "codex", args: [], promptArgs: ["{prompt}"], continueArgs: ["resume", "--last"] },
 };
 
-/** Strip `<think>...</think>` blocks (including unclosed streaming think sections) from model output. */
+/** Strip `<think>...</think>` blocks (including pre-opened lone closing tags and unclosed tails) from model output. */
 export function stripThinkTags(text: string): string {
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think>[\s\S]*$/gi, "")
-    .trim();
+  let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  const closeIdx = clean.toLowerCase().lastIndexOf("</think>");
+  if (closeIdx >= 0) clean = clean.slice(closeIdx + "</think>".length);
+  return clean.replace(/<think>[\s\S]*$/gi, "").trim();
+}
+
+function readyEarlySay(rawContent: string): string | null {
+  const clean = stripThinkTags(rawContent).replace(/^```(?:json)?\s*/i, "").trimStart();
+  if (!clean.startsWith("{")) return null;
+  return extractEarlySay(clean);
 }
 
 function positiveInt(value: unknown): number | null {
@@ -382,8 +388,11 @@ export function localEngineSpec(
   }
 
   if (resolved.kind === "opencode") {
+    const modelRef = `vibeforge-local/${model}`;
     const configContent = JSON.stringify({
       $schema: "https://opencode.ai/config.json",
+      model: modelRef,
+      small_model: modelRef,
       provider: {
         "vibeforge-local": {
           npm: "@ai-sdk/openai-compatible",
@@ -398,28 +407,29 @@ export function localEngineSpec(
       binPath: resolved.binPath,
       harness: "opencode",
       harnessRow: resolved.row,
-      extraArgs: ["-m", `vibeforge-local/${model}`],
+      extraArgs: [],
       env: { OPENCODE_CONFIG_CONTENT: configContent },
       localModel: model,
     };
   }
 
   if (resolved.kind === "claude") {
+    const claudeEnv = {
+      ANTHROPIC_BASE_URL: anthropicBaseUrl(url),
+      ANTHROPIC_AUTH_TOKEN: "local",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+      ANTHROPIC_SMALL_FAST_MODEL: model,
+    };
     return {
       engine,
       binPath: resolved.binPath,
       harness: "claude",
       harnessRow: resolved.row,
-      extraArgs: ["--model", model],
-      env: {
-        ANTHROPIC_BASE_URL: anthropicBaseUrl(url),
-        ANTHROPIC_AUTH_TOKEN: "local",
-        ANTHROPIC_API_KEY: "local",
-        ANTHROPIC_DEFAULT_OPUS_MODEL: model,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: model,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
-        ANTHROPIC_SMALL_FAST_MODEL: model,
-      },
+      extraArgs: ["--settings", JSON.stringify({ env: claudeEnv }), "--model", model],
+      env: claudeEnv,
       localModel: model,
     };
   }
@@ -449,12 +459,23 @@ export function localEngineSpec(
   };
 }
 
+export interface LocalHistoryStep {
+  kind: string;
+  action?: string;
+  engineId?: string;
+  workspaceId?: string;
+  branch?: string;
+  target?: string;
+  prompt?: string;
+  asked?: string;
+}
+
 export interface LocalHistoryTurn {
   from: "you" | "vibeforge";
   text: string;
   note?: unknown;
   problem?: unknown;
-  steps?: ReadonlyArray<{ kind: string; action?: string; asked?: string }>;
+  steps?: ReadonlyArray<LocalHistoryStep>;
 }
 
 const MAX_LOCAL_HISTORY_TURNS = 12;
@@ -480,7 +501,11 @@ export function buildLocalBrainMessages(
     const summarySteps = (turn.steps ?? []).map((step) => ({
       kind: step.kind,
       ...(step.action ? { action: step.action } : {}),
-      ...(step.asked ? { target: step.asked } : {}),
+      ...(step.engineId ? { engine: step.engineId } : {}),
+      ...(step.workspaceId ? { workspace: step.workspaceId } : {}),
+      ...(step.branch ? { branch: step.branch } : {}),
+      ...(step.target ? { target: step.target } : {}),
+      ...(step.prompt ? { prompt: step.prompt.slice(0, 120) } : {}),
     }));
     messages.push({
       role: "assistant",
@@ -534,12 +559,17 @@ async function readSseContent(
   let buf = "";
   let content = "";
   let earlySaySent = false;
+  let doneSeen = false;
 
   const processLine = (rawLine: string) => {
     const line = rawLine.trim();
     if (!line.startsWith("data:")) return;
     const payload = line.slice(5).trim();
-    if (!payload || payload === "[DONE]") return;
+    if (!payload) return;
+    if (payload === "[DONE]") {
+      doneSeen = true;
+      return;
+    }
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(payload) as Record<string, unknown>;
@@ -553,7 +583,7 @@ async function readSseContent(
     if (!piece) return;
     content += piece;
     if (!earlySaySent && onEarlySay) {
-      const early = extractEarlySay(stripThinkTags(content));
+      const early = readyEarlySay(content);
       if (early) {
         earlySaySent = true;
         onEarlySay(early);
@@ -561,20 +591,40 @@ async function readSseContent(
     }
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl = buf.indexOf("\n");
-    while (nl >= 0) {
-      processLine(buf.slice(0, nl));
-      buf = buf.slice(nl + 1);
-      nl = buf.indexOf("\n");
+  try {
+    while (!doneSeen) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl = buf.indexOf("\n");
+      while (nl >= 0) {
+        processLine(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+        if (doneSeen) break;
+        nl = buf.indexOf("\n");
+      }
     }
+    if (!doneSeen) {
+      buf += decoder.decode();
+      if (buf.trim()) processLine(buf);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
   }
-  buf += decoder.decode();
-  if (buf.trim()) processLine(buf);
   return content;
+}
+
+function isImageError(error: string): boolean {
+  return /image|vision|multimodal|mmproj|content.*array|expected.*string/i.test(error);
+}
+
+function isFormatError(error: string): boolean {
+  return /response_format|json_schema|json_object|grammar|structured|unsupported|invalid.*format/i.test(error);
+}
+
+function canFallbackStatus(status: number, error: string): boolean {
+  if (status === 400 || status === 422) return true;
+  return status === 500 && (isImageError(error) || isFormatError(error));
 }
 
 /**
@@ -656,7 +706,7 @@ export async function runLocalBrain(req: LocalBrainRequest, fetchFn: typeof fetc
             ? (parsed.choices[0].text as string)
             : "";
       if (content && req.onEarlySay) {
-        const early = extractEarlySay(stripThinkTags(content));
+        const early = readyEarlySay(content);
         if (early) req.onEarlySay(early);
       }
       return { ok: true, status: res.status, content, error: "" };
@@ -668,15 +718,15 @@ export async function runLocalBrain(req: LocalBrainRequest, fetchFn: typeof fetc
   try {
     let activeMessages = req.messages;
     let attempt = await postTurn(activeMessages, "json_schema");
-    if (!attempt.ok && (attempt.status === 400 || attempt.status === 422)) {
-      if (hasImages(activeMessages) && /image|vision|multimodal|content.*array|expected.*string/i.test(attempt.error)) {
+    if (!attempt.ok && canFallbackStatus(attempt.status, attempt.error)) {
+      if (hasImages(activeMessages) && isImageError(attempt.error)) {
         activeMessages = stripMessageImages(activeMessages);
         attempt = await postTurn(activeMessages, "json_schema");
       }
-      if (!attempt.ok && (attempt.status === 400 || attempt.status === 422)) {
+      if (!attempt.ok && canFallbackStatus(attempt.status, attempt.error)) {
         attempt = await postTurn(activeMessages, "json_object");
       }
-      if (!attempt.ok && (attempt.status === 400 || attempt.status === 422)) {
+      if (!attempt.ok && canFallbackStatus(attempt.status, attempt.error)) {
         attempt = await postTurn(activeMessages, "none");
       }
     }

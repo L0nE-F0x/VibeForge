@@ -460,7 +460,16 @@ function unhold(session) {
 
 // ------------------------------------------------------------------ sessions
 
-const BLOCKED_SPAWN_ENV = new Set(["VIBEFORGE_PTY", "VIBEFORGE_PTY_TOKEN", "VIBEFORGE_RUN_DIR", "ELECTRON_RUN_AS_NODE", "PATH"]);
+const ALLOWED_SPAWN_ENV = new Set([
+  "OPENCODE_CONFIG_CONTENT",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+]);
 
 /** @param {Extract<PtyRequest, { op: "spawn" }>} msg */
 function spawnSession(msg) {
@@ -475,7 +484,7 @@ function spawnSession(msg) {
   const env = { ...process.env };
   if (msg.env && typeof msg.env === "object") {
     for (const [key, value] of Object.entries(msg.env)) {
-      if (typeof key === "string" && typeof value === "string" && !BLOCKED_SPAWN_ENV.has(key)) env[key] = value;
+      if (typeof key === "string" && typeof value === "string" && ALLOWED_SPAWN_ENV.has(key)) env[key] = value;
     }
   }
   env.TERM = "xterm-256color";

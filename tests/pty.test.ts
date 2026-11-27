@@ -502,4 +502,61 @@ describe("pty host", () => {
     expect(host.exitOf(pty)).toMatchObject({ exitCode: 3 });
     await expect(host.request({ op: "teleport" })).resolves.toMatchObject({ ok: false, error: "Unknown op teleport" });
   });
+
+  it("forwards allowlisted spawn env keys (including empty strings) while dropping unlisted vars and preserving host identity", async () => {
+    const host = await startHost();
+    const dir = tempDir();
+    const pty = String(
+      (
+        await host.request({
+          op: "spawn",
+          cwd: tempDir(),
+          runDir: dir,
+          argv: [
+            "/bin/sh",
+            "-c",
+            [
+              "printenv ANTHROPIC_API_KEY >/dev/null 2>&1 && printf 'KEY=set:%s\\n' \"$ANTHROPIC_API_KEY\" || printf 'KEY=unset\\n'",
+              "printf 'TOK=%s\\n' \"$ANTHROPIC_AUTH_TOKEN\"",
+              "printf 'OC=%s\\n' \"$OPENCODE_CONFIG_CONTENT\"",
+              "printenv UNLISTED_SECRET >/dev/null 2>&1 && printf 'SEC=set\\n' || printf 'SEC=unset\\n'",
+              "printf 'PATH=%s\\n' \"$PATH\"",
+              "printf 'TERM=%s\\n' \"$TERM\"",
+              "printf 'COLORTERM=%s\\n' \"$COLORTERM\"",
+              "printf 'TERM_PROGRAM=%s\\n' \"$TERM_PROGRAM\"",
+              "printf 'VP=%s\\n' \"$VIBEFORGE_PTY\"",
+              "printf 'VPT=%s\\n' \"$VIBEFORGE_PTY_TOKEN\"",
+              "printf 'VRD=%s\\n' \"$VIBEFORGE_RUN_DIR\"",
+            ].join("; "),
+          ],
+          env: {
+            ANTHROPIC_API_KEY: "",
+            ANTHROPIC_AUTH_TOKEN: "local",
+            OPENCODE_CONFIG_CONTENT: "ok",
+            UNLISTED_SECRET: "nope",
+            PATH: "/bogus",
+            TERM: "dumb",
+            COLORTERM: "none",
+            TERM_PROGRAM: "other",
+            VIBEFORGE_PTY: "fake",
+            VIBEFORGE_PTY_TOKEN: "fake",
+            VIBEFORGE_RUN_DIR: "/fake",
+          },
+        })
+      ).ptyId,
+    );
+    await host.until(() => Boolean(host.exitOf(pty)));
+    const output = fs.readFileSync(path.join(dir, "transcript.txt"), "utf8");
+    expect(output).toContain("KEY=set:");
+    expect(output).toContain("TOK=local");
+    expect(output).toContain("OC=ok");
+    expect(output).toContain("SEC=unset");
+    expect(output).not.toContain("PATH=/bogus");
+    expect(output).not.toContain("TERM=dumb");
+    expect(output).not.toContain("COLORTERM=none");
+    expect(output).not.toContain("TERM_PROGRAM=other");
+    expect(output).not.toContain("VP=fake");
+    expect(output).not.toContain("VPT=fake");
+    expect(output).not.toContain("VRD=/fake");
+  });
 });

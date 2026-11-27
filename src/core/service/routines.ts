@@ -112,8 +112,8 @@ export class RoutineDesk {
     if (!routine) throw new Error("That routine no longer exists.");
     const agent = this.core.store.getAgent(routine.agentId);
     if (!agent) throw new Error("The routine's agent no longer exists.");
-    const targetEngineId = this.core.effectiveEngineId(agent.engine, { fromAgent: true });
-    const engine = this.core.resolveEngine(targetEngineId);
+    const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
+    const engine = this.core.resolveEngine(target.engineId, { model: target.model });
     const decision = decideRunNow({
       allowRoutines: agent.allowRoutines,
       engineAvailable: Boolean(engine),
@@ -124,7 +124,7 @@ export class RoutineDesk {
         decision.reason === "disallowed"
           ? `${agent.name} does not allow routines. Turn it on in the agent's settings.`
           : decision.reason === "engine-missing"
-            ? this.core.engineMissingText(targetEngineId)
+            ? this.core.engineMissingText(target.engineId)
             : "The previous run of this routine is still going.",
       );
     }
@@ -226,7 +226,12 @@ export class RoutineDesk {
     const results: Array<{ routineId: string; decision: TickDecision; error?: string }> = [];
     for (const routine of this.core.store.listRoutines()) {
       const agent = routine.agentId ? this.core.store.getAgent(routine.agentId) : null;
-      const engine = agent ? this.core.resolveEngine(this.core.effectiveEngineId(agent.engine, { fromAgent: true })) : null;
+      const engine = agent
+        ? (() => {
+            const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
+            return this.core.resolveEngine(target.engineId, { model: target.model });
+          })()
+        : null;
       const decision = decideRoutineTick({
         now,
         appStartedAt: this.core.options.appStartedAt,
@@ -272,7 +277,8 @@ export class RoutineDesk {
   private async launchRoutine(routine: Routine, agent: Agent, size: TermSize): Promise<Launched> {
     const cwd = this.core.firstPlace(agent.places);
     if (!cwd) throw new Error(`None of ${agent.name}'s allowed folders exist any more.`);
-    const engine = this.core.requireEngine(this.core.effectiveEngineId(agent.engine, { fromAgent: true }));
+    const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
+    const engine = this.core.requireEngine(target.engineId, { model: target.model });
     return this.core.launch({
       origin: "routine",
       title: `${agent.name} · ${routine.name}`,
@@ -337,8 +343,8 @@ export class RoutineDesk {
     if (!agent) return ["The agent for this routine is gone."];
     const issues: string[] = [];
     if (!agent.allowRoutines) issues.push(`${agent.name} does not allow routines.`);
-    const targetEngineId = this.core.effectiveEngineId(agent.engine, { fromAgent: true });
-    if (!this.core.resolveEngine(targetEngineId)) issues.push(this.core.engineMissingText(targetEngineId));
+    const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
+    if (!this.core.resolveEngine(target.engineId, { model: target.model })) issues.push(this.core.engineMissingText(target.engineId));
     if (!this.core.firstPlace(agent.places)) issues.push("None of the agent's allowed folders exist.");
     if (!isScheduleValid(routine.schedule)) issues.push("The schedule is not valid.");
     return issues;

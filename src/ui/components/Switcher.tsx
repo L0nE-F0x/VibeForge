@@ -141,7 +141,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
                   sub: local.model,
                   kind: "switcher.action" as const,
                   icon: local.active ? Cloud : Laptop,
-                  act: () => void call("settings.save", { local: { ...local, active: !local.active } }),
+                  act: () => void call("settings.save", { local: { active: !local.active } }),
                 },
           ]
         : []),

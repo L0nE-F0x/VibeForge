@@ -7,6 +7,18 @@ export const LOCAL_ENGINE_ID = "local";
 export const LOCAL_HARNESSES = ["opencode", "claude", "codex"] as const;
 export type ConcreteLocalHarness = (typeof LOCAL_HARNESSES)[number];
 
+/** Environment variable names allowed in per-spawn PTY overrides (mirrors `electron/pty-host.cjs`). */
+export const LOCAL_SPAWN_ENV_KEYS = [
+  "OPENCODE_CONFIG_CONTENT",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+] as const;
+
 export interface LocalPreset {
   id: "llamacpp" | "ollama" | "lmstudio";
   label: string;

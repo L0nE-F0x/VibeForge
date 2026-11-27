@@ -5,7 +5,7 @@ import { canOrchestrate, plannerFor, RISK_POLICY_GROUPS } from "../../shared/orc
 import { call, useEngines, useOrchestrator, useSettings } from "../api.js";
 import { type Key, useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
-import type { OrchestratorSettings, Settings } from "../../shared/api.js";
+import type { OrchestratorSettings, SettingsPatch } from "../../shared/api.js";
 import { Field, Input, Segmented, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
@@ -15,7 +15,7 @@ export function OrchestratorCard() {
   const t = useT();
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
-  const [save] = useAction(async (patch: Partial<Settings>) => call("settings.save", patch), t("settings.saveFailed"));
+  const [save] = useAction(async (patch: SettingsPatch) => call("settings.save", patch), t("settings.saveFailed"));
   // Maestro's own view says where a new workspace goes when this is left empty.
   const view = useOrchestrator().data;
   if (!settings) return null;
@@ -29,15 +29,20 @@ export function OrchestratorCard() {
     planners.push({ id: LOCAL_ENGINE_ID, label: t("local.title"), bin: LOCAL_ENGINE_ID, args: [], available: localReady, path: null, local: true });
   }
   // Until one is picked, the first planner on this machine is the one shown (and used).
-  const engineId = (local.enabled && local.active && localReady ? LOCAL_ENGINE_ID : "") || plannerFor(current.engine, planners) || current.engine;
+  const engineId = (local.enabled && local.active && local.useForViby && localReady ? LOCAL_ENGINE_ID : "") || plannerFor(current.engine, planners) || current.engine;
   const selectedEngine = planners.find((engine) => engine.id === engineId);
   const levels = selectedEngine ? effortLevels(selectedEngine) : [];
   const currentEffort = engineId === current.engine ? (current.effort ?? "") : "";
   const isLocal = engineId === LOCAL_ENGINE_ID;
   const currentModel = isLocal ? local.vibyModel : (engineId === current.engine ? current.model : "");
   const saveOrchestrator = (orchestrator: OrchestratorSettings) => {
-    const clearActive = local.active && orchestrator.engine !== LOCAL_ENGINE_ID;
-    void save(clearActive ? { orchestrator, local: { ...local, active: false } } : { orchestrator });
+    if (local.active && orchestrator.engine !== LOCAL_ENGINE_ID) {
+      void save({ orchestrator, local: { useForViby: false } });
+    } else if (local.active && orchestrator.engine === LOCAL_ENGINE_ID && !local.useForViby) {
+      void save({ orchestrator, local: { useForViby: true } });
+    } else {
+      void save({ orchestrator });
+    }
   };
   const modeHint =
     current.mode === "plan" ? t("orch.mode.planHint") : current.mode === "never" ? t("orch.mode.neverHint") : t("orch.mode.goHint");
@@ -63,7 +68,7 @@ export function OrchestratorCard() {
             defaultLabel={isLocal ? t("local.vibySame") : t("orch.modelDefault")}
             onChange={(model) => {
               if (isLocal) {
-                void save({ local: { ...local, vibyModel: model } });
+                void save({ local: { vibyModel: model } });
               } else {
                 saveOrchestrator({ ...current, engine: engineId, model, effort: selectedEngine ? effortForModel(selectedEngine, model, currentEffort) : "" });
               }

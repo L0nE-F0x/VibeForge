@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
-import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl } from "../local.js";
+import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, type ConcreteLocalHarness, type LocalServerProbe } from "../local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -22,6 +22,7 @@ type Settle = () => unknown;
 export interface ResolvedEngine {
   row: EngineRow;
   binPath: string;
+  harness?: ConcreteLocalHarness | null;
   extraArgs?: string[];
   env?: Record<string, string>;
   localModel?: string;
@@ -57,6 +58,8 @@ export class ServiceCore {
   readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a run started: a tree that was already dirty isn't this run's doing. */
   readonly gitAtStart = new Map<string, string>();
+  private readonly localProbeCache = new Map<string, LocalServerProbe>();
+  private readonly knownLocalModels = new Set<string>();
   /** Per live run: the files already changed when it started, so its own changes can be told apart. */
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
@@ -196,6 +199,9 @@ export class ServiceCore {
     }
     if (localPatch) {
       next.local = { ...current.local, ...localPatch };
+      if (localPatch.active === true && !current.local.active && localPatch.useForViby === undefined) {
+        next.local.useForViby = true;
+      }
     }
     this.store.writeSettings(next);
     if (localPatch) {
@@ -221,17 +227,45 @@ export class ServiceCore {
     this.emit("unreadable", "settings", "engines", "agents", "routines", "tasks", "workspaces", "chats");
   }
 
+  recordLocalProbe(probe: LocalServerProbe): boolean {
+    let changed = false;
+    const url = normalizeLocalUrl(probe.url);
+    if (url && probe.reachable) {
+      const prev = this.localProbeCache.get(url);
+      const signature = (p: LocalServerProbe) => `${p.contextLength ?? ""}|${p.models.map((m) => `${m.id}:${m.contextLength ?? ""}`).join(",")}`;
+      if (!prev || signature(prev) !== signature(probe)) changed = true;
+      this.localProbeCache.set(url, probe);
+    }
+    for (const m of probe.models) {
+      const clean = cleanLocalModel(m.id);
+      if (clean && !this.knownLocalModels.has(clean)) {
+        this.knownLocalModels.add(clean);
+      }
+    }
+    return changed;
+  }
+
+  cachedLocalContext(url: string, model: string): number | null {
+    const probe = this.localProbeCache.get(normalizeLocalUrl(url));
+    if (!probe) return null;
+    const clean = cleanLocalModel(model);
+    const exact = clean ? probe.models.find((m) => m.id === clean)?.contextLength : null;
+    return exact ?? probe.contextLength ?? null;
+  }
+
+  private isKnownLocalModel(model: string): boolean {
+    const clean = cleanLocalModel(model);
+    if (!clean) return false;
+    const { local } = this.store.readSettings();
+    return clean === local.model || clean === local.vibyModel || this.knownLocalModels.has(clean);
+  }
+
   localBrainConfig(): { url: string; model: string } | null {
     const { local } = this.store.readSettings();
     if (!local.enabled) return null;
     const url = normalizeLocalUrl(local.url);
     const model = cleanLocalModel(local.vibyModel || local.model);
     return url && model ? { url, model } : null;
-  }
-
-  isLocalModeActive(): boolean {
-    const { local } = this.store.readSettings();
-    return local.enabled && local.active && Boolean(this.localBrainConfig() || this.resolveEngine(LOCAL_ENGINE_ID));
   }
 
   isLocalCodingActive(): boolean {
@@ -251,6 +285,19 @@ export class ServiceCore {
     if (engineId === LOCAL_ENGINE_ID) return LOCAL_ENGINE_ID;
     if (opts?.fromAgent && this.isLocalAgentOverrideActive()) return LOCAL_ENGINE_ID;
     return engineId;
+  }
+
+  /** Single entry point choosing engine + model for Code, Agents, Chat, Tasks, Routines, and Viby start steps. */
+  resolveLaunchTarget(input: { engineId?: string | null; fromAgent?: boolean; model?: string | null }): { engineId: string; model?: string } {
+    const baseId = input.engineId?.trim() || this.effectiveDefaultEngine();
+    const engineId = this.effectiveEngineId(baseId, { fromAgent: input.fromAgent });
+    const rawModel = typeof input.model === "string" ? input.model.trim() : "";
+    if (engineId === LOCAL_ENGINE_ID) {
+      const clean = cleanLocalModel(rawModel);
+      const model = baseId === LOCAL_ENGINE_ID && clean && this.isKnownLocalModel(clean) ? clean : undefined;
+      return model ? { engineId, model } : { engineId };
+    }
+    return rawModel ? { engineId, model: rawModel } : { engineId };
   }
 
   listEngines(): Engine[] {
@@ -279,6 +326,7 @@ export class ServiceCore {
       return {
         row: spec.engine,
         binPath: spec.binPath,
+        harness: spec.harness,
         extraArgs: spec.extraArgs,
         env: spec.env,
         localModel: spec.localModel,
@@ -336,11 +384,17 @@ export class ServiceCore {
 
   /**
    * How to pick a finished session back up with the same engine: its exact session id when the
-   * CLI printed one, the engine's continue flag otherwise, or not at all.
+   * CLI printed one, the engine's continue flag when the folder's latest run on that CLI was in the
+   * same mode and harness, or starting fresh from the transcript otherwise.
    */
-  resumePlan(row: EngineRow, previous: RunMeta | null): { native: boolean; resumeArgs: string[] | null } {
+  resumePlan(target: ResolvedEngine | EngineRow, previous: RunMeta | null, cwd?: string): { native: boolean; resumeArgs: string[] | null } {
+    const row = "row" in target ? target.row : target;
+    const harness = "row" in target ? (target.harness ?? null) : null;
     // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
     if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
+    if (row.id === LOCAL_ENGINE_ID && previous.localHarness && harness && previous.localHarness !== harness) {
+      return { native: false, resumeArgs: null };
+    }
     if (previous.dir) {
       const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
       if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
@@ -348,7 +402,28 @@ export class ServiceCore {
       const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
       if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
     }
-    return { native: Boolean(row.continueArgs?.length), resumeArgs: null };
+    if (!row.continueArgs?.length) return { native: false, resumeArgs: null };
+    // Bare continue flags (e.g. `claude --continue`, `codex resume --last`) resume whatever session
+    // last ran in that folder on the underlying CLI; block them if a newer run used the opposite mode.
+    const folder = path.resolve(cwd || previous.cwd || ".");
+    const rows = this.store.readEngineRows();
+    const underlyingCli = (run: Pick<RunMeta, "engine" | "localHarness" | "argv">): string => {
+      if (run.engine === LOCAL_ENGINE_ID) return run.localHarness || path.basename(run.argv[0] ?? "");
+      const known = rows.find((item) => item.id === run.engine);
+      return known?.bin ? path.basename(known.bin) : run.engine || path.basename(run.argv[0] ?? "");
+    };
+    const currentCli = row.id === LOCAL_ENGINE_ID ? (harness || path.basename(row.bin)) : path.basename(row.bin || row.id);
+    const recentInFolder = this.store
+      .queryRuns({ limit: 50 })
+      .find((run) => run.cwd && path.resolve(run.cwd) === folder && underlyingCli(run) === currentCli);
+    if (recentInFolder) {
+      const sameMode = (recentInFolder.engine === LOCAL_ENGINE_ID) === (row.id === LOCAL_ENGINE_ID);
+      if (!sameMode) return { native: false, resumeArgs: null };
+      if (row.id === LOCAL_ENGINE_ID && recentInFolder.localHarness && harness && recentInFolder.localHarness !== harness) {
+        return { native: false, resumeArgs: null };
+      }
+    }
+    return { native: true, resumeArgs: null };
   }
 
   transcriptPath(run: RunMeta): string | null {
@@ -543,6 +618,8 @@ export class ServiceCore {
       changes: null,
       gitStart,
       continuedFrom: input.continuedFrom ?? null,
+      ...(input.engine.harness ? { localHarness: input.engine.harness } : {}),
+      ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     };
     this.store.saveRun(meta);
     let spawned: { ptyId: string; pid: number; ptyToken?: string };

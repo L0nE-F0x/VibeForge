@@ -384,7 +384,7 @@ function Rail() {
                 go({ view: "settings", section: "local" });
                 return;
               }
-              void call("settings.save", { local: { ...local, active: !local.active } });
+              void call("settings.save", { local: { active: !local.active } });
             }}
           >
             {local.active ? <Laptop size={19} strokeWidth={1.9} className="accent-text" /> : <Cloud size={19} strokeWidth={1.9} />}

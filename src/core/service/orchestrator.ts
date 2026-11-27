@@ -408,6 +408,7 @@ export class OrchestratorDesk {
   private readonly gitRepoCache = new Map<string, { at: number; git: boolean }>();
   private themesCache: { at: number; ids: string[] } | null = null;
   private readonly plannerPool = new PlannerSessionPool();
+  private lastLocalRulesTokens = 0;
   runner: BrainRunner = spawnBrain;
   localRunner: LocalBrainRunner = runLocalBrain;
   verifyRunner: VerifyRunner = spawnVerifyCommand;
@@ -522,7 +523,7 @@ export class OrchestratorDesk {
   private planner(): string {
     const local = this.core.store.readSettings().local;
     const localBrain = this.core.localBrainConfig();
-    if (local.enabled && local.active && localBrain) return LOCAL_ENGINE_ID;
+    if (local.enabled && local.active && local.useForViby && localBrain) return LOCAL_ENGINE_ID;
     const rows = this.core.store
       .readEngineRows()
       .map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
@@ -535,6 +536,11 @@ export class OrchestratorDesk {
   view(): OrchestratorView {
     const { engine, mode } = this.settings();
     const planner = this.planner();
+    const localBrain = planner === LOCAL_ENGINE_ID ? this.core.localBrainConfig() : null;
+    const ctxLen = localBrain ? this.core.cachedLocalContext(localBrain.url, localBrain.model) : null;
+    const neededTokens = (this.lastLocalRulesTokens || 3500) + 2048;
+    const localContextWarning =
+      ctxLen !== null && ctxLen < neededTokens ? { contextLength: ctxLen, neededTokens } : null;
     return {
       engineId: planner || engine,
       engineReady: Boolean(planner),
@@ -547,6 +553,7 @@ export class OrchestratorDesk {
       activeThreadId: this.conversation.id,
       threads: listThreadSummaries(this.threadsDir, this.toSaved(this.conversation)),
       hasMemory: Boolean(boundedVibyMemory(this.core.options.configRoot)),
+      ...(localContextWarning ? { localContextWarning } : {}),
     };
   }
 
@@ -1097,11 +1104,11 @@ export class OrchestratorDesk {
     let capturedInitialRules = this.conversation.initialRules;
     const localExtraMessages: LocalChatMessage[] = [];
     const turn = async (said: string, ctx: PlanContext = context, includeImages = false, extraImages: SavedPromptImage[] = []) => {
-      const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex" || plannerKind === "local") && Boolean(this.conversation.initialRules);
+      const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
       const liveChanged = keepPromptCache && this.conversation.liveKey !== undefined && this.conversation.liveKey !== liveStateFingerprint(ctx);
       const liveLine = liveChanged ? formatLiveUpdate(ctx) : "";
       const rules = keepPromptCache ? this.conversation.initialRules! : orchestratorRules(ctx);
-      if (!this.conversation.begun) capturedInitialRules = rules;
+      if (!this.conversation.begun && plannerKind !== "local") capturedInitialRules = rules;
       const turnImages = [...(includeImages ? savedImages : []), ...extraImages];
       const extraImageLine = extraImages.length
         ? `(Captured screen image${extraImages.length === 1 ? "" : "s"} saved on disk: ${extraImages.map((img) => img.path).join(", ")})`
@@ -1113,9 +1120,9 @@ export class OrchestratorDesk {
         includeImages ? imageLine : "",
         extraImageLine,
         liveLine,
-        this.conversation.begun ? settingsLine : "",
-        this.conversation.begun ? libraryLine : "",
-        this.conversation.begun ? memoryLine : "",
+        this.conversation.begun && plannerKind !== "local" ? settingsLine : "",
+        this.conversation.begun && plannerKind !== "local" ? libraryLine : "",
+        this.conversation.begun && plannerKind !== "local" ? memoryLine : "",
       ]
         .filter(Boolean)
         .join("\n");
@@ -1133,6 +1140,7 @@ export class OrchestratorDesk {
       const pStartedAt = Date.now();
       if (plannerKind === "local") {
         if (!localBrain) return null;
+        this.lastLocalRulesTokens = Math.ceil(rules.length / 4);
         const localImages: LocalBrainImage[] = turnImages.map((img) => ({ mediaType: img.mediaType, base64: img.base64 }));
         const messages = buildLocalBrainMessages(
           rules,
@@ -1664,6 +1672,7 @@ export class OrchestratorDesk {
       const { url, model, vibyModel } = this.core.store.readSettings().local;
       if (!url) return [vibyModel || model].filter(Boolean);
       const probe = await probeLocalServer(url);
+      this.core.recordLocalProbe(probe);
       const ids = probe.models.map((item) => item.id);
       if (ids.length) {
         this.models.set(LOCAL_ENGINE_ID, ids);

@@ -1011,7 +1011,12 @@ export function resolveSettingsStep(
     if (flag === null) return { action: null, issue: "prompt", asked: value || "local" };
     const summary = `Local AI mode · ${flag ? "on" : "off"}`;
     return {
-      action: { op: "app-patch", patch: { local: flag ? { enabled: true, active: true } : { active: false } }, summary },
+      action: {
+        op: "app-patch",
+        patch: { local: flag ? { enabled: true, active: true, useForViby: true } : { active: false } },
+        ...(flag ? { networkOn: true } : {}),
+        summary,
+      },
       issue: null,
       asked: summary,
     };

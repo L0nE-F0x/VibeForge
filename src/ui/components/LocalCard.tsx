@@ -37,7 +37,7 @@ export function LocalCard() {
   const [copiedTip, setCopiedTip] = useState<"ollama" | "llama" | null>(null);
   const skipModelBlurRef = useRef(false);
 
-  const [save] = useAction(async (local: LocalSettings) => call("settings.save", { local }), t("settings.saveFailed"));
+  const [save] = useAction(async (local: Partial<LocalSettings>) => call("settings.save", { local }), t("settings.saveFailed"));
 
   const currentUrl = settings?.local.url ?? "";
   const [checkStatus, checking] = useAction(
@@ -50,10 +50,11 @@ export function LocalCard() {
     t("settings.recheckFailed"),
   );
 
+  const savedUrl = settings?.local.url;
   useEffect(() => {
-    if (!settings) return;
-    setUrlInput(settings.local.url);
-  }, [settings]);
+    if (savedUrl === undefined) return;
+    setUrlInput(savedUrl);
+  }, [savedUrl]);
 
   useEffect(() => {
     if (!settings?.local.enabled) return;
@@ -80,7 +81,6 @@ export function LocalCard() {
       const nextModel = keepModel ? current.model : firstModelId(probe);
       const keepViby = current.vibyModel && (!modelIds.length || modelIds.includes(current.vibyModel));
       await save({
-        ...current,
         enabled: true,
         url: probe.url,
         model: nextModel,
@@ -97,7 +97,7 @@ export function LocalCard() {
     if (!probe.reachable) {
       const normalized = normalizeLocalUrl(urlInput);
       if (normalized && normalized !== settings.local.url) {
-        await save({ ...settings.local, enabled: true, url: normalized });
+        await save({ enabled: true, url: normalized });
       }
     }
   }, t("local.unreachable"));
@@ -121,6 +121,7 @@ export function LocalCard() {
   const hasAnyHarness = status ? status.harnesses.some((h) => h.available) : true;
   const normalizedConfigured = normalizeLocalUrl(local.url);
   const showLoopback = Boolean(normalizedConfigured) && isLoopbackLocalUrl(normalizedConfigured);
+  const resolvedHarness = local.harness === "auto" ? (status?.harnesses.find((h) => h.available)?.id ?? null) : local.harness;
 
   const copyCommand = (kind: "ollama" | "llama", command: string) => {
     void navigator.clipboard?.writeText(command).then(() => {
@@ -135,7 +136,7 @@ export function LocalCard() {
         <Toggle
           checked={local.enabled}
           onChange={(enabled) => {
-            void save({ ...local, enabled, ...(enabled ? {} : { active: false }) });
+            void save({ enabled, ...(enabled ? {} : { active: false }) });
           }}
         />
       </Field>
@@ -147,14 +148,14 @@ export function LocalCard() {
               <Toggle
                 checked={local.active}
                 disabled={!configuredReady && !local.active}
-                onChange={(active) => void save({ ...local, active })}
+                onChange={(active) => void save({ active })}
               />
             </Field>
 
             <Field label={t("local.overrideAgents")} hint={t("local.overrideAgentsHint")}>
               <Toggle
                 checked={local.overrideAgents}
-                onChange={(overrideAgents) => void save({ ...local, overrideAgents })}
+                onChange={(overrideAgents) => void save({ overrideAgents })}
               />
             </Field>
 
@@ -251,7 +252,7 @@ export function LocalCard() {
                         return;
                       }
                       const clean = cleanLocalModel(modelInput);
-                      if (clean && clean !== local.model) void save({ ...local, model: clean });
+                      if (clean && clean !== local.model) void save({ model: clean });
                     }}
                     onKeyDown={(event) => {
                       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -274,7 +275,7 @@ export function LocalCard() {
                         setModelInput(local.model);
                         setTypingModel(true);
                       } else {
-                        void save({ ...local, model: event.target.value });
+                        void save({ model: event.target.value });
                       }
                     }}
                   >
@@ -298,30 +299,37 @@ export function LocalCard() {
             </Field>
 
             <Field label={t("local.harness")} hint={t("local.harnessHint")}>
-              <Select
-                value={local.harness}
-                onChange={(event) => void save({ ...local, harness: event.target.value as LocalHarness })}
-              >
-                <option value="auto">{t("local.harnessAuto")}</option>
-                {(status?.harnesses ??
-                  (["opencode", "claude", "codex"] as const).map((id) => ({
-                    id,
-                    label: HARNESS_LABELS[id],
-                    available: true,
-                    path: null,
-                  }))).map((item) => (
-                  <option key={item.id} value={item.id} disabled={!item.available && local.harness !== item.id}>
-                    {item.label}
-                    {item.available ? "" : ` ${t("common.notOnPath")}`}
-                  </option>
-                ))}
-              </Select>
+              <div className="vstack" style={{ gap: 6 }}>
+                <Select
+                  value={local.harness}
+                  onChange={(event) => void save({ harness: event.target.value as LocalHarness })}
+                >
+                  <option value="auto">{t("local.harnessAuto")}</option>
+                  {(status?.harnesses ??
+                    (["opencode", "claude", "codex"] as const).map((id) => ({
+                      id,
+                      label: HARNESS_LABELS[id],
+                      available: true,
+                      path: null,
+                    }))).map((item) => (
+                    <option key={item.id} value={item.id} disabled={!item.available && local.harness !== item.id}>
+                      {item.label}
+                      {item.available ? "" : ` ${t("common.notOnPath")}`}
+                    </option>
+                  ))}
+                </Select>
+                {resolvedHarness === "codex" && (
+                  <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>
+                    {t("local.codexResponsesNote")}
+                  </span>
+                )}
+              </div>
             </Field>
 
             <Field label={t("local.vibyModel")} hint={t("local.vibyModelHint")}>
               <Select
                 value={local.vibyModel}
-                onChange={(event) => void save({ ...local, vibyModel: event.target.value })}
+                onChange={(event) => void save({ vibyModel: event.target.value })}
               >
                 <option value="">{t("local.vibySame")}</option>
                 {local.vibyModel && !modelIds.includes(local.vibyModel) && <option value={local.vibyModel}>{local.vibyModel}</option>}

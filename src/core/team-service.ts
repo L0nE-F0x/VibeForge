@@ -237,14 +237,21 @@ export class TeamService extends ServiceCore {
     return this.orchestrator.listModels(engineId);
   }
 
-  localStatus(url?: string): Promise<LocalRuntimeStatus> {
+  async localStatus(url?: string): Promise<LocalRuntimeStatus> {
     const local = this.store.readSettings().local;
     const rows = this.store.readEngineRows();
-    return detectLocalRuntimes({ url: url ?? local.url }, rows, this.options.host.resolveBin);
+    const status = await detectLocalRuntimes({ url: url ?? local.url }, rows, this.options.host.resolveBin);
+    let changed = false;
+    for (const srv of status.servers) if (srv.reachable && this.recordLocalProbe(srv)) changed = true;
+    if (status.configured?.reachable && this.recordLocalProbe(status.configured)) changed = true;
+    if (changed) this.emit("orchestrator");
+    return status;
   }
 
-  localProbe(url: string): Promise<LocalServerProbe> {
-    return probeLocalServer(url);
+  async localProbe(url: string): Promise<LocalServerProbe> {
+    const probe = await probeLocalServer(url);
+    if (probe.reachable && this.recordLocalProbe(probe)) this.emit("orchestrator");
+    return probe;
   }
 
   orchestratorStopThinking(silent = false): void {

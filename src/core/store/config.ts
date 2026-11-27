@@ -40,7 +40,7 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "go", model: "", projectsFolder: "", terse: true },
-    local: { enabled: false, active: false, overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
+    local: { enabled: false, active: false, useForViby: true, overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
     computerUse: {
       on: false,
       app: { see: true, pointer: true, keys: true },
@@ -103,6 +103,7 @@ function normalizeLocalSettings(value: unknown, defaults: LocalSettings): LocalS
   return {
     enabled: bool(raw.enabled, defaults.enabled),
     active: bool(raw.active, defaults.active),
+    useForViby: bool(raw.useForViby, defaults.useForViby),
     overrideAgents: bool(raw.overrideAgents, defaults.overrideAgents),
     url: cleanLocalText(raw.url, 300),
     model: cleanLocalModelId(raw.model),

@@ -196,7 +196,7 @@ export const es: Catalog = {
   "tour.room.title": "Haz sitio",
   "tour.room.body": "Arrastra el borde de cualquier panel lateral para cambiar su tamaño, o contráelo a una franja estrecha. VibeForge recuerda tu diseño.",
   "tour.more.title": "Ajustes: el resto del escritorio",
-  "tour.more.body": "**Teléfono** lleva tu escritorio al teléfono. **Sincronización** mantiene un espacio de trabajo en tu otro equipo. **Voz** prepara el dictado, las llamadas y la voz de Viby. Apariencia fija un tema y un idioma. Teléfono, Sincronización y Uso del ordenador siguen apagados hasta que los actives.",
+  "tour.more.body": "**Teléfono** lleva tu escritorio al teléfono. **Sincronización** mantiene un espacio de trabajo en tu otro equipo. **Voz** prepara el dictado, las llamadas y la voz de Viby. **IA local** te permite conectar tu propio servidor local o en red. Apariencia fija un tema y un idioma. IA local, Teléfono, Sincronización y Uso del ordenador siguen apagados hasta que los actives.",
   "tour.whichOne.body": "Lo que quieres y dónde hacerlo. Esta lista también está en Ayuda, en la barra lateral.",
   "tour.help.title": "La ayuda siempre está aquí",
   "tour.help.body": "Repite este recorrido, consulta los atajos, busca actualizaciones o envía un informe de error o una idea directamente a GitHub.",
@@ -2230,7 +2230,7 @@ export const es: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge ejecuta las CLI de programación que ya usas, como Claude Code y Codex, en terminales reales una al lado de otra, y guarda cada sesión como una ejecución que puedes volver a leer. Al final de este recorrido puedes abrir una carpeta tuya e iniciar una CLI en ella.",
   "first.tour.clis.title": "Las CLI de programación que encontró",
-  "first.tour.clis.body": "VibeForge las inicia tal como son, con la sesión iniciada en tus propias cuentas. Nunca llama a un modelo ni guarda una clave de API por su cuenta. Se encontraron en tu PATH; Ajustes las muestra y puede añadir otra.",
+  "first.tour.clis.body": "VibeForge las inicia tal como son, con la sesión iniciada en tus propias cuentas. Nunca llama a una API de modelos en la nube ni guarda claves de API en la nube (salvo si activas **Ajustes → IA local** para tu propio servidor). Se encontraron en tu PATH; Ajustes las muestra y puede añadir otra.",
   "first.tour.clis.none": "Aún ninguna. Instala una, como Claude Code o Codex, y luego pulsa **Comprobar CLI** en Ajustes.",
   "first.tour.code.title": "Código: terminales en tu proyecto",
   "first.tour.code.body": "Añade una carpeta de proyecto y abre terminales en ella. Escribe claude, codex o cualquier CLI, y divide paneles para tener varias una al lado de otra. Desde que una CLI arranca hasta que vuelves al prompt, VibeForge la guarda como una ejecución: su transcripción y lo que cambió en git.",
@@ -2331,6 +2331,7 @@ export const es: Catalog = {
   "local.harness": "Herramienta de programación",
   "local.harnessHint": "Qué CLI instalada apunta VibeForge a tu servidor local en Código, Agents, Chat, Tareas o Rutinas.",
   "local.harnessAuto": "Automático (recomendado)",
+  "local.codexResponsesNote": "Codex requiere un servidor compatible con /v1/responses (Ollama, LM Studio o llama.cpp reciente).",
   "local.vibyModel": "Modelo de Viby",
   "local.vibyModelHint": "Modelo distinto opcional solo para Viby, o usa el mismo que para programar.",
   "local.vibySame": "Igual que el modelo de programación",
@@ -2350,5 +2351,6 @@ export const es: Catalog = {
   "switcher.useCloud": "Volver al modo Nube",
   "switcher.setupLocal": "Configurar IA local",
   "pane.local": "Local",
+  "orch.localSmallContext": "La ventana de memoria de tu modelo local ({ctx} tokens) es menor que las instrucciones de Viby (~{needed} tokens), así que el inicio del prompt puede recortarse. Aumenta el contexto en tu servidor.",
   "core.localNotReady": "La IA local necesita un servidor conectado, un modelo y tener instalado OpenCode, Claude Code o Codex.",
 };

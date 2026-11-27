@@ -23,6 +23,7 @@ import type {
   OrchestratorTurn,
   OrchestratorView as View,
   Settings,
+  SettingsPatch,
 } from "../../shared/api.js";
 import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
 import { LOCAL_ENGINE_ID, isLocalConfigured } from "../../shared/local.js";
@@ -31,7 +32,7 @@ import { call, useAgents, useEngines, useLive, useOrchestrator, useRoutines, use
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
 import { VibySprite } from "../components/Pixel.js";
 import { tipProps } from "../components/Tooltip.js";
-import { Button, Input, Modal, Popover, Spinner, useOverlayStack } from "../components/ui.js";
+import { Button, Input, Modal, Notice, Popover, Spinner, useOverlayStack } from "../components/ui.js";
 import { readDraft, seedDraft } from "../drafts.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { overlayOpen } from "../overlays.js";
@@ -165,6 +166,7 @@ export function OrchestratorView() {
   }, [typingOpen]);
 
   const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
+  useLocalContextProbe(engineId, settings);
   const turns = view?.turns ?? [];
   const copies = view?.copies ?? [];
   const waitingTurnId = [...turns].reverse().find((item) => item.plan === "waiting")?.id ?? null;
@@ -245,6 +247,23 @@ export function OrchestratorView() {
         </Popover>
       )}
       {memoryOpen && <VibyMemorySheet onClose={() => setMemoryOpen(false)} />}
+      {engineId === LOCAL_ENGINE_ID && view?.localContextWarning && (
+        <div style={{ padding: "0 14px 8px" }}>
+          <Notice tone="warn">
+            <div className="hstack wrap" style={{ gap: 8 }}>
+              <span className="grow">
+                {t("orch.localSmallContext", {
+                  ctx: view.localContextWarning.contextLength.toLocaleString(),
+                  needed: view.localContextWarning.neededTokens.toLocaleString(),
+                })}
+              </span>
+              <Button size="sm" onClick={() => go({ view: "settings", section: "local" })}>
+                {t("local.title")}
+              </Button>
+            </div>
+          </Notice>
+        </div>
+      )}
 
       {emptyBeforeCall ? (
         <div className="viby-empty">
@@ -355,6 +374,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
   useOverlay(true);
   useOverlayStack(box, onClose);
   const engineId = view?.engineId ?? plannerFor(settings?.orchestrator.engine ?? "", engines) ?? settings?.orchestrator.engine ?? "";
+  useLocalContextProbe(engineId, settings);
   const waitingTurnId = [...(view?.turns ?? [])].reverse().find((item) => item.plan === "waiting")?.id ?? null;
 
   return createPortal(
@@ -382,6 +402,29 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
           </Button>
           <Button size="sm" variant="ghost" icon={X} tip={t("common.close")} kbd={shortcutKeys("overlay.close")} onClick={onClose} />
         </div>
+        {engineId === LOCAL_ENGINE_ID && view?.localContextWarning && (
+          <div style={{ padding: "0 12px 6px" }}>
+            <Notice tone="warn">
+              <div className="hstack wrap" style={{ gap: 8 }}>
+                <span className="grow">
+                  {t("orch.localSmallContext", {
+                    ctx: view.localContextWarning.contextLength.toLocaleString(),
+                    needed: view.localContextWarning.neededTokens.toLocaleString(),
+                  })}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    onClose();
+                    go({ view: "settings", section: "local" });
+                  }}
+                >
+                  {t("local.title")}
+                </Button>
+              </div>
+            </Notice>
+          </div>
+        )}
         {memoryOpen && <VibyMemorySheet onClose={() => setMemoryOpen(false)} />}
         <LeaveBar.Provider value={onClose}>
           <ConversationStream view={view} callState={callState} sees={sees} compact />
@@ -427,12 +470,21 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
 
 // ------------------------------------------------------------------ between-calls model label
 
+function useLocalContextProbe(engineId: string, settings: Settings | undefined) {
+  const url = settings?.local.url ?? "";
+  const model = settings?.local.vibyModel || settings?.local.model || "";
+  useEffect(() => {
+    if (engineId !== LOCAL_ENGINE_ID || !url) return;
+    void call("local.probe", url).catch(() => undefined);
+  }, [engineId, url, model]);
+}
+
 function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boolean }) {
   const t = useT();
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [save] = useAction(async (patch: Partial<Settings>) => call("settings.save", patch), t("settings.saveFailed"));
+  const [save] = useAction(async (patch: SettingsPatch) => call("settings.save", patch), t("settings.saveFailed"));
 
   const isLocal = engineId === LOCAL_ENGINE_ID;
   const engine = engines.find((item) => item.id === engineId);
@@ -563,7 +615,7 @@ function ModelPopover({
   current: OrchestratorSettings;
   local: Settings["local"];
   engines: Engine[];
-  onSave: (next: Partial<Settings>) => void;
+  onSave: (next: SettingsPatch) => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -581,7 +633,7 @@ function ModelPopover({
   // Another model keeps the effort only where it is still valid for it.
   const savePickedModel = (model: string) => {
     if (isLocal) {
-      onSave({ local: { ...local, vibyModel: model } });
+      onSave({ local: { vibyModel: model } });
       return;
     }
     onSave({
@@ -637,7 +689,8 @@ function ModelPopover({
                 setTyped("");
                 onSave({
                   orchestrator: { ...current, engine: item.id, model: "", effort: "" },
-                  ...(local.active && item.id !== LOCAL_ENGINE_ID ? { local: { ...local, active: false } } : {}),
+                  ...(local.active && item.id !== LOCAL_ENGINE_ID ? { local: { useForViby: false } } : {}),
+                  ...(local.active && item.id === LOCAL_ENGINE_ID && !local.useForViby ? { local: { useForViby: true } } : {}),
                 });
               }}
             >

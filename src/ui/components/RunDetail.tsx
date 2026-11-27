@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { RunView, Topic } from "../../shared/api.js";
+import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
 import { routeForRun, useAction, useNav, useToast } from "../state.js";
@@ -270,6 +271,10 @@ export function RunDetail({
   }
 
   const engine = engines.find((item) => item.id === run.engine);
+  const isLocalRun = run.engine === LOCAL_ENGINE_ID || Boolean(run.localModel);
+  const engineSummary = isLocalRun
+    ? [t("pane.local"), run.localModel ? shortLocalModel(run.localModel) : "", run.localHarness].filter(Boolean).join(" · ")
+    : (engine?.label ?? run.engine);
   const place = routeForRun(run);
   const openLabel = t(place.view === "agents" ? "run.openIn.agents" : place.view === "chat" ? "run.openIn.chat" : place.view === "tasks" ? "run.openIn.tasks" : "run.openIn.code");
   const canOpenElsewhere = place.view !== "runs";
@@ -281,10 +286,15 @@ export function RunDetail({
           <div className="hstack">
             <h1 className="truncate">{run.title}</h1>
             <StatusChip status={run.status} exitCode={run.exitCode} />
+            {isLocalRun && (
+              <Chip tone="accent" title={run.localModel ?? undefined}>
+                {run.localModel ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}` : t("pane.local")}
+              </Chip>
+            )}
             {run.changes && <Chip icon={FileDiff}>{changesFor(run.changes, t)}</Chip>}
           </div>
           <div className="sub truncate">
-            {t(ORIGIN_KEY[run.origin])} · {engine?.label ?? run.engine} · <span className="mono">{tildify(run.cwd, home)}</span> · {t("run.started")}{" "}
+            {t(ORIGIN_KEY[run.origin])} · {engineSummary} · <span className="mono">{tildify(run.cwd, home)}</span> · {t("run.started")}{" "}
             <TimeAgo iso={run.startedAt} /> · <Elapsed start={run.startedAt} end={run.endedAt} />
           </div>
         </div>

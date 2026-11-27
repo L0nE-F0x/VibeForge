@@ -196,7 +196,7 @@ export const pt: Catalog = {
   "tour.room.title": "Abra espaço",
   "tour.room.body": "Arraste a borda de qualquer painel lateral para redimensioná-lo, ou recolha-o em uma faixa estreita. O VibeForge lembra do seu layout.",
   "tour.more.title": "Ajustes: o resto da mesa",
-  "tour.more.body": "**Telefone** põe sua mesa no telefone. **Sincronização** mantém um espaço de trabalho na sua outra máquina. **Voz** prepara o ditado, as chamadas e a voz do Viby. Aparência fixa um tema e um idioma. Telefone, Sincronização e Uso do computador ficam desligados até você ativar.",
+  "tour.more.body": "**Telefone** põe sua mesa no telefone. **Sincronização** mantém um espaço de trabalho na sua outra máquina. **Voz** prepara o ditado, as chamadas e a voz do Viby. **IA local** permite conectar seu próprio servidor local ou na rede doméstica. Aparência fixa um tema e um idioma. IA local, Telefone, Sincronização e Uso do computador ficam desligados até você ativar.",
   "tour.whichOne.body": "O que você quer e onde fazer. Esta lista também fica em Ajuda, na barra lateral.",
   "tour.help.title": "A ajuda está sempre aqui",
   "tour.help.body": "Refaça este tour, consulte os atalhos, procure atualizações ou envie um relato de bug ou uma ideia direto para o GitHub.",
@@ -2230,7 +2230,7 @@ export const pt: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "O VibeForge roda as CLIs de programação que você já usa, como Claude Code e Codex, em terminais reais lado a lado, e guarda cada sessão como uma execução que você pode reler. No fim deste tour você pode abrir uma pasta sua e iniciar uma CLI nela.",
   "first.tour.clis.title": "As CLIs de programação que ele encontrou",
-  "first.tour.clis.body": "O VibeForge as inicia do jeito que são, conectadas com as suas próprias contas. Ele nunca chama um modelo nem guarda uma chave de API por conta própria. Elas foram encontradas no seu PATH; os Ajustes as listam e podem adicionar outra.",
+  "first.tour.clis.body": "O VibeForge as inicia do jeito que são, conectadas com as suas próprias contas. Ele nunca chama uma API de modelo na nuvem nem guarda chaves de API na nuvem (a menos que você ative **Ajustes → IA local** para o seu próprio servidor). Elas foram encontradas no seu PATH; os Ajustes as listam e podem adicionar outra.",
   "first.tour.clis.none": "Nenhuma ainda. Instale uma, como Claude Code ou Codex, e depois clique em **Verificar CLIs** nos Ajustes.",
   "first.tour.code.title": "Código: terminais no seu projeto",
   "first.tour.code.body": "Adicione uma pasta de projeto e abra terminais nela. Digite claude, codex ou qualquer CLI, e divida os painéis para rodar várias lado a lado. Do momento em que uma CLI começa até você voltar ao prompt, o VibeForge a registra como uma execução: a transcrição e o que mudou no git.",
@@ -2331,6 +2331,7 @@ export const pt: Catalog = {
   "local.harness": "Ferramenta de código",
   "local.harnessHint": "Qual CLI instalada o VibeForge aponta para o seu servidor local em Código, Agents, Chat, Tarefas ou Rotinas.",
   "local.harnessAuto": "Automático (recomendado)",
+  "local.codexResponsesNote": "O Codex requer um servidor com suporte a /v1/responses (Ollama, LM Studio ou llama.cpp recente).",
   "local.vibyModel": "Modelo do Viby",
   "local.vibyModelHint": "Modelo separado opcional apenas para o Viby, ou use o mesmo modelo de código.",
   "local.vibySame": "Mesmo modelo de código",
@@ -2350,5 +2351,6 @@ export const pt: Catalog = {
   "switcher.useCloud": "Voltar para o modo Nuvem",
   "switcher.setupLocal": "Configurar IA local",
   "pane.local": "Local",
+  "orch.localSmallContext": "A janela de memória do seu modelo local ({ctx} tokens) é menor que as instruções do Viby (~{needed} tokens), então o início do prompt pode ser cortado. Aumente o contexto no servidor.",
   "core.localNotReady": "A IA local precisa de um servidor conectado, um modelo e do OpenCode, Claude Code ou Codex instalado.",
 };

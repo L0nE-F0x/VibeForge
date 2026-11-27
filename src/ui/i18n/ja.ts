@@ -197,7 +197,7 @@ export const ja: Catalog = {
   "tour.room.title": "スペースを作る",
   "tour.room.body": "サイドパネルの端をドラッグしてサイズを変えたり、細い帯に折りたたんだりできます。VibeForge はレイアウトを覚えています。",
   "tour.more.title": "設定：デスクの残り",
-  "tour.more.body": "**電話** はデスクを電話に届けます。**同期** はワークスペースをもう一台のマシンと揃えます。**音声** は口述、通話、Viby の声の準備をします。外観ではテーマと言語を固定できます。電話、同期、コンピューター操作は、オンにするまで動きません。",
+  "tour.more.body": "**電話** はデスクを電話に届けます。**同期** はワークスペースをもう一台のマシンと揃えます。**音声** は口述、通話、Viby の声の準備をします。**ローカル AI** では自分のローカルや自宅ネットワーク上のサーバーに接続できます。外観ではテーマと言語を固定できます。ローカル AI、電話、同期、コンピューター操作は、オンにするまで動きません。",
   "tour.whichOne.body": "やりたいことと、それをする場所です。この一覧はサイドバーのヘルプにもあります。",
   "tour.help.title": "ヘルプはいつでもここに",
   "tour.help.body": "このツアーの見直し、ショートカットの確認、アップデートの確認、GitHub への不具合報告やアイデアの送信ができます。",
@@ -2231,7 +2231,7 @@ export const ja: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge は、Claude Code や Codex など普段お使いのコーディング CLI を本物のターミナルで並べて動かし、各セッションをあとから読み返せる実行として残します。このツアーの最後に、お手元のフォルダーを開いて CLI を起動できます。",
   "first.tour.clis.title": "見つかったコーディング CLI",
-  "first.tour.clis.body": "VibeForge はこれらをそのまま、あなた自身のアカウントでサインインした状態で起動します。VibeForge 自身がモデルを呼び出したり API キーを持ったりすることはありません。これらは PATH 上で見つかりました。設定で一覧を確認でき、別の CLI も追加できます。",
+  "first.tour.clis.body": "VibeForge はこれらをそのまま、あなた自身のアカウントでサインインした状態で起動します。VibeForge 自身がクラウドのモデル API を呼び出したりクラウド API キーを保持したりすることはありません（自己ホストサーバー向けに **設定 → ローカル AI** を有効にした場合を除く）。これらは PATH 上で見つかりました。設定で一覧を確認でき、別の CLI も追加できます。",
   "first.tour.clis.none": "まだありません。Claude Code や Codex などをインストールしてから、設定の **CLI を再確認** を押してください。",
   "first.tour.code.title": "コード：プロジェクトの中のターミナル",
   "first.tour.code.body": "プロジェクトのフォルダーを追加し、その中でターミナルを開きます。claude や codex などの CLI を入力し、ペインを分割すれば複数を並べて動かせます。CLI が起動してからプロンプトに戻るまでを、VibeForge が実行として記録します。記録と git の変更が残ります。",
@@ -2332,6 +2332,7 @@ export const ja: Catalog = {
   "local.harness": "コーディングツール",
   "local.harnessHint": "コード、Agent、チャット、タスク、ルーティンを開くときにローカルサーバーへ向ける CLI。",
   "local.harnessAuto": "自動（推奨）",
+  "local.codexResponsesNote": "Codex には /v1/responses に対応したサーバー（Ollama、LM Studio、または新しい llama.cpp）が必要です。",
   "local.vibyModel": "Viby 用モデル",
   "local.vibyModelHint": "Viby 専用の別モデルを選ぶか、コーディングと同じモデルを使います。",
   "local.vibySame": "コーディング用モデルと同じ",
@@ -2351,5 +2352,6 @@ export const ja: Catalog = {
   "switcher.useCloud": "クラウドモードに戻る",
   "switcher.setupLocal": "ローカル AI を設定",
   "pane.local": "ローカル",
+  "orch.localSmallContext": "ローカルモデルのメモリ枠（{ctx} トークン）が Viby の指示（約 {needed} トークン）より小さいため、プロンプトの先頭が途切れる恐れがあります。サーバー側でコンテキスト長を増やしてください。",
   "core.localNotReady": "ローカル AI を使うには、接続されたサーバー、モデル、および OpenCode・Claude Code・Codex のいずれかが必要です。",
 };

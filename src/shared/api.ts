@@ -167,6 +167,12 @@ export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "..
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
 export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
 
+/** Partial settings patch supporting nested partial updates for `companion` and `local`. */
+export type SettingsPatch = Partial<Omit<Settings, "companion" | "local">> & {
+  companion?: Partial<Settings["companion"]>;
+  local?: Partial<LocalSettings>;
+};
+
 export interface AppInfo {
   version: string;
   configRoot: string;
@@ -431,7 +437,7 @@ export interface DeskMethods {
   "updates.rollback": (size?: TermSize) => { ptyId: string };
 
   "settings.get": () => Settings;
-  "settings.save": (patch: Partial<Settings>) => Settings;
+  "settings.save": (patch: SettingsPatch) => Settings;
   /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
   "files.unreadable": () => UnreadableFile[];
   /** Moves an unreadable file (one listed above) to `<name>.broken` and puts back its last good copy. */

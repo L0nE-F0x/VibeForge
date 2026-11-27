@@ -197,7 +197,7 @@ export const zh: Catalog = {
   "tour.room.title": "腾出空间",
   "tour.room.body": "拖动任意侧边栏的边缘来调整大小，或把它折叠成一条细边。VibeForge 会记住你的布局。",
   "tour.more.title": "设置：桌面的其余部分",
-  "tour.more.body": "**手机** 把你的桌面带到手机上。**同步** 让一个工作区同时留在你的另一台机器上。**语音** 用来设置口述、通话和 Viby 的声音。外观可以固定主题和语言。手机、同步和电脑操作在你打开之前一直关闭。",
+  "tour.more.body": "**手机** 把你的桌面带到手机上。**同步** 让一个工作区同时留在你的另一台机器上。**语音** 用来设置口述、通话和 Viby 的声音。**本地 AI** 可以连接你本机或局域网上的自建模型服务器。外观可以固定主题和语言。本地 AI、手机、同步和电脑操作在你打开之前一直关闭。",
   "tour.whichOne.body": "你想做的事，以及在哪里做。侧边栏的帮助里也有这份清单。",
   "tour.help.title": "帮助随时都在",
   "tour.help.body": "重看这段导览、查阅快捷键、检查更新，或直接向 GitHub 发送错误报告和想法。",
@@ -2231,7 +2231,7 @@ export const zh: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge 会在真正的终端里并排运行你已经在用的编程 CLI，比如 Claude Code 和 Codex，并把每个会话保存为一次可以回看的运行。在这段导览的最后，你可以打开自己的一个文件夹，并在里面启动一个 CLI。",
   "first.tour.clis.title": "找到的编程 CLI",
-  "first.tour.clis.body": "VibeForge 会按原样启动它们，使用你自己登录的账号。它自己从不调用模型，也不保存 API 密钥。这些是在你的 PATH 上找到的；设置里可以查看它们，也可以添加别的。",
+  "first.tour.clis.body": "VibeForge 会按原样启动它们，使用你自己登录的账号。它自己从不调用云端模型 API，也不保存云端 API 密钥（除非你主动开启 **设置 → 本地 AI** 连接自建服务器）。这些是在你的 PATH 上找到的；设置里可以查看它们，也可以添加别的。",
   "first.tour.clis.none": "还没有。先安装一个，比如 Claude Code 或 Codex，然后在设置里点 **重新检查 CLI**。",
   "first.tour.code.title": "代码：项目里的终端",
   "first.tour.code.body": "添加一个项目文件夹，并在里面打开终端。输入 claude、codex 或任何 CLI，拆分窗格就能并排运行好几个。从 CLI 启动到你回到提示符，VibeForge 会把它记录为一次运行：包括文字记录和 git 中的改动。",
@@ -2332,6 +2332,7 @@ export const zh: Catalog = {
   "local.harness": "编程工具",
   "local.harnessHint": "打开代码、Agent、聊天、任务或例行任务时，指向你本地服务器的已安装编程 CLI。",
   "local.harnessAuto": "自动（推荐）",
+  "local.codexResponsesNote": "Codex 需要支持 /v1/responses 的服务器（Ollama、LM Studio 或较新版 llama.cpp）。",
   "local.vibyModel": "Viby 模型",
   "local.vibyModelHint": "可选为 Viby 单独指定一个模型，或与编程共用同一个模型。",
   "local.vibySame": "与编程模型相同",
@@ -2351,5 +2352,6 @@ export const zh: Catalog = {
   "switcher.useCloud": "切换回云端模式",
   "switcher.setupLocal": "设置本地 AI",
   "pane.local": "本地",
+  "orch.localSmallContext": "本地模型的记忆窗口（{ctx} token）小于 Viby 指令（约 {needed} token），提示词开头可能会被截断。请在服务器设置中增大上下文窗口。",
   "core.localNotReady": "本地 AI 需要已连接的服务器、模型，以及已安装的 OpenCode、Claude Code 或 Codex。",
 };

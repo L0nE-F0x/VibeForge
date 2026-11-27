@@ -25,7 +25,7 @@
 
 ---
 
-VibeForge never calls a model API and never holds a key. Every engine is a CLI you are already signed in to; VibeForge gives them a home. It remembers **who** does the work (agents with a brief, memory and skills), **where** they may work (allowed folders), **when** work starts (routines), and **what to review** when it ends (every run keeps its final screen, a transcript and the git diff since it began). No accounts. No telemetry. Everything on disk is plain YAML and Markdown. What it will and won't do is in [the principles](docs/principles.md).
+VibeForge never calls a cloud model API and never holds a key. Every engine is a CLI you are already signed in to (unless you opt in to [Local AI](#local-ai) for your own self-hosted server); VibeForge gives them a home. It remembers **who** does the work (agents with a brief, memory and skills), **where** they may work (allowed folders), **when** work starts (routines), and **what to review** when it ends (every run keeps its final screen, a transcript and the git diff since it began). No accounts. No telemetry. Everything on disk is plain YAML and Markdown. What it will and won't do is in [the principles](docs/principles.md).
 
 ## Install
 
@@ -177,6 +177,15 @@ What else it can do:
 - **It hears back.** When a CLI it started finishes a turn after real work, or closes by itself, a line in the conversation says so, with what changed, **Open in Code** and **Review**. Asking *"how's it going?"* gets an answer from what each one was asked, where it works and what is waiting for review.
 
 Planning runs at low effort unless you pick another (and Claude Code without your MCP servers), so answers come back sooner. With Claude Code planning, Viby keeps it running between messages, so a message sent within two minutes of the last doesn't wait for it to start again, and on a call the next sentence is made ready while the one before is spoken. A name speech-to-text got slightly wrong (*"Grock"*, *"Cloud Code"*, *"Star Leger"*) still finds the CLI, workspace or agent you meant; when two could fit, Viby asks. When a CLI ends a step on a question (trust this folder?), a later step that waits for it waits for the answer too, and a planner answer that comes back garbled gets one quiet retry before Viby says it couldn't read it. Picking another model keeps the effort if that model takes it, and an Antigravity model that names its own level plans at that level. If the planner's saved session is gone, or you switch to another planner, Viby starts a new session and tells it what was said last.
+
+## Local AI
+
+Off until you turn it on in **Settings → Local AI**. Connect to any OpenAI-compatible server on this computer (`llama.cpp`, Ollama, LM Studio) or another machine on your home network or Tailscale:
+
+- **Coding CLIs.** VibeForge adds a `Local` option that points your installed **OpenCode**, **Claude Code**, or **Codex** at the configured server per launch using runtime flags and environment variables, leaving your cloud CLI configs untouched.
+- **Viby.** When Local mode is on (or when you pick `Local AI` in Viby's planner menu), Viby talks directly to your server's chat endpoint — even if no local coding CLI is installed yet. You can keep Viby on the same model as coding or pick a smaller/faster one.
+- **Cloud / Local switch.** Once enabled, a toggle at the foot of the rail and in <kbd>Ctrl</kbd>+<kbd>K</kbd> switches between Cloud and Local mode without changing your saved cloud defaults. Saved **Agents** stay on their own cloud CLIs unless you explicitly turn on **Also switch saved Agents to Local** (which routes them temporarily without editing their `agent.yaml` files).
+- **Safe Continue.** Cloud and Local sessions in the same project folder are tracked separately so **Continue** never resumes a local run on a cloud provider (or vice versa).
 
 ## Voice
 

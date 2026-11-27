@@ -202,7 +202,7 @@ export const en = {
   "tour.room.title": "Make room",
   "tour.room.body": "Drag the edge of any side panel to resize it, or collapse it to a slim strip. VibeForge remembers your layout.",
   "tour.more.title": "Settings: the rest of the desk",
-  "tour.more.body": "**Phone** puts your desk on your phone. **Sync** keeps a workspace on your other machine. **Voice** sets up dictation, calls and Viby's voice. Appearance pins a theme and a language. Phone, Sync and Computer use stay off until you turn them on.",
+  "tour.more.body": "**Phone** puts your desk on your phone. **Sync** keeps a workspace on your other machine. **Voice** sets up dictation, calls and Viby's voice. **Local AI** lets you connect your own local or home-network model server. Appearance pins a theme and a language. Local AI, Phone, Sync and Computer use stay off until you turn them on.",
   "tour.whichOne.body": "What you want, and where to do it. Help in the rail has this list too.",
   "tour.help.title": "Help is always here",
   "tour.help.body": "Replay this tour, look up shortcuts, check for updates, or send a bug report or an idea straight to GitHub.",
@@ -2243,7 +2243,7 @@ export const en = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge runs the coding CLIs you already use, such as Claude Code and Codex, in real terminals side by side, and keeps each session as a run you can read back. At the end of this tour you can open a folder of yours and start a CLI in it.",
   "first.tour.clis.title": "The coding CLIs it found",
-  "first.tour.clis.body": "VibeForge starts these as they are, signed in with your own accounts. It never calls a model or holds an API key itself. They were found on your PATH; Settings lists them and can add another.",
+  "first.tour.clis.body": "VibeForge starts these as they are, signed in with your own accounts. It never calls a cloud model API or holds a cloud API key itself (unless you opt in to **Settings → Local AI** for your own self-hosted server). They were found on your PATH; Settings lists them and can add another.",
   "first.tour.clis.none": "None yet. Install one, such as Claude Code or Codex, then press **Recheck CLIs** in Settings.",
   "first.tour.code.title": "Code: terminals in your project",
   "first.tour.code.body": "Add a project folder and open terminals in it. Type claude, codex or any CLI, and split panes to run several side by side. From the moment a CLI starts until you're back at the prompt, VibeForge records it as a run: its transcript and what changed in git.",
@@ -2344,6 +2344,7 @@ export const en = {
   "local.harness": "Coding tool",
   "local.harnessHint": "Which installed coding CLI VibeForge points at your local server when opening Code, Agents, Chat, Tasks, or Routines.",
   "local.harnessAuto": "Auto (recommended)",
+  "local.codexResponsesNote": "Codex requires a server with /v1/responses support (Ollama, LM Studio, or recent llama.cpp).",
   "local.vibyModel": "Viby model",
   "local.vibyModelHint": "Optional separate model just for Viby, or use the same model as coding.",
   "local.vibySame": "Same as coding model",
@@ -2363,5 +2364,6 @@ export const en = {
   "switcher.useCloud": "Switch back to Cloud mode",
   "switcher.setupLocal": "Set up Local AI",
   "pane.local": "Local",
+  "orch.localSmallContext": "Your local model's memory window ({ctx} tokens) is smaller than Viby's instructions (~{needed} tokens), so the start of the prompt may be cut off. Increase the context window in your server.",
   "core.localNotReady": "Local AI needs a connected server, a model, and OpenCode, Claude Code, or Codex installed.",
 } as const;

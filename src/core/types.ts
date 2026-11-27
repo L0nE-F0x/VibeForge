@@ -114,6 +114,10 @@ export interface RunMeta {
   gitStart: string | null;
   /** The run this one continues, if any. */
   continuedFrom: string | null;
+  /** Resolved local CLI harness (`"opencode" | "claude" | "codex"`) when run via Local AI. */
+  localHarness?: string | null;
+  /** Resolved model id when run via Local AI. */
+  localModel?: string | null;
 }
 
 export interface EngineRow {
@@ -144,6 +148,8 @@ export interface LocalSettings {
   enabled: boolean;
   /** Quick switch: prefer Local for Viby and default new launches when configured. */
   active: boolean;
+  /** Whether Viby also uses Local when Local mode is active. */
+  useForViby: boolean;
   /** When Local mode (`active`) is on, also run saved Agents (tasks, routines, agent chats, Viby starts) through Local without editing agent.yaml. */
   overrideAgents: boolean;
   /** Base URL of an OpenAI-compatible server on this computer or home network / Tailscale. */

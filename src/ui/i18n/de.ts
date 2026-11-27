@@ -196,7 +196,7 @@ export const de: Catalog = {
   "tour.room.title": "Schaffe Platz",
   "tour.room.body": "Ziehe den Rand einer Seitenleiste, um ihre Größe zu ändern, oder klappe sie zu einem schmalen Streifen ein. VibeForge merkt sich dein Layout.",
   "tour.more.title": "Optionen: der Rest des Schreibtischs",
-  "tour.more.body": "**Telefon** bringt deinen Schreibtisch aufs Telefon. **Synchronisierung** hält einen Arbeitsbereich auf deinem anderen Rechner. **Sprache** richtet Diktat, Anrufe und Vibys Stimme ein. Darstellung legt ein Thema und eine Sprache fest. Telefon, Synchronisierung und Computer-Nutzung bleiben aus, bis du sie einschaltest.",
+  "tour.more.body": "**Telefon** bringt deinen Schreibtisch aufs Telefon. **Synchronisierung** hält einen Arbeitsbereich auf deinem anderen Rechner. **Sprache** richtet Diktat, Anrufe und Vibys Stimme ein. **Lokale KI** verbindet deinen eigenen Server im Heimnetz oder auf diesem PC. Darstellung legt ein Thema und eine Sprache fest. Lokale KI, Telefon, Synchronisierung und Computer-Nutzung bleiben aus, bis du sie einschaltest.",
   "tour.whichOne.body": "Was du willst, und wo du es machst. Diese Liste steht auch unter Hilfe in der Leiste.",
   "tour.help.title": "Hilfe ist immer da",
   "tour.help.body": "Wiederhole diese Tour, schlage Tastenkürzel nach, suche nach Updates oder schicke einen Fehlerbericht oder eine Idee direkt an GitHub.",
@@ -2230,7 +2230,7 @@ export const de: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge startet die Coding-CLIs, die du schon nutzt, etwa Claude Code und Codex, in echten Terminals nebeneinander und bewahrt jede Sitzung als Lauf auf, den du nachlesen kannst. Am Ende dieser Tour kannst du einen deiner Ordner öffnen und darin eine CLI starten.",
   "first.tour.clis.title": "Die Coding-CLIs, die es gefunden hat",
-  "first.tour.clis.body": "VibeForge startet sie so, wie sie sind, angemeldet mit deinen eigenen Konten. Es ruft selbst nie ein Modell auf und hält keinen API-Schlüssel. Sie wurden auf deinem PATH gefunden; die Einstellungen listen sie auf und können weitere hinzufügen.",
+  "first.tour.clis.body": "VibeForge startet sie so, wie sie sind, angemeldet mit deinen eigenen Konten. Es ruft selbst nie eine Cloud-Modell-API auf und hält keinen Cloud-API-Schlüssel (außer du aktivierst **Einstellungen → Lokale KI** für deinen eigenen Server). Sie wurden auf deinem PATH gefunden; die Einstellungen listen sie auf und können weitere hinzufügen.",
   "first.tour.clis.none": "Noch keine. Installiere eine, etwa Claude Code oder Codex, und drück dann in den Einstellungen auf **CLIs neu prüfen**.",
   "first.tour.code.title": "Code: Terminals in deinem Projekt",
   "first.tour.code.body": "Füge einen Projektordner hinzu und öffne Terminals darin. Tippe claude, codex oder eine andere CLI und teile Bereiche, um mehrere nebeneinander laufen zu lassen. Vom Start einer CLI, bis du wieder am Prompt bist, zeichnet VibeForge sie als Lauf auf: ihr Transkript und was sich in git geändert hat.",
@@ -2331,6 +2331,7 @@ export const de: Catalog = {
   "local.harness": "Coding-Tool",
   "local.harnessHint": "Welche installierte Coding-CLI VibeForge für Code, Agents, Chat, Aufgaben und Routinen auf deinen lokalen Server richtet.",
   "local.harnessAuto": "Automatisch (empfohlen)",
+  "local.codexResponsesNote": "Codex braucht einen Server mit /v1/responses-Unterstützung (Ollama, LM Studio oder neueres llama.cpp).",
   "local.vibyModel": "Viby-Modell",
   "local.vibyModelHint": "Optionales eigenes Modell nur für Viby oder dasselbe Modell wie beim Programmieren.",
   "local.vibySame": "Wie beim Coding-Modell",
@@ -2350,5 +2351,6 @@ export const de: Catalog = {
   "switcher.useCloud": "Zurück in den Cloud-Modus wechseln",
   "switcher.setupLocal": "Lokale KI einrichten",
   "pane.local": "Lokal",
+  "orch.localSmallContext": "Das Speicherfenster deines lokalen Modells ({ctx} Token) ist kleiner als Vibys Anweisungen (~{needed} Token), daher könnte der Anfang des Prompts abgeschnitten werden. Erhöhe das Kontextfenster im Server.",
   "core.localNotReady": "Lokale KI braucht einen verbundenen Server, ein Modell sowie OpenCode, Claude Code oder Codex.",
 };

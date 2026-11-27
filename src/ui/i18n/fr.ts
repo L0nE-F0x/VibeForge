@@ -197,7 +197,7 @@ export const fr: Catalog = {
   "tour.room.title": "Faites de la place",
   "tour.room.body": "Faites glisser le bord d'un panneau latéral pour le redimensionner, ou repliez-le en une fine bande. VibeForge retient votre disposition.",
   "tour.more.title": "Réglages : le reste du bureau",
-  "tour.more.body": "**Téléphone** met votre bureau sur votre téléphone. **Synchronisation** garde un espace de travail sur votre autre machine. **Voix** prépare la dictée, les appels et la voix de Viby. Apparence fixe un thème et une langue. Téléphone, Synchronisation et Utilisation de l’ordinateur restent éteints tant que vous ne les activez pas.",
+  "tour.more.body": "**Téléphone** met votre bureau sur votre téléphone. **Synchronisation** garde un espace de travail sur votre autre machine. **Voix** prépare la dictée, les appels et la voix de Viby. **IA locale** permet de connecter votre propre serveur local ou sur votre réseau. Apparence fixe un thème et une langue. IA locale, Téléphone, Synchronisation et Utilisation de l’ordinateur restent éteints tant que vous ne les activez pas.",
   "tour.whichOne.body": "Ce que vous voulez, et où le faire. Cette liste est aussi dans Aide, dans la barre latérale.",
   "tour.help.title": "L'aide est toujours là",
   "tour.help.body": "Relancez cette visite, consultez les raccourcis, recherchez des mises à jour, ou envoyez un rapport de bug ou une idée directement sur GitHub.",
@@ -2231,7 +2231,7 @@ export const fr: Catalog = {
   // ---------------------------------------------------------------- the first ten minutes: short tour, first steps, a fresh shell's hint, recording, problems
   "first.tour.lead": "VibeForge lance les CLI de code que vous utilisez déjà, comme Claude Code et Codex, dans de vrais terminaux côte à côte, et garde chaque session comme une exécution que vous pouvez relire. À la fin de cette visite, vous pouvez ouvrir un de vos dossiers et y lancer une CLI.",
   "first.tour.clis.title": "Les CLI de code trouvées",
-  "first.tour.clis.body": "VibeForge les lance telles quelles, connectées avec vos propres comptes. Il n'appelle jamais de modèle lui-même et ne détient aucune clé d'API. Elles ont été trouvées dans votre PATH ; les Réglages les listent et peuvent en ajouter une autre.",
+  "first.tour.clis.body": "VibeForge les lance telles quelles, connectées avec vos propres comptes. Il n'appelle jamais d'API cloud lui-même et ne détient aucune clé d'API cloud (sauf si vous activez **Réglages → IA locale** pour votre propre serveur). Elles ont été trouvées dans votre PATH ; les Réglages les listent et peuvent en ajouter une autre.",
   "first.tour.clis.none": "Aucune pour l'instant. Installez-en une, comme Claude Code ou Codex, puis appuyez sur **Revérifier les CLI** dans les Réglages.",
   "first.tour.code.title": "Code : des terminaux dans votre projet",
   "first.tour.code.body": "Ajoutez un dossier de projet et ouvrez-y des terminaux. Tapez claude, codex ou une autre CLI, et divisez les volets pour en faire tourner plusieurs côte à côte. Du démarrage d'une CLI jusqu'au retour à l'invite, VibeForge l'enregistre comme une exécution : sa transcription et ce qui a changé dans git.",
@@ -2332,6 +2332,7 @@ export const fr: Catalog = {
   "local.harness": "Outil de code",
   "local.harnessHint": "La CLI installée que VibeForge dirige vers votre serveur local dans Code, Agents, Chat, Tâches ou Routines.",
   "local.harnessAuto": "Auto (recommandé)",
+  "local.codexResponsesNote": "Codex nécessite un serveur prenant en charge /v1/responses (Ollama, LM Studio ou llama.cpp récent).",
   "local.vibyModel": "Modèle pour Viby",
   "local.vibyModelHint": "Modèle séparé optionnel pour Viby uniquement, ou le même modèle que pour coder.",
   "local.vibySame": "Identique au modèle de code",
@@ -2351,5 +2352,6 @@ export const fr: Catalog = {
   "switcher.useCloud": "Revenir en mode Cloud",
   "switcher.setupLocal": "Configurer l'IA locale",
   "pane.local": "Local",
+  "orch.localSmallContext": "La fenêtre mémoire de votre modèle local ({ctx} jetons) est plus petite que les instructions de Viby (~{needed} jetons) : le début du prompt risque d'être tronqué. Augmentez la taille du contexte dans votre serveur.",
   "core.localNotReady": "L'IA locale nécessite un serveur connecté, un modèle et OpenCode, Claude Code ou Codex installé.",
 };
