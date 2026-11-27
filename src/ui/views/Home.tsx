@@ -1,6 +1,6 @@
 import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBranch, History, Hourglass, KanbanSquare, MessagesSquare, Play, Settings, SquareTerminal, TerminalSquare } from "lucide-react";
-import { useCallback, useMemo } from "react";
-import type { RunView } from "../../shared/api.js";
+import { useCallback, useMemo, useState } from "react";
+import type { LiveSession, RunView, Workspace, WorkspaceCategory } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useOrchestrator, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
@@ -11,7 +11,7 @@ import { ORIGIN_KEY } from "../components/RunDetail.js";
 import { Button, ShortAgo, StatusChip, TimeAgo } from "../components/ui.js";
 import { tipProps } from "../components/Tooltip.js";
 import { shellNumber, workspaceMark, WorkspaceState } from "../components/WorkspaceState.js";
-import { useAttention, usePtyAttention } from "../attention.js";
+import { useAttention, usePtyAttention, type Attention } from "../attention.js";
 import { writerNames } from "../components/Occupancy.js";
 import { markWhere, markWho } from "../watch.js";
 import { t as translate, useT } from "../i18n/index.js";
@@ -21,6 +21,8 @@ import { railKey, type RailView } from "../rail.js";
 import { changesFor } from "../changes-text.js";
 import { firstSteps, firstStepsDone, startCliIn } from "../first-run.js";
 import { scheduleText } from "../schedule-text.js";
+import { useWorkspaceCategory, workspacesInCategory } from "../workspace-view.js";
+import { dropWorkspaceOnCategory, WORKSPACE_MIME, WorkspaceTabs } from "./code/WorkspaceTabs.js";
 
 const DAYS = 14;
 /** Waiting rows painted on Home before "and N more"; eight is the point, this is a backstop. */
@@ -115,6 +117,92 @@ function perDay(runs: RunView[], days: number, now: number): number[] {
   return counts;
 }
 
+export function HomeWorkspacesSection({
+  workspaces,
+  categories,
+  home,
+  live,
+  attention,
+  onOpen,
+}: {
+  workspaces: readonly Workspace[];
+  categories: readonly WorkspaceCategory[];
+  home: string;
+  live: readonly LiveSession[];
+  attention: ReadonlyMap<string, Attention>;
+  onOpen: (workspaceId: string) => void;
+}) {
+  const t = useT();
+  const { currentCategory, activeCategory, selectCategory } = useWorkspaceCategory(categories);
+  const [draggingWorkspaceId, setDraggingWorkspaceId] = useState<string | null>(null);
+  const [moveWorkspaceCategory] = useAction(
+    async (workspace: Workspace, targetCategoryId: string, fromCategoryId: string | null, copy: boolean = false) => {
+      await dropWorkspaceOnCategory(workspace, targetCategoryId, fromCategoryId, copy);
+    },
+    t("code.categoryAddFailed"),
+  );
+  const tabWorkspaces = workspacesInCategory(workspaces, activeCategory);
+  const showTabs = workspaces.length > 0 || categories.length > 0;
+  const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
+
+  return (
+    <>
+      <div className="section-title">
+        <FolderOpen size={13} /> {t("home.workspaces.title")}
+      </div>
+      {showTabs && (
+        <WorkspaceTabs
+          categories={categories}
+          workspaces={workspaces}
+          activeCategory={activeCategory}
+          onSelect={selectCategory}
+          draggingWorkspace={draggingWorkspaceId !== null}
+          onDropWorkspace={(workspaceId, targetCategoryId, copy) => {
+            setDraggingWorkspaceId(null);
+            const workspace = workspaces.find((item) => item.id === workspaceId);
+            if (workspace) void moveWorkspaceCategory(workspace, targetCategoryId, activeCategory, copy);
+          }}
+        />
+      )}
+      {workspaces.length === 0 ? (
+        <div className="home-empty">{t("home.workspaces.empty")}</div>
+      ) : tabWorkspaces.length === 0 && currentCategory ? (
+        <div className="home-empty hstack" style={{ gap: 10 }}>
+          <span className="grow">{t("code.categoryEmpty", { name: currentCategory.name })}</span>
+          <Button size="sm" onClick={() => selectCategory(null)}>
+            {t("code.categoryShowAll")}
+          </Button>
+        </div>
+      ) : (
+        <div className="workspace-tiles">
+          {tabWorkspaces.map((workspace) => (
+            <button
+              key={workspace.id}
+              type="button"
+              className={`run-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}${draggingWorkspaceId === workspace.id ? " is-dragging" : ""}`}
+              draggable={categories.length > 0}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(WORKSPACE_MIME, workspace.id);
+                event.dataTransfer.effectAllowed = "move";
+                setDraggingWorkspaceId(workspace.id);
+              }}
+              onDragEnd={() => setDraggingWorkspaceId(null)}
+              onClick={() => onOpen(workspace.id)}
+            >
+              <FolderOpen size={14} className="accent-text" />
+              <span className="vstack grow" style={{ gap: 1 }}>
+                <span className="title truncate">{workspace.name}</span>
+                <span className="meta truncate">{tildify(workspace.path, home)}</span>
+              </span>
+              <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveIn(workspace.id)} />
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function HomeView() {
   const t = useT();
   const { go } = useNav();
@@ -126,6 +214,7 @@ export function HomeView() {
   const agents = useAgents().data ?? [];
   const workspaceFile = useWorkspaces().data;
   const workspaces = workspaceFile?.workspaces ?? [];
+  const categories = workspaceFile?.categories ?? [];
   const engines = useEngines().data ?? [];
   const home = useAppInfo().data?.home ?? "";
   const since = useMemo(() => new Date(Date.now() - DAYS * 86_400_000).toISOString(), []);
@@ -197,7 +286,6 @@ export function HomeView() {
     const number = session.program ? null : shellNumber(session.ptyId, live);
     return session.program ?? (number ? `${t("common.shell")} ${number} · ${session.title}` : session.title);
   };
-  const liveIn = (workspaceId: string) => live.filter((session) => session.workspaceId === workspaceId).length;
   const attention = useAttention();
   const marks = usePtyAttention();
   const tasks = useTasks().data ?? [];
@@ -374,30 +462,14 @@ export function HomeView() {
                 </>
               )}
 
-              <div className="section-title">
-                <FolderOpen size={13} /> {t("home.workspaces.title")}
-              </div>
-              {workspaces.length === 0 ? (
-                <div className="home-empty">{t("home.workspaces.empty")}</div>
-              ) : (
-                <div className="workspace-tiles">
-                  {workspaces.map((workspace) => (
-                    <button
-                      key={workspace.id}
-                      type="button"
-                      className={`run-row${attention.get(workspace.id) === "waiting" ? " needs-you" : ""}`}
-                      onClick={() => go({ view: "code", workspaceId: workspace.id })}
-                    >
-                      <FolderOpen size={14} className="accent-text" />
-                      <span className="vstack grow" style={{ gap: 1 }}>
-                        <span className="title truncate">{workspace.name}</span>
-                        <span className="meta truncate">{tildify(workspace.path, home)}</span>
-                      </span>
-                      <WorkspaceState mark={workspaceMark(workspace.id, live, attention)} count={liveIn(workspace.id)} />
-                    </button>
-                  ))}
-                </div>
-              )}
+              <HomeWorkspacesSection
+                workspaces={workspaces}
+                categories={categories}
+                home={home}
+                live={live}
+                attention={attention}
+                onOpen={(workspaceId) => go({ view: "code", workspaceId })}
+              />
             </div>
 
             <div>

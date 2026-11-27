@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { fuzzyScore } from "./fuzzy.js";
 
 /** Facets the workspace list can narrow to; several may be on at once (ANDed), and empty means Show all. */
@@ -238,6 +239,9 @@ export function workspacesInCategory<T extends { categories?: readonly string[] 
   return items.filter((item) => Boolean(item.categories?.includes(categoryId)));
 }
 
+let memoryCategory: string | null | undefined;
+const categoryListeners = new Set<() => void>();
+
 export function loadWorkspaceCategory(): string | null {
   try {
     const raw = localStorage.getItem(CATEGORY_KEY);
@@ -247,11 +251,45 @@ export function loadWorkspaceCategory(): string | null {
   }
 }
 
-export function saveWorkspaceCategory(categoryId: string | null): void {
+export function getSelectedWorkspaceCategory(): string | null {
   try {
-    if (categoryId) localStorage.setItem(CATEGORY_KEY, categoryId);
+    const raw = localStorage.getItem(CATEGORY_KEY);
+    const stored = raw && raw.trim() ? raw : null;
+    memoryCategory = stored;
+    return stored;
+  } catch {
+    return memoryCategory ?? null;
+  }
+}
+
+export function subscribeWorkspaceCategory(listener: () => void): () => void {
+  categoryListeners.add(listener);
+  return () => categoryListeners.delete(listener);
+}
+
+export function saveWorkspaceCategory(categoryId: string | null): void {
+  const next = categoryId && categoryId.trim() ? categoryId : null;
+  memoryCategory = next;
+  try {
+    if (next) localStorage.setItem(CATEGORY_KEY, next);
     else localStorage.removeItem(CATEGORY_KEY);
   } catch {
     // A blocked store only means the pick isn't remembered.
   }
+  for (const listener of categoryListeners) listener();
+}
+
+/** Shared reactive category tab selection synced between Home and Code's workspace sidebar. */
+export function useWorkspaceCategory<T extends { id: string }>(categories: readonly T[]): {
+  currentCategory: T | null;
+  activeCategory: string | null;
+  selectCategory: (categoryId: string | null) => void;
+} {
+  const selectedId = useSyncExternalStore(subscribeWorkspaceCategory, getSelectedWorkspaceCategory, getSelectedWorkspaceCategory);
+  const currentCategory = selectedId ? (categories.find((cat) => cat.id === selectedId) ?? null) : null;
+  return {
+    currentCategory,
+    activeCategory: currentCategory?.id ?? null,
+    selectCategory: saveWorkspaceCategory,
+  };
 }

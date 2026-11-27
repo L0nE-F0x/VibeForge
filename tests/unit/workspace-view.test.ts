@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKSPACE_VIEW,
   filterCounts,
+  getSelectedWorkspaceCategory,
   groupWorkspaces,
   isDefaultWorkspaceView,
   leafFolder,
@@ -11,6 +12,7 @@ import {
   parentFolder,
   saveWorkspaceCategory,
   saveWorkspaceView,
+  subscribeWorkspaceCategory,
   toggleFilter,
   viewWorkspaces,
   workspacesInCategory,
@@ -209,9 +211,21 @@ describe("workspace list view", () => {
       },
     });
     expect(loadWorkspaceCategory()).toBeNull();
+    expect(getSelectedWorkspaceCategory()).toBeNull();
+    const seen: Array<string | null> = [];
+    const unsubscribe = subscribeWorkspaceCategory(() => {
+      seen.push(getSelectedWorkspaceCategory());
+    });
     saveWorkspaceCategory("games");
     expect(loadWorkspaceCategory()).toBe("games");
-    saveWorkspaceCategory(null);
+    expect(getSelectedWorkspaceCategory()).toBe("games");
+    saveWorkspaceCategory("  ");
     expect(loadWorkspaceCategory()).toBeNull();
+    expect(getSelectedWorkspaceCategory()).toBeNull();
+    expect(seen).toEqual(["games", null]);
+    unsubscribe();
+    saveWorkspaceCategory("work");
+    expect(seen).toEqual(["games", null]);
+    saveWorkspaceCategory(null);
   });
 });

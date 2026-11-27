@@ -742,6 +742,18 @@
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+.ws-tab.is-dragging {
+  opacity: 0.45;
+}
+
+.ws-tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ws-tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
 .ws-tab-count {
   font-family: var(--font-mono);
   font-size: 10px;

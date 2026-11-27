@@ -9,6 +9,36 @@ import { isShortcut } from "../../shortcuts.js";
 import { useAction, useDeleted } from "../../state.js";
 
 export const WORKSPACE_MIME = "application/x-vibeforge-workspace";
+export const WORKSPACE_CATEGORY_MIME = "application/x-vibeforge-workspace-category";
+
+/**
+ * Convert a visual insertion slot `0..length` among custom category tabs (after the pinned All tab)
+ * into the `toIndex` expected by `workspaces.moveCategory`, or `null` when the drop is a no-op.
+ */
+export function categoryReorderTarget(fromIndex: number, overSlot: number, length: number): number | null {
+  if (fromIndex < 0 || fromIndex >= length || length < 2) return null;
+  const clamped = Math.max(0, Math.min(overSlot, length));
+  const toIndex = clamped > fromIndex ? clamped - 1 : clamped;
+  return toIndex === fromIndex ? null : toIndex;
+}
+
+/**
+ * Assign or move a workspace onto a category tab: dragging out of a custom tab moves it unless
+ * `copy` is true (holding Alt), while dragging from All adds membership to the target tab.
+ */
+export async function dropWorkspaceOnCategory(
+  workspace: Workspace,
+  targetCategoryId: string,
+  fromCategoryId: string | null,
+  copy = false,
+): Promise<void> {
+  if (!copy && fromCategoryId && fromCategoryId !== targetCategoryId) {
+    const nextCats = [...(workspace.categories ?? []).filter((id) => id !== fromCategoryId), targetCategoryId];
+    await call("workspaces.update", workspace.id, { categories: nextCats });
+  } else {
+    await call("workspaces.setCategory", [workspace.id], targetCategoryId, true);
+  }
+}
 
 export interface WorkspaceTabsProps {
   categories: readonly WorkspaceCategory[];
@@ -18,8 +48,8 @@ export interface WorkspaceTabsProps {
   /** External trigger to open the "+ new category" input and optionally assign workspaces on creation. */
   createRequest?: { key: number; workspaceIds: string[] } | null;
   onCreatedFor?: () => void;
-  draggingWorkspace: boolean;
-  onDropWorkspace: (workspaceId: string, targetCategoryId: string) => void;
+  draggingWorkspace?: boolean;
+  onDropWorkspace?: (workspaceId: string, targetCategoryId: string, copy?: boolean) => void;
 }
 
 /**
@@ -34,7 +64,7 @@ export function WorkspaceTabs({
   onSelect,
   createRequest,
   onCreatedFor,
-  draggingWorkspace,
+  draggingWorkspace = false,
   onDropWorkspace,
 }: WorkspaceTabsProps) {
   const t = useT();
@@ -45,6 +75,7 @@ export function WorkspaceTabs({
   const [pendingWorkspaceIds, setPendingWorkspaceIds] = useState<string[]>([]);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dropOver, setDropOver] = useState<string | null>(null);
+  const [dragCategory, setDragCategory] = useState<{ id: string; over: number | null } | null>(null);
   const [tabMenu, setTabMenu] = useState<{ category: WorkspaceCategory; index: number; anchor: HTMLElement } | null>(null);
   const skipRenameBlurRef = useRef(false);
   const skipAddBlurRef = useRef(false);
@@ -205,8 +236,63 @@ export function WorkspaceTabs({
 
   const countIn = (categoryId: string) => workspaces.filter((workspace) => workspace.categories?.includes(categoryId)).length;
 
+  const slotAtClientX = (clientX: number, target: EventTarget | null): number => {
+    const tabs = [...(trackRef.current?.querySelectorAll<HTMLElement>(".ws-tab[data-category-index]") ?? [])];
+    if (tabs.length > 0 && tabs.some((tab) => tab.getBoundingClientRect().width > 0)) {
+      for (let i = 0; i < tabs.length; i += 1) {
+        const rect = tabs[i].getBoundingClientRect();
+        if (clientX < rect.left + rect.width / 2) {
+          const idx = Number(tabs[i].dataset.categoryIndex);
+          return Number.isFinite(idx) ? idx : i;
+        }
+      }
+      return categories.length;
+    }
+    const el = target as HTMLElement | null;
+    const tab = el?.closest<HTMLElement>("[data-category-index]");
+    if (tab) return Number(tab.dataset.categoryIndex) || 0;
+    if (el?.closest('[data-tab-id="__all__"]')) return 0;
+    return categories.length;
+  };
+
+  const dragFrom = dragCategory ? categories.findIndex((item) => item.id === dragCategory.id) : -1;
+  const activeDropSlot =
+    dragCategory && dragCategory.over !== null && categoryReorderTarget(dragFrom, dragCategory.over, categories.length) !== null
+      ? dragCategory.over
+      : null;
+
   return (
-    <div className="ws-tabs">
+    <div
+      className="ws-tabs"
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(WORKSPACE_CATEGORY_MIME) || categories.length < 2) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        const track = trackRef.current;
+        if (overflow.any && track) {
+          const trackRect = track.getBoundingClientRect();
+          if (event.clientX < trackRect.left + 24) track.scrollLeft -= 12;
+          else if (event.clientX > trackRect.right - 24) track.scrollLeft += 12;
+        }
+        const at = slotAtClientX(event.clientX, event.target);
+        setDragCategory((prev) => (prev ? (prev.over === at ? prev : { ...prev, over: at }) : { id: "", over: at }));
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setDragCategory((prev) => (prev && prev.id ? { ...prev, over: null } : null));
+        }
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes(WORKSPACE_CATEGORY_MIME)) return;
+        event.preventDefault();
+        const draggedId = event.dataTransfer.getData(WORKSPACE_CATEGORY_MIME) || dragCategory?.id || "";
+        const slot = dragCategory?.over ?? slotAtClientX(event.clientX, event.target);
+        setDragCategory(null);
+        const from = categories.findIndex((item) => item.id === draggedId);
+        const to = categoryReorderTarget(from, slot, categories.length);
+        if (draggedId && to !== null) void moveCategory(draggedId, to);
+      }}
+    >
       {overflow.any && (
         <button
           type="button"
@@ -286,9 +372,17 @@ export function WorkspaceTabs({
               type="button"
               role="tab"
               data-tab-id={category.id}
-              className={cx("ws-tab", dropOver === category.id && "is-drop-target")}
+              className={cx(
+                "ws-tab",
+                dropOver === category.id && "is-drop-target",
+                dragCategory?.id === category.id && "is-dragging",
+                activeDropSlot === index && "drop-before",
+                activeDropSlot === categories.length && index === categories.length - 1 && "drop-after",
+              )}
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
+              data-category-index={index}
+              draggable={categories.length > 1}
               onClick={() => onSelect(category.id)}
               onDoubleClick={() => startRename(category.id)}
               onKeyDown={(event) => {
@@ -306,8 +400,15 @@ export function WorkspaceTabs({
                 event.preventDefault();
                 setTabMenu({ category, index, anchor: event.currentTarget });
               }}
+              onDragStart={(event) => {
+                event.dataTransfer.setData(WORKSPACE_CATEGORY_MIME, category.id);
+                event.dataTransfer.effectAllowed = "move";
+                setTabMenu(null);
+                setDragCategory({ id: category.id, over: null });
+              }}
+              onDragEnd={() => setDragCategory(null)}
               onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
+                if (!onDropWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "move";
                 if (dropOver !== category.id) setDropOver(category.id);
@@ -316,10 +417,11 @@ export function WorkspaceTabs({
                 if (!event.currentTarget.contains(event.relatedTarget as Node | null) && dropOver === category.id) setDropOver(null);
               }}
               onDrop={(event) => {
+                if (!onDropWorkspace || !event.dataTransfer.types.includes(WORKSPACE_MIME)) return;
                 event.preventDefault();
                 setDropOver(null);
                 const id = event.dataTransfer.getData(WORKSPACE_MIME);
-                if (id) onDropWorkspace(id, category.id);
+                if (id) onDropWorkspace(id, category.id, event.altKey);
               }}
             >
               <span className="truncate">{category.name}</span>

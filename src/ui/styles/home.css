@@ -610,10 +610,23 @@
   background: var(--green);
 }
 
+.home-page .ws-tabs {
+  margin: -2px 0 8px;
+  padding-top: 0;
+}
+
+.home-page .ws-tabs-track {
+  flex: 0 1 auto;
+}
+
 .workspace-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 6px;
+}
+
+.workspace-tiles .run-row.is-dragging {
+  opacity: 0.45;
 }
 
 .run-row {

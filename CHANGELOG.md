@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-11-27
+
+**3.14.0: Home's Workspaces section now shares the same category tabs as Code, with live filtering, workspace drops, and drag-to-reorder tabs.**
+
+### Added
+
+- **Category tabs on Home's Workspaces section.** Home now shows the same category tab strip as Code's Workspaces sidebar (**All** first, followed by your custom tabs such as **Work**, **Games** or **Production**, plus `+` to add a new tab). Adding, renaming, reordering or deleting a tab (with **Undo**) — or selecting a tab — in either Home or Code updates the other straight away, filters Home's workspace tiles to the active tab, and lets you drag workspace tiles onto tabs on Home too.
+- **Drag category tabs to reorder them.** Drag any custom category tab left or right on Home or in Code's sidebar to rearrange your tabs (**All** stays pinned first), with the order saved in `workspaces.json` and shared everywhere.
+
 ## [3.13.0] - 2026-11-27
 
 **3.13.0: Viby gets its own Cloud / Local choice, so your coding tools can run on a local model while Viby keeps planning on the cloud, and the README, website, screenshots and in-app tour now describe Local AI.**
@@ -1308,7 +1317,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.13.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.14.0...HEAD
+[3.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.14.0
 [3.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.13.0
 [3.12.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.12.0
 [3.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.11.0
