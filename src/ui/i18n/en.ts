@@ -174,7 +174,7 @@ export const en = {
   "tour.welcome.start": "Show me around",
   "tour.welcome.note": "Use `←` `→` to move and `Esc` to leave. You can replay the tour from Help in the rail.",
   "tour.rail.title": "Everything is one click away",
-  "tour.rail.body": "The rail holds every view. Badges count runs and tasks waiting for your review, and a view glows when a CLI in it is waiting for you. Hover over anything in VibeForge to see what it does. With Local AI on, the **Cloud** / **Local** button at its foot switches between your cloud CLIs and your own local model.",
+  "tour.rail.body": "The rail holds every view. Badges count runs and tasks waiting for your review, and a view glows when a CLI in it is waiting for you. Hover over anything in VibeForge to see what it does. With Local AI on, the **Cloud** / **Local** button at its foot switches your coding tools between the cloud and your own local model. Viby keeps its own choice, set in Settings → Local AI.",
   "tour.home.title": "Home: what needs you",
   "tour.home.body": "What's running right now, what has finished and needs a review, and which routines run next.",
   "tour.workspaces.title": "Code: a workspace per project",

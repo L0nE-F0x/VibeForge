@@ -168,7 +168,7 @@ export const pt: Catalog = {
   "tour.welcome.start": "Mostre tudo",
   "tour.welcome.note": "Use `←` `→` para navegar e `Esc` para sair. Você pode refazer o tour em Ajuda, na barra lateral.",
   "tour.rail.title": "Tudo a um clique",
-  "tour.rail.body": "A barra lateral reúne todas as telas. Os selos contam as execuções e tarefas que aguardam sua revisão, e uma tela brilha quando uma CLI espera por você ali. Passe o mouse sobre qualquer coisa no VibeForge para ver o que ela faz. Com a IA local ativada, o botão **Nuvem** / **Local** no pé dela alterna entre suas CLIs na nuvem e seu próprio modelo local.",
+  "tour.rail.body": "A barra lateral reúne todas as telas. Os selos contam as execuções e tarefas que aguardam sua revisão, e uma tela brilha quando uma CLI espera por você ali. Passe o mouse sobre qualquer coisa no VibeForge para ver o que ela faz. Com a IA local ativada, o botão **Nuvem** / **Local** no pé dela alterna suas ferramentas de código entre a nuvem e seu próprio modelo local. O Viby mantém a própria escolha, em Ajustes → IA local.",
   "tour.home.title": "Início: o que precisa de você",
   "tour.home.body": "O que está rodando agora, o que terminou e precisa de revisão e quais rotinas rodam em seguida.",
   "tour.workspaces.title": "Código: um espaço de trabalho por projeto",

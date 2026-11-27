@@ -168,7 +168,7 @@ export const de: Catalog = {
   "tour.welcome.start": "Zeig mir alles",
   "tour.welcome.note": "Mit `←` `→` blätterst du, mit `Esc` beendest du die Tour. Du kannst sie jederzeit über Hilfe in der Leiste wiederholen.",
   "tour.rail.title": "Alles ist einen Klick entfernt",
-  "tour.rail.body": "Die Leiste enthält jede Ansicht. Abzeichen zählen Läufe und Aufgaben, die auf deine Prüfung warten, und eine Ansicht glüht, wenn dort eine CLI auf dich wartet. Fahre über irgendetwas in VibeForge, um zu sehen, was es tut. Mit eingeschalteter Lokaler KI wechselt der Knopf **Cloud** / **Lokal** unten zwischen deinen Cloud-CLIs und deinem eigenen lokalen Modell.",
+  "tour.rail.body": "Die Leiste enthält jede Ansicht. Abzeichen zählen Läufe und Aufgaben, die auf deine Prüfung warten, und eine Ansicht glüht, wenn dort eine CLI auf dich wartet. Fahre über irgendetwas in VibeForge, um zu sehen, was es tut. Mit eingeschalteter Lokaler KI schaltet der Knopf **Cloud** / **Lokal** unten deine Coding-Tools zwischen der Cloud und deinem eigenen lokalen Modell um. Viby behält seine eigene Wahl, einstellbar unter Optionen → Lokale KI.",
   "tour.home.title": "Start: was dich braucht",
   "tour.home.body": "Was gerade läuft, was fertig ist und geprüft werden will und welche Routinen als Nächstes laufen.",
   "tour.workspaces.title": "Code: ein Arbeitsbereich pro Projekt",
