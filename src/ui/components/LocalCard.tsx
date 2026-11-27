@@ -1,13 +1,13 @@
-import { AlertTriangle, Check, Laptop, Network, Plug, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Laptop, Network, Play, Plug, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalHarness, LocalRuntimeStatus, LocalServerProbe, LocalSettings, SettingsPatch } from "../../shared/api.js";
-import { LOCAL_PRESETS, cleanLocalModel, isLocalConfigured, isLoopbackLocalUrl, normalizeLocalUrl } from "../../shared/local.js";
+import { LOCAL_PRESETS, LOCAL_SERVER_PORTS, cleanLocalModel, isLocalConfigured, isLoopbackLocalUrl, normalizeLocalUrl } from "../../shared/local.js";
 import { call, useEngines, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import { vibyUse } from "../viby-route.js";
 import { LocalServerSection } from "./LocalServerSection.js";
-import { Button, Chip, Field, Input, Notice, Select, Toggle } from "./ui.js";
+import { Button, Chip, Field, Input, Notice, Segmented, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
 /** The "Viby in Local mode" choice that keeps Viby on its own (cloud) planner; any other value is a local model ("" = same as coding). */
@@ -113,6 +113,22 @@ export function LocalCard() {
     await applyServerProbe(probe, settings.local);
   }, t("local.unreachable"));
 
+  /**
+   * "VibeForge starts it" or "already running, or on another machine". Starting it with nothing
+   * picked yet suggests what is installed, and the address follows that kind's usual port.
+   */
+  const pickWhere = async (managed: boolean) => {
+    if (!settings) return;
+    const current = settings.local;
+    if (!managed) return save({ server: { ...current.server, managed } });
+    const bins = status?.binaries;
+    const kind = current.server.kind || (bins?.llamaServer ? "llamacpp" : bins?.ollama ? "ollama" : bins?.lms ? "lmstudio" : "");
+    const url = normalizeLocalUrl(current.url);
+    const presetUrls = LOCAL_PRESETS.map((preset) => preset.url);
+    const follow = kind && kind !== "command" && (!url || presetUrls.includes(url));
+    return save({ server: { ...current.server, managed, kind }, ...(follow ? { url: `http://127.0.0.1:${LOCAL_SERVER_PORTS[kind]}` } : {}) });
+  };
+
   if (!settings) return null;
   const local = settings.local;
   const activeProbe = probeOverride ?? status?.configured ?? null;
@@ -140,22 +156,25 @@ export function LocalCard() {
 
       {local.enabled && (
         <>
-          <div className="form-grid">
-            <Field label={t("local.active")} hint={configuredReady ? t("local.activeHint") : t("local.activeNeedSetup")}>
-              <Toggle
-                checked={local.active}
-                disabled={!configuredReady && !local.active}
-                onChange={(active) => void save({ active })}
-              />
-            </Field>
+          <div className="vstack" style={{ gap: 8 }}>
+            <strong>{t("local.where")}</strong>
+            <Segmented
+              value={local.server.managed ? "start" : "connect"}
+              options={[
+                { value: "start", label: t("local.whereStart"), icon: Play },
+                { value: "connect", label: t("local.whereConnect"), icon: Network },
+              ]}
+              onChange={(where) => void pickWhere(where === "start")}
+            />
+            <span className="faint" style={{ fontSize: "var(--fs-sm)" }}>
+              {local.server.managed ? t("local.whereStartHint") : t("local.whereConnectHint")}
+            </span>
+          </div>
 
-            <Field label={t("local.overrideAgents")} hint={t("local.overrideAgentsHint")}>
-              <Toggle
-                checked={local.overrideAgents}
-                onChange={(overrideAgents) => void save({ overrideAgents })}
-              />
-            </Field>
-
+          {local.server.managed ? (
+            <LocalServerSection local={local} save={save} />
+          ) : (
+            <div className="form-grid">
             <Field label={t("local.detected")} hint={t("local.detectedHint")}>
               <div className="hstack wrap" style={{ gap: 6 }}>
                 {detectedServers.map((srv) => {
@@ -232,8 +251,13 @@ export function LocalCard() {
                 )}
               </div>
             </Field>
+            </div>
+          )}
 
-            <Field label={t("local.model")} hint={t("local.modelHint")}>
+          <div style={{ borderTop: "1px solid var(--line)" }} />
+          <strong>{t("local.modelAndTools")}</strong>
+          <div className="form-grid">
+            <Field label={t("local.model")} hint={local.server.managed && !activeProbe?.reachable ? t("local.modelStartFirst") : t("local.modelHint")}>
               <div className="vstack" style={{ gap: 6 }}>
                 {typingModel ? (
                   <Input
@@ -354,7 +378,23 @@ export function LocalCard() {
           </div>
 
           <div style={{ borderTop: "1px solid var(--line)" }} />
-          <LocalServerSection local={local} save={save} />
+          <strong>{t("local.switchOn")}</strong>
+          <div className="form-grid">
+            <Field label={t("local.active")} hint={configuredReady ? t("local.activeHint") : t("local.activeNeedSetup")}>
+              <Toggle
+                checked={local.active}
+                disabled={!configuredReady && !local.active}
+                onChange={(active) => void save({ active })}
+              />
+            </Field>
+
+            <Field label={t("local.overrideAgents")} hint={t("local.overrideAgentsHint")}>
+              <Toggle
+                checked={local.overrideAgents}
+                onChange={(overrideAgents) => void save({ overrideAgents })}
+              />
+            </Field>
+          </div>
 
           {effectiveContext !== null && effectiveContext < MIN_COMFORTABLE_CONTEXT && (
             <Notice tone="warn" icon={AlertTriangle}>

@@ -37,6 +37,12 @@ describe("normalizeLocalServer", () => {
     });
     expect(normalizeLocalServer({ kind: "llamacpp", withLocalMode: true }).kind).toBe("llamacpp");
   });
+
+  it("carries 3.15.0's settings over: a server picked to run means VibeForge starts it", () => {
+    expect(normalizeLocalServer({ kind: "llamacpp", models: "~/AI/models" }).managed).toBe(true);
+    expect(normalizeLocalServer({}).managed).toBe(false);
+    expect(normalizeLocalServer({ kind: "ollama", managed: false }).managed).toBe(false);
+  });
 });
 
 describe("localServerPlan", () => {
@@ -273,9 +279,9 @@ describe("the service's Local AI server", () => {
       const port = await freePort();
       const plan = fakeServer(dir, port, 0);
       const command = `ELECTRON_RUN_AS_NODE=1 exec '${process.execPath}' '${plan.args[0]}'`;
-      ctx.svc.saveSettings({ local: { enabled: true, url: `http://127.0.0.1:${port}`, server: { kind: "command", command } } });
+      ctx.svc.saveSettings({ local: { enabled: true, url: `http://127.0.0.1:${port}`, server: { managed: true, kind: "command", command } } });
       ctx.svc.saveSettings({ local: { server: { withLocalMode: true } } });
-      expect(ctx.svc.getSettings().local.server).toMatchObject({ kind: "command", command, withLocalMode: true });
+      expect(ctx.svc.getSettings().local.server).toMatchObject({ managed: true, kind: "command", command, withLocalMode: true });
       expect(ctx.svc.localServerView()).toMatchObject({ problem: null, plan: { url: `http://127.0.0.1:${port}`, shown: command } });
 
       ctx.svc.saveSettings({ local: { active: true } });
@@ -286,6 +292,16 @@ describe("the service's Local AI server", () => {
       ctx.svc.saveSettings({ local: { active: false } });
       await until(() => ctx.svc.localServerView().state.status === "stopped");
       expect((await probeLocalServer(`http://127.0.0.1:${port}`, { timeoutMs: 300 })).reachable).toBe(false);
+
+      // Switched to a server that's already running: the one VibeForge started goes, and Local mode no longer starts one.
+      ctx.svc.saveSettings({ local: { active: true } });
+      await until(() => ctx.svc.localServerView().state.status === "running");
+      ctx.svc.saveSettings({ local: { server: { managed: false } } });
+      await until(() => ctx.svc.localServerView().state.status === "stopped");
+      ctx.svc.saveSettings({ local: { active: false } });
+      ctx.svc.saveSettings({ local: { active: true } });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(ctx.svc.localServerView().state.status).toBe("stopped");
     } finally {
       await ctx.svc.close();
     }

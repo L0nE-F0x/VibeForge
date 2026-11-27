@@ -175,6 +175,11 @@ export interface LocalSettings {
 export type LocalServerLaunch = "llamacpp" | "ollama" | "lmstudio" | "command";
 
 export interface LocalServerSettings {
+  /**
+   * Where the model runs: true when VibeForge starts the server (Run a server), false when it is
+   * already running or on another machine and VibeForge only connects to its address.
+   */
+  managed: boolean;
   /** What to start; "" until one is picked (the card then suggests what is installed). */
   kind: LocalServerLaunch | "";
   /** llama.cpp: the llama-server program, or a script that runs it; "" finds llama-server on PATH. */
