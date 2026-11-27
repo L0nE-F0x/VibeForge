@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { Store } from "../../src/core/store.js";
@@ -642,5 +644,65 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     await ctx.exit(freshChatRun.ptyId);
 
     await ctx.svc.close();
+  });
+
+  it("localProbe and localStatus record probed server context and emit orchestrator updates", async () => {
+    let currentCtx = 4096;
+    const srv = http.createServer((req, res) => {
+      if (req.url === "/v1/models") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "qwen3:14b" }] }));
+        return;
+      }
+      if (req.url === "/props") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ default_generation_settings: { n_ctx: currentCtx } }));
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", () => resolve()));
+    const { port } = srv.address() as AddressInfo;
+    const mockUrl = `http://127.0.0.1:${port}`;
+
+    const ctx = setup();
+    try {
+      ctx.svc.saveSettings({
+        local: {
+          enabled: true,
+          active: true,
+          useForViby: true,
+          overrideAgents: false,
+          url: mockUrl,
+          model: "qwen3:14b",
+          vibyModel: "",
+          harness: "auto",
+        },
+      });
+
+      const topics: string[] = [];
+      const stop = ctx.svc.onChange((changed) => {
+        topics.push(...changed);
+      });
+
+      const probe = await ctx.svc.localProbe(mockUrl);
+      expect(probe.reachable).toBe(true);
+      expect(probe.contextLength).toBe(4096);
+      expect(topics).toContain("orchestrator");
+      expect(ctx.svc.orchestratorView().localContextWarning?.contextLength).toBe(4096);
+
+      currentCtx = 65536;
+      topics.length = 0;
+      const status = await ctx.svc.localStatus();
+      expect(status.configured?.reachable).toBe(true);
+      expect(status.configured?.contextLength).toBe(65536);
+      expect(topics).toContain("orchestrator");
+      expect(ctx.svc.orchestratorView().localContextWarning).toBeUndefined();
+
+      stop();
+    } finally {
+      await ctx.svc.close();
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+    }
   });
 });
