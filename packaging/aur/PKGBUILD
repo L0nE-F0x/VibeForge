@@ -1,7 +1,7 @@
 # Maintainer: Lone Fox <https://github.com/L0nE-F0x>
 # Update checksums from release SHA256SUMS (or with `updpkgsums`) when publishing to AUR.
 pkgname=vibeforge-bin
-pkgver=3.11.0
+pkgver=3.12.0
 pkgrel=1
 pkgdesc="Desktop workspace for coding CLIs (Claude Code, Codex, Grok and more) with real terminals, agents, routines, tasks and Viby"
 arch=('x86_64' 'aarch64')
