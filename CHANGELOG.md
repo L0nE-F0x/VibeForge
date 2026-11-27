@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-11-27
+
+**3.12.0: Run local LLMs alongside your cloud CLIs — connect llama.cpp, Ollama, LM Studio, or a home-network/Tailscale server once in Settings and switch Code, Chat, Agents, Tasks, Routines, and Viby between Cloud and Local whenever you like.**
+
+### Added
+
+- **Opt-in Local AI for coding CLIs and Viby.** **Settings → Local AI** is off until you turn it on and never touches your cloud CLI configs or keys. Auto-detect local `llama.cpp`, Ollama, or LM Studio servers (or point at a LAN or Tailscale machine), pick a model (with a context-window warning when a model is small), choose a coding CLI harness (**Auto**, **OpenCode**, **Claude Code**, or **Codex**), and optionally set a separate model for Viby.
+- **One-click Cloud / Local switching.** Once Local AI is enabled, switch between Cloud and Local from the rail footer, the <kbd>Ctrl+K</kbd> switcher, **Settings → Local AI**, or Viby itself (turning Local mode on through Viby waits for **Go** under the default approval mode). Keep Viby on a cloud planner while coding locally, or turn on **Also switch saved Agents to Local** to temporarily run saved Agents, Tasks, and Routines locally without changing `agent.yaml`.
+- **Direct OpenAI-compatible Viby.** Local Viby talks directly to your local server's `/v1/chat/completions` endpoint with SSE streaming, early speech callbacks, `<think>` block stripping, automatic fallback across `json_schema`, `json_object`, and plain JSON (plus text-only retry when a model does not accept images), and a context-window warning when a server reports less context than Viby needs. Works even without a coding CLI harness installed.
+- **Local run provenance and session isolation.** Local runs record their model and harness (`Local · <model>` in Home and Runs), forward only an explicit allowlist of ephemeral per-spawn environment variables through the PTY host, and prevent bare `--continue` flags from resuming across local/cloud mode or local harness switches while keeping Code's bare `--continue` behaviour intact for cloud sessions.
+
 ## [3.11.0] - 2026-11-26
 
 **3.11.0: Category tabs under the search bar in Code let you split workspaces into Work, Personal, Games or any tabs you like, Viby's clicks land where it saw things in a single-window screenshot, and X11 desktops get scroll, drag and wait.**
@@ -1283,7 +1294,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.11.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.12.0...HEAD
+[3.12.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.12.0
 [3.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.11.0
 [3.10.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.1
 [3.10.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.0
