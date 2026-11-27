@@ -387,25 +387,34 @@ export class ServiceCore {
    * CLI printed one, the engine's continue flag when the folder's latest run on that CLI was in the
    * same mode and harness, or starting fresh from the transcript otherwise.
    */
-  resumePlan(target: ResolvedEngine | EngineRow, previous: RunMeta | null, cwd?: string): { native: boolean; resumeArgs: string[] | null } {
+  resumePlan(
+    target: ResolvedEngine | EngineRow,
+    previous: RunMeta | null,
+    cwd?: string,
+    opts?: { allowBareWithoutPrevious?: boolean },
+  ): { native: boolean; resumeArgs: string[] | null } {
     const row = "row" in target ? target.row : target;
     const harness = "row" in target ? (target.harness ?? null) : null;
-    // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
-    if (!previous || previous.engine !== row.id) return { native: false, resumeArgs: null };
-    if (row.id === LOCAL_ENGINE_ID && previous.localHarness && harness && previous.localHarness !== harness) {
+    if (previous) {
+      // A different CLI cannot pick up another CLI's session; start fresh with the transcript instead.
+      if (previous.engine !== row.id) return { native: false, resumeArgs: null };
+      if (row.id === LOCAL_ENGINE_ID && previous.localHarness && harness && previous.localHarness !== harness) {
+        return { native: false, resumeArgs: null };
+      }
+      if (previous.dir) {
+        const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
+        if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
+        // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
+        const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
+        if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
+      }
+    } else if (!opts?.allowBareWithoutPrevious) {
       return { native: false, resumeArgs: null };
-    }
-    if (previous.dir) {
-      const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-      if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
-      // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
-      const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
-      if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
     }
     if (!row.continueArgs?.length) return { native: false, resumeArgs: null };
     // Bare continue flags (e.g. `claude --continue`, `codex resume --last`) resume whatever session
     // last ran in that folder on the underlying CLI; block them if a newer run used the opposite mode.
-    const folder = path.resolve(cwd || previous.cwd || ".");
+    const folder = path.resolve(cwd || previous?.cwd || ".");
     const rows = this.store.readEngineRows();
     const underlyingCli = (run: Pick<RunMeta, "engine" | "localHarness" | "argv">): string => {
       if (run.engine === LOCAL_ENGINE_ID) return run.localHarness || path.basename(run.argv[0] ?? "");
@@ -413,13 +422,18 @@ export class ServiceCore {
       return known?.bin ? path.basename(known.bin) : run.engine || path.basename(run.argv[0] ?? "");
     };
     const currentCli = row.id === LOCAL_ENGINE_ID ? (harness || path.basename(row.bin)) : path.basename(row.bin || row.id);
-    const recentInFolder = this.store
-      .queryRuns({ limit: 50 })
-      .find((run) => run.cwd && path.resolve(run.cwd) === folder && underlyingCli(run) === currentCli);
+    const folderRuns = this.store.queryRuns({ limit: 50 }).filter((run) => run.cwd && path.resolve(run.cwd) === folder);
+    const recentInFolder = folderRuns.find((run) => underlyingCli(run) === currentCli);
     if (recentInFolder) {
       const sameMode = (recentInFolder.engine === LOCAL_ENGINE_ID) === (row.id === LOCAL_ENGINE_ID);
       if (!sameMode) return { native: false, resumeArgs: null };
       if (row.id === LOCAL_ENGINE_ID && recentInFolder.localHarness && harness && recentInFolder.localHarness !== harness) {
+        return { native: false, resumeArgs: null };
+      }
+    }
+    if (row.id === LOCAL_ENGINE_ID && harness) {
+      const recentLocalInFolder = folderRuns.find((run) => run.engine === LOCAL_ENGINE_ID);
+      if (recentLocalInFolder?.localHarness && recentLocalInFolder.localHarness !== harness) {
         return { native: false, resumeArgs: null };
       }
     }

@@ -348,7 +348,9 @@ export class WorkspaceDesk {
     const previous = opts.continueSession
       ? (this.core.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
       : null;
-    const resume = opts.continueSession ? this.core.resumePlan(engine, previous, workspace.path) : { native: false, resumeArgs: null };
+    const resume = opts.continueSession
+      ? this.core.resumePlan(engine, previous, workspace.path, { allowBareWithoutPrevious: true })
+      : { native: false, resumeArgs: null };
     return this.core.launch({
       origin: "code",
       title: `${agent ? (target.engineId === LOCAL_ENGINE_ID ? `${agent.name} · Local` : agent.name) : engine.row.label} · ${workspace.name}`,

@@ -556,4 +556,91 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     expect(persisted.local).toMatchObject({ useForViby: true });
     ctx.svc.close();
   });
+
+  it("preserves bare continueArgs in Code when previous is null while still guarding mode and harness changes", async () => {
+    let nowMs = 1_700_000_100_000;
+    const ctx = setup({
+      now: () => {
+        nowMs += 1000;
+        return new Date(nowMs);
+      },
+    });
+    ctx.svc.saveEngines([
+      { id: "claude", label: "Claude Code", bin: "claude", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
+      { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
+    ]);
+    ctx.host.resolveBin = (bin) => (bin === "claude" || bin === "opencode" ? `/usr/bin/${bin}` : null);
+
+    // 1. No prior VibeForge runs at all: Code Continue keeps main's bare --continue behavior.
+    const dir1 = tempDir();
+    ctx.svc.addWorkspace(dir1);
+    const ws1 = ctx.svc.listWorkspaces().workspaces.find((w) => w.path === dir1)!;
+    const noRunsCode = await ctx.svc.startEngine({ workspaceId: ws1.id, engineId: "claude", continueSession: true });
+    expect(ctx.spawns.at(-1)?.argv.at(-1)).toBe("--continue");
+    await ctx.exit(noRunsCode.ptyId);
+
+    // 2. Folder previously used only via a Cloud Task (no prior "code" run): Code Continue still passes --continue.
+    const dir2 = tempDir();
+    ctx.svc.addWorkspace(dir2);
+    const ws2 = ctx.svc.listWorkspaces().workspaces.find((w) => w.path === dir2)!;
+    const agent2 = await ctx.svc.saveAgent({ name: "CloudWorker", brief: "Work", engine: "claude", places: [dir2] });
+    const task2 = ctx.svc.saveTask({ title: "Cloud task", body: "Check", agentId: agent2.id, workspaceId: ws2.id });
+    const taskRun2 = started(await ctx.svc.executeTask(task2.id));
+    await ctx.exit(taskRun2.ptyId);
+
+    const afterTaskCode = await ctx.svc.startEngine({ workspaceId: ws2.id, engineId: "claude", continueSession: true });
+    expect(ctx.spawns.at(-1)?.argv.at(-1)).toBe("--continue");
+    await ctx.exit(afterTaskCode.ptyId);
+
+    // 3. Opposite mode in folder with no prior Cloud "code" run (previous === null): block bare --continue.
+    const dir3 = tempDir();
+    ctx.svc.addWorkspace(dir3);
+    const ws3 = ctx.svc.listWorkspaces().workspaces.find((w) => w.path === dir3)!;
+    ctx.svc.saveSettings({
+      local: {
+        enabled: true,
+        active: true,
+        overrideAgents: false,
+        useForViby: true,
+        url: "http://127.0.0.1:11434",
+        model: "qwen3-coder:32b",
+        vibyModel: "",
+        harness: "claude",
+      },
+    });
+    const localRun3 = await ctx.svc.startEngine({ workspaceId: ws3.id, engineId: "local", prompt: "Local session" });
+    await ctx.exit(localRun3.ptyId);
+
+    ctx.svc.saveSettings({ local: { active: false } });
+    const blockedCrossMode = await ctx.svc.startEngine({ workspaceId: ws3.id, engineId: "claude", continueSession: true });
+    expect(ctx.spawns.at(-1)?.argv[0]).toBe("/usr/bin/claude");
+    expect(ctx.spawns.at(-1)?.argv).not.toContain("--continue");
+    await ctx.exit(blockedCrossMode.ptyId);
+
+    // 4. Different local harness in folder with previous === null (only a Local claude chat ran): block bare --continue on opencode.
+    const dir4 = tempDir();
+    ctx.svc.addWorkspace(dir4);
+    const ws4 = ctx.svc.listWorkspaces().workspaces.find((w) => w.path === dir4)!;
+    const agent4 = await ctx.svc.saveAgent({ name: "ChatWorker", brief: "Chat", engine: "claude", places: [dir4] });
+    ctx.svc.saveSettings({ local: { active: true, overrideAgents: true, harness: "claude", model: "qwen3-coder:32b" } });
+    const chat4 = ctx.svc.createChat({ agentId: agent4.id });
+    const chatRun4 = await ctx.svc.sendChat(chat4.id, "Local claude chat");
+    await ctx.exit(chatRun4.ptyId);
+
+    ctx.svc.saveSettings({ local: { harness: "opencode" } });
+    const blockedHarnessSwitch = await ctx.svc.startEngine({ workspaceId: ws4.id, engineId: "local", continueSession: true });
+    expect(ctx.spawns.at(-1)?.argv[0]).toBe("/usr/bin/opencode");
+    expect(ctx.spawns.at(-1)?.argv).not.toContain("--continue");
+    await ctx.exit(blockedHarnessSwitch.ptyId);
+
+    // 5. Brand-new plain chat still starts fresh without --continue.
+    ctx.svc.saveSettings({ local: { active: false, overrideAgents: false } });
+    const freshChat = ctx.svc.createChat({ engine: "claude" });
+    const freshChatRun = await ctx.svc.sendChat(freshChat.id, "Brand new chat");
+    expect(ctx.spawns.at(-1)?.argv[0]).toBe("/usr/bin/claude");
+    expect(ctx.spawns.at(-1)?.argv).not.toContain("--continue");
+    await ctx.exit(freshChatRun.ptyId);
+
+    await ctx.svc.close();
+  });
 });
