@@ -14,6 +14,7 @@ import type { JsonFiles } from "./json-files.js";
 import type { ReadCache } from "./read-cache.js";
 import { cleanModel } from "../../shared/launch-options.js";
 import { DEFAULT_DICTATE_KEYS, normalizeDictateKeys } from "../../shared/dictation.js";
+import { migrateVibyRoute } from "../../shared/local.js";
 
 export function defaultSettings(): Settings {
   return {
@@ -40,7 +41,7 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "go", model: "", projectsFolder: "", terse: true },
-    local: { enabled: false, active: false, useForViby: true, overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
+    local: { enabled: false, active: false, viby: "cloud", overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
     computerUse: {
       on: false,
       app: { see: true, pointer: true, keys: true },
@@ -63,6 +64,8 @@ const SETTINGS_SHAPE: Shape = (() => {
   // Fields that are only there when set.
   (shape.orchestrator as Shape).effort = true;
   shape.version = true;
+  // Retired: 3.12.0's local.useForViby, read once into local.viby. Named here, so a save drops it rather than carrying it.
+  (shape.local as Shape).useForViby = true;
   return shape;
 })();
 
@@ -99,11 +102,11 @@ function cleanLocalModelId(value: unknown): string {
 }
 
 function normalizeLocalSettings(value: unknown, defaults: LocalSettings): LocalSettings {
-  const raw = value && typeof value === "object" ? (value as Partial<LocalSettings>) : {};
+  const raw = value && typeof value === "object" ? (value as Partial<LocalSettings> & { useForViby?: unknown }) : {};
   return {
     enabled: bool(raw.enabled, defaults.enabled),
     active: bool(raw.active, defaults.active),
-    useForViby: bool(raw.useForViby, defaults.useForViby),
+    viby: migrateVibyRoute(raw),
     overrideAgents: bool(raw.overrideAgents, defaults.overrideAgents),
     url: cleanLocalText(raw.url, 300),
     model: cleanLocalModelId(raw.model),

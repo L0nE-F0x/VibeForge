@@ -320,7 +320,7 @@
             <span>Claude Code</span><span>Codex</span><span>Grok Build</span><span>Cursor Agent</span><span>Antigravity CLI</span><span>OpenCode</span><span>Copilot</span><span>Crush</span><span>Kimi</span><span>Muse</span><span>Pi</span><span>Hermes</span><span class="any">+ any other CLI</span>
           </div>
         </div>
-        <p class="engines-note">No API keys or proxy servers. VibeForge runs the CLIs you're already signed into.</p>
+        <p class="engines-note">No API keys or proxy servers. VibeForge runs the CLIs you're already signed into, or points them at your own model server if you turn on Local AI.</p>
       </section>
 
       <!-- ============================================================ features -->
@@ -336,7 +336,7 @@
             <div class="card-copy">
               <span class="card-icon" aria-hidden="true"><svg><use href="#i-workflow" /></svg></span>
               <h3>Say what you want built</h3>
-              <p>Hit <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> and tell Viby what you need. Your signed-in CLI turns it into a plan without touching disk, then launches each agent on its own git branch. Low-risk steps run straight away by default while risky ones wait for <b>Go</b> — or switch between <b>Ask for everything</b> and <b>Never ask</b> in Settings.</p>
+              <p>Hit <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd> and tell Viby what you need. Your signed-in CLI, or your own local model, turns it into a plan without touching disk, then launches each agent on its own git branch. Low-risk steps run straight away by default while risky ones wait for <b>Go</b> — or switch between <b>Ask for everything</b> and <b>Never ask</b> in Settings.</p>
             </div>
             <div class="art art-orch" aria-hidden="true">
               <div class="or-bar">
@@ -409,6 +409,26 @@
                 <div class="or-say"><svg><use href="#i-volume" /></svg>Telling Claude Code in landing-page to run the tests.</div>
                 <div class="or-say"><svg><use href="#i-volume" /></svg>Claude Code in landing-page finished its turn. It says: all 18 tests pass.</div>
                 <div class="or-foot"><span>or just talk</span><span>Mute</span><span class="or-hang"><svg><use href="#i-phone" /></svg>Hang up</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card wide full reveal" data-glow>
+            <div class="card-copy">
+              <span class="card-icon" aria-hidden="true"><svg><use href="#i-cpu" /></svg></span>
+              <h3>Run on your own models, when you want to</h3>
+              <p>Turn on <b>Local AI</b> in Settings and connect <code>llama.cpp</code>, Ollama, LM Studio, or a machine on your home network or Tailscale. OpenCode, Claude Code or Codex then codes on that model, and Viby can plan with it too. The <b>Cloud</b> / <b>Local</b> button at the foot of the rail switches back whenever you like. It stays off until you turn it on, and your cloud CLIs' own settings are never touched.</p>
+            </div>
+            <div class="art art-orch" aria-hidden="true">
+              <div class="or-bar">
+                <div class="or-head"><svg><use href="#i-laptop" /></svg><b>Viby</b><span class="or-mem"><svg><use href="#i-cpu" /></svg>Local · qwen3-coder-30b</span></div>
+                <div class="or-you">In weather-api, add a /health route. Keep it on the local model.</div>
+                <div class="or-say">Starting it on add-health in weather-api, with OpenCode on your local server.</div>
+                <div class="or-plan">
+                  <div class="or-plan-head"><span class="tk-chip">Plan</span><span>1 step</span></div>
+                  <div class="or-step"><svg><use href="#i-terminal" /></svg><b>Local</b><span>add-health</span><span class="or-branch">OpenCode · qwen3-coder-30b</span></div>
+                </div>
+                <div class="or-say or-ok"><svg><use href="#i-check" /></svg>Finished add-health: 1 file changed. Ready to review.</div>
               </div>
             </div>
           </article>
@@ -684,7 +704,7 @@
         <div class="section-head reveal">
           <span class="kicker"><b>03</b> Tour</span>
           <h2>See it running.</h2>
-          <p>VibeForge 3.9 in the Apex Forge theme.</p>
+          <p>VibeForge 3.12 in the Apex Forge theme, with Local AI switched on.</p>
         </div>
         <div class="tour reveal" data-tour>
           <div class="tour-tabs" role="tablist" aria-label="Screenshots">
@@ -695,19 +715,19 @@
           </div>
           <div class="tour-frame">
             <figure class="shot is-on">
-              <img src="assets/app-home.webp?v=3.12.0" width="1890" height="1138" alt="VibeForge Home view showing live terminals, waiting CLIs, a run and a branch to review, and the commit graph." />
+              <img src="assets/app-home.webp?v=3.12.0-2" width="1890" height="1138" alt="VibeForge Home view showing live terminals, waiting CLIs (one of them on a local model), a run and a branch to review, the commit graph, and the Local switch at the foot of the rail." />
             </figure>
             <figure class="shot">
-              <img src="assets/app-code.webp?v=3.12.0" width="1890" height="1138" alt="VibeForge Code view with tiled terminals, git log, Claude Code recording its session, workspaces and the file tree." loading="lazy" />
+              <img src="assets/app-code.webp?v=3.12.0-2" width="1890" height="1138" alt="VibeForge Code view with tiled terminals, git log, Claude Code recording its session as it sums up 3.12, workspaces and the file tree." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-tasks.webp?v=3.12.0" width="1890" height="1138" alt="VibeForge Tasks board showing To do, Running, Review and Done columns with worktree diffs." loading="lazy" />
+              <img src="assets/app-tasks.webp?v=3.12.0-2" width="1890" height="1138" alt="VibeForge Tasks board showing To do, Running, Review and Done columns with worktree diffs." loading="lazy" />
             </figure>
             <figure class="shot">
-              <img src="assets/app-viby.webp?v=3.12.0" width="1890" height="1138" alt="VibeForge Viby tab during a voice call: a screenshot fix whose tests passed, and a click in VibeForge's own window that Viby carried out after Go." loading="lazy" />
+              <img src="assets/app-viby.webp?v=3.12.0-2" width="1890" height="1138" alt="VibeForge Viby tab planning on a local model during a voice call: a screenshot fix whose tests passed, and a click in VibeForge's own window that Viby carried out after Go." loading="lazy" />
             </figure>
           </div>
-          <p class="tour-caption" data-tour-caption><b>Home</b> Live terminals, waiting CLIs, diffs to review and upcoming scheduled runs.</p>
+          <p class="tour-caption" data-tour-caption><b>Home</b> Live terminals, waiting CLIs, diffs to review and upcoming scheduled runs. A run on your local model says which model it used.</p>
         </div>
       </section>
 
@@ -905,6 +925,6 @@ npm run build && ./scripts/vibeforge</pre>
       <p class="fine">Independent open-source project. Not affiliated with Omarchy, GitHub, Tailscale or any AI provider whose CLI VibeForge runs.</p>
     </footer>
 
-    <script src="main.js?v=3.12.0" defer></script>
+    <script src="main.js?v=3.12.0-2" defer></script>
   </body>
 </html>

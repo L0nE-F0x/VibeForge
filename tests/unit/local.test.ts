@@ -59,7 +59,7 @@ const baseRows: EngineRow[] = [
 const baseLocal: LocalSettings = {
   enabled: true,
   active: true,
-  useForViby: true,
+  viby: "local",
   overrideAgents: false,
   url: "http://127.0.0.1:8080",
   model: "bonsai-2.5-27b",

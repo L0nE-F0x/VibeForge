@@ -301,7 +301,7 @@ describe("Centralized risk classification and approval policy", () => {
       issue: null,
       action: {
         op: "app-patch",
-        patch: { local: { enabled: true, active: true, useForViby: true } },
+        patch: { local: { enabled: true, active: true } },
         networkOn: true,
         summary: "Local AI mode · on",
       },

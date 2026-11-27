@@ -3,6 +3,7 @@ import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
 import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, type ConcreteLocalHarness, type LocalServerProbe } from "../local.js";
+import { normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -198,10 +199,8 @@ export class ServiceCore {
       if (next.companion.enabled && !next.companion.token) next.companion.token = newCompanionToken();
     }
     if (localPatch) {
-      next.local = { ...current.local, ...localPatch };
-      if (localPatch.active === true && !current.local.active && localPatch.useForViby === undefined) {
-        next.local.useForViby = true;
-      }
+      // Viby's own route (local.viby) stays as it was saved: switching coding to Local or back never moves Viby.
+      next.local = { ...current.local, ...localPatch, viby: normalizeVibyRoute(localPatch.viby) ?? current.local.viby };
     }
     this.store.writeSettings(next);
     if (localPatch) {
@@ -264,7 +263,7 @@ export class ServiceCore {
     const { local } = this.store.readSettings();
     if (!local.enabled) return null;
     const url = normalizeLocalUrl(local.url);
-    const model = cleanLocalModel(local.vibyModel || local.model);
+    const model = cleanLocalModel(vibyLocalModel(local));
     return url && model ? { url, model } : null;
   }
 

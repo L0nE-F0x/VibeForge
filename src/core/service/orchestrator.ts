@@ -45,7 +45,6 @@ import {
   brainKind,
   canOrchestrate,
   KNOWN_MODELS,
-  plannerFor,
   STEP_KINDS,
   STRICT_PLAN_SCHEMA,
   signedOut,
@@ -155,6 +154,7 @@ import {
   type LocalBrainRunner,
   type LocalChatMessage,
 } from "../local.js";
+import { vibyLocalModel, vibyPlanner } from "../../shared/local.js";
 import type { RoutineDesk } from "./routines.js";
 import type { RunDesk } from "./runs.js";
 import type { TaskDesk } from "./tasks.js";
@@ -519,18 +519,13 @@ export class OrchestratorDesk {
     return this.core.store.readSettings().orchestrator;
   }
 
-  /** The CLI that plans right now: the one picked, or until then the first one here that can (plannerFor). */
+  /** The CLI that plans right now: Local when Local mode sends Viby there, else the one picked, or until then the first one here that can (vibyPlanner). */
   private planner(): string {
     const local = this.core.store.readSettings().local;
-    const localBrain = this.core.localBrainConfig();
-    if (local.enabled && local.active && local.useForViby && localBrain) return LOCAL_ENGINE_ID;
-    const rows = this.core.store
+    const engines = this.core.store
       .readEngineRows()
       .map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
-    if (local.enabled) {
-      rows.push({ id: LOCAL_ENGINE_ID, bin: "local", available: Boolean(localBrain) });
-    }
-    return plannerFor(this.settings().engine, rows);
+    return vibyPlanner({ local, localReady: Boolean(this.core.localBrainConfig()), picked: this.settings().engine, engines });
   }
 
   view(): OrchestratorView {
@@ -811,7 +806,7 @@ export class OrchestratorDesk {
         };
       });
     if (all.local.enabled) {
-      const localModel = all.local.vibyModel || all.local.model;
+      const localModel = vibyLocalModel(all.local);
       availablePlanners.push({
         id: LOCAL_ENGINE_ID,
         label: "Local",
@@ -856,7 +851,7 @@ export class OrchestratorDesk {
         terse: all.orchestrator.terse !== false,
         model:
           planner === LOCAL_ENGINE_ID
-            ? all.local.vibyModel || all.local.model
+            ? vibyLocalModel(all.local)
             : planner && planner === all.orchestrator.engine
               ? all.orchestrator.model
               : "",
@@ -872,6 +867,7 @@ export class OrchestratorDesk {
         url: all.local.url,
         model: all.local.model,
         vibyModel: all.local.vibyModel,
+        viby: all.local.viby,
         harness: all.local.harness,
       },
       voice: {

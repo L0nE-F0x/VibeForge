@@ -40,6 +40,8 @@ export interface PlanSettingsContext {
     url: string;
     model: string;
     vibyModel: string;
+    /** What Viby uses while Local mode is on: "cloud" (its own planner) or "local". */
+    viby: "cloud" | "local";
     harness: string;
   };
   voice: {
@@ -167,7 +169,8 @@ export function formatSettingsRules(settings: PlanSettingsContext, options?: { s
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, themeLimit).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px${app.terminalPassthrough ? ", terminalPassthrough=on" : ""}, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
     ...(local
       ? [
-          `- Local AI: ${local.enabled ? (local.active ? "on (Local mode active)" : "enabled (currently in Cloud mode)") : "disabled"}, url=${local.url || "unset"}, model=${local.model || "unset"}${local.vibyModel ? `, vibyModel=${local.vibyModel}` : ""}, harness=${local.harness}, overrideAgents=${local.overrideAgents ? "on" : "off"}`,
+          `- Local AI: ${local.enabled ? (local.active ? "on (Local mode active: coding tools run on Local)" : "enabled (currently in Cloud mode: coding tools on the cloud)") : "disabled"}, url=${local.url || "unset"}, model=${local.model || "unset"}, vibyModel=${local.vibyModel || "same as model"}, harness=${local.harness}, overrideAgents=${local.overrideAgents ? "on" : "off"}`,
+          `- Local AI for you (Viby): local.viby=${local.viby} (${local.viby === "local" ? "while Local mode is on you plan on the Local server too" : "while Local mode is on you keep your own planner, model and effort"}); right now you are ${viby.planner === "local" ? "on Local" : "on your own planner (Local mode does not change it)"}. With Local mode off you always use viby.planner, which may itself be local.`,
         ]
       : []),
     `- ${describeComputerGrants(viby.computer)}`,
@@ -433,6 +436,12 @@ function matchEngine(query: string, engines: SettingsValidationContext["engines"
     fuzzyMatchName(cleaned, engines, (e) => [e.id, e.label], true) ??
     null
   );
+}
+
+/** A model id from a local server, one line and never a CLI flag; "" otherwise. */
+function cleanLocalModelId(raw: string): string {
+  const trimmed = raw.trim();
+  return !trimmed || trimmed.length > 160 || /[\r\n\0]/.test(trimmed) || trimmed.startsWith("-") ? "" : trimmed;
 }
 
 function isPlannerRow(row: Pick<EngineRow, "id" | "bin">): boolean {
@@ -1013,13 +1022,38 @@ export function resolveSettingsStep(
     return {
       action: {
         op: "app-patch",
-        patch: { local: flag ? { enabled: true, active: true, useForViby: true } : { active: false } },
+        patch: { local: flag ? { enabled: true, active: true } : { active: false } },
         ...(flag ? { networkOn: true } : {}),
         summary,
       },
       issue: null,
       asked: summary,
     };
+  }
+
+  // What Viby itself uses while Local mode is on: Cloud (its own planner) or Local (optionally naming the model).
+  if (/^(?:localviby|vibylocal|vibyroute|localvibyroute|vibyinlocalmode|localforviby)$/.test(key)) {
+    const words = value.trim();
+    const lower = words.toLowerCase().replace(/[.!]+$/, "");
+    const flag = parseBool(words);
+    const route = /^(?:cloud|own|planner|normal|default)$/.test(lower) || flag === false ? "cloud" : /^(?:local|same)$/.test(lower) || flag === true ? "local" : null;
+    const named = route === null ? cleanLocalModelId(words.replace(/^local[\s:]+/i, "")) : "";
+    if (!route && !named) return { action: null, issue: "prompt", asked: words || "local.viby" };
+    const patch: Record<string, unknown> = route === "cloud" ? { viby: "cloud" } : named ? { viby: "local", vibyModel: named } : { viby: "local" };
+    const summary = `Viby in Local mode · ${route === "cloud" ? "Cloud (own planner)" : named ? `Local (${named})` : "Local"}`;
+    return {
+      action: { op: "app-patch", patch: { local: patch }, ...(route === "cloud" ? {} : { networkOn: true }), summary },
+      issue: null,
+      asked: summary,
+    };
+  }
+
+  if (/^(?:localvibymodel|vibylocalmodel)$/.test(key)) {
+    const same = isResetWord(value) || /^same(?: as (?:the )?coding model)?$/i.test(value);
+    const model = same ? "" : cleanLocalModelId(value);
+    if (!same && !model) return { action: null, issue: "prompt", asked: value || "local.vibyModel" };
+    const summary = `Viby's local model · ${model || "same as coding model"}`;
+    return { action: { op: "app-patch", patch: { local: { vibyModel: model } }, summary }, issue: null, asked: summary };
   }
 
   if (/^(?:syncname|machinename)$/.test(key)) {
