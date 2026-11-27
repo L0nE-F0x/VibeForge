@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.13.0] - 2026-11-27
+
+**3.13.0: Viby gets its own Cloud / Local choice, so your coding tools can run on a local model while Viby keeps planning on the cloud, and the README, website, screenshots and in-app tour now describe Local AI.**
+
+### Added
+
+- **Viby in Local mode.** **Settings → Local AI** has a new **Viby in Local mode** choice: **Cloud (your normal Viby planner)** keeps the planner, model and effort from Settings → Viby, which suits a small local model, or a local model (the coding one, or one of its own) runs Viby on your server too. Switching Local mode on or off never changes it. With Local mode off, picking **Local AI** as Viby's planner still keeps coding on the cloud while Viby plans locally.
+- **It says where Viby goes.** The rail's Cloud / Local tooltip and its <kbd>Ctrl</kbd>+<kbd>K</kbd> line name where the coding tools and Viby each run, Viby's top bar marks a cloud planner **Cloud** while Local mode is on, and the Viby settings card explains the split. Viby can read and change the choice itself; sending itself to Local waits for **Go**.
+
+### Changed
+
+- **Your earlier setting carries over.** If you turned Viby's local planning off in 3.12.0, it stays on Cloud. If you were in Local mode with Viby on Local, it stays on Local. Everyone else starts on Cloud. Picking Local as Viby's planner no longer overwrites your saved cloud planner, model or effort, and your Viby settings and `agent.yaml` files are never changed by the move.
+- **The README, website and in-app tour describe Local AI.** A Local AI card on the website, new screenshots with Local AI switched on, and the tour and help (in all 7 languages) now cover the Cloud / Local button and Viby planning on your own model.
+
 ## [3.12.0] - 2026-11-27
 
 **3.12.0: Run local LLMs alongside your cloud CLIs — connect llama.cpp, Ollama, LM Studio, or a home-network/Tailscale server once in Settings and switch Code, Chat, Agents, Tasks, Routines, and Viby between Cloud and Local whenever you like.**
@@ -1294,7 +1308,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.12.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.13.0...HEAD
+[3.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.13.0
 [3.12.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.12.0
 [3.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.11.0
 [3.10.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.1
