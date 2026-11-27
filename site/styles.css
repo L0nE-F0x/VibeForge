@@ -910,7 +910,7 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
+  gap: 0;
   padding: 8px 0 6px;
   background: var(--bg-dark);
   border-right: 1px solid var(--line);
@@ -938,7 +938,7 @@ h1 {
   align-items: center;
   gap: 2px;
   width: 48px;
-  padding: 3px 0 2px;
+  padding: 2px 0 1px;
   border: 1px solid transparent;
   color: var(--fg-3);
 }
@@ -981,8 +981,24 @@ h1 {
   margin-top: auto;
 }
 
-.m-rail-call + .m-rail-foot {
+.m-rail-call ~ .m-rail-foot {
   margin-top: 0;
+}
+
+/* The Cloud / Local switch under Call, on Local as in the app: an ember laptop with a lit corner. */
+.m-rail-local svg {
+  color: var(--accent);
+}
+
+.m-rail-local::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: calc(50% + 6px);
+  width: 4px;
+  height: 4px;
+  background: var(--accent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
 .m-rail-foot.is-live {
