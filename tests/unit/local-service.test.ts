@@ -178,6 +178,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
       local: {
         enabled: true,
         active: true,
+        viby: "local",
         overrideAgents: true,
         url: "http://127.0.0.1:8080",
         model: "bonsai-2.5-27b",
@@ -293,6 +294,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
       local: {
         enabled: true,
         active: true,
+        viby: "local",
         overrideAgents: false,
         url: "http://127.0.0.1:11434",
         model: "qwen3:32b",
@@ -318,7 +320,8 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     expect(localCalls).toHaveLength(1);
     expect(localCalls[0].model).toBe("qwen3:14b");
     expect(localCalls[0].url).toBe("http://127.0.0.1:11434");
-    expect(localCalls[0].rules).toContain("- Local AI: on (Local mode active)");
+    expect(localCalls[0].rules).toContain("- Local AI: on (Local mode active");
+    expect(localCalls[0].rules).toContain("local.viby=local");
 
     // Start a live CLI between Turn 1 and Turn 2: fresh rules rebuild must show it on Turn 2 and Turn 3.
     const live = await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "claude" });
@@ -334,7 +337,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     await ctx.svc.orchestratorAsk("Back to cloud");
     expect(cloudCalls).toEqual(["/usr/bin/claude"]);
 
-    // Settings step enabling Local mode requires Go under mode: "go" and enables useForViby on approval.
+    // Settings step enabling Local mode requires Go under mode: "go" and leaves Viby's own route as it was.
     ctx.svc.orchestrator.runner = async () => ({
       code: 0,
       stdout: JSON.stringify({
@@ -352,7 +355,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     await ctx.svc.orchestratorRun(waitingTurn!.id);
     expect(ctx.svc.getSettings().local.active).toBe(true);
     expect(ctx.svc.getSettings().local.enabled).toBe(true);
-    expect(ctx.svc.getSettings().local.useForViby).toBe(true);
+    expect(ctx.svc.getSettings().local.viby).toBe("local");
     ctx.svc.close();
   });
 
@@ -447,7 +450,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     freshStore.close();
   });
 
-  it("keeps coding on Local while picking a cloud Viby planner via useForViby, and restores useForViby when re-enabling local.active", async () => {
+  it("keeps Viby on its cloud planner while coding runs on Local, across Local mode switches", async () => {
     const ctx = setup();
     ctx.svc.saveEngines([
       { id: "claude", label: "Claude Code", bin: "claude", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
@@ -458,10 +461,11 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     const ws = ctx.svc.listWorkspaces().workspaces[0];
 
     ctx.svc.saveSettings({
+      orchestrator: { engine: "claude", mode: "go", terse: true, model: "opus", effort: "high", projectsFolder: "" },
       local: {
         enabled: true,
         active: true,
-        useForViby: true,
+        viby: "local",
         url: "http://127.0.0.1:11434",
         model: "qwen3:32b",
         vibyModel: "qwen3:14b",
@@ -470,23 +474,38 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     });
     expect(ctx.svc.orchestratorView().engineId).toBe("local");
 
-    const cur = ctx.svc.getSettings();
-    ctx.svc.saveSettings({
-      orchestrator: { ...cur.orchestrator, engine: "claude" },
-      local: { useForViby: false },
-    });
+    ctx.svc.saveSettings({ local: { viby: "cloud" } });
     expect(ctx.svc.orchestratorView().engineId).toBe("claude");
     expect(ctx.svc.getSettings().local.active).toBe(true);
-    expect(ctx.svc.getSettings().local.useForViby).toBe(false);
+    // The cloud planner's model and effort were never touched by Local mode.
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject({ engine: "claude", model: "opus", effort: "high" });
+
+    const cloudArgv: string[][] = [];
+    ctx.svc.orchestrator.runner = async (argv) => {
+      cloudArgv.push(argv);
+      return { code: 0, stdout: JSON.stringify({ say: "Cloud reply.", steps: [] }), stderr: "", timedOut: false };
+    };
+    ctx.svc.orchestrator.localRunner = async () => {
+      throw new Error("Viby must not call the local server while it is set to Cloud");
+    };
+    await ctx.svc.orchestratorAsk("Plan something");
+    expect(cloudArgv).toHaveLength(1);
+    expect(cloudArgv[0][0]).toBe("/usr/bin/claude");
+    expect(cloudArgv[0]).toContain("opus");
 
     const codeRun = await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "" });
     expect(ctx.spawns[0].argv[0]).toBe("/usr/bin/opencode");
     await ctx.exit(codeRun.ptyId);
 
+    // Switching Local mode off and on again keeps Viby where it was set (3.12.0 sent it back to Local).
     ctx.svc.saveSettings({ local: { active: false } });
     ctx.svc.saveSettings({ local: { active: true } });
-    expect(ctx.svc.getSettings().local.useForViby).toBe(true);
-    expect(ctx.svc.orchestratorView().engineId).toBe("local");
+    expect(ctx.svc.getSettings().local.viby).toBe("cloud");
+    expect(ctx.svc.orchestratorView().engineId).toBe("claude");
+
+    // A value that isn't a route is ignored rather than saved.
+    ctx.svc.saveSettings({ local: { viby: "sideways" as never } });
+    expect(ctx.svc.getSettings().local.viby).toBe("cloud");
     ctx.svc.close();
   });
 
@@ -496,7 +515,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
       local: {
         enabled: true,
         active: true,
-        useForViby: true,
+        viby: "local",
         url: "http://127.0.0.1:11434",
         model: "qwen3:32b",
         vibyModel: "qwen3:14b",
@@ -544,7 +563,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
       enabled: false,
       active: false,
       overrideAgents: false,
-      useForViby: true,
+      viby: "cloud",
       model: "",
       vibyModel: "",
       harness: "auto",
@@ -555,7 +574,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
     expect(persisted.futureField).toBe("keep-me");
     expect(persisted.notify).toBe(false);
     expect(persisted.defaultEngine).toBe("argy");
-    expect(persisted.local).toMatchObject({ useForViby: true });
+    expect(persisted.local).toMatchObject({ viby: "cloud" });
     ctx.svc.close();
   });
 
@@ -603,7 +622,6 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
         enabled: true,
         active: true,
         overrideAgents: false,
-        useForViby: true,
         url: "http://127.0.0.1:11434",
         model: "qwen3-coder:32b",
         vibyModel: "",
@@ -671,7 +689,7 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
         local: {
           enabled: true,
           active: true,
-          useForViby: true,
+          viby: "local",
           overrideAgents: false,
           url: mockUrl,
           model: "qwen3:14b",
@@ -704,5 +722,86 @@ describe("Local AI across ServiceCore, engines, workspaces, agents, and Viby", (
       await ctx.svc.close();
       await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
+  });
+  it("runs Viby on Local while coding tools stay on the cloud (Local picked as Viby's own planner)", async () => {
+    const ctx = setup();
+    ctx.svc.saveEngines([
+      { id: "claude", label: "Claude Code", bin: "claude", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
+      { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
+    ]);
+    ctx.host.resolveBin = (bin) => (bin === "claude" || bin === "opencode" ? `/usr/bin/${bin}` : null);
+    ctx.svc.addWorkspace(ctx.place);
+    const ws = ctx.svc.listWorkspaces().workspaces[0];
+    ctx.svc.saveSettings({
+      defaultEngine: "claude",
+      orchestrator: { engine: "local", mode: "go", terse: true, model: "", effort: "", projectsFolder: "" },
+      local: { enabled: true, active: false, viby: "cloud", url: "http://127.0.0.1:11434", model: "qwen3:32b", vibyModel: "qwen3:14b", harness: "opencode" },
+    });
+    expect(ctx.svc.orchestratorView().engineId).toBe("local");
+
+    const localModels: string[] = [];
+    ctx.svc.orchestrator.localRunner = async (req) => {
+      localModels.push(req.model);
+      return { code: 0, stdout: JSON.stringify({ say: "Local reply.", steps: [] }), stderr: "", timedOut: false };
+    };
+    ctx.svc.orchestrator.runner = async () => {
+      throw new Error("Viby must plan on Local here");
+    };
+    await ctx.svc.orchestratorAsk("Hi");
+    expect(localModels).toEqual(["qwen3:14b"]);
+
+    const codeRun = await ctx.svc.startEngine({ workspaceId: ws.id, engineId: "" });
+    expect(ctx.spawns[0].argv[0]).toBe("/usr/bin/claude");
+    expect(ctx.spawns[0].env?.ANTHROPIC_BASE_URL).toBeUndefined();
+    await ctx.exit(codeRun.ptyId);
+    ctx.svc.close();
+  });
+
+  it("lets Viby move itself between Local and Cloud without overwriting the saved cloud planner, model or effort", async () => {
+    const ctx = setup();
+    ctx.svc.saveEngines([
+      { id: "claude", label: "Claude Code", bin: "claude", args: [], promptArgs: ["{prompt}"], continueArgs: ["--continue"] },
+      { id: "opencode", label: "OpenCode", bin: "opencode", args: [], promptArgs: ["--prompt", "{prompt}"], continueArgs: ["--continue"] },
+    ]);
+    ctx.host.resolveBin = (bin) => (bin === "claude" || bin === "opencode" ? `/usr/bin/${bin}` : null);
+    const cloudPlanner = { engine: "claude", mode: "never" as const, terse: true, model: "opus", effort: "high", projectsFolder: "" };
+    ctx.svc.saveSettings({
+      orchestrator: cloudPlanner,
+      local: { enabled: true, active: true, viby: "cloud", url: "http://127.0.0.1:11434", model: "qwen3:32b", vibyModel: "", harness: "opencode" },
+    });
+    const reply = (steps: unknown[]) => async () => ({ code: 0, stdout: JSON.stringify({ say: "Done.", steps }), stderr: "", timedOut: false });
+
+    // On the cloud planner, Viby sends itself to Local: only local.viby changes.
+    ctx.svc.orchestrator.runner = reply([{ kind: "settings", target: "viby.planner", prompt: "local" }]);
+    await ctx.svc.orchestratorAsk("Plan on my local model");
+    await until(() => ctx.svc.getSettings().local.viby === "local");
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject(cloudPlanner);
+    expect(ctx.svc.orchestratorView().engineId).toBe("local");
+
+    // On Local, a model named for Viby is a local one; the cloud planner's model and effort stay.
+    ctx.svc.orchestrator.localRunner = reply([{ kind: "settings", target: "local.vibyModel", prompt: "qwen3:14b" }]);
+    await ctx.svc.orchestratorAsk("Use the smaller one");
+    await until(() => ctx.svc.getSettings().local.vibyModel === "qwen3:14b");
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject(cloudPlanner);
+
+    // Changing its approval mode on Local doesn't pin Local as the Viby settings' planner.
+    ctx.svc.orchestrator.localRunner = reply([{ kind: "settings", target: "viby.terse", prompt: "off" }]);
+    await ctx.svc.orchestratorAsk("Longer replies please");
+    await until(() => ctx.svc.getSettings().orchestrator.terse === false);
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject({ ...cloudPlanner, terse: false });
+
+    // Back to the cloud planner: Viby returns to Cloud with opus and high effort as they were.
+    ctx.svc.orchestrator.localRunner = reply([{ kind: "settings", target: "viby.planner", prompt: "claude" }]);
+    await ctx.svc.orchestratorAsk("Go back to Claude");
+    await until(() => ctx.svc.getSettings().local.viby === "cloud");
+    expect(ctx.svc.getSettings().local.active).toBe(true);
+    expect(ctx.svc.getSettings().orchestrator).toMatchObject({ engine: "claude", model: "opus", effort: "high" });
+    expect(ctx.svc.orchestratorView().engineId).toBe("claude");
+
+    // And local.viby directly, the way the settings summary names it.
+    ctx.svc.orchestrator.runner = reply([{ kind: "settings", target: "local.viby", prompt: "local" }]);
+    await ctx.svc.orchestratorAsk("Use local for yourself too");
+    await until(() => ctx.svc.getSettings().local.viby === "local");
+    ctx.svc.close();
   });
 });

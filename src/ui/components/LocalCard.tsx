@@ -2,12 +2,15 @@ import { AlertTriangle, Check, Copy, Laptop, Network, Plug, RefreshCw } from "lu
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalHarness, LocalRuntimeStatus, LocalServerProbe, LocalSettings } from "../../shared/api.js";
 import { LOCAL_PRESETS, cleanLocalModel, isLocalConfigured, isLoopbackLocalUrl, normalizeLocalUrl } from "../../shared/local.js";
-import { call, useSettings } from "../api.js";
+import { call, useEngines, useSettings } from "../api.js";
 import { useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
+import { vibyUse } from "../viby-route.js";
 import { Button, Chip, Field, Input, Notice, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
+/** The "Viby in Local mode" choice that keeps Viby on its own (cloud) planner; any other value is a local model ("" = same as coding). */
+const VIBY_CLOUD = "\u0000cloud";
 const MIN_COMFORTABLE_CONTEXT = 32_768;
 
 const HARNESS_LABELS: Record<"opencode" | "claude" | "codex", string> = {
@@ -29,6 +32,7 @@ function firstModelId(probe: LocalServerProbe | null): string {
 export function LocalCard() {
   const t = useT();
   const settings = useSettings().data;
+  const engines = useEngines().data ?? [];
   const [status, setStatus] = useState<LocalRuntimeStatus | null>(null);
   const [probeOverride, setProbeOverride] = useState<LocalServerProbe | null>(null);
   const [urlInput, setUrlInput] = useState("");
@@ -326,19 +330,33 @@ export function LocalCard() {
               </div>
             </Field>
 
-            <Field label={t("local.vibyModel")} hint={t("local.vibyModelHint")}>
-              <Select
-                value={local.vibyModel}
-                onChange={(event) => void save({ vibyModel: event.target.value })}
-              >
-                <option value="">{t("local.vibySame")}</option>
-                {local.vibyModel && !modelIds.includes(local.vibyModel) && <option value={local.vibyModel}>{local.vibyModel}</option>}
-                {models.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.id}
-                  </option>
-                ))}
-              </Select>
+            <Field label={t("local.vibyRoute")} hint={t("local.vibyRouteHint")}>
+              <div className="vstack" style={{ gap: 6 }}>
+                <Select
+                  value={local.viby === "cloud" ? VIBY_CLOUD : local.vibyModel}
+                  onChange={(event) => {
+                    const picked = event.target.value;
+                    // Cloud keeps the local model picked for Viby: it is still used when Local is Viby's own planner.
+                    void save(picked === VIBY_CLOUD ? { viby: "cloud" } : { viby: "local", vibyModel: picked });
+                  }}
+                >
+                  <option value={VIBY_CLOUD}>{t("local.vibyCloud")}</option>
+                  <option value="">{t("local.vibyLocalSame")}</option>
+                  {local.vibyModel && !modelIds.includes(local.vibyModel) && (
+                    <option value={local.vibyModel}>{t("local.vibyLocalModel", { model: local.vibyModel })}</option>
+                  )}
+                  {models.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {t("local.vibyLocalModel", { model: item.id })}
+                    </option>
+                  ))}
+                </Select>
+                <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>
+                  {t(local.active ? "local.vibyNow" : "local.vibyInLocalMode", {
+                    viby: vibyUse({ local: { ...local, active: true }, orchestrator: settings.orchestrator }, engines, t).label,
+                  })}
+                </span>
+              </div>
             </Field>
           </div>
 

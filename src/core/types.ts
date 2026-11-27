@@ -143,13 +143,20 @@ export interface Engine extends EngineRow {
 
 export type LocalHarness = "auto" | "opencode" | "claude" | "codex";
 
+/** What Viby plans with while Local mode is on: its own planner from the Viby settings, or the Local AI server. */
+export type VibyRoute = "cloud" | "local";
+
 export interface LocalSettings {
   /** Enable Local AI in pickers and show the Cloud / Local switch. */
   enabled: boolean;
   /** Quick switch: prefer Local for Viby and default new launches when configured. */
   active: boolean;
-  /** Whether Viby also uses Local when Local mode is active. */
-  useForViby: boolean;
+  /**
+   * What Viby uses while Local mode (`active`) is on: "cloud" keeps the planner, model and effort
+   * from the Viby settings; "local" plans on this server with `vibyModel` (or `model`). With Local
+   * mode off, Viby always uses the Viby settings, whose planner may itself be Local.
+   */
+  viby: VibyRoute;
   /** When Local mode (`active`) is on, also run saved Agents (tasks, routines, agent chats, Viby starts) through Local without editing agent.yaml. */
   overrideAgents: boolean;
   /** Base URL of an OpenAI-compatible server on this computer or home network / Tailscale. */

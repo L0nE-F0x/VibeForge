@@ -1,7 +1,8 @@
 import { Bot, CalendarClock, Cloud, History, Keyboard, KanbanSquare, Laptop, MessageSquarePlus, MessagesSquare, Palette, Plus, Search, Server, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { isLocalConfigured } from "../../shared/local.js";
+import { isLocalConfigured, shortLocalModel } from "../../shared/local.js";
+import { vibyUse } from "../viby-route.js";
 import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useOrchestrator, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
 import { runLabel } from "../views/Home.js";
@@ -138,7 +139,11 @@ export function Switcher({ onClose }: { onClose: () => void }) {
               : {
                   id: "local:toggle",
                   title: local.active ? t("switcher.useCloud") : t("switcher.useLocal"),
-                  sub: local.model,
+                  // What switching leads to: coding on one side, and where Viby goes (its own setting).
+                  sub: t("switcher.localSub", {
+                    coding: local.active ? t("rail.cloud") : `${t("rail.local")} · ${shortLocalModel(local.model)}`,
+                    viby: settings ? vibyUse({ ...settings, local: { ...local, active: !local.active } }, engines ?? [], t).label : "",
+                  }),
                   kind: "switcher.action" as const,
                   icon: local.active ? Cloud : Laptop,
                   act: () => void call("settings.save", { local: { active: !local.active } }),
@@ -152,7 +157,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       { id: `theme:${FOLLOW}`, title: `${t("switcher.theme")} · ${t("settings.followOmarchy")}`, sub: themes?.system?.name, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(FOLLOW) },
       ...(themes?.themes ?? []).map((theme): Item => ({ id: `theme:${theme.id}`, title: `${t("switcher.theme")} · ${theme.name}`, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(theme.id) })),
     ];
-  }, [agents, chats, workspaces, orchestrator?.threads, tasks, routines, skills, themes, rail, local, home, t, go, open, pickTheme]);
+  }, [agents, chats, workspaces, orchestrator?.threads, tasks, routines, skills, themes, rail, local, settings, engines, home, t, go, open, pickTheme]);
 
   const shown = useMemo(() => {
     // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open

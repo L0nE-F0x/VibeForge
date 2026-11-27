@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { effortForModel } from "../../shared/launch-options.js";
 import { isDirectory } from "../fsx.js";
+import { LOCAL_ENGINE_ID, localModeRoutesViby } from "../../shared/local.js";
 import {
   branchFromPrompt,
   folderNameOk,
@@ -791,8 +792,25 @@ export async function carryOutSettingsStep(deps: EntityStepDeps, step: Orchestra
   if (!action) throw new Error("Unsupported settings change.");
 
   if (action.op === "viby") {
-    const current = deps.core.getSettings().orchestrator;
-    const activePlanner = deps.planner();
+    const all = deps.core.getSettings();
+    const current = all.orchestrator;
+    const local = all.local;
+    const localMode = local.enabled && local.active;
+    // Local mode sending Viby to Local is not a planner picked in the Viby settings: never pin it there.
+    const routedLocal = localModeRoutesViby(local) && deps.planner() === LOCAL_ENGINE_ID;
+    const activePlanner = routedLocal ? "" : deps.planner();
+    // While Local mode is on, Local only moves Viby (local.viby): the planner, model and effort saved for Cloud stay.
+    if (localMode && action.engine === LOCAL_ENGINE_ID) {
+      const nextMode = action.mode ?? current.mode;
+      const nextProjectsFolder = action.projectsFolder !== undefined ? action.projectsFolder : current.projectsFolder;
+      const nextTerse = action.terse ?? (current.terse ?? true);
+      deps.core.saveSettings({
+        orchestrator: { ...current, mode: nextMode, projectsFolder: nextProjectsFolder, terse: nextTerse },
+        local: { viby: "local", ...(action.model !== undefined ? { vibyModel: action.model } : {}) },
+      });
+      step.result = `Updated ${action.summary}.`;
+      return;
+    }
     const nextEngine = action.engine !== undefined ? action.engine : (current.engine || activePlanner);
     const changedEngine = action.engine !== undefined && action.engine !== (current.engine || activePlanner);
     const nextModel = action.model !== undefined ? action.model : changedEngine ? "" : current.model;
@@ -803,15 +821,27 @@ export async function carryOutSettingsStep(deps: EntityStepDeps, step: Orchestra
     const nextMode = action.mode ?? current.mode;
     const nextProjectsFolder = action.projectsFolder !== undefined ? action.projectsFolder : current.projectsFolder;
     const nextTerse = action.terse ?? (current.terse ?? true);
+    // A model named for Viby on Local is a local model id, kept apart from the cloud planner's.
+    const onLocal = nextEngine === LOCAL_ENGINE_ID || (action.engine === undefined && routedLocal);
+    const localModel = onLocal && action.model !== undefined ? action.model : undefined;
+    const savedModel = localModel !== undefined ? current.model : nextModel;
+    const savedEffort = localModel !== undefined ? (current.effort ?? "") : nextEffort;
+    // Picking a cloud planner while Local mode is on brings Viby back to Cloud.
+    const backToCloud = localMode && action.engine !== undefined && action.engine !== LOCAL_ENGINE_ID && local.viby !== "cloud";
+    const localPatch = {
+      ...(localModel !== undefined ? { vibyModel: localModel } : {}),
+      ...(backToCloud ? { viby: "cloud" as const } : {}),
+    };
     deps.core.saveSettings({
       orchestrator: {
         engine: nextEngine,
         mode: nextMode,
-        model: nextModel,
+        model: savedModel,
         projectsFolder: nextProjectsFolder,
         terse: nextTerse,
-        ...(nextEffort ? { effort: nextEffort } : {}),
+        ...(savedEffort ? { effort: savedEffort } : {}),
       },
+      ...(Object.keys(localPatch).length ? { local: localPatch } : {}),
     });
     step.result = `Updated ${action.summary}.`;
     return;

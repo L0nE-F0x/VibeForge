@@ -26,7 +26,7 @@ import type {
   SettingsPatch,
 } from "../../shared/api.js";
 import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
-import { LOCAL_ENGINE_ID, isLocalConfigured } from "../../shared/local.js";
+import { LOCAL_ENGINE_ID, isLocalConfigured, vibyLocalModel, vibyPlannerPatch } from "../../shared/local.js";
 import { brainKind, CONFIRMED_KEY, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
 import { call, useAgents, useEngines, useLive, useOrchestrator, useRoutines, useSettings, useSkills, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
@@ -472,7 +472,7 @@ export function OrchestratorBar({ onClose }: { onClose: () => void }) {
 
 function useLocalContextProbe(engineId: string, settings: Settings | undefined) {
   const url = settings?.local.url ?? "";
-  const model = settings?.local.vibyModel || settings?.local.model || "";
+  const model = settings ? vibyLocalModel(settings.local) : "";
   useEffect(() => {
     if (engineId !== LOCAL_ENGINE_ID || !url) return;
     void call("local.probe", url).catch(() => undefined);
@@ -490,10 +490,19 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
   const engine = engines.find((item) => item.id === engineId);
   const engineLabel = isLocal ? t("local.title") : (engine?.label ?? (engineId || t("orch.title")));
   const chosenModel = isLocal
-    ? (settings?.local.vibyModel || settings?.local.model || "")
+    ? (settings ? vibyLocalModel(settings.local) : "")
     : (settings && engineId === settings.orchestrator.engine ? settings.orchestrator.model : "");
   const isClaude = Boolean(!isLocal && engine && brainKind(engine) === "claude");
   const modelLabel = chosenModel || (isClaude ? (locked ? "haiku" : t("orch.modelCallDefault")) : t("orch.modelDefault"));
+  // With Local mode on, say plainly whether Viby went along to Local or stayed on the cloud.
+  const localMode = Boolean(settings?.local.enabled && settings.local.active);
+  const routeTag = localMode && !isLocal && (
+    <>
+      <span className="faint">·</span>
+      <span className="faint">{t("rail.cloud")}</span>
+    </>
+  );
+  const routeTip = localMode ? (isLocal ? t("orch.routeLocalTip") : t("orch.routeCloudTip")) : "";
   // A call starting while the popover is open closes it for good, rather than it coming back on hang-up.
   useEffect(() => {
     if (locked) setAnchor(null);
@@ -506,10 +515,11 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
   if (locked) {
     return (
       <>
-        <span className="viby-model locked" {...tipProps(t("orch.modelLocked"))}>
+        <span className="viby-model locked" {...tipProps(routeTip ? `${t("orch.modelLocked")} ${routeTip}` : t("orch.modelLocked"))}>
           <span>{engineLabel}</span>
           <span className="faint">·</span>
           <span className="mono">{modelLabel}</span>
+          {routeTag}
         </span>
         {effortPick}
       </>
@@ -522,12 +532,13 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
         type="button"
         className="viby-model"
         aria-expanded={Boolean(anchor)}
-        {...tipProps(t("orch.plannerTip"))}
+        {...tipProps(routeTip ? `${t("orch.plannerTip")} ${routeTip}` : t("orch.plannerTip"))}
         onClick={(event) => setAnchor(anchor ? null : event.currentTarget)}
       >
         <span>{engineLabel}</span>
         <span className="faint">·</span>
         <span className="mono">{modelLabel}</span>
+        {routeTag}
         <ChevronDown size={12} className="faint" />
       </button>
       {anchor && settings && (
@@ -674,6 +685,11 @@ function ModelPopover({
     <Popover anchor={anchor} onClose={onClose}>
       <div className="viby-model-popover">
         <div className="list-label">{t("orch.planner")}</div>
+        {local.enabled && local.active && (
+          <div className="faint small" style={{ padding: "0 8px 4px", maxWidth: 260 }}>
+            {isLocal ? t("orch.routeLocalTip") : t("orch.routeCloudTip")}
+          </div>
+        )}
         {planners.map((item) => {
           const selected = item.id === engineId;
           return (
@@ -687,11 +703,8 @@ function ModelPopover({
               onClick={() => {
                 setCustom(false);
                 setTyped("");
-                onSave({
-                  orchestrator: { ...current, engine: item.id, model: "", effort: "" },
-                  ...(local.active && item.id !== LOCAL_ENGINE_ID ? { local: { useForViby: false } } : {}),
-                  ...(local.active && item.id === LOCAL_ENGINE_ID && !local.useForViby ? { local: { useForViby: true } } : {}),
-                });
+                const patch = vibyPlannerPatch(item.id, local, current);
+                if (patch.orchestrator || patch.local) onSave(patch);
               }}
             >
               <span className="viby-menu-check">{selected && <Check size={13} />}</span>

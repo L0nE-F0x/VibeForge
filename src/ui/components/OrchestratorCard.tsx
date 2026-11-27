@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { effortForModel, effortLevels } from "../../shared/launch-options.js";
-import { LOCAL_ENGINE_ID, isLocalConfigured } from "../../shared/local.js";
-import { canOrchestrate, plannerFor, RISK_POLICY_GROUPS } from "../../shared/orchestrator.js";
+import { LOCAL_ENGINE_ID, isLocalConfigured, shortLocalModel, vibyLocalModel, vibyPlanner, vibyPlannerPatch } from "../../shared/local.js";
+import { canOrchestrate, RISK_POLICY_GROUPS } from "../../shared/orchestrator.js";
 import { call, useEngines, useOrchestrator, useSettings } from "../api.js";
 import { type Key, useT } from "../i18n/index.js";
 import { useAction } from "../state.js";
 import type { OrchestratorSettings, SettingsPatch } from "../../shared/api.js";
-import { Field, Input, Segmented, Select, Toggle } from "./ui.js";
+import { Field, Input, Notice, Segmented, Select, Toggle } from "./ui.js";
 
 const OTHER = "\u0000other";
 
@@ -28,29 +28,28 @@ export function OrchestratorCard() {
   if (local.enabled && !planners.some((engine) => engine.id === LOCAL_ENGINE_ID)) {
     planners.push({ id: LOCAL_ENGINE_ID, label: t("local.title"), bin: LOCAL_ENGINE_ID, args: [], available: localReady, path: null, local: true });
   }
-  // Until one is picked, the first planner on this machine is the one shown (and used).
-  const engineId = (local.enabled && local.active && local.useForViby && localReady ? LOCAL_ENGINE_ID : "") || plannerFor(current.engine, planners) || current.engine;
+  // What Viby plans with right now: Local when Local mode sends it there, else the planner picked
+  // here (until one is picked, the first on this machine).
+  const engineId = vibyPlanner({ local, localReady, picked: current.engine, engines: planners }) || current.engine;
   const selectedEngine = planners.find((engine) => engine.id === engineId);
   const levels = selectedEngine ? effortLevels(selectedEngine) : [];
   const currentEffort = engineId === current.engine ? (current.effort ?? "") : "";
   const isLocal = engineId === LOCAL_ENGINE_ID;
   const currentModel = isLocal ? local.vibyModel : (engineId === current.engine ? current.model : "");
-  const saveOrchestrator = (orchestrator: OrchestratorSettings) => {
-    if (local.active && orchestrator.engine !== LOCAL_ENGINE_ID) {
-      void save({ orchestrator, local: { useForViby: false } });
-    } else if (local.active && orchestrator.engine === LOCAL_ENGINE_ID && !local.useForViby) {
-      void save({ orchestrator, local: { useForViby: true } });
-    } else {
-      void save({ orchestrator });
-    }
+  // Only the planner pick moves Viby between Local and Cloud (vibyPlannerPatch); a model or effort is the shown planner's.
+  const saveOrchestrator = (orchestrator: OrchestratorSettings) => void save({ orchestrator });
+  const pickPlanner = (picked: string) => {
+    const patch = vibyPlannerPatch(picked, local, current);
+    if (patch.orchestrator || patch.local) void save(patch);
   };
+  const localMode = local.enabled && local.active;
   const modeHint =
     current.mode === "plan" ? t("orch.mode.planHint") : current.mode === "never" ? t("orch.mode.neverHint") : t("orch.mode.goHint");
   return (
     <div className="card vstack" style={{ gap: 14 }}>
       <div className="form-grid">
         <Field label={t("orch.planner")} hint={t("orch.plannerHint")}>
-          <Select value={engineId} onChange={(event) => saveOrchestrator({ ...current, engine: event.target.value, model: "", effort: "" })}>
+          <Select value={engineId} onChange={(event) => pickPlanner(event.target.value)}>
             {!planners.some((engine) => engine.id === engineId) && <option value={engineId}>{engineId}</option>}
             {planners.map((engine) => (
               <option key={engine.id} value={engine.id} disabled={!engine.available && engine.id !== engineId}>
@@ -104,6 +103,13 @@ export function OrchestratorCard() {
           <FolderInput value={current.projectsFolder} placeholder={view?.projectsFolder ?? "~/Projects"} onChange={(projectsFolder) => void save({ orchestrator: { ...current, projectsFolder } })} />
         </Field>
       </div>
+      {localMode && (
+        <Notice>
+          {isLocal
+            ? t("orch.localNoteLocal", { model: shortLocalModel(vibyLocalModel(local)) || t("local.title") })
+            : t("orch.localNoteCloud")}
+        </Notice>
+      )}
       <details className="orch-risk-details">
         <summary>{t("orch.riskSummary")}</summary>
         <div className="orch-risk-grid">

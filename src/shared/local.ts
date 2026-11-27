@@ -1,4 +1,5 @@
-import type { LocalSettings } from "../core/types.js";
+import type { EngineRow, LocalSettings, OrchestratorSettings, VibyRoute } from "../core/types.js";
+import { plannerFor } from "./orchestrator.js";
 
 /** Virtual engine id for VibeForge's configured Local AI server. */
 export const LOCAL_ENGINE_ID = "local";
@@ -130,4 +131,78 @@ export function shortLocalModel(model: string): string {
   const base = clean.includes("/") ? clean.slice(clean.lastIndexOf("/") + 1) : clean;
   const trimmed = base.replace(/\.gguf$/i, "");
   return trimmed.length > 28 ? `${trimmed.slice(0, 27)}…` : trimmed;
+}
+
+// ------------------------------------------------------------------ Viby's own route
+
+/** "cloud" or "local" when `value` names one; null otherwise. */
+export function normalizeVibyRoute(value: unknown): VibyRoute | null {
+  return value === "cloud" || value === "local" ? value : null;
+}
+
+/**
+ * settings.json's `local.viby`, read from what is saved. Files from before it existed (3.12.0)
+ * only had `useForViby`, which was set back to true on every switch to Local: so `false` there is
+ * a choice someone made (Cloud), and Local is kept only for someone in Local mode right now, whose
+ * Viby already planned locally. Everyone else starts on Cloud: a Viby planner, model and effort
+ * picked in the Viby settings keep working when coding moves to Local.
+ */
+export function migrateVibyRoute(raw: { viby?: unknown; useForViby?: unknown; enabled?: unknown; active?: unknown } | null | undefined): VibyRoute {
+  const saved = normalizeVibyRoute(raw?.viby);
+  if (saved) return saved;
+  if (raw?.useForViby === false) return "cloud";
+  if (raw?.useForViby === true && raw.enabled === true && raw.active === true) return "local";
+  return "cloud";
+}
+
+/** Local mode is on and sends Viby to the Local AI server too (it plans there once the server is ready). */
+export function localModeRoutesViby(local: Pick<LocalSettings, "enabled" | "active" | "viby">): boolean {
+  return local.enabled && local.active && local.viby === "local";
+}
+
+/** The local model Viby plans with: its own pick, or the coding model. */
+export function vibyLocalModel(local: Pick<LocalSettings, "model" | "vibyModel">): string {
+  return local.vibyModel || local.model;
+}
+
+type PlannerRow = Pick<EngineRow, "id" | "bin"> & { available: boolean };
+
+/**
+ * The planner Viby uses right now. Local mode with Viby set to Local plans on the Local AI server;
+ * anything else is the planner from the Viby settings, untouched by Local mode (until one is picked,
+ * the first one here that can plan, Local only when nothing else can). That planner may itself be
+ * Local: that is how Viby plans locally while coding stays on the cloud.
+ */
+export function vibyPlanner(input: {
+  local: Pick<LocalSettings, "enabled" | "active" | "viby">;
+  localReady: boolean;
+  picked: string;
+  engines: readonly PlannerRow[];
+}): string {
+  const { local, localReady, picked } = input;
+  if (localModeRoutesViby(local) && localReady) return LOCAL_ENGINE_ID;
+  const rows: PlannerRow[] = input.engines.filter((row) => row.id !== LOCAL_ENGINE_ID);
+  if (local.enabled) rows.push({ id: LOCAL_ENGINE_ID, bin: LOCAL_ENGINE_ID, available: localReady });
+  return plannerFor(picked, rows);
+}
+
+/**
+ * The settings change for picking `engineId` in a Viby planner picker. While Local mode is on,
+ * Local only sends Viby to the server, so the planner, model and effort saved for Cloud stay as
+ * they are, and any other planner sends Viby back to Cloud. With Local mode off it is the Viby
+ * settings' planner (Local there keeps coding on the cloud). Picking the planner already saved
+ * keeps its model and effort.
+ */
+export function vibyPlannerPatch(
+  engineId: string,
+  local: Pick<LocalSettings, "enabled" | "active" | "viby">,
+  orchestrator: OrchestratorSettings,
+): { orchestrator?: OrchestratorSettings; local?: { viby: VibyRoute } } {
+  const localMode = local.enabled && local.active;
+  if (localMode && engineId === LOCAL_ENGINE_ID) return local.viby === "local" ? {} : { local: { viby: "local" } };
+  const nextOrchestrator = engineId === orchestrator.engine ? orchestrator : { ...orchestrator, engine: engineId, model: "", effort: "" };
+  const patch: { orchestrator?: OrchestratorSettings; local?: { viby: VibyRoute } } =
+    nextOrchestrator === orchestrator ? {} : { orchestrator: nextOrchestrator };
+  if (localMode && local.viby !== "cloud") patch.local = { viby: "cloud" };
+  return patch;
 }

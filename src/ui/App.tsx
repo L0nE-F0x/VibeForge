@@ -2,8 +2,9 @@ import { Activity, CircleHelp, Cloud, EyeOff, Laptop, Settings as SettingsIcon, 
 import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { UsagePeriod } from "../shared/api.js";
 import { isLocalConfigured } from "../shared/local.js";
+import { vibyUse } from "./viby-route.js";
 import { duration, tildify } from "../shared/text.js";
-import { call, on, useAppInfo, useInbox, useLive, useNow, useOrchestrator, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
+import { call, on, useAppInfo, useEngines, useInbox, useLive, useNow, useOrchestrator, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
 import { useAttention, useChatAttention, usePtyInView, useWorkspaceInView, type Attention } from "./attention.js";
 import { HelpPopover, ProblemActions, SHOW_SHORTCUTS_EVENT, ShortcutsModal, useProblemNotice } from "./components/Help.js";
@@ -287,6 +288,8 @@ function Rail() {
   const settingsData = useSettings().data;
   const rail = settingsData?.rail;
   const local = settingsData?.local;
+  const engines = useEngines().data ?? [];
+  const viby = settingsData ? vibyUse(settingsData, engines, t).label : "";
   const { visible } = railViews(rail);
   const hide = (view: RailView) => void call("settings.save", { rail: { order: rail?.order ?? [], hidden: [...(rail?.hidden ?? []), view] } });
 
@@ -375,8 +378,8 @@ function Rail() {
               !isLocalConfigured(local)
                 ? t("rail.tip.localSetup")
                 : local.active
-                  ? t("rail.tip.localMode")
-                  : t("rail.tip.cloudMode"),
+                  ? t("rail.tip.localMode", { viby })
+                  : t("rail.tip.cloudMode", { viby }),
               { side: "right" },
             )}
             onClick={() => {
