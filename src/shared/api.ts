@@ -32,6 +32,7 @@ import type {
   LayoutNode,
   LiveSession,
   LocalHarness,
+  LocalServerSettings,
   LocalSettings,
   VibyRoute,
   Routine,
@@ -56,6 +57,9 @@ import type {
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
 import type { LocalModelInfo, LocalRuntimeStatus, LocalServerKind, LocalServerProbe } from "../core/local.js";
+import type { LocalServerState, LocalServerView } from "./local.js";
+
+export type { LocalServerState, LocalServerView };
 import type { UsageSummary } from "../core/usage.js";
 import type { PlanSummary } from "../core/plans.js";
 import type { Activity } from "../core/activity.js";
@@ -122,6 +126,7 @@ export type {
   LocalRuntimeStatus,
   LocalServerKind,
   LocalServerProbe,
+  LocalServerSettings,
   LocalSettings,
   VibyRoute,
   Palette,
@@ -172,7 +177,7 @@ export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, Un
 /** Partial settings patch supporting nested partial updates for `companion` and `local`. */
 export type SettingsPatch = Partial<Omit<Settings, "companion" | "local">> & {
   companion?: Partial<Settings["companion"]>;
-  local?: Partial<LocalSettings>;
+  local?: Partial<Omit<LocalSettings, "server">> & { server?: Partial<LocalServerSettings> };
 };
 
 export interface AppInfo {
@@ -455,6 +460,12 @@ export interface DeskMethods {
   "local.status": (url?: string) => LocalRuntimeStatus;
   /** Probe a specific OpenAI-compatible Local AI or home-network server address. */
   "local.probe": (url: string) => LocalServerProbe;
+  /** The server VibeForge starts from Settings → Local AI: what it would run, and how it is doing. */
+  "local.server": () => LocalServerView;
+  /** Start that server; it answers at `state.url` once `state.status` is "running". */
+  "local.serverStart": () => LocalServerView;
+  /** Stop the server VibeForge started (one it didn't start is left alone). */
+  "local.serverStop": () => LocalServerView;
 
   "workspaces.list": () => WorkspaceFile;
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */

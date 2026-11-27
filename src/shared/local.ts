@@ -1,4 +1,4 @@
-import type { EngineRow, LocalSettings, OrchestratorSettings, VibyRoute } from "../core/types.js";
+import type { EngineRow, LocalServerLaunch, LocalServerSettings, LocalSettings, OrchestratorSettings, VibyRoute } from "../core/types.js";
 import { plannerFor } from "./orchestrator.js";
 
 /** Virtual engine id for VibeForge's configured Local AI server. */
@@ -205,4 +205,203 @@ export function vibyPlannerPatch(
     nextOrchestrator === orchestrator ? {} : { orchestrator: nextOrchestrator };
   if (localMode && local.viby !== "cloud") patch.local = { viby: "cloud" };
   return patch;
+}
+
+// ------------------------------------------------------------------ running a server from VibeForge
+
+/** Where each kind VibeForge starts answers unless the server address names another port on this computer. */
+export const LOCAL_SERVER_PORTS: Record<LocalServerLaunch, number> = {
+  llamacpp: 8080,
+  ollama: 11434,
+  lmstudio: 1234,
+  command: 8080,
+};
+
+export const LOCAL_SERVER_KINDS: readonly LocalServerLaunch[] = ["llamacpp", "ollama", "lmstudio", "command"] as const;
+
+export function defaultLocalServer(): LocalServerSettings {
+  return { kind: "", program: "", models: "", presets: "", extraArgs: "", command: "", withLocalMode: false };
+}
+
+/** One line of at most `max` characters, or "". */
+function oneLine(value: unknown, max: number): string {
+  const s = typeof value === "string" ? value.trim() : "";
+  return !s || s.length > max || /[\r\n\0]/.test(s) ? "" : s;
+}
+
+/** settings.json's `local.server`, whatever was saved there. */
+export function normalizeLocalServer(raw: Partial<LocalServerSettings> | null | undefined): LocalServerSettings {
+  const value = raw && typeof raw === "object" ? raw : {};
+  const kind = LOCAL_SERVER_KINDS.includes(value.kind as LocalServerLaunch) ? (value.kind as LocalServerLaunch) : "";
+  return {
+    kind,
+    program: oneLine(value.program, 1000),
+    models: oneLine(value.models, 1000),
+    presets: oneLine(value.presets, 1000),
+    extraArgs: oneLine(value.extraArgs, 2000),
+    command: oneLine(value.command, 2000),
+    withLocalMode: value.withLocalMode === true,
+  };
+}
+
+/**
+ * A line of options split the way a shell would split it into words, honouring '…', "…" and
+ * backslashes, with nothing expanded. Null when a quote is left open.
+ */
+export function splitArgs(line: string): string[] | null {
+  const out: string[] = [];
+  let word = "";
+  let inWord = false;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else word += ch;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && i + 1 < line.length && /["\\$`]/.test(line[i + 1])) word += line[++i];
+      else word += ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (inWord) out.push(word);
+      word = "";
+      inWord = false;
+      continue;
+    }
+    inWord = true;
+    if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "\\" && i + 1 < line.length) word += line[++i];
+    else word += ch;
+  }
+  if (quote) return null;
+  if (inWord) out.push(word);
+  return out;
+}
+
+/** `~` and `~/…` as the home folder; anything else as typed. */
+export function expandHome(value: string, home: string): string {
+  if (value === "~") return home;
+  if (value.startsWith("~/")) return `${home.replace(/\/+$/, "")}/${value.slice(2)}`;
+  return value;
+}
+
+/** A word as a shell would need it typed, for showing a command line. */
+function shellWord(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/** What starting a server runs, worked out from the settings. */
+export interface LocalServerPlan {
+  kind: LocalServerLaunch;
+  bin: string;
+  args: string[];
+  /** Added to VibeForge's own environment for it. */
+  env: Record<string, string>;
+  /** Where it answers once started. */
+  url: string;
+  /** The start command ends once the server runs on its own (LM Studio's `lms server start`). */
+  oneShot: boolean;
+  /** What stops it, when ending the process VibeForge started is not how. */
+  stop: { bin: string; args: string[] } | null;
+  /** The command line, for the card. */
+  shown: string;
+}
+
+/** Why a server can't be started from these settings. */
+export type LocalServerProblem = "noKind" | "noProgram" | "noModels" | "noCommand" | "badArgs";
+
+/**
+ * The command VibeForge runs to start the server Settings describe, bound to this computer only
+ * (127.0.0.1) unless the extra options say otherwise. The port comes from the server address when
+ * that names this computer and a port, and is otherwise the kind's usual one.
+ */
+export function localServerPlan(
+  server: LocalServerSettings,
+  url: string,
+  resolveBin: (bin: string) => string | null,
+  home: string,
+): { plan: LocalServerPlan; problem: null } | { plan: null; problem: LocalServerProblem } {
+  const kind = server.kind;
+  if (!kind) return { plan: null, problem: "noKind" };
+  const base = normalizeLocalUrl(url);
+  let port = LOCAL_SERVER_PORTS[kind];
+  if (base && isLoopbackLocalUrl(base)) {
+    const named = Number(new URL(base).port);
+    if (Number.isInteger(named) && named > 0) port = named;
+  }
+  const at = kind === "command" && base && isLoopbackLocalUrl(base) ? base : `http://127.0.0.1:${port}`;
+  const done = (plan: Omit<LocalServerPlan, "kind" | "url" | "shown"> & { shown?: string }) => ({
+    plan: { kind, url: at, shown: plan.shown ?? [plan.bin, ...plan.args].map(shellWord).join(" "), ...plan },
+    problem: null,
+  });
+
+  if (kind === "command") {
+    const command = server.command.trim();
+    if (!command) return { plan: null, problem: "noCommand" };
+    return done({ bin: "/bin/sh", args: ["-c", command], env: {}, oneShot: false, stop: null, shown: command });
+  }
+  if (kind === "ollama") {
+    const bin = resolveBin("ollama");
+    if (!bin) return { plan: null, problem: "noProgram" };
+    return done({ bin, args: ["serve"], env: { OLLAMA_HOST: `127.0.0.1:${port}` }, oneShot: false, stop: null, shown: `OLLAMA_HOST=127.0.0.1:${port} ${shellWord(bin)} serve` });
+  }
+  if (kind === "lmstudio") {
+    const bin = resolveBin("lms") ?? resolveBin(`${home.replace(/\/+$/, "")}/.lmstudio/bin/lms`);
+    if (!bin) return { plan: null, problem: "noProgram" };
+    return done({ bin, args: ["server", "start", "--port", String(port)], env: {}, oneShot: true, stop: { bin, args: ["server", "stop"] } });
+  }
+
+  const program = server.program ? expandHome(server.program, home) : "";
+  const bin = resolveBin(program || "llama-server");
+  if (!bin) return { plan: null, problem: "noProgram" };
+  const models = expandHome(server.models, home);
+  if (!models) return { plan: null, problem: "noModels" };
+  const extra = splitArgs(server.extraArgs);
+  if (!extra) return { plan: null, problem: "badArgs" };
+  const presets = server.presets ? expandHome(server.presets, home) : "";
+  const modelArgs = /\.gguf$/i.test(models)
+    ? ["-m", models]
+    : ["--models-dir", models, ...(presets ? ["--models-preset", presets] : []), "--models-max", "1"];
+  return done({ bin, args: [...modelArgs, "--host", "127.0.0.1", "--port", String(port), ...extra], env: {}, oneShot: false, stop: null });
+}
+
+export type LocalServerStatus = "stopped" | "starting" | "running" | "stopping" | "failed";
+
+/** The server VibeForge started (or last tried to), for Settings and the Cloud / Local switch. */
+export interface LocalServerState {
+  status: LocalServerStatus;
+  /** Where it answers (or will). */
+  url: string | null;
+  /** The command it ran. */
+  shown: string | null;
+  pid: number | null;
+  /** When it started, ISO. */
+  since: string | null;
+  /** Why it is not running: a problem with the settings, or what went wrong running it. */
+  problem: LocalServerProblem | "busy" | "exited" | "timeout" | "spawn" | null;
+  /** The exit code or the error's words, with `problem`. */
+  detail: string | null;
+  /** The last lines it printed. */
+  log: string[];
+}
+
+/** The Run a server card: what VibeForge would run now, and how the last start went. */
+export interface LocalServerView {
+  state: LocalServerState;
+  plan: LocalServerPlan | null;
+  problem: LocalServerProblem | null;
+  /** What could be started here, to suggest a kind. */
+  found: Record<Exclude<LocalServerLaunch, "command">, boolean>;
+}
+
+/**
+ * Whether Local mode wants the server VibeForge starts: Local AI on and in Local mode, or on with
+ * Viby planning on Local by its own choice (which needs the server in Cloud mode too).
+ */
+export function localServerWanted(local: Pick<LocalSettings, "enabled" | "active">, vibyPlansLocal: boolean): boolean {
+  return local.enabled && (local.active || vibyPlansLocal);
 }

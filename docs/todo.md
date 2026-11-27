@@ -1,6 +1,6 @@
 # To do
 
-What's next. What shipped is in `CHANGELOG.md` (3.14.0, 2026-11-27, is the latest release), and what has been verified, and how, is in `status.md`.
+What's next. What shipped is in `CHANGELOG.md` (3.15.0, 2026-11-27, is the latest release), and what has been verified, and how, is in `status.md`.
 
 ## Next up
 
@@ -27,7 +27,7 @@ These work against fake CLIs, synthetic audio and the hidden test window. Nothin
 - Settings → Storage's first upkeep on a large real run folder.
 - A task in its own copy on a repository Claude Code hasn't trusted yet.
 - **Viby's computer use with real clicks and keys** (3.9.0): a click, scroll, drag or typing on a real Hyprland desktop through the app, and a real planner choosing coordinates from a screenshot. Screenshots and the window list were taken for real outside the app; the actions ran only against a stand-in driver and VibeForge's own window.
-- **Local AI against a real model server** (3.12.0): Ollama, `llama.cpp` and LM Studio found, connected and planned with by Viby, OpenCode, Claude Code and Codex each coding on one, and a server on another machine over the home network or Tailscale. Built against stand-in HTTP servers and the real CLIs' flags; `status.md` lists exactly what was checked.
+- **Local AI against a real model server** (3.12.0): Ollama, `llama.cpp` and LM Studio found, connected and planned with by Viby, OpenCode, Claude Code and Codex each coding on one, and a server on another machine over the home network or Tailscale. Built against stand-in HTTP servers and the real CLIs' flags; `status.md` lists exactly what was checked. 3.15.0's **Run a server** was driven with the real `llama-server` in router mode; Ollama and LM Studio starting from it are still to try.
 - **Codex as Viby's planner.** Built to Codex's JSON lines and tested against its real "not signed in" answer. Codex isn't signed in on this machine, so a real plan from it waits for someone who uses Codex.
 
 ## Left from recent audits

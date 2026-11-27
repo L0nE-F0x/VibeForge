@@ -7,14 +7,14 @@ import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import { cleanCategoryName, type WorkspaceFile } from "../workspaces.js";
-import type { ComputerUseGrant, EngineRow, LayoutNode, LocalHarness, LocalSettings, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
+import type { ComputerUseGrant, EngineRow, LayoutNode, LocalHarness, LocalServerSettings, LocalSettings, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
 import type { ReadCache } from "./read-cache.js";
 import { cleanModel } from "../../shared/launch-options.js";
 import { DEFAULT_DICTATE_KEYS, normalizeDictateKeys } from "../../shared/dictation.js";
-import { migrateVibyRoute } from "../../shared/local.js";
+import { defaultLocalServer, migrateVibyRoute, normalizeLocalServer } from "../../shared/local.js";
 
 export function defaultSettings(): Settings {
   return {
@@ -41,7 +41,17 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "go", model: "", projectsFolder: "", terse: true },
-    local: { enabled: false, active: false, viby: "cloud", overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
+    local: {
+      enabled: false,
+      active: false,
+      viby: "cloud",
+      overrideAgents: false,
+      url: "",
+      model: "",
+      vibyModel: "",
+      harness: "auto",
+      server: defaultLocalServer(),
+    },
     computerUse: {
       on: false,
       app: { see: true, pointer: true, keys: true },
@@ -112,6 +122,7 @@ function normalizeLocalSettings(value: unknown, defaults: LocalSettings): LocalS
     model: cleanLocalModelId(raw.model),
     vibyModel: cleanLocalModelId(raw.vibyModel),
     harness: normalizeLocalHarness(raw.harness),
+    server: normalizeLocalServer(raw.server as Partial<LocalServerSettings> | undefined),
   };
 }
 
