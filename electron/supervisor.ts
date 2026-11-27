@@ -275,7 +275,7 @@ export class PtySupervisor {
     });
   }
 
-  async spawn(opts: { cwd: string; argv: string[]; runDir: string | null; pasteInput: string | null; cols?: number; rows?: number }) {
+  async spawn(opts: { cwd: string; argv: string[]; env?: Record<string, string>; runDir: string | null; pasteInput: string | null; cols?: number; rows?: number }) {
     const result = await this.request({ op: "spawn", ...opts });
     return { ptyId: String(result.ptyId), pid: Number(result.pid), ...(typeof result.ptyToken === "string" ? { ptyToken: result.ptyToken } : {}) };
   }

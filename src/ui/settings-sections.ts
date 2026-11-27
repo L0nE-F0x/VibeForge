@@ -1,4 +1,4 @@
-import { Activity, AudioLines, Bell, Cpu, Download, FolderOpen, HardDrive, Laptop, LifeBuoy, MessagesSquare, Mic, MousePointerClick, PanelLeft, Palette, Power, Smartphone, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
+import { Activity, AudioLines, Bell, Cpu, Download, FolderOpen, HardDrive, Laptop, LifeBuoy, MessagesSquare, Mic, MousePointerClick, PanelLeft, Palette, Power, Server, Smartphone, SquareTerminal, Volume2, type LucideIcon } from "lucide-react";
 import type { Key } from "./i18n/index.js";
 
 /**
@@ -12,6 +12,7 @@ export const SETTINGS_SECTIONS = [
   { id: "defaults", icon: SquareTerminal, label: "settings.defaults" },
   { id: "together", icon: MessagesSquare, label: "settings.together" },
   { id: "orchestrator", icon: AudioLines, label: "orch.title" },
+  { id: "local", icon: Server, label: "local.title" },
   { id: "computer-use", icon: MousePointerClick, label: "cu.title" },
   { id: "voice", icon: Mic, label: "voice.title" },
   { id: "notifications", icon: Bell, label: "settings.notifications" },

@@ -920,6 +920,8 @@ export async function carryOutSettingsStep(deps: EntityStepDeps, step: Orchestra
       merged.agentTalk = { ...current.agentTalk, ...(v as Partial<Settings["agentTalk"]>) };
     } else if (k === "sync" && v && typeof v === "object") {
       merged.sync = { ...current.sync, ...(v as Partial<Settings["sync"]>) };
+    } else if (k === "local" && v && typeof v === "object") {
+      merged.local = { ...current.local, ...(v as Partial<Settings["local"]>) };
     } else if (k === "keepRuns" && v && typeof v === "object") {
       merged.keepRuns = { ...current.keepRuns, ...(v as Partial<Settings["keepRuns"]>) };
     } else if (k === "companion" && v && typeof v === "object") {

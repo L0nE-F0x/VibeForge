@@ -71,7 +71,7 @@ export class TaskDesk {
       agentPlaces: agent?.places ?? [],
     });
     if (!decision.ok) return decision.reason;
-    if (agent && !this.core.resolveEngine(agent.engine)) return "engine-missing";
+    if (agent && !this.core.resolveEngine(this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true }).engineId)) return "engine-missing";
     return null;
   }
 
@@ -207,13 +207,14 @@ export class TaskDesk {
     const id = task.id;
     const agent = this.core.store.getAgent(task.agentId!)!;
     const workspace = this.core.workspaceById(task.workspaceId)!;
-    const engine = this.core.requireEngine(agent.engine);
+    const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
+    const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = taskPrompt(task.title, task.body);
     const previous = task.runIds[task.runIds.length - 1] ? this.core.store.getRun(task.runIds[task.runIds.length - 1]) : null;
-    const resume = continueSession ? this.core.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
+    const cwd = task.isolated ? await this.copyFor(task, workspace) : workspace.path;
+    const resume = continueSession ? this.core.resumePlan(engine, previous, cwd) : { native: false, resumeArgs: null };
     const canContinue = resume.native;
     const prior = continueSession && previous && !canContinue ? this.core.transcriptPath(previous) : null;
-    const cwd = task.isolated ? await this.copyFor(task, workspace) : workspace.path;
     const launched = await this.core.launch({
       origin: "task",
       title: task.title,

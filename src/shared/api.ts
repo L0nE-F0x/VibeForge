@@ -31,6 +31,8 @@ import type {
   EngineRow,
   LayoutNode,
   LiveSession,
+  LocalHarness,
+  LocalSettings,
   Routine,
   RunOrigin,
   Schedule,
@@ -52,6 +54,7 @@ import type {
   WorkspaceCategory,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
+import type { LocalModelInfo, LocalRuntimeStatus, LocalServerKind, LocalServerProbe } from "../core/local.js";
 import type { UsageSummary } from "../core/usage.js";
 import type { PlanSummary } from "../core/plans.js";
 import type { Activity } from "../core/activity.js";
@@ -113,6 +116,12 @@ export type {
   Launched,
   Queued,
   LiveSession,
+  LocalHarness,
+  LocalModelInfo,
+  LocalRuntimeStatus,
+  LocalServerKind,
+  LocalServerProbe,
+  LocalSettings,
   Palette,
   ThemeChoice,
   ThemeList,
@@ -157,6 +166,12 @@ export type {
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
 export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
+
+/** Partial settings patch supporting nested partial updates for `companion` and `local`. */
+export type SettingsPatch = Partial<Omit<Settings, "companion" | "local">> & {
+  companion?: Partial<Settings["companion"]>;
+  local?: Partial<LocalSettings>;
+};
 
 export interface AppInfo {
   version: string;
@@ -422,7 +437,7 @@ export interface DeskMethods {
   "updates.rollback": (size?: TermSize) => { ptyId: string };
 
   "settings.get": () => Settings;
-  "settings.save": (patch: Partial<Settings>) => Settings;
+  "settings.save": (patch: SettingsPatch) => Settings;
   /** settings.json, engines.json, workspaces.json or chats.json, there but not readable right now. */
   "files.unreadable": () => UnreadableFile[];
   /** Moves an unreadable file (one listed above) to `<name>.broken` and puts back its last good copy. */
@@ -434,6 +449,10 @@ export interface DeskMethods {
   "engines.list": () => Engine[];
   "engines.recheck": () => Engine[];
   "engines.save": (rows: EngineRow[]) => Engine[];
+  /** Detect local AI binaries, coding CLIs, loopback servers, and the configured Local AI server. */
+  "local.status": (url?: string) => LocalRuntimeStatus;
+  /** Probe a specific OpenAI-compatible Local AI or home-network server address. */
+  "local.probe": (url: string) => LocalServerProbe;
 
   "workspaces.list": () => WorkspaceFile;
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */

@@ -292,4 +292,42 @@ describe("Centralized risk classification and approval policy", () => {
     expect(rulesPlanVerbose).toContain("Ask for everything");
     expect(rulesPlanVerbose).toContain("conversational");
   });
+
+  it("treats enabling local mode as high risk (broad-settings) requiring Go under go mode", () => {
+    const engines = [{ id: "claude", label: "Claude Code", available: true, bin: "claude" }];
+
+    const onResolved = resolveSettingsStep({ target: "local", prompt: "on" }, { engines });
+    expect(onResolved).toEqual({
+      issue: null,
+      action: {
+        op: "app-patch",
+        patch: { local: { enabled: true, active: true, useForViby: true } },
+        networkOn: true,
+        summary: "Local AI mode · on",
+      },
+      asked: "Local AI mode · on",
+    });
+
+    const onStep = step({ kind: "settings", target: "local", prompt: "on" });
+    expect(classifyStepRisk(onStep, ctx("go"))).toMatchObject({ risk: "high", category: "broad-settings" });
+    expect(holdsForGo(onStep, ctx("go"))).toBe(true);
+    expect(shouldAutoRunPlan([onStep], ctx("go"), { mode: "go" })).toBe(false);
+
+    const offResolved = resolveSettingsStep({ target: "local", prompt: "off" }, { engines });
+    expect(offResolved).toEqual({
+      issue: null,
+      action: {
+        op: "app-patch",
+        patch: { local: { active: false } },
+        summary: "Local AI mode · off",
+      },
+      asked: "Local AI mode · off",
+    });
+    expect("networkOn" in offResolved.action!).toBe(false);
+
+    const offStep = step({ kind: "settings", target: "local", prompt: "off" });
+    expect(classifyStepRisk(offStep, ctx("go"))).toMatchObject({ risk: "low", category: "safe-action" });
+    expect(holdsForGo(offStep, ctx("go"))).toBe(false);
+    expect(shouldAutoRunPlan([offStep], ctx("go"), { mode: "go" })).toBe(true);
+  });
 });

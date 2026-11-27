@@ -41,7 +41,10 @@ export function ChatView({ route }: { route: Extract<Route, { view: "chat" }> })
   useEffect(() => {
     if (engine) return;
     const available = engines.filter((item) => item.available);
-    const preferred = available.find((item) => item.id === settings?.defaultEngine) ?? available[0];
+    const preferred =
+      (settings?.local.enabled && settings.local.active ? available.find((item) => item.local) : undefined) ??
+      available.find((item) => item.id === settings?.defaultEngine) ??
+      available[0];
     if (preferred) setEngine(preferred.id);
   }, [engines, settings, engine]);
 

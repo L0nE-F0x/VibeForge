@@ -350,6 +350,8 @@ export interface OrchestratorView {
   threads?: OrchestratorThreadSummary[];
   /** Whether ~/.config/vibeforge/viby.md currently holds non-empty memory. */
   hasMemory?: boolean;
+  /** Set when Local Viby is active and the server's reported context window is smaller than the rules need. */
+  localContextWarning?: { contextLength: number; neededTokens: number } | null;
 }
 
 /** The engines that can plan: the ones with a headless turn, structured output and a way to turn tools off. */
@@ -357,7 +359,7 @@ export function canOrchestrate(row: Pick<EngineRow, "id" | "bin">): boolean {
   return brainKind(row) !== null;
 }
 
-export type BrainKind = "grok" | "claude" | "codex" | "agy";
+export type BrainKind = "grok" | "claude" | "codex" | "agy" | "local";
 
 /**
  * The CLI that plans: the one picked in Settings while it is on this machine; until one is picked
@@ -375,6 +377,7 @@ export function plannerFor(picked: string, engines: ReadonlyArray<Pick<EngineRow
  * and Antigravity CLI (Google's, for Gemini).
  */
 export function brainKind(row: Pick<EngineRow, "id" | "bin">): BrainKind | null {
+  if (row.id === "local") return "local";
   const name = `${row.id} ${row.bin.split("/").pop() ?? row.bin}`.toLowerCase();
   if (/\bgrok\b/.test(name)) return "grok";
   if (/\bclaude\b/.test(name)) return "claude";

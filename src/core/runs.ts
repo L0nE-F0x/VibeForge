@@ -112,6 +112,8 @@ export function normalizeRun(value: unknown): RunMeta | null {
       return sha && isCommitId(sha) ? sha : null;
     })(),
     continuedFrom: strOrNull(record.continuedFrom),
+    ...(strOrNull(record.localHarness) ? { localHarness: strOrNull(record.localHarness) } : {}),
+    ...(strOrNull(record.localModel) ? { localModel: strOrNull(record.localModel) } : {}),
   };
 }
 

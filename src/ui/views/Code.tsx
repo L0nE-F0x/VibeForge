@@ -265,7 +265,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
       setOpened(true);
       setCurrentId(workspace.id);
       void call("workspaces.select", workspace.id).catch(() => undefined);
-      void p.startCommand(workspace, engine ? cliCommand(engine) : null).then(done, () => done(null));
+      void (engine?.local ? p.openFirst(workspace, { type: "engine", engineId: engine.id }) : p.startCommand(workspace, engine ? cliCommand(engine) : null)).then(done, () => done(null));
     };
     window.addEventListener(START_CLI_EVENT, onStart);
     return () => window.removeEventListener(START_CLI_EVENT, onStart);

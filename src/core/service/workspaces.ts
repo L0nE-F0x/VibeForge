@@ -1,6 +1,7 @@
 import path from "node:path";
 import { openBranchCheckout, readBranches, type BranchList } from "../branches.js";
 import { isDirectory } from "../fsx.js";
+import { LOCAL_ENGINE_ID } from "../local.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
 import type { LayoutNode, Workspace, WorkspaceCategory } from "../types.js";
@@ -337,27 +338,34 @@ export class WorkspaceDesk {
     if (!workspace) throw new Error("Open a workspace first.");
     if (!isDirectory(workspace.path)) throw new Error(`The workspace folder is gone: ${workspace.path}`);
     const agent = opts.agentId ? this.core.store.getAgent(opts.agentId) : null;
-    const engine = this.core.requireEngine(agent ? agent.engine : opts.engineId);
+    const target = this.core.resolveLaunchTarget({
+      engineId: agent ? agent.engine : opts.engineId,
+      fromAgent: Boolean(agent),
+      model: opts.model,
+    });
+    const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = opts.prompt?.trim() ?? "";
     const previous = opts.continueSession
       ? (this.core.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
       : null;
-    const resume = opts.continueSession ? this.core.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };
+    const resume = opts.continueSession
+      ? this.core.resumePlan(engine, previous, workspace.path, { allowBareWithoutPrevious: true })
+      : { native: false, resumeArgs: null };
     return this.core.launch({
       origin: "code",
-      title: `${agent ? agent.name : engine.row.label} · ${workspace.name}`,
+      title: `${agent ? (target.engineId === LOCAL_ENGINE_ID ? `${agent.name} · Local` : agent.name) : engine.row.label} · ${workspace.name}`,
       engine,
       cwd: workspace.path,
       prompt,
       promptText: agent ? this.core.preambleFor(agent, prompt, null, opts.copyOf ?? null) : prompt || null,
-      continueSession: Boolean(opts.continueSession && (resume.resumeArgs || engine.row.continueArgs?.length)),
+      continueSession: Boolean(opts.continueSession && resume.native),
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,
       agentId: agent?.id ?? null,
       continuedFrom: previous?.id ?? null,
       ...(agent ? { instructions: null, allowVibeforge: Boolean(this.core.store.readSettings().agentTalk.on) } : this.paneInstructions(engine.row.id, workspace.path)),
       orchestrated: opts.orchestrated,
-      model: opts.model,
+      model: target.model,
       effort: opts.effort,
       cols: opts.cols,
       rows: opts.rows,

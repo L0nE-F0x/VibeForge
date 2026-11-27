@@ -1,6 +1,7 @@
 import { BellRing, Bot, CalendarClock, CheckCheck, FolderOpen, FolderPlus, GitBranch, History, Hourglass, KanbanSquare, MessagesSquare, Play, Settings, SquareTerminal, TerminalSquare } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import type { RunView } from "../../shared/api.js";
+import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { duration, fireTime, tildify } from "../../shared/text.js";
 import { call, useActivity, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useNow, useOrchestrator, useQuery, useRoutines, useSettings, useTasks, useWorkspaces } from "../api.js";
 import { PickMark } from "../components/ListTools.js";
@@ -43,7 +44,13 @@ export function RunRow({
 }) {
   const t = useT();
   const engines = useEngines().data ?? [];
-  const { title, kind } = runLabel(run, engines.find((engine) => engine.id === run.engine)?.label ?? null);
+  const isLocalRun = run.engine === LOCAL_ENGINE_ID || Boolean(run.localModel);
+  const engineLabel = isLocalRun
+    ? run.localModel
+      ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}`
+      : t("pane.local")
+    : (engines.find((engine) => engine.id === run.engine)?.label ?? null);
+  const { title, kind } = runLabel(run, engineLabel);
   // The dot says how it went; a chip only for what didn't simply finish.
   const clean = run.status === "exited" && !run.exitCode;
   const picking = picked !== undefined;
@@ -64,6 +71,9 @@ export function RunRow({
         )}
         <span className="meta truncate">
           {kind}
+          {isLocalRun && !kind.includes(t("pane.local"))
+            ? ` · ${run.localModel ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}` : t("pane.local")}`
+            : ""}
           {run.changes ? ` · ${changesFor(run.changes, t)}` : ""}
           {!compact && (
             <>
@@ -143,7 +153,11 @@ export function HomeView() {
   const onboarding = latestRuns !== undefined && !firstStepsDone(steps);
   const rail = settings?.rail;
   // The CLI the "Run a CLI" step starts: the default one when it is here, else the first found.
-  const firstCli = available.find((engine) => engine.id === settings?.defaultEngine) ?? available[0] ?? null;
+  const firstCli =
+    (settings?.local.enabled && settings.local.active ? available.find((engine) => engine.local) : undefined) ??
+    available.find((engine) => engine.id === settings?.defaultEngine) ??
+    available[0] ??
+    null;
   const lastWorkspace = workspaces.find((item) => item.id === workspaceFile?.lastWorkspaceId) ?? workspaces.at(-1) ?? null;
   const runCli = () => {
     if (!lastWorkspace) {

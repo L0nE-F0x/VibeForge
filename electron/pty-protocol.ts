@@ -4,7 +4,7 @@
 
 /** What the window asks the host, without the reqId the request adds. */
 export type PtyAsk =
-  | { op: "spawn"; cwd: string; argv: string[]; runDir: string | null; pasteInput: string | null; cols?: number; rows?: number }
+  | { op: "spawn"; cwd: string; argv: string[]; env?: Record<string, string>; runDir: string | null; pasteInput: string | null; cols?: number; rows?: number }
   | { op: "write"; ptyId: string; data: string }
   /** Paste text the way a person would, then press Enter unless `enter` is false. */
   | { op: "send"; ptyId: string; text: string; enter: boolean }

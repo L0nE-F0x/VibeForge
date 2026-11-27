@@ -68,8 +68,9 @@ export class ChatDesk {
       this.core.emit("chats");
       return this.chatView(chat);
     }
-    const engineId = input.engine?.trim() || this.core.store.readSettings().defaultEngine;
-    this.core.requireEngine(engineId);
+    const target = this.core.resolveLaunchTarget({ engineId: input.engine });
+    const engineId = target.engineId;
+    this.core.requireEngine(engineId, { model: target.model });
     const scratchRoot = path.join(this.core.options.dataRoot, "scratch");
     const id = this.uniqueChatId(input.prompt ? scratchName(input.prompt) : "chat", scratchRoot);
     const chat: ChatRecord = {
@@ -234,14 +235,15 @@ export class ChatDesk {
   ): Promise<Launched> {
     const agent = chat.agentId ? this.core.store.getAgent(chat.agentId) : null;
     if (chat.agentId && !agent) throw new Error("This chat's agent no longer exists.");
-    const engine = this.core.requireEngine(agent ? agent.engine : chat.engine);
+    const target = this.core.resolveLaunchTarget({ engineId: agent ? agent.engine : chat.engine, fromAgent: Boolean(agent) });
+    const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const previous = opts.continueSession ? this.core.store.getRun(chat.runIds[chat.runIds.length - 1] ?? "") : null;
-    const resume = this.core.resumePlan(engine.row, previous);
-    const nativeContinue = resume.native;
-    const prior = previous && !nativeContinue ? this.core.transcriptPath(previous) : null;
     let cwd = chat.cwd;
     if (agent) cwd = isDirectory(chat.cwd) && agent.places.some((place) => isPathInside(place, chat.cwd)) ? chat.cwd : (this.core.firstPlace(agent.places) ?? "");
     if (!cwd) throw new Error("The chat's folder is gone.");
+    const resume = this.core.resumePlan(engine, previous, cwd);
+    const nativeContinue = resume.native;
+    const prior = previous && !nativeContinue ? this.core.transcriptPath(previous) : null;
     if (!agent) fs.mkdirSync(cwd, { recursive: true });
     let promptText: string | null = null;
     let pasteAfterContinue: string | null = null;
