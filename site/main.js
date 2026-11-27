@@ -733,10 +733,10 @@ function setupPausing() {
 // ------------------------------------------------------------------ tour
 
 const CAPTIONS = [
-  ["Home", "Live terminals, waiting CLIs, diffs to review and upcoming scheduled runs."],
+  ["Home", "Live terminals, waiting CLIs, diffs to review and upcoming scheduled runs. A run on your local model says which model it used."],
   ["Code", "Tiled shells and coding CLIs alongside your file tree and browser."],
   ["Tasks", "Queue tasks to run in separate git worktrees, then apply diffs."],
-  ["Viby", "Paste a screenshot, let Viby click where you allow it, or start a voice call. Viby plans the branches and verifies the tests."],
+  ["Viby", "Here Viby plans on a local model. Paste a screenshot, let Viby click where you allow it, or start a voice call. Viby plans the branches and verifies the tests."],
 ];
 
 function setupTour() {
