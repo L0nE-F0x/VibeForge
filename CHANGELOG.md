@@ -1308,7 +1308,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.12.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.13.0...HEAD
+[3.13.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.13.0
 [3.12.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.12.0
 [3.11.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.11.0
 [3.10.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.10.1
