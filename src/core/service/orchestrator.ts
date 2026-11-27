@@ -146,6 +146,15 @@ import {
 } from "./orchestrator-utils.js";
 import type { LiveSession, Settings, Task } from "../types.js";
 import { cleanModel, effortLevels, takesModel } from "../../shared/launch-options.js";
+import {
+  LOCAL_ENGINE_ID,
+  buildLocalBrainMessages,
+  probeLocalServer,
+  runLocalBrain,
+  type LocalBrainImage,
+  type LocalBrainRunner,
+  type LocalChatMessage,
+} from "../local.js";
 import type { RoutineDesk } from "./routines.js";
 import type { RunDesk } from "./runs.js";
 import type { TaskDesk } from "./tasks.js";
@@ -400,6 +409,7 @@ export class OrchestratorDesk {
   private themesCache: { at: number; ids: string[] } | null = null;
   private readonly plannerPool = new PlannerSessionPool();
   runner: BrainRunner = spawnBrain;
+  localRunner: LocalBrainRunner = runLocalBrain;
   verifyRunner: VerifyRunner = spawnVerifyCommand;
   /** Reuse persistent warm stream-json stdio sessions for compatible planners when using `spawnBrain`. */
   warmPlanners = true;
@@ -510,7 +520,15 @@ export class OrchestratorDesk {
 
   /** The CLI that plans right now: the one picked, or until then the first one here that can (plannerFor). */
   private planner(): string {
-    const rows = this.core.store.readEngineRows().map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
+    const local = this.core.store.readSettings().local;
+    const localBrain = this.core.localBrainConfig();
+    if (local.enabled && local.active && localBrain) return LOCAL_ENGINE_ID;
+    const rows = this.core.store
+      .readEngineRows()
+      .map((row) => ({ id: row.id, bin: row.bin, available: Boolean(this.core.resolveEngine(row.id)) }));
+    if (local.enabled) {
+      rows.push({ id: LOCAL_ENGINE_ID, bin: "local", available: Boolean(localBrain) });
+    }
     return plannerFor(this.settings().engine, rows);
   }
 
@@ -746,12 +764,13 @@ export class OrchestratorDesk {
         ...(item.agentId && agentNames.get(item.agentId) ? { agent: agentNames.get(item.agentId) } : {}),
       }));
     const allSettings = this.core.store.readSettings();
-    const defaultPick = allSettings.defaultEngine;
+    const listedEngines = this.core.listEngines();
+    const defaultPick = this.core.effectiveDefaultEngine();
     const defaultEngine = defaultPick && this.core.resolveEngine(defaultPick) ? defaultPick : undefined;
     const memory = boundedVibyMemory(this.core.options.configRoot);
     return {
       workspaces,
-      engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
+      engines: listedEngines.map((row) => ({ id: row.id, label: row.label, available: row.available, bin: row.bin })),
       ...(defaultEngine ? { defaultEngine } : {}),
       running,
       copies: copies.map((item) => ({ id: item.id, name: item.name, branch: item.branch, workspace: names.get(item.workspaceId) ?? item.workspaceId })),
@@ -770,6 +789,7 @@ export class OrchestratorDesk {
 
   private buildSettingsContext(all: Settings = this.core.store.readSettings(), rows = this.core.store.readEngineRows()): PlanSettingsContext {
     const planner = this.planner();
+    const localBrain = this.core.localBrainConfig();
     const availablePlanners = rows
       .filter((row) => canOrchestrate(row))
       .map((row) => {
@@ -783,6 +803,16 @@ export class OrchestratorDesk {
           efforts: [...effortLevels(row)],
         };
       });
+    if (all.local.enabled) {
+      const localModel = all.local.vibyModel || all.local.model;
+      availablePlanners.push({
+        id: LOCAL_ENGINE_ID,
+        label: "Local",
+        available: Boolean(localBrain),
+        models: localModel ? [localModel] : [],
+        efforts: [],
+      });
+    }
 
     const hostVoice = this.core.options.host.voiceStatus?.();
     const home = os.homedir();
@@ -817,11 +847,25 @@ export class OrchestratorDesk {
         pickedEngine: all.orchestrator.engine,
         mode: all.orchestrator.mode,
         terse: all.orchestrator.terse !== false,
-        model: planner && planner === all.orchestrator.engine ? all.orchestrator.model : "",
+        model:
+          planner === LOCAL_ENGINE_ID
+            ? all.local.vibyModel || all.local.model
+            : planner && planner === all.orchestrator.engine
+              ? all.orchestrator.model
+              : "",
         effort: planner && planner === all.orchestrator.engine ? (all.orchestrator.effort ?? "") : "",
         projectsFolder: this.projectsFolder(),
         computer: all.computerUse,
         availablePlanners,
+      },
+      local: {
+        enabled: all.local.enabled,
+        active: all.local.active,
+        overrideAgents: all.local.overrideAgents,
+        url: all.local.url,
+        model: all.local.model,
+        vibyModel: all.local.vibyModel,
+        harness: all.local.harness,
       },
       voice: {
         ready: hostVoice ? hostVoice.ready : Boolean(recorder && runnableModel),
@@ -964,15 +1008,19 @@ export class OrchestratorDesk {
     // A model or effort picked for another planner means nothing to this one.
     const explicitModel = engineId === picked ? chosen : "";
     const explicitEffort = engineId === picked ? (chosenEffort ?? "") : "";
-    const engine = engineId ? this.core.resolveEngine(engineId) : null;
-    if (!engine || !canOrchestrate(engine.row)) {
+    const localBrain = engineId === LOCAL_ENGINE_ID ? this.core.localBrainConfig() : null;
+    const engine = engineId && engineId !== LOCAL_ENGINE_ID ? this.core.resolveEngine(engineId) : null;
+    if (engineId === LOCAL_ENGINE_ID ? !localBrain : !engine || !canOrchestrate(engine.row)) {
       outcome = "noEngine";
       errorKind = "noEngine";
       this.answer({ text: "", problem: "noEngine" });
       return;
     }
     // In a live voice call, default Claude Code to haiku unless the person chose a specific model.
-    model = explicitModel || (this.onCall && brainKind(engine.row) === "claude" ? "haiku" : "");
+    model =
+      engineId === LOCAL_ENGINE_ID
+        ? localBrain!.model
+        : explicitModel || (this.onCall && engine && brainKind(engine.row) === "claude" ? "haiku" : "");
     const contextStartedAt = Date.now();
     const context = await this.context();
     contextMs = Date.now() - contextStartedAt;
@@ -986,7 +1034,7 @@ export class OrchestratorDesk {
     const currentLibraryKey = libraryFingerprint(context);
     const currentMemoryKey = memoryFingerprint(context.memory ?? "");
     const switchedEngine = Boolean(this.conversation.engineId && this.conversation.engineId !== engineId);
-    const plannerKind = brainKind(engine.row);
+    const plannerKind = engineId === LOCAL_ENGINE_ID ? "local" : brainKind(engine!.row);
     const workspacesChanged = Boolean(
       this.conversation.begun &&
         this.conversation.workspacesKey !== undefined &&
@@ -1047,8 +1095,9 @@ export class OrchestratorDesk {
     // The plan as the person saw it when they answered: a yes is to this, and nothing else.
     const waitingSeen = waiting?.steps?.length ? planKey(waiting.steps) : "";
     let capturedInitialRules = this.conversation.initialRules;
+    const localExtraMessages: LocalChatMessage[] = [];
     const turn = async (said: string, ctx: PlanContext = context, includeImages = false, extraImages: SavedPromptImage[] = []) => {
-      const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex") && Boolean(this.conversation.initialRules);
+      const keepPromptCache = this.conversation.begun && (plannerKind === "claude" || plannerKind === "codex" || plannerKind === "local") && Boolean(this.conversation.initialRules);
       const liveChanged = keepPromptCache && this.conversation.liveKey !== undefined && this.conversation.liveKey !== liveStateFingerprint(ctx);
       const liveLine = liveChanged ? formatLiveUpdate(ctx) : "";
       const rules = keepPromptCache ? this.conversation.initialRules! : orchestratorRules(ctx);
@@ -1082,10 +1131,35 @@ export class OrchestratorDesk {
         ...(turnImages.length ? { images: turnImages.map((img) => img.path) } : {}),
       };
       const pStartedAt = Date.now();
+      if (plannerKind === "local") {
+        if (!localBrain) return null;
+        const localImages: LocalBrainImage[] = turnImages.map((img) => ({ mediaType: img.mediaType, base64: img.base64 }));
+        const messages = buildLocalBrainMessages(
+          rules,
+          this.conversation.turns.slice(0, -1),
+          localExtraMessages,
+          text,
+          localImages,
+        );
+        const runResult = await this.localRunner({
+          url: localBrain.url,
+          model: localBrain.model,
+          messages,
+          schema: STRICT_PLAN_SCHEMA as unknown as Record<string, unknown>,
+          signal,
+          timeoutMs: BRAIN_TIMEOUT_MS,
+          ...(this.onEarlySay ? { onEarlySay: this.onEarlySay } : {}),
+        });
+        if (runResult.code === 0 && runResult.stdout) {
+          localExtraMessages.push({ role: "user", content: text }, { role: "assistant", content: runResult.stdout });
+        }
+        plannerMs += Date.now() - pStartedAt;
+        return runResult;
+      }
       if (this.runner === spawnBrain && this.warmPlanners && plannerKind === "claude") {
         const warmRun = await this.plannerPool.runTurn({
-          binPath: engine.binPath,
-          row: engine.row,
+          binPath: engine!.binPath,
+          row: engine!.row,
           opts: brainOpts,
           images: turnImages.length ? turnImages : undefined,
           cwd: work,
@@ -1099,14 +1173,14 @@ export class OrchestratorDesk {
           return warmRun;
         }
       }
-      const args = brainArgs(engine.row, brainOpts);
+      const args = brainArgs(engine!.row, brainOpts);
       if (!args) return null;
       const runResult =
         plannerKind === "claude" && turnImages.length
-          ? await this.runner([engine.binPath, ...args], work, signal, undefined, claudeImageStdin(text, turnImages))
+          ? await this.runner([engine!.binPath, ...args], work, signal, undefined, claudeImageStdin(text, turnImages))
           : this.runner === spawnBrain && this.onEarlySay
-            ? await spawnBrain([engine.binPath, ...args], work, signal, BRAIN_TIMEOUT_MS, KILL_GRACE_MS, undefined, this.onEarlySay)
-            : await this.runner([engine.binPath, ...args], work, signal);
+            ? await spawnBrain([engine!.binPath, ...args], work, signal, BRAIN_TIMEOUT_MS, KILL_GRACE_MS, undefined, this.onEarlySay)
+            : await this.runner([engine!.binPath, ...args], work, signal);
       plannerMs += Date.now() - pStartedAt;
       return runResult;
     };
@@ -1586,6 +1660,17 @@ export class OrchestratorDesk {
    * opened). Codex has no list; the picker takes a name typed in.
    */
   async listModels(engineId: string): Promise<string[]> {
+    if (engineId === LOCAL_ENGINE_ID) {
+      const { url, model, vibyModel } = this.core.store.readSettings().local;
+      if (!url) return [vibyModel || model].filter(Boolean);
+      const probe = await probeLocalServer(url);
+      const ids = probe.models.map((item) => item.id);
+      if (ids.length) {
+        this.models.set(LOCAL_ENGINE_ID, ids);
+        return ids;
+      }
+      return this.models.get(LOCAL_ENGINE_ID) ?? [vibyModel || model].filter(Boolean);
+    }
     const engine = this.core.resolveEngine(engineId);
     const kind = engine ? brainKind(engine.row) : null;
     if (!engine || !kind) return [];
@@ -1910,7 +1995,6 @@ export class OrchestratorDesk {
     }
     const nextStep: OrchestratorStep = { ...current, ...clean };
     if (nextStep.kind === "settings") {
-      const rows = this.core.store.readEngineRows();
       const agents = this.core.store.listAgents().map((item) => ({ id: item.id, name: item.name }));
       const resolved = resolveSettingsStep(
         {
@@ -1925,7 +2009,7 @@ export class OrchestratorDesk {
           options: nextStep.options,
         },
         {
-          engines: rows.map((row) => ({ id: row.id, label: row.label, available: Boolean(this.core.resolveEngine(row.id)), bin: row.bin })),
+          engines: this.core.listEngines().map((row) => ({ id: row.id, label: row.label, available: row.available, bin: row.bin })),
           agents,
           settings: this.buildSettingsContext(),
         },

@@ -460,6 +460,8 @@ function unhold(session) {
 
 // ------------------------------------------------------------------ sessions
 
+const BLOCKED_SPAWN_ENV = new Set(["VIBEFORGE_PTY", "VIBEFORGE_PTY_TOKEN", "VIBEFORGE_RUN_DIR", "ELECTRON_RUN_AS_NODE", "PATH"]);
+
 /** @param {Extract<PtyRequest, { op: "spawn" }>} msg */
 function spawnSession(msg) {
   const argv = Array.isArray(msg.argv) && msg.argv.length ? msg.argv.map(String) : [process.env.SHELL || "/bin/bash"];
@@ -470,7 +472,17 @@ function spawnSession(msg) {
   const ptyToken = crypto.randomBytes(24).toString("hex");
   // VIBEFORGE_PTY tells `vibeforge tell` which terminal it was typed in; VIBEFORGE_PTY_TOKEN authenticates it.
   /** @type {NodeJS.ProcessEnv} */
-  const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "VibeForge", VIBEFORGE_PTY: id, VIBEFORGE_PTY_TOKEN: ptyToken };
+  const env = { ...process.env };
+  if (msg.env && typeof msg.env === "object") {
+    for (const [key, value] of Object.entries(msg.env)) {
+      if (typeof key === "string" && typeof value === "string" && !BLOCKED_SPAWN_ENV.has(key)) env[key] = value;
+    }
+  }
+  env.TERM = "xterm-256color";
+  env.COLORTERM = "truecolor";
+  env.TERM_PROGRAM = "VibeForge";
+  env.VIBEFORGE_PTY = id;
+  env.VIBEFORGE_PTY_TOKEN = ptyToken;
   if (runDir) env.VIBEFORGE_RUN_DIR = runDir;
   const term = pty.spawn(argv[0], argv.slice(1), { name: "xterm-256color", cols, rows, cwd: msg.cwd, env });
   // The tail reads the output, the end included, into onData below; node-pty emits nothing before

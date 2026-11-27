@@ -357,7 +357,7 @@ export function canOrchestrate(row: Pick<EngineRow, "id" | "bin">): boolean {
   return brainKind(row) !== null;
 }
 
-export type BrainKind = "grok" | "claude" | "codex" | "agy";
+export type BrainKind = "grok" | "claude" | "codex" | "agy" | "local";
 
 /**
  * The CLI that plans: the one picked in Settings while it is on this machine; until one is picked
@@ -375,6 +375,7 @@ export function plannerFor(picked: string, engines: ReadonlyArray<Pick<EngineRow
  * and Antigravity CLI (Google's, for Gemini).
  */
 export function brainKind(row: Pick<EngineRow, "id" | "bin">): BrainKind | null {
+  if (row.id === "local") return "local";
   const name = `${row.id} ${row.bin.split("/").pop() ?? row.bin}`.toLowerCase();
   if (/\bgrok\b/.test(name)) return "grok";
   if (/\bclaude\b/.test(name)) return "claude";

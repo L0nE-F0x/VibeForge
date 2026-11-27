@@ -33,6 +33,15 @@ export interface PlanSettingsContext {
       efforts: string[];
     }>;
   };
+  local?: {
+    enabled: boolean;
+    active: boolean;
+    overrideAgents: boolean;
+    url: string;
+    model: string;
+    vibyModel: string;
+    harness: string;
+  };
   voice: {
     ready: boolean;
     activeModel: string;
@@ -114,7 +123,7 @@ function modelLanguageTag(choice: ModelChoice): string {
 
 /** Renders the current Viby, Voice/STT, and VibeForge settings block for `orchestratorRules`. */
 export function formatSettingsRules(settings: PlanSettingsContext, options?: { slim?: boolean }): string[] {
-  const { viby, voice, app } = settings;
+  const { viby, voice, app, local } = settings;
   const slim = Boolean(options?.slim);
   const planners = viby.availablePlanners
     .filter((item) => item.available)
@@ -156,6 +165,11 @@ export function formatSettingsRules(settings: PlanSettingsContext, options?: { s
     `- Voice & STT: ${voice.ready ? "ready" : "not ready"}, activeModel=${voice.activeModel || "none"} (setting: ${voice.pickedModel || "auto"}, language=${voice.language}, runtimes: ${runtimes}); installed STT models: [${installedModels}]; downloadable STT catalog: [${catalogList}]`,
     `- Viby's voice & controls: talkBack=${voice.talkBack ? "on" : "off"}, talkOver=${voice.talkOver}, speaker=${voice.activeSpeaker || "none"} (installed voices: [${installedVoices}]; downloadable voices: [${voiceCatalogList}]), mouseButton=${voice.mouseButton}, sendButton=${voice.sendButton}`,
     `- App settings: defaultEngine=${app.defaultEngine || "none"}, shell=${app.defaultShell}, theme=${app.theme}${app.availableThemes?.length ? ` (themes: ${app.availableThemes.slice(0, themeLimit).join(", ")})` : ""}, language=${app.language}, font="${app.terminalFontFamily}" ${app.terminalFontSize}px${app.terminalPassthrough ? ", terminalPassthrough=on" : ""}, notify=${app.notify ? "on" : "off"}, sounds=${app.sounds.on ? `on (${Math.round(app.sounds.volume * 100)}%)` : "off"}, tray=${app.tray ? "on" : "off"} (closeToTray=${app.closeToTray ? "on" : "off"}${app.autostart !== undefined ? `, autostart=${app.autostart ? "on" : "off"}` : ""}), usage=${app.usage ? "on" : "off"}, planLimits=${app.planLimits ? "on" : "off"}, quotaAlerts=${app.quotaAlerts ? "on" : "off"}, activity=${app.activity}, checkUpdates=${app.checkUpdates ? "on" : "off"}, agentTalk=${app.agentTalk.on ? `on (handOff=${app.agentTalk.handOff}, lead=${app.agentTalk.lead || "none"})` : "off"}, phone=${app.companion.enabled ? "on" : "off"}, sync=${app.sync.enabled ? "on" : "off"}, keepRuns=${app.keepRuns.days || "forever"}d/${app.keepRuns.maxMb || "unlimited"}MB`,
+    ...(local
+      ? [
+          `- Local AI: ${local.enabled ? (local.active ? "on (Local mode active)" : "enabled (currently in Cloud mode)") : "disabled"}, url=${local.url || "unset"}, model=${local.model || "unset"}${local.vibyModel ? `, vibyModel=${local.vibyModel}` : ""}, harness=${local.harness}, overrideAgents=${local.overrideAgents ? "on" : "off"}`,
+        ]
+      : []),
     `- ${describeComputerGrants(viby.computer)}`,
     ...(slim ? ['  (Use an `inspect` step with prompt "settings" or "voice" for full model/voice sizes, languages, and themes.)'] : []),
   ];
@@ -202,6 +216,7 @@ export function settingsFingerprint(settings: PlanSettingsContext | undefined): 
     app.agentTalk.on,
     app.agentTalk.handOff,
     app.agentTalk.lead,
+    settings.local ?? null,
   ]);
 }
 
@@ -421,6 +436,7 @@ function matchEngine(query: string, engines: SettingsValidationContext["engines"
 }
 
 function isPlannerRow(row: Pick<EngineRow, "id" | "bin">): boolean {
+  if (row.id === "local") return true;
   const name = `${row.id} ${(row.bin ?? "").split("/").pop() ?? ""}`.toLowerCase();
   return /\b(?:grok|claude|codex|agy)\b|antigravity/.test(name);
 }
@@ -988,6 +1004,17 @@ export function resolveSettingsStep(
     if (flag === null) return { action: null, issue: "prompt", asked: value || "sync" };
     const summary = `Workspace sync · ${flag ? "on" : "off"}`;
     return { action: { op: "app-patch", patch: { sync: { enabled: flag } }, networkOn: flag, summary }, issue: null, asked: summary };
+  }
+
+  if (/^(?:local|localai|localmode|uselocal)$/.test(key)) {
+    const flag = parseBool(value);
+    if (flag === null) return { action: null, issue: "prompt", asked: value || "local" };
+    const summary = `Local AI mode · ${flag ? "on" : "off"}`;
+    return {
+      action: { op: "app-patch", patch: { local: flag ? { enabled: true, active: true } : { active: false } }, summary },
+      issue: null,
+      asked: summary,
+    };
   }
 
   if (/^(?:syncname|machinename)$/.test(key)) {

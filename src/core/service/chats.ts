@@ -68,7 +68,7 @@ export class ChatDesk {
       this.core.emit("chats");
       return this.chatView(chat);
     }
-    const engineId = input.engine?.trim() || this.core.store.readSettings().defaultEngine;
+    const engineId = input.engine?.trim() || this.core.effectiveDefaultEngine();
     this.core.requireEngine(engineId);
     const scratchRoot = path.join(this.core.options.dataRoot, "scratch");
     const id = this.uniqueChatId(input.prompt ? scratchName(input.prompt) : "chat", scratchRoot);
@@ -234,7 +234,8 @@ export class ChatDesk {
   ): Promise<Launched> {
     const agent = chat.agentId ? this.core.store.getAgent(chat.agentId) : null;
     if (chat.agentId && !agent) throw new Error("This chat's agent no longer exists.");
-    const engine = this.core.requireEngine(agent ? agent.engine : chat.engine);
+    const targetEngineId = this.core.effectiveEngineId(agent ? agent.engine : chat.engine, { fromAgent: Boolean(agent) });
+    const engine = this.core.requireEngine(targetEngineId);
     const previous = opts.continueSession ? this.core.store.getRun(chat.runIds[chat.runIds.length - 1] ?? "") : null;
     const resume = this.core.resumePlan(engine.row, previous);
     const nativeContinue = resume.native;

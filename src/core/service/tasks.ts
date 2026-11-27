@@ -71,7 +71,7 @@ export class TaskDesk {
       agentPlaces: agent?.places ?? [],
     });
     if (!decision.ok) return decision.reason;
-    if (agent && !this.core.resolveEngine(agent.engine)) return "engine-missing";
+    if (agent && !this.core.resolveEngine(this.core.effectiveEngineId(agent.engine, { fromAgent: true }))) return "engine-missing";
     return null;
   }
 
@@ -207,7 +207,7 @@ export class TaskDesk {
     const id = task.id;
     const agent = this.core.store.getAgent(task.agentId!)!;
     const workspace = this.core.workspaceById(task.workspaceId)!;
-    const engine = this.core.requireEngine(agent.engine);
+    const engine = this.core.requireEngine(this.core.effectiveEngineId(agent.engine, { fromAgent: true }));
     const prompt = taskPrompt(task.title, task.body);
     const previous = task.runIds[task.runIds.length - 1] ? this.core.store.getRun(task.runIds[task.runIds.length - 1]) : null;
     const resume = continueSession ? this.core.resumePlan(engine.row, previous) : { native: false, resumeArgs: null };

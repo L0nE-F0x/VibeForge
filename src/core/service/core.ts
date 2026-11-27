@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
 import { instructionArgs, launchOptionArgs, planLaunch, resumeArgsFromTranscript, withAvailability } from "../engines.js";
+import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl } from "../local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
 import { buildPreamble } from "../preamble.js";
@@ -17,6 +18,14 @@ import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type Ru
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
 type Settle = () => unknown;
+
+export interface ResolvedEngine {
+  row: EngineRow;
+  binPath: string;
+  extraArgs?: string[];
+  env?: Record<string, string>;
+  localModel?: string;
+}
 
 /** Strip terminal escape sequences so post-exit resume commands in raw scrollback read cleanly. */
 function stripTerminalCodes(raw: string): string {
@@ -169,9 +178,14 @@ export class ServiceCore {
     return this.store.readSettings();
   }
 
-  saveSettings(patch: Partial<Omit<Settings, "companion">> & { companion?: Partial<Settings["companion"]> }): Settings {
+  saveSettings(
+    patch: Partial<Omit<Settings, "companion" | "local">> & {
+      companion?: Partial<Settings["companion"]>;
+      local?: Partial<Settings["local"]>;
+    },
+  ): Settings {
     const current = this.store.readSettings();
-    const { companion: companionPatch, ...rest } = patch;
+    const { companion: companionPatch, local: localPatch, ...rest } = patch;
     const next: Settings = { ...current, ...rest };
     // A partial phone-page patch must not drop the pairing code or the saved nudges.
     if (companionPatch) {
@@ -180,8 +194,15 @@ export class ServiceCore {
       if (companionPatch.token === "" && current.companion.token) next.companion.devices = [];
       if (next.companion.enabled && !next.companion.token) next.companion.token = newCompanionToken();
     }
+    if (localPatch) {
+      next.local = { ...current.local, ...localPatch };
+    }
     this.store.writeSettings(next);
-    this.emit("settings");
+    if (localPatch) {
+      this.emit("settings", "engines", "orchestrator", "agents", "routines", "tasks");
+    } else {
+      this.emit("settings");
+    }
     return this.store.readSettings();
   }
 
@@ -200,31 +221,89 @@ export class ServiceCore {
     this.emit("unreadable", "settings", "engines", "agents", "routines", "tasks", "workspaces", "chats");
   }
 
+  localBrainConfig(): { url: string; model: string } | null {
+    const { local } = this.store.readSettings();
+    if (!local.enabled) return null;
+    const url = normalizeLocalUrl(local.url);
+    const model = cleanLocalModel(local.vibyModel || local.model);
+    return url && model ? { url, model } : null;
+  }
+
+  isLocalModeActive(): boolean {
+    const { local } = this.store.readSettings();
+    return local.enabled && local.active && Boolean(this.localBrainConfig() || this.resolveEngine(LOCAL_ENGINE_ID));
+  }
+
+  isLocalCodingActive(): boolean {
+    const { local } = this.store.readSettings();
+    return local.enabled && local.active && Boolean(this.resolveEngine(LOCAL_ENGINE_ID));
+  }
+
+  isLocalAgentOverrideActive(): boolean {
+    return this.isLocalCodingActive() && this.store.readSettings().local.overrideAgents;
+  }
+
+  effectiveDefaultEngine(): string {
+    return this.isLocalCodingActive() ? LOCAL_ENGINE_ID : this.store.readSettings().defaultEngine;
+  }
+
+  effectiveEngineId(engineId: string, opts?: { fromAgent?: boolean }): string {
+    if (engineId === LOCAL_ENGINE_ID) return LOCAL_ENGINE_ID;
+    if (opts?.fromAgent && this.isLocalAgentOverrideActive()) return LOCAL_ENGINE_ID;
+    return engineId;
+  }
+
   listEngines(): Engine[] {
-    return withAvailability(this.store.readEngineRows(), (bin) => this.options.host.resolveBin(bin));
+    const rows = this.store.readEngineRows();
+    const engines = withAvailability(rows, (bin) => this.options.host.resolveBin(bin));
+    const { local } = this.store.readSettings();
+    if (local.enabled && !engines.some((engine) => engine.id === LOCAL_ENGINE_ID)) {
+      engines.push(localEngineSpec(local, rows, (bin) => this.options.host.resolveBin(bin)).engine);
+    }
+    return engines;
   }
 
   saveEngines(rows: EngineRow[]): Engine[] {
-    this.store.writeEngineRows(rows);
+    this.store.writeEngineRows(rows.filter((row) => row.id !== LOCAL_ENGINE_ID));
     this.emit("engines", "agents", "routines", "tasks");
     return this.listEngines();
   }
 
-  resolveEngine(engineId: string): { row: EngineRow; binPath: string } | null {
-    const row = this.store.readEngineRows().find((engine) => engine.id === engineId);
+  resolveEngine(engineId: string, opts?: { model?: string }): ResolvedEngine | null {
+    const rows = this.store.readEngineRows();
+    if (engineId === LOCAL_ENGINE_ID) {
+      const { local } = this.store.readSettings();
+      if (!local.enabled) return null;
+      const spec = localEngineSpec(local, rows, (bin) => this.options.host.resolveBin(bin), opts?.model);
+      if (!spec.engine.available || !spec.binPath) return null;
+      return {
+        row: spec.engine,
+        binPath: spec.binPath,
+        extraArgs: spec.extraArgs,
+        env: spec.env,
+        localModel: spec.localModel,
+      };
+    }
+    const row = rows.find((engine) => engine.id === engineId);
     if (!row) return null;
     const binPath = this.options.host.resolveBin(row.bin);
     return binPath ? { row, binPath } : null;
   }
 
-  requireEngine(engineId: string): { row: EngineRow; binPath: string } {
-    const engine = this.resolveEngine(engineId);
+  requireEngine(engineId: string, opts?: { model?: string }): ResolvedEngine {
+    const engine = this.resolveEngine(engineId, opts);
     if (engine) return engine;
+    if (engineId === LOCAL_ENGINE_ID) {
+      throw new Error("Local AI needs a connected server, a model, and OpenCode, Claude Code, or Codex installed.");
+    }
     const row = this.store.readEngineRows().find((item) => item.id === engineId);
     throw new Error(row ? `${row.label} (${row.bin}) is not on PATH.` : `There is no engine called "${engineId}".`);
   }
 
   engineMissingText(engineId: string): string {
+    if (engineId === LOCAL_ENGINE_ID) {
+      return "Local AI is not ready (check server, model, and OpenCode/Claude/Codex).";
+    }
     const row = this.store.readEngineRows().find((item) => item.id === engineId);
     return row ? `${row.label} (${row.bin}) is not on PATH.` : `The engine "${engineId}" is not configured.`;
   }
@@ -374,7 +453,7 @@ export class ServiceCore {
   async launch(input: {
     origin: RunOrigin;
     title: string;
-    engine: { row: EngineRow; binPath: string };
+    engine: ResolvedEngine;
     cwd: string;
     /** What the human asked for, kept for the record. */
     prompt: string;
@@ -407,6 +486,13 @@ export class ServiceCore {
     const { id, dir } = allocateRunDir(this.options.dataRoot, started, input.title);
     const preamblePath = path.join(dir, RUN_FILES.preamble);
     writeFileAtomic(preamblePath, input.promptText ?? "");
+    const launchArgs = [
+      ...(input.engine.extraArgs ?? []),
+      ...launchOptionArgs(input.engine.row, {
+        ...(input.engine.row.id === LOCAL_ENGINE_ID ? {} : { model: input.model }),
+        effort: input.effort,
+      }),
+    ];
     const plan = planLaunch(input.engine.row, input.engine.binPath, {
       prompt: input.promptText,
       continueSession: input.continueSession,
@@ -418,7 +504,7 @@ export class ServiceCore {
             record: instructionArgs(input.engine.row, "{VibeForge note}", { allowVibeforge: input.allowVibeforge }),
           }
         : null,
-      options: launchOptionArgs(input.engine.row, { model: input.model, effort: input.effort }),
+      options: launchArgs,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
     let gitStart: string | null = null;
@@ -464,6 +550,7 @@ export class ServiceCore {
       spawned = await this.options.host.spawn({
         cwd: input.cwd,
         argv: plan.argv,
+        ...(input.engine.env && Object.keys(input.engine.env).length ? { env: input.engine.env } : {}),
         runDir: dir,
         pasteInput,
         cols: input.cols,
@@ -493,6 +580,7 @@ export class ServiceCore {
       workspaceId: meta.workspaceId,
       routineId: meta.routineId,
       ...(input.orchestrated ? { orchestrated: true } : {}),
+      ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     });
     if (input.chatId) {
       const chat = this.store.getChat(input.chatId);

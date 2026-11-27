@@ -1,6 +1,7 @@
-import { Bot, CalendarClock, History, Keyboard, KanbanSquare, MessageSquarePlus, MessagesSquare, Palette, Plus, Search, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
+import { Bot, CalendarClock, Cloud, History, Keyboard, KanbanSquare, Laptop, MessageSquarePlus, MessagesSquare, Palette, Plus, Search, Server, Settings as SettingsIcon, Sparkles, SquareTerminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { isLocalConfigured } from "../../shared/local.js";
 import { tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useDebounced, useEngines, useOrchestrator, useQuery, useRoutines, useSettings, useSkills, useTasks, useWorkspaces } from "../api.js";
 import { runLabel } from "../views/Home.js";
@@ -45,7 +46,9 @@ export function Switcher({ onClose }: { onClose: () => void }) {
   const t = useT();
   const { go, open } = useNav();
   const home = useAppInfo().data?.home ?? "";
-  const rail = useSettings().data?.rail;
+  const settings = useSettings().data;
+  const rail = settings?.rail;
+  const local = settings?.local;
   const agents = useAgents().data;
   const chats = useChats(undefined).data;
   const workspaces = useWorkspaces().data?.workspaces;
@@ -128,6 +131,20 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       })),
       { id: "shortcuts", title: t("shortcuts.title"), kind: "switcher.setting", icon: Keyboard, act: () => window.dispatchEvent(new Event(SHOW_SHORTCUTS_EVENT)) },
       { id: "new:viby", title: t("switcher.newViby"), kind: "switcher.action", icon: Sparkles, act: () => { void call("orchestrator.clear"); go({ view: "orchestrator" }); } },
+      ...(local?.enabled
+        ? [
+            !isLocalConfigured(local)
+              ? { id: "local:toggle", title: t("switcher.setupLocal"), kind: "switcher.setting" as const, icon: Server, act: () => go({ view: "settings", section: "local" }) }
+              : {
+                  id: "local:toggle",
+                  title: local.active ? t("switcher.useCloud") : t("switcher.useLocal"),
+                  sub: local.model,
+                  kind: "switcher.action" as const,
+                  icon: local.active ? Cloud : Laptop,
+                  act: () => void call("settings.save", { local: { ...local, active: !local.active } }),
+                },
+          ]
+        : []),
       { id: "new:chat", title: t("switcher.newChat"), kind: "switcher.action", icon: MessageSquarePlus, act: () => go({ view: "chat" }) },
       { id: "new:task", title: t("tasks.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "tasks", taskId: "new" }) },
       { id: "new:skill", title: t("skills.new"), kind: "switcher.action", icon: Plus, act: () => go({ view: "skills", skillId: "new" }) },
@@ -135,7 +152,7 @@ export function Switcher({ onClose }: { onClose: () => void }) {
       { id: `theme:${FOLLOW}`, title: `${t("switcher.theme")} · ${t("settings.followOmarchy")}`, sub: themes?.system?.name, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(FOLLOW) },
       ...(themes?.themes ?? []).map((theme): Item => ({ id: `theme:${theme.id}`, title: `${t("switcher.theme")} · ${theme.name}`, kind: "switcher.theme", icon: Palette, act: () => void pickTheme(theme.id) })),
     ];
-  }, [agents, chats, workspaces, orchestrator?.threads, tasks, routines, skills, themes, rail, home, t, go, open, pickTheme]);
+  }, [agents, chats, workspaces, orchestrator?.threads, tasks, routines, skills, themes, rail, local, home, t, go, open, pickTheme]);
 
   const shown = useMemo(() => {
     // Nothing typed: what you were just in comes first (recent chats, workspaces, agents, open

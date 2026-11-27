@@ -1,6 +1,7 @@
-import { Activity, CircleHelp, EyeOff, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
+import { Activity, CircleHelp, Cloud, EyeOff, Laptop, Settings as SettingsIcon, SlidersHorizontal, TerminalSquare } from "lucide-react";
 import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { UsagePeriod } from "../shared/api.js";
+import { isLocalConfigured } from "../shared/local.js";
 import { duration, tildify } from "../shared/text.js";
 import { call, on, useAppInfo, useInbox, useLive, useNow, useOrchestrator, usePlans, useSettings, useTasks, useUpdate, useUsage, useWorkspaces } from "./api.js";
 import { compactTokens, hottestPlan, PLAN_NAMES, PlanPanel, USAGE_PERIODS, UsageMeter, UsagePanel, usageToday } from "./components/Usage.js";
@@ -283,7 +284,9 @@ function Rail() {
   const [liveAnchor, setLiveAnchor] = useState<HTMLElement | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
   const [viewMenu, setViewMenu] = useState<{ view: RailView; anchor: HTMLElement } | null>(null);
-  const rail = useSettings().data?.rail;
+  const settingsData = useSettings().data;
+  const rail = settingsData?.rail;
+  const local = settingsData?.local;
   const { visible } = railViews(rail);
   const hide = (view: RailView) => void call("settings.save", { rail: { order: rail?.order ?? [], hidden: [...(rail?.hidden ?? []), view] } });
 
@@ -363,6 +366,32 @@ function Rail() {
       })}
       <div className="rail-foot">
         <VibyRailButton inVibyTab={route.view === "orchestrator"} onOpen={() => window.dispatchEvent(new Event(OPEN_ORCHESTRATOR_EVENT))} />
+        {local?.enabled && (
+          <button
+            type="button"
+            className="rail-btn"
+            aria-pressed={local.active}
+            {...tipProps(
+              !isLocalConfigured(local)
+                ? t("rail.tip.localSetup")
+                : local.active
+                  ? t("rail.tip.localMode")
+                  : t("rail.tip.cloudMode"),
+              { side: "right" },
+            )}
+            onClick={() => {
+              if (!isLocalConfigured(local)) {
+                go({ view: "settings", section: "local" });
+                return;
+              }
+              void call("settings.save", { local: { ...local, active: !local.active } });
+            }}
+          >
+            {local.active ? <Laptop size={19} strokeWidth={1.9} className="accent-text" /> : <Cloud size={19} strokeWidth={1.9} />}
+            <span>{local.active ? t("rail.local") : t("rail.cloud")}</span>
+            {local.active && <span className="rail-dot" />}
+          </button>
+        )}
         <button
           type="button"
           className="rail-btn"

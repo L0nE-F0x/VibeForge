@@ -124,6 +124,7 @@ export const PaneView = memo(function PaneView({
   const [zone, setZone] = useState<DropZone | null>(null);
   const terminalRef = useRef<TerminalHandle | null>(null);
   const engine = pane.launch.type === "engine" ? engines.find((item) => item.id === (pane.launch as { engineId: string }).engineId) : null;
+  const isLocalPane = Boolean(engine?.local || (pane.launch.type === "engine" && (pane.launch as { engineId: string }).engineId === "local"));
   const title = pane.launch.type === "shell" ? `${t("common.shell")}${shellNumber ? ` ${shellNumber}` : ""}` : (engine?.label ?? (pane.launch as { engineId: string }).engineId);
   // A shell running something shows that instead: `claude` typed at the prompt reads "Claude Code".
   const shown = state === "live" && program ? program : title;
@@ -136,6 +137,11 @@ export const PaneView = memo(function PaneView({
   const hint = showShellHint({ shell: pane.launch.type === "shell", fresh: Boolean(runtime?.fresh), live: state === "live", program });
   const found = hint ? engines.filter((item) => item.available) : [];
   const startFromHint = (item: Engine) => {
+    if (item.local) {
+      onStart({ type: "engine", engineId: item.id });
+      terminalRef.current?.focus();
+      return;
+    }
     const ptyId = runtime?.ptyId;
     if (!ptyId) return;
     actions.typed(pane.id);
@@ -172,6 +178,7 @@ export const PaneView = memo(function PaneView({
           <span className="dot" role="img" aria-label={t("pane.idle")} {...tipProps(t("pane.idle"))} />
         )}
         <span className="pane-title truncate">{shown}</span>
+        {isLocalPane && <span className="chip accent">{t("pane.local")}</span>}
         {shown !== title && <span className="pane-sub truncate">{title}</span>}
         {alsoHere.length > 0 && (
           <span className="pane-sub truncate" {...tipProps(t("occupancy.paneTip"))}>
@@ -242,7 +249,7 @@ export const PaneView = memo(function PaneView({
             <div className="pane-hint">
               <span className="pane-hint-text">{found.length ? t("first.hint.pick") : t("first.hint.none")}</span>
               {found.map((item) => (
-                <Button key={item.id} size="sm" icon={Play} tip={t("first.hint.tip", { command: cliCommand(item) })} onClick={() => startFromHint(item)}>
+                <Button key={item.id} size="sm" icon={Play} tip={item.local ? t("code.startEngine", { engine: item.label }) : t("first.hint.tip", { command: cliCommand(item) })} onClick={() => startFromHint(item)}>
                   {item.label}
                 </Button>
               ))}

@@ -143,7 +143,11 @@ export function HomeView() {
   const onboarding = latestRuns !== undefined && !firstStepsDone(steps);
   const rail = settings?.rail;
   // The CLI the "Run a CLI" step starts: the default one when it is here, else the first found.
-  const firstCli = available.find((engine) => engine.id === settings?.defaultEngine) ?? available[0] ?? null;
+  const firstCli =
+    (settings?.local.enabled && settings.local.active ? available.find((engine) => engine.local) : undefined) ??
+    available.find((engine) => engine.id === settings?.defaultEngine) ??
+    available[0] ??
+    null;
   const lastWorkspace = workspaces.find((item) => item.id === workspaceFile?.lastWorkspaceId) ?? workspaces.at(-1) ?? null;
   const runCli = () => {
     if (!lastWorkspace) {

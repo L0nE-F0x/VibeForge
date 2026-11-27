@@ -12,6 +12,8 @@ import type { Waiting } from "./turns.js";
 export interface SpawnRequest {
   cwd: string;
   argv: string[];
+  /** Ephemeral per-spawn environment variables (e.g. pointing a local CLI session at a local server). */
+  env?: Record<string, string>;
   /** Run directory the PTY host writes scrollback, the final screen, and a text transcript into. */
   runDir: string | null;
   /** Pasted once the CLI has drawn its UI and gone quiet. */

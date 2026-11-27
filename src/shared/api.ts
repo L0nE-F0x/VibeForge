@@ -31,6 +31,8 @@ import type {
   EngineRow,
   LayoutNode,
   LiveSession,
+  LocalHarness,
+  LocalSettings,
   Routine,
   RunOrigin,
   Schedule,
@@ -52,6 +54,7 @@ import type {
   WorkspaceCategory,
 } from "../core/types.js";
 import type { InstallKind, Release } from "../core/updates.js";
+import type { LocalModelInfo, LocalRuntimeStatus, LocalServerKind, LocalServerProbe } from "../core/local.js";
 import type { UsageSummary } from "../core/usage.js";
 import type { PlanSummary } from "../core/plans.js";
 import type { Activity } from "../core/activity.js";
@@ -113,6 +116,12 @@ export type {
   Launched,
   Queued,
   LiveSession,
+  LocalHarness,
+  LocalModelInfo,
+  LocalRuntimeStatus,
+  LocalServerKind,
+  LocalServerProbe,
+  LocalSettings,
   Palette,
   ThemeChoice,
   ThemeList,
@@ -434,6 +443,10 @@ export interface DeskMethods {
   "engines.list": () => Engine[];
   "engines.recheck": () => Engine[];
   "engines.save": (rows: EngineRow[]) => Engine[];
+  /** Detect local AI binaries, coding CLIs, loopback servers, and the configured Local AI server. */
+  "local.status": (url?: string) => LocalRuntimeStatus;
+  /** Probe a specific OpenAI-compatible Local AI or home-network server address. */
+  "local.probe": (url: string) => LocalServerProbe;
 
   "workspaces.list": () => WorkspaceFile;
   /** Git state and recent run timestamp per workspace id, for filtering and sorting the workspace list. */

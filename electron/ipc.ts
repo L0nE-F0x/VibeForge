@@ -230,6 +230,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
       return s().listEngines();
     },
     "engines.save": (rows) => s().saveEngines(rows),
+    "local.status": (url) => s().localStatus(url),
+    "local.probe": (url) => s().localProbe(url),
 
     "workspaces.list": () => s().listWorkspaces(),
     "workspaces.status": () => s().summarizeWorkspaces(),

@@ -133,6 +133,27 @@ export interface EngineRow {
 export interface Engine extends EngineRow {
   available: boolean;
   path: string | null;
+  /** Managed virtual engine backed by Settings → Local AI. */
+  local?: boolean;
+}
+
+export type LocalHarness = "auto" | "opencode" | "claude" | "codex";
+
+export interface LocalSettings {
+  /** Enable Local AI in pickers and show the Cloud / Local switch. */
+  enabled: boolean;
+  /** Quick switch: prefer Local for Viby and default new launches when configured. */
+  active: boolean;
+  /** When Local mode (`active`) is on, also run saved Agents (tasks, routines, agent chats, Viby starts) through Local without editing agent.yaml. */
+  overrideAgents: boolean;
+  /** Base URL of an OpenAI-compatible server on this computer or home network / Tailscale. */
+  url: string;
+  /** Active model id picked from the server (shared default for coding and Viby). */
+  model: string;
+  /** Optional separate model id for Viby; empty uses `model`. */
+  vibyModel: string;
+  /** Installed coding CLI that drives local coding sessions. */
+  harness: LocalHarness;
 }
 
 export interface Settings {
@@ -179,6 +200,8 @@ export interface Settings {
   agentTalk: AgentTalkSettings;
   /** The Orchestrator: which CLI plans, and whether a plan waits for Go. */
   orchestrator: OrchestratorSettings;
+  /** Local AI server (this computer or home network / Tailscale) and Cloud / Local mode. */
+  local: LocalSettings;
   /** What Viby may see and do on the screen. Only a person changes it, in Settings; Viby can't. */
   computerUse: ComputerUseSettings;
   /** Workspaces synced with your other machines. Off until turned on. */
@@ -380,6 +403,8 @@ export interface LiveSession {
   talk?: TalkState | null;
   /** The Orchestrator started it: Code gives it a pane in its workspace. */
   orchestrated?: boolean;
+  /** Local model id when launched through the Local AI engine. */
+  localModel?: string | null;
 }
 
 /** A terminal talking with other CLIs through VibeForge, for its pane. */

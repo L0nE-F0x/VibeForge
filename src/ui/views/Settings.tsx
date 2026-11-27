@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, MousePointerClick, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Undo2, Volume2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, AudioLines, Bell, Bug, Check, Compass, Cpu, Download, FolderOpen, HardDrive, Keyboard, Laptop, LifeBuoy, Lightbulb, MessagesSquare, Mic, Minus, MousePointerClick, PanelLeft, Palette as PaletteIcon, Pencil, Plus, RefreshCw, Save, Server, Settings as SettingsIcon, Power, Smartphone, SquareTerminal, Stethoscope, Trash2, Undo2, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Engine, EngineRow, Settings } from "../../shared/api.js";
 import { joinArgs, splitArgs, tildify } from "../../shared/text.js";
@@ -15,6 +15,7 @@ import { StorageCard } from "../components/StorageCard.js";
 import { TalkCard } from "../components/TalkCard.js";
 import { ComputerUseCard } from "../components/ComputerUseCard.js";
 import { OrchestratorCard } from "../components/OrchestratorCard.js";
+import { LocalCard } from "../components/LocalCard.js";
 import { ThemeField } from "../components/ThemePicker.js";
 import { TrayCard } from "../components/TrayCard.js";
 import { VoiceCard } from "../components/VoiceCard.js";
@@ -166,6 +167,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
   const [editing, setEditing] = useState<string | null>(null);
   const current = settings.data;
   const rows = engines.data ?? [];
+  const customRows = rows.filter((engine) => !engine.local);
   const update = useUpdate().data;
   const copyDiagnostics = useCopyDiagnostics();
 
@@ -187,8 +189,8 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
   }, t("settings.enginesFailed"));
   // Undo puts the row back where it was, with its arguments: as every other delete can be undone.
   const removeEngine = (id: string) => {
-    const before = rows.map(toRow);
-    const gone = rows.find((item) => item.id === id);
+    const before = customRows.map(toRow);
+    const gone = customRows.find((item) => item.id === id);
     void saveEngines(before.filter((item) => item.id !== id)).then((saved) =>
       saved && push("info", t("common.deletedNamed", { name: gone?.label ?? id }), undefined, { label: t("common.undo"), run: () => void saveEngines(before) }),
     );
@@ -236,7 +238,6 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
       </div>
     );
   }
-  const available = rows.filter((engine) => engine.available);
 
   return (
     <div className="main">
@@ -326,6 +327,11 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
           </div>
           <OrchestratorCard />
 
+          <div className="section-title" id="settings-local">
+            <Server size={13} /> {t("local.title")}
+          </div>
+          <LocalCard />
+
           <div className="section-title" id="settings-computer-use">
             <MousePointerClick size={13} /> {t("cu.title")}
           </div>
@@ -398,7 +404,7 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
           <div className="section-title" id="settings-engines">
             <SquareTerminal size={13} /> {t("settings.engines")}
             <span className="count">
-              {available.length}/{rows.length}
+              {customRows.filter((engine) => engine.available).length}/{customRows.length}
             </span>
             <span className="grow" />
             <Button size="sm" variant="ghost" icon={RefreshCw} busy={rechecking} onClick={() => void recheck()}>
@@ -415,22 +421,22 @@ export function SettingsView({ route }: { route: Extract<Route, { view: "setting
               engine={{ id: "", label: "", bin: "", args: [], promptArgs: ["{prompt}"] }}
               onCancel={() => setEditing(null)}
               onSave={(row) => {
-                if (rows.some((engine) => engine.id === row.id)) {
+                if (customRows.some((engine) => engine.id === row.id) || row.id === "local") {
                   push("error", t("settings.idTaken"));
                   return;
                 }
-                void saveEngines([...rows.map(toRow), row]);
+                void saveEngines([...customRows.map(toRow), row]);
               }}
             />
           )}
           <div className="vstack" style={{ gap: 6 }}>
-            {rows.map((engine) =>
+            {customRows.map((engine) =>
               editing === engine.id ? (
                 <EngineEditor
                   key={engine.id}
                   engine={engine}
                   onCancel={() => setEditing(null)}
-                  onSave={(row) => void saveEngines(rows.map((item) => (item.id === engine.id ? row : toRow(item))))}
+                  onSave={(row) => void saveEngines(customRows.map((item) => (item.id === engine.id ? row : toRow(item))))}
                 />
               ) : (
                 <div key={engine.id} className="card hstack" style={{ padding: "9px 12px" }}>

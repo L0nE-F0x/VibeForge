@@ -22,8 +22,10 @@ import type {
   OrchestratorSettings,
   OrchestratorTurn,
   OrchestratorView as View,
+  Settings,
 } from "../../shared/api.js";
 import { cleanModel, effortForModel, effortLevels, modelOwnEffort } from "../../shared/launch-options.js";
+import { LOCAL_ENGINE_ID, isLocalConfigured } from "../../shared/local.js";
 import { brainKind, CONFIRMED_KEY, canOrchestrate, orchestratorVoiceWords, plannerFor } from "../../shared/orchestrator.js";
 import { call, useAgents, useEngines, useLive, useOrchestrator, useRoutines, useSettings, useSkills, useWorkspaces } from "../api.js";
 import { CallButton, CallMeterCells, callMood, LiveVibySprite, useCall, useCallToggle, useUnreadSaid } from "../call.js";
@@ -430,20 +432,23 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
   const settings = useSettings().data;
   const engines = useEngines().data ?? [];
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const [save] = useAction(async (orchestrator: OrchestratorSettings) => call("settings.save", { orchestrator }), t("settings.saveFailed"));
+  const [save] = useAction(async (patch: Partial<Settings>) => call("settings.save", patch), t("settings.saveFailed"));
 
+  const isLocal = engineId === LOCAL_ENGINE_ID;
   const engine = engines.find((item) => item.id === engineId);
-  const engineLabel = engine?.label ?? (engineId || t("orch.title"));
-  const chosenModel = settings && engineId === settings.orchestrator.engine ? settings.orchestrator.model : "";
-  const isClaude = Boolean(engine && brainKind(engine) === "claude");
+  const engineLabel = isLocal ? t("local.title") : (engine?.label ?? (engineId || t("orch.title")));
+  const chosenModel = isLocal
+    ? (settings?.local.vibyModel || settings?.local.model || "")
+    : (settings && engineId === settings.orchestrator.engine ? settings.orchestrator.model : "");
+  const isClaude = Boolean(!isLocal && engine && brainKind(engine) === "claude");
   const modelLabel = chosenModel || (isClaude ? (locked ? "haiku" : t("orch.modelCallDefault")) : t("orch.modelDefault"));
   // A call starting while the popover is open closes it for good, rather than it coming back on hang-up.
   useEffect(() => {
     if (locked) setAnchor(null);
   }, [locked]);
 
-  const effortPick = engine && settings && (
-    <PlannerEffortLabel engine={engine} current={settings.orchestrator} onSave={(next) => void save(next)} />
+  const effortPick = !isLocal && engine && settings && (
+    <PlannerEffortLabel engine={engine} current={settings.orchestrator} onSave={(orchestrator) => void save({ orchestrator })} />
   );
 
   if (locked) {
@@ -478,6 +483,7 @@ function PlannerModelLabel({ engineId, locked }: { engineId: string; locked: boo
           anchor={anchor}
           engineId={engineId}
           current={settings.orchestrator}
+          local={settings.local}
           engines={engines}
           onSave={(next) => void save(next)}
           onClose={() => setAnchor(null)}
@@ -547,6 +553,7 @@ function ModelPopover({
   anchor,
   engineId,
   current,
+  local,
   engines,
   onSave,
   onClose,
@@ -554,22 +561,38 @@ function ModelPopover({
   anchor: HTMLElement;
   engineId: string;
   current: OrchestratorSettings;
+  local: Settings["local"];
   engines: Engine[];
-  onSave: (next: OrchestratorSettings) => void;
+  onSave: (next: Partial<Settings>) => void;
   onClose: () => void;
 }) {
   const t = useT();
-  const planners = engines.filter((item) => canOrchestrate(item));
-  const activeEngine = engines.find((item) => item.id === engineId);
-  const isClaude = Boolean(activeEngine && brainKind(activeEngine) === "claude");
-  const activeModel = engineId === current.engine ? current.model : "";
+  const localReady = Boolean(local.enabled && isLocalConfigured(local));
+  const planners = engines
+    .filter((item) => canOrchestrate(item))
+    .map((item) => (item.id === LOCAL_ENGINE_ID ? { ...item, available: localReady } : item));
+  if (local.enabled && !planners.some((item) => item.id === LOCAL_ENGINE_ID)) {
+    planners.push({ id: LOCAL_ENGINE_ID, label: t("local.title"), bin: LOCAL_ENGINE_ID, args: [], available: localReady, path: null, local: true });
+  }
+  const isLocal = engineId === LOCAL_ENGINE_ID;
+  const activeEngine = planners.find((item) => item.id === engineId);
+  const isClaude = Boolean(!isLocal && activeEngine && brainKind(activeEngine) === "claude");
+  const activeModel = isLocal ? local.vibyModel : (engineId === current.engine ? current.model : "");
   // Another model keeps the effort only where it is still valid for it.
-  const withModel = (model: string): OrchestratorSettings => ({
-    ...current,
-    engine: engineId,
-    model,
-    effort: activeEngine ? effortForModel(activeEngine, model, engineId === current.engine ? current.effort : "") : "",
-  });
+  const savePickedModel = (model: string) => {
+    if (isLocal) {
+      onSave({ local: { ...local, vibyModel: model } });
+      return;
+    }
+    onSave({
+      orchestrator: {
+        ...current,
+        engine: engineId,
+        model,
+        effort: activeEngine ? effortForModel(activeEngine, model, engineId === current.engine ? current.effort : "") : "",
+      },
+    });
+  };
   const [models, setModels] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [custom, setCustom] = useState(false);
@@ -593,7 +616,7 @@ function ModelPopover({
   }, [engineId]);
 
   const listed = models ?? [];
-  const defaultLabel = isClaude ? t("orch.modelCallDefault") : t("orch.modelDefault");
+  const defaultLabel = isLocal ? t("local.vibySame") : isClaude ? t("orch.modelCallDefault") : t("orch.modelDefault");
 
   return (
     <Popover anchor={anchor} onClose={onClose}>
@@ -612,12 +635,15 @@ function ModelPopover({
               onClick={() => {
                 setCustom(false);
                 setTyped("");
-                onSave({ ...current, engine: item.id, model: "", effort: "" });
+                onSave({
+                  orchestrator: { ...current, engine: item.id, model: "", effort: "" },
+                  ...(local.active && item.id !== LOCAL_ENGINE_ID ? { local: { ...local, active: false } } : {}),
+                });
               }}
             >
               <span className="viby-menu-check">{selected && <Check size={13} />}</span>
-              <span className="grow truncate">{item.label}</span>
-              {!item.available && <span className="faint small">{t("common.notOnPath")}</span>}
+              <span className="grow truncate">{item.id === LOCAL_ENGINE_ID ? t("local.title") : item.label}</span>
+              {!item.available && <span className="faint small">{item.id === LOCAL_ENGINE_ID ? t("local.notReadyShort") : t("common.notOnPath")}</span>}
             </button>
           );
         })}
@@ -631,7 +657,7 @@ function ModelPopover({
           aria-checked={activeModel === "" && !custom}
           className="menu-item"
           onClick={() => {
-            onSave(withModel(""));
+            savePickedModel("");
             onClose();
           }}
         >
@@ -660,7 +686,7 @@ function ModelPopover({
               aria-checked={selected}
               className="menu-item"
               onClick={() => {
-                onSave(withModel(name));
+                savePickedModel(name);
                 onClose();
               }}
             >
@@ -682,7 +708,7 @@ function ModelPopover({
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {
                   const cleaned = cleanModel(typed);
-                  onSave(withModel(cleaned));
+                  savePickedModel(cleaned);
                   onClose();
                 } else if (event.key === "Escape") {
                   event.preventDefault();

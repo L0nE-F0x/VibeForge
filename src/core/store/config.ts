@@ -7,7 +7,7 @@ import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import { cleanCategoryName, type WorkspaceFile } from "../workspaces.js";
-import type { ComputerUseGrant, EngineRow, LayoutNode, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
+import type { ComputerUseGrant, EngineRow, LayoutNode, LocalHarness, LocalSettings, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
 import type { JsonFiles } from "./json-files.js";
@@ -40,6 +40,7 @@ export function defaultSettings(): Settings {
     companion: defaultCompanion(),
     agentTalk: { on: true, maxMessages: DEFAULT_MAX_MESSAGES, reviewRounds: 1, lead: "", handOff: "ask", maxWorking: 3, maxHandOffs: 4, leadApplies: false },
     orchestrator: { engine: "", mode: "go", model: "", projectsFolder: "", terse: true },
+    local: { enabled: false, active: false, overrideAgents: false, url: "", model: "", vibyModel: "", harness: "auto" },
     computerUse: {
       on: false,
       app: { see: true, pointer: true, keys: true },
@@ -80,6 +81,34 @@ function talkBackFlag(value: unknown, fallback: boolean): boolean {
   if (value === "off") return false;
   if (value === "summary" || value === "full") return true;
   return fallback;
+}
+
+function normalizeLocalHarness(value: unknown): LocalHarness {
+  return value === "opencode" || value === "claude" || value === "codex" ? value : "auto";
+}
+
+function cleanLocalText(value: unknown, max: number): string {
+  const s = str(value).trim();
+  if (!s || s.length > max || /[\r\n\0]/.test(s)) return "";
+  return s;
+}
+
+function cleanLocalModelId(value: unknown): string {
+  const s = cleanLocalText(value, 160);
+  return s && !s.startsWith("-") ? s : "";
+}
+
+function normalizeLocalSettings(value: unknown, defaults: LocalSettings): LocalSettings {
+  const raw = value && typeof value === "object" ? (value as Partial<LocalSettings>) : {};
+  return {
+    enabled: bool(raw.enabled, defaults.enabled),
+    active: bool(raw.active, defaults.active),
+    overrideAgents: bool(raw.overrideAgents, defaults.overrideAgents),
+    url: cleanLocalText(raw.url, 300),
+    model: cleanLocalModelId(raw.model),
+    vibyModel: cleanLocalModelId(raw.vibyModel),
+    harness: normalizeLocalHarness(raw.harness),
+  };
 }
 
 function normalizeSoundSettings(value: unknown, defaults: SoundSettings): SoundSettings {
@@ -275,6 +304,7 @@ export class Config {
           ...(/^[a-z]{2,12}$/.test(effort) ? { effort } : {}),
         };
       })(),
+      local: normalizeLocalSettings(raw.local, defaults.local),
       computerUse: (() => {
         const grant = (value: unknown, fallback: ComputerUseGrant): ComputerUseGrant => {
           const g = value && typeof value === "object" ? (value as Partial<ComputerUseGrant>) : {};

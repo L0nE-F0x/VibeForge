@@ -9,6 +9,7 @@ import { ShellRecorder } from "./service/shell-runs.js";
 import { FolderTurns, type SavedTurn } from "./service/turns.js";
 import { MessageDesk, type TaskResult, type TellResult, type WhoResult } from "./service/messages.js";
 import { OrchestratorDesk } from "./service/orchestrator.js";
+import { detectLocalRuntimes, probeLocalServer, type LocalRuntimeStatus, type LocalServerProbe } from "./local.js";
 import type { Looking, OrchestratorView, StepPatch, VibyWord } from "./orchestrator.js";
 import type { TickDecision } from "./routines.js";
 import type { RunQuery } from "./store.js";
@@ -234,6 +235,16 @@ export class TeamService extends ServiceCore {
 
   orchestratorModels(engineId: string): Promise<string[]> {
     return this.orchestrator.listModels(engineId);
+  }
+
+  localStatus(url?: string): Promise<LocalRuntimeStatus> {
+    const local = this.store.readSettings().local;
+    const rows = this.store.readEngineRows();
+    return detectLocalRuntimes({ url: url ?? local.url }, rows, this.options.host.resolveBin);
+  }
+
+  localProbe(url: string): Promise<LocalServerProbe> {
+    return probeLocalServer(url);
   }
 
   orchestratorStopThinking(silent = false): void {
