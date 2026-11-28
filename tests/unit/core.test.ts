@@ -538,8 +538,10 @@ describe("store", () => {
     expect(store.reindex()).toBe(1);
     expect(store.queryRuns({ routineId: "weekday" }).map((run) => run.id)).toEqual([id]);
     expect(store.queryRuns({ status: "running" })).toEqual([]);
+    expect(store.queryRuns({ opened: true })).toEqual([]);
     store.saveRun({ ...meta, openedAt: "2026-09-25T10:00:00.000Z" });
     expect(store.queryRuns({ unopened: true })).toEqual([]);
+    expect(store.queryRuns({ opened: true }).map((run) => run.id)).toEqual([id]);
     expect(JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8")).openedAt).toBe("2026-09-25T10:00:00.000Z");
     expect(runFolderStamp(new Date("2026-01-02T03:04:05.678Z"))).toBe("2026-01-02T030405Z");
     store.close();

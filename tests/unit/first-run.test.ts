@@ -33,6 +33,10 @@ describe("the first ten minutes", () => {
     expect(firstStepsDone(ran)).toBe(false);
     const read = firstSteps({ workspaces: 2, runs: [{ openedAt: null }, { openedAt: "2026-11-25T10:00:00.000Z" }] });
     expect(firstStepsDone(read)).toBe(true);
+    // Twenty new runs nobody opened (a swarm of agents) don't undo it: an older opened run counts.
+    const swarm = Array.from({ length: 20 }, () => ({ openedAt: null }));
+    expect(firstStepsDone(firstSteps({ workspaces: 2, runs: swarm }))).toBe(false);
+    expect(firstStepsDone(firstSteps({ workspaces: 2, runs: swarm, opened: true }))).toBe(true);
     // A run opened somewhere without a workspace still leaves "Open a folder" to do.
     expect(firstStepsDone(firstSteps({ workspaces: 0, runs: [{ openedAt: "2026-11-25T10:00:00.000Z" }] }))).toBe(false);
   });

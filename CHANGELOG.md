@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.16.1] - 2026-11-28
+
+**3.16.1: Home's three first steps stay done after a burst of new runs.**
+
+### Fixed
+
+- **Home's first steps no longer come back.** "Review the run" counted as done only if one of your latest 20 runs had been opened, so twenty new runs nobody opened yet (a swarm of agents and their reviews, say) brought the three getting-started cards back for someone who had used VibeForge for weeks. Any run you have ever opened now counts.
+
 ## [3.16.0] - 2026-11-28
 
 **3.16.0: Your CLIs pick up where they left off after a restart, a separate copy starts with your setup, you can put a run's files back, agents propose lines for their memory, routines end by themselves, and the review screen lists files and applies only the ones you tick.**
@@ -1369,7 +1377,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.16.0...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.16.1...HEAD
+[3.16.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.16.1
 [3.16.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.16.0
 [3.15.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.1
 [3.15.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.0
