@@ -25,6 +25,8 @@ const PASTE_QUIET_MS = 700;
 const PASTE_FIRST_OUTPUT_MS = 3000;
 const PASTE_MAX_WAIT_MS = 20000;
 const ENTER_AFTER_PASTE_MS = 150;
+/** How often a copy's terminal is checked for its setup command having handed over to the CLI. */
+const SETUP_POLL_MS = 150;
 const EXIT_SETTLE_MS = 120;
 // Stop hangs up at once, then asks (SIGTERM) and insists (SIGKILL) after these.
 const STOP_TERM_MS = 1500;
@@ -62,6 +64,7 @@ const PAUSED_LOOK_MS = 15;
  * @property {NodeJS.Timeout | undefined} quietTimer
  * @property {NodeJS.Timeout | undefined} capTimer
  * @property {boolean} done
+ * @property {boolean} waiting Still waiting for a copy's setup command to hand over to the CLI.
  * @property {() => void} deliver
  */
 
@@ -319,59 +322,83 @@ function clearPasteTimers(paste) {
   clearTimeout(paste.capTimer);
 }
 
-/** @param {Session} session */
-function isSetupWrapperRunning(session) {
-  if (session.argv[1] !== "-c" || session.argv[3] !== "vibeforge-setup") return false;
-  try {
-    const parts = fs.readFileSync(`/proc/${session.pid}/cmdline`, "utf8").split("\0");
-    return parts[1] === "-c" && parts[3] === "vibeforge-setup";
-  } catch {
-    return false;
-  }
+/** This host's own command line: what a terminal's process shows between fork and exec. */
+let ownCmdline = "";
+try {
+  ownCmdline = fs.readFileSync("/proc/self/cmdline", "utf8");
+} catch {
+  /* not Linux: a copy's first prompt then waits for the CLI's output as usual */
 }
 
 /**
+ * Whether the terminal was started through a copy's setup wrapper (src/core/copy-setup.ts
+ * wrapForCopy), which runs the setup command and then `exec`s the CLI.
+ * @param {Session} session
+ */
+function startsThroughSetup(session) {
+  return session.argv[1] === "-c" && session.argv[3] === "vibeforge-setup";
+}
+
+/**
+ * Whether the CLI hasn't started yet: the process is still the setup wrapper, or not yet anything
+ * (between fork and exec it shows this host's own command line).
+ * @param {Session} session
+ */
+function beforeCli(session) {
+  let cmdline;
+  try {
+    cmdline = fs.readFileSync(`/proc/${session.pid}/cmdline`, "utf8");
+  } catch {
+    return false;
+  }
+  if (cmdline === ownCmdline) return true;
+  const parts = cmdline.split("\0");
+  return parts[1] === "-c" && parts[3] === "vibeforge-setup";
+}
+
+/**
+ * Hold a first prompt until the program is ready for it: until it has printed something and then
+ * gone quiet, or a cap. Through a setup wrapper, that wait starts only once the CLI itself has
+ * started: what the setup command prints, and how long it is quiet, says nothing about the CLI.
  * @param {Session} session
  * @param {string} text
  */
 function armPaste(session, text) {
-  const startTimers = () => {
-    paste.quietTimer = setTimeout(deliver, PASTE_FIRST_OUTPUT_MS);
-    paste.capTimer = setTimeout(deliver, PASTE_MAX_WAIT_MS);
-  };
   const deliver = () => {
     if (paste.done || session.exited) return;
-    if (isSetupWrapperRunning(session)) {
-      paste.capTimer = setTimeout(deliver, 150);
-      return;
-    }
     paste.done = true;
     clearPasteTimers(paste);
     session.paste = null;
     session.mirror.write("", () => sendText(session, paste.text, true, true));
   };
   /** @type {Paste} */
-  const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, deliver };
+  const paste = { text, quietTimer: undefined, capTimer: undefined, done: false, waiting: false, deliver };
   session.paste = paste;
-  if (isSetupWrapperRunning(session)) {
-    const waitForExec = () => {
-      if (paste.done || session.exited) return;
-      if (isSetupWrapperRunning(session)) {
-        paste.capTimer = setTimeout(waitForExec, 150);
-        return;
-      }
-      startTimers();
-    };
-    paste.capTimer = setTimeout(waitForExec, 150);
+  const startTimers = () => {
+    paste.waiting = false;
+    paste.quietTimer = setTimeout(deliver, PASTE_FIRST_OUTPUT_MS);
+    paste.capTimer = setTimeout(deliver, PASTE_MAX_WAIT_MS);
+  };
+  if (!startsThroughSetup(session) || !ownCmdline) {
+    startTimers();
     return;
   }
-  startTimers();
+  paste.waiting = true;
+  const waitForCli = () => {
+    if (paste.done || session.exited) return;
+    if (beforeCli(session)) {
+      paste.capTimer = setTimeout(waitForCli, SETUP_POLL_MS);
+      return;
+    }
+    startTimers();
+  };
+  waitForCli();
 }
 
 /** @param {Session} session */
 function notePasteActivity(session) {
   const paste = session.paste;
-  if (!paste || paste.done) return;
+  if (!paste || paste.done || paste.waiting) return;
   clearTimeout(paste.quietTimer);
   paste.quietTimer = setTimeout(paste.deliver, PASTE_QUIET_MS);
 }
