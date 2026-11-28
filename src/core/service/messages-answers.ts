@@ -31,6 +31,8 @@ export interface WaitSpec {
    * it counts as quiet this long after the watch began.
    */
   stuckMs?: number;
+  /** Internal watcher (e.g. routine turn completion): does not show agent-talk chips on the pane. */
+  internal?: boolean;
 }
 
 interface Waiter extends WaitSpec {
@@ -78,7 +80,7 @@ export class Answers {
 
   /** For `ptyId`'s pane: whether it's waited on, and the terminal a task it works on reports to. */
   waitedOn(ptyId: string): { any: boolean; reportsTo: string | null } {
-    const mine = this.waiting.get(ptyId) ?? [];
+    const mine = (this.waiting.get(ptyId) ?? []).filter((waiter) => !waiter.internal);
     const reporting = mine.find((waiter) => waiter.after && waiter.forwardTo);
     return { any: mine.length > 0, reportsTo: reporting?.forwardTo ?? null };
   }
@@ -107,7 +109,7 @@ export class Answers {
    * that CLI's logs, else the end of its screen once it has worked and gone quiet. Past the
    * deadline the sender is told it's still going, and the answer follows as a message.
    */
-  watchAnswer(target: string, spec: WaitSpec, since: number, forwardTo: string | null = null): void {
+  watchAnswer(target: string, spec: WaitSpec, since: number, forwardTo: string | null = null): () => void {
     const session = this.core.live.get(target);
     const engine = session ? this.roster.engineOf(session) : null;
     const watch = this.core.options.host.watchReply;
@@ -135,6 +137,9 @@ export class Answers {
         })
         .catch(() => undefined);
     }
+    return () => {
+      this.takeWaiter(target, waiter);
+    };
   }
 
   private async checkWaiter(target: string, waiter: Waiter, now: number): Promise<void> {

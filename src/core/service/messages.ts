@@ -252,6 +252,49 @@ export class MessageDesk {
       .catch(() => null);
   }
 
+  /**
+   * Watches one routine turn until its CLI writes a log answer or goes quiet on screen, then reads
+   * the screen too so callers can tell a finished turn apart from one waiting on a question.
+   */
+  watchRoutineTurn(
+    ptyId: string,
+    opts: {
+      words: string;
+      sent: string;
+      since: number;
+      stuckMs?: number;
+      onTurn: (info: { reply: string | null; fromScreen: boolean; screen: string; hasLogReader: boolean }) => void | Promise<void>;
+    },
+  ): () => void {
+    const session = this.core.live.get(ptyId);
+    const engine = session ? this.roster.engineOf(session) : null;
+    const hasLogReader = Boolean(engine && this.core.options.host.watchReply && replyLogFor(engine.id, engine.bin));
+    let cancelled = false;
+    const stopWatch = this.answers.watchAnswer(
+      ptyId,
+      {
+        words: opts.words,
+        sent: opts.sent,
+        deadline: Number.MAX_SAFE_INTEGER,
+        ...(opts.stuckMs ? { stuckMs: opts.stuckMs } : {}),
+        internal: true,
+        done: (answered) => {
+          if (cancelled || !answered) return;
+          void (this.core.options.host.screen?.(ptyId).catch(() => "") ?? Promise.resolve("")).then((screen) => {
+            if (cancelled) return;
+            void opts.onTurn({ reply: answered.reply, fromScreen: answered.fromScreen, screen, hasLogReader });
+          });
+        },
+        dropped: () => undefined,
+      },
+      opts.since,
+    );
+    return () => {
+      cancelled = true;
+      stopWatch();
+    };
+  }
+
   private async screenOf(ptyId: string): Promise<string> {
     const screen = await this.core.options.host.screen?.(ptyId).catch(() => "");
     return cleanText(screenTail(screen ?? ""));

@@ -186,6 +186,10 @@ export interface RoutineInput {
   schedule: Schedule;
   prompt?: string;
   notify?: boolean;
+  /** Per-run time limit in minutes (default 120 = 2 hours). */
+  timeoutMinutes?: number;
+  /** Work in a separate git worktree of the agent's folder. */
+  isolated?: boolean;
   /** Start even while another coding CLI is busy in the agent's folder. */
   shareCheckout?: boolean;
 }
@@ -216,14 +220,22 @@ export interface RoutineView extends Routine {
   agentName: string | null;
   issues: string[];
   stillRunning: boolean;
+  /** True when a live run of this routine stopped on a question and stayed open for the person. */
+  needsInput: boolean;
   description: string;
   nextFires: string[];
   lastRun: RunView | null;
+  /** Recent runs for this routine, newest first, for the routine's run list. */
+  recentRuns: RunView[];
+  /** False when the routine file points its copy somewhere other than its own worktree. */
+  copyOwned: boolean;
+  /** Name of the routine's target workspace or folder, for Apply labels. */
+  workspaceName: string | null;
   /** Its latest runs that failed in a row. */
   failStreak: number;
   /** Failed often enough in a row (ROUTINE_FAILING) to glow on Routines and Home. */
   failing: boolean;
-  /** Other coding CLIs in the routine's folder right now. */
+  /** Other coding CLIs in the routine's folder right now (none when `isolated` is on). */
   writers: Writer[];
   /** A due slot or Run now waiting for the folder, and who it waits for. */
   waiting: Waiting | null;

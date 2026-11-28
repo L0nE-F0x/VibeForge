@@ -36,13 +36,13 @@ export class TeamService extends ServiceCore {
   private readonly library = new LibraryDesk(this);
   private readonly workspaces = new WorkspaceDesk(this);
   private readonly turns = new FolderTurns(this);
-  private readonly routines = new RoutineDesk(this, this.turns);
   private readonly tasks = new TaskDesk(this, this.turns);
   private readonly chats = new ChatDesk(this);
   private readonly runs = new RunDesk(this, this.chats, this.tasks);
   private readonly shellRuns = new ShellRecorder(this);
   private readonly sessions = new SessionTracker(this);
   private readonly messages = new MessageDesk(this, this.tasks);
+  private readonly routines = new RoutineDesk(this, this.turns, this.tasks, this.messages);
   readonly orchestrator = new OrchestratorDesk(this, this.workspaces, this.messages, this.tasks, this.routines, this.runs, this.library, this.chats);
 
   /** The Local AI server started from Settings → Local AI → Run a server. */
@@ -101,6 +101,7 @@ export class TeamService extends ServiceCore {
 
   override close(): Promise<void> {
     this.sessions.stop();
+    this.routines.close();
     this.turns.close();
     this.messages.close();
     this.orchestrator.close();
@@ -453,8 +454,16 @@ export class TeamService extends ServiceCore {
     return this.routines.saveRoutine(input);
   }
 
-  deleteRoutine(id: string): Deleted {
+  deleteRoutine(id: string): Promise<Deleted> {
     return this.routines.deleteRoutine(id);
+  }
+
+  applyRoutineCopy(id: string): Promise<ApplyResult> {
+    return this.routines.applyCopy(id);
+  }
+
+  discardRoutineCopy(id: string): Promise<Deleted> {
+    return this.routines.discardCopy(id);
   }
 
   setRoutineEnabled(id: string, enabled: boolean): Routine {
@@ -559,6 +568,7 @@ export class TeamService extends ServiceCore {
   /** A person typed into a terminal (not a message from another CLI). */
   onHumanInput(ptyId: string, data: string): void {
     this.messages.onHumanInput(ptyId, data);
+    this.routines.onHumanInput(ptyId, data);
   }
 
   /** Delivers waiting messages and reads answers now (also every second while any are in flight). */

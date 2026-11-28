@@ -422,7 +422,7 @@ export async function carryOutRoutineStep(deps: EntityStepDeps, turn: Orchestrat
     return;
   }
   if (action === "delete") {
-    const deleted = deps.routines.deleteRoutine(step.target);
+    const deleted = await deps.routines.deleteRoutine(step.target);
     step.undo = deleted.undo;
     step.result = "Deleted routine.";
     return;

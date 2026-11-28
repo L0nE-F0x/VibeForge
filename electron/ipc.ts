@@ -280,6 +280,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "routines.runNow": (id, size, now) => s().runRoutineNow(id, size, now),
     "routines.cancelWait": (id) => s().cancelRoutineWait(id),
     "routines.preview": (schedule) => s().previewSchedule(schedule),
+    "routines.applyCopy": (id) => s().applyRoutineCopy(id),
+    "routines.discardCopy": (id) => s().discardRoutineCopy(id),
 
     "tasks.list": () => s().listTasks(),
     "tasks.save": (input) => s().saveTask(input),

@@ -185,7 +185,7 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, WorkspaceCategory, WorkspaceCopySetup, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
+export type { Workspace, WorkspaceCategory, WorkspaceCopySetup, RoutineRunResult, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
 export type { CutOffRun } from "../core/team-service.js";
 
 /** Partial settings patch supporting nested partial updates for `companion` and `local`. */
@@ -527,6 +527,10 @@ export interface DeskMethods {
   "routines.runNow": (id: string, size?: TermSize, now?: boolean) => Launched | Queued;
   "routines.cancelWait": (id: string) => void;
   "routines.preview": (schedule: Schedule) => SchedulePreview;
+  /** Bring an isolated routine copy's changes into its folder as uncommitted edits. */
+  "routines.applyCopy": (id: string) => ApplyResult;
+  /** Throw an isolated routine's copy away. */
+  "routines.discardCopy": (id: string) => Deleted;
 
   "tasks.list": () => TaskView[];
   "tasks.save": (input: TaskInput) => TaskView;

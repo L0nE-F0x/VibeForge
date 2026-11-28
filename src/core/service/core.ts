@@ -13,9 +13,9 @@ import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile, readRunTail } from "../run-storage.js";
 import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
-import { failStreak, ROUTINE_FAILING } from "../routines.js";
+import { failStreak, isCutOffRun, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
-import type { Agent, CutOff, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
+import type { Agent, CutOff, Engine, EngineRow, LiveSession, RoutineRunResult, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
 import { readCutOff, settleCutOff, writeCutOff, type CutOffNote } from "../cut-off.js";
 import { wrapWithSetupCommand } from "../copy-setup.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
@@ -56,6 +56,8 @@ export class ServiceCore {
   private readonly listeners = new Set<(topics: Topic[]) => void>();
   private readonly exitWaiters = new Map<string, Array<() => void>>();
   private readonly finishing = new Set<Promise<void>>();
+  /** Explicit end state for a run VibeForge closes on purpose (routine turn end or time limit). */
+  private readonly pendingOutcome = new Map<string, { status: "exited" | "stopped"; exitCode?: number | null; result: RoutineRunResult; error?: string }>();
   /** Per shell: the latest command line in its foreground, and the queue that records it. */
   readonly shellArgv = new Map<string, string[]>();
   readonly recordings = new Map<string, Promise<void>>();
@@ -403,13 +405,46 @@ export class ServiceCore {
   async stopRun(id: string): Promise<void> {
     const run = this.store.getRun(id);
     if (!run || run.status !== "running") return;
+    this.pendingOutcome.delete(id);
     const ptyId = this.ptyByRun.get(id);
-    this.store.saveRun({ ...run, stopRequested: true });
+    this.store.saveRun({ ...run, stopRequested: true, result: undefined });
     if (ptyId) {
       await this.options.host.kill(ptyId);
       return;
     }
     await this.finishRun(run.id, { exitCode: null, signal: null, status: "stopped" });
+  }
+
+  /**
+   * Ends a running session with an explicit outcome (e.g. a routine whose turn ended cleanly,
+   * or a routine that hit its time limit) so its exit records that result instead of plain "stopped".
+   */
+  async endRunWithResult(
+    id: string,
+    outcome: { status: "exited" | "stopped"; exitCode?: number | null; result: RoutineRunResult; error?: string },
+  ): Promise<void> {
+    const run = this.store.getRun(id);
+    if (!run || run.status !== "running") return;
+    const ptyId = this.ptyByRun.get(id);
+    this.pendingOutcome.set(id, outcome);
+    this.store.saveRun({
+      ...run,
+      stopRequested: outcome.status === "stopped",
+      result: outcome.result,
+      ...(outcome.error ? { error: outcome.error } : {}),
+    });
+    if (ptyId) {
+      await this.options.host.kill(ptyId);
+      return;
+    }
+    this.pendingOutcome.delete(id);
+    await this.finishRun(run.id, {
+      exitCode: outcome.exitCode ?? null,
+      signal: null,
+      status: outcome.status,
+      ...(outcome.error ? { error: outcome.error } : {}),
+      result: outcome.result,
+    });
   }
 
 
@@ -769,7 +804,28 @@ export class ServiceCore {
       }
       this.ptyByRun.delete(session.runId);
       const run = this.store.getRun(session.runId);
-      const done = this.finishRun(session.runId, { exitCode, signal, status: run?.stopRequested ? "stopped" : "exited", ...(error ? { error } : {}) });
+      const planned = this.pendingOutcome.get(session.runId);
+      this.pendingOutcome.delete(session.runId);
+      const resolvedStatus: "exited" | "stopped" = planned ? planned.status : run?.stopRequested ? "stopped" : "exited";
+      const resolvedExit = planned && planned.exitCode !== undefined ? planned.exitCode : exitCode;
+      const resolvedSignal = planned?.status === "exited" && planned.exitCode === 0 ? null : signal;
+      const resolvedError = planned?.error ?? error ?? undefined;
+      const resolvedResult: RoutineRunResult | undefined =
+        planned?.result ??
+        (run?.origin === "routine"
+          ? error
+            ? "cutoff"
+            : resolvedStatus === "exited" && (resolvedExit === 0 || resolvedExit === null)
+              ? "finished"
+              : (run.result ?? undefined)
+          : undefined);
+      const done = this.finishRun(session.runId, {
+        exitCode: resolvedExit,
+        signal: resolvedSignal,
+        status: resolvedStatus,
+        ...(resolvedError ? { error: resolvedError } : {}),
+        ...(resolvedResult ? { result: resolvedResult } : {}),
+      });
       this.finishing.add(done);
       try {
         await done;
@@ -785,7 +841,7 @@ export class ServiceCore {
 
   async finishRun(
     runId: string,
-    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped"; error?: string },
+    outcome: { exitCode: number | null; signal: number | null; status: "exited" | "stopped"; error?: string; result?: RoutineRunResult },
   ): Promise<void> {
     if (this.closed) return;
     const run = this.store.getRun(runId);
@@ -811,13 +867,16 @@ export class ServiceCore {
     this.dirtyAtStart.delete(runId);
     // Only edits that were there before it started, left as they were: none of this run's doing.
     const untouched = Boolean(dirty?.size) && own !== null && !own.trim() && !git.includes("commits since the run started");
+    const status = latest.stopRequested ? "stopped" : outcome.status;
+    const result = outcome.result ?? (status === "stopped" ? (latest.result ?? undefined) : latest.result === "question" ? undefined : (latest.result ?? undefined));
     const finished = this.store.saveRun({
       ...latest,
-      status: latest.stopRequested ? "stopped" : outcome.status,
+      status,
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       endedAt: this.now().toISOString(),
       ...(outcome.error ? { error: outcome.error } : {}),
+      result,
       changes: (before !== undefined && before === git) || untouched ? "No changes" : summarizeSnapshot(git),
     });
     this.indexText(finished);
@@ -833,7 +892,14 @@ export class ServiceCore {
       this.options.host.finished?.({
         runId: finished.id,
         origin: finished.origin,
-        outcome: finished.status === "stopped" ? "stopped" : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0) ? "failed" : "ok",
+        outcome:
+          finished.result === "timeout" || finished.result === "cutoff"
+            ? "failed"
+            : finished.status === "stopped"
+              ? "stopped"
+              : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0)
+                ? "failed"
+                : "ok",
       });
     } catch {
       /* a sound is never worth failing a run over */
@@ -852,13 +918,17 @@ export class ServiceCore {
       if (routine && !routine.notify) return;
     }
     const outcome =
-      run.status === "stopped"
-        ? "stopped"
-        : run.status === "failed" && run.exitCode === null
-          ? `couldn't start: ${run.error ?? "unknown error"}`
-          : run.exitCode && run.exitCode !== 0
-          ? `exited with code ${run.exitCode}`
-          : "finished";
+      run.result === "timeout"
+        ? "hit its time limit"
+        : isCutOffRun(run)
+          ? "cut off"
+          : run.status === "stopped"
+            ? "stopped"
+            : run.status === "failed" && run.exitCode === null
+              ? `couldn't start: ${run.error ?? "unknown error"}`
+              : run.exitCode && run.exitCode !== 0
+                ? `exited with code ${run.exitCode}`
+                : "finished";
     // Said once, on the run that makes it a streak; Routines and Home keep it lit after that.
     const streak = run.routineId ? failStreak(this.store.queryRuns({ routineId: run.routineId, limit: ROUTINE_FAILING + 1 })) : 0;
     const failing = streak === ROUTINE_FAILING ? `failed ${streak} times in a row` : null;
@@ -895,6 +965,7 @@ export class ServiceCore {
         status: "stopped",
         endedAt: run.endedAt ?? this.now().toISOString(),
         error: run.error ?? "VibeForge closed while this run was going.",
+        ...(run.origin === "routine" && run.result !== "timeout" ? { result: "cutoff" as const } : {}),
         changes,
         cutOff: run.cutOff ?? "crash",
       });
@@ -912,7 +983,7 @@ export class ServiceCore {
       const noted = this.readNote();
       if (noted && runIds.some((id) => noted.runIds.includes(id))) this.noteCutOff({ ...noted, runIds: [...new Set([...noted.runIds, ...runIds])] });
       else if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds, offered: true });
-      this.emit("runs", "tasks");
+      this.emit("runs", "tasks", "routines");
     }
   }
 
@@ -924,9 +995,10 @@ export class ServiceCore {
       if (!item || typeof item !== "object") continue;
       const note = item as { kind?: unknown; taskId?: unknown; copy?: WorkingCopy };
       if (note.kind !== "copy" || typeof note.taskId !== "string" || !note.copy) continue;
-      // A task that is still there with a copy (Execute made a new one) owns that folder and branch; a
-      // discarded copy's task is still there without one, and its copy goes.
-      if (this.store.getTask(note.taskId)?.copy || copies.some((entry) => entry?.id === note.taskId)) continue;
+      // A task, routine, or Viby copy that still holds this folder/branch keeps it.
+      const ownedByRoutine =
+        note.taskId.startsWith("routine-") && Boolean(this.store.getRoutine(note.taskId.slice("routine-".length))?.copy);
+      if (this.store.getTask(note.taskId)?.copy || ownedByRoutine || copies.some((entry) => entry?.id === note.taskId)) continue;
       await removeCopy(note.copy, { dataRoot: this.options.dataRoot, taskId: note.taskId }, true).catch(() => undefined);
     }
   }
@@ -984,7 +1056,8 @@ export class ServiceCore {
 
   /**
    * Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped",
-   * and as cut off by this close (`reason`), so the next start offers to pick it back up.
+   * and as cut off by this close (`reason`), so the next start offers to pick it back up. A
+   * routine's run is recorded as cut off; its next slot is its own retry, so it isn't offered.
    */
   prepareShutdown(reason: CutOff = "quit"): void {
     const cut: string[] = [];
@@ -992,8 +1065,13 @@ export class ServiceCore {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
       if (!run || run.status !== "running" || run.stopRequested) continue;
+      if (run.origin === "routine") {
+        this.pendingOutcome.set(run.id, { status: "stopped", result: "cutoff", error: "Stopped when VibeForge quit." });
+        this.store.saveRun({ ...run, stopRequested: true, cutOff: reason, result: "cutoff", error: "Stopped when VibeForge quit." });
+        continue;
+      }
       this.store.saveRun({ ...run, stopRequested: true, cutOff: reason });
-      if (run.origin !== "routine") cut.push(run.id);
+      cut.push(run.id);
     }
     this.noteCutOff({ reason, at: this.now().toISOString(), runIds: cut });
   }
@@ -1091,7 +1169,15 @@ export class ServiceCore {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
       if (!run || run.status !== "running") continue;
-      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit.", cutOff: run.cutOff ?? "quit" });
+      this.store.saveRun({
+        ...run,
+        status: "stopped",
+        stopRequested: true,
+        endedAt: ended,
+        error: "Stopped when VibeForge quit.",
+        cutOff: run.cutOff ?? "quit",
+        ...(run.origin === "routine" ? { result: "cutoff" as const } : {}),
+      });
       if (run.taskId) {
         const task = this.store.getTask(run.taskId);
         if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });

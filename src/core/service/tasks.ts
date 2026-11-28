@@ -6,7 +6,7 @@ import { RUN_FILES } from "../runs.js";
 import { isDirectory } from "../fsx.js";
 import { taskPrompt } from "../preamble.js";
 import { createTask, markStopped, requestExecute } from "../tasks.js";
-import type { Task, TaskStatus, Workspace } from "../types.js";
+import type { Task, TaskStatus, Workspace, WorkspaceCopySetup } from "../types.js";
 import { isSafeId } from "../slug.js";
 import type { Bin } from "../trash.js";
 import { applyToWorkspace, copyBranch, copyPatch, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
@@ -298,25 +298,54 @@ export class TaskDesk {
     return this.taskView(task);
   }
 
-  /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
-  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null }> {
-    if (task.copy && isDirectory(task.copy.path)) {
-      if (!ownedCopyPath(this.owner(task.id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
-      if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
-      return { cwd: folderInCopy(task.copy, workspace.path), setupCommand: null };
+  /**
+   * The folder an isolated task or routine runs in: its own copy of `folder` under
+   * `<dataRoot>/worktrees/<ownerId>`. Reused by both tasks and isolated routines so copy creation
+   * goes through one shared path.
+   */
+  async ensureCopy(
+    ownerId: string,
+    folder: string,
+    previous: WorkingCopy | null,
+    untrustedError: string,
+    otherRepoError: string,
+    /** The workspace's "when a copy is made" setting: files brought along, folders cloned, a setup command. */
+    copySetup?: WorkspaceCopySetup | null,
+  ): Promise<{ copy: WorkingCopy; cwd: string; created: boolean; setupCommand: string | null }> {
+    const owner = this.owner(ownerId);
+    if (previous && isDirectory(previous.path)) {
+      if (!ownedCopyPath(owner, previous.path)?.real) throw new Error(untrustedError);
+      const repo = await repoRoot(folder);
+      if (!repo || repo !== path.resolve(previous.repo)) throw new Error(otherRepoError);
+      return { copy: previous, cwd: folderInCopy(previous, folder), created: false, setupCommand: null };
     }
-    if (!isSafeId(task.id)) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
+    if (!isSafeId(ownerId)) throw new Error(untrustedError);
     // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
     const { copy, setupCommand } = await prepareCopy({
-      folder: workspace.path,
-      target: path.join(this.core.options.dataRoot, "worktrees", task.id),
-      branch: copyBranch(task.id),
-      previous: task.copy,
-      copySetup: workspace.copySetup,
+      folder,
+      target: path.join(this.core.options.dataRoot, "worktrees", ownerId),
+      branch: copyBranch(ownerId),
+      previous,
+      copySetup,
     });
-    const current = this.core.store.getTask(task.id) ?? task;
-    this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
-    return { cwd: folderInCopy(copy, workspace.path), setupCommand };
+    return { copy, cwd: folderInCopy(copy, folder), created: true, setupCommand };
+  }
+
+  /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
+  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null }> {
+    const { copy, cwd, created, setupCommand } = await this.ensureCopy(
+      task.id,
+      workspace.path,
+      task.copy,
+      "This task's copy is not in VibeForge's worktrees folder, so it was left alone.",
+      "This task's copy names another repository, so it was left alone.",
+      workspace.copySetup,
+    );
+    if (created) {
+      const current = this.core.store.getTask(task.id) ?? task;
+      this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
+    }
+    return { cwd, setupCommand };
   }
 
   /**
