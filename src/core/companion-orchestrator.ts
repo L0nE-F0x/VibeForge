@@ -1,3 +1,4 @@
+import { copySetupChange, type CopySetupChange } from "../shared/copy-setup.js";
 import { isCodingSession } from "./companion.js";
 import {
   canOrchestrate,
@@ -29,6 +30,8 @@ export interface PhoneStep extends OrchestratorStep {
   /** start, once done: whether the terminal it opened is still open, and its run, for Open. */
   live: boolean;
   runId: string | null;
+  /** A workspace copy-setup step: what it changes, for the card to show before Go. */
+  copySetup?: CopySetupChange;
 }
 
 export type PhoneTurn = Omit<OrchestratorTurn, "steps"> & { steps?: PhoneStep[] };
@@ -126,7 +129,15 @@ export function buildPhoneOrchestrator(input: PhoneOrchestratorInput): PhoneOrch
       steps: turn.steps.map((step) => {
         const opened = step.ptyId ? coding.find((item) => item.ptyId === step.ptyId) : undefined;
         const reply = step.reply && step.reply.length > PHONE_REPLY ? { reply: `${step.reply.slice(0, PHONE_REPLY).trimEnd()}…` } : {};
-        return { ...step, ...reply, issue: turn.plan === "waiting" ? stepIssue(step, checked) : null, live: Boolean(opened), runId: opened?.runId ?? step.runId ?? null };
+        const copySetup = copySetupChange(step);
+        return {
+          ...step,
+          ...reply,
+          issue: turn.plan === "waiting" ? stepIssue(step, checked) : null,
+          live: Boolean(opened),
+          runId: opened?.runId ?? step.runId ?? null,
+          ...(copySetup ? { copySetup } : {}),
+        };
       }),
     };
   });

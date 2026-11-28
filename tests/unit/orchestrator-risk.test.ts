@@ -152,6 +152,8 @@ describe("Centralized risk classification and approval policy", () => {
       [{ kind: "workspace", action: "remove", target: "ws1" }, "delete"],
       [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "setupCommand=npm i" }, "unsafe-shell"],
       [{ kind: "workspace", action: "copy-setup", target: "ws1", prompt: "pnpm install" }, "unsafe-shell"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "files=**" }, "outward-or-privilege"],
+      [{ kind: "workspace", action: "copy-setup", target: "ws1", options: "folders=secrets" }, "outward-or-privilege"],
       [{ kind: "run", action: "tidy" }, "delete"],
       [{ kind: "shell", prompt: "rm -rf src" }, "unsafe-shell"],
       [{ kind: "verify", branch: "", prompt: "npm test", dirty: 2 }, "in-place-edit"],

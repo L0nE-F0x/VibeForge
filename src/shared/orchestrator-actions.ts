@@ -475,14 +475,6 @@ export function normalizeWorkspaceAction(rawAction: string | undefined): Workspa
   return null;
 }
 
-/** Whether a workspace step sets or changes a copy setup command (always waits for Go). */
-export function workspaceStepSetsCommand(step: { kind: string; action?: string; prompt?: string; options?: string }): boolean {
-  if (step.kind !== "workspace" || normalizeWorkspaceAction(step.action) !== "copy-setup") return false;
-  if (Boolean(step.prompt?.trim())) return true;
-  const opts = parseOptions(step.options);
-  return opts.has("setupCommand") || opts.has("command");
-}
-
 export function normalizeChatAction(rawAction: string | undefined, hasTarget: boolean, hasPrompt: boolean): ChatAction | null {
   const key = squash(rawAction ?? "");
   if (!key) return hasTarget ? (hasPrompt ? "send" : "continue") : "create";

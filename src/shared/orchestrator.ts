@@ -2,6 +2,7 @@
 // (src/core/orchestrator.ts), the window shows them and lets a person fix one before Go. No Node
 // here, so the window can check a step the same way the main process does.
 
+import { copySetupChange } from "./copy-setup.js";
 import type { EngineRow, OrchestratorMode } from "../core/types.js";
 import type { en } from "../ui/i18n/en.js";
 import { effortLevels } from "./launch-options.js";
@@ -609,9 +610,8 @@ export function stepIssue(step: OrchestratorStep, context: PlanContext): StepIss
       return "prompt";
     }
     if (action === "copy-setup") {
-      const opts = parseOptions(step.options);
-      const hasAny = Boolean(step.prompt?.trim()) || opts.has("files") || opts.has("folders") || opts.has("setupCommand") || opts.has("command");
-      return hasAny ? null : "prompt";
+      // A step that would change nothing has nothing to say yet.
+      return Object.keys(copySetupChange(step) ?? {}).length ? null : "prompt";
     }
     return null;
   }

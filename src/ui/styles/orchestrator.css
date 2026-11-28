@@ -668,6 +668,37 @@ button.viby-chip:disabled {
   gap: 6px;
 }
 
+.viby-pending-item.wide {
+  flex-basis: 100%;
+}
+
+/* What a copy-setup step changes, readable before Go. */
+.orch-copy-setup {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  flex-basis: 100%;
+  font-size: var(--fs-sm);
+}
+
+.orch-copy-setup > div {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.orch-copy-setup dt {
+  flex: none;
+  color: var(--fg-3);
+}
+
+.orch-copy-setup dd {
+  margin: 0;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .viby-confirm-editor {
   display: flex;
   flex-direction: column;
