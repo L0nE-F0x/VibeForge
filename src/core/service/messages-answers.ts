@@ -9,7 +9,8 @@ const LOG_PATIENCE_MS = 30_000;
 /** An answer still not in this long after the sender stopped waiting is given up on. */
 const LATE_ANSWER_MS = 30 * 60 * 1000;
 
-export type Answered = { reply: string | null; fromScreen: boolean };
+/** `stuck`: read off the screen because the CLI never got going (it never worked, then went quiet). */
+export type Answered = { reply: string | null; fromScreen: boolean; stuck?: boolean };
 
 /** What waiting for an answer is for: `done` gets the answer, or null once the deadline passes. */
 export interface WaitSpec {
@@ -146,7 +147,7 @@ export class Answers {
       waiter.reading = true;
       const screen = await this.core.options.host.screen?.(target).catch(() => "");
       const reply = cleanText(answerFromScreen(screen ?? "", waiter.sent ?? ""));
-      return this.finishWaiter(target, waiter, { reply, fromScreen: true });
+      return this.finishWaiter(target, waiter, { reply, fromScreen: true, ...(quietAt > waiter.since ? {} : { stuck: true }) });
     }
     if (!waiter.gaveUp && now >= waiter.deadline) {
       waiter.gaveUp = true;

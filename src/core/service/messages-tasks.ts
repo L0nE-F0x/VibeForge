@@ -419,10 +419,13 @@ export class HandedTasks {
     const task = this.core.store.getTask(taskId);
     if (!to || !isCodingCli(to) || !task || this.delivery.isStopped(asker) || this.delivery.isStopped(taskPty)) return false;
     // Read from the screen although VibeForge reads this CLI's log: nothing came into the log, so
-    // it never got going (a trust or permission question on screen, most likely).
+    // it never got going (a trust or permission question on screen, most likely). The same when it
+    // never moved at all.
     const session = this.core.live.get(taskPty);
     const engine = session ? this.roster.engineOf(session) : null;
-    const waiting = Boolean(!ended && answered?.fromScreen && engine && replyLogFor(engine.id, engine.bin));
+    // A CLI that never moved since it started is held up too (a trust question on screen), whether
+    // or not VibeForge reads its log: Antigravity's is read off the screen either way.
+    const waiting = Boolean(!ended && answered?.fromScreen && (answered.stuck || (engine && replyLogFor(engine.id, engine.bin))));
     const from = this.roster.list().find((item) => item.ptyId === taskPty) ?? null;
     const agent = task.agentId ? this.core.store.getAgent(task.agentId) : null;
     let patch = "";
