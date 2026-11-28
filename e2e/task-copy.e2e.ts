@@ -155,7 +155,16 @@ test("reviewing a multi-file task copy: file list, folded lock file, viewed tick
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   })()`);
   expect(rowBox).not.toBeNull();
+  // The file's one note button moves onto the line under the pointer.
   await app.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rowBox!.x, y: rowBox!.y });
+  await app.waitFor(
+    `(() => {
+      const row = document.querySelector('.sheet [data-diff-file="src/app.ts"] .diff-row.add');
+      const button = document.querySelector('.sheet [data-diff-file="src/app.ts"] .diff-note-trigger');
+      return Boolean(row && button && Math.abs(row.getBoundingClientRect().top - button.getBoundingClientRect().top) < 1);
+    })()`,
+    { what: "the note button on the added line" },
+  );
   await app.click({ name: "Add a note (src/app.ts:1)", role: "button", within: ".sheet" });
   await app.waitFor(`document.activeElement?.tagName === "TEXTAREA"`, { what: "note composer focus" });
   await app.type("Check count value.");
@@ -169,22 +178,29 @@ test("reviewing a multi-file task copy: file list, folded lock file, viewed tick
   await app.terminal(reviewer.ptyId).waitForText("Check count value.");
   app.openGate("reviewer");
 
-  // Reopen the task, untick src/extra.ts, and Apply only the 2 ticked files.
+  // The run's Changes tab lists the copy's own files, as the sheet does: untick src/extra.ts there
+  // and Apply only the 2 ticked files.
   await openTask(app, "Update three files");
-  await app.click({ name: "Review changes", role: "button", within: ".sheet" });
-  await app.waitFor(`Boolean(document.querySelector('.sheet .review-files input[type="checkbox"]'))`, { what: "file selection checkboxes" });
-  await app.click({ name: "src/extra.ts", role: "checkbox", within: ".sheet .review-files" });
-  await app.click({ name: "Apply 2 of 3 to site", role: "button", within: ".sheet" });
+  await app.click({ name: /Update three files/, role: "button", within: ".sheet" });
+  await app.click({ name: "Changes", role: "tab" });
+  await app.waitFor(`Boolean(document.querySelector('.review-files input[type="checkbox"]'))`, { what: "file selection checkboxes on the run's Changes tab" });
+  await app.click({ name: "src/extra.ts", role: "checkbox", within: ".review-files" });
+  await app.click({ name: "Apply 2 of 3 to site", role: "button" });
   await app.waitFor(async () => (await toasts(app)).includes("1 file stayed in the copy."), { what: "partial Apply toast" });
   expect(fs.readFileSync(path.join(repo, "src/app.ts"), "utf8")).toBe("export const count = 2;\n");
   expect(fs.readFileSync(path.join(repo, "package-lock.json"), "utf8")).toContain("lockfileVersion");
   expect(fs.readFileSync(path.join(repo, "src/extra.ts"), "utf8")).toBe("export const extra = false;\n");
   expect((await taskOf(app, task.id))?.copy).toBeTruthy();
 
-  // Apply the remaining change: all files arrive and the copy is removed.
-  await app.click({ name: "Apply to site", role: "button", within: ".sheet" });
+  // The copy remembers what went in: the review starts those two unticked and marked applied.
+  await app.waitFor(async () => ((await app.text(".review-files")).match(/applied/g) ?? []).length === 2, { what: "the two applied files marked" });
+  expect(await app.text(".review-toolbar")).toContain("1/3 selected");
+  // Reverted in the workspace since: the rest goes in without bringing it back, and the copy goes.
+  app.git(repo, "checkout", "--", "src/app.ts");
+  await app.click({ name: "Apply to site", role: "button" });
   await app.waitFor(async () => (await toasts(app)).includes("The copy is gone.") && !(await taskOf(app, task.id))?.copy, { what: "final Apply to finish and remove the copy" });
   expect(fs.readFileSync(path.join(repo, "src/extra.ts"), "utf8")).toBe("export const extra = true;\n");
+  expect(fs.readFileSync(path.join(repo, "src/app.ts"), "utf8")).toBe("export const count = 1;\n");
   expect((await taskOf(app, task.id))?.status).toBe("done");
 
   expect(app.pageErrors).toEqual([]);
