@@ -24,7 +24,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
-import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -210,6 +210,10 @@ export class TeamService extends ServiceCore {
 
   writeMemory(agentId: string, text: string): void {
     this.library.writeMemory(agentId, text);
+  }
+
+  rememberFromPty(input: { fromPty: string | null; text: string }): RememberResult {
+    return this.library.rememberFromPty(input);
   }
 
   listSkills(): Skill[] {

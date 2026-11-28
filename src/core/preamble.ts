@@ -68,6 +68,10 @@ export function leadNote(input: { team: readonly TeamMember[]; handOff: "ask" | 
   ].join("\n");
 }
 
+/** One line under Memory telling the agent how and when to add durable notes. */
+export const MEMORY_NOTE =
+  'Save a note for future runs with `vibeforge remember "<one line>"`: lessons, the person\'s preferences and decisions that should still matter next week; not progress notes, not secrets.';
+
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
 export function memoryForPrompt(memory: string): string {
   return memory.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trim();
@@ -92,7 +96,7 @@ export function buildPreamble(input: PreambleInput): string {
     input.brief.trim(),
   ];
   const memory = memoryForPrompt(input.memory);
-  if (memory) parts.push("", "## Memory", memory);
+  parts.push("", "## Memory", ...(memory ? [memory] : []), MEMORY_NOTE);
   for (const skill of input.skills) {
     if (!skill.body.trim()) continue;
     parts.push("", `## Skill: ${skill.name}`, skill.body.trim());

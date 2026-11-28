@@ -67,12 +67,13 @@ export function parseControl(line: string): VoiceAction | null {
   return action && VOICE_ACTIONS.includes(action) ? action : null;
 }
 
-/** A request from `vibeforge tell|who|task` (scripts/talk.mjs): one JSON line. */
+/** A request from `vibeforge tell|who|task|apply|remember` (scripts/talk.mjs): one JSON line. */
 export type TalkRequest =
   | { op: "who"; pty: string | null; ptyToken?: string }
   | { op: "tell"; pty: string | null; ptyToken?: string; to: string; text: string; wait: boolean; timeoutMs?: number }
   | { op: "task"; pty: string | null; ptyToken?: string; agent: string; text: string; title?: string; start: boolean; wait: boolean; timeoutMs?: number }
-  | { op: "apply"; pty: string | null; ptyToken?: string; task: string };
+  | { op: "apply"; pty: string | null; ptyToken?: string; task: string }
+  | { op: "remember"; pty: string | null; ptyToken?: string; text: string };
 
 /** Any request can come back refused, with the reason. */
 export type TalkRefusal = { ok: false; error: string };
@@ -93,6 +94,7 @@ export interface TalkAnswers {
   tell: { ok: true; to: string; delivered: "sent" | "draft" | "queued"; reply?: string | null; fromScreen?: boolean; timedOut?: boolean; note?: string } | TalkRefusal;
   task: { ok: true; taskId: string; title: string; started: boolean; reply?: string | null; note?: string } | TalkRefusal;
   apply: { ok: true; files: string[]; conflicts: string[]; note: string } | TalkRefusal;
+  remember: { ok: true; agent: string; line: string; flagged: boolean } | TalkRefusal;
 }
 
 /** The largest request line: a long message is still one line of JSON. */
@@ -118,6 +120,10 @@ export function parseTalkRequest(line: string): TalkRequest | null {
   if (raw.op === "apply") {
     const task = text(raw.task, 200);
     return task ? { op: "apply", ...auth, task } : null;
+  }
+  if (raw.op === "remember") {
+    const note = text(raw.text, TALK_REQUEST_MAX);
+    return note !== null ? { op: "remember", ...auth, text: note } : null;
   }
   const body = text(raw.text, TALK_REQUEST_MAX);
   if (!body) return null;

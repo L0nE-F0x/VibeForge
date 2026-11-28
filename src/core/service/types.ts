@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { MemoryFlag } from "../../shared/memory.js";
 import type { ComputerUseDriver } from "../computer-use.js";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
@@ -118,6 +119,8 @@ export interface DeskHost {
   logDiagnostics?(line: string): void;
   /** Desktop + app UI computer-use observation and control driver. */
   computer?: ComputerUseDriver;
+  /** An agent added a dated line to its own memory (`vibeforge remember`); `undo` removes that exact line. */
+  remembered?(item: { agentId: string; agentName: string; note: string; line: string; flagged: boolean; undo: string }): void;
 }
 
 /** A run the last close of VibeForge cut off, as the window offers it back. */
@@ -278,6 +281,20 @@ export interface Deleted {
   /** A task's copy was left on disk because its path wasn't the task's own worktree. */
   copyLeft?: boolean;
 }
+
+/** Result of `vibeforge remember "<one line>"` from an agent's terminal. */
+export type RememberResult =
+  | {
+      ok: true;
+      agentId: string;
+      agent: string;
+      note: string;
+      line: string;
+      flagged: boolean;
+      flags: MemoryFlag[];
+      undo: string;
+    }
+  | { ok: false; error: string };
 
 /** Written on a patch that could not be taken at exit, because the app was already gone. */
 export const LATE_PATCH_NOTE = "# Saved when VibeForge next opened, because it closed during this run.\n";

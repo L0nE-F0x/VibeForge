@@ -218,7 +218,8 @@ export type DeskNotice =
   | { id: "host-stopped"; terminals: number; runIds: string[] }
   | { id: "host-stalled" }
   | { id: "host-answering" }
-  | { id: "errors"; count: number };
+  | { id: "errors"; count: number }
+  | { id: "agent-remembered"; agentId: string; agentName: string; note: string; line: string; flagged: boolean; undo: string };
 
 export interface UpdateInfo {
   current: string;

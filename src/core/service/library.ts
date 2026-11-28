@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { appendMemoryBullet, prepareMemoryLine, removeMemoryLine } from "../../shared/memory.js";
+import { dayKey } from "../../shared/text.js";
 import { isDirectory } from "../fsx.js";
-import { agentTier, oneLine } from "../store.js";
+import { describeError } from "../log.js";
+import { agentTier, MEMORY_STARTER, oneLine } from "../store.js";
 import type { Agent, Skill } from "../types.js";
-import { type AgentInput, type Deleted, normalizePlaces, type SkillInput } from "./types.js";
+import { type AgentInput, type Deleted, normalizePlaces, type RememberResult, type SkillInput } from "./types.js";
 import type { ServiceCore } from "./core.js";
 
 /** Agents and skills: the people and the know-how runs are started with. */
@@ -98,6 +101,39 @@ export class LibraryDesk {
     if (!this.core.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
     this.core.store.writeMemory(agentId, text);
     this.core.emit("agents");
+  }
+
+  /** Append a dated bullet to the running agent's `memory.md` and register an exact-line Undo. */
+  rememberFromPty(input: { fromPty: string | null; text: string }): RememberResult {
+    const session = input.fromPty ? this.core.live.get(input.fromPty) : undefined;
+    if (!session) return { ok: false, error: "Run this from an agent's terminal in VibeForge; a plain terminal has no agent memory." };
+    const run = session.runId ? this.core.store.getRun(session.runId) : null;
+    const agentId = run?.agentId ?? session.agentId ?? null;
+    if (!agentId) return { ok: false, error: "This terminal isn't running an agent; a plain CLI has no agent memory." };
+    const agent = this.core.store.getAgent(agentId);
+    if (!agent) return { ok: false, error: "That agent no longer exists." };
+    const prepared = prepareMemoryLine(input.text);
+    if (!prepared.ok) return prepared;
+    let prev: string;
+    try {
+      prev = this.core.store.readMemory(agent.id);
+    } catch (error) {
+      return { ok: false, error: describeError(error) };
+    }
+    const line = `- ${dayKey(this.core.now().toISOString())}: ${prepared.note}`;
+    this.core.store.writeMemory(agent.id, appendMemoryBullet(prev, line, MEMORY_STARTER));
+    this.core.emit("agents");
+    const { undo } = this.core.keepForUndo(this.core.trash.stash([]), () => {
+      if (!this.core.store.getAgent(agent.id)) return;
+      const current = this.core.store.readMemory(agent.id);
+      const updated = removeMemoryLine(current, line);
+      if (updated === current) return;
+      this.core.store.writeMemory(agent.id, updated);
+      this.core.emit("agents");
+    });
+    const flagged = prepared.flags.length > 0;
+    this.core.options.host.remembered?.({ agentId: agent.id, agentName: agent.name, note: prepared.note, line, flagged, undo });
+    return { ok: true, agentId: agent.id, agent: agent.name, note: prepared.note, line, flagged, flags: prepared.flags, undo };
   }
 
   // ---------------------------------------------------------------- skills
