@@ -24,7 +24,7 @@ export const NOT_A_REPO = "not a git repo";
  */
 export async function commitDays(cwd: string, since: string, timeoutMs = 8000): Promise<Array<{ hash: string; day: string }>> {
   const email = (await execGit(["config", "user.email"], cwd, timeoutMs)).stdout.trim();
-  const args = ["log", "--all", "--no-merges", `--since=${since}`, "--date=short-local", "--format=%H %ad"];
+  const args = ["log", "--exclude=refs/vibeforge/*", "--all", "--no-merges", `--since=${since}`, "--date=short-local", "--format=%H %ad"];
   if (email) args.push(`--author=${email}`);
   const log = await execGit(args, cwd, timeoutMs, 32 * 1024 * 1024);
   if (log.code !== 0) return [];

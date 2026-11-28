@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { newCompanionToken, normalizeCompanion, shellForegroundEngine } from "../companion.js";
@@ -6,6 +7,7 @@ import { LOCAL_ENGINE_ID, cleanLocalModel, localEngineSpec, normalizeLocalUrl, t
 import { normalizeLocalServer, normalizeVibyRoute, vibyLocalModel } from "../../shared/local.js";
 import { isDirectory, readJson, readText, writeFileAtomic } from "../fsx.js";
 import { diffSince, dirtyFiles, leaveOutUntouched, summarizeSnapshot, type DirtyFiles } from "../vcs.js";
+import { applyUndoRestore, isRunInCopy, removeRunSnapshots, takeEndSnapshot, takeStartSnapshot, type RestoreUndoData } from "../snapshots.js";
 import { buildPreamble } from "../preamble.js";
 import { allocateRunDir, RUN_FILES } from "../runs.js";
 import { hasRunFile, readRunTail } from "../run-storage.js";
@@ -69,6 +71,7 @@ export class ServiceCore {
   readonly dirtyAtStart = new Map<string, Promise<DirtyFiles | null>>();
   readonly trash: Trash;
   private readonly undoable = new Map<string, { bin: Bin; restore: (restored: string[]) => void; timer: ReturnType<typeof setTimeout>; settle?: Settle }>();
+  private readonly restoreUndos = new Map<string, { data: RestoreUndoData; timer: ReturnType<typeof setTimeout> }>();
   private pending = new Set<Topic>();
   private flushQueued = false;
   protected closed = false;
@@ -105,8 +108,10 @@ export class ServiceCore {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     for (const entry of this.undoable.values()) clearTimeout(entry.timer);
+    for (const entry of this.restoreUndos.values()) clearTimeout(entry.timer);
     const settling = [...this.undoable.values()].flatMap((entry) => (entry.settle ? [entry.settle] : []));
     this.undoable.clear();
+    this.restoreUndos.clear();
     this.trash.empty();
     this.store.close();
     const tidied = settling.map((settle) => {
@@ -152,6 +157,27 @@ export class ServiceCore {
   /** The most recent delete still inside its undo window, or null when none is left. */
   latestUndoToken(): string | null {
     return [...this.undoable.keys()].at(-1) ?? null;
+  }
+
+  /** Keep a file-restore operation undoable for a short window, putting the end state back for those exact files. */
+  keepRestoreForUndo(data: RestoreUndoData): string {
+    const token = randomUUID();
+    const timer = setTimeout(() => {
+      this.restoreUndos.delete(token);
+    }, UNDO_MS);
+    timer.unref?.();
+    this.restoreUndos.set(token, { data, timer });
+    return token;
+  }
+
+  /** Undo a previous "Put files back as before this run" action. */
+  async undoRunRestore(token: string): Promise<void> {
+    const entry = this.restoreUndos.get(token);
+    if (!entry) throw new Error("It is too late to undo that.");
+    clearTimeout(entry.timer);
+    this.restoreUndos.delete(token);
+    const reverted = await applyUndoRestore(entry.data);
+    if (reverted.length > 0) this.emit("workspaces");
   }
 
   // ---------------------------------------------------------------- events
@@ -618,14 +644,26 @@ export class ServiceCore {
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
     const spawnArgv = wrapWithSetupCommand(plan.argv, input.setupCommand, this.store.readSettings().defaultShell);
     let gitStart: string | null = null;
-    try {
-      gitStart = await this.options.host.gitHead(input.cwd);
-      // What the tree looked like: a run that only answers a question ends with "No changes",
-      // however many edits were already there, and doesn't go to Review for them.
-      if (gitStart) this.gitAtStart.set(id, await this.options.host.snapshotGit(input.cwd, gitStart));
-    } catch {
-      /* not a repository, or git is slow: the run is recorded without */
-    }
+    const captureStartGit = async () => {
+      try {
+        gitStart = await this.options.host.gitHead(input.cwd);
+        // What the tree looked like: a run that only answers a question ends with "No changes",
+        // however many edits were already there, and doesn't go to Review for them.
+        if (gitStart) this.gitAtStart.set(id, await this.options.host.snapshotGit(input.cwd, gitStart));
+      } catch {
+        /* not a repository, or git is slow: the run is recorded without */
+      }
+    };
+    const captureStartSnapshot = async () => {
+      if (isRunInCopy(input.cwd, this.options.dataRoot)) return;
+      await takeStartSnapshot({
+        cwd: input.cwd,
+        runId: id,
+        runDir: dir,
+        onWarn: (message) => this.options.host.logWarn?.(message),
+      });
+    };
+    await Promise.all([captureStartGit(), captureStartSnapshot()]);
     this.dirtyAtStart.set(id, dirtyFiles(input.cwd).catch(() => null));
     const meta: RunMeta = {
       id,
@@ -674,6 +712,8 @@ export class ServiceCore {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.dirtyAtStart.delete(id);
+      this.gitAtStart.delete(id);
+      await removeRunSnapshots(meta);
       this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
@@ -756,6 +796,15 @@ export class ServiceCore {
     if (this.closed) return;
     const own = await this.writePatch(run, "", dirty);
     if (this.closed) return;
+    if (!isRunInCopy(run.cwd, this.options.dataRoot)) {
+      await takeEndSnapshot({
+        cwd: run.cwd,
+        runId: run.id,
+        runDir: run.dir,
+        onWarn: (message) => this.options.host.logWarn?.(message),
+      });
+      if (this.closed) return;
+    }
     const latest = this.store.getRun(runId) ?? run;
     const before = this.gitAtStart.get(runId);
     this.gitAtStart.delete(runId);
@@ -838,6 +887,8 @@ export class ServiceCore {
         // The exit that should have frozen the patch never arrived. This is the tree now.
         if (!hasRunFile(dir, RUN_FILES.patch)) await this.writePatch(run, LATE_PATCH_NOTE);
       }
+      if (this.closed) return;
+      await removeRunSnapshots(run);
       if (this.closed) return;
       this.store.saveRun({
         ...run,

@@ -24,7 +24,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
-import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
+import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RunRestorePreview, RunRestoreResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
 
@@ -671,6 +671,22 @@ export class TeamService extends ServiceCore {
 
   runMarkdown(id: string): Promise<string> {
     return this.runs.runMarkdown(id);
+  }
+
+  previewRunRestore(id: string): Promise<RunRestorePreview> {
+    return this.runs.previewRestore(id);
+  }
+
+  restoreRun(id: string): Promise<RunRestoreResult> {
+    return this.runs.restoreRun(id);
+  }
+
+  undoRunRestore(token: string): Promise<void> {
+    return this.undoRunRestoreImpl(token);
+  }
+
+  private undoRunRestoreImpl(token: string): Promise<void> {
+    return super.undoRunRestore(token);
   }
 
   searchRuns(text: string, limit?: number): RunHit[] {

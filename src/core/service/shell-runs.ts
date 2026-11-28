@@ -1,6 +1,7 @@
 import path from "node:path";
 import { programOf } from "../engines.js";
 import { allocateRunDir } from "../runs.js";
+import { isRunInCopy, removeRunSnapshots, takeStartSnapshot } from "../snapshots.js";
 import { dirtyFiles } from "../vcs.js";
 import { BLIP_MS } from "./types.js";
 import type { ServiceCore } from "./core.js";
@@ -76,12 +77,24 @@ export class ShellRecorder {
     const title = `${row.label} · ${workspace?.name ?? (path.basename(cwd) || cwd)}`;
     const { id, dir } = allocateRunDir(this.core.options.dataRoot, started, title);
     let gitStart: string | null = null;
-    try {
-      gitStart = await this.core.options.host.gitHead(cwd);
-      this.core.gitAtStart.set(id, await this.core.options.host.snapshotGit(cwd, gitStart));
-    } catch {
-      /* not a repo, or git is slow; the run is recorded without */
-    }
+    const captureStartGit = async () => {
+      try {
+        gitStart = await this.core.options.host.gitHead(cwd);
+        this.core.gitAtStart.set(id, await this.core.options.host.snapshotGit(cwd, gitStart));
+      } catch {
+        /* not a repo, or git is slow; the run is recorded without */
+      }
+    };
+    const captureStartSnapshot = async () => {
+      if (isRunInCopy(cwd, this.core.options.dataRoot)) return;
+      await takeStartSnapshot({
+        cwd,
+        runId: id,
+        runDir: dir,
+        onWarn: (message) => this.core.options.host.logWarn?.(message),
+      });
+    };
+    await Promise.all([captureStartGit(), captureStartSnapshot()]);
     this.core.dirtyAtStart.set(id, dirtyFiles(cwd).catch(() => null));
     this.core.store.saveRun({
       id,
@@ -154,14 +167,15 @@ export class ShellRecorder {
     const session = this.core.live.get(ptyId);
     if (session?.runId === runId) this.core.live.set(ptyId, { ...session, runId: null });
     await this.core.finishRun(runId, { exitCode: null, signal: null, status: "exited" });
-    this.dropBlip(runId);
+    await this.dropBlip(runId);
   }
 
-  private dropBlip(runId: string): void {
+  private async dropBlip(runId: string): Promise<void> {
     const run = this.core.store.getRun(runId);
     if (!run?.endedAt || run.stopRequested) return;
     const lasted = Date.parse(run.endedAt) - Date.parse(run.startedAt);
     if (lasted >= BLIP_MS || (run.changes && run.changes !== "No changes")) return;
+    await removeRunSnapshots(run);
     this.core.store.deleteRun(run);
     this.core.emit("runs");
   }

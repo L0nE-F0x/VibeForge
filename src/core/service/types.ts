@@ -7,7 +7,16 @@ import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord
 import type { Writer } from "../checkout.js";
 import type { ReplyLog } from "../replies.js";
 import type { SessionLog } from "../session-ids.js";
+import type {
+  LeftAloneReason,
+  RestoreFileAction,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
+} from "../snapshots.js";
 import type { Waiting } from "./turns.js";
+
+export type { LeftAloneReason, RestoreFileAction, RunRestoreAvailability, RunRestorePreview, RunRestoreResult };
 
 // ------------------------------------------------------------------ host contract
 
@@ -117,6 +126,8 @@ export interface DeskHost {
   autostart?: { get(): boolean; set(on: boolean): boolean };
   /** Write a privacy-safe single-line Viby diagnostic event to the app log (never prompts or output). */
   logDiagnostics?(line: string): void;
+  /** Write a non-fatal warning to the app log (never prompts or output). */
+  logWarn?(line: string): void;
   /** Desktop + app UI computer-use observation and control driver. */
   computer?: ComputerUseDriver;
   /** An agent added a dated line to its own memory (`vibeforge remember`); `undo` removes that exact line. */
@@ -238,6 +249,7 @@ export interface ChatView extends ChatRecord {
 export interface RunBundle {
   run: RunView;
   files: RunFiles;
+  restore: RunRestoreAvailability;
 }
 
 export interface Launched {

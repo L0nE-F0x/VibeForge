@@ -13,8 +13,13 @@ import type {
   RoutineView,
   RunBundle,
   RunHit,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
   RunUpkeep,
   RunView,
+  LeftAloneReason,
+  RestoreFileAction,
   SchedulePreview,
   SendResult,
   SkillInput,
@@ -141,8 +146,13 @@ export type {
   RunBundle,
   RunHit,
   RunQuery,
+  RunRestoreAvailability,
+  RunRestorePreview,
+  RunRestoreResult,
   RunUpkeep,
   RunView,
+  LeftAloneReason,
+  RestoreFileAction,
   Schedule,
   SchedulePreview,
   StorageSummary,
@@ -568,6 +578,12 @@ export interface DeskMethods {
   "runs.diff": (id: string, source?: "saved" | "now") => string;
   /** A finished run as Markdown for an issue or a pull request (src/core/run-markdown.ts). */
   "runs.markdown": (id: string) => string;
+  /** Preview which files will be restored vs. left alone if putting files back as before this run. */
+  "runs.restorePreview": (id: string) => RunRestorePreview;
+  /** Put files back as before this run (only files still matching the end snapshot). */
+  "runs.restore": (id: string) => RunRestoreResult;
+  /** Put the run's end state back for the exact files restored by `runs.restore`. */
+  "runs.undoRestore": (token: string) => void;
 
   /** Where VibeForge's disk space goes. */
   "storage.summary": () => StorageSummary;

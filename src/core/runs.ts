@@ -17,6 +17,8 @@ export const RUN_FILES = {
   git: "git.txt",
   /** Full patch frozen when the run ended. Absent on runs saved before this existed. Gzipped later (run-storage.ts). */
   patch: "diff.patch",
+  /** Before-and-after git snapshot refs and oversized skipped files for restoring what a run did. */
+  snapshots: "snapshots.json",
 } as const;
 
 export const RUN_ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];

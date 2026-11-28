@@ -319,6 +319,9 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "runs.search": (text, limit) => s().searchRuns(String(text ?? "").slice(0, 200), typeof limit === "number" ? limit : undefined),
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
     "runs.markdown": (id) => s().runMarkdown(id),
+    "runs.restorePreview": (id) => s().previewRunRestore(String(id ?? "")),
+    "runs.restore": (id) => s().restoreRun(String(id ?? "")),
+    "runs.undoRestore": (token) => s().undoRunRestore(String(token ?? "")),
     "storage.summary": () => s().storageSummary(),
     "storage.tidy": () => s().maintainRuns(),
 
