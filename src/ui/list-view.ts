@@ -110,8 +110,8 @@ export function viewCounts<T, F extends string>(
 }
 
 /** A run that failed, timed out, was cut off, or exited with an error: what "Last run went wrong" and "Went wrong" keep. */
-export function runWentWrong(run: { status: string; exitCode: number | null; result?: string | null; error?: string | null }): boolean {
-  return run.status === "failed" || (run.status === "exited" && Boolean(run.exitCode)) || run.result === "timeout" || isCutOffRun(run);
+export function runWentWrong(run: { status: string; exitCode: number | null; result?: string | null; origin?: string | null; cutOff?: string | null }): boolean {
+  return run.status === "failed" || (run.status === "exited" && Boolean(run.exitCode)) || run.result === "timeout" || run.result === "failed" || isCutOffRun(run);
 }
 
 /** Epoch ms of an ISO time, 0 when there is none: what "recent" sorts compare. */

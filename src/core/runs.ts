@@ -23,7 +23,7 @@ export const RUN_FILES = {
 
 export const RUN_ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];
 export const RUN_STATUSES: RunStatus[] = ["running", "exited", "stopped", "failed"];
-export const RUN_RESULTS: RoutineRunResult[] = ["finished", "question", "timeout", "cutoff"];
+export const RUN_RESULTS: RoutineRunResult[] = ["finished", "question", "timeout", "stuck", "cutoff", "failed"];
 
 export function runFolderStamp(date: Date): string {
   const iso = date.toISOString();

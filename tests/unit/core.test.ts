@@ -16,6 +16,8 @@ import {
   failStreak,
   isCutOffRun,
   isQuestionForPerson,
+  normalizeRoutineTimeout,
+  screenAsks,
   isRoutineTimeoutValid,
   isScheduleValid,
   mostRecentSlot,
@@ -257,21 +259,22 @@ describe("routines", () => {
     expect(mostRecentSlot(base.schedule, new Date("2026-09-25T09:00:00"))?.getTime()).toBe(new Date("2026-09-25T09:00:00").getTime());
   });
 
-  it("fires a slot that arrived while running, records one that passed while closed", () => {
+  it("fires a due slot, skips one that came while running (saying which), records one that passed while closed", () => {
     expect(decideRoutineTick(base)).toEqual({ action: "fire", scheduledAt: new Date("2026-09-25T09:00:00").toISOString() });
     expect(decideRoutineTick({ ...base, appStartedAt: new Date("2026-09-25T09:00:10") }).action).toBe("miss");
     expect(decideRoutineTick({ ...base, lastFiredAt: new Date("2026-09-25T09:00:00").toISOString() })).toEqual({ action: "skip", reason: "not-due" });
-    expect(decideRoutineTick({ ...base, previousStillRunning: true })).toEqual({ action: "skip", reason: "still-running" });
+    const slot = new Date("2026-09-25T09:00:00").toISOString();
+    expect(decideRoutineTick({ ...base, previousStillRunning: true })).toEqual({ action: "skip", reason: "still-running", scheduledAt: slot });
     // Still running past MAX_SLOT_LATENESS_MS keeps reporting still-running instead of miss.
-    expect(decideRoutineTick({ ...base, previousStillRunning: true, now: new Date("2026-09-25T09:10:00") })).toEqual({ action: "skip", reason: "still-running" });
-    // Once a long run finishes past the slot, that overlapped slot is skipped instead of marked "missed while closed".
+    expect(decideRoutineTick({ ...base, previousStillRunning: true, now: new Date("2026-09-25T09:10:00") })).toEqual({ action: "skip", reason: "still-running", scheduledAt: slot });
+    // Once a long run finishes past the slot, that overlapped slot is skipped (and so recorded) instead of marked "missed while closed".
     expect(
       decideRoutineTick({
         ...base,
         now: new Date("2026-09-25T09:10:00"),
         previousEndedAt: new Date("2026-09-25T09:08:00").toISOString(),
       }),
-    ).toEqual({ action: "skip", reason: "not-due" });
+    ).toEqual({ action: "skip", reason: "still-running", scheduledAt: slot });
     // With no run covering the slot, a >2m-late slot still counts as missed.
     expect(decideRoutineTick({ ...base, now: new Date("2026-09-25T09:10:00") })).toEqual({
       action: "miss",
@@ -739,28 +742,33 @@ describe("when a routine is due", () => {
 });
 
 describe("a routine's failures in a row", () => {
-  it("counts failed starts, error exits, timeouts and cut-off runs, not questions", () => {
-    const run = (
-      status: RunMeta["status"],
-      exitCode: number | null = null,
-      result: RunMeta["result"] = null,
-      error: string | null = null,
-    ) => ({ status, exitCode, result, error });
+  it("counts failed starts, error exits, timeouts and cut-off runs, not questions or runs from before results", () => {
+    const run = (status: RunMeta["status"], result: RunMeta["result"] = null, more: Partial<RunMeta> = {}) => ({ status, result, ...more });
     expect(failStreak([])).toBe(0);
-    expect(failStreak([run("running"), run("exited", 1), run("failed"), run("exited", 0), run("exited", 1)])).toBe(2);
-    expect(failStreak([run("stopped"), run("exited", 1)])).toBe(0);
-    expect(failStreak([run("exited", null), run("failed")])).toBe(0);
-    // Timeouts and cut-off runs increment the streak; a run stopped on a question does not.
-    expect(failStreak([run("stopped", null, "timeout"), run("stopped", null, "cutoff"), run("exited", 1)])).toBe(3);
-    expect(failStreak([run("stopped", null, null, "VibeForge closed while this run was going."), run("exited", 1)])).toBe(2);
-    expect(failStreak([run("running", null, "question"), run("stopped", null, "timeout")])).toBe(0);
-    expect(failStreak([run("stopped", null, "question"), run("failed")])).toBe(0);
-    expect(isCutOffRun({ status: "stopped", result: "cutoff" })).toBe(true);
-    expect(isCutOffRun({ status: "exited", error: "The terminal host stopped, so this terminal was cut off." })).toBe(true);
-    expect(isCutOffRun({ status: "stopped", error: "Manual stop" })).toBe(false);
+    expect(failStreak([run("running"), run("exited", "failed"), run("failed", "failed"), run("exited", "finished"), run("exited", "failed")])).toBe(2);
+    expect(failStreak([run("stopped"), run("exited", "failed")])).toBe(0);
+    // Timeouts and cut-off runs add to the streak; a question, or one ended stuck on a question, ends it.
+    expect(failStreak([run("stopped", "timeout"), run("stopped", "cutoff"), run("exited", "failed")])).toBe(3);
+    expect(failStreak([run("running", "question"), run("stopped", "timeout")])).toBe(0);
+    expect(failStreak([run("stopped", "question"), run("failed", "failed")])).toBe(0);
+    expect(failStreak([run("stopped", "stuck"), run("stopped", "timeout")])).toBe(0);
+    // Runs from before results were recorded never count, whatever their exit or error said.
+    expect(failStreak([run("exited", null, { exitCode: 1 }), run("failed")])).toBe(0);
+    expect(failStreak([run("stopped", null, { error: "VibeForge closed while this run was going." }), run("exited", "failed")])).toBe(0);
+    expect(failStreak([run("stopped", null, { error: "Stopped when VibeForge quit." })])).toBe(0);
   });
 
-  it("validates routine time limits and conservatively detects questions", () => {
+  it("calls a run cut off from what it recorded, never from its error text", () => {
+    expect(isCutOffRun({ status: "stopped", result: "cutoff" })).toBe(true);
+    expect(isCutOffRun({ status: "stopped", origin: "routine", cutOff: "quit" })).toBe(true);
+    expect(isCutOffRun({ status: "running", result: "cutoff" })).toBe(false);
+    // A task's or chat's run cut off by a quit keeps its own status; old error text means nothing.
+    expect(isCutOffRun({ status: "stopped", origin: "task", cutOff: "quit" })).toBe(false);
+    expect(isCutOffRun({ status: "exited", origin: "chat", error: "The terminal host stopped, so this terminal was cut off." } as never)).toBe(false);
+    expect(isCutOffRun({ status: "stopped", origin: "routine", error: "Stopped when VibeForge quit." } as never)).toBe(false);
+  });
+
+  it("validates routine time limits and keeps old routines without one", () => {
     expect(DEFAULT_ROUTINE_TIMEOUT_MINUTES).toBe(120);
     expect(isRoutineTimeoutValid(5)).toBe(true);
     expect(isRoutineTimeoutValid(120)).toBe(true);
@@ -768,23 +776,51 @@ describe("a routine's failures in a row", () => {
     expect(isRoutineTimeoutValid(4)).toBe(false);
     expect(isRoutineTimeoutValid(10_081)).toBe(false);
     expect(isRoutineTimeoutValid(15.5)).toBe(false);
+    // Saved before time limits existed: none, until the person sets one.
+    expect(normalizeRoutineTimeout(undefined)).toBeNull();
+    expect(normalizeRoutineTimeout(null)).toBeNull();
+    expect(normalizeRoutineTimeout(30)).toBe(30);
+    expect(normalizeRoutineTimeout(2)).toBe(120);
+  });
 
-    // Direct questions and choice lists are caught.
+  it("treats any question as one: a known prompt, a reply or bottom line ending in \"?\", or a wait for a key", () => {
     expect(isQuestionForPerson("All checks look good.\nShould I update the major versions too?")).toBe(true);
     expect(isQuestionForPerson("Which branch should I target?\n1. main\n2. staging")).toBe(true);
     expect(isQuestionForPerson("Would you like me to apply these edits?")).toBe(true);
     expect(isQuestionForPerson("Proceed?")).toBe(true);
+    expect(isQuestionForPerson("Done! Anything else you need help with?")).toBe(true);
+    expect(isQuestionForPerson("Is it OK to delete them?")).toBe(true);
+    expect(isQuestionForPerson("Ready to push these 3 commits?")).toBe(true);
+    expect(isQuestionForPerson("Okay to proceed?")).toBe(true);
+    expect(isQuestionForPerson("**Want me to open a PR?**")).toBe(true);
+    expect(isQuestionForPerson("Press Enter to continue")).toBe(true);
+    expect(isQuestionForPerson("Waiting for your approval...")).toBe(true);
     expect(isQuestionForPerson(null, "Quick safety check:\nDo you trust the files in this folder?\n❯ 1. Yes, proceed")).toBe(true);
 
-    // Normal summaries, code blocks, URLs, headings mid-reply and polite sign-offs stay finished.
+    // Summaries, code blocks, URLs and a question mid-reply aren't questions.
     expect(isQuestionForPerson("Updated README.md and all tests pass.")).toBe(false);
     expect(isQuestionForPerson("### Should I keep this?\nYes, tests pass.")).toBe(false);
     expect(isQuestionForPerson("```ts\nconst ok = x ? 1 : 2;\n```\nChecked https://example.com?a=1\nDone.")).toBe(false);
-    expect(isQuestionForPerson("Done! Anything else you need help with?")).toBe(false);
 
-    expect(classifyRoutineTurn({ reply: "Summary complete.", screen: "", fromScreen: false, hasLogReader: true, worked: true })).toBe("finished");
-    expect(classifyRoutineTurn({ reply: "Could you confirm the target branch?", screen: "", fromScreen: false, hasLogReader: true, worked: true })).toBe("question");
-    expect(classifyRoutineTurn({ reply: "boot banner", screen: "boot banner", fromScreen: true, hasLogReader: false, worked: false })).toBe("working");
-    expect(classifyRoutineTurn({ reply: "   ", screen: "spinner", fromScreen: true, hasLogReader: true, worked: true })).toBe("working");
+    // A quiet screen: a question near the bottom counts even with choices or the CLI's frame below it.
+    expect(screenAsks("Do you trust the authors of the files in this folder?\n  Yes, continue\n  No, exit\n\nEnter to confirm · Esc to exit")).toBe(true);
+    expect(screenAsks("Trust folder and continue?\n╭────────╮\n│ >      │\n╰────────╯")).toBe(true);
+    expect(screenAsks("Waiting for authentication…")).toBe(true);
+    expect(screenAsks("Press Enter to continue")).toBe(true);
+    expect(screenAsks("Running: cargo build --release")).toBe(false);
+    expect(screenAsks("⎿ Running…\n╭────╮\n│ >  │\n╰────╯\n  ? for shortcuts")).toBe(false);
+  });
+
+  it("ends a turn only on the CLI's log; a quiet screen can only be a question or still working", () => {
+    expect(classifyRoutineTurn({ reply: "Summary complete.", screen: "", fromScreen: false, hasLogReader: true })).toBe("finished");
+    expect(classifyRoutineTurn({ reply: "Could you confirm the target branch?", screen: "", fromScreen: false, hasLogReader: true })).toBe("question");
+    // A screen-only CLI, quiet mid-work: never finished.
+    expect(classifyRoutineTurn({ reply: "Running: cargo build --release", screen: "Running: cargo build --release", fromScreen: true, hasLogReader: false })).toBe("working");
+    expect(classifyRoutineTurn({ reply: "Done updating dependencies.", screen: "Done updating dependencies.", fromScreen: true, hasLogReader: false })).toBe("working");
+    // A log-reader CLI quiet on its screen with no log reply: still working, never finished.
+    expect(classifyRoutineTurn({ reply: "⎿ Running…", screen: "⎿ Running…", fromScreen: true, hasLogReader: true })).toBe("working");
+    // A question nobody knew the wording of is still a question.
+    expect(classifyRoutineTurn({ reply: "Okay to proceed?", screen: "Okay to proceed?", fromScreen: true, hasLogReader: false })).toBe("question");
+    expect(classifyRoutineTurn({ reply: "", screen: "Waiting for your approval...", fromScreen: true, hasLogReader: true })).toBe("question");
   });
 });

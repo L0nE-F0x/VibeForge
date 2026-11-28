@@ -47,6 +47,9 @@ function stripTerminalCodes(raw: string): string {
  * and what is written when it ends. The desks in this folder hold the rest; `TeamService` puts
  * them together behind one API.
  */
+/** Who wrote into a pane: a person (or Viby, or a chat, for one), or another CLI's message. */
+export type PaneInputFrom = "person" | "cli";
+
 export class ServiceCore {
   readonly options: DeskOptions;
   readonly store: Store;
@@ -181,6 +184,16 @@ export class ServiceCore {
     const reverted = await applyUndoRestore(entry.data);
     if (reverted.length > 0) this.emit("workspaces");
   }
+
+  // ---------------------------------------------------------------- input into a pane
+
+  /**
+   * Something went into a pane from outside its program: a person typing, or something sent on a
+   * person's behalf (Viby answering a prompt, a chat message), or (`from` "cli") another CLI's
+   * message through `vibeforge tell`. Every write into a pane reports here once it's in, so
+   * routines, messages and the attention marks all see the same input. TeamService hands it on.
+   */
+  paneInput(_ptyId: string, _data: string, _from: PaneInputFrom): void {}
 
   // ---------------------------------------------------------------- events
 
@@ -749,7 +762,7 @@ export class ServiceCore {
       this.dirtyAtStart.delete(id);
       this.gitAtStart.delete(id);
       await removeRunSnapshots(meta);
-      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message });
+      this.store.saveRun({ ...meta, status: "failed", endedAt: this.now().toISOString(), error: message, ...(meta.origin === "routine" ? { result: "failed" as const } : {}) });
       this.emit("runs");
       throw new Error(`Could not start ${input.engine.row.label}: ${message}`);
     }
@@ -810,15 +823,7 @@ export class ServiceCore {
       const resolvedExit = planned && planned.exitCode !== undefined ? planned.exitCode : exitCode;
       const resolvedSignal = planned?.status === "exited" && planned.exitCode === 0 ? null : signal;
       const resolvedError = planned?.error ?? error ?? undefined;
-      const resolvedResult: RoutineRunResult | undefined =
-        planned?.result ??
-        (run?.origin === "routine"
-          ? error
-            ? "cutoff"
-            : resolvedStatus === "exited" && (resolvedExit === 0 || resolvedExit === null)
-              ? "finished"
-              : (run.result ?? undefined)
-          : undefined);
+      const resolvedResult: RoutineRunResult | undefined = planned?.result ?? (run?.origin === "routine" ? routineExitResult(run, resolvedStatus, resolvedExit, signal, error) : undefined);
       const done = this.finishRun(session.runId, {
         exitCode: resolvedExit,
         signal: resolvedSignal,
@@ -893,9 +898,9 @@ export class ServiceCore {
         runId: finished.id,
         origin: finished.origin,
         outcome:
-          finished.result === "timeout" || finished.result === "cutoff"
+          finished.result === "timeout" || finished.result === "cutoff" || finished.result === "failed"
             ? "failed"
-            : finished.status === "stopped"
+            : finished.status === "stopped" || finished.result === "stuck"
               ? "stopped"
               : finished.status === "failed" || (finished.exitCode && finished.exitCode !== 0)
                 ? "failed"
@@ -920,7 +925,9 @@ export class ServiceCore {
     const outcome =
       run.result === "timeout"
         ? "hit its time limit"
-        : isCutOffRun(run)
+        : run.result === "stuck"
+          ? "stuck on a question"
+          : isCutOffRun(run)
           ? "cut off"
           : run.status === "stopped"
             ? "stopped"
@@ -928,7 +935,9 @@ export class ServiceCore {
               ? `couldn't start: ${run.error ?? "unknown error"}`
               : run.exitCode && run.exitCode !== 0
                 ? `exited with code ${run.exitCode}`
-                : "finished";
+                : run.result === "failed" && run.signal !== null
+                  ? `ended by signal ${run.signal}`
+                  : "finished";
     // Said once, on the run that makes it a streak; Routines and Home keep it lit after that.
     const streak = run.routineId ? failStreak(this.store.queryRuns({ routineId: run.routineId, limit: ROUTINE_FAILING + 1 })) : 0;
     const failing = streak === ROUTINE_FAILING ? `failed ${streak} times in a row` : null;
@@ -1192,4 +1201,18 @@ export class ServiceCore {
     for (const place of places) if (isDirectory(place)) return path.resolve(place);
     return null;
   }
+}
+
+/**
+ * How a routine's run ended when its terminal did, with no outcome planned for it: cut off when
+ * the terminal host stopped under it (`error` is only given then), finished when the CLI quit by
+ * itself with code 0, failed when it quit with an error code or was ended by a signal. A person's
+ * Stop records no result; neither does an exit that says nothing (no code, no signal).
+ */
+function routineExitResult(run: RunMeta, status: "exited" | "stopped", exitCode: number | null, signal: number | null, error: string | null): RoutineRunResult | undefined {
+  if (error) return "cutoff";
+  if (status !== "exited") return run.result === "question" ? undefined : (run.result ?? undefined);
+  if (exitCode === 0) return "finished";
+  if ((exitCode !== null && exitCode !== 0) || signal !== null) return "failed";
+  return undefined;
 }

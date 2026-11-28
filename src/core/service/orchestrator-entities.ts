@@ -582,7 +582,6 @@ export async function carryOutChatStep(deps: EntityStepDeps, turn: OrchestratorT
       const sent = await deps.chats.sendChat(created.id, step.prompt.trim(), START_SIZE);
       step.ptyId = sent.ptyId;
       step.runId = sent.runId;
-      if (!sent.started) deps.messages.onHumanInput(sent.ptyId, step.prompt.trim());
     } else {
       step.result = `Created chat "${step.name?.trim() || created.title}".`;
     }
@@ -602,7 +601,6 @@ export async function carryOutChatStep(deps: EntityStepDeps, turn: OrchestratorT
     const sent = await deps.chats.sendChat(chatId, step.prompt.trim(), START_SIZE);
     step.ptyId = sent.ptyId;
     step.runId = sent.runId;
-    if (!sent.started) deps.messages.onHumanInput(sent.ptyId, step.prompt.trim());
     if (sent.note) step.result = sent.note;
     return;
   }

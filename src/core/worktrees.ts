@@ -165,6 +165,20 @@ export function copyBranch(taskId: string): string {
   return `vibeforge/${taskId}`;
 }
 
+/**
+ * Whether `folder` sits in a git repository, by looking for a `.git` in it or a folder above it:
+ * quick, with no git to run, for checking a setting as it's saved. `repoRoot` is the real test.
+ */
+export function insideGitRepo(folder: string): boolean {
+  let dir = path.resolve(folder);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return true;
+    const up = path.dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+}
+
 /** The repository's top folder, or null when `folder` isn't inside one. */
 export async function repoRoot(folder: string): Promise<string | null> {
   const run = await git(["rev-parse", "--show-toplevel"], folder);

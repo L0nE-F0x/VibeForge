@@ -352,8 +352,11 @@ describe("routines", () => {
     expect(ctx.spawns).toHaveLength(1);
 
     const decisions = await ctx.svc.tick(new Date(11 * INTERVAL + 1000));
-    expect(decisions[0].decision).toEqual({ action: "skip", reason: "still-running" });
-    expect(ctx.svc.listRoutines()[0].stillRunning).toBe(true);
+    expect(decisions[0].decision).toEqual({ action: "skip", reason: "still-running", scheduledAt: new Date(11 * INTERVAL).toISOString() });
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ stillRunning: true, skippedSlots: { count: 1, lastAt: new Date(11 * INTERVAL).toISOString() } });
+    // Counted once per slot, however many ticks see it.
+    await ctx.svc.tick(new Date(11 * INTERVAL + 31_000));
+    expect(ctx.svc.listRoutines()[0].skippedSlots?.count).toBe(1);
 
     await ctx.exit("pty-1");
     await ctx.svc.tick(new Date(12 * INTERVAL + 1000));
@@ -432,7 +435,8 @@ describe("routines", () => {
     ctx.svc.close();
   });
 
-  it("ends a routine session cleanly once its turn finishes via log or quiet screen", async () => {
+  /** A clock the test moves, a Claude Code-like engine whose log the test answers, and a screen it sets. */
+  const routineClock = () => {
     let at = Date.parse("2026-10-01T09:00:00.000Z");
     const ctx = setup({ appStartedAt: new Date(at), now: () => new Date(at) });
     fs.writeFileSync(
@@ -444,80 +448,202 @@ describe("routines", () => {
         ],
       }),
     );
-    ctx.host.screen = async () => "Summary:\nDone updating dependencies.";
-    let resolveWatch!: (reply: string | null) => void;
-    ctx.host.watchReply = ({ signal }) =>
+    let screen = "";
+    ctx.host.screen = async () => screen;
+    const watches: Array<{ since: number; words: string; resolve: (reply: string | null) => void }> = [];
+    ctx.host.watchReply = ({ since, words, signal }) =>
       new Promise((resolve) => {
-        resolveWatch = resolve;
+        const watch = { since, words, resolve };
+        watches.push(watch);
         signal.addEventListener("abort", () => resolve(null), { once: true });
       });
+    const pass = (ms: number) => (at += ms);
+    /** The CLI works a moment, then sits still for `quietMs` with `shown` on its screen. */
+    const workThenQuiet = async (ptyId: string, shown: string, quietMs: number) => {
+      screen = shown;
+      ctx.svc.onPtyActivity(ptyId, true);
+      pass(1000);
+      ctx.svc.onPtyActivity(ptyId, false);
+      pass(quietMs);
+      await ctx.svc.tick(new Date(at));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    return { ctx, pass, now: () => at, workThenQuiet, watches, setScreen: (next: string) => (screen = next) };
+  };
 
-    const claudeAgent = await ctx.svc.saveAgent({ name: "ClaudeBot", brief: "b", engine: "claude", places: [ctx.place], allowRoutines: true });
-    const claudeRoutine = ctx.svc.saveRoutine({ name: "Log Finish", agentId: claudeAgent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check logs" });
-    const first = started(await ctx.svc.runRoutineNow(claudeRoutine.id));
-    resolveWatch("Updated package notes and verified checks.");
-    await until(() => ctx.svc.getRun(first.runId).run.status === "exited");
-    expect(ctx.svc.getRun(first.runId).run).toMatchObject({ status: "exited", exitCode: 0, result: "finished" });
+  it("ends a routine session cleanly once the CLI's log says its turn finished", async () => {
+    const { ctx, watches } = routineClock();
+    const agent = await ctx.svc.saveAgent({ name: "ClaudeBot", brief: "b", engine: "claude", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Log Finish", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check logs" });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    await until(() => watches.length > 0);
+    watches.at(-1)!.resolve("Updated package notes and verified checks.");
+    await until(() => ctx.svc.getRun(run.runId).run.status === "exited");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "exited", exitCode: 0, result: "finished" });
     expect(ctx.notes.at(-1)?.body).toMatch(/^finished/);
-
-    // Screen fallback path when a CLI has no session log reader: works then settles quietly.
-    const pastyAgent = await agentIn(ctx, "pasty");
-    const pastyRoutine = ctx.svc.saveRoutine({ name: "Screen Finish", agentId: pastyAgent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check screen" });
-    const second = started(await ctx.svc.runRoutineNow(pastyRoutine.id));
-    ctx.svc.onPtyActivity(second.ptyId, true);
-    at += 1000;
-    ctx.svc.onPtyActivity(second.ptyId, false);
-    at += SETTLE_MS + 100;
-    await ctx.svc.tick(new Date(at));
-    await until(() => ctx.svc.getRun(second.runId).run.status === "exited");
-    expect(ctx.svc.getRun(second.runId).run).toMatchObject({ status: "exited", exitCode: 0, result: "finished" });
-    expect(ctx.svc.listRoutines().find((item) => item.id === pastyRoutine.id)?.recentRuns[0]).toMatchObject({
-      id: second.runId,
-      result: "finished",
-    });
     ctx.svc.close();
   });
 
-  it("keeps a routine open when it asks a question, notifies once, and finishes once answered", async () => {
-    let at = Date.parse("2026-10-01T09:00:00.000Z");
-    const ctx = setup({ appStartedAt: new Date(at), now: () => new Date(at) });
-    let resolveWatch!: (reply: string | null) => void;
-    ctx.host.screen = async () => "Which environment should I check?\n1. staging\n2. production";
-    ctx.host.watchReply = ({ signal }) =>
-      new Promise((resolve) => {
-        resolveWatch = resolve;
-        signal.addEventListener("abort", () => resolve(null), { once: true });
-      });
+  it("never ends a CLI whose log it can't read on a quiet screen: it stays open until its time limit", async () => {
+    const { ctx, pass, now, workThenQuiet } = routineClock();
+    const agent = await agentIn(ctx, "pasty");
+    const routine = ctx.svc.saveRoutine({ name: "Screen", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check screen", timeoutMinutes: 15 });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    // A startup banner, a slow silent command, even something that looks done: never ended on the screen.
+    await workThenQuiet(run.ptyId, "Pasty 1.0 ready", SETTLE_MS + 100);
+    await workThenQuiet(run.ptyId, "Running: cargo build --release", SETTLE_MS + 100);
+    await workThenQuiet(run.ptyId, "Done updating dependencies.", 60_000);
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "running" });
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ stillRunning: true, needsInput: false });
+    // Its time limit ends it, as having hit its limit.
+    pass(15 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    await until(() => ctx.svc.getRun(run.runId).run.status !== "running");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "timeout" });
+    ctx.svc.close();
+  });
+
+  it("never ends a CLI with a log reader on its screen while its log hasn't said the turn ended", async () => {
+    const { ctx, workThenQuiet, watches } = routineClock();
+    const agent = await ctx.svc.saveAgent({ name: "ClaudeBot", brief: "b", engine: "claude", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Long", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Long job" });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    await workThenQuiet(run.ptyId, "⎿ Running…\n╭────╮\n│ >  │\n╰────╯\n  ? for shortcuts", 31_000);
+    await workThenQuiet(run.ptyId, "Done.\n╭────╮\n│ >  │\n╰────╯", 31_000);
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "running" });
+    expect(ctx.svc.listRoutines()[0].needsInput).toBe(false);
+    // The log, watched again after each look at the screen, is what ends it.
+    watches.at(-1)!.resolve("All done.");
+    await until(() => ctx.svc.getRun(run.runId).run.status === "exited");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ result: "finished" });
+    ctx.svc.close();
+  });
+
+  it("keeps a routine open on a question in any wording, waits its time limit from then, and ends it stuck (not failing)", async () => {
+    const { ctx, pass, now, workThenQuiet } = routineClock();
     const agent = await agentIn(ctx, "pasty");
     const routine = ctx.svc.saveRoutine({ name: "Deploy Check", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check deploy", timeoutMinutes: 10 });
     const run = started(await ctx.svc.runRoutineNow(routine.id));
-    ctx.svc.onPtyActivity(run.ptyId, true);
-    at += 1000;
-    ctx.svc.onPtyActivity(run.ptyId, false);
-    at += SETTLE_MS + 100;
-    await ctx.svc.tick(new Date(at));
-    await until(() => ctx.svc.getRun(run.runId).run.result === "question");
-
-    // Stays open past the timeout limit while awaiting a human answer and never adds to failStreak.
-    at += 30 * 60_000;
-    await ctx.svc.tick(new Date(at));
+    pass(8 * 60_000);
+    await workThenQuiet(run.ptyId, "Found 3 stale branches.\nIs it OK to delete them?", SETTLE_MS + 100);
     expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "running", result: "question" });
     expect(ctx.svc.listRoutines()[0]).toMatchObject({ stillRunning: true, needsInput: true, failStreak: 0 });
-    expect(ctx.notes.map((n) => n.body)).toContain("waiting on a question");
+    expect(ctx.notes.map((n) => n.body)).toEqual(["waiting on a question"]);
 
-    // Human answers in the terminal; question state clears and next turn finishes cleanly.
-    ctx.svc.onHumanInput(run.ptyId, "staging\r");
+    // Its own time limit (10 minutes from the start) has passed, but a question gets 10 minutes from when it was asked.
+    pass(5 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "running", result: "question" });
+    pass(6 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    await until(() => ctx.svc.getRun(run.runId).run.status !== "running");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "stuck" });
+    expect(ctx.notes.map((n) => n.body)).toEqual(["waiting on a question", expect.stringMatching(/^stuck on a question/)]);
+    expect(ctx.svc.listRoutines()[0]).toMatchObject({ failStreak: 0, failing: false, stillRunning: false });
+    ctx.svc.close();
+  });
+
+  it("records the slots a run waiting on a question held up, and the next slot runs as usual", async () => {
+    const { ctx, pass, now, workThenQuiet } = routineClock();
+    const agent = await agentIn(ctx, "pasty");
+    const routine = ctx.svc.saveRoutine({ name: "Hourly", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check", timeoutMinutes: 150 });
+    pass(60 * 60_000 + 1000);
+    await ctx.svc.tick(new Date(now()));
+    const run = ctx.svc.listRuns().find((item) => item.routineId === routine.id)!;
+    await workThenQuiet(run.ptyId!, "Want me to open a PR?", SETTLE_MS + 100);
+    expect(ctx.svc.getRun(run.id).run.result).toBe("question");
+    for (let hour = 0; hour < 2; hour += 1) {
+      pass(60 * 60_000);
+      await ctx.svc.tick(new Date(now()));
+    }
+    expect(ctx.svc.listRoutines()[0].skippedSlots).toMatchObject({ runId: run.id, count: 2 });
+    pass(30 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    await until(() => ctx.svc.getRun(run.id).run.status !== "running");
+    expect(ctx.svc.getRun(run.id).run.result).toBe("stuck");
+    // The next slot starts a fresh run.
+    pass(30 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    expect(ctx.svc.listRuns().filter((item) => item.routineId === routine.id)).toHaveLength(2);
+    ctx.svc.close();
+  });
+
+  it("hears an answer typed in, sent by another CLI, or put in by Viby, and watches the next turn", async () => {
+    const { ctx, pass, workThenQuiet, watches } = routineClock();
+    const claude = await ctx.svc.saveAgent({ name: "ClaudeBot", brief: "b", engine: "claude", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Ask", agentId: claude.id, schedule: { kind: "every", minutes: 60 }, prompt: "Check deploy" });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    await until(() => watches.length > 0);
+    // The log ends the turn with a question: left open for a person.
+    watches.at(-1)!.resolve("Which environment should I check?\n1. staging\n2. production");
+    await until(() => ctx.svc.getRun(run.runId).run.result === "question");
+    expect(ctx.svc.listRoutines()[0].needsInput).toBe(true);
+
+    // Another CLI answers through `vibeforge tell`: the question is answered and the next turn is watched.
+    pass(10_000);
+    const told = await ctx.svc.tell({ fromPty: null, to: "claude", text: "staging" });
+    expect(told).toMatchObject({ ok: true, delivered: "sent" });
     expect(ctx.svc.getRun(run.runId).run.result ?? null).toBeNull();
     expect(ctx.svc.listRoutines()[0].needsInput).toBe(false);
-    ctx.host.screen = async () => "Checked staging and everything is healthy.";
-    ctx.svc.onPtyActivity(run.ptyId, true);
-    at += 1000;
-    ctx.svc.onPtyActivity(run.ptyId, false);
-    at += SETTLE_MS + 100;
-    await ctx.svc.tick(new Date(at));
+    const next = watches.at(-1)!;
+    expect(next.words).toBe("");
+    // That turn asks again; this time Viby's key answer (a write into the pane) clears it.
+    next.resolve("Staging is fine. Check production too?");
+    await until(() => ctx.svc.getRun(run.runId).run.result === "question");
+    ctx.svc.paneInput(run.ptyId, "y\r", "person");
+    expect(ctx.svc.listRoutines()[0].needsInput).toBe(false);
+    await workThenQuiet(run.ptyId, "Checking production…", 1000);
+    watches.at(-1)!.resolve("Both are healthy.");
     await until(() => ctx.svc.getRun(run.runId).run.status === "exited");
     expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "exited", exitCode: 0, result: "finished" });
-    expect(typeof resolveWatch).toBe("undefined");
+    ctx.svc.close();
+  });
+
+  it("doesn't move a routine's time limit when someone types into it", async () => {
+    const { ctx, pass, now } = routineClock();
+    const agent = await agentIn(ctx, "pasty");
+    const routine = ctx.svc.saveRoutine({ name: "Typed", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Work", timeoutMinutes: 10 });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    pass(9 * 60_000);
+    ctx.svc.onHumanInput(run.ptyId, "also check the docs\r");
+    pass(2 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    await until(() => ctx.svc.getRun(run.runId).run.status !== "running");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ status: "stopped", result: "timeout" });
+    ctx.svc.close();
+  });
+
+  it("gives routines saved before time limits none, and new ones two hours", async () => {
+    const { ctx, pass, now } = routineClock();
+    const agent = await agentIn(ctx, "pasty");
+    const fresh = ctx.svc.saveRoutine({ name: "New", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "p" });
+    expect(fresh.timeoutMinutes).toBe(120);
+    // An older file has no timeoutMinutes at all.
+    const file = path.join(ctx.configRoot, "routines", `${fresh.id}.yaml`);
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^timeoutMinutes: .*\n/m, ""));
+    expect(ctx.svc.store.getRoutine(fresh.id)?.timeoutMinutes).toBeNull();
+    // Saving it again keeps it without one; the person can still set one, or clear it.
+    expect(ctx.svc.saveRoutine({ id: fresh.id, name: "New", agentId: agent.id, schedule: fresh.schedule, prompt: "p" }).timeoutMinutes).toBeNull();
+    const run = started(await ctx.svc.runRoutineNow(fresh.id));
+    pass(5 * 60 * 60_000);
+    await ctx.svc.tick(new Date(now()));
+    expect(ctx.svc.getRun(run.runId).run.status).toBe("running");
+    expect(ctx.svc.saveRoutine({ id: fresh.id, name: "New", agentId: agent.id, schedule: fresh.schedule, prompt: "p", timeoutMinutes: 30 }).timeoutMinutes).toBe(30);
+    expect(ctx.svc.saveRoutine({ id: fresh.id, name: "New", agentId: agent.id, schedule: fresh.schedule, prompt: "p", timeoutMinutes: null }).timeoutMinutes).toBeNull();
+    ctx.svc.close();
+  });
+
+  it("records an exit by a signal or an error code as failed, and a routine that can't have a copy as it's saved", async () => {
+    const ctx = setup();
+    const agent = await ctx.svc.saveAgent({ name: "Notes", brief: "b", engine: "argy", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Sig", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "p" });
+    const first = started(await ctx.svc.runRoutineNow(routine.id));
+    await ctx.svc.onPtyExit(first.ptyId, null, 9);
+    expect(ctx.svc.getRun(first.runId).run).toMatchObject({ status: "exited", result: "failed" });
+    expect(ctx.notes.at(-1)?.body).toMatch(/^ended by signal 9/);
+    expect(ctx.svc.listRoutines()[0].failStreak).toBe(1);
+    // ctx.place isn't in a git repository: a separate copy is refused as it's saved, not at run time.
+    expect(() => ctx.svc.saveRoutine({ name: "Copy", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "p", isolated: true })).toThrow(/git repository/);
     ctx.svc.close();
   });
 

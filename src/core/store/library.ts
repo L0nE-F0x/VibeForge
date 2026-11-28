@@ -208,8 +208,18 @@ function normalizeRoutine(id: string, value: unknown): Routine | null {
     copy: workingCopy(record.copy),
     lastFiredAt: strOrNull(record.lastFiredAt),
     lastMissedAt: strOrNull(record.lastMissedAt),
+    skippedSlots: skippedSlots(record.skippedSlots),
     shareCheckout: record.shareCheckout === true,
   };
+}
+
+function skippedSlots(value: unknown): Routine["skippedSlots"] {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const count = Number(record.count);
+  const runId = str(record.runId);
+  const lastAt = str(record.lastAt);
+  return Number.isInteger(count) && count > 0 && runId && lastAt ? { runId, count, lastAt } : null;
 }
 
 function normalizeTask(id: string, value: unknown): Task | null {

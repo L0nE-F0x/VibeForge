@@ -20,7 +20,7 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import type { RoutineRunResult, RunStatus, UnreadableFile } from "../../shared/api.js";
+import type { CutOff, RoutineRunResult, RunOrigin, RunStatus, UnreadableFile } from "../../shared/api.js";
 import { isCutOffRun } from "../../shared/routine-result.js";
 import { identicon, mark, shade } from "../../shared/pixel.js";
 import { initials, shortAgo, timeAgo } from "../../shared/text.js";
@@ -281,13 +281,26 @@ export const STATUS_KEY: Record<RunStatus, Key> = {
   failed: "status.failed",
 };
 
-export function StatusChip({ status, exitCode, result, error }: { status: RunStatus; exitCode?: number | null; result?: RoutineRunResult | null; error?: string | null }) {
+export function StatusChip({
+  status,
+  exitCode,
+  result,
+  origin,
+  cutOff,
+}: {
+  status: RunStatus;
+  exitCode?: number | null;
+  result?: RoutineRunResult | null;
+  origin?: RunOrigin | null;
+  cutOff?: CutOff | null;
+}) {
   const t = useT();
   if (status === "running" && result === "question") return <Chip tone="warn">{t("status.question")}</Chip>;
   if (status === "running") return <Chip tone="accent">{t("status.running")}</Chip>;
   if (result === "timeout") return <Chip tone="bad">{t("status.timeout")}</Chip>;
-  if (isCutOffRun({ status, result, error })) return <Chip tone="bad">{t("status.cutoff")}</Chip>;
-  if (status === "failed") return <Chip tone="bad">{t("status.failed")}</Chip>;
+  if (result === "stuck") return <Chip tone="warn">{t("status.stuck")}</Chip>;
+  if (isCutOffRun({ status, result, origin, cutOff })) return <Chip tone="bad">{t("status.cutoff")}</Chip>;
+  if (status === "failed" || (result === "failed" && !exitCode)) return <Chip tone="bad">{t("status.failed")}</Chip>;
   if (status === "stopped") return <Chip tone="warn">{t("status.stopped")}</Chip>;
   if (exitCode && exitCode !== 0) return <Chip tone="bad">{t("status.exit", { code: exitCode })}</Chip>;
   return <Chip tone="ok">{t("status.exited")}</Chip>;

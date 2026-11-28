@@ -321,7 +321,7 @@ export function RoutinesView({ route }: { route: Extract<Route, { view: "routine
                       style={{ padding: "6px 8px" }}
                       onClick={() => go({ view: "runs", runId: run.id, filter: "all" })}
                     >
-                      <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} error={run.error} />
+                      <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} origin={run.origin} cutOff={run.cutOff} />
                       <span className="meta truncate grow">
                         <TimeAgo iso={run.endedAt ?? run.startedAt} />
                         {run.changes ? ` · ${changesFor(run.changes, t)}` : ""}

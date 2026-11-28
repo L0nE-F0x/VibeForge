@@ -33,6 +33,11 @@ export interface WaitSpec {
   stuckMs?: number;
   /** Internal watcher (e.g. routine turn completion): does not show agent-talk chips on the pane. */
   internal?: boolean;
+  /**
+   * Read the screen only for a quiet spell that began after this (ms), not one since `since`: a
+   * routine that looked at its screen once waits for the CLI's next quiet spell before looking again.
+   */
+  quietAfter?: number;
 }
 
 interface Waiter extends WaitSpec {
@@ -146,13 +151,14 @@ export class Answers {
     const session = this.core.live.get(target);
     if (!session || !isCodingCli(session)) return this.dropWaiter(target, waiter, "That CLI isn't running any more.");
     const quietAt = Date.parse(session.quietAt ?? "");
-    const quietSince = quietAt > waiter.since ? quietAt : waiter.stuckMs ? waiter.since + waiter.stuckMs : Number.NaN;
+    const after = Math.max(waiter.since, waiter.quietAfter ?? 0);
+    const quietSince = quietAt > after ? quietAt : waiter.stuckMs ? waiter.since + waiter.stuckMs : Number.NaN;
     const answered = !session.working && Number.isFinite(quietSince) && now - quietSince >= (waiter.logKind ? LOG_PATIENCE_MS : SETTLE_MS);
     if (answered && !waiter.reading) {
       waiter.reading = true;
       const screen = await this.core.options.host.screen?.(target).catch(() => "");
       const reply = cleanText(answerFromScreen(screen ?? "", waiter.sent ?? ""));
-      return this.finishWaiter(target, waiter, { reply, fromScreen: true, ...(quietAt > waiter.since ? {} : { stuck: true }) });
+      return this.finishWaiter(target, waiter, { reply, fromScreen: true, ...(quietAt > after ? {} : { stuck: true }) });
     }
     if (!waiter.gaveUp && now >= waiter.deadline) {
       waiter.gaveUp = true;

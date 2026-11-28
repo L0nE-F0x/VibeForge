@@ -55,7 +55,7 @@ export function RunRow({
     : (engines.find((engine) => engine.id === run.engine)?.label ?? null);
   const { title, kind } = runLabel(run, engineLabel);
   // The dot says how it went; a chip only for what didn't simply finish.
-  const clean = run.status === "exited" && !run.exitCode && run.result !== "timeout" && !isCutOffRun(run);
+  const clean = run.status === "exited" && !run.exitCode && run.result !== "timeout" && run.result !== "failed" && run.result !== "stuck" && !isCutOffRun(run);
   const picking = picked !== undefined;
   return (
     <button type="button" className="run-row" aria-current={(!picking && selected) || undefined} aria-pressed={picking ? picked : undefined} onClick={onClick}>
@@ -87,7 +87,7 @@ export function RunRow({
         </span>
         {snippet && <Snippet text={snippet} className="truncate-2" />}
       </span>
-      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} error={run.error} />}
+      {!compact && !clean && <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} origin={run.origin} cutOff={run.cutOff} />}
     </button>
   );
 }

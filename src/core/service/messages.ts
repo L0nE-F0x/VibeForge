@@ -271,6 +271,8 @@ export class MessageDesk {
       words: string;
       sent: string;
       since: number;
+      /** Read the screen only for a quiet spell that began after this (see WaitSpec.quietAfter). */
+      quietAfter?: number;
       stuckMs?: number;
       onTurn: (info: { reply: string | null; fromScreen: boolean; screen: string; hasLogReader: boolean }) => void | Promise<void>;
     },
@@ -286,6 +288,7 @@ export class MessageDesk {
         sent: opts.sent,
         deadline: Number.MAX_SAFE_INTEGER,
         ...(opts.stuckMs ? { stuckMs: opts.stuckMs } : {}),
+        ...(opts.quietAfter !== undefined ? { quietAfter: opts.quietAfter } : {}),
         internal: true,
         done: (answered) => {
           if (cancelled || !answered) return;

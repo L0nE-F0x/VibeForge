@@ -445,7 +445,7 @@ export function RunDetail({
         <div className="vstack grow" style={{ gap: 1 }}>
           <div className="hstack">
             <h1 className="truncate">{run.title}</h1>
-            <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} error={run.error} />
+            <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} origin={run.origin} cutOff={run.cutOff} />
             {isLocalRun && (
               <Chip tone="accent" title={run.localModel ?? undefined}>
                 {run.localModel ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}` : t("pane.local")}

@@ -185,8 +185,8 @@ export interface RoutineInput {
   schedule: Schedule;
   prompt?: string;
   notify?: boolean;
-  /** Per-run time limit in minutes (default 120 = 2 hours). */
-  timeoutMinutes?: number;
+  /** Per-run time limit in minutes; null for none. Left out: a new routine gets 120, a saved one keeps its own. */
+  timeoutMinutes?: number | null;
   /** Work in a separate git worktree of the agent's folder. */
   isolated?: boolean;
   /** Start even while another coding CLI is busy in the agent's folder. */

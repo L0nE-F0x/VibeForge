@@ -19,7 +19,7 @@ import {
 import { allocateRunDir } from "../runs.js";
 import type { Bin } from "../trash.js";
 import type { Agent, Routine, RunMeta, Schedule } from "../types.js";
-import { applyToWorkspace, copyPatch, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import { applyToWorkspace, copyPatch, insideGitRepo, leftInCopy, lockCopy, ownedCopyPath, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
 import type { Deleted, Launched, Queued, RoutineInput, RoutineView, SchedulePreview, TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { MessageDesk } from "./messages.js";
@@ -31,12 +31,28 @@ const ROUTINE_STUCK_MS = 30_000;
 /** How many recent runs are attached to each routine view for its run list. */
 const ROUTINE_RECENT_RUNS = 5;
 
+/**
+ * A routine run being watched until its turn ends. Its time limit counts from `startedAt`, less
+ * the time it spent waiting on answered questions; a question waits its own time limit from when
+ * it appeared. Typing into it never moves either.
+ */
 interface ActiveRoutineRun {
   routineId: string;
   ptyId: string;
+  /** The first line of what was sent, to find the watched turn in the CLI's log; "" once a later turn is watched. */
   words: string;
   sent: string;
-  activeSince: number;
+  startedAt: number;
+  /** When the watched turn began: its log is read from here. */
+  turnSince: number;
+  /** The screen is read only for a quiet spell that began after this. */
+  quietAfter: number;
+  /** Time spent on questions that were answered, not counted against the time limit. */
+  pausedMs: number;
+  /** The question it waits on now: when it appeared, and whether the CLI's log ended its turn with it. */
+  question: { since: number; fromLog: boolean } | null;
+  /** When a line was last sent in (a person pressed Enter, or a message went in). */
+  submittedAt: number;
   unwatch: (() => void) | null;
   timer: NodeJS.Timeout | null;
   questionNotified: boolean;
@@ -141,13 +157,23 @@ export class RoutineDesk {
     }
     if (!input.prompt?.trim()) throw new Error("Write the routine's prompt.");
     const existing = input.id ? this.core.store.getRoutine(input.id) : null;
+    // A new routine gets the default limit; a saved one keeps its own (none, for one saved before limits).
     const timeoutMinutes =
-      input.timeoutMinutes !== undefined
-        ? Math.round(Number(input.timeoutMinutes))
-        : (existing?.timeoutMinutes ?? DEFAULT_ROUTINE_TIMEOUT_MINUTES);
-    if (!isRoutineTimeoutValid(timeoutMinutes)) throw new Error("Time limits must be between 5 minutes and 7 days.");
+      input.timeoutMinutes === null
+        ? null
+        : input.timeoutMinutes !== undefined
+          ? Math.round(Number(input.timeoutMinutes))
+          : existing
+            ? existing.timeoutMinutes
+            : DEFAULT_ROUTINE_TIMEOUT_MINUTES;
+    if (timeoutMinutes !== null && !isRoutineTimeoutValid(timeoutMinutes)) throw new Error("Time limits must be between 5 minutes and 7 days.");
     if (existing?.copy && existing.agentId !== input.agentId) {
       throw new Error("Apply or discard the routine's copy before changing its agent.");
+    }
+    const isolated = typeof input.isolated === "boolean" ? input.isolated : (existing?.isolated ?? false);
+    if (isolated) {
+      const folder = this.core.firstPlace(this.core.store.getAgent(input.agentId)?.places ?? []);
+      if (folder && !insideGitRepo(folder)) throw new Error("A separate copy needs the agent's folder to be in a git repository.");
     }
     const routine: Routine = {
       id: existing?.id ?? this.core.freeId("routines", name, ".yaml", (id) => this.core.store.queryRuns({ routineId: id, limit: 1 }).length > 0),
@@ -158,10 +184,11 @@ export class RoutineDesk {
       prompt: input.prompt.trimEnd(),
       notify: typeof input.notify === "boolean" ? input.notify : (existing?.notify ?? true),
       timeoutMinutes,
-      isolated: typeof input.isolated === "boolean" ? input.isolated : (existing?.isolated ?? false),
+      isolated,
       copy: existing?.copy ?? null,
       lastFiredAt: existing?.lastFiredAt ?? null,
       lastMissedAt: existing?.lastMissedAt ?? null,
+      skippedSlots: existing?.skippedSlots ?? null,
       shareCheckout: typeof input.shareCheckout === "boolean" ? input.shareCheckout : (existing?.shareCheckout ?? false),
     };
     // A new or rescheduled routine starts counting from now, not from a slot in the past.
@@ -408,27 +435,29 @@ export class RoutineDesk {
     this.core.options.host.notify({ title, body, routineId: routine.id, ...(runId ? { runId } : {}) });
   }
 
-  /** A person answered a routine waiting on a question: clear its needs-input state and watch its next turn. */
-  onHumanInput(ptyId: string, data: string): void {
-    if (!typedIn(data)) return;
+  /**
+   * Something went into a routine's pane (a person typing, Viby, a chat message, another CLI's
+   * message). A question it waited on counts as answered, and the turn after it is watched. Its
+   * time limit stays where it was.
+   */
+  onPaneInput(ptyId: string, data: string): void {
+    const typed = typedIn(data);
+    if (!typed) return;
     this.pruneInactive();
     for (const [runId, entry] of this.activeRuns) {
       if (entry.ptyId !== ptyId) continue;
-      entry.questionNotified = false;
-      entry.activeSince = this.core.now().getTime();
-      const session = this.core.live.get(ptyId);
-      let changed = false;
-      if (session?.needsInput) {
-        this.core.live.set(ptyId, { ...session, needsInput: false });
-        changed = true;
+      const now = this.core.now().getTime();
+      if (/[\r\n]/.test(typed)) entry.submittedAt = now;
+      const question = entry.question;
+      if (!question) break;
+      this.leaveQuestion(runId, entry, now);
+      // A turn that ended on a question goes on in a new turn: watch that one in the log.
+      if (question.fromLog) {
+        entry.turnSince = now;
+        entry.words = "";
       }
-      const run = this.core.store.getRun(runId);
-      if (run?.result === "question") {
-        this.core.store.saveRun({ ...run, result: undefined });
-        changed = true;
-      }
+      entry.quietAfter = now;
       this.armRun(runId, false);
-      if (changed) this.core.emit("live", "runs", "routines");
       break;
     }
   }
@@ -464,7 +493,9 @@ export class RoutineDesk {
         previousEndedAt: last?.endedAt ?? null,
       });
       results.push({ routineId: routine.id, decision });
-      if (decision.action === "miss") {
+      if (decision.action === "skip" && decision.reason === "still-running" && decision.scheduledAt) {
+        this.recordSkipped(routine, decision.scheduledAt, last);
+      } else if (decision.action === "miss") {
         // Already queued behind a busy CLI: keep its wait instead of marking it missed while waiting.
         if (this.turns.waiting("routine", routine.id)) continue;
         if (routine.lastMissedAt !== decision.scheduledAt) {
@@ -505,10 +536,11 @@ export class RoutineDesk {
     let workingCopy: { path: string; of: string } | null = null;
     let setupCommand: string | null = null;
     if (routine.isolated) {
+      const previous = await this.freshCopyFor(routine, agent);
       const prepared = await this.tasks.ensureCopy(
         this.copyId(routine.id),
         folder,
-        routine.copy,
+        previous,
         "This routine's copy is not in VibeForge's worktrees folder, so it was left alone.",
         "This routine's copy names another repository, so it was left alone.",
         // Its workspace's "when a copy is made" setting, as a task's copy has.
@@ -542,6 +574,29 @@ export class RoutineDesk {
     return launched;
   }
 
+  /**
+   * The copy a routine's next run works in. One the last run left nothing in is removed, so the
+   * next run starts from the folder as it is now instead of a copy that fell behind it; one with
+   * changes stays, for Apply or Discard. Null when a new copy is to be made.
+   */
+  private async freshCopyFor(routine: Routine, agent: Agent): Promise<WorkingCopy | null> {
+    const copy = routine.copy;
+    if (!copy) return null;
+    const owner = this.copyOwner(routine.id);
+    if (!ownedCopyPath(owner, copy.path)?.real || !(await this.repoTrusted(agent, copy))) return copy;
+    try {
+      const [patch, left] = await Promise.all([copyPatch(copy, owner), leftInCopy(copy)]);
+      if (patch.trim() || left.length) return copy;
+      await removeCopy(copy, owner);
+    } catch {
+      // Couldn't read it: keep it as it is.
+      return copy;
+    }
+    this.core.store.writeRoutine({ ...(this.core.store.getRoutine(routine.id) ?? routine), copy: null });
+    this.core.emit("routines");
+    return null;
+  }
+
   private watchLaunched(runId: string, ptyId: string, routine: Routine, sentText: string): void {
     if (!this.core.live.has(ptyId)) return;
     const words =
@@ -550,12 +605,18 @@ export class RoutineDesk {
         .map((line) => line.trim())
         .find(Boolean) ?? routine.prompt.slice(0, 80);
     this.clearActive(runId);
+    const now = this.core.now().getTime();
     this.activeRuns.set(runId, {
       routineId: routine.id,
       ptyId,
       words,
       sent: sentText,
-      activeSince: this.core.now().getTime(),
+      startedAt: now,
+      turnSince: now,
+      quietAfter: now,
+      pausedMs: 0,
+      question: null,
+      submittedAt: 0,
       unwatch: null,
       timer: null,
       questionNotified: false,
@@ -563,22 +624,37 @@ export class RoutineDesk {
     this.armRun(runId, true);
   }
 
+  /** The routine's time limit in ms, or null for none. */
+  private limitMs(routineId: string): number | null {
+    const minutes = this.core.store.getRoutine(routineId)?.timeoutMinutes;
+    return typeof minutes === "number" ? minutes * 60_000 : null;
+  }
+
+  /** When the run's time limit (or its question's) runs out, or null with no limit. */
+  private deadline(entry: ActiveRoutineRun): number | null {
+    const limit = this.limitMs(entry.routineId);
+    if (limit === null) return null;
+    return entry.question ? entry.question.since + limit : entry.startedAt + entry.pausedMs + limit;
+  }
+
+  /** Watch the run's turn again (from `turnSince`, its screen after `quietAfter`), and set its time limit. */
   private armRun(runId: string, initial: boolean): void {
     const entry = this.activeRuns.get(runId);
     if (!entry) return;
     entry.unwatch?.();
     if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = null;
     entry.unwatch = this.messages.watchRoutineTurn(entry.ptyId, {
       words: entry.words,
       sent: entry.sent,
-      since: entry.activeSince - 1,
+      since: entry.turnSince - 1,
+      quietAfter: entry.quietAfter,
       ...(initial ? { stuckMs: ROUTINE_STUCK_MS } : {}),
       onTurn: (info) => this.handleTurn(runId, info),
     });
-    const routine = this.core.store.getRoutine(entry.routineId);
-    const limitMs = (routine?.timeoutMinutes ?? DEFAULT_ROUTINE_TIMEOUT_MINUTES) * 60_000;
-    const elapsed = Math.max(0, this.core.now().getTime() - entry.activeSince);
-    const delay = Math.max(10, limitMs - elapsed);
+    const deadline = this.deadline(entry);
+    if (deadline === null) return;
+    const delay = Math.max(10, deadline - this.core.now().getTime());
     entry.timer = setTimeout(() => void this.enforceTimeouts(this.core.now()), delay);
     entry.timer.unref?.();
   }
@@ -589,44 +665,45 @@ export class RoutineDesk {
   ): Promise<void> {
     const entry = this.activeRuns.get(runId);
     if (!entry) return;
+    entry.unwatch = null;
     const session = this.core.live.get(entry.ptyId);
     const run = this.core.store.getRun(runId);
     if (!session || !run || run.status !== "running") {
       this.clearActive(runId);
       return;
     }
-    const quietAt = Date.parse(session.quietAt ?? "");
-    const worked = Number.isFinite(quietAt) && quietAt >= entry.activeSince - 1;
-    const verdict = classifyRoutineTurn({
-      reply: info.reply,
-      screen: info.screen,
-      fromScreen: info.fromScreen,
-      hasLogReader: info.hasLogReader,
-      worked,
-    });
-    if (verdict === "working") {
-      const routine = this.core.store.getRoutine(entry.routineId);
-      const limitMs = (routine?.timeoutMinutes ?? DEFAULT_ROUTINE_TIMEOUT_MINUTES) * 60_000;
-      if (this.core.now().getTime() - entry.activeSince >= limitMs) return;
-      // Nothing has run yet (slow CLI start): keep waiting for real turn completion without re-checking stuckMs.
+    const now = this.core.now().getTime();
+    const verdict = classifyRoutineTurn({ reply: info.reply, screen: info.screen, fromScreen: info.fromScreen, hasLogReader: info.hasLogReader });
+    if (verdict === "question") {
+      // A turn the log says ended on a question is a new question, even while an older one showed.
+      if (!info.fromScreen && entry.question) this.leaveQuestion(runId, entry, now);
+      this.enterQuestion(runId, entry, !info.fromScreen, now);
+      // Keep watching: an answer that comes some other way, or the turn going on, is seen too.
+      if (!info.fromScreen) {
+        entry.turnSince = now;
+        entry.words = "";
+      }
+      entry.quietAfter = now;
       this.armRun(runId, false);
       return;
     }
-    if (verdict === "question") {
-      // Leave the session open for the person and suspend timeout while it awaits their answer.
-      if (entry.timer) {
-        clearTimeout(entry.timer);
-        entry.timer = null;
-      }
-      entry.unwatch = null;
-      this.core.live.set(entry.ptyId, { ...session, needsInput: true });
-      if (run.result !== "question") this.core.store.saveRun({ ...run, result: "question" });
-      if (!entry.questionNotified) {
-        entry.questionNotified = true;
-        const routine = this.core.store.getRoutine(entry.routineId);
-        if (routine) this.tell(routine, "waiting on a question", run.title, run.id);
-      }
-      this.core.emit("live", "runs", "routines");
+    if (verdict === "working") {
+      // Quiet, but not asking anything: never ended on its screen. A question it showed there is
+      // gone; one its log ended the turn with stands until something is sent in.
+      if (entry.question && !entry.question.fromLog) this.leaveQuestion(runId, entry, now);
+      const quietAt = Date.parse(session.quietAt ?? "");
+      entry.quietAfter = Number.isFinite(quietAt) ? Math.max(quietAt, entry.quietAfter) : now;
+      this.armRun(runId, false);
+      return;
+    }
+    // The log says the watched turn ended. A line sent in since then that the CLI is working on is a
+    // turn of its own: wait for that one to end instead.
+    if (entry.submittedAt > entry.turnSince && session.working) {
+      if (entry.question) this.leaveQuestion(runId, entry, now);
+      entry.turnSince = entry.submittedAt;
+      entry.words = "";
+      entry.quietAfter = now;
+      this.armRun(runId, false);
       return;
     }
     this.clearActive(runId);
@@ -634,30 +711,81 @@ export class RoutineDesk {
     await this.core.waitForExit(entry.ptyId, 200);
   }
 
+  /** The run waits on a question: the pane shows it, the person hears once, and its time limit pauses. */
+  private enterQuestion(runId: string, entry: ActiveRoutineRun, fromLog: boolean, now: number): void {
+    if (!entry.question) entry.question = { since: now, fromLog };
+    else if (fromLog) entry.question.fromLog = true;
+    const session = this.core.live.get(entry.ptyId);
+    if (session && !session.needsInput) this.core.live.set(entry.ptyId, { ...session, needsInput: true });
+    const run = this.core.store.getRun(runId);
+    if (run && run.result !== "question") this.core.store.saveRun({ ...run, result: "question" });
+    if (!entry.questionNotified) {
+      entry.questionNotified = true;
+      const routine = this.core.store.getRoutine(entry.routineId);
+      if (routine && run) this.tell(routine, "waiting on a question", run.title, run.id);
+    }
+    this.core.emit("live", "runs", "routines");
+  }
+
+  /** The question was answered (or went away): the time it waited isn't counted against the limit. */
+  private leaveQuestion(runId: string, entry: ActiveRoutineRun, now: number): void {
+    if (!entry.question) return;
+    entry.pausedMs += Math.max(0, now - entry.question.since);
+    entry.question = null;
+    entry.questionNotified = false;
+    const session = this.core.live.get(entry.ptyId);
+    if (session?.needsInput) this.core.live.set(entry.ptyId, { ...session, needsInput: false });
+    const run = this.core.store.getRun(runId);
+    if (run?.result === "question") this.core.store.saveRun({ ...run, result: undefined });
+    this.core.emit("live", "runs", "routines");
+  }
+
+  /**
+   * Ends routine runs past their time limit: one working that long hit its limit (a failure); one
+   * whose question waited that long ends stuck on a question (not a failure, and its next slot
+   * runs as usual). A routine without a limit is left open.
+   */
   private async enforceTimeouts(now: Date): Promise<void> {
     this.pruneInactive();
     for (const session of [...this.core.live.values()]) {
       if (!session.runId) continue;
       const run = this.core.store.getRun(session.runId);
-      if (!run || run.origin !== "routine" || !run.routineId || run.status !== "running" || run.result === "question") continue;
-      if (run.result === "timeout") {
+      if (!run || run.origin !== "routine" || !run.routineId || run.status !== "running") continue;
+      if (run.result === "timeout" || run.result === "stuck") {
         await this.core.waitForExit(session.ptyId, 200);
         continue;
       }
-      const routine = this.core.store.getRoutine(run.routineId);
-      if (!routine) continue;
-      const since = this.activeRuns.get(run.id)?.activeSince ?? Date.parse(run.startedAt);
-      if (!Number.isFinite(since)) continue;
-      if (now.getTime() - since < routine.timeoutMinutes * 60_000) continue;
+      const entry = this.activeRuns.get(run.id);
+      // Not watched (it can't be told when its question came): left for the person.
+      if (!entry && run.result === "question") continue;
+      const limit = this.limitMs(run.routineId);
+      if (limit === null) continue;
+      const deadline = entry ? this.deadline(entry) : Date.parse(run.startedAt) + limit;
+      if (deadline === null || !Number.isFinite(deadline) || now.getTime() < deadline) continue;
+      const stuck = Boolean(entry?.question);
       this.clearActive(run.id);
-      await this.core.endRunWithResult(run.id, {
-        status: "stopped",
-        result: "timeout",
-        error: "Stopped after reaching its time limit.",
-      });
+      await this.core.endRunWithResult(
+        run.id,
+        stuck
+          ? { status: "stopped", result: "stuck", error: "Ended after waiting on a question for its time limit." }
+          : { status: "stopped", result: "timeout", error: "Stopped after reaching its time limit." },
+      );
       await this.core.waitForExit(session.ptyId, 200);
     }
     await this.core.whenIdle();
+  }
+
+  /**
+   * A slot that came while the routine's last run was still open: used up and counted, so the
+   * routine shows how many it skipped while that run stayed open.
+   */
+  private recordSkipped(routine: Routine, scheduledAt: string, last: RunMeta | null): void {
+    if (firedAtOrAfter(routine.lastFiredAt, new Date(scheduledAt))) return;
+    const runId = this.openRunOf(routine.id) ?? last?.id ?? "";
+    const before = routine.skippedSlots;
+    const count = before && before.runId === runId ? before.count + 1 : 1;
+    this.core.store.writeRoutine({ ...routine, lastFiredAt: scheduledAt, skippedSlots: { runId, count, lastAt: scheduledAt } });
+    this.core.emit("routines");
   }
 
   private clearActive(runId: string): void {
@@ -713,12 +841,17 @@ export class RoutineDesk {
   }
 
   private routineStillRunning(routineId: string): boolean {
+    return this.openRunOf(routineId) !== null;
+  }
+
+  /** The routine's run that is live now, if any. */
+  private openRunOf(routineId: string): string | null {
     for (const session of this.core.live.values()) {
       if (!session.runId) continue;
       const run = this.core.store.getRun(session.runId);
-      if (run?.routineId === routineId) return true;
+      if (run?.routineId === routineId) return run.id;
     }
-    return false;
+    return null;
   }
 
   private routineIssues(routine: Routine, agent: Agent | null): string[] {
@@ -729,7 +862,7 @@ export class RoutineDesk {
     if (!this.core.resolveEngine(target.engineId, { model: target.model })) issues.push(this.core.engineMissingText(target.engineId));
     if (!this.core.firstPlace(agent.places)) issues.push("None of the agent's allowed folders exist.");
     if (!isScheduleValid(routine.schedule)) issues.push("The schedule is not valid.");
-    if (!isRoutineTimeoutValid(routine.timeoutMinutes)) issues.push("Time limits must be between 5 minutes and 7 days.");
+    if (routine.timeoutMinutes !== null && !isRoutineTimeoutValid(routine.timeoutMinutes)) issues.push("Time limits must be between 5 minutes and 7 days.");
     return issues;
   }
 }

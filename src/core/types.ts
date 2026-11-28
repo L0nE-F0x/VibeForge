@@ -10,7 +10,14 @@ export type RunOrigin = "agent-chat" | "routine" | "task" | "code" | "chat";
 export type RunStatus = "running" | "exited" | "stopped" | "failed";
 
 /** How a routine run ended, or why it stays open for the person ("question"). */
-export type RoutineRunResult = "finished" | "question" | "timeout" | "cutoff";
+/**
+ * How a routine run ended, or why it stays open: `finished` (the CLI's log said its turn ended, or
+ * it quit by itself with code 0), `question` (open, waiting for a person), `timeout` (hit its time
+ * limit while working), `stuck` (ended after a question waited its time limit; not a failure),
+ * `cutoff` (VibeForge closed or lost the terminal host under it), `failed` (couldn't start, or the
+ * CLI quit with an error or a signal).
+ */
+export type RoutineRunResult = "finished" | "question" | "timeout" | "stuck" | "cutoff" | "failed";
 
 export type TaskStatus = "todo" | "running" | "review" | "done";
 
@@ -60,16 +67,27 @@ export interface Routine {
   schedule: Schedule;
   prompt: string;
   notify: boolean;
-  /** Per-run time limit in minutes (default 120 = 2 hours). */
-  timeoutMinutes: number;
+  /**
+   * Per-run time limit in minutes: new routines get 120 (2 hours), routines saved before time
+   * limits existed have none (null) until the person sets one.
+   */
+  timeoutMinutes: number | null;
   /** Work in a separate git worktree of the agent's folder instead of the folder itself. */
   isolated: boolean;
   /** That worktree, once a run has made it; gone again after Apply or Discard. */
   copy: WorkingCopy | null;
   lastFiredAt: string | null;
   lastMissedAt: string | null;
+  /** Slots that passed while a run was still open: how many, the latest, and which run held them up. */
+  skippedSlots: SkippedSlots | null;
   /** Start even while another coding CLI is busy in the agent's folder, instead of waiting a turn. */
   shareCheckout: boolean;
+}
+
+export interface SkippedSlots {
+  runId: string;
+  count: number;
+  lastAt: string;
 }
 
 export interface Task {

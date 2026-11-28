@@ -1,4 +1,4 @@
-import { ServiceCore } from "./service/core.js";
+import { ServiceCore, type PaneInputFrom } from "./service/core.js";
 import { LibraryDesk } from "./service/library.js";
 import { WorkspaceDesk } from "./service/workspaces.js";
 import { RoutineDesk } from "./service/routines.js";
@@ -584,8 +584,13 @@ export class TeamService extends ServiceCore {
 
   /** A person typed into a terminal (not a message from another CLI). */
   onHumanInput(ptyId: string, data: string): void {
-    this.messages.onHumanInput(ptyId, data);
-    this.routines.onHumanInput(ptyId, data);
+    this.paneInput(ptyId, data, "person");
+  }
+
+  /** Every write into a pane: a person's counts start again; a routine hears it was answered. */
+  override paneInput(ptyId: string, data: string, from: PaneInputFrom): void {
+    if (from === "person") this.messages.onHumanInput(ptyId, data);
+    this.routines.onPaneInput(ptyId, data);
   }
 
   /** Delivers waiting messages and reads answers now (also every second while any are in flight). */
@@ -641,10 +646,8 @@ export class TeamService extends ServiceCore {
   }
 
   async sendChat(id: string, text: string, size: TermSize = {}): Promise<SendResult> {
-    const result = await this.chats.sendChat(id, text, size);
-    // Typed into a live session by a person, like typing in its terminal.
-    if (!result.started) this.messages.onHumanInput(result.ptyId, "\r");
-    return result;
+    // Typed into a live session, it reports itself as a person's input (ChatDesk.sendChat).
+    return this.chats.sendChat(id, text, size);
   }
 
   /** Start an agent in a workspace it is allowed to use, with its brief. */

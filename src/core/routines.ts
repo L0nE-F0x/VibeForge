@@ -25,23 +25,33 @@ export function isRoutineTimeoutValid(minutes: unknown): minutes is number {
   );
 }
 
-export function normalizeRoutineTimeout(minutes: unknown): number {
+/**
+ * A routine's time limit as read from its file. One saved before time limits existed has none
+ * (null) until the person sets one; a value out of range falls back to the default.
+ */
+export function normalizeRoutineTimeout(minutes: unknown): number | null {
+  if (minutes === undefined || minutes === null) return null;
   return isRoutineTimeoutValid(minutes) ? minutes : DEFAULT_ROUTINE_TIMEOUT_MINUTES;
 }
 
-/** Whether a finished routine run counts as a failure for `failStreak`. A question is never a failure. */
-export function isRoutineFailure(run: Pick<RunMeta, "status" | "exitCode"> & Partial<Pick<RunMeta, "result" | "error">>): boolean {
-  if (run.result === "question") return false;
-  if (run.result === "timeout" || isCutOffRun(run)) return true;
-  return run.status === "failed" || (run.status === "exited" && run.exitCode !== null && run.exitCode !== 0);
+type StreakRun = Pick<RunMeta, "status"> & Partial<Pick<RunMeta, "result" | "origin" | "cutOff">>;
+
+/**
+ * Whether a finished routine run counts as a failure for `failStreak`: it couldn't start, quit
+ * with an error, hit its time limit, or was cut off. Only runs that carry a result count, so runs
+ * from before results were recorded never light a routine up. A question, or one that ended stuck
+ * on a question, is never a failure.
+ */
+export function isRoutineFailure(run: StreakRun): boolean {
+  return run.result === "failed" || run.result === "timeout" || isCutOffRun(run);
 }
 
 /**
- * How many of a routine's latest runs failed in a row, newest first: a start that failed, an error
- * exit, a timeout, or a cut-off run. A live run is skipped (unless waiting on a question, which
- * breaks any older streak); a clean finish, question, or manual stop ends it.
+ * How many of a routine's latest runs failed in a row, newest first. A live run is skipped
+ * (unless waiting on a question, which breaks any older streak); anything that isn't a failure
+ * ends it: a clean finish, a question, a manual stop, or a run from before results were recorded.
  */
-export function failStreak(runs: ReadonlyArray<Pick<RunMeta, "status" | "exitCode"> & Partial<Pick<RunMeta, "result" | "error">>>): number {
+export function failStreak(runs: ReadonlyArray<StreakRun>): number {
   let streak = 0;
   for (const run of runs) {
     if (run.status === "running") {
@@ -65,7 +75,7 @@ export type TickSkipReason =
 export type TickDecision =
   | { action: "fire"; scheduledAt: string }
   | { action: "miss"; scheduledAt: string }
-  | { action: "skip"; reason: TickSkipReason };
+  | { action: "skip"; reason: TickSkipReason; scheduledAt?: string };
 
 export interface RoutineTickInput {
   now: Date;
@@ -247,11 +257,12 @@ export function decideRoutineTick(input: RoutineTickInput): TickDecision {
   }
   const scheduledAt = slot.toISOString();
   if (slot.getTime() < input.appStartedAt.getTime()) return { action: "miss", scheduledAt };
-  if (input.previousStillRunning) return { action: "skip", reason: "still-running" };
+  // A slot that comes while the last run is still open is skipped, and recorded as skipped.
+  if (input.previousStillRunning) return { action: "skip", reason: "still-running", scheduledAt };
   if (input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
     // A run that finished after this slot overlapped it while running, so it wasn't missed while closed.
     const prevEnd = input.previousEndedAt ? Date.parse(input.previousEndedAt) : Number.NaN;
-    if (Number.isFinite(prevEnd) && prevEnd >= slot.getTime()) return { action: "skip", reason: "not-due" };
+    if (Number.isFinite(prevEnd) && prevEnd >= slot.getTime()) return { action: "skip", reason: "still-running", scheduledAt };
     return { action: "miss", scheduledAt };
   }
   return { action: "fire", scheduledAt };
@@ -265,10 +276,10 @@ export function decideRunNow(input: RunNowInput): RunNowDecision {
 }
 
 const CHOICE_OPTION_LINE = /^(?:[-*•]|\d+[.)])\s+\S.*$/;
-const DIRECT_QUESTION_TO_PERSON =
-  /\b(?:should i|should we|shall i|shall we|would you like|do you want|do you prefer|can i|may i|could you|can you|would you|will you|do you have|which (?:one|option|approach|branch|folder|file|path|version|target|package|environment|way|method|model)|what would you like|what should (?:i|we)|how would you like|how should (?:i|we)|where should (?:i|we)|want me to|like me to|ready for me to|proceed with|go ahead and|confirm whether|please confirm|please clarify|could you clarify|please let me know (?:which|whether|what|where|how|if)|let me know (?:which|whether|what|where|how))\b/i;
-const SHORT_CONFIRM_QUESTION = /^(?:please\s+)?(?:confirm|proceed|continue|apply (?:this|these|the changes)|commit (?:this|these|the changes))\s*[?？]$/i;
-const SIGNOFF_QUESTION = /\b(?:anything else|something else)\b[^?\n]*[?？]$/i;
+/** A line that waits for a person without asking in so many words: "Press Enter", "Waiting for approval…". */
+const PERSON_PROMPT_LINE = /\bpress (?:enter|return|any key|space)\b|\bapprov(?:al|e)\b|\bwaiting for\b|\bawaiting\b|\((?:y\/n|yes\/no)\)|\[(?:y\/n|Y\/n|y\/N)\]/i;
+/** Frame and prompt marks a TUI draws around its text. */
+const CHROME = /^[\s│┃║╭╮╰╯┌┐└┘├┤─━═❯›>*•·]+|[\s│┃║╭╮╰╯┌┐└┘├┤─━═]+$/g;
 
 function stripCodeAndUrls(text: string): string {
   return text
@@ -278,51 +289,69 @@ function stripCodeAndUrls(text: string): string {
 }
 
 function endsWithQuestionMark(line: string): boolean {
-  const cleaned = line.replace(/["'”’)\]]+$/g, "").trimEnd();
+  const cleaned = line.replace(/["'”’)\]*_~`]+$/g, "").trimEnd();
   return cleaned.endsWith("?") || cleaned.endsWith("？");
 }
 
-/**
- * Conservatively decides whether a CLI reply or terminal screen ended asking the person a
- * question or waiting on an interactive prompt (trust, approval, sign-in, clarification).
- */
-export function isQuestionForPerson(reply: string | null | undefined, screen?: string | null): boolean {
-  if (screen && detectWaitingPrompt(screen)) return true;
-  const cleaned = stripCodeAndUrls(reply ?? "").trim();
-  if (!cleaned) return false;
-  const lines = cleaned
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*>\s?/, "").trim())
-    .filter(Boolean);
-  if (!lines.length) return false;
-  // A question followed by a short bulleted or numbered list of choices puts the "?" right above the choices.
-  let droppedChoices = 0;
-  while (lines.length > 1 && droppedChoices < 6 && CHOICE_OPTION_LINE.test(lines[lines.length - 1]) && lines[lines.length - 1].length <= 120) {
-    lines.pop();
-    droppedChoices += 1;
-  }
-  const tail = lines.slice(-3);
-  const last = tail[tail.length - 1] ?? "";
-  if (!endsWithQuestionMark(last)) return false;
-  const check = tail.join(" ");
-  if (SIGNOFF_QUESTION.test(last) && !SHORT_CONFIRM_QUESTION.test(last)) return false;
-  return DIRECT_QUESTION_TO_PERSON.test(check) || SHORT_CONFIRM_QUESTION.test(last);
+/** The lines of `text` with words in them, oldest first; `framed` takes a TUI's frame marks off too. */
+function meaningfulLines(text: string, framed = false): string[] {
+  return text
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => (framed ? line.replace(CHROME, "") : line).trim())
+    .filter((line) => /[\p{L}\p{N}?？]/u.test(line));
 }
 
 /**
- * Classifies a routine turn event from the watcher: `"question"` leaves the session open for the
- * person, `"finished"` ends the run cleanly, and `"working"` keeps watching (when a check fired
- * on an idle screen before any CLI activity or log reply arrived).
+ * Whether a CLI's reply (from its log, or the end of its screen) ends asking the person
+ * something: its last line, past a short list of choices, ends in "?" or waits for a key or an
+ * approval. Fail safe: any question at all counts, "Anything else?" too.
+ */
+export function replyAsks(reply: string | null | undefined): boolean {
+  const lines = meaningfulLines(stripCodeAndUrls(reply ?? "")).map((line) => line.replace(/^>\s?/, ""));
+  if (!lines.length) return false;
+  // A question followed by a short bulleted or numbered list of choices puts the "?" right above the choices.
+  let dropped = 0;
+  while (lines.length > 1 && dropped < 6 && CHOICE_OPTION_LINE.test(lines[lines.length - 1]) && lines[lines.length - 1].length <= 120) {
+    if (endsWithQuestionMark(lines[lines.length - 1])) break;
+    lines.pop();
+    dropped += 1;
+  }
+  const last = lines[lines.length - 1];
+  return endsWithQuestionMark(last) || PERSON_PROMPT_LINE.test(last);
+}
+
+/**
+ * Whether a quiet terminal's screen shows it waiting on a person: a prompt VibeForge knows
+ * (trust, approval, sign-in), a line near the bottom ending in "?" (choices and the CLI's own
+ * frame can sit below it), or "Press Enter" / "Waiting for…" / "approval" in its last lines.
+ */
+export function screenAsks(screen: string | null | undefined): boolean {
+  if (!screen?.trim()) return false;
+  if (detectWaitingPrompt(screen)) return true;
+  const lines = meaningfulLines(screen, true);
+  return lines.slice(-6).some(endsWithQuestionMark) || lines.slice(-3).some((line) => PERSON_PROMPT_LINE.test(line));
+}
+
+/** Whether a reply or screen ends waiting on a person. */
+export function isQuestionForPerson(reply: string | null | undefined, screen?: string | null): boolean {
+  return replyAsks(reply) || Boolean(screen && detectWaitingPrompt(screen));
+}
+
+/**
+ * What a routine turn event from the watcher means. Only the CLI's own log can say a turn
+ * finished; a quiet screen can only mean "question" (it waits for a person) or "working" (keep
+ * watching), never "finished", so a routine is never ended mid-work. A CLI whose log VibeForge
+ * can't read is never ended on its screen at all: it stays open until its time limit, or until it
+ * quits by itself.
  */
 export function classifyRoutineTurn(input: {
   reply: string | null;
   screen?: string | null;
   fromScreen: boolean;
   hasLogReader: boolean;
-  worked: boolean;
 }): Extract<RoutineRunResult, "finished" | "question"> | "working" {
+  if (input.fromScreen) return screenAsks(input.screen) || replyAsks(input.reply) ? "question" : "working";
   if (isQuestionForPerson(input.reply, input.screen)) return "question";
-  if (!input.worked && input.fromScreen) return "working";
-  if (input.hasLogReader && input.fromScreen && !input.reply?.trim()) return "working";
-  return "finished";
+  return input.hasLogReader ? "finished" : "working";
 }
