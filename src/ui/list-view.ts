@@ -1,4 +1,5 @@
 import { fuzzyScore } from "./fuzzy.js";
+import { isCutOffRun } from "../shared/routine-result.js";
 
 // Search, filter and sort for VibeForge's lists (agents, skills, chats, routines, tasks, runs),
 // the way Code's workspace list does them (workspace-view.ts): a search box, filters that can be
@@ -108,9 +109,9 @@ export function viewCounts<T, F extends string>(
   return counts as Record<F, number> & { all: number };
 }
 
-/** A run that failed or exited with an error: what "Last run went wrong" and "Went wrong" keep. */
-export function runWentWrong(run: { status: string; exitCode: number | null }): boolean {
-  return run.status === "failed" || (run.status === "exited" && Boolean(run.exitCode));
+/** A run that failed, timed out, was cut off, or exited with an error: what "Last run went wrong" and "Went wrong" keep. */
+export function runWentWrong(run: { status: string; exitCode: number | null; result?: string | null; error?: string | null }): boolean {
+  return run.status === "failed" || (run.status === "exited" && Boolean(run.exitCode)) || run.result === "timeout" || isCutOffRun(run);
 }
 
 /** Epoch ms of an ISO time, 0 when there is none: what "recent" sorts compare. */

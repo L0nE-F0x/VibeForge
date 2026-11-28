@@ -414,7 +414,7 @@ export function RunDetail({
         <div className="vstack grow" style={{ gap: 1 }}>
           <div className="hstack">
             <h1 className="truncate">{run.title}</h1>
-            <StatusChip status={run.status} exitCode={run.exitCode} />
+            <StatusChip status={run.status} exitCode={run.exitCode} result={run.result} error={run.error} />
             {isLocalRun && (
               <Chip tone="accent" title={run.localModel ?? undefined}>
                 {run.localModel ? `${t("pane.local")} · ${shortLocalModel(run.localModel)}` : t("pane.local")}
@@ -501,6 +501,11 @@ export function RunDetail({
           { value: "details", label: t("run.tab.details"), icon: Info },
         ]}
       />
+      {run.status === "running" && run.result === "question" && (
+        <div style={{ padding: "10px 16px 0" }}>
+          <Notice tone="warn">{t("routines.questionNote")}</Notice>
+        </div>
+      )}
       {run.error && run.status !== "running" && (
         <div style={{ padding: "10px 16px 0" }}>
           <Notice tone={run.status === "failed" ? "bad" : "warn"}>{coreText(run.error)}</Notice>
