@@ -1301,7 +1301,6 @@ export const en = {
   "origin.code": "Code",
   "origin.chat": "Chat",
   "run.noDiff": "No differences.",
-  "run.diffCapped": "Showing the first 20,000 lines. The whole diff is saved with the run.",
   "run.diffNowSha": "The folder now, compared with {sha} from when the run started, plus new files.",
   "run.diffNow": "The folder now, compared with HEAD, plus new files.",
   "run.diffSavedSha": "The diff saved for this run: everything since {sha}, plus new files.",

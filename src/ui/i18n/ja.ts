@@ -1289,7 +1289,6 @@ export const ja: Catalog = {
   "origin.code": "コード",
   "origin.chat": "チャット",
   "run.noDiff": "差分はありません。",
-  "run.diffCapped": "最初の 20,000 行を表示しています。差分全体は実行と一緒に保存されています。",
   "run.diffNowSha": "今のフォルダーを、実行開始時の {sha} と比較（新しいファイルを含む）。",
   "run.diffNow": "今のフォルダーを HEAD と比較（新しいファイルを含む）。",
   "run.diffSavedSha": "この実行で保存した差分：{sha} 以降のすべて（新しいファイルを含む）。",

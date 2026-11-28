@@ -1288,7 +1288,6 @@ export const es: Catalog = {
   "origin.code": "Código",
   "origin.chat": "Chat",
   "run.noDiff": "Sin diferencias.",
-  "run.diffCapped": "Se muestran las primeras 20 000 líneas. El diff completo se guarda con la ejecución.",
   "run.diffNowSha": "La carpeta ahora, comparada con {sha} del inicio de la ejecución, más archivos nuevos.",
   "run.diffNow": "La carpeta ahora, comparada con HEAD, más archivos nuevos.",
   "run.diffSavedSha": "El diff guardado de esta ejecución: todo desde {sha}, más archivos nuevos.",

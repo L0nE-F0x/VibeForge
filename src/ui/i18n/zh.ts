@@ -1289,7 +1289,6 @@ export const zh: Catalog = {
   "origin.code": "代码",
   "origin.chat": "聊天",
   "run.noDiff": "没有差异。",
-  "run.diffCapped": "仅显示前 20,000 行。完整差异已随运行保存。",
   "run.diffNowSha": "当前文件夹与运行开始时的 {sha} 比较，包括新文件。",
   "run.diffNow": "当前文件夹与 HEAD 比较，包括新文件。",
   "run.diffSavedSha": "此运行保存的差异：自 {sha} 以来的全部内容，包括新文件。",
