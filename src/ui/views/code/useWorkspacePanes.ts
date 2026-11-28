@@ -152,15 +152,17 @@ export function useWorkspacePanes({
       // Continue in a pane a close cut off picks up exactly the session that ran here.
       const cut = runtimeRef.current[pane.id]?.cutOff ?? null;
       const continueRun = opts.continueRun ?? (opts.continueSession && cut ? cut.runId : undefined);
-      // Starting it any other way lets that session go: it is no longer offered.
-      if (cut && !continueRun) settleCutOff([cut.runId]);
+      // A saved shell coming back by itself keeps offering it above the prompt. The person starting
+      // the pane some other way (Start, Shell instead) lets that session go.
+      const keep = Boolean(cut && !continueRun && pane.launch.type === "shell" && !opts.fresh && !opts.command);
+      if (cut && !continueRun && !keep) settleCutOff([cut.runId]);
       patchRuntime(pane.id, {
         state: "starting",
         ptyId: null,
         runId: null,
         exitText: null,
         fresh: pane.launch.type === "shell" && !opts.command && !continueRun && Boolean(opts.fresh),
-        cutOff: null,
+        cutOff: keep ? cut : null,
       });
       // Measure after React has laid the new pane out. A window on a hidden workspace gets no
       // frames, so don't wait on one forever.
