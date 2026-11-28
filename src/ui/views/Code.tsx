@@ -16,6 +16,7 @@ import { shortcutKeys } from "../shortcuts.js";
 import { MicButton, setDictationTarget, useDictationTarget, type DictationTarget } from "../voice.js";
 import { BranchDialog } from "./BranchDialog.js";
 import { CodeSide, useCodeSide } from "./code/CodeSide.js";
+import { CopySetupDialog } from "./code/CopySetupDialog.js";
 import { PaneView, type PaneActions } from "./code/PaneView.js";
 import { SplitView } from "./code/SplitView.js";
 import { useCodeShortcuts } from "./code/useCodeShortcuts.js";
@@ -58,6 +59,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [dragPane, setDragPane] = useState<string | null>(null);
   const [branchFor, setBranchFor] = useState<Workspace | null>(null);
+  const [copySetupFor, setCopySetupFor] = useState<Workspace | null>(null);
   const ptyAttention = usePtyAttention();
 
   const current = workspaces.find((item) => item.id === currentId) ?? null;
@@ -337,7 +339,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
   return (
     <div className="view" hidden={!active}>
       <div className="code-view">
-        <WorkspaceList active={active} workspaces={workspaces} categories={categories} currentId={currentId} onSelect={select} onAdd={(categoryId) => void addWorkspace(categoryId)} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} />
+        <WorkspaceList active={active} workspaces={workspaces} categories={categories} currentId={currentId} onSelect={select} onAdd={(categoryId) => void addWorkspace(categoryId)} onRemove={async (picked) => (await removeWorkspaces(picked)) === true} onBranch={setBranchFor} onCopySetup={setCopySetupFor} />
 
         {!current ? (
           <Empty
@@ -448,6 +450,7 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
         )}
       </div>
       {branchFor && <BranchDialog workspace={branchFor} onClose={() => setBranchFor(null)} onOpened={openedBranch} />}
+      {copySetupFor && <CopySetupDialog workspace={copySetupFor} onClose={() => setCopySetupFor(null)} />}
     </div>
   );
 }
