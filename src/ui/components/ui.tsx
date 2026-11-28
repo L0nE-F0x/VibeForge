@@ -514,6 +514,8 @@ export interface MenuItem {
   label: ReactNode;
   icon?: LucideIcon;
   hint?: ReactNode;
+  /** Secondary line under `label`, used e.g. to explain why a disabled item is unavailable. */
+  note?: ReactNode;
   onSelect: () => void;
   danger?: boolean;
   /** Stands out in the accent colour, for the one thing worth noticing (an available update). */
@@ -666,7 +668,14 @@ export function Menu({ items, onClose }: { items: MenuEntry[]; onClose: () => vo
           >
             {item.checked !== undefined && (item.checked ? <Check size={14} className="accent-text" /> : <span style={{ width: 14, flex: "none" }} />)}
             {item.icon && <item.icon size={14} />}
-            <span className="grow truncate">{item.label}</span>
+            {item.note !== undefined ? (
+              <span className="grow vstack" style={{ gap: 2 }}>
+                <span className="truncate">{item.label}</span>
+                <span className="menu-note">{item.note}</span>
+              </span>
+            ) : (
+              <span className="grow truncate">{item.label}</span>
+            )}
             {item.hint !== undefined && <span className="faint" style={{ fontSize: "var(--fs-xs)" }}>{item.hint}</span>}
           </button>
         ),

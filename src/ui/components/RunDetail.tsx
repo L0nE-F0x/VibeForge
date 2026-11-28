@@ -18,9 +18,10 @@ import {
   ScrollText,
   Square,
   TerminalSquare,
+  Undo2,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { RunView, Topic } from "../../shared/api.js";
+import type { RunRestoreAvailability, RunRestorePreview, RunView, Topic } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery } from "../api.js";
@@ -29,7 +30,7 @@ import { setPtyInView } from "../attention.js";
 import { usePlace } from "../remember.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { useNarrowStage } from "./SidePanel.js";
-import { Button, Chip, Empty, MenuButton, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
+import { Button, Chip, Empty, MenuButton, Modal, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
 import { coreText } from "../core-text.js";
 import { diffFiles } from "../diff-files.js";
@@ -195,6 +196,105 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   );
 }
 
+function restoreNote(restore: RunRestoreAvailability, t: Translator): string | undefined {
+  if (restore === "running") return t("runs.restoreWhileRunning");
+  if (restore === "missing") return t("runs.restoreMissing");
+  if (restore === "no-changes") return t("runs.restoreNoChanges");
+  if (restore === "not-repo") return t("runs.restoreNotRepo");
+  if (restore === "folder-gone") return t("runs.restoreFolderGone");
+  return undefined;
+}
+
+function summarizeFiles(files: string[]): string {
+  const shown = files.slice(0, 6).join(", ");
+  return files.length > 6 ? `${shown}, …` : shown;
+}
+
+function leftAloneBody(leftAlone: RunRestorePreview["leftAlone"], t: Translator): string | undefined {
+  const changed = leftAlone.filter((item) => item.reason === "changed").map((item) => item.path);
+  const oversized = leftAlone.filter((item) => item.reason === "oversized").map((item) => item.path);
+  const parts: string[] = [];
+  if (changed.length) parts.push(t("runs.restoredLeftChanged", { files: summarizeFiles(changed) }));
+  if (oversized.length) parts.push(t("runs.restoredLeftOversized", { files: summarizeFiles(oversized) }));
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+function RestoreConfirmModal({
+  preview,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  preview: RunRestorePreview;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useT();
+  const none = preview.restorable.length === 0;
+  return (
+    <Modal
+      title={t("runs.restoreTitle")}
+      icon={Undo2}
+      onClose={() => {
+        if (!busy) onCancel();
+      }}
+      footer={
+        none ? (
+          <Button variant="primary" onClick={onCancel} autoFocus>
+            {t("common.close")}
+          </Button>
+        ) : (
+          <>
+            <Button variant="ghost" disabled={busy} onClick={onCancel}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="primary" busy={busy} onClick={onConfirm} autoFocus>
+              {t("runs.restoreConfirm")}
+            </Button>
+          </>
+        )
+      }
+    >
+      {none ? (
+        <Notice>{preview.leftAlone.length > 0 ? t("runs.restoreNoneLeft") : t("runs.restoreAlreadyBack")}</Notice>
+      ) : (
+        <>
+          <div className="muted" style={{ lineHeight: 1.55 }}>
+            {t.count("runs.restoreCount", preview.restorable.length)}
+            {preview.leftAlone.length > 0 ? ` ${t.count("runs.restoreLeftCount", preview.leftAlone.length)}` : ""}
+          </div>
+          <div className="branch-list">
+            {preview.restorable.map((item) => (
+              <div key={item.path} className="hstack" style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)" }}>
+                <span className="faint" style={{ fontSize: "var(--fs-xs)", minWidth: 64 }}>
+                  {t(item.action === "delete" ? "runs.restoreActionDelete" : item.action === "recreate" ? "runs.restoreActionRecreate" : "runs.restoreActionRestore")}
+                </span>
+                <span className="mono truncate grow">{item.path}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {preview.leftAlone.length > 0 && (
+        <div className="vstack" style={{ gap: 6 }}>
+          <div className="list-label">{t("runs.restoreLeftHeading")}</div>
+          <div className="branch-list">
+            {preview.leftAlone.map((item) => (
+              <div key={item.path} className="hstack" style={{ padding: "6px 10px", borderBottom: "1px solid var(--line)" }}>
+                <span className="faint" style={{ fontSize: "var(--fs-xs)", minWidth: 96 }}>
+                  {t(item.reason === "oversized" ? "runs.restoreReasonOversized" : "runs.restoreReasonChanged")}
+                </span>
+                <span className="mono truncate grow">{item.path}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 const RUNNING_TOPICS: Topic[] = ["runs", "live", "working"];
 const DONE_TOPICS: Topic[] = ["runs"];
 
@@ -213,7 +313,7 @@ export function RunDetail({
 }) {
   const t = useT();
   const { go } = useNav();
-  const { push } = useToast();
+  const { push, fail } = useToast();
   // A running run follows its terminal; a finished one changes only when the runs do. Its files
   // are large and don't move with the clock, so the 30 s refresh skips them and they aren't kept.
   const bundle = useQuery(`run:${runId}`, (data) => (data?.run.status === "running" ? RUNNING_TOPICS : DONE_TOPICS), () => call("runs.get", runId), {
@@ -228,6 +328,8 @@ export function RunDetail({
   const narrow = useNarrowStage();
   const run = bundle.data?.run;
   const files = bundle.data?.files;
+  const restore = bundle.data?.restore ?? "missing";
+  const [restorePreview, setRestorePreview] = useState<RunRestorePreview | null>(null);
 
   // Opening a finished run marks it reviewed, once per visit: "Put it back in Needs review" from
   // its menu then stays put instead of being marked again as the run reloads.
@@ -260,6 +362,33 @@ export function RunDetail({
     go({ view: "tasks", taskId: task.id });
     push("success", t("handoff.done", { agent: agents.find((agent) => agent.id === agentId)?.name ?? "" }), t("handoff.doneBody"));
   }, t("handoff.failed"));
+  const [askRestore, previewingRestore] = useAction(async () => {
+    if (!run) return;
+    setRestorePreview(await call("runs.restorePreview", run.id));
+  }, t("runs.restoreFailed"));
+  const [confirmRestore, applyingRestore] = useAction(async () => {
+    if (!run) return;
+    const result = await call("runs.restore", run.id);
+    setRestorePreview(null);
+    if (result.restored.length === 0) {
+      push("info", t("runs.restoreNothingDone"), leftAloneBody(result.leftAlone, t));
+      return;
+    }
+    push(
+      "success",
+      t.count("runs.restoredTitle", result.restored.length),
+      leftAloneBody(result.leftAlone, t),
+      result.undo
+        ? {
+            label: t("common.undo"),
+            run: () =>
+              void call("runs.undoRestore", result.undo!)
+                .then(() => push("info", t("runs.restoreUndone")))
+                .catch((error: unknown) => fail(error, t("common.undoFailed"))),
+          }
+        : undefined,
+    );
+  }, t("runs.restoreFailed"));
 
   if (bundle.error) return <Empty icon={ScrollText} title={t("runs.notFound")}>{bundle.error}</Empty>;
   if (!run || !files) {
@@ -344,6 +473,18 @@ export function RunDetail({
                     label: run.openedAt ? t("runs.unreview") : t("runs.markReviewed"),
                     icon: run.openedAt ? ListRestart : CheckCheck,
                     onSelect: () => void call("runs.markOpened", run.id, !run.openedAt),
+                  },
+                ]),
+            ...(restore === "in-copy"
+              ? []
+              : [
+                  "sep" as const,
+                  {
+                    label: t("runs.restore"),
+                    icon: Undo2,
+                    disabled: restore !== "ready" || previewingRestore || applyingRestore,
+                    note: restoreNote(restore, t),
+                    onSelect: () => void askRestore(),
                   },
                 ]),
           ]}
@@ -439,6 +580,14 @@ export function RunDetail({
             </Button>
           </div>
         </div>
+      )}
+      {restorePreview && (
+        <RestoreConfirmModal
+          preview={restorePreview}
+          busy={applyingRestore}
+          onCancel={() => setRestorePreview(null)}
+          onConfirm={() => void confirmRestore()}
+        />
       )}
     </div>
   );
