@@ -28,11 +28,16 @@ export interface FirstStepState {
  * Home's three steps to a first result, each done from what is on disk rather than a flag: a
  * workspace exists, a run was recorded, and a finished run was opened.
  */
-export function firstSteps(state: { workspaces: number; runs: ReadonlyArray<{ openedAt: string | null }> }): FirstStepState[] {
+export function firstSteps(state: {
+  workspaces: number;
+  runs: ReadonlyArray<{ openedAt: string | null }>;
+  /** Some run, of any age, has been opened: a burst of new unopened runs doesn't undo the third step. */
+  opened?: boolean;
+}): FirstStepState[] {
   return [
     { key: "folder", done: state.workspaces > 0 },
     { key: "cli", done: state.runs.length > 0 },
-    { key: "review", done: state.runs.some((run) => Boolean(run.openedAt)) },
+    { key: "review", done: Boolean(state.opened) || state.runs.some((run) => Boolean(run.openedAt)) },
   ];
 }
 

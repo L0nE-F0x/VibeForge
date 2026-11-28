@@ -52,6 +52,8 @@ export interface RunQuery {
   workspaceId?: string;
   status?: RunStatus | RunStatus[];
   unopened?: boolean;
+  /** Only runs someone has opened. */
+  opened?: boolean;
   since?: string;
   search?: string;
   limit?: number;
@@ -301,6 +303,7 @@ export class RunIndex {
       }
     }
     if (query.unopened) where.push("openedAt IS NULL");
+    if (query.opened) where.push("openedAt IS NOT NULL");
     if (query.since) {
       where.push("startedAt >= ?");
       params.push(query.since);
