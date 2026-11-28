@@ -456,7 +456,7 @@ describe("the Orchestrator in the service", () => {
     git(copy.path, "commit", "-qam", "two");
     fs.appendFileSync(path.join(copy.path, "a.txt"), "three\n");
     fs.writeFileSync(path.join(copy.path, "b.txt"), "new\n");
-    const diff = await ctx.svc.orchestratorCopyDiff(copy.id);
+    const diff = (await ctx.svc.orchestratorCopyDiff(copy.id)).patch;
     expect(diff).toContain("+TWO");
     expect(diff).toContain("+three");
     expect(diff).toContain("b/b.txt");
@@ -483,6 +483,40 @@ describe("the Orchestrator in the service", () => {
     expect(view.copies?.map((item) => item.id)).toEqual(["fix-a-2"]);
     expect(view.turns.flatMap((turn) => turn.steps ?? []).find((item) => item.id === step.id)?.outcome).toBe("applied");
     await expect(ctx.svc.orchestratorApplyCopy(copy.id)).rejects.toThrow("That copy is gone.");
+    ctx.svc.close();
+  });
+
+  it("applies only the ticked files of a step's copy, refusing while its CLI still works there, and keeps the copy for the rest", async () => {
+    const { repo } = repoWithFile();
+    const ctx = withPlanner([{ say: "On it.", steps: [{ kind: "start", engine: "argy", workspace: "shop", branch: "part", prompt: "Change a, add b." }] }]);
+    ctx.svc.addWorkspace(repo);
+    const { step, copy } = await startInCopy(ctx, "part");
+    fs.writeFileSync(path.join(copy.path, "a.txt"), "one\nTWO\n");
+    fs.writeFileSync(path.join(copy.path, "b.txt"), "new\n");
+
+    // Leaving b.txt in the copy while its CLI works there: refused, and the CLI is left alone.
+    await expect(ctx.svc.orchestratorApplyCopy(copy.id, ["b.txt"])).rejects.toThrow("Stop the CLI working in this copy before applying only some of its files.");
+    expect(ctx.killed).not.toContain(step.ptyId);
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\ntwo\n");
+
+    // Its CLI ended: a.txt goes in, b.txt stays, and so does the copy, which remembers a.txt.
+    await ctx.exit(step.ptyId ?? "");
+    expect(await ctx.svc.orchestratorApplyCopy(copy.id, ["b.txt"])).toEqual({ files: ["a.txt"], conflicts: [], kept: [], stayed: 1 });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("one\nTWO\n");
+    expect(fs.existsSync(path.join(repo, "b.txt"))).toBe(false);
+    expect(fs.existsSync(copy.path)).toBe(true);
+    expect((await ctx.svc.orchestratorCopyDiff(copy.id)).files.map((file) => [file.path, file.applied])).toEqual([
+      ["a.txt", true],
+      ["b.txt", false],
+    ]);
+    // Kept across a restart, in the copies file.
+    expect(JSON.parse(fs.readFileSync(path.join(ctx.dataRoot, "orchestrator", "copies.json"), "utf8")).copies[0].applied).toEqual([{ path: "a.txt", id: expect.stringMatching(/^[0-9a-f]{40,64}$/) }]);
+
+    // The rest, with a.txt left unticked as the review starts it: the copy goes.
+    expect(await ctx.svc.orchestratorApplyCopy(copy.id, ["a.txt"])).toEqual({ files: ["b.txt"], conflicts: [], kept: [], already: 1 });
+    expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("new\n");
+    expect(fs.existsSync(copy.path)).toBe(false);
+    expect(ctx.svc.orchestratorView().copies ?? []).toEqual([]);
     ctx.svc.close();
   });
 
@@ -575,7 +609,7 @@ describe("the Orchestrator in the service", () => {
     expect(ctx.svc.getLayout(copy.openedWorkspaceId ?? "")).toMatchObject({ id: "p1" });
     expect(ctx.svc.orchestratorView().copies?.map((item) => item.id)).toEqual(["try-it"]);
     expect(ctx.svc.orchestratorView().turns[1].steps?.[0].outcome).toBeNull();
-    expect(await ctx.svc.orchestratorCopyDiff(copy.id)).toContain("+changed");
+    expect((await ctx.svc.orchestratorCopyDiff(copy.id)).patch).toContain("+changed");
 
     // Discarded again; closing ends the chance to undo, and the branch goes with it.
     await ctx.svc.orchestratorDiscardCopy(copy.id);

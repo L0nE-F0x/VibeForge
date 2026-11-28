@@ -164,6 +164,18 @@
   min-width: 0;
 }
 
+/* Files off screen aren't laid out or painted until they scroll near: Expand all on a big review
+   stays quick. Each card says about how tall it is (DiffReview's cardHeight). */
+.review-diffs > .diff-card {
+  content-visibility: auto;
+}
+
+.diff-applied {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--green);
+}
+
 .diff-card-head {
   display: flex;
   align-items: center;
@@ -244,12 +256,9 @@
 }
 
 .diff-table {
+  position: relative;
   overflow-x: auto;
   padding: 4px 0;
-}
-
-.diff-row-group {
-  min-width: max-content;
 }
 
 .diff-row {
@@ -323,23 +332,24 @@
   color: var(--red);
 }
 
+/* One note button per file, moved onto the line under the pointer (or picked with the arrow keys). */
 .diff-note-trigger {
-  display: none;
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 88px;
+  z-index: 1;
+  display: grid;
   place-items: center;
+  width: 22px;
+  height: 20px;
   color: var(--accent);
   background: var(--bg-dark);
+  opacity: 0;
 }
 
-.diff-row.can-note:hover .diff-note-trigger,
+.diff-table:hover .diff-note-trigger[data-at],
 .diff-note-trigger:focus-visible {
-  display: grid;
-}
-
-.diff-row.can-note:hover .diff-sign-char,
-.diff-note-trigger:focus-visible + .diff-sign-char {
-  visibility: hidden;
+  opacity: 1;
 }
 
 .diff-code {

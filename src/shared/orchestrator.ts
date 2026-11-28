@@ -229,6 +229,8 @@ export interface MaestroCopy {
   base: string;
   repo: string;
   seeded?: string[];
+  /** Files an earlier Apply of only some files brought in, with their content ids then. */
+  applied?: Array<{ path: string; id: string }>;
 }
 
 /** The fields a plan card can change on a step before Go. */

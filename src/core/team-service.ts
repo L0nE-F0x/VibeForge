@@ -22,7 +22,7 @@ import type { RunQuery } from "./store.js";
 import type { Agent, LayoutNode, LiveSession, Routine, Schedule, Skill, TaskStatus, UnreadableItem, WorkspaceCategory } from "./types.js";
 import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
-import type { ApplyResult } from "./worktrees.js";
+import type { ApplyResult, CopyReview } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
 import type { MemoryProposal } from "../shared/memory.js";
 import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RestorePick, RunRestorePreview, RunRestoreResult, RunRestoreUndoResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
@@ -445,12 +445,12 @@ export class TeamService extends ServiceCore {
     this.orchestrator.removeStep(turnId, stepId);
   }
 
-  orchestratorCopyDiff(copyId: string): Promise<string> {
+  orchestratorCopyDiff(copyId: string): Promise<CopyReview> {
     return this.orchestrator.copyDiff(copyId);
   }
 
-  orchestratorApplyCopy(copyId: string, files?: readonly string[]): Promise<ApplyResult> {
-    return this.orchestrator.applyCopy(copyId, files);
+  orchestratorApplyCopy(copyId: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.orchestrator.applyCopy(copyId, skip);
   }
 
   orchestratorDiscardCopy(copyId: string): Promise<Deleted> {
@@ -611,12 +611,12 @@ export class TeamService extends ServiceCore {
     return this.tasks.setTaskStatus(id, status);
   }
 
-  taskCopyDiff(id: string): Promise<string> {
+  taskCopyDiff(id: string): Promise<CopyReview> {
     return this.tasks.copyDiff(id);
   }
 
-  applyTaskCopy(id: string, files?: readonly string[]): Promise<ApplyResult> {
-    return this.tasks.applyCopy(id, files);
+  applyTaskCopy(id: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.tasks.applyCopy(id, skip);
   }
 
   discardTaskCopy(id: string): Promise<Deleted> {

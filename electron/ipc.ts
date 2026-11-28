@@ -297,7 +297,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "tasks.stop": (id) => s().stopTask(id),
     "tasks.setStatus": (id, status) => s().setTaskStatus(id, status),
     "tasks.copyDiff": (id) => s().taskCopyDiff(String(id ?? "")),
-    "tasks.applyCopy": (id, files) => s().applyTaskCopy(String(id ?? ""), Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : undefined),
+    "tasks.applyCopy": (id, skip) => s().applyTaskCopy(String(id ?? ""), fileList(skip)),
     "tasks.discardCopy": (id) => s().discardTaskCopy(id),
 
     "chats.list": (filter) => s().listChats(filter ?? {}),
@@ -370,7 +370,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "orchestrator.editStep": (turnId, stepId, patch) => s().orchestratorEditStep(String(turnId ?? ""), String(stepId ?? ""), patch && typeof patch === "object" ? patch : {}),
     "orchestrator.removeStep": (turnId, stepId) => s().orchestratorRemoveStep(String(turnId ?? ""), String(stepId ?? "")),
     "orchestrator.copyDiff": (copyId) => s().orchestratorCopyDiff(String(copyId ?? "")),
-    "orchestrator.applyCopy": (copyId, files) => s().orchestratorApplyCopy(String(copyId ?? ""), Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : undefined),
+    "orchestrator.applyCopy": (copyId, skip) => s().orchestratorApplyCopy(String(copyId ?? ""), fileList(skip)),
     "orchestrator.discardCopy": (copyId) => s().orchestratorDiscardCopy(String(copyId ?? "")),
 
     "sync.view": () => sync.view(),
@@ -453,6 +453,11 @@ export function registerIpc(ctx: MainContext, parts: IpcParts): void {
       throw error;
     }
   });
+}
+
+/** A list of file names from the renderer, or undefined when it sent none. */
+function fileList(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
 }
 
 const talkLimiters = new WeakMap<MainContext, TalkRateLimiter>();

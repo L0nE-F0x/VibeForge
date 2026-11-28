@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyToWorkspace, copyBranch, copyPatch, createCopy, hasStagedTree, leftInCopy, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
+import { splitPatch } from "../../src/shared/review.js";
+import { applyCopyFiles, applyToWorkspace, copyBranch, copyPatch, copyReview, createCopy, hasStagedTree, leftInCopy, lockCopy, patchFiles, removeCopy, unlockCopy, type CopyOwner, type WorkingCopy } from "../../src/core/worktrees.js";
 
 // Real git in throwaway repositories: a task's copy, changed, then applied to a workspace that has moved on.
 
@@ -592,7 +593,7 @@ describe("applying a copy that was already merged", () => {
     expect(read(offline.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
   });
 
-  it("applies only ticked files, keeps unticked ones untouched in workspace, and skips fast-forward when partial", async () => {
+  it("leaves unticked files untouched in the workspace, and skips fast-forward when some are left out", async () => {
     const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES, "b.txt": LINES, "gone.txt": "bye\n", "old.txt": LINES });
     write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
     write(copy.path, "b.txt", LINES.replace("two", "TWO"));
@@ -603,7 +604,7 @@ describe("applying a copy that was already merged", () => {
     write(repo, "b.txt", LINES.replace("two", "MINE"));
 
     const patch = await copyPatch(copy, owner);
-    const partial = await applyToWorkspace(copy, patch, { files: ["a.txt", "moved.txt"] });
+    const partial = await applyToWorkspace(copy, patch, { skip: ["b.txt", "new.txt", "gone.txt"] });
     expect(partial).toEqual({ files: ["a.txt", "moved.txt"], conflicts: [], kept: [], stayed: 3 });
     expect(read(repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
     expect(read(repo, "moved.txt")).toBe(LINES);
@@ -613,8 +614,8 @@ describe("applying a copy that was already merged", () => {
     expect(fs.existsSync(path.join(repo, "new.txt"))).toBe(false);
     expect(read(repo, "gone.txt")).toBe("bye\n");
 
-    // Empty file selection leaves everything in the copy untouched.
-    expect(await applyToWorkspace(copy, patch, { files: [] })).toEqual({ files: [], conflicts: [], kept: [], stayed: 5 });
+    // Nothing ticked leaves everything in the copy untouched.
+    expect(await applyToWorkspace(copy, patch, { skip: ["a.txt", "b.txt", "new.txt", "gone.txt", "old.txt", "moved.txt"] })).toEqual({ files: [], conflicts: [], kept: [], stayed: 5 });
 
     // Partial Apply never fast-forwards even when the branch's commits were merged upstream.
     const merged = await remoteRepoWithCopy({ "a.txt": LINES, "b.txt": LINES }, "task-partial-ff");
@@ -627,11 +628,79 @@ describe("applying a copy that was already merged", () => {
     git(merged.github, "commit", "-qm", "squash");
     git(merged.github, "push", "-q", "origin", "main");
 
-    const mergedPartial = await applyToWorkspace(merged.copy, await copyPatch(merged.copy, merged.owner), { files: ["a.txt"] });
+    const mergedPartial = await applyToWorkspace(merged.copy, await copyPatch(merged.copy, merged.owner), { skip: ["b.txt"] });
     expect(mergedPartial).toEqual({ files: ["a.txt"], conflicts: [], kept: [], stayed: 1 });
     expect(mergedPartial.pulled).toBeUndefined();
     expect(read(merged.repo, "a.txt")).toBe(LINES.replace("five", "FIVE"));
     expect(read(merged.repo, "b.txt")).toBe(LINES);
+  });
+  it("pairs a rename the way Apply does whatever diff.renames says, and applies it only with both names ticked", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "old.txt": LINES, "keep.txt": LINES });
+    // The person's git config turns rename detection off; the CLI moved the file without telling git.
+    git(repo, "config", "diff.renames", "false");
+    fs.renameSync(path.join(copy.path, "old.txt"), path.join(copy.path, "new.txt"));
+    write(copy.path, "keep.txt", LINES.replace("one", "ONE"));
+
+    const review = await copyReview(copy, owner);
+    expect(review.files).toEqual([
+      { path: "keep.txt", oldPath: null, applied: false },
+      { path: "new.txt", oldPath: "old.txt", applied: false },
+    ]);
+    // The patch the review shows lists the same files: one rename, not a delete and an add.
+    expect(splitPatch(review.patch).files.map((file) => [file.path, file.oldPath, file.status])).toEqual([
+      ["keep.txt", null, "modified"],
+      ["new.txt", "old.txt", "renamed"],
+    ]);
+
+    // One side of the rename unticked: refused, and nothing is written.
+    for (const skip of [["old.txt"], ["new.txt"]]) {
+      await expect(applyToWorkspace(copy, review.patch, { skip })).rejects.toThrow("old.txt was renamed to new.txt in the copy. Tick or untick both together, then Apply again.");
+    }
+    expect(read(repo, "old.txt")).toBe(LINES);
+    expect(fs.existsSync(path.join(repo, "new.txt"))).toBe(false);
+    expect(read(repo, "keep.txt")).toBe(LINES);
+
+    // Both unticked: the rename stays in the copy and the other file goes in.
+    const patch = await copyPatch(copy, owner);
+    expect(await applyToWorkspace(copy, patch, { skip: ["old.txt", "new.txt"] })).toEqual({ files: ["keep.txt"], conflicts: [], kept: [], stayed: 1 });
+    expect(read(repo, "old.txt")).toBe(LINES);
+    expect(fs.existsSync(path.join(repo, "new.txt"))).toBe(false);
+    expect(read(repo, "keep.txt")).toBe(LINES.replace("one", "ONE"));
+
+    // Both ticked: the rename goes in.
+    expect((await applyToWorkspace(copy, await copyPatch(copy, owner), { skip: [] })).files).toEqual(["keep.txt", "new.txt"]);
+    expect(fs.existsSync(path.join(repo, "old.txt"))).toBe(false);
+    expect(read(repo, "new.txt")).toBe(LINES);
+  });
+
+  it("remembers what a partial Apply brought in, so a file reverted since isn't brought back", async () => {
+    const { repo, copy, owner } = await repoWithCopy({ "a.txt": LINES, "b.txt": LINES });
+    write(copy.path, "a.txt", LINES.replace("five", "FIVE"));
+    write(copy.path, "b.txt", LINES.replace("two", "TWO"));
+
+    const first = await applyCopyFiles(copy, await copyPatch(copy, owner), { skip: ["b.txt"] });
+    expect(first.result).toEqual({ files: ["a.txt"], conflicts: [], kept: [], stayed: 1 });
+    expect(first.applied.map((file) => file.path)).toEqual(["a.txt"]);
+    // The task's record keeps it; the person then reverts a.txt in the workspace.
+    copy.applied = first.applied;
+    git(repo, "checkout", "--", "a.txt");
+
+    // The next review starts a.txt as applied, so it is left unticked.
+    expect((await copyReview(copy, owner)).files).toEqual([
+      { path: "a.txt", oldPath: null, applied: true },
+      { path: "b.txt", oldPath: null, applied: false },
+    ]);
+    const rest = await applyCopyFiles(copy, await copyPatch(copy, owner), { skip: ["a.txt"] });
+    expect(rest.result).toEqual({ files: ["b.txt"], conflicts: [], kept: [], already: 1 });
+    expect(read(repo, "a.txt")).toBe(LINES);
+    expect(read(repo, "b.txt")).toBe(LINES.replace("two", "TWO"));
+    // Without a list (Viby's Apply), applied files are left out too.
+    expect((await applyToWorkspace(copy, await copyPatch(copy, owner))).files).toEqual(["b.txt"]);
+    expect(read(repo, "a.txt")).toBe(LINES);
+
+    // Once the CLI changes a.txt again in the copy, it is no longer applied.
+    write(copy.path, "a.txt", LINES.replace("six", "SIX"));
+    expect((await copyReview(copy, owner)).files[0]).toEqual({ path: "a.txt", oldPath: null, applied: false });
   });
 });
 

@@ -12,7 +12,6 @@ import {
   Forward,
   GitBranch,
   GitCompare,
-  GitMerge,
   Info,
   ListRestart,
   MoreHorizontal,
@@ -24,10 +23,9 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { RunRestoreAvailability, RunRestorePreview, RunRestoreUndoResult, RunView, Topic } from "../../shared/api.js";
+import { memo, useEffect, useRef, useState } from "react";
+import type { CopyReview, RunRestoreAvailability, RunRestorePreview, RunRestoreUndoResult, RunView, TaskView, Topic } from "../../shared/api.js";
 import { LOCAL_ENGINE_ID, shortLocalModel } from "../../shared/local.js";
-import { splitPatch } from "../../shared/review.js";
 import { duration, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useEngines, useNow, useQuery, useTasks, useWorkspaces } from "../api.js";
 import { applyToast } from "../apply-note.js";
@@ -36,7 +34,9 @@ import { setPtyInView } from "../attention.js";
 import { usePlace } from "../remember.js";
 import { LiveTerminal, ReplayTerminal } from "./Terminal.js";
 import { useNarrowStage } from "./SidePanel.js";
-import { DiffReview } from "./DiffReview.js";
+import { CopyApplyButton } from "./CopyApply.js";
+import { DiffReview } from "./DiffReviewLazy.js";
+import { useCopyPick } from "../copy-pick.js";
 import { Button, Chip, Empty, MenuButton, Modal, Notice, Skeleton, StatusChip, Tabs, TimeAgo } from "./ui.js";
 import { Rich } from "../i18n/Rich.js";
 import { useT, type Key, type Translator } from "../i18n/index.js";
@@ -102,16 +102,19 @@ function diffCaption(run: RunView, saved: boolean, shown: "saved" | "now" | null
 }
 
 function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: string; patchSaved: boolean }) {
-  const t = useT();
   const { push } = useToast();
-  const deleted = useDeleted();
-  const home = useAppInfo().data?.home ?? "";
   const tasks = useTasks().data ?? [];
-  const workspaces = useWorkspaces().data?.workspaces ?? [];
   const task = run.taskId ? tasks.find((item) => item.id === run.taskId) : undefined;
-  const taskWorkspace = task ? workspaces.find((item) => item.id === task.workspaceId) : undefined;
+  // The last run of a task in its own copy shows the copy itself, as the task's sheet does: the
+  // files Apply would bring in, renames paired the same way, from every run in it.
+  const copy = task?.copy;
+  if (task && copy && task.copyOwned && run.id === task.lastRun?.id && !task.lastRun?.live && run.status !== "running") return <CopyChanges run={run} task={task} copy={copy} />;
+  return <RunChanges run={run} snapshot={snapshot} patchSaved={patchSaved} push={push} />;
+}
+
+function RunChanges({ run, snapshot, patchSaved, push }: { run: RunView; snapshot: string; patchSaved: boolean; push: ReturnType<typeof useToast>["push"] }) {
+  const t = useT();
   const [diff, setDiff] = useState<{ text: string; source: "saved" | "now" } | null>(null);
-  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const [load, loading] = useAction(async (source: "saved" | "now") => {
     setDiff({ text: await call("runs.diff", run.id, source), source });
   }, t("run.diffFailed"));
@@ -119,36 +122,9 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
   const saved = run.status !== "running" && patchSaved;
   // What a finished run changed is the point of reviewing it: its saved diff opens with the tab.
   useEffect(() => {
-    setExcluded(new Set());
+    setDiff(null);
     if (saved && !notRepo) void load("saved");
   }, [run.id, saved, notRepo, load]);
-
-  const parsedPaths = useMemo(() => (diff ? splitPatch(diff.text).files.map((file) => file.path) : []), [diff]);
-  const pickedPaths = useMemo(() => parsedPaths.filter((item) => !excluded.has(item)), [parsedPaths, excluded]);
-  const pickedSet = useMemo(() => new Set(pickedPaths), [pickedPaths]);
-  const toggleFile = (filePath: string) =>
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(filePath)) next.delete(filePath);
-      else next.add(filePath);
-      return next;
-    });
-
-  const canApplyTaskCopy = Boolean(task && task.copy && task.copyOwned && !task.lastRun?.live && run.id === task.lastRun?.id && diff?.source !== "now");
-  const workspaceName = taskWorkspace?.name ?? task?.copy?.repo ?? "";
-  const [applyCopy, applying] = useAction(async () => {
-    if (!task?.copy) return;
-    const partial = parsedPaths.length > 0 && pickedPaths.length < parsedPaths.length ? pickedPaths : undefined;
-    const result = await call("tasks.applyCopy", task.id, partial);
-    const toast = applyToast(t, result, workspaceName, home);
-    push(toast.tone, toast.title, toast.body);
-    if (result.stayed) setExcluded(new Set());
-  }, t("tasks.applyFailed"));
-  const [discardCopy, discarding] = useAction(async () => {
-    if (!task) return;
-    const result = await call("tasks.discardCopy", task.id);
-    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
-  }, t("tasks.discardFailed"));
 
   return (
     <div className="page-body vstack" style={{ gap: 14 }}>
@@ -178,52 +154,66 @@ function ChangesTab({ run, snapshot, patchSaved }: { run: RunView; snapshot: str
             )}
             <span className="faint">{diffCaption(run, saved, diff?.source ?? null, t)}</span>
           </div>
-          {canApplyTaskCopy && task?.copy && (
-            <Notice tone="accent" icon={GitBranch}>
-              <div className="hstack wrap">
-                <span className="grow">
-                  <Rich text={t("tasks.copyNote", { branch: task.copy.branch, workspace: workspaceName })} />
-                </span>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  icon={GitMerge}
-                  busy={applying}
-                  disabled={parsedPaths.length > 0 && pickedPaths.length === 0}
-                  tip={t("tasks.applyTip")}
-                  onClick={() => void applyCopy()}
-                >
-                  {parsedPaths.length > 0 && pickedPaths.length < parsedPaths.length
-                    ? t("review.applyPicked", { count: pickedPaths.length, total: parsedPaths.length, workspace: workspaceName })
-                    : t("tasks.apply", { workspace: workspaceName })}
-                </Button>
-                <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
-                  {t("tasks.discardCopy")}
-                </Button>
-              </div>
-            </Notice>
-          )}
-          {diff !== null && (
-            <DiffReview
-              text={diff.text}
-              reviewKey={run.id}
-              workspaceId={run.workspaceId}
-              preferredPtyId={run.live ? run.ptyId : null}
-              selection={
-                canApplyTaskCopy && parsedPaths.length > 0
-                  ? {
-                      picked: pickedSet,
-                      onToggle: toggleFile,
-                      onPickAll: () => setExcluded(new Set()),
-                      onPickNone: () => setExcluded(new Set(parsedPaths)),
-                    }
-                  : undefined
-              }
-            />
-          )}
+          {diff !== null && <DiffReview text={diff.text} reviewKey={run.id} workspaceId={run.workspaceId} folder={run.cwd} preferredPtyId={run.live ? run.ptyId : null} />}
           {snapshot && (diff === null || !diff.text.trim()) && <pre className="pre">{snapshot.trim()}</pre>}
         </div>
       )}
+    </div>
+  );
+}
+
+function CopyChanges({ run, task, copy }: { run: RunView; task: TaskView; copy: NonNullable<TaskView["copy"]> }) {
+  const t = useT();
+  const { push } = useToast();
+  const deleted = useDeleted();
+  const home = useAppInfo().data?.home ?? "";
+  const workspaces = useWorkspaces().data?.workspaces ?? [];
+  const workspaceName = workspaces.find((item) => item.id === task.workspaceId)?.name ?? copy.repo;
+  const [review, setReview] = useState<CopyReview | null>(null);
+  const [load, loading] = useAction(async () => setReview(await call("tasks.copyDiff", task.id)), t("run.diffFailed"));
+  useEffect(() => {
+    setReview(null);
+    void load();
+  }, [task.id, copy.path, run.id, load]);
+  const pick = useCopyPick(review?.files);
+  const [applyCopy, applying] = useAction(async () => {
+    const result = await call("tasks.applyCopy", task.id, pick.skip);
+    const toast = applyToast(t, result, workspaceName, home);
+    push(toast.tone, toast.title, toast.body);
+    if (result.stayed || result.conflicts.length || result.left) void load();
+  }, t("tasks.applyFailed"));
+  const [discardCopy, discarding] = useAction(async () => {
+    const result = await call("tasks.discardCopy", task.id);
+    deleted(t("tasks.copyDiscarded", { title: task.title }), result);
+  }, t("tasks.discardFailed"));
+
+  return (
+    <div className="page-body vstack" style={{ gap: 14 }}>
+      <div className="vstack">
+        <div className="hstack wrap">
+          <Button icon={GitCompare} busy={loading} onClick={() => void load()}>
+            {t("run.refreshDiff")}
+          </Button>
+          {review && (
+            <Button size="sm" variant="ghost" icon={Copy} onClick={() => void navigator.clipboard.writeText(review.patch).then(() => push("success", t("run.diffCopied")))}>
+              {t("common.copy")}
+            </Button>
+          )}
+          <span className="faint">{t("run.diffCopy")}</span>
+        </div>
+        <Notice tone="accent" icon={GitBranch}>
+          <div className="hstack wrap">
+            <span className="grow">
+              <Rich text={t("tasks.copyNote", { branch: copy.branch, workspace: workspaceName })} />
+            </span>
+            <CopyApplyButton pick={pick} workspace={workspaceName} tip={t("tasks.applyTip")} busy={applying} onApply={() => void applyCopy()} />
+            <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
+              {t("tasks.discardCopy")}
+            </Button>
+          </div>
+        </Notice>
+        {review !== null && <DiffReview text={review.patch} reviewKey={`task:${task.id}`} workspaceId={run.workspaceId} folder={copy.path} selection={pick.selection} />}
+      </div>
     </div>
   );
 }

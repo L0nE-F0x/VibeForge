@@ -2,13 +2,31 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MESSAGE_INLINE_MAX } from "../../src/core/agent-talk.js";
-import { formatReviewNotes, isLockFile, parseDiffGitHeader, parseFileDiff, splitPatch, syntaxLang, tokenizeLine, unquoteGitPath } from "../../src/shared/review.js";
+import type { ReviewFile } from "../../src/shared/api.js";
+import { formatReviewNotes, isLockFile, notesThatFit, parseDiffGitHeader, parseFileDiff, splitPatch, syntaxLang, tokenizeLine, unquoteGitPath } from "../../src/shared/review.js";
+import { useCopyPick, type CopyPick } from "../../src/ui/copy-pick.js";
 import { DiffReview } from "../../src/ui/components/DiffReview.js";
 import { remember, resetPlaces } from "../../src/ui/remember.js";
 import { NavProvider, ToastProvider } from "../../src/ui/state.js";
 import { setup, started, tempDir } from "./fixtures/service-harness.js";
+
+// Rendered on the server, with no main process: Send to… lists no CLIs.
+vi.mock("../../src/ui/api.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/ui/api.js")>()),
+  useLive: () => ({ data: [] }),
+  useAgents: () => ({ data: [] }),
+  useWorkspaces: () => ({ data: undefined }),
+}));
+
+/** Renders useCopyPick on the server, unticking `untick` once, and hands back what it gave. */
+function PickProbe({ files, untick, onPick }: { files: ReviewFile[] | null; untick?: string; onPick: (pick: CopyPick) => void }) {
+  const pick = useCopyPick(files);
+  if (untick && pick.selection?.picked.has(untick)) pick.selection.onToggle(untick);
+  onPick(pick);
+  return null;
+}
 
 function initGitRepo(files: Record<string, string>): string {
   const repo = tempDir();
@@ -256,24 +274,37 @@ describe("patch splitting, folding, syntax tokens and review notes", () => {
     fs.writeFileSync(path.join(copyPath, "b.txt"), "b2\n");
     await ctx.exit(launched.ptyId);
 
-    const diff = await ctx.svc.taskCopyDiff(task.id);
-    expect(diff).toContain("a.txt");
-    expect(diff).toContain("b.txt");
+    const review = await ctx.svc.taskCopyDiff(task.id);
+    expect(review.patch).toContain("a.txt");
+    expect(review.patch).toContain("b.txt");
+    expect(review.files).toEqual([
+      { path: "a.txt", oldPath: null, applied: false },
+      { path: "b.txt", oldPath: null, applied: false },
+    ]);
     await expect(ctx.svc.taskCopyDiff("missing-task")).rejects.toThrow("That task no longer exists.");
     const plainTask = ctx.svc.saveTask({ title: "No copy", body: "Direct.", agentId: agent.id, workspaceId: workspace.id, isolated: false });
     await expect(ctx.svc.taskCopyDiff(plainTask.id)).rejects.toThrow("This task has no separate copy.");
 
-    const partial = await ctx.svc.applyTaskCopy(task.id, ["a.txt"]);
+    const partial = await ctx.svc.applyTaskCopy(task.id, ["b.txt"]);
     expect(partial).toEqual({ files: ["a.txt"], conflicts: [], kept: [], stayed: 1 });
     expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("a2\n");
     expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("b1\n");
     const stillOpen = ctx.svc.listTasks().find((item) => item.id === task.id)!;
     expect(stillOpen.copy).not.toBeNull();
     expect(stillOpen.status).toBe("review");
+    // The task's copy remembers what went in: the next review starts a.txt unticked, marked applied.
+    expect(stillOpen.copy?.applied?.map((file) => file.path)).toEqual(["a.txt"]);
+    expect((await ctx.svc.taskCopyDiff(task.id)).files.map((file) => [file.path, file.applied])).toEqual([
+      ["a.txt", true],
+      ["b.txt", false],
+    ]);
+    // Reverted in the workspace since: the rest of the copy goes in without bringing it back.
+    fs.writeFileSync(path.join(repo, "a.txt"), "a1\n");
 
-    // Applying all remaining files clears the copy and finishes the task.
-    const rest = await ctx.svc.applyTaskCopy(task.id);
-    expect(rest).toEqual({ files: ["a.txt", "b.txt"], conflicts: [], kept: [] });
+    // Applying the remaining file clears the copy and finishes the task.
+    const rest = await ctx.svc.applyTaskCopy(task.id, ["a.txt"]);
+    expect(rest).toEqual({ files: ["b.txt"], conflicts: [], kept: [], already: 1 });
+    expect(fs.readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("a1\n");
     expect(fs.readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("b2\n");
     const finished = ctx.svc.listTasks().find((item) => item.id === task.id)!;
     expect(finished.copy).toBeNull();
@@ -281,7 +312,7 @@ describe("patch splitting, folding, syntax tokens and review notes", () => {
     ctx.svc.close();
   });
 
-  it("renders file list, syntax colours, lazy folded files, remembered viewed ticks and notes in DiffReview SSR", () => {
+  it("renders file list, syntax colours, lazy folded files, applied files and notes in DiffReview SSR", () => {
     const patch = [
       "diff --git a/src/app.ts b/src/app.ts",
       "--- a/src/app.ts",
@@ -305,8 +336,10 @@ describe("patch splitting, folding, syntax tokens and review notes", () => {
           <DiffReview
             text={patch}
             reviewKey="run-1"
+            folder="/work/copy"
             selection={{
               picked: new Set(["src/app.ts"]),
+              applied: new Set(["package-lock.json"]),
               onToggle: () => undefined,
               onPickAll: () => undefined,
               onPickNone: () => undefined,
@@ -323,7 +356,79 @@ describe("patch splitting, folding, syntax tokens and review notes", () => {
     expect(html).toContain("1/2 selected");
     expect(html).toContain("Check constant");
     expect(html).toContain("Send to…");
+    expect(html).toContain(">applied<");
+    // One note button per file, not one per line.
+    expect(html.match(/diff-note-trigger/g)).toHaveLength(1);
     // Folded file's diff lines are rendered lazily: not present in HTML while folded.
     expect(html).not.toContain("secret_never_rendered_while_folded");
+  });
+  it("keeps viewed ticks for the version of a file that was viewed, and drops notes whose line changed", () => {
+    const patch = (value: number) =>
+      ["diff --git a/src/app.ts b/src/app.ts", "--- a/src/app.ts", "+++ b/src/app.ts", "@@ -1 +1 @@", "-const a = 1;", `+const a = ${value};`, "diff --git a/b.txt b/b.txt", "--- a/b.txt", "+++ b/b.txt", "@@ -1 +1 @@", "-x", "+y"].join("\n");
+    const first = splitPatch(patch(2)).files[0];
+    const render = (text: string) =>
+      renderToStaticMarkup(
+        <NavProvider>
+          <ToastProvider>
+            <DiffReview text={text} reviewKey="task:t1" />
+          </ToastProvider>
+        </NavProvider>,
+      );
+    remember("run.viewed", "task:t1", [`${first.key}:src/app.ts`]);
+    remember("run.notes", "task:t1", [{ id: "n1", path: "src/app.ts", line: 1, side: "new", code: "const a = 2;", body: "Why two?" }]);
+
+    // Viewed: counted, and folded.
+    const viewed = render(patch(2));
+    expect(viewed).toContain("1/2 viewed");
+    expect(viewed).not.toContain("const a");
+    expect(viewed).toContain("1 note");
+
+    // The CLI changed the file again after Continue: it shows again, unviewed, and the note on
+    // the line that changed is gone.
+    const changed = render(patch(3));
+    expect(splitPatch(patch(3)).files[0].key).not.toBe(first.key);
+    expect(changed).toContain("0/2 viewed");
+    expect(changed).toContain("tok-num");
+    expect(changed).not.toContain("Why two?");
+    expect(changed).not.toContain("1 note");
+  });
+
+  it("keeps notes on lines that still read the same, and names the folder at the top of the message", () => {
+    const files = splitPatch(["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1,2 +1,2 @@", " keep();", "-old();", "+fresh();"].join("\n")).files;
+    const notes = [
+      { id: "1", path: "a.ts", line: 1, side: "new" as const, code: "keep();", body: "ok" },
+      { id: "2", path: "a.ts", line: 2, side: "old" as const, code: "old();", body: "gone?" },
+      { id: "3", path: "a.ts", line: 2, side: "new" as const, code: "stale();", body: "moved" },
+      { id: "4", path: "elsewhere.ts", line: 1, side: "new" as const, code: "x", body: "not in this patch" },
+    ];
+    expect(notesThatFit(notes, files).map((note) => note.id)).toEqual(["1", "2"]);
+    expect(formatReviewNotes([notes[0]], ["a.ts"], "/home/me/.local/share/vibeforge/worktrees/t1").split("\n")[0]).toBe(
+      "Review notes on the changes in /home/me/.local/share/vibeforge/worktrees/t1 (paths are from the top of its git repository):",
+    );
+  });
+
+  it("starts files applied before unticked, and sends both names of an unticked rename", () => {
+    const files: ReviewFile[] = [
+      { path: "a.txt", oldPath: null, applied: true },
+      { path: "new.txt", oldPath: "old.txt", applied: false },
+      { path: "c.txt", oldPath: null, applied: false },
+    ];
+    const pickOf = (list: ReviewFile[] | null, untick?: string) => {
+      let seen: CopyPick | null = null;
+      renderToStaticMarkup(<PickProbe files={list} untick={untick} onPick={(pick) => (seen = pick)} />);
+      return seen as unknown as CopyPick;
+    };
+    const pick = pickOf(files);
+    expect([...(pick.selection?.picked ?? [])]).toEqual(["new.txt", "c.txt"]);
+    expect([...(pick.selection?.applied ?? [])]).toEqual(["a.txt"]);
+    expect(pick.skip).toEqual(["a.txt"]);
+    // Only an applied file is left out: nothing stays in the copy, so Apply reads as a whole Apply.
+    expect(pick).toMatchObject({ picked: 2, total: 3, partial: false, none: false });
+
+    const unticked = pickOf(files, "new.txt");
+    expect(unticked.skip).toEqual(["a.txt", "old.txt", "new.txt"]);
+    expect(unticked).toMatchObject({ picked: 1, partial: true });
+    // No list yet (the review isn't open): Apply sends nothing, and the main process leaves out what was applied.
+    expect(pickOf(null).skip).toBeUndefined();
   });
 });

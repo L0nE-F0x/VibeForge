@@ -114,9 +114,9 @@ export type {
   StepIssue,
   StepPatch,
 };
-import type { ApplyResult, WorkingCopy } from "../core/worktrees.js";
+import type { ApplyResult, CopyReview, ReviewFile, WorkingCopy } from "../core/worktrees.js";
 
-export type { ApplyResult, WorkingCopy, BranchList };
+export type { ApplyResult, CopyReview, ReviewFile, WorkingCopy, BranchList };
 import type { Deleted } from "../core/team-service.js";
 
 export type { Deleted };
@@ -559,10 +559,14 @@ export interface DeskMethods {
   "tasks.continue": (id: string, size?: TermSize) => Launched;
   "tasks.stop": (id: string) => TaskView;
   "tasks.setStatus": (id: string, status: TaskStatus) => TaskView;
-  /** Everything an isolated task's copy changed since it started, as a patch. */
-  "tasks.copyDiff": (id: string) => string;
-  /** Bring an isolated task's changes (or only the ticked files) into its workspace as uncommitted edits. */
-  "tasks.applyCopy": (id: string, files?: string[]) => ApplyResult;
+  /** Everything an isolated task's copy changed since it started, as a patch, with its list of files as Apply sees them. */
+  "tasks.copyDiff": (id: string) => CopyReview;
+  /**
+   * Bring an isolated task's changes into its workspace as uncommitted edits, leaving out `skip`
+   * (the files unticked in the review; both names of a rename). Without it, files an earlier
+   * Apply brought in are left out.
+   */
+  "tasks.applyCopy": (id: string, skip?: string[]) => ApplyResult;
   /** Throw an isolated task's copy away. */
   "tasks.discardCopy": (id: string) => Deleted;
 
@@ -643,8 +647,8 @@ export interface DeskMethods {
   "orchestrator.editStep": (turnId: string, stepId: string, patch: StepPatch) => void;
   "orchestrator.removeStep": (turnId: string, stepId: string) => void;
   /** A step's copy: its changes, Apply into the workspace it came from, or Discard (undone with undo.delete). */
-  "orchestrator.copyDiff": (copyId: string) => string;
-  "orchestrator.applyCopy": (copyId: string, files?: string[]) => ApplyResult;
+  "orchestrator.copyDiff": (copyId: string) => CopyReview;
+  "orchestrator.applyCopy": (copyId: string, skip?: string[]) => ApplyResult;
   "orchestrator.discardCopy": (copyId: string) => Deleted;
 
   /** Sync between machines: this machine, the paired ones, what is shared, offered and waiting for a choice. */

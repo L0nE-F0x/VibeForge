@@ -88,7 +88,7 @@ import {
   voiceName,
   type VoiceBackend,
 } from "../voice.js";
-import type { ApplyResult } from "../worktrees.js";
+import type { ApplyResult, CopyReview } from "../worktrees.js";
 import type { ChatDesk } from "./chats.js";
 import type { ServiceCore } from "./core.js";
 import type { LibraryDesk } from "./library.js";
@@ -2050,14 +2050,14 @@ export class OrchestratorDesk {
 
   // ---------------------------------------------------------------- copies
 
-  /** A step's copy: everything it changed, as Apply would bring it in. */
-  copyDiff(copyId: string): Promise<string> {
-    return this.copies.diff(copyId);
+  /** A step's copy: everything it changed, as Apply would bring it in, with its list of files. */
+  copyDiff(copyId: string): Promise<CopyReview> {
+    return this.copies.review(copyId);
   }
 
-  /** Apply a step's copy into the workspace it came from (see MaestroCopies.apply). */
-  applyCopy(copyId: string, files?: readonly string[]): Promise<ApplyResult> {
-    return this.copies.apply(copyId, files);
+  /** Apply a step's copy into the workspace it came from, leaving out `skip` (see MaestroCopies.apply). */
+  applyCopy(copyId: string, skip?: readonly string[]): Promise<ApplyResult> {
+    return this.copies.apply(copyId, skip);
   }
 
   /** Throw a step's copy away, with Undo (see MaestroCopies.discard). */

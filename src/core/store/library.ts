@@ -8,7 +8,7 @@ import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
 import { normalizeRoutineTimeout } from "../routines.js";
 import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
-import type { WorkingCopy } from "../worktrees.js";
+import { appliedFiles, type WorkingCopy } from "../worktrees.js";
 import type { Agent, AgentTier, LibraryKind, Routine, Schedule, Skill, Task, TaskStatus, UnreadableItem } from "../types.js";
 import { carryUnknown, formatVersion, type Shape } from "./carry.js";
 import { bool, str, strList, strOrNull } from "./fields.js";
@@ -250,7 +250,8 @@ function workingCopy(value: unknown): WorkingCopy | null {
   const [copyPath, branch, base, repo] = [record.path, record.branch, record.base, record.repo].map((item) => str(item));
   if (!path.isAbsolute(copyPath) || !path.isAbsolute(repo) || !/^vibeforge\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{7,64}$/.test(base)) return null;
   const seeded = strList(record.seeded);
-  return { path: copyPath, branch, base, repo, ...(seeded.length ? { seeded } : {}) };
+  const applied = appliedFiles(record.applied);
+  return { path: copyPath, branch, base, repo, ...(seeded.length ? { seeded } : {}), ...(applied.length ? { applied } : {}) };
 }
 
 /**

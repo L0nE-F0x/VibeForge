@@ -36,6 +36,8 @@ export type FileChangeStatus = "added" | "deleted" | "renamed" | "modified";
 
 export interface PatchFile {
   path: string;
+  /** A short hash of this file's part of the patch: it changes whenever the change does. */
+  key: string;
   oldPath: string | null;
   status: FileChangeStatus;
   binary: boolean;
@@ -279,8 +281,10 @@ export function splitPatch(text: string): ParsedPatch {
     else if (file.lineCount > LARGE_FILE_LINES || file.added + file.removed > LARGE_FILE_CHANGES) foldReason = "large";
     else if (unfoldedBudget > 0 && unfoldedBudget + file.lineCount > AUTO_EXPAND_LINE_BUDGET) foldReason = "many";
     if (!foldReason) unfoldedBudget += file.lineCount;
+    const raw = text.slice(file.startOffset, file.endOffset);
     return {
       path: file.path,
+      key: hashText(raw),
       oldPath: file.oldPath,
       status: file.status,
       binary: file.binary,
@@ -288,13 +292,23 @@ export function splitPatch(text: string): ParsedPatch {
       removed: file.removed,
       lineCount: file.lineCount,
       headerLine: file.headerLine,
-      raw: text.slice(file.startOffset, file.endOffset),
+      raw,
       startFolded: foldReason !== null,
       foldReason,
     };
   });
 
   return { files, notes };
+}
+
+/** FNV-1a over the text, as 8 hex digits: cheap enough for a whole patch, and only ever compared. */
+function hashText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 /** Parse one file's patch slice lazily into display rows with old/new line numbers. */
@@ -623,8 +637,37 @@ export function tokenizeLine(code: string, lang: SyntaxLang): DiffToken[] {
   return out;
 }
 
-/** Gather line notes into one plain-text message naming file and line for a coding CLI. */
-export function formatReviewNotes(notes: readonly LineNote[], fileOrder?: readonly string[]): string {
+/**
+ * The notes that still sit on the line they were written on: the file is still in the patch and
+ * that line still reads the same. A note whose line changed or went is left out.
+ */
+export function notesThatFit(notes: readonly LineNote[], files: readonly PatchFile[]): LineNote[] {
+  if (!notes.length) return [];
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const lines = new Map<string, Map<string, string>>();
+  const linesOf = (file: PatchFile) => {
+    let found = lines.get(file.path);
+    if (!found) {
+      found = new Map();
+      for (const row of parseFileDiff(file.raw)) {
+        if (row.kind === "del") found.set(`old:${row.oldNo}`, row.code);
+        else if (row.kind === "add" || row.kind === "ctx") found.set(`new:${row.newNo}`, row.code);
+      }
+      lines.set(file.path, found);
+    }
+    return found;
+  };
+  return notes.filter((note) => {
+    const file = byPath.get(note.path);
+    return Boolean(file && linesOf(file).get(`${note.side}:${note.line}`) === (note.code ?? ""));
+  });
+}
+
+/**
+ * Gather line notes into one plain-text message naming file and line for a coding CLI. `folder` is
+ * where the changes are, so a CLI in another folder can find the files the notes name.
+ */
+export function formatReviewNotes(notes: readonly LineNote[], fileOrder?: readonly string[], folder?: string | null): string {
   const valid = notes.filter((note) => note.body.trim().length > 0);
   if (!valid.length) return "";
   const order = new Map<string, number>();
@@ -652,5 +695,6 @@ export function formatReviewNotes(notes: readonly LineNote[], fileOrder?: readon
       .join("\n");
     return `${head}\n${body}`;
   });
-  return `Review notes:\n\n${blocks.join("\n")}`;
+  const head = folder ? `Review notes on the changes in ${folder} (paths are from the top of its git repository):` : "Review notes:";
+  return `${head}\n\n${blocks.join("\n")}`;
 }

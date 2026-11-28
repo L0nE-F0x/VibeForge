@@ -1,10 +1,11 @@
-import { ArrowRightLeft, CheckCircle2, FileDiff, FolderPlus, GitBranch, GitMerge, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { ArrowRightLeft, CheckCircle2, FileDiff, FolderPlus, GitBranch, Hourglass, KanbanSquare, MessagesSquare, MoreHorizontal, Play, Plus, RotateCcw, Save, Square, Trash2, Undo2, X } from "lucide-react";
+import { useEffect, useState, type DragEvent } from "react";
 import { setPtyInView } from "../attention.js";
-import type { TaskStatus, TaskView } from "../../shared/api.js";
-import { splitPatch } from "../../shared/review.js";
+import type { CopyReview, TaskStatus, TaskView } from "../../shared/api.js";
 import { call, useAgents, useAppInfo, useQuery, useSettings, useTasks, useWorkspaces } from "../api.js";
-import { DiffReview } from "../components/DiffReview.js";
+import { CopyApplyButton } from "../components/CopyApply.js";
+import { DiffReview } from "../components/DiffReviewLazy.js";
+import { useCopyPick } from "../copy-pick.js";
 import { LiveTerminal } from "../components/Terminal.js";
 import { LoadFailed, UnreadableFiles, useUnreadableOf } from "../components/LoadState.js";
 import { activeFilterLabels, ListBar, NoMatch, PickMark, toolsWanted, useList, type ListLabels, type ListRules } from "../components/ListTools.js";
@@ -360,40 +361,25 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
   const [setStatus] = useAction(async (status: TaskStatus) => task && call("tasks.setStatus", task.id, status), t("tasks.moveFailed"));
   const home = useAppInfo().data?.home ?? "";
   const [reviewing, setReviewing] = useState(false);
-  const [copyDiff, setCopyDiff] = useState<string | null>(null);
-  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
-  const [loadCopyDiff, loadingCopyDiff] = useAction(async (taskId: string) => {
-    setCopyDiff(await call("tasks.copyDiff", taskId));
+  const [review, setReview] = useState<CopyReview | null>(null);
+  const [loadReview, loadingReview] = useAction(async (taskId: string) => {
+    setReview(await call("tasks.copyDiff", taskId));
   }, t("run.diffFailed"));
   const copyPath = task?.copy?.path ?? null;
   const lastRunId = task?.lastRun?.id ?? null;
   useEffect(() => {
-    setCopyDiff(null);
-    setExcluded(new Set());
-    if (reviewing && task?.id && copyPath && !live) void loadCopyDiff(task.id);
-  }, [reviewing, task?.id, copyPath, lastRunId, live, loadCopyDiff]);
-
-  const reviewPaths = useMemo(() => (copyDiff ? splitPatch(copyDiff).files.map((file) => file.path) : []), [copyDiff]);
-  const pickedPaths = useMemo(() => reviewPaths.filter((item) => !excluded.has(item)), [reviewPaths, excluded]);
-  const pickedSet = useMemo(() => new Set(pickedPaths), [pickedPaths]);
-  const toggleFile = (filePath: string) =>
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(filePath)) next.delete(filePath);
-      else next.add(filePath);
-      return next;
-    });
+    setReview(null);
+    if (reviewing && task?.id && copyPath && !live) void loadReview(task.id);
+  }, [reviewing, task?.id, copyPath, lastRunId, live, loadReview]);
+  const pick = useCopyPick(review?.files);
 
   const [applyCopy, applying] = useAction(async () => {
     if (!task || !workspace) return;
-    const partial = reviewPaths.length > 0 && pickedPaths.length < reviewPaths.length ? pickedPaths : undefined;
-    const result = await call("tasks.applyCopy", task.id, partial);
+    const result = await call("tasks.applyCopy", task.id, pick.skip);
     const toast = applyToast(t, result, workspace.name, home);
     push(toast.tone, toast.title, toast.body);
-    if (result.stayed) {
-      setExcluded(new Set());
-      if (reviewing) void loadCopyDiff(task.id);
-    }
+    // The copy stays: the review shows what is left, with what just went in marked applied.
+    if (reviewing && (result.stayed || result.conflicts.length || result.left)) void loadReview(task.id);
   }, t("tasks.applyFailed"));
   // Discarding happens at once, with Undo on the toast, as deleting does. Its button only shows
   // while no CLI is working in the copy, so nothing running is stopped by it.
@@ -549,19 +535,7 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
                   <Button size="sm" icon={FileDiff} pressed={reviewing} onClick={() => setReviewing((was) => !was)}>
                     {t("orch.review")}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    icon={GitMerge}
-                    busy={applying}
-                    disabled={reviewPaths.length > 0 && pickedPaths.length === 0}
-                    tip={t("tasks.applyTip")}
-                    onClick={() => void applyCopy()}
-                  >
-                    {reviewPaths.length > 0 && pickedPaths.length < reviewPaths.length
-                      ? t("review.applyPicked", { count: pickedPaths.length, total: reviewPaths.length, workspace: workspace?.name ?? "" })
-                      : t("tasks.apply", { workspace: workspace?.name ?? "" })}
-                  </Button>
+                  <CopyApplyButton pick={pick} workspace={workspace?.name ?? ""} tip={t("tasks.applyTip")} busy={applying} onApply={() => void applyCopy()} />
                   <Button size="sm" variant="ghost" icon={Trash2} busy={discarding} onClick={() => void discardCopy()}>
                     {t("tasks.discardCopy")}
                   </Button>
@@ -571,20 +545,10 @@ function TaskSheet({ task, onClose, onCreated }: { task: TaskView | null; onClos
           </Notice>
         )}
         {reviewing && task?.copy && task.copyOwned && !live && (
-          loadingCopyDiff && copyDiff === null ? (
+          loadingReview && review === null ? (
             <Skeleton rows={4} />
-          ) : copyDiff !== null ? (
-            <DiffReview
-              text={copyDiff}
-              reviewKey={`task:${task.id}`}
-              workspaceId={task.workspaceId}
-              selection={{
-                picked: pickedSet,
-                onToggle: toggleFile,
-                onPickAll: () => setExcluded(new Set()),
-                onPickNone: () => setExcluded(new Set(reviewPaths)),
-              }}
-            />
+          ) : review !== null ? (
+            <DiffReview text={review.patch} reviewKey={`task:${task.id}`} workspaceId={task.workspaceId} folder={task.copy.path} selection={pick.selection} />
           ) : null
         )}
         <Field label={t("tasks.fieldTitle")}>

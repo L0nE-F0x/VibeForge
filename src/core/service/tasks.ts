@@ -9,7 +9,7 @@ import { createTask, markStopped, requestExecute } from "../tasks.js";
 import type { Task, TaskStatus, Workspace, WorkspaceCopySetup } from "../types.js";
 import { isSafeId } from "../slug.js";
 import type { Bin } from "../trash.js";
-import { applyToWorkspace, copyBranch, copyPatch, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type WorkingCopy } from "../worktrees.js";
+import { applyCopyFiles, copyBranch, copyPatch, copyReview, folderInCopy, leftInCopy, lockCopy, ownedCopyPath, patchFiles, prepareCopy, removeCopy, repoRoot, unlockCopy, type ApplyResult, type CopyOwner, type CopyReview, type WorkingCopy } from "../worktrees.js";
 import { BLOCKER_TEXT, type Deleted, type Launched, type Queued, type TaskInput, type TaskView, type TermSize } from "./types.js";
 import type { ServiceCore } from "./core.js";
 import type { FolderTurns } from "./turns.js";
@@ -353,38 +353,39 @@ export class TaskDesk {
     return { cwd, setupCommand, warnings };
   }
 
-  /** Everything the task's separate copy changed since it started, as a unified patch. */
-  async copyDiff(id: string): Promise<string> {
+  /** Everything the task's separate copy changed since it started, as a patch, with its list of files. */
+  async copyDiff(id: string): Promise<CopyReview> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (!task.copy) throw new Error("This task has no separate copy.");
     if (!ownedCopyPath(this.owner(id), task.copy.path)?.real) throw new Error("This task's copy is not in VibeForge's worktrees folder, so it was left alone.");
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
-    return copyPatch(task.copy, this.owner(id));
+    return copyReview(task.copy, this.owner(id));
   }
 
   /**
-   * Bring a task copy's changes into the workspace as uncommitted edits. A clean apply removes the
-   * copy and marks the task done, and so does a copy with nothing to apply; with conflicts or when
-   * only some files are ticked the copy stays until they're sorted out or applied.
+   * Bring a task copy's changes into the workspace as uncommitted edits, leaving out the files in
+   * `skip` (those unticked in the review). A clean apply removes the copy and marks the task done,
+   * and so does a copy with nothing to apply; with conflicts, or files left unticked, the copy stays
+   * and remembers what was applied, so the next review starts those unticked.
    */
-  async applyCopy(id: string, files?: readonly string[]): Promise<ApplyResult> {
+  async applyCopy(id: string, skip?: readonly string[]): Promise<ApplyResult> {
     const task = this.core.store.getTask(id);
     if (!task) throw new Error("That task no longer exists.");
     if (!task.copy) throw new Error("This task has no separate copy.");
     if (this.taskLive(task)) throw new Error("Stop the task before applying its changes.");
     if (!(await this.repoTrusted(task, task.copy))) throw new Error("This task's copy names another repository, so it was left alone.");
     const patch = await copyPatch(task.copy, this.owner(id));
-    const result = await applyToWorkspace(task.copy, patch, files ? { files } : undefined);
-    // Partial Apply keeps the copy intact so unticked files aren't lost.
-    if (result.stayed) return result;
-    // Files git ignores that only live in the copy keep it, as conflicts do, until it is discarded.
-    const left = result.conflicts.length ? [] : await leftInCopy(task.copy);
+    const { result, applied } = await applyCopyFiles(task.copy, patch, { skip });
+    // Files left unticked keep the copy, as conflicts and files git ignores do, until it is discarded.
+    const left = result.conflicts.length || result.stayed ? [] : await leftInCopy(task.copy);
     if (left.length) result.left = { folder: task.copy.path, files: left };
-    if (!result.conflicts.length && !left.length) {
+    const current = this.core.store.getTask(id) ?? task;
+    if (!result.conflicts.length && !result.stayed && !left.length) {
       await removeCopy(task.copy, this.owner(id));
-      const current = this.core.store.getTask(id) ?? task;
       this.core.store.writeTask({ ...current, copy: null, status: "done", updatedAt: this.core.now().toISOString() });
+    } else if (current.copy && path.resolve(current.copy.path) === path.resolve(task.copy.path)) {
+      this.core.store.writeTask({ ...current, copy: { ...current.copy, applied }, updatedAt: this.core.now().toISOString() });
     }
     this.core.emit("tasks");
     if (result.pulled) this.core.emit("workspaces");
