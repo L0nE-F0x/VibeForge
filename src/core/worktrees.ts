@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { MADE_COPY_FOLDERS, seedCopy } from "./copy-setup.js";
 import { runGit, runGitBytes } from "./git.js";
 import { isPathInside } from "./places.js";
 import { isSafeId } from "./slug.js";
+import type { WorkspaceCopySetup } from "./types.js";
 
 /**
  * A task's own copy of its repository: a git worktree on a `vibeforge/<task>` branch, so an agent
@@ -21,6 +23,8 @@ export interface WorkingCopy {
   base: string;
   /** The workspace repository's top folder. */
   repo: string;
+  /** Repo-relative POSIX paths brought in by setup (`dir/` for cloned folders), omitted from leftInCopy. */
+  seeded?: string[];
 }
 
 export interface ApplyResult {
@@ -177,6 +181,30 @@ export async function createCopy(folder: string, target: string, branch: string,
   return withRepoLock(repo, () => makeCopy(repo, target, branch, previous));
 }
 
+/**
+ * Make a new copy of the workspace repository and apply the workspace's copy setup
+ * (git-ignored files matching workspace patterns + `.worktreeinclude`, and cloned folders).
+ * Shared across tasks, Viby starts, and routines.
+ */
+export async function prepareCopy(opts: {
+  folder: string;
+  target: string;
+  branch: string;
+  previous?: WorkingCopy | null;
+  copySetup?: WorkspaceCopySetup | null;
+}): Promise<{ copy: WorkingCopy; setupCommand: string | null }> {
+  const made = await createCopy(opts.folder, opts.target, opts.branch, opts.previous ?? null);
+  const seeded = await seedCopy({
+    repo: made.repo,
+    folder: opts.folder,
+    copyPath: made.path,
+    copySetup: opts.copySetup,
+  });
+  const copy: WorkingCopy = seeded.length ? { ...made, seeded } : made;
+  const setupCommand = opts.copySetup?.setupCommand?.trim() || null;
+  return { copy, setupCommand };
+}
+
 async function makeCopy(repo: string, target: string, branch: string, previous: WorkingCopy | null): Promise<WorkingCopy> {
   const head = await git(["rev-parse", "--verify", "-q", "HEAD"], repo);
   const base = head.stdout.trim();
@@ -254,28 +282,58 @@ function samePlace(a: string, b: string): boolean {
  * What builds, installs and the CLIs' own settings make in a folder: never the agent's work, so
  * never a reason to keep a copy around.
  */
-const MADE_FOLDERS = new Set([
-  "node_modules", "vendor", "dist", "dist-electron", "build", "out", "target", "coverage", ".venv", "venv", "__pycache__",
-  ".next", ".nuxt", ".svelte-kit", ".turbo", ".vite", ".cache", ".parcel-cache", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-  ".gradle", ".tox", ".claude", ".codex", ".gemini", ".grok", ".cursor", ".agy", ".antigravity", ".opencode", ".crush", ".kimi",
-  ".muse", ".pi", ".hermes", ".copilot",
-]);
+const MADE_FOLDERS = MADE_COPY_FOLDERS;
 const MADE_FILES = /(?:\.log|\.pyc|\.tsbuildinfo|(?:^|\/)\.DS_Store)$/;
+
+function isMadeEntry(entry: string): boolean {
+  return entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) || MADE_FILES.test(entry);
+}
 
 /**
  * Files the agent left in its copy that git ignores (notes, a `config.local`), leaving out what
- * builds, installs and the CLIs make. A new copy holds tracked files only, so each of these was
- * made in it later, and only lives there: removing the copy would lose them without a word. A
- * folder with nothing but such files in it is named once, as `notes/`.
+ * builds, installs, the CLIs make, and anything copy setup brought in (`copy.seeded`).
  */
 export async function leftInCopy(copy: WorkingCopy): Promise<string[]> {
   const run = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"], copy.path);
   if (run.code !== 0) return [];
-  return run.stdout
-    .split("\0")
-    .filter(Boolean)
-    .filter((entry) => !entry.replace(/\/$/, "").split("/").some((part) => MADE_FOLDERS.has(part)) && !MADE_FILES.test(entry))
-    .slice(0, 200);
+  const seededFiles = new Set<string>();
+  const seededDirs: string[] = [];
+  for (const item of copy.seeded ?? []) {
+    const clean = item.split(path.sep).join("/").replace(/^\/+/, "");
+    if (!clean) continue;
+    if (clean.endsWith("/")) seededDirs.push(clean);
+    else seededFiles.add(clean);
+  }
+  const inSeededDir = (entry: string) => seededDirs.some((dir) => entry === dir || entry.startsWith(dir));
+  const out: string[] = [];
+  for (const rawEntry of run.stdout.split("\0")) {
+    if (!rawEntry) continue;
+    const entry = rawEntry.split(path.sep).join("/");
+    if (isMadeEntry(entry) || inSeededDir(entry)) continue;
+    if (!entry.endsWith("/")) {
+      if (!seededFiles.has(entry)) out.push(entry);
+      continue;
+    }
+    const hasSeededChild = [...seededFiles].some((file) => file.startsWith(entry));
+    if (!hasSeededChild) {
+      out.push(entry);
+      continue;
+    }
+    const expanded = await git(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", entry.slice(0, -1)], copy.path);
+    if (expanded.code !== 0) {
+      out.push(entry);
+      continue;
+    }
+    for (const rawChild of expanded.stdout.split("\0")) {
+      if (!rawChild) continue;
+      const child = rawChild.split(path.sep).join("/");
+      if (isMadeEntry(child) || inSeededDir(child) || seededFiles.has(child)) continue;
+      out.push(child);
+      if (out.length >= 200) break;
+    }
+    if (out.length >= 200) break;
+  }
+  return out.slice(0, 200);
 }
 
 /** A commit id, never something git could read as an option. */

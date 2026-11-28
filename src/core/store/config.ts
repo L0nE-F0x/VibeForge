@@ -7,6 +7,7 @@ import { readJson, writeJson } from "../fsx.js";
 import { isSafeId } from "../slug.js";
 import { isThemeId } from "../theme.js";
 import { cleanCategoryName, type WorkspaceFile } from "../workspaces.js";
+import { normalizeCopySetup } from "../copy-setup.js";
 import type { ComputerUseGrant, EngineRow, LayoutNode, LocalHarness, LocalServerSettings, LocalSettings, OrchestratorMode, Settings, SoundSettings, VoiceSettings, Workspace, WorkspaceCategory } from "../types.js";
 import { carryUnknown, formatVersion, shapeOf, type Shape } from "./carry.js";
 import { bool, str, strOrNull } from "./fields.js";
@@ -183,12 +184,14 @@ function normalizeWorkspace(value: unknown, validCategories?: ReadonlySet<string
     if (typeof item !== "string" || !isSafeId(item) || (validCategories && !validCategories.has(item)) || categories.includes(item)) continue;
     categories.push(item);
   }
+  const copySetup = normalizeCopySetup(record.copySetup);
   return {
     id,
     name: str(record.name) || path.basename(folder) || id,
     path: folder,
     dockUrl: str(record.dockUrl),
     ...(categories.length ? { categories } : {}),
+    ...(copySetup ? { copySetup } : {}),
   };
 }
 

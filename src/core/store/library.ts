@@ -220,7 +220,8 @@ function workingCopy(value: unknown): WorkingCopy | null {
   const record = value as Record<string, unknown>;
   const [copyPath, branch, base, repo] = [record.path, record.branch, record.base, record.repo].map((item) => str(item));
   if (!path.isAbsolute(copyPath) || !path.isAbsolute(repo) || !/^vibeforge\/[A-Za-z0-9._-]+$/.test(branch) || !/^[0-9a-f]{7,64}$/.test(base)) return null;
-  return { path: copyPath, branch, base, repo };
+  const seeded = strList(record.seeded);
+  return { path: copyPath, branch, base, repo, ...(seeded.length ? { seeded } : {}) };
 }
 
 /**

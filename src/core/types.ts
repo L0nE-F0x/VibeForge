@@ -393,6 +393,15 @@ export interface WorkspaceCategory {
   name: string;
 }
 
+export interface WorkspaceCopySetup {
+  /** Gitignore-style patterns of git-ignored files to bring along; defaults to [".env*"] when omitted. */
+  files?: string[];
+  /** Project-relative folders to clone with `cp -a --reflink=auto` when making a copy (e.g. ["node_modules"]). */
+  folders?: string[];
+  /** Optional command run visibly in a terminal in the copy before the CLI starts. */
+  setupCommand?: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -400,6 +409,8 @@ export interface Workspace {
   dockUrl: string;
   /** Custom category tab ids this workspace belongs to; omitted when in none (still shown in All). */
   categories?: string[];
+  /** What files/folders to bring into separate copies of this workspace, and an optional setup command. */
+  copySetup?: WorkspaceCopySetup;
 }
 
 export interface ChatRecord {
