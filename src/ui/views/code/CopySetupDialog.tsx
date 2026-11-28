@@ -1,12 +1,13 @@
 import { Copy, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Workspace, WorkspaceCopySetup } from "../../../shared/api.js";
+import { cleanCopyFolderPath, DEFAULT_COPY_FILES } from "../../../shared/copy-setup.js";
 import { call, errorText } from "../../api.js";
-import { Button, Field, Input, Modal, Notice, TextArea } from "../../components/ui.js";
+import { Button, Field, Input, Modal, Notice, TextArea, Toggle } from "../../components/ui.js";
 import { useT } from "../../i18n/index.js";
 import { useAction } from "../../state.js";
 
-const DEFAULT_FILES_TEXT = ".env*";
+const DEFAULT_FILES_TEXT = DEFAULT_COPY_FILES.join("\n");
 
 function parseLines(text: string): string[] {
   const out: string[] = [];
@@ -18,38 +19,23 @@ function parseLines(text: string): string[] {
   return out;
 }
 
-function normalizeFolderLine(raw: string): string {
-  let clean = raw.trim();
-  while (clean.startsWith("./")) clean = clean.slice(2);
-  while (clean.endsWith("/")) clean = clean.slice(0, -1);
-  return clean;
-}
-
-function invalidFolderLine(lines: readonly string[]): string | null {
-  for (const raw of lines) {
-    if (raw.includes("\0") || raw.includes("\\")) return raw;
-    const clean = normalizeFolderLine(raw);
-    if (!clean || clean.startsWith("/") || clean === "." || clean === ".." || clean === ".git" || clean.startsWith(".git/")) return raw;
-    if (clean.split("/").some((part) => part === "." || part === "..")) return raw;
-  }
-  return null;
-}
-
 /** Per-workspace settings for what comes along when a separate copy is made, and an optional setup command. */
 export function CopySetupDialog({ workspace, onClose }: { workspace: Workspace; onClose: () => void }) {
   const t = useT();
-  const [filesText, setFilesText] = useState(() => (workspace.copySetup?.files ?? [".env*"]).join("\n"));
+  const [filesText, setFilesText] = useState(() => (workspace.copySetup?.files ?? DEFAULT_COPY_FILES).join("\n"));
   const [foldersText, setFoldersText] = useState(() => (workspace.copySetup?.folders ?? []).join("\n"));
   const [setupCommand, setSetupCommand] = useState(() => workspace.copySetup?.setupCommand ?? "");
+  const [useInclude, setUseInclude] = useState(() => workspace.copySetup?.worktreeInclude !== false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasNodeModules, setHasNodeModules] = useState(false);
   const [hasWorktreeInclude, setHasWorktreeInclude] = useState(false);
 
   useEffect(() => {
-    setFilesText((workspace.copySetup?.files ?? [".env*"]).join("\n"));
+    setFilesText((workspace.copySetup?.files ?? DEFAULT_COPY_FILES).join("\n"));
     setFoldersText((workspace.copySetup?.folders ?? []).join("\n"));
     setSetupCommand(workspace.copySetup?.setupCommand ?? "");
+    setUseInclude(workspace.copySetup?.worktreeInclude !== false);
     setFolderError(null);
     setSaveError(null);
     let cancelled = false;
@@ -66,30 +52,30 @@ export function CopySetupDialog({ workspace, onClose }: { workspace: Workspace; 
     };
   }, [workspace.id, workspace.path, workspace.copySetup]);
 
-  const currentFolders = parseLines(foldersText).map(normalizeFolderLine);
+  const currentFolders = parseLines(foldersText).map((line) => cleanCopyFolderPath(line) ?? line);
   const showNodeModulesHint = hasNodeModules && !currentFolders.includes("node_modules");
-  const isDefault = filesText.trim() === DEFAULT_FILES_TEXT && !foldersText.trim() && !setupCommand.trim();
+  const isDefault = filesText.trim() === DEFAULT_FILES_TEXT && !foldersText.trim() && !setupCommand.trim() && useInclude;
 
   const [save, saving] = useAction(async () => {
     setFolderError(null);
     setSaveError(null);
     const files = parseLines(filesText);
     const folders = parseLines(foldersText);
-    const bad = invalidFolderLine(folders);
-    if (bad) {
+    const cleanFolders = folders.map(cleanCopyFolderPath);
+    if (cleanFolders.some((folder) => folder === null)) {
       setFolderError(t("copySetup.folderInvalid"));
       return;
     }
-    const cleanFolders = folders.map(normalizeFolderLine);
     const command = setupCommand.trim();
-    const isFilesDefault = files.length === 1 && files[0] === ".env*";
+    const isFilesDefault = files.join("\n") === DEFAULT_FILES_TEXT;
     const copySetup: WorkspaceCopySetup | null =
-      isFilesDefault && !cleanFolders.length && !command
+      isFilesDefault && !cleanFolders.length && !command && useInclude
         ? null
         : {
             ...(isFilesDefault ? {} : { files }),
-            ...(cleanFolders.length ? { folders: cleanFolders } : {}),
+            ...(cleanFolders.length ? { folders: cleanFolders.filter((folder): folder is string => folder !== null) } : {}),
             ...(command ? { setupCommand: command } : {}),
+            ...(useInclude ? {} : { worktreeInclude: false as const }),
           };
     try {
       await call("workspaces.update", workspace.id, { copySetup });
@@ -101,7 +87,7 @@ export function CopySetupDialog({ workspace, onClose }: { workspace: Workspace; 
   }, t("common.saveFailed"));
 
   const addNodeModules = () => {
-    const next = [...parseLines(foldersText).map(normalizeFolderLine), "node_modules"];
+    const next = [...parseLines(foldersText).map((line) => cleanCopyFolderPath(line) ?? line), "node_modules"];
     setFoldersText(next.join("\n"));
     setFolderError(null);
   };
@@ -110,6 +96,7 @@ export function CopySetupDialog({ workspace, onClose }: { workspace: Workspace; 
     setFilesText(DEFAULT_FILES_TEXT);
     setFoldersText("");
     setSetupCommand("");
+    setUseInclude(true);
     setFolderError(null);
     setSaveError(null);
   };
@@ -148,7 +135,7 @@ export function CopySetupDialog({ workspace, onClose }: { workspace: Workspace; 
           onChange={(event) => setFilesText(event.target.value)}
         />
       </Field>
-      {hasWorktreeInclude && <Notice>{t("copySetup.worktreeIncludeFound")}</Notice>}
+      {(hasWorktreeInclude || !useInclude) && <Toggle checked={useInclude} onChange={setUseInclude} label={t("copySetup.worktreeInclude")} />}
       <Field label={t("copySetup.foldersLabel")} hint={t("copySetup.foldersHint")} error={folderError ?? undefined}>
         <TextArea
           code

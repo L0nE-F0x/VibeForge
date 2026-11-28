@@ -17,7 +17,9 @@ import { failStreak, isCutOffRun, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
 import type { Agent, CutOff, Engine, EngineRow, LiveSession, RoutineRunResult, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
 import { readCutOff, settleCutOff, writeCutOff, type CutOffNote } from "../cut-off.js";
-import { wrapWithSetupCommand } from "../copy-setup.js";
+import { wrapForCopy } from "../copy-setup.js";
+import { catalog, fill, phoneLanguage } from "../companion-text.js";
+import { matchCoreText } from "../../ui/core-match.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
 import { type CutOffRun, type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
@@ -200,6 +202,21 @@ export class ServiceCore {
   onChange(listener: (topics: Topic[]) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * A copy's CLI argv, wrapped to show first what copy setup couldn't bring along and to run its
+   * setup command (copy-setup.ts), in the window's language.
+   */
+  private async wrapForCopy(argv: string[], setupCommand?: string | null, notes?: readonly string[]): Promise<string[]> {
+    if (!setupCommand?.trim() && !notes?.length) return argv;
+    const settings = this.store.readSettings();
+    const words = await catalog(phoneLanguage(settings.language, process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG));
+    const say = (text: string) => {
+      const found = matchCoreText(text);
+      return found ? fill(words[found.key], found.vars) : text;
+    };
+    return wrapForCopy(argv, { setupCommand, notes: notes?.map(say), words: { failed: words["core.copySetupFailed"] }, userShell: settings.defaultShell });
   }
 
   emit(...topics: Topic[]): void {
@@ -662,6 +679,8 @@ export class ServiceCore {
     effort?: string;
     /** Optional per-workspace setup command run visibly in the copy's terminal before the CLI starts. */
     setupCommand?: string | null;
+    /** What copy setup couldn't bring along, shown in the copy's terminal before the CLI starts. */
+    setupNotes?: readonly string[];
     cols?: number;
     rows?: number;
   }): Promise<Launched> {
@@ -690,7 +709,7 @@ export class ServiceCore {
       options: launchArgs,
     });
     const pasteInput = plan.pasteInput ?? input.pasteAfter ?? null;
-    const spawnArgv = wrapWithSetupCommand(plan.argv, input.setupCommand, this.store.readSettings().defaultShell);
+    const spawnArgv = await this.wrapForCopy(plan.argv, input.setupCommand, input.setupNotes);
     let gitStart: string | null = null;
     const captureStartGit = async () => {
       try {

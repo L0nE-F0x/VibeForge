@@ -433,6 +433,8 @@ export interface WorkspaceCopySetup {
   folders?: string[];
   /** Optional command run visibly in a terminal in the copy before the CLI starts. */
   setupCommand?: string;
+  /** false: leave out what the project's `.worktreeinclude` names (used by default). */
+  worktreeInclude?: false;
 }
 
 export interface Workspace {

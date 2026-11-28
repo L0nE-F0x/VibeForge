@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { cleanCopyFolderPath, DEFAULT_COPY_FILES } from "../shared/copy-setup.js";
 import { runGit } from "./git.js";
 import { isPathInside } from "./places.js";
 import type { WorkspaceCopySetup } from "./types.js";
 
-/** Files brought into a new copy by default when a workspace hasn't overridden them. */
-export const DEFAULT_COPY_FILES: readonly string[] = [".env*"];
+export { cleanCopyFolderPath, DEFAULT_COPY_FILES };
 
 /** Git-ignored build/package folders skipped when scanning for ignored files unless named explicitly. */
 export const MADE_COPY_FOLDERS = new Set([
@@ -29,20 +30,6 @@ interface CompiledRule {
   segments: string[];
   matchFile: RegExp;
   matchDir: RegExp;
-}
-
-/** Normalize a configured folder path relative to the workspace; null when unsafe or empty. */
-export function cleanCopyFolderPath(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (!trimmed || trimmed.includes("\0") || trimmed.includes("\\")) return null;
-  let clean = trimmed;
-  while (clean.startsWith("./")) clean = clean.slice(2);
-  while (clean.endsWith("/")) clean = clean.slice(0, -1);
-  if (!clean || clean.startsWith("/") || clean === "." || clean === "..") return null;
-  const parts = clean.split("/").filter(Boolean);
-  if (!parts.length || parts.some((part) => part === "." || part === "..")) return null;
-  if (parts[0] === ".git") return null;
-  return parts.join("/");
 }
 
 /** Normalize per-workspace copy setup; returns undefined when everything matches defaults. */
@@ -68,11 +55,14 @@ export function normalizeCopySetup(raw: unknown): WorkspaceCopySetup | undefined
   }
   const command = typeof record.setupCommand === "string" ? record.setupCommand.trim() : "";
   const setupCommand = command || undefined;
-  if (files === undefined && !folders && !setupCommand) return undefined;
+  // Only "off" is kept: using the project's .worktreeinclude is the default.
+  const worktreeInclude = record.worktreeInclude === false ? false : undefined;
+  if (files === undefined && !folders && !setupCommand && worktreeInclude === undefined) return undefined;
   return {
     ...(files !== undefined ? { files } : {}),
     ...(folders ? { folders } : {}),
     ...(setupCommand ? { setupCommand } : {}),
+    ...(worktreeInclude === false ? { worktreeInclude } : {}),
   };
 }
 
@@ -342,7 +332,7 @@ function symlinkStaysInside(linkPath: string, rootReal: string): string | null {
   }
 }
 
-function walkIgnoredDirectory(
+async function walkIgnoredDirectory(
   repo: string,
   repoReal: string,
   dirRel: string,
@@ -350,20 +340,15 @@ function walkIgnoredDirectory(
   positiveRules: readonly CompiledRule[],
   skipDirs: ReadonlySet<string>,
   add: (rel: string) => void,
-): void {
+): Promise<void> {
   if (skipDirs.has(`${dirRel}/`) || !explicitMadeFolderMatch(dirRel, positiveRules)) return;
   const absDir = path.join(repo, ...dirRel.split("/"));
-  let stat: fs.Stats;
-  try {
-    stat = fs.lstatSync(absDir);
-    if (!stat.isDirectory()) return;
-    if (!isPathInside(repoReal, fs.realpathSync(absDir))) return;
-  } catch {
-    return;
-  }
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(absDir, { withFileTypes: true });
+    const stat = await fs.promises.lstat(absDir);
+    if (!stat.isDirectory()) return;
+    if (!isPathInside(repoReal, await fs.promises.realpath(absDir))) return;
+    entries = await fs.promises.readdir(absDir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -372,7 +357,7 @@ function walkIgnoredDirectory(
     const rel = `${dirRel}/${entry.name}`;
     const abs = path.join(absDir, entry.name);
     if (entry.isDirectory()) {
-      walkIgnoredDirectory(repo, repoReal, rel, rules, positiveRules, skipDirs, add);
+      await walkIgnoredDirectory(repo, repoReal, rel, rules, positiveRules, skipDirs, add);
       continue;
     }
     if (entry.isSymbolicLink()) {
@@ -386,13 +371,21 @@ function walkIgnoredDirectory(
   }
 }
 
+/**
+ * The rules a copy's file patterns stand for. `.env*` names files only: a folder called `.env`
+ * (a virtualenv, say) is not brought along file by file.
+ */
+function expandFilePatterns(patterns: readonly string[]): string[] {
+  return patterns.flatMap((pattern) => (pattern === ".env*" ? [pattern, "!.env*/"] : [pattern]));
+}
+
 /** Find git-ignored files inside `repo` matching `patterns`, skipping `skipDirs` and symlinks leaving `repo`. */
 export async function selectIgnoredFiles(repo: string, patterns: readonly string[], skipDirs: ReadonlySet<string>): Promise<string[]> {
-  const rules = compileRules(patterns);
+  const rules = compileRules(expandFilePatterns(patterns));
   const positiveRules = rules.filter((rule) => !rule.negated);
   if (!positiveRules.length) return [];
 
-  const repoReal = fs.realpathSync(repo);
+  const repoReal = await fs.promises.realpath(repo);
   const listed = await runGit(["-c", "core.quotePath=false", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"], { cwd: repo });
   if (listed.code !== 0) return [];
 
@@ -413,13 +406,13 @@ export async function selectIgnoredFiles(repo: string, patterns: readonly string
 
     if (entry.endsWith("/")) {
       const dirRel = entry.slice(0, -1);
-      walkIgnoredDirectory(repo, repoReal, dirRel, rules, positiveRules, skipDirs, add);
+      await walkIgnoredDirectory(repo, repoReal, dirRel, rules, positiveRules, skipDirs, add);
       continue;
     }
     if (!parentSegmentsSafe(repo, repoReal, entry, true)) continue;
     const abs = path.join(repo, ...entry.split("/"));
     try {
-      const stat = fs.lstatSync(abs);
+      const stat = await fs.promises.lstat(abs);
       if (stat.isSymbolicLink() && !symlinkStaysInside(abs, repoReal)) continue;
     } catch {
       continue;
@@ -429,25 +422,69 @@ export async function selectIgnoredFiles(repo: string, patterns: readonly string
   return found;
 }
 
-function pruneOutsideSymlinks(dir: string, rootReal: string): void {
+/**
+ * Of `paths` (repo-relative, a folder ending in `/`), those git ignores in the copy itself. The copy
+ * checks out the committed `.gitignore`: a file ignored only by an uncommitted rule in the main
+ * folder would show up in the copy's changes, and so in its diff and Apply.
+ */
+async function ignoredInCopy(copyPath: string, paths: readonly string[]): Promise<Set<string>> {
+  if (!paths.length) return new Set();
+  const run = await runGit(["-c", "core.quotePath=false", "check-ignore", "-z", "--stdin"], { cwd: copyPath, input: `${paths.join("\0")}\0` });
+  // 1: none of them is ignored. Anything else that isn't 0 is an error: nothing counts as ignored.
+  if (run.code !== 0) return new Set();
+  return new Set(run.stdout.split("\0").filter(Boolean));
+}
+
+/**
+ * Whether a link in a cloned folder may stay: it points inside the copy (a link it points to is
+ * judged on its own), or it is an absolute link to a system path such as a virtualenv's
+ * `/usr/bin/python3`. Links into the main repository, into the person's home outside the copy, or
+ * to a folder holding either are dropped.
+ */
+function clonedLinkMayStay(linkPath: string, copyReal: string, repoReal: string, homeReal: string | null): boolean {
+  let raw: string;
+  let lexical: string;
+  try {
+    raw = fs.readlinkSync(linkPath);
+    lexical = path.resolve(fs.realpathSync(path.dirname(linkPath)), raw);
+  } catch {
+    return false;
+  }
+  if (isPathInside(copyReal, lexical) && realTailInside(copyReal, path.dirname(lexical))) return true;
+  if (!path.isAbsolute(raw)) return false;
+  const targets = [lexical];
+  try {
+    targets.push(fs.realpathSync(linkPath));
+  } catch {
+    /* a dangling link: only where it says it points */
+  }
+  const guarded = [repoReal, ...(homeReal ? [homeReal] : [])];
+  return targets.every((target) => guarded.every((place) => !isPathInside(place, target) && !isPathInside(target, place)));
+}
+
+function realHome(): string | null {
+  try {
+    return fs.realpathSync(os.homedir());
+  } catch {
+    return null;
+  }
+}
+
+async function pruneClonedLinks(dir: string, copyReal: string, repoReal: string, homeReal: string | null): Promise<void> {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
   for (const entry of entries) {
     const abs = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      pruneOutsideSymlinks(abs, rootReal);
+      await pruneClonedLinks(abs, copyReal, repoReal, homeReal);
       continue;
     }
-    if (entry.isSymbolicLink() && !symlinkStaysInside(abs, rootReal)) {
-      try {
-        fs.unlinkSync(abs);
-      } catch {
-        /* ignore */
-      }
+    if (entry.isSymbolicLink() && !clonedLinkMayStay(abs, copyReal, repoReal, homeReal)) {
+      await fs.promises.unlink(abs).catch(() => undefined);
     }
   }
 }
@@ -465,6 +502,7 @@ function runCp(args: readonly string[]): Promise<{ code: number; stderr: string 
     };
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
+      stderr = `cp took longer than ${CP_TIMEOUT_MS / 60_000} minutes`;
       finish(1);
     }, CP_TIMEOUT_MS);
     child.stderr.on("data", (chunk: Buffer) => {
@@ -478,15 +516,16 @@ function runCp(args: readonly string[]): Promise<{ code: number; stderr: string 
   });
 }
 
-async function cloneFolder(srcDir: string, dstDir: string): Promise<void> {
+/** Clone a folder with `cp -a --reflink=auto`; the reason it failed, or null. */
+async function cloneFolder(srcDir: string, dstDir: string): Promise<string | null> {
   const reflink = await runCp(["-a", "--reflink=auto", "--", srcDir, dstDir]);
-  if (reflink.code === 0) return;
+  if (reflink.code === 0) return null;
   if (/unrecognized option|illegal option|invalid option/i.test(reflink.stderr)) {
     const fallback = await runCp(["-a", "--", srcDir, dstDir]);
-    if (fallback.code === 0) return;
-    throw new Error(`Could not copy folder ${path.basename(srcDir)}: ${fallback.stderr.trim() || "cp failed"}`);
+    if (fallback.code === 0) return null;
+    return fallback.stderr.trim() || "cp failed";
   }
-  throw new Error(`Could not copy folder ${path.basename(srcDir)}: ${reflink.stderr.trim() || "cp failed"}`);
+  return reflink.stderr.trim() || "cp failed";
 }
 
 function pathOccupied(target: string): boolean {
@@ -498,25 +537,51 @@ function pathOccupied(target: string): boolean {
   }
 }
 
+function reasonOf(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code) return code;
+  return error instanceof Error ? error.message : String(error);
+}
+
+export interface SeedResult {
+  /** Repo-relative POSIX paths brought in (`folder/` for a cloned folder). */
+  seeded: string[];
+  /** What could not be brought in, in plain words, for the copy's terminal. */
+  warnings: string[];
+}
+
 /**
  * Populate a newly created worktree (`copyPath`) with git-ignored files matching workspace settings +
- * `.worktreeinclude` and cloned folders from `folder`/`repo`. Never copies anything outside `repo`
- * and skips symlinks pointing outside it. Returns repo-relative POSIX paths brought in (`folder/` for dirs).
+ * `.worktreeinclude` and cloned folders from `folder`/`repo`. Never copies anything outside `repo`,
+ * and nothing git doesn't ignore in the copy too. Best effort: it never throws. A file that can't
+ * be copied is skipped and a folder that can't be cloned is left out, each with a warning.
  */
 export async function seedCopy(opts: {
   repo: string;
   folder: string;
   copyPath: string;
   copySetup?: WorkspaceCopySetup | null;
-}): Promise<string[]> {
+}): Promise<SeedResult> {
+  const result: SeedResult = { seeded: [], warnings: [] };
+  try {
+    await seedInto(opts, result);
+  } catch (error) {
+    result.warnings.push(`Could not finish setting up the copy: ${reasonOf(error)}`);
+  }
+  return result;
+}
+
+async function seedInto(opts: { repo: string; folder: string; copyPath: string; copySetup?: WorkspaceCopySetup | null }, result: SeedResult): Promise<void> {
   const repo = path.resolve(opts.repo);
   const copyPath = path.resolve(opts.copyPath);
   const repoReal = fs.realpathSync(repo);
   const copyReal = fs.realpathSync(copyPath);
-  const seeded: string[] = [];
+  const homeReal = realHome();
+  const { seeded, warnings } = result;
   const clonedDirs = new Set<string>();
 
   // 1. Clone configured folders first so the file scanner doesn't walk inside them.
+  const folders: Array<{ repoRel: string; srcDir: string; dstDir: string }> = [];
   for (const rawFolder of opts.copySetup?.folders ?? []) {
     const clean = cleanCopyFolderPath(rawFolder);
     if (!clean) continue;
@@ -532,68 +597,99 @@ export async function seedCopy(opts: {
       continue;
     }
     if (!srcStat.isDirectory()) continue;
-
     const dstDir = path.join(copyPath, ...repoRel.split("/"));
     if (!parentSegmentsSafe(copyPath, copyReal, repoRel, false) || pathOccupied(dstDir)) continue;
-    fs.mkdirSync(path.dirname(dstDir), { recursive: true });
-    await cloneFolder(srcDir, dstDir);
-    pruneOutsideSymlinks(dstDir, copyReal);
+    folders.push({ repoRel, srcDir, dstDir });
+  }
+  const foldersIgnored = await ignoredInCopy(copyPath, folders.map((item) => `${item.repoRel}/`));
+  for (const { repoRel, srcDir, dstDir } of folders) {
+    if (!foldersIgnored.has(`${repoRel}/`)) {
+      warnings.push(`Left out ${repoRel}/: git doesn't ignore it in the copy, so it would show up in the changes.`);
+      continue;
+    }
+    // Skipped by the file scan even if the clone fails: a half-made folder isn't filled file by file.
     clonedDirs.add(`${repoRel}/`);
+    fs.mkdirSync(path.dirname(dstDir), { recursive: true });
+    const failed = await cloneFolder(srcDir, dstDir);
+    if (failed) {
+      await fs.promises.rm(dstDir, { recursive: true, force: true }).catch(() => undefined);
+      warnings.push(`Could not copy folder ${repoRel}: ${failed}`);
+      continue;
+    }
+    await pruneClonedLinks(dstDir, copyReal, repoReal, homeReal);
     seeded.push(`${repoRel}/`);
   }
 
-  // 2. Copy matching git-ignored files (defaults + .worktreeinclude).
+  // 2. Copy matching git-ignored files (the workspace's patterns, and .worktreeinclude unless turned off).
   const basePatterns = opts.copySetup?.files ?? DEFAULT_COPY_FILES;
-  const includePatterns = readWorktreeInclude(repo);
+  const includePatterns = opts.copySetup?.worktreeInclude === false ? [] : readWorktreeInclude(repo);
   const patterns = [...basePatterns, ...includePatterns];
-  const files = await selectIgnoredFiles(repo, patterns, clonedDirs);
+  const files = (await selectIgnoredFiles(repo, patterns, clonedDirs)).filter((rel) => ![...clonedDirs].some((dir) => rel.startsWith(dir)));
+  const filesIgnored = await ignoredInCopy(copyPath, files);
 
   for (const rel of files) {
-    if ([...clonedDirs].some((dir) => rel.startsWith(dir))) continue;
     if (!parentSegmentsSafe(repo, repoReal, rel, true)) continue;
     if (!parentSegmentsSafe(copyPath, copyReal, rel, false)) continue;
     const src = path.join(repo, ...rel.split("/"));
     const dst = path.join(copyPath, ...rel.split("/"));
     if (pathOccupied(dst)) continue;
-    let stat: fs.Stats;
+    if (!filesIgnored.has(rel)) {
+      warnings.push(`Left out ${rel}: git doesn't ignore it in the copy, so it would show up in the changes.`);
+      continue;
+    }
     try {
-      stat = fs.lstatSync(src);
-    } catch {
-      continue;
-    }
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    if (stat.isSymbolicLink()) {
-      const target = symlinkStaysInside(src, repoReal);
-      if (!target) continue;
-      fs.symlinkSync(target, dst);
-      seeded.push(rel);
-      continue;
-    }
-    if (stat.isFile()) {
-      fs.copyFileSync(src, dst);
-      seeded.push(rel);
+      const stat = fs.lstatSync(src);
+      if (stat.isSymbolicLink()) {
+        const target = symlinkStaysInside(src, repoReal);
+        if (!target) continue;
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.symlinkSync(target, dst);
+        seeded.push(rel);
+      } else if (stat.isFile()) {
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        await fs.promises.copyFile(src, dst);
+        seeded.push(rel);
+      }
+    } catch (error) {
+      warnings.push(`Could not copy ${rel}: ${reasonOf(error)}`);
     }
   }
+}
 
-  return seeded;
+/** The words a copy's terminal shows before its CLI starts (src/core/service/core.ts translates them). */
+export interface CopyStartWords {
+  /** Printed when the setup command fails; `{code}` is its exit status. */
+  failed: string;
 }
 
 /**
- * Wrap CLI launch arguments with a visible pre-CLI setup command in the copy terminal.
- * `vibeforge-setup` sits in argv[3] so pty-host delays spawn pasteInput until `exec "$@"` starts the CLI.
+ * Wrap CLI launch arguments so the copy's terminal first shows what copy setup couldn't bring
+ * along (`notes`), then runs the setup command visibly, and starts the CLI only if it succeeded.
+ * `vibeforge-setup` sits in argv[3] so pty-host holds the first prompt until `exec "$@"` starts the CLI.
  */
-export function wrapWithSetupCommand(argv: readonly string[], setupCommand: string | null | undefined, userShell?: string): string[] {
-  const command = setupCommand?.trim();
-  if (!command || !argv.length) return [...argv];
+export function wrapForCopy(
+  argv: readonly string[],
+  opts: { setupCommand?: string | null; notes?: readonly string[]; words: CopyStartWords; userShell?: string },
+): string[] {
+  const command = opts.setupCommand?.trim() ?? "";
+  const notes = (opts.notes ?? []).map((note) => note.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "").trim()).filter(Boolean);
+  if ((!command && !notes.length) || !argv.length) return [...argv];
   const runner = fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh";
-  const shellBin = userShell?.trim() || process.env.SHELL || runner;
-  return [
-    runner,
-    "-c",
-    'printf "\\033[2m$ %s\\033[0m\\n" "$1"; "$2" -c "$1" && shift 2 && exec "$@"',
-    "vibeforge-setup",
-    command,
-    shellBin,
-    ...argv,
-  ];
+  const shellBin = opts.userShell?.trim() || process.env.SHELL || runner;
+  // printf's own format: a % or backslash in the words is printed as is, and {code} becomes the exit status.
+  const failed = opts.words.failed.replace(/\\/g, "\\\\").replace(/%/g, "%%").replace("{code}", "%s");
+  return [runner, "-c", COPY_START_SCRIPT, "vibeforge-setup", command, shellBin, failed, notes.join("\n"), ...argv];
 }
+
+/** $1 setup command (may be empty), $2 the shell to run it in, $3 the failure words, $4 notes; then the CLI. */
+export const COPY_START_SCRIPT = [
+  'if [ -n "$4" ]; then printf "\\033[33m%s\\033[0m\\n" "$4"; fi',
+  'if [ -n "$1" ]; then',
+  '  printf "\\033[2m$ %s\\033[0m\\n" "$1"',
+  '  "$2" -c "$1"',
+  "  status=$?",
+  '  if [ "$status" -ne 0 ]; then printf "\\033[31m$3\\033[0m\\n" "$status"; exit "$status"; fi',
+  "fi",
+  "shift 4",
+  'exec "$@"',
+].join("\n");

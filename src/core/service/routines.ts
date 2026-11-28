@@ -537,6 +537,7 @@ export class RoutineDesk {
     let cwd = folder;
     let workingCopy: { path: string; of: string } | null = null;
     let setupCommand: string | null = null;
+    let setupNotes: string[] = [];
     if (routine.isolated) {
       const previous = await this.freshCopyFor(routine, agent);
       const prepared = await this.tasks.ensureCopy(
@@ -547,14 +548,15 @@ export class RoutineDesk {
         "This routine's copy names another repository, so it was left alone.",
         // Its workspace's "when a copy is made" setting, as a task's copy has.
         workspace?.copySetup,
+        (copy) => {
+          this.core.store.writeRoutine({ ...(this.core.store.getRoutine(routine.id) ?? routine), copy });
+          this.core.emit("routines");
+        },
       );
       cwd = prepared.cwd;
       setupCommand = prepared.setupCommand;
+      setupNotes = prepared.warnings;
       workingCopy = { path: cwd, of: folder };
-      if (prepared.created) {
-        this.core.store.writeRoutine({ ...(this.core.store.getRoutine(routine.id) ?? routine), copy: prepared.copy });
-        this.core.emit("routines");
-      }
     }
     const target = this.core.resolveLaunchTarget({ engineId: agent.engine, fromAgent: true });
     const engine = this.core.requireEngine(target.engineId, { model: target.model });
@@ -570,6 +572,7 @@ export class RoutineDesk {
       routineId: routine.id,
       ...(workspace ? { workspaceId: workspace.id } : {}),
       setupCommand,
+      setupNotes,
       ...size,
     });
     this.watchLaunched(launched.runId, launched.ptyId, routine, promptText);

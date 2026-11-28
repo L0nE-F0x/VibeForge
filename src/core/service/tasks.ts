@@ -211,7 +211,7 @@ export class TaskDesk {
     const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = taskPrompt(task.title, task.body);
     const previous = task.runIds[task.runIds.length - 1] ? this.core.store.getRun(task.runIds[task.runIds.length - 1]) : null;
-    const { cwd, setupCommand } = task.isolated ? await this.copyFor(task, workspace) : { cwd: workspace.path, setupCommand: null };
+    const { cwd, setupCommand, warnings } = task.isolated ? await this.copyFor(task, workspace) : { cwd: workspace.path, setupCommand: null, warnings: [] };
     const resume = continueSession ? this.core.resumePlan(engine, previous, cwd) : { native: false, resumeArgs: null };
     const canContinue = resume.native;
     const prior = continueSession && previous && !canContinue ? this.core.transcriptPath(previous) : null;
@@ -221,6 +221,7 @@ export class TaskDesk {
       engine,
       cwd,
       setupCommand,
+      setupNotes: warnings,
       prompt,
       promptText: canContinue ? null : this.core.preambleFor(agent, followUp ? `${prompt}\n\n${followUp}` : prompt, prior, task.isolated ? { path: cwd, of: workspace.path } : null),
       pasteAfter: canContinue ? followUp : null,
@@ -301,7 +302,8 @@ export class TaskDesk {
   /**
    * The folder an isolated task or routine runs in: its own copy of `folder` under
    * `<dataRoot>/worktrees/<ownerId>`. Reused by both tasks and isolated routines so copy creation
-   * goes through one shared path.
+   * goes through one shared path. A new copy is handed to `record` as soon as git has made it, so
+   * the owner keeps it even if bringing files in goes wrong.
    */
   async ensureCopy(
     ownerId: string,
@@ -311,41 +313,44 @@ export class TaskDesk {
     otherRepoError: string,
     /** The workspace's "when a copy is made" setting: files brought along, folders cloned, a setup command. */
     copySetup?: WorkspaceCopySetup | null,
-  ): Promise<{ copy: WorkingCopy; cwd: string; created: boolean; setupCommand: string | null }> {
+    record?: (copy: WorkingCopy) => void,
+  ): Promise<{ copy: WorkingCopy; cwd: string; created: boolean; setupCommand: string | null; warnings: string[] }> {
     const owner = this.owner(ownerId);
     if (previous && isDirectory(previous.path)) {
       if (!ownedCopyPath(owner, previous.path)?.real) throw new Error(untrustedError);
       const repo = await repoRoot(folder);
       if (!repo || repo !== path.resolve(previous.repo)) throw new Error(otherRepoError);
-      return { copy: previous, cwd: folderInCopy(previous, folder), created: false, setupCommand: null };
+      return { copy: previous, cwd: folderInCopy(previous, folder), created: false, setupCommand: null, warnings: [] };
     }
     if (!isSafeId(ownerId)) throw new Error(untrustedError);
     // A copy whose folder went (deleted by hand, say) picks its branch's commits back up.
-    const { copy, setupCommand } = await prepareCopy({
+    const { copy, setupCommand, warnings } = await prepareCopy({
       folder,
       target: path.join(this.core.options.dataRoot, "worktrees", ownerId),
       branch: copyBranch(ownerId),
       previous,
       copySetup,
+      record,
     });
-    return { copy, cwd: folderInCopy(copy, folder), created: true, setupCommand };
+    for (const warning of warnings) this.core.options.host.logWarn?.(`copy setup: ${warning}`);
+    return { copy, cwd: folderInCopy(copy, folder), created: true, setupCommand, warnings };
   }
 
   /** The folder an isolated task runs in: its copy of the workspace, made on first Execute. */
-  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null }> {
-    const { copy, cwd, created, setupCommand } = await this.ensureCopy(
+  private async copyFor(task: Task, workspace: Workspace): Promise<{ cwd: string; setupCommand: string | null; warnings: string[] }> {
+    const { cwd, setupCommand, warnings } = await this.ensureCopy(
       task.id,
       workspace.path,
       task.copy,
       "This task's copy is not in VibeForge's worktrees folder, so it was left alone.",
       "This task's copy names another repository, so it was left alone.",
       workspace.copySetup,
+      (copy) => {
+        const current = this.core.store.getTask(task.id) ?? task;
+        this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
+      },
     );
-    if (created) {
-      const current = this.core.store.getTask(task.id) ?? task;
-      this.core.store.writeTask({ ...current, copy, updatedAt: this.core.now().toISOString() });
-    }
-    return { cwd, setupCommand };
+    return { cwd, setupCommand, warnings };
   }
 
   /** Everything the task's separate copy changed since it started, as a unified patch. */

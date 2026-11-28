@@ -200,7 +200,10 @@ export async function createCopy(folder: string, target: string, branch: string,
 /**
  * Make a new copy of the workspace repository and apply the workspace's copy setup
  * (git-ignored files matching workspace patterns + `.worktreeinclude`, and cloned folders).
- * Shared across tasks, Viby starts, and routines.
+ * Shared across tasks, Viby starts, and routines. `record` is called with the copy as soon as
+ * git has made it, before anything is brought in, and again once it holds what was brought in:
+ * a copy is always kept somewhere it can be discarded from. Bringing things in is best effort;
+ * what couldn't be is in `warnings`.
  */
 export async function prepareCopy(opts: {
   folder: string;
@@ -208,17 +211,20 @@ export async function prepareCopy(opts: {
   branch: string;
   previous?: WorkingCopy | null;
   copySetup?: WorkspaceCopySetup | null;
-}): Promise<{ copy: WorkingCopy; setupCommand: string | null }> {
+  record?: (copy: WorkingCopy) => void;
+}): Promise<{ copy: WorkingCopy; setupCommand: string | null; warnings: string[] }> {
   const made = await createCopy(opts.folder, opts.target, opts.branch, opts.previous ?? null);
-  const seeded = await seedCopy({
+  opts.record?.(made);
+  const { seeded, warnings } = await seedCopy({
     repo: made.repo,
     folder: opts.folder,
     copyPath: made.path,
     copySetup: opts.copySetup,
   });
   const copy: WorkingCopy = seeded.length ? { ...made, seeded } : made;
+  if (seeded.length) opts.record?.(copy);
   const setupCommand = opts.copySetup?.setupCommand?.trim() || null;
-  return { copy, setupCommand };
+  return { copy, setupCommand, warnings };
 }
 
 async function makeCopy(repo: string, target: string, branch: string, previous: WorkingCopy | null): Promise<WorkingCopy> {

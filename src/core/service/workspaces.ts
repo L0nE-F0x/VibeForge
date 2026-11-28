@@ -390,6 +390,8 @@ export class WorkspaceDesk {
       continueRun?: string;
       orchestrated?: boolean;
       setupCommand?: string | null;
+      /** What copy setup couldn't bring along, shown in the terminal before the CLI starts. */
+      setupNotes?: readonly string[];
       model?: string;
       effort?: string;
     } & TermSize,
@@ -431,6 +433,7 @@ export class WorkspaceDesk {
       ...(agent ? { instructions: null, allowVibeforge: Boolean(this.core.store.readSettings().agentTalk.on) } : this.paneInstructions(engine.row.id, workspace.path)),
       orchestrated: opts.orchestrated,
       setupCommand: opts.setupCommand,
+      setupNotes: opts.setupNotes,
       model: target.model,
       effort: opts.effort,
       cols: opts.cols,
