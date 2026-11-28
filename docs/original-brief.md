@@ -94,7 +94,7 @@ Leave out of every phase until this spec is revised:
 
 Personal choices that differ from BridgeMind on purpose:
 
-- Memory is a markdown file the human edits. The app shows it and prepends it to a run. v1 does not let the agent rewrite its own memory.
+- Memory is a markdown file the human edits. The app shows it and prepends it to a run. v1 does not let the agent rewrite its own memory. (Still so: since 3.16.0 an agent can propose a line with `vibeforge remember`, and it goes in only when the person keeps it.)
 - Engine launch flags live in an editable `engines.json`, not compiled into the app, because CLI flags rot.
 - The window uses ordinary system decorations so Hyprland can manage it. No custom title bar that fights the compositor.
 - When a run exits inside a git repo, the app snapshots `git status --short` and `git diff --stat`. That snapshot is the review, not a reconstructed tool log.
