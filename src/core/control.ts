@@ -94,7 +94,7 @@ export interface TalkAnswers {
   tell: { ok: true; to: string; delivered: "sent" | "draft" | "queued"; reply?: string | null; fromScreen?: boolean; timedOut?: boolean; note?: string } | TalkRefusal;
   task: { ok: true; taskId: string; title: string; started: boolean; reply?: string | null; note?: string } | TalkRefusal;
   apply: { ok: true; files: string[]; conflicts: string[]; note: string } | TalkRefusal;
-  remember: { ok: true; agent: string; line: string; flagged: boolean } | TalkRefusal;
+  remember: { ok: true; agent: string; note: string; flagged: boolean; waiting: number; already?: "waiting" | "memory" } | TalkRefusal;
 }
 
 /** The largest request line: a long message is still one line of JSON. */

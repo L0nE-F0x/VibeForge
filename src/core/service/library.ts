@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { appendMemoryBullet, prepareMemoryLine, removeMemoryLine } from "../../shared/memory.js";
+import { appendMemoryBullets, type MemoryProposal, memoryBullet, prepareMemoryLine, PROPOSALS_PER_RUN, PROPOSALS_WAITING_MAX } from "../../shared/memory.js";
 import { dayKey } from "../../shared/text.js";
 import { isDirectory } from "../fsx.js";
 import { describeError } from "../log.js";
@@ -11,6 +12,9 @@ import type { ServiceCore } from "./core.js";
 
 /** Agents and skills: the people and the know-how runs are started with. */
 export class LibraryDesk {
+  /** How many lines each run (or terminal) proposed for memory with `vibeforge remember`. */
+  private readonly proposedByRun = new Map<string, number>();
+
   constructor(private readonly core: ServiceCore) {}
 
   listAgents(): Agent[] {
@@ -103,7 +107,10 @@ export class LibraryDesk {
     this.core.emit("agents");
   }
 
-  /** Append a dated bullet to the running agent's `memory.md` and register an exact-line Undo. */
+  /**
+   * `vibeforge remember "<line>"` from an agent's terminal: the line waits, proposed, beside the
+   * agent's memory until the person keeps or drops it. Nothing proposed reaches a prompt.
+   */
   rememberFromPty(input: { fromPty: string | null; text: string }): RememberResult {
     const session = input.fromPty ? this.core.live.get(input.fromPty) : undefined;
     if (!session) return { ok: false, error: "Run this from an agent's terminal in VibeForge; a plain terminal has no agent memory." };
@@ -114,26 +121,88 @@ export class LibraryDesk {
     if (!agent) return { ok: false, error: "That agent no longer exists." };
     const prepared = prepareMemoryLine(input.text);
     if (!prepared.ok) return prepared;
-    let prev: string;
+    let waiting: MemoryProposal[];
+    let memory: string;
     try {
-      prev = this.core.store.readMemory(agent.id);
+      waiting = this.core.store.readProposals(agent.id);
+      memory = this.core.store.readMemory(agent.id);
     } catch (error) {
       return { ok: false, error: describeError(error) };
     }
-    const line = `- ${dayKey(this.core.now().toISOString())}: ${prepared.note}`;
-    this.core.store.writeMemory(agent.id, appendMemoryBullet(prev, line, MEMORY_STARTER));
+    const same = (note: string) => note.toLowerCase() === prepared.note.toLowerCase();
+    const known = memory.replace(/\r\n?/g, "\n").split("\n").some((line) => same(line.replace(/^\s*[-*]\s+(?:\d{4}-\d{2}-\d{2}:\s*)?/, "").trim()));
+    if (known) return { ok: true, agent: agent.name, note: prepared.note, flagged: false, waiting: waiting.length, already: "memory" };
+    if (waiting.some((item) => same(item.note))) return { ok: true, agent: agent.name, note: prepared.note, flagged: prepared.flags.length > 0, waiting: waiting.length, already: "waiting" };
+    const runKey = session.runId ?? session.ptyId;
+    const proposedHere = this.proposedByRun.get(runKey) ?? 0;
+    if (proposedHere >= PROPOSALS_PER_RUN) {
+      return { ok: false, error: `This run already proposed ${PROPOSALS_PER_RUN} lines for memory, the most one run may. Save the most useful lessons only.` };
+    }
+    if (waiting.length >= PROPOSALS_WAITING_MAX) {
+      return { ok: false, error: `${PROPOSALS_WAITING_MAX} proposed lines are already waiting for the person to review in ${agent.name}'s Memory. Nothing more can be proposed until they keep or drop some.` };
+    }
+    const proposal: MemoryProposal = { id: randomUUID(), note: prepared.note, flags: prepared.flags, at: this.core.now().toISOString(), runId: session.runId };
+    this.core.store.writeProposals(agent.id, [...waiting, proposal]);
+    this.proposedByRun.delete(runKey);
+    this.proposedByRun.set(runKey, proposedHere + 1);
+    for (const key of this.proposedByRun.keys()) {
+      if (this.proposedByRun.size <= 200) break;
+      this.proposedByRun.delete(key);
+    }
     this.core.emit("agents");
-    const { undo } = this.core.keepForUndo(this.core.trash.stash([]), () => {
-      if (!this.core.store.getAgent(agent.id)) return;
-      const current = this.core.store.readMemory(agent.id);
-      const updated = removeMemoryLine(current, line);
-      if (updated === current) return;
-      this.core.store.writeMemory(agent.id, updated);
+    const flagged = prepared.flags.length > 0;
+    this.core.options.host.memoryProposed?.({ agentId: agent.id, agentName: agent.name, note: prepared.note, flagged, waiting: waiting.length + 1 });
+    return { ok: true, agent: agent.name, note: prepared.note, flagged, waiting: waiting.length + 1 };
+  }
+
+  /** Lines the agent proposed for its memory, oldest first, waiting for the person. */
+  listProposals(agentId: string): MemoryProposal[] {
+    if (!this.core.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
+    return this.core.store.readProposals(agentId);
+  }
+
+  /** How many proposed lines wait, per agent; agents with none are left out. */
+  proposalCounts(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const agent of this.core.store.listAgents()) {
+      try {
+        const count = this.core.store.readProposals(agent.id).length;
+        if (count) out[agent.id] = count;
+      } catch {
+        /* an unreadable proposed.json shows up when its Memory tab is opened */
+      }
+    }
+    return out;
+  }
+
+  /** The person keeps these proposals: each goes into memory.md as `- YYYY-MM-DD: …`. Gives the lines added. */
+  keepProposals(agentId: string, ids: readonly string[]): { lines: string[] } {
+    if (!this.core.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
+    const waiting = this.core.store.readProposals(agentId);
+    const picked = waiting.filter((item) => ids.includes(item.id));
+    if (!picked.length) return { lines: [] };
+    const lines = picked.map((item) => memoryBullet(dayKey(item.at), item.note));
+    const memory = this.core.store.readMemory(agentId);
+    this.core.store.writeMemory(agentId, appendMemoryBullets(memory, lines, MEMORY_STARTER));
+    this.core.store.writeProposals(agentId, waiting.filter((item) => !ids.includes(item.id)));
+    this.core.emit("agents");
+    return { lines };
+  }
+
+  /** The person drops these proposals; Undo puts them back in the list. */
+  dropProposals(agentId: string, ids: readonly string[]): Deleted {
+    if (!this.core.store.getAgent(agentId)) throw new Error("That agent no longer exists.");
+    const waiting = this.core.store.readProposals(agentId);
+    const dropped = waiting.filter((item) => ids.includes(item.id));
+    this.core.store.writeProposals(agentId, waiting.filter((item) => !ids.includes(item.id)));
+    this.core.emit("agents");
+    return this.core.keepForUndo(this.core.trash.stash([]), () => {
+      if (!this.core.store.getAgent(agentId)) return;
+      const now = this.core.store.readProposals(agentId);
+      const back = dropped.filter((item) => !now.some((held) => held.id === item.id));
+      this.core.store.writeProposals(agentId, [...now, ...back].sort((a, b) => a.at.localeCompare(b.at)));
       this.core.emit("agents");
     });
-    const flagged = prepared.flags.length > 0;
-    this.core.options.host.remembered?.({ agentId: agent.id, agentName: agent.name, note: prepared.note, line, flagged, undo });
-    return { ok: true, agentId: agent.id, agent: agent.name, note: prepared.note, line, flagged, flags: prepared.flags, undo };
   }
 
   // ---------------------------------------------------------------- skills

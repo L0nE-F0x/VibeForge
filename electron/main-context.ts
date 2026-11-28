@@ -88,10 +88,7 @@ export class MainContext {
       this.send("notice", notice);
       return;
     }
-    this.pendingNotices = [
-      ...(notice.id === "agent-remembered" ? this.pendingNotices : this.pendingNotices.filter((held) => held.id !== notice.id)),
-      notice,
-    ].slice(-10);
+    this.pendingNotices = [...this.pendingNotices.filter((held) => held.id !== notice.id), notice];
   };
 
   /** The page's first call: what it missed. From now on it hears notices as they happen. */

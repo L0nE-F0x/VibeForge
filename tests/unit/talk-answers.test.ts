@@ -13,7 +13,6 @@ describe("the answers vibeforge tell|who|task|apply|remember read", () => {
     expectTypeOf<TellResult>().toExtend<TalkAnswers["tell"]>();
     expectTypeOf<TaskResult>().toExtend<TalkAnswers["task"]>();
     expectTypeOf<Awaited<ReturnType<TeamService["applyHandedTask"]>>>().toExtend<TalkAnswers["apply"]>();
-    type RememberSuccess = Extract<ReturnType<TeamService["rememberFromPty"]>, { ok: true }>;
-    expectTypeOf<({ ok: true } & Pick<RememberSuccess, "agent" | "line" | "flagged">) | Extract<ReturnType<TeamService["rememberFromPty"]>, { ok: false }>>().toExtend<TalkAnswers["remember"]>();
+    expectTypeOf<ReturnType<TeamService["rememberFromPty"]>>().toExtend<TalkAnswers["remember"]>();
   });
 });

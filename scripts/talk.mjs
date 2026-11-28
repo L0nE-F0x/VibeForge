@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 // `vibeforge tell`, `vibeforge who`, `vibeforge task`, `vibeforge apply` and `vibeforge remember`: coding CLIs in VibeForge's terminals
-// talking to each other (and agents adding to their memory) through the running window's control socket. One JSON line goes in, one
+// talking to each other (and agents proposing lines for their memory) through the running window's control socket. One JSON line goes in, one
 // comes back. The window knows which terminal asked from VIBEFORGE_PTY, which it sets in each one.
 import net from "node:net";
 
@@ -32,8 +32,10 @@ const USAGE = `Talk to the other coding CLIs open in VibeForge.
       session. Only when Settings → Agents together lets the CLI that handed it out.
 
   vibeforge remember "<one line>"
-      Add a dated bullet to your own memory (lessons, preferences and decisions that
-      should still matter next week; not progress notes, not secrets). Agent runs only.
+      Propose a line for your agent's memory: lessons about this agent's work,
+      preferences and decisions that should still matter next week (not progress notes,
+      not secrets). It waits for the person to keep or drop it; only kept lines reach
+      later runs. Agent runs only; up to 10 per run.
 
 Two CLIs may send each other a limited number of messages before a person has to
 press Enter on the next one (Settings → Agents together). Exit codes: 0 done,
@@ -177,10 +179,15 @@ try {
   if (command === "remember") {
     let text = words.join(" ");
     if (text === "-" || (!words.length && !process.stdin.isTTY)) text = await readStdin();
-    if (!words.length && !text) fail(`remember needs one line to save\n\n${USAGE}`, 2);
+    if (!words.length && !text) fail(`remember needs one line to propose\n\n${USAGE}`, 2);
     const answer = await ask({ op: "remember", ...auth, text });
     if (!answer.ok) fail(answer.error ?? "VibeForge refused that.");
-    process.stdout.write(`Remembered for ${answer.agent}: ${answer.line}${answer.flagged ? " (marked to check in Memory)" : ""}\n`);
+    if (answer.already === "memory") process.stdout.write(`Already in ${answer.agent}'s memory: ${answer.note}\n`);
+    else {
+      const head = answer.already === "waiting" ? "Already proposed" : "Proposed";
+      const flag = answer.flagged ? " It has a command, link or instruction in it, which the person is shown." : "";
+      process.stdout.write(`${head} for ${answer.agent}'s memory: ${answer.note}\nIt waits for the person to keep or drop it in VibeForge (Agents → ${answer.agent} → Memory); it is not in your memory until then.${flag}\n`);
+    }
     process.exit(0);
   }
   if (command !== "tell" && command !== "task") fail(`unknown command ${command}\n\n${USAGE}`, 2);

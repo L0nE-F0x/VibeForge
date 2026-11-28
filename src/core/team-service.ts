@@ -24,6 +24,7 @@ import type { WorkspaceFile } from "./workspaces.js";
 import type { BranchList } from "./branches.js";
 import type { ApplyResult } from "./worktrees.js";
 import type { Writer } from "./checkout.js";
+import type { MemoryProposal } from "../shared/memory.js";
 import type { AgentInput, ChatView, Deleted, DeskOptions, Launched, Queued, RememberResult, RoutineInput, RoutineView, RunBundle, RunHit, RunRestorePreview, RunRestoreResult, RunView, SchedulePreview, SendResult, SkillInput, StorageSummary, RunUpkeep, TaskInput, TaskView, TermSize, WorkspaceSummary } from "./service/types.js";
 
 export * from "./service/types.js";
@@ -215,6 +216,22 @@ export class TeamService extends ServiceCore {
 
   rememberFromPty(input: { fromPty: string | null; text: string }): RememberResult {
     return this.library.rememberFromPty(input);
+  }
+
+  listProposals(agentId: string): MemoryProposal[] {
+    return this.library.listProposals(agentId);
+  }
+
+  proposalCounts(): Record<string, number> {
+    return this.library.proposalCounts();
+  }
+
+  keepProposals(agentId: string, ids: readonly string[]): { lines: string[] } {
+    return this.library.keepProposals(agentId, ids);
+  }
+
+  dropProposals(agentId: string, ids: readonly string[]): Deleted {
+    return this.library.dropProposals(agentId, ids);
   }
 
   listSkills(): Skill[] {

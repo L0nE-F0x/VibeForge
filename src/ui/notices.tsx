@@ -63,6 +63,8 @@ export function MainNotices() {
   useEffect(() => {
     // The "isn't answering" toast on screen, cleared when the host answers again.
     let stalled: number | null = null;
+    // The proposed-memory toast on screen: only the newest, so a burst can't crowd out the others.
+    let proposed: number | null = null;
     const show = (notice: DeskNotice) => {
       if (notice.id === "window-reloaded") {
         push("info", t("app.notice.windowReloaded"), t("app.notice.windowReloadedBody"));
@@ -110,30 +112,20 @@ export function MainNotices() {
           // It says what was cut off and offers Continue all: it stays until it is closed.
           { stay: true },
         );
-      } else if (notice.id === "agent-remembered") {
+      } else if (notice.id === "memory-proposed") {
+        // A nudge, not a question: the proposal waits on the agent's Memory tab either way, counted
+        // on the agent. Review is not an undo, so Ctrl+Z leaves it alone.
+        if (proposed !== null) dismiss(proposed);
         const note = notice.note.length > 140 ? `${notice.note.slice(0, 139).trimEnd()}…` : notice.note;
-        const id = push(
+        proposed = push(
           "info",
-          t("agents.rememberedToast", { name: notice.agentName, note }),
-          notice.flagged ? t("agents.rememberedFlaggedToast") : undefined,
+          t("agents.proposedToast", { name: notice.agentName, note }),
+          notice.flagged ? t("agents.proposedFlaggedToast") : t.count("agents.proposedWaiting", notice.waiting),
           {
-            label: t("common.undo"),
-            run: () => void call("undo.delete", notice.undo).catch((error: unknown) => fail(error, t("common.undoFailed"))),
+            label: t("agents.review"),
+            notUndo: true,
+            run: () => goRef.current({ view: "agents", agentId: notice.agentId, tab: "memory" }),
           },
-          notice.flagged
-            ? {
-                stay: true,
-                more: [
-                  {
-                    label: t("agents.openMemory"),
-                    run: () => {
-                      dismiss(id);
-                      goRef.current({ view: "agents", agentId: notice.agentId, tab: "memory" });
-                    },
-                  },
-                ],
-              }
-            : undefined,
         );
       }
     };

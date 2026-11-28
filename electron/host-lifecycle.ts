@@ -85,7 +85,7 @@ export function deskHost(
     ...(extras?.openFolder ? { openFolder: extras.openFolder } : {}),
     ...(extras?.writeClipboard ? { writeClipboard: extras.writeClipboard } : {}),
     ...(extras?.computer ? { computer: extras.computer } : {}),
-    remembered: (item) => ctx.notice({ id: "agent-remembered", ...item }),
+    memoryProposed: (item) => ctx.notice({ id: "memory-proposed", ...item }),
     ...(extras?.updater
       ? {
           checkUpdates: async () => {

@@ -279,6 +279,18 @@
   color: var(--yellow);
 }
 
+/* Lines an agent proposed for its memory, waiting on the Memory tab; a flagged one is edged in yellow. */
+.proposed-line {
+  padding: 6px 8px;
+  border-left: 2px solid var(--line);
+  border-radius: 4px;
+}
+
+.proposed-line.flagged {
+  border-left-color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 6%, transparent);
+}
+
 .notice.bad {
   border-color: color-mix(in srgb, var(--red) 40%, transparent);
   background: color-mix(in srgb, var(--red) 7%, transparent);

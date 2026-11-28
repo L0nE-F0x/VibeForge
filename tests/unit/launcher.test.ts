@@ -38,7 +38,7 @@ function answerFor(op: string): unknown {
   if (op === "tell") return { ok: true, delivered: "sent", to: "codex" };
   if (op === "task") return { ok: true, started: false, title: "t", taskId: "task-1" };
   if (op === "apply") return { ok: true, files: [], note: "Applied.", conflicts: [] };
-  if (op === "remember") return { ok: true, agent: "Builder", line: "- 2026-11-28: Tests use vitest.", flagged: false };
+  if (op === "remember") return { ok: true, agent: "Builder", note: "Tests use vitest.", flagged: false, waiting: 1 };
   return { ok: true };
 }
 

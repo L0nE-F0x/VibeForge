@@ -1,5 +1,6 @@
 // The contract between the renderer and the main process. The renderer calls
 // `call("agents.list")`; the main process implements every key of DeskMethods.
+import type { MemoryProposal } from "./memory.js";
 import type { ComputerFacts } from "./computer.js";
 import type { FileNode } from "../core/files.js";
 import type { RunQuery } from "../core/store.js";
@@ -229,7 +230,8 @@ export type DeskNotice =
   | { id: "host-stalled" }
   | { id: "host-answering" }
   | { id: "errors"; count: number }
-  | { id: "agent-remembered"; agentId: string; agentName: string; note: string; line: string; flagged: boolean; undo: string };
+  /** An agent proposed a line for its memory; it waits on the agent's Memory tab. */
+  | { id: "memory-proposed"; agentId: string; agentName: string; note: string; flagged: boolean; waiting: number };
 
 export interface UpdateInfo {
   current: string;
@@ -513,6 +515,14 @@ export interface DeskMethods {
   "agents.delete": (id: string) => Deleted;
   "agents.readMemory": (id: string) => string;
   "agents.writeMemory": (id: string, text: string) => void;
+  /** Lines the agent proposed for its memory (`vibeforge remember`), waiting for the person; never sent to a CLI. */
+  "agents.proposals": (id: string) => MemoryProposal[];
+  /** How many proposed lines wait, per agent id (agents with none left out). */
+  "agents.proposalCounts": () => Record<string, number>;
+  /** Keep proposals: each goes into memory.md as a dated bullet. Gives the lines added. */
+  "agents.keepProposals": (id: string, proposalIds: string[]) => { lines: string[] };
+  /** Drop proposals, undone with undo.delete. */
+  "agents.dropProposals": (id: string, proposalIds: string[]) => Deleted;
 
   "skills.list": () => Skill[];
   "skills.save": (input: SkillInput) => Skill;

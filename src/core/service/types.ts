@@ -1,5 +1,4 @@
 import path from "node:path";
-import type { MemoryFlag } from "../../shared/memory.js";
 import type { ComputerUseDriver } from "../computer-use.js";
 import type { RunFiles } from "../runs.js";
 import type { ExecuteBlocker } from "../tasks.js";
@@ -130,8 +129,8 @@ export interface DeskHost {
   logWarn?(line: string): void;
   /** Desktop + app UI computer-use observation and control driver. */
   computer?: ComputerUseDriver;
-  /** An agent added a dated line to its own memory (`vibeforge remember`); `undo` removes that exact line. */
-  remembered?(item: { agentId: string; agentName: string; note: string; line: string; flagged: boolean; undo: string }): void;
+  /** An agent proposed a line for its memory (`vibeforge remember`); it waits for the person to keep or drop it. */
+  memoryProposed?(item: { agentId: string; agentName: string; note: string; flagged: boolean; waiting: number }): void;
 }
 
 /** A run the last close of VibeForge cut off, as the window offers it back. */
@@ -306,18 +305,12 @@ export interface Deleted {
   copyLeft?: boolean;
 }
 
-/** Result of `vibeforge remember "<one line>"` from an agent's terminal. */
+/**
+ * Result of `vibeforge remember "<one line>"` from an agent's terminal: the line is proposed, and
+ * waits for the person. `already` says it was there before (waiting, or in memory) and wasn't added again.
+ */
 export type RememberResult =
-  | {
-      ok: true;
-      agentId: string;
-      agent: string;
-      note: string;
-      line: string;
-      flagged: boolean;
-      flags: MemoryFlag[];
-      undo: string;
-    }
+  | { ok: true; agent: string; note: string; flagged: boolean; waiting: number; already?: "waiting" | "memory" }
   | { ok: false; error: string };
 
 /** Written on a patch that could not be taken at exit, because the app was already gone. */

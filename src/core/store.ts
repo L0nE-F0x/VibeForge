@@ -1,3 +1,4 @@
+import type { MemoryProposal } from "../shared/memory.js";
 import { ensureLayout } from "./layout.js";
 import type { RUN_FILES } from "./runs.js";
 import { Chats } from "./store/chats.js";
@@ -174,6 +175,14 @@ export class Store {
 
   writeMemory(agentId: string, text: string): void {
     this.library.writeMemory(agentId, text);
+  }
+
+  readProposals(agentId: string): MemoryProposal[] {
+    return this.library.readProposals(agentId);
+  }
+
+  writeProposals(agentId: string, proposals: readonly MemoryProposal[]): void {
+    this.library.writeProposals(agentId, proposals);
   }
 
   listSkills(): Skill[] {

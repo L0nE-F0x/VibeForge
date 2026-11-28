@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parse, stringify } from "yaml";
+import type { MemoryFlag, MemoryProposal } from "../../shared/memory.js";
 import { tildify } from "../../shared/text.js";
 import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
 import { normalizeRoutineTimeout } from "../routines.js";
@@ -109,6 +110,20 @@ function readYaml(file: string): Record<string, unknown> | null {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnreadableError(file, `Couldn't read ${shown(file)}: it doesn't hold any fields.`);
   return value as Record<string, unknown>;
+}
+
+const MEMORY_FLAGS: readonly MemoryFlag[] = ["command", "url", "instruction"];
+
+/** One proposal as saved, or null for an entry that isn't one. */
+function normalizeProposal(value: unknown): MemoryProposal | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const id = str(record.id).trim();
+  const note = str(record.note).trim();
+  if (!id || !note) return null;
+  const flags = strList(record.flags).filter((flag): flag is MemoryFlag => MEMORY_FLAGS.includes(flag as MemoryFlag));
+  const at = str(record.at);
+  return { id, note, flags, at: Number.isNaN(Date.parse(at)) ? new Date(0).toISOString() : at, runId: strOrNull(record.runId) };
 }
 
 /** What `read` gives, or null for an item that is there but couldn't be read: for the many callers that only look something up. */
@@ -297,6 +312,37 @@ export class Library {
   writeMemory(agentId: string, text: string): void {
     if (!isSafeId(agentId)) throw new Error("Agent is missing");
     writeFileAtomic(path.join(this.configRoot, "agents", agentId, "memory.md"), text);
+  }
+
+  /**
+   * Lines the agent proposed for its memory, waiting for the person: agents/<id>/proposed.json.
+   * Kept apart from memory.md, so they never reach a prompt and Sync never carries them. Empty when
+   * there are none; a file that is there but can't be read throws UnreadableError.
+   */
+  readProposals(agentId: string): MemoryProposal[] {
+    if (!isSafeId(agentId)) return [];
+    const file = path.join(this.configRoot, "agents", agentId, "proposed.json");
+    const text = readText(file);
+    if (text === null || !text.trim()) return [];
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw new UnreadableError(file, `Couldn't read ${shown(file)}: it isn't valid JSON.`);
+    }
+    const list = value && typeof value === "object" ? (value as { proposals?: unknown }).proposals : null;
+    return Array.isArray(list) ? list.flatMap((item) => normalizeProposal(item) ?? []) : [];
+  }
+
+  writeProposals(agentId: string, proposals: readonly MemoryProposal[]): void {
+    if (!isSafeId(agentId)) throw new Error("Agent is missing");
+    const file = path.join(this.configRoot, "agents", agentId, "proposed.json");
+    if (!proposals.length) {
+      noteOwnDelete(file);
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    writeFileAtomic(file, `${JSON.stringify({ version: 1, proposals }, null, 2)}\n`);
   }
 
   // ---------------------------------------------------------------- skills

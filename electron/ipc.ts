@@ -267,6 +267,10 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "agents.delete": (id) => s().deleteAgent(id),
     "agents.readMemory": (id) => s().readMemory(id),
     "agents.writeMemory": (id, text) => s().writeMemory(id, text),
+    "agents.proposals": (id) => s().listProposals(id),
+    "agents.proposalCounts": () => s().proposalCounts(),
+    "agents.keepProposals": (id, ids) => s().keepProposals(id, ids),
+    "agents.dropProposals": (id, ids) => s().dropProposals(id, ids),
 
     "skills.list": () => s().listSkills(),
     "skills.save": (input) => s().saveSkill(input),
@@ -483,9 +487,6 @@ export async function answerTalk(
   if (request.op === "who") return { ok: true, ...ctx.service.whoIsHere(pty) };
   if (request.op === "tell") return ctx.service.tell({ fromPty: pty, to: request.to, text: request.text, wait: request.wait, timeoutMs: request.timeoutMs, gone });
   if (request.op === "apply") return ctx.service.applyHandedTask({ fromPty: pty, task: request.task });
-  if (request.op === "remember") {
-    const res = ctx.service.rememberFromPty({ fromPty: pty, text: request.text });
-    return res.ok ? { ok: true, agent: res.agent, line: res.line, flagged: res.flagged } : res;
-  }
+  if (request.op === "remember") return ctx.service.rememberFromPty({ fromPty: pty, text: request.text });
   return ctx.service.handTask({ fromPty: pty, agent: request.agent, text: request.text, title: request.title, start: request.start, wait: request.wait, timeoutMs: request.timeoutMs, gone });
 }

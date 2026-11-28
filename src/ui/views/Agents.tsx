@@ -3,6 +3,8 @@ import {
   Bot,
   BookOpen,
   Brain,
+  Check,
+  CheckCheck,
   FolderOpen,
   FolderPlus,
   History,
@@ -18,8 +20,8 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChatAttention } from "../attention.js";
 import type { Agent, AgentTier, ChatView, Engine } from "../../shared/api.js";
-import { flaggedMemoryLines, removeMemoryLineAt } from "../../shared/memory.js";
-import { listText, tildify } from "../../shared/text.js";
+import { type MemoryProposal, withAppendedLines } from "../../shared/memory.js";
+import { dayKey, listText, tildify } from "../../shared/text.js";
 import { call, useAgents, useAppInfo, useChats, useEngines, useInbox, useLive, useQuery, useSettings, useSkills } from "../api.js";
 import { autosaveDue, oneLine } from "../autosave.js";
 import { forgetDraft, useDraftState } from "../drafts.js";
@@ -155,6 +157,7 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
   const inbox = useInbox().data ?? [];
   const engines = useEngines().data ?? [];
   const sessions = useLive().data ?? [];
+  const proposedCounts = useQuery("memory-proposal-counts", ["agents"], () => call("agents.proposalCounts")).data ?? {};
   const [creating, setCreating] = useState(false);
   const library = useLibrary().data;
   const syncReady = useSyncReady().ready;
@@ -312,6 +315,11 @@ export function AgentsView({ route }: { route: Extract<Route, { view: "agents" }
                   </span>
                 </span>
                 <SyncMark item={library?.agents[agent.id]} />
+                {proposedCounts[agent.id] > 0 && (
+                  <Chip icon={Brain} title={t.count("agents.proposedCount", proposedCounts[agent.id])}>
+                    {proposedCounts[agent.id]}
+                  </Chip>
+                )}
                 {unread > 0 && (
                   <Chip tone="accent" title={t.count("home.status.review", unread).replaceAll("**", "")}>
                     {unread}
@@ -514,8 +522,7 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
   const engine = engines.find((item) => item.id === agent.engine);
   const chats = useChats(agent.id).data ?? [];
   const runs = useQuery(`runs:agent:${agent.id}`, ["runs"], () => call("runs.list", { agentId: agent.id, limit: AGENT_RUNS }));
-  const memoryPeek = useQuery(`memory-peek:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id).catch(() => ""));
-  const flaggedCount = useMemo(() => flaggedMemoryLines(memoryPeek.data ?? "").length, [memoryPeek.data]);
+  const proposals = useProposals(agent.id).data ?? [];
   const setTab = (next: AgentTab) => go({ view: "agents", agentId: agent.id, tab: next, chatId: next === "chats" ? (chatId ?? lastChat(agent.id)) : undefined });
 
   return (
@@ -548,7 +555,11 @@ function AgentDetail({ agent, tab, chatId }: { agent: Agent; tab: AgentTab; chat
             value: "memory",
             label: t("agents.tab.memory"),
             icon: Brain,
-            badge: flaggedCount ? <Chip tone="warn" title={t.count("agents.memoryFlaggedShort", flaggedCount)}>{flaggedCount}</Chip> : undefined,
+            badge: proposals.length ? (
+              <Chip tone={proposals.some((item) => item.flags.length) ? "warn" : "accent"} title={t.count("agents.proposedCount", proposals.length)}>
+                {proposals.length}
+              </Chip>
+            ) : undefined,
           },
           { value: "skills", label: t("skills.title"), icon: Sparkles, badge: agent.skills.length ? <Chip>{agent.skills.length}</Chip> : undefined },
           { value: "folders", label: t("agents.folders"), icon: FolderOpen },
@@ -719,53 +730,120 @@ function BriefTab({ agent }: { agent: Agent }) {
   );
 }
 
-/** Warning banner listing lines in `memory.md` that look like commands, URLs, or injected instructions. */
-export function FlaggedMemoryNotice({ text, onRemove }: { text: string; onRemove: (index: number) => void }) {
+/** Lines the agent proposed for its memory (`vibeforge remember`), waiting for the person. */
+function useProposals(agentId: string) {
+  return useQuery(`memory-proposals:${agentId}`, ["agents"], () => call("agents.proposals", agentId));
+}
+
+/**
+ * The lines an agent proposed for its memory, each with Keep and Drop. Nothing here reaches the
+ * agent until it is kept; a line with a command, link or instruction in it says so.
+ */
+export function ProposedMemory({
+  agentName,
+  proposals,
+  busy,
+  onKeep,
+  onDrop,
+}: {
+  agentName: string;
+  proposals: readonly MemoryProposal[];
+  busy?: boolean;
+  onKeep: (ids: string[]) => void;
+  onDrop: (ids: string[]) => void;
+}) {
   const t = useT();
-  const flagged = useMemo(() => flaggedMemoryLines(text), [text]);
-  if (!flagged.length) return null;
+  if (!proposals.length) return null;
+  const all = proposals.map((item) => item.id);
   return (
-    <Notice tone="warn" icon={AlertTriangle}>
-      <div className="vstack" style={{ gap: 8 }}>
-        <strong>{t.count("agents.memoryFlagged", flagged.length)}</strong>
-        <div className="vstack" style={{ gap: 6 }}>
-          {flagged.map((item) => (
-            <div key={`${item.index}:${item.line}`} className="hstack" style={{ gap: 8, alignItems: "flex-start" }}>
-              <span className="hstack wrap" style={{ gap: 4, flex: "none", paddingTop: 2 }}>
-                {item.flags.map((flag) => (
-                  <Chip key={flag} tone="warn">
-                    {t(`agents.memoryFlag.${flag}`)}
-                  </Chip>
-                ))}
-              </span>
-              <span className="mono selectable grow" style={{ overflowWrap: "anywhere" }}>
-                {item.line}
-              </span>
-              <Button size="sm" variant="ghost" icon={X} title={t("agents.removeLine")} onClick={() => onRemove(item.index)} />
-            </div>
-          ))}
-        </div>
+    <section className="card vstack proposed-memory" style={{ gap: 10, padding: 12 }} aria-label={t("agents.proposedBy", { name: agentName })}>
+      <div className="hstack wrap" style={{ gap: 8 }}>
+        <Brain size={14} className="accent-text" />
+        <strong className="grow">{t("agents.proposedBy", { name: agentName })}</strong>
+        {proposals.length > 1 && (
+          <>
+            <Button size="sm" icon={CheckCheck} disabled={busy} onClick={() => onKeep(all)}>
+              {t("agents.keepAll")}
+            </Button>
+            <Button size="sm" variant="ghost" icon={X} disabled={busy} onClick={() => onDrop(all)}>
+              {t("agents.dropAll")}
+            </Button>
+          </>
+        )}
       </div>
-    </Notice>
+      <span className="faint">{t("agents.proposedNote", { name: agentName })}</span>
+      <div className="vstack" style={{ gap: 8 }}>
+        {proposals.map((item) => (
+          <div key={item.id} className={`hstack proposed-line${item.flags.length ? " flagged" : ""}`} style={{ gap: 8, alignItems: "flex-start" }}>
+            <div className="vstack grow" style={{ gap: 4, minWidth: 0 }}>
+              <span className="mono selectable" style={{ overflowWrap: "anywhere" }}>
+                {item.note}
+              </span>
+              <span className="hstack wrap faint" style={{ gap: 6 }}>
+                <span>{dayKey(item.at)}</span>
+                {item.flags.length > 0 && (
+                  <>
+                    {item.flags.map((flag) => (
+                      <Chip key={flag} tone="warn" icon={AlertTriangle}>
+                        {t(`agents.memoryFlag.${flag}`)}
+                      </Chip>
+                    ))}
+                    <span>{t("agents.proposedFlagged")}</span>
+                  </>
+                )}
+              </span>
+            </div>
+            <Button size="sm" icon={Check} disabled={busy} onClick={() => onKeep([item.id])}>
+              {t("agents.keep")}
+            </Button>
+            <Button size="sm" variant="ghost" icon={X} disabled={busy} onClick={() => onDrop([item.id])}>
+              {t("agents.drop")}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
 function MemoryTab({ agent }: { agent: Agent }) {
   const t = useT();
+  const { push } = useToast();
   const memory = useQuery(`memory:${agent.id}`, ["agents"], () => call("agents.readMemory", agent.id), { what: "load.memory" });
+  const proposals = useProposals(agent.id);
   const [text, setText] = useDraftState<string | null>(memory.data === undefined ? null : `agent:${agent.id}:memory`, memory.data ?? null);
   const [save, saving] = useAction(async () => {
     await call("agents.writeMemory", agent.id, text ?? "");
     await memory.reload();
   }, t("agents.memoryFailed"));
   const dirty = text !== null && text !== memory.data;
+  // Lines added on disk under unsaved edits (a kept proposal, a note from Viby) join the edits, so saving them doesn't drop those lines.
+  const seenMemory = useRef(memory.data);
+  useEffect(() => {
+    const before = seenMemory.current;
+    seenMemory.current = memory.data;
+    if (before === undefined || memory.data === undefined || before === memory.data) return;
+    setText((prev) => (prev === null || prev === before ? prev : withAppendedLines(before, memory.data ?? "", prev)));
+  }, [memory.data, setText]);
   useAutosave(text, dirty, !saving, () => void save());
+  const deleted = useDeleted();
+  const [keep, keeping] = useAction(async (ids: string[]) => {
+    const { lines } = await call("agents.keepProposals", agent.id, ids);
+    // Unsaved edits get the kept lines now, so an autosave in between can't write over them.
+    setText((prev) => (prev === null || prev === memory.data ? prev : withAppendedLines("", lines.join("\n"), prev)));
+    if (lines.length) push("success", t.count("agents.kept", lines.length));
+  }, t("agents.keepFailed"));
+  const [drop, dropping] = useAction(async (ids: string[]) => {
+    const gone = await call("agents.dropProposals", agent.id, ids);
+    deleted(t.count("agents.dropped", ids.length), gone);
+  }, t("agents.dropFailed"));
   // Never an empty editor for a memory that couldn't be read: saving that would write over it.
   if (text === null) return <LoadFailed query={memory} />;
   return (
     <EditorShell dirty={dirty} saving={saving} note={`${t("common.saved")} · ${t("agents.memoryStored")}`}>
       <Notice icon={Brain}>{t("agents.memoryNote")}</Notice>
-      <FlaggedMemoryNotice text={text} onRemove={(index) => setText((prev) => (prev === null ? prev : removeMemoryLineAt(prev, index)))} />
+      <LoadFailed query={proposals} what="load.proposals" />
+      <ProposedMemory agentName={agent.name} proposals={proposals.data ?? []} busy={keeping || dropping} onKeep={(ids) => void keep(ids)} onDrop={(ids) => void drop(ids)} />
       <LibraryConflicts kind="agent" id={agent.id} />
       <TextArea code value={text} style={{ minHeight: 320 }} onChange={(event) => setText(event.target.value)} />
       <SecretNote />

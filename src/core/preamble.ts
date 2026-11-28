@@ -68,9 +68,9 @@ export function leadNote(input: { team: readonly TeamMember[]; handOff: "ask" | 
   ].join("\n");
 }
 
-/** One line under Memory telling the agent how and when to add durable notes. */
+/** One line under Memory telling the agent how to propose a note, and that the person decides. */
 export const MEMORY_NOTE =
-  'Save a note for future runs with `vibeforge remember "<one line>"`: lessons, the person\'s preferences and decisions that should still matter next week; not progress notes, not secrets.';
+  'To propose a note for this agent\'s future runs, use `vibeforge remember "<one line>"`: lessons about this agent\'s work, the person\'s preferences and decisions that should still matter next week; not progress notes, not secrets. It is a proposal: the person reviews it and keeps or drops it, and only kept lines appear under Memory.';
 
 /** Drop the HTML comment the starter memory file opens with; it is a note to the human. */
 export function memoryForPrompt(memory: string): string {
