@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { needsNoSandbox, shortTmp } from "./test-electron.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const port = Number(process.env.SMOKE_PORT || 9331);
@@ -34,7 +35,7 @@ const fail = (text) => {
 
 // ------------------------------------------------------------------ a throwaway profile
 
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "vibeforge-smoke-"));
+const scratch = fs.mkdtempSync(path.join(shortTmp(os.tmpdir()), "vibeforge-smoke-"));
 const home = path.join(scratch, "home");
 const config = path.join(scratch, "config");
 const workspace = path.join(scratch, "project");
@@ -71,7 +72,7 @@ for (const file of attach ? [] : ["dist/index.html", "dist-electron/main.js"]) {
 
 const args = [root, `--user-data-dir=${path.join(scratch, "profile")}`, ...(attach ? [] : ["--remote-debugging-pipe"])];
 // CI runners have no setuid sandbox helper.
-if (process.env.CI) args.push("--no-sandbox");
+if (needsNoSandbox()) args.push("--no-sandbox");
 // SMOKE_HEADLESS=1 draws nowhere at all, for a run on a desktop you're using.
 if (process.env.SMOKE_HEADLESS === "1") args.push("--ozone-platform=headless");
 // The real config, data and cache folders stay out of reach too: the app reads plan limits, usage

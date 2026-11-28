@@ -18,6 +18,7 @@ import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { expect, onTestFinished, type TestContext } from "vitest";
 import { type CdpEvent, evaluated, InspectorCdp, PipeCdp } from "./cdp.js";
+import { needsNoSandbox, shortTmp } from "../../scripts/test-electron.mjs";
 
 export const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const ELECTRON = path.join(ROOT, "node_modules", "electron", "dist", "electron");
@@ -171,10 +172,12 @@ export class App {
     const { paths, opts } = this;
     const headless = process.env.E2E_HEADLESS !== "0";
     const args = [...(opts.mainProcess ? ["--inspect=0"] : []), ROOT, `--user-data-dir=${paths.profile}`, "--remote-debugging-pipe", "--force-device-scale-factor=1", "--lang=en-US"];
-    if (process.env.CI) args.push("--no-sandbox");
+    if (needsNoSandbox()) args.push("--no-sandbox");
     if (headless) args.push("--ozone-platform=headless");
     const env: NodeJS.ProcessEnv = {};
     for (const key of PASSED_THROUGH) if (process.env[key] !== undefined) env[key] = process.env[key];
+    // Chromium's lock socket lives in TMPDIR: a long one stops the app at start.
+    if (env.TMPDIR) env.TMPDIR = shortTmp(env.TMPDIR);
     Object.assign(env, {
       HOME: paths.home,
       XDG_CONFIG_HOME: path.join(paths.root, "xdg-config"),
@@ -570,7 +573,7 @@ function testName(context?: TestContext): string {
 }
 
 /** Where scratch folders go: E2E_OUT, or a folder in the system's temporary directory. */
-export const OUT = process.env.E2E_OUT ? path.resolve(process.env.E2E_OUT) : path.join(os.tmpdir(), "vibeforge-e2e");
+export const OUT = process.env.E2E_OUT ? path.resolve(process.env.E2E_OUT) : path.join(shortTmp(os.tmpdir()), "vibeforge-e2e");
 
 /**
  * Start the built app for the current test. It is quit when the test ends; its folder is removed
