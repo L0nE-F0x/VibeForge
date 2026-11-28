@@ -1,23 +1,54 @@
 import { CronExpressionParser } from "cron-parser";
 import cronstrue from "cronstrue";
-import type { RunMeta, Schedule } from "./types.js";
+import { detectWaitingPrompt } from "../shared/orchestrator-intel.js";
+import { isCutOffRun } from "../shared/routine-result.js";
+import type { RoutineRunResult, RunMeta, Schedule } from "./types.js";
+
+export { isCutOffRun };
 
 export const TICK_MS = 30_000;
 /** Slots older than this (e.g. while asleep) count as missed rather than running late. */
 export const MAX_SLOT_LATENESS_MS = 2 * 60_000;
 export const MIN_INTERVAL_MINUTES = 5;
+export const DEFAULT_ROUTINE_TIMEOUT_MINUTES = 120;
+export const MIN_ROUTINE_TIMEOUT_MINUTES = 5;
+export const MAX_ROUTINE_TIMEOUT_MINUTES = 7 * 24 * 60;
 /** Failed runs in a row before a routine glows on Routines and Home, and its notification says so. */
 export const ROUTINE_FAILING = 3;
 
+export function isRoutineTimeoutValid(minutes: unknown): minutes is number {
+  return (
+    typeof minutes === "number" &&
+    Number.isInteger(minutes) &&
+    minutes >= MIN_ROUTINE_TIMEOUT_MINUTES &&
+    minutes <= MAX_ROUTINE_TIMEOUT_MINUTES
+  );
+}
+
+export function normalizeRoutineTimeout(minutes: unknown): number {
+  return isRoutineTimeoutValid(minutes) ? minutes : DEFAULT_ROUTINE_TIMEOUT_MINUTES;
+}
+
+/** Whether a finished routine run counts as a failure for `failStreak`. A question is never a failure. */
+export function isRoutineFailure(run: Pick<RunMeta, "status" | "exitCode"> & Partial<Pick<RunMeta, "result" | "error">>): boolean {
+  if (run.result === "question") return false;
+  if (run.result === "timeout" || isCutOffRun(run)) return true;
+  return run.status === "failed" || (run.status === "exited" && run.exitCode !== null && run.exitCode !== 0);
+}
+
 /**
- * How many of a routine's latest runs failed in a row, newest first: a start that failed, or a CLI
- * that exited with an error. A run still going is skipped; one that finished, or was stopped, ends it.
+ * How many of a routine's latest runs failed in a row, newest first: a start that failed, an error
+ * exit, a timeout, or a cut-off run. A live run is skipped (unless waiting on a question, which
+ * breaks any older streak); a clean finish, question, or manual stop ends it.
  */
-export function failStreak(runs: ReadonlyArray<Pick<RunMeta, "status" | "exitCode">>): number {
+export function failStreak(runs: ReadonlyArray<Pick<RunMeta, "status" | "exitCode"> & Partial<Pick<RunMeta, "result" | "error">>>): number {
   let streak = 0;
   for (const run of runs) {
-    if (run.status === "running") continue;
-    if (run.status === "failed" || (run.status === "exited" && run.exitCode !== null && run.exitCode !== 0)) streak += 1;
+    if (run.status === "running") {
+      if (run.result === "question") break;
+      continue;
+    }
+    if (isRoutineFailure(run)) streak += 1;
     else break;
   }
   return streak;
@@ -45,6 +76,7 @@ export interface RoutineTickInput {
   schedule: Schedule;
   lastFiredAt: string | null;
   previousStillRunning: boolean;
+  previousEndedAt?: string | null;
 }
 
 export type RunNowDecision =
@@ -214,10 +246,14 @@ export function decideRoutineTick(input: RoutineTickInput): TickDecision {
     if (lastSlot && sameWallMinute(lastSlot, slot)) return { action: "skip", reason: "not-due" };
   }
   const scheduledAt = slot.toISOString();
-  if (slot.getTime() < input.appStartedAt.getTime() || input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
+  if (slot.getTime() < input.appStartedAt.getTime()) return { action: "miss", scheduledAt };
+  if (input.previousStillRunning) return { action: "skip", reason: "still-running" };
+  if (input.now.getTime() - slot.getTime() > MAX_SLOT_LATENESS_MS) {
+    // A run that finished after this slot overlapped it while running, so it wasn't missed while closed.
+    const prevEnd = input.previousEndedAt ? Date.parse(input.previousEndedAt) : Number.NaN;
+    if (Number.isFinite(prevEnd) && prevEnd >= slot.getTime()) return { action: "skip", reason: "not-due" };
     return { action: "miss", scheduledAt };
   }
-  if (input.previousStillRunning) return { action: "skip", reason: "still-running" };
   return { action: "fire", scheduledAt };
 }
 
@@ -226,4 +262,67 @@ export function decideRunNow(input: RunNowInput): RunNowDecision {
   if (input.engineAvailable === false) return { ok: false, reason: "engine-missing" };
   if (input.previousStillRunning) return { ok: false, reason: "still-running" };
   return { ok: true };
+}
+
+const CHOICE_OPTION_LINE = /^(?:[-*•]|\d+[.)])\s+\S.*$/;
+const DIRECT_QUESTION_TO_PERSON =
+  /\b(?:should i|should we|shall i|shall we|would you like|do you want|do you prefer|can i|may i|could you|can you|would you|will you|do you have|which (?:one|option|approach|branch|folder|file|path|version|target|package|environment|way|method|model)|what would you like|what should (?:i|we)|how would you like|how should (?:i|we)|where should (?:i|we)|want me to|like me to|ready for me to|proceed with|go ahead and|confirm whether|please confirm|please clarify|could you clarify|please let me know (?:which|whether|what|where|how|if)|let me know (?:which|whether|what|where|how))\b/i;
+const SHORT_CONFIRM_QUESTION = /^(?:please\s+)?(?:confirm|proceed|continue|apply (?:this|these|the changes)|commit (?:this|these|the changes))\s*[?？]$/i;
+const SIGNOFF_QUESTION = /\b(?:anything else|something else)\b[^?\n]*[?？]$/i;
+
+function stripCodeAndUrls(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "")
+    .replace(/https?:\/\/\S+/g, "");
+}
+
+function endsWithQuestionMark(line: string): boolean {
+  const cleaned = line.replace(/["'”’)\]]+$/g, "").trimEnd();
+  return cleaned.endsWith("?") || cleaned.endsWith("？");
+}
+
+/**
+ * Conservatively decides whether a CLI reply or terminal screen ended asking the person a
+ * question or waiting on an interactive prompt (trust, approval, sign-in, clarification).
+ */
+export function isQuestionForPerson(reply: string | null | undefined, screen?: string | null): boolean {
+  if (screen && detectWaitingPrompt(screen)) return true;
+  const cleaned = stripCodeAndUrls(reply ?? "").trim();
+  if (!cleaned) return false;
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*>\s?/, "").trim())
+    .filter(Boolean);
+  if (!lines.length) return false;
+  // A question followed by a short bulleted or numbered list of choices puts the "?" right above the choices.
+  let droppedChoices = 0;
+  while (lines.length > 1 && droppedChoices < 6 && CHOICE_OPTION_LINE.test(lines[lines.length - 1]) && lines[lines.length - 1].length <= 120) {
+    lines.pop();
+    droppedChoices += 1;
+  }
+  const tail = lines.slice(-3);
+  const last = tail[tail.length - 1] ?? "";
+  if (!endsWithQuestionMark(last)) return false;
+  const check = tail.join(" ");
+  if (SIGNOFF_QUESTION.test(last) && !SHORT_CONFIRM_QUESTION.test(last)) return false;
+  return DIRECT_QUESTION_TO_PERSON.test(check) || SHORT_CONFIRM_QUESTION.test(last);
+}
+
+/**
+ * Classifies a routine turn event from the watcher: `"question"` leaves the session open for the
+ * person, `"finished"` ends the run cleanly, and `"working"` keeps watching (when a check fired
+ * on an idle screen before any CLI activity or log reply arrived).
+ */
+export function classifyRoutineTurn(input: {
+  reply: string | null;
+  screen?: string | null;
+  fromScreen: boolean;
+  hasLogReader: boolean;
+  worked: boolean;
+}): Extract<RoutineRunResult, "finished" | "question"> | "working" {
+  if (isQuestionForPerson(input.reply, input.screen)) return "question";
+  if (!input.worked && input.fromScreen) return "working";
+  if (input.hasLogReader && input.fromScreen && !input.reply?.trim()) return "working";
+  return "finished";
 }

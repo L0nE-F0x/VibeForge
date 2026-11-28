@@ -9,6 +9,9 @@ export type RunOrigin = "agent-chat" | "routine" | "task" | "code" | "chat";
 
 export type RunStatus = "running" | "exited" | "stopped" | "failed";
 
+/** How a routine run ended, or why it stays open for the person ("question"). */
+export type RoutineRunResult = "finished" | "question" | "timeout" | "cutoff";
+
 export type TaskStatus = "todo" | "running" | "review" | "done";
 
 /** What an agent costs to hand work to, as its owner rates it; "" when they haven't said. */
@@ -57,6 +60,12 @@ export interface Routine {
   schedule: Schedule;
   prompt: string;
   notify: boolean;
+  /** Per-run time limit in minutes (default 120 = 2 hours). */
+  timeoutMinutes: number;
+  /** Work in a separate git worktree of the agent's folder instead of the folder itself. */
+  isolated: boolean;
+  /** That worktree, once a run has made it; gone again after Apply or Discard. */
+  copy: WorkingCopy | null;
   lastFiredAt: string | null;
   lastMissedAt: string | null;
   /** Start even while another coding CLI is busy in the agent's folder, instead of waiting a turn. */
@@ -114,6 +123,8 @@ export interface RunMeta {
   gitStart: string | null;
   /** The run this one continues, if any. */
   continuedFrom: string | null;
+  /** How a routine run ended, or why it stays open ("question"). */
+  result?: RoutineRunResult | null;
   /** Resolved local CLI harness (`"opencode" | "claude" | "codex"`) when run via Local AI. */
   localHarness?: string | null;
   /** Resolved model id when run via Local AI. */
@@ -464,6 +475,8 @@ export interface LiveSession {
   talk?: TalkState | null;
   /** The Orchestrator started it: Code gives it a pane in its workspace. */
   orchestrated?: boolean;
+  /** A routine run whose turn ended asking the person a question, left open for them. */
+  needsInput?: boolean;
   /** Local model id when launched through the Local AI engine. */
   localModel?: string | null;
 }

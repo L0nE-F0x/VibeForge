@@ -3,7 +3,7 @@ import path from "node:path";
 import { readJson, readText, writeJson } from "./fsx.js";
 import { hasRunFile, readRunText } from "./run-storage.js";
 import { isSafeId } from "./slug.js";
-import type { CutOff, RunMeta, RunOrigin, RunStatus } from "./types.js";
+import type { CutOff, RoutineRunResult, RunMeta, RunOrigin, RunStatus } from "./types.js";
 import { isCommitId } from "./worktrees.js";
 
 /** What a run directory holds. The PTY host writes the terminal files, the service writes the rest. */
@@ -23,6 +23,7 @@ export const RUN_FILES = {
 
 export const RUN_ORIGINS: RunOrigin[] = ["agent-chat", "routine", "task", "code", "chat"];
 export const RUN_STATUSES: RunStatus[] = ["running", "exited", "stopped", "failed"];
+export const RUN_RESULTS: RoutineRunResult[] = ["finished", "question", "timeout", "cutoff"];
 
 export function runFolderStamp(date: Date): string {
   const iso = date.toISOString();
@@ -129,6 +130,7 @@ export function normalizeRun(value: unknown): RunMeta | null {
       return sha && isCommitId(sha) ? sha : null;
     })(),
     continuedFrom: strOrNull(record.continuedFrom),
+    ...(RUN_RESULTS.includes(record.result as RoutineRunResult) ? { result: record.result as RoutineRunResult } : {}),
     ...(strOrNull(record.localHarness) ? { localHarness: strOrNull(record.localHarness) } : {}),
     ...(strOrNull(record.localModel) ? { localModel: strOrNull(record.localModel) } : {}),
     ...(strOrNull(record.paneId) ? { paneId: strOrNull(record.paneId) } : {}),

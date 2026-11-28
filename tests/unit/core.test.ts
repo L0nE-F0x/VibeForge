@@ -7,7 +7,20 @@ import { instructionArgs, normalizeEngineRows, planLaunch, programOf, resumeArgs
 import { listDir } from "../../src/core/files.js";
 import { cwdAllowed, isPathInside } from "../../src/core/places.js";
 import { buildPreamble, MEMORY_NOTE, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
-import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, isScheduleValid, mostRecentSlot, nextFireTimes } from "../../src/core/routines.js";
+import {
+  classifyRoutineTurn,
+  decideRoutineTick,
+  decideRunNow,
+  DEFAULT_ROUTINE_TIMEOUT_MINUTES,
+  describeSchedule,
+  failStreak,
+  isCutOffRun,
+  isQuestionForPerson,
+  isRoutineTimeoutValid,
+  isScheduleValid,
+  mostRecentSlot,
+  nextFireTimes,
+} from "../../src/core/routines.js";
 import { allocateRunDir, normalizeRun, runFolderStamp, writeRunMeta } from "../../src/core/runs.js";
 import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
 import { createTask, requestExecute, syncTaskWithRun } from "../../src/core/tasks.js";
@@ -249,6 +262,21 @@ describe("routines", () => {
     expect(decideRoutineTick({ ...base, appStartedAt: new Date("2026-09-25T09:00:10") }).action).toBe("miss");
     expect(decideRoutineTick({ ...base, lastFiredAt: new Date("2026-09-25T09:00:00").toISOString() })).toEqual({ action: "skip", reason: "not-due" });
     expect(decideRoutineTick({ ...base, previousStillRunning: true })).toEqual({ action: "skip", reason: "still-running" });
+    // Still running past MAX_SLOT_LATENESS_MS keeps reporting still-running instead of miss.
+    expect(decideRoutineTick({ ...base, previousStillRunning: true, now: new Date("2026-09-25T09:10:00") })).toEqual({ action: "skip", reason: "still-running" });
+    // Once a long run finishes past the slot, that overlapped slot is skipped instead of marked "missed while closed".
+    expect(
+      decideRoutineTick({
+        ...base,
+        now: new Date("2026-09-25T09:10:00"),
+        previousEndedAt: new Date("2026-09-25T09:08:00").toISOString(),
+      }),
+    ).toEqual({ action: "skip", reason: "not-due" });
+    // With no run covering the slot, a >2m-late slot still counts as missed.
+    expect(decideRoutineTick({ ...base, now: new Date("2026-09-25T09:10:00") })).toEqual({
+      action: "miss",
+      scheduledAt: new Date("2026-09-25T09:00:00").toISOString(),
+    });
     expect(decideRoutineTick({ ...base, enabled: false })).toEqual({ action: "skip", reason: "disabled" });
     expect(decideRoutineTick({ ...base, allowRoutines: false })).toEqual({ action: "skip", reason: "disallowed" });
     expect(decideRoutineTick({ ...base, engineAvailable: false })).toEqual({ action: "skip", reason: "engine-missing" });
@@ -711,11 +739,52 @@ describe("when a routine is due", () => {
 });
 
 describe("a routine's failures in a row", () => {
-  it("counts failed starts and error exits from the newest, skipping a live run", () => {
-    const run = (status: RunMeta["status"], exitCode: number | null = null) => ({ status, exitCode });
+  it("counts failed starts, error exits, timeouts and cut-off runs, not questions", () => {
+    const run = (
+      status: RunMeta["status"],
+      exitCode: number | null = null,
+      result: RunMeta["result"] = null,
+      error: string | null = null,
+    ) => ({ status, exitCode, result, error });
     expect(failStreak([])).toBe(0);
     expect(failStreak([run("running"), run("exited", 1), run("failed"), run("exited", 0), run("exited", 1)])).toBe(2);
     expect(failStreak([run("stopped"), run("exited", 1)])).toBe(0);
     expect(failStreak([run("exited", null), run("failed")])).toBe(0);
+    // Timeouts and cut-off runs increment the streak; a run stopped on a question does not.
+    expect(failStreak([run("stopped", null, "timeout"), run("stopped", null, "cutoff"), run("exited", 1)])).toBe(3);
+    expect(failStreak([run("stopped", null, null, "VibeForge closed while this run was going."), run("exited", 1)])).toBe(2);
+    expect(failStreak([run("running", null, "question"), run("stopped", null, "timeout")])).toBe(0);
+    expect(failStreak([run("stopped", null, "question"), run("failed")])).toBe(0);
+    expect(isCutOffRun({ status: "stopped", result: "cutoff" })).toBe(true);
+    expect(isCutOffRun({ status: "exited", error: "The terminal host stopped, so this terminal was cut off." })).toBe(true);
+    expect(isCutOffRun({ status: "stopped", error: "Manual stop" })).toBe(false);
+  });
+
+  it("validates routine time limits and conservatively detects questions", () => {
+    expect(DEFAULT_ROUTINE_TIMEOUT_MINUTES).toBe(120);
+    expect(isRoutineTimeoutValid(5)).toBe(true);
+    expect(isRoutineTimeoutValid(120)).toBe(true);
+    expect(isRoutineTimeoutValid(10_080)).toBe(true);
+    expect(isRoutineTimeoutValid(4)).toBe(false);
+    expect(isRoutineTimeoutValid(10_081)).toBe(false);
+    expect(isRoutineTimeoutValid(15.5)).toBe(false);
+
+    // Direct questions and choice lists are caught.
+    expect(isQuestionForPerson("All checks look good.\nShould I update the major versions too?")).toBe(true);
+    expect(isQuestionForPerson("Which branch should I target?\n1. main\n2. staging")).toBe(true);
+    expect(isQuestionForPerson("Would you like me to apply these edits?")).toBe(true);
+    expect(isQuestionForPerson("Proceed?")).toBe(true);
+    expect(isQuestionForPerson(null, "Quick safety check:\nDo you trust the files in this folder?\n❯ 1. Yes, proceed")).toBe(true);
+
+    // Normal summaries, code blocks, URLs, headings mid-reply and polite sign-offs stay finished.
+    expect(isQuestionForPerson("Updated README.md and all tests pass.")).toBe(false);
+    expect(isQuestionForPerson("### Should I keep this?\nYes, tests pass.")).toBe(false);
+    expect(isQuestionForPerson("```ts\nconst ok = x ? 1 : 2;\n```\nChecked https://example.com?a=1\nDone.")).toBe(false);
+    expect(isQuestionForPerson("Done! Anything else you need help with?")).toBe(false);
+
+    expect(classifyRoutineTurn({ reply: "Summary complete.", screen: "", fromScreen: false, hasLogReader: true, worked: true })).toBe("finished");
+    expect(classifyRoutineTurn({ reply: "Could you confirm the target branch?", screen: "", fromScreen: false, hasLogReader: true, worked: true })).toBe("question");
+    expect(classifyRoutineTurn({ reply: "boot banner", screen: "boot banner", fromScreen: true, hasLogReader: false, worked: false })).toBe("working");
+    expect(classifyRoutineTurn({ reply: "   ", screen: "spinner", fromScreen: true, hasLogReader: true, worked: true })).toBe("working");
   });
 });

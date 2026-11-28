@@ -4,6 +4,7 @@ import path from "node:path";
 import { parse, stringify } from "yaml";
 import { tildify } from "../../shared/text.js";
 import { noteOwnDelete, writeFileAtomic } from "../fsx.js";
+import { normalizeRoutineTimeout } from "../routines.js";
 import { isSafeId, slugify } from "../slug.js";
 import { TASK_STATUSES } from "../tasks.js";
 import type { WorkingCopy } from "../worktrees.js";
@@ -187,6 +188,9 @@ function normalizeRoutine(id: string, value: unknown): Routine | null {
     schedule: schedule(record.schedule),
     prompt: str(record.prompt),
     notify: bool(record.notify, true),
+    timeoutMinutes: normalizeRoutineTimeout(record.timeoutMinutes),
+    isolated: record.isolated === true,
+    copy: workingCopy(record.copy),
     lastFiredAt: strOrNull(record.lastFiredAt),
     lastMissedAt: strOrNull(record.lastMissedAt),
     shareCheckout: record.shareCheckout === true,
