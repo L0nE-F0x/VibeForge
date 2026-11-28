@@ -145,7 +145,7 @@ export async function carryOutWorkspaceStep(deps: EntityStepDeps, turn: Orchestr
   }
   if (action === "copy-setup") {
     const change = copySetupChange(step) ?? {};
-    if (auto && copySetupNeedsGo(change)) {
+    if (auto && copySetupNeedsGo(change, ws.copySetup ?? null)) {
       throw new Error("Changing what a workspace's copies get waits for Go.");
     }
     const next = { ...(ws.copySetup ?? {}) };

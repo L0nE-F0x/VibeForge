@@ -593,6 +593,10 @@ export class TeamService extends ServiceCore {
     this.routines.onPaneInput(ptyId, data);
   }
 
+  override expectsReply(ptyId: string): boolean {
+    return this.messages.expectsReport(ptyId);
+  }
+
   /** Delivers waiting messages and reads answers now (also every second while any are in flight). */
   pumpMessages(): Promise<void> {
     return this.messages.pump();

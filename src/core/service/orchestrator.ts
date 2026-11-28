@@ -2444,7 +2444,9 @@ export class OrchestratorDesk {
       if (this.core.options.host.write) await this.core.options.host.write(step.target, action.data);
       else await this.core.options.host.send(step.target, action.data.replace(/\r$/, ""), action.data.endsWith("\r"));
       // Viby answering a CLI for the person: routines and messages hear of it as they do of typing.
-      this.core.paneInput(step.target, action.data, "person");
+      // Viby's keys, not the person's: they answer the CLI (a routine hears it) without lifting a
+      // Stop or resetting the limits on CLIs messaging each other.
+      this.core.paneInput(step.target, action.data, "cli");
       this.followTo(session?.workspaceId, step.target);
       step.result = `Sent ${action.label}.`;
       return;

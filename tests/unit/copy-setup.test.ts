@@ -349,6 +349,26 @@ describe("prepareCopy, symlink safety, folder cloning, and leftInCopy exclusion"
     expect(await copyPatch(copy, owner)).not.toContain("SECRET=1");
   });
 
+  it("never puts what it brought in into the changes, even when the agent un-ignores it in the copy", async () => {
+    const repo = temp();
+    git(repo, "init", "-q");
+    write(repo, ".gitignore", ".env\n");
+    write(repo, "a.txt", "a\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    write(repo, ".env", "SECRET=1\n");
+    const dataRoot = temp();
+    const owner = { dataRoot, taskId: "task-unign" };
+    const { copy } = await prepareCopy({ folder: repo, target: path.join(dataRoot, "worktrees", "task-unign"), branch: copyBranch("task-unign") });
+    expect(copy.seeded).toEqual([".env"]);
+    // The agent drops .env from the copy's .gitignore.
+    write(copy.path, ".gitignore", "\n");
+    write(copy.path, "a.txt", "b\n");
+    const patch = await copyPatch(copy, owner);
+    expect(patch).toContain("a.txt");
+    expect(patch).not.toContain("SECRET=1");
+  });
+
   it("keeps a cloned virtualenv's links to system paths, and drops links into the project or home", async () => {
     const repo = temp();
     git(repo, "init", "-q");
@@ -583,4 +603,19 @@ describe("service integration for tasks and Viby copies", () => {
     }
   });
 
+});
+
+describe("what waits for Go when Viby changes what copies get", () => {
+  it("waits for Go to turn copying back on after the person turned it off", async () => {
+    const { copySetupNeedsGo } = await import("../../src/shared/copy-setup.js");
+    // Back to the default .env* after the person chose no files.
+    expect(copySetupNeedsGo({ files: null }, { files: [] })).toBe(true);
+    expect(copySetupNeedsGo({ files: null }, {})).toBe(false);
+    // .worktreeinclude back on after it was turned off; unknown current state is treated as off.
+    expect(copySetupNeedsGo({ worktreeInclude: true }, { worktreeInclude: false })).toBe(true);
+    expect(copySetupNeedsGo({ worktreeInclude: true })).toBe(true);
+    expect(copySetupNeedsGo({ worktreeInclude: true }, {})).toBe(false);
+    // Turning things off never waits.
+    expect(copySetupNeedsGo({ files: [], worktreeInclude: false }, {})).toBe(false);
+  });
 });

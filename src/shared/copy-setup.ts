@@ -77,9 +77,12 @@ export function copySetupChange(step: { kind: string; action?: string; prompt?: 
  * beyond the default .env*, or a folder that isn't a package or build folder. Each gives the
  * agents working in copies more to act on.
  */
-export function copySetupNeedsGo(change: CopySetupChange | null): boolean {
+export function copySetupNeedsGo(change: CopySetupChange | null, current?: { files?: string[]; worktreeInclude?: boolean } | null): boolean {
   if (!change) return false;
   if (change.command) return true;
+  // Turning copying back on after the person turned it off widens it too.
+  if (change.worktreeInclude === true && (current === undefined || current?.worktreeInclude === false)) return true;
+  if (change.files === null && current?.files && current.files.length === 0) return true;
   if (change.files?.some((pattern) => !DEFAULT_COPY_FILES.includes(pattern))) return true;
   if (change.folders?.some((folder) => !PACKAGE_FOLDERS.has(folder.split("/").pop() ?? ""))) return true;
   return false;

@@ -818,7 +818,14 @@ describe("a routine's failures in a row", () => {
     for (const offer of ["Done: 3 files updated.\n\nWant me to also open a PR?", "All tests pass. Anything else?", "Let me know if you'd like changes.", "Would you like me to also update the changelog?"]) {
       expect(classifyRoutineTurn({ reply: offer, screen: "", fromScreen: false, hasLogReader: true })).toBe("finished");
     }
-    for (const asked of ["Should I delete the 3 old branches?", "Is it OK to push to main?", "Want me to proceed? (y/n)"]) {
+    for (const asked of [
+      "Should I delete the 3 old branches?",
+      "Is it OK to push to main?",
+      "Want me to proceed? (y/n)",
+      "Shall I also drop the old tables?",
+      "Which branch should I push to?\n\nLet me know if you have questions.",
+      "Which branch should I push to? Let me know if you have questions.",
+    ]) {
       expect(classifyRoutineTurn({ reply: asked, screen: "", fromScreen: false, hasLogReader: true })).toBe("question");
     }
     // On a screen-only CLI an offer is never taken as the end.

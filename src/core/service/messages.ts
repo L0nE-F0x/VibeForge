@@ -65,6 +65,11 @@ export class MessageDesk {
     this.handed = new HandedTasks(core, tasks, this.roster, this.delivery, this.answers, this.files, pump);
   }
 
+  /** Whether a task this terminal handed out is still to report back to it. */
+  expectsReport(ptyId: string): boolean {
+    return this.answers.reportingTo(ptyId) > 0;
+  }
+
   close(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;

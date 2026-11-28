@@ -343,13 +343,28 @@ export function isQuestionForPerson(reply: string | null | undefined, screen?: s
  * "Let me know if…"): the turn finished, and nothing waits on the answer. Only clearly optional
  * offers; a question about the task itself ("Should I delete them?") still waits.
  */
-const CLOSING_OFFER = /\b(?:anything else|is there anything else|let me know if|(?:do you )?want me to (?:also|go ahead and also)|would you like me to (?:also|next)|shall i also|should i also)\b|\bas well\?\s*$/i;
+const CLOSING_OFFER = /\b(?:anything else|is there anything else|let me know if|(?:do you )?want me to (?:also|go ahead and also)|would you like me to (?:also|next))\b/i;
 
-/** Whether a reply from the CLI's log ends on a closing offer rather than a question about the work. */
+/**
+ * Whether a reply from the CLI's log ends on a closing offer rather than a question about the
+ * work. A reply that asked something earlier ("Which branch should I push to? … Let me know if…")
+ * is a question, whatever its last line says.
+ */
 export function endsOnOffer(reply: string | null | undefined): boolean {
+  return closingOffer(reply) === "offer";
+}
+
+/**
+ * How a reply's last line closes: "offer" (an optional offer, nothing asked), "asked" (it closes
+ * with an offer but asked something before it, on that line or an earlier one), or null.
+ */
+function closingOffer(reply: string | null | undefined): "offer" | "asked" | null {
   const lines = meaningfulLines(stripCodeAndUrls(reply ?? "")).map((line) => line.replace(/^>\s?/, ""));
   const last = lines[lines.length - 1] ?? "";
-  return CLOSING_OFFER.test(last) && !PERSON_PROMPT_LINE.test(last);
+  if (!CLOSING_OFFER.test(last) || PERSON_PROMPT_LINE.test(last)) return null;
+  // Sentences before the offer, on its own line or the same one, that ask something.
+  const before = [...lines.slice(0, -1), last.replace(CLOSING_OFFER, "\u0000").split("\u0000")[0]];
+  return before.some((line) => /[?？]/.test(line)) ? "asked" : "offer";
 }
 
 /**
@@ -366,8 +381,10 @@ export function classifyRoutineTurn(input: {
   hasLogReader: boolean;
 }): Extract<RoutineRunResult, "finished" | "question"> | "working" {
   if (input.fromScreen) return screenAsks(input.screen) || replyAsks(input.reply) ? "question" : "working";
-  // The log says the turn ended on a closing offer: the work is done.
-  if (input.hasLogReader && endsOnOffer(input.reply) && !(input.screen && detectWaitingPrompt(input.screen))) return "finished";
+  // The log says the turn ended on a closing offer: the work is done, unless it asked something before it.
+  const offer = closingOffer(input.reply);
+  if (offer === "asked") return "question";
+  if (input.hasLogReader && offer === "offer" && !(input.screen && detectWaitingPrompt(input.screen))) return "finished";
   if (isQuestionForPerson(input.reply, input.screen)) return "question";
   return input.hasLogReader ? "finished" : "working";
 }

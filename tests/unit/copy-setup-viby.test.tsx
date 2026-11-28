@@ -43,7 +43,9 @@ describe("a Viby copy-setup step", () => {
     expect(copySetupNeedsGo(change("files=.env*"))).toBe(false);
     expect(copySetupNeedsGo(change("files=none"))).toBe(false);
     expect(copySetupNeedsGo(change("folders=node_modules packages/web/.venv"))).toBe(false);
-    expect(copySetupNeedsGo(change("worktreeInclude=on"))).toBe(false);
+    // Turning .worktreeinclude on waits for Go unless it is known to be on already.
+    expect(copySetupNeedsGo(change("worktreeInclude=on"))).toBe(true);
+    expect(copySetupNeedsGo(change("worktreeInclude=on"), {})).toBe(false);
     expect(copySetupNeedsGo(change("setupCommand=none"))).toBe(false);
     expect(copySetupNeedsGo(change("files=**"))).toBe(true);
     expect(copySetupNeedsGo(change("files=.env* *.pem"))).toBe(true);

@@ -465,6 +465,13 @@ function stageCopy(copy: WorkingCopy, owner: CopyOwner): Promise<{ patch: string
       const env = { GIT_INDEX_FILE: tempIndex };
       const staged = await git(["add", "-A"], copy.path, { env });
       if (staged.code !== 0) throw stagingFailure(staged);
+      // What copy setup brought in (a .env) is never part of the copy's changes, even if the agent
+      // changed .gitignore there so git no longer ignores it.
+      const seeded = (copy.seeded ?? []).map((item) => item.replace(/\/+$/, "")).filter(Boolean);
+      if (seeded.length) {
+        const unstaged = await git(["rm", "-r", "--cached", "--ignore-unmatch", "--quiet", "--", ...seeded], copy.path, { env });
+        if (unstaged.code !== 0) throw stagingFailure(unstaged);
+      }
       // The staged tree is what Apply merges: the patch below is text, and text in some other
       // encoding (Latin-1, Shift-JIS) wouldn't survive being read as UTF-8 and written back.
       const tree = await git(["write-tree"], copy.path, { env });

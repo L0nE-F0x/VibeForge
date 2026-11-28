@@ -484,6 +484,26 @@ describe("routines", () => {
     ctx.svc.close();
   });
 
+  it("keeps a routine open while a task it handed out is still to report back", async () => {
+    const { ctx, watches } = routineClock();
+    const agent = await ctx.svc.saveAgent({ name: "ClaudeBot", brief: "b", engine: "claude", places: [ctx.place], allowRoutines: true });
+    const routine = ctx.svc.saveRoutine({ name: "Hands off", agentId: agent.id, schedule: { kind: "every", minutes: 60 }, prompt: "Hand it out" });
+    const run = started(await ctx.svc.runRoutineNow(routine.id));
+    let waiting = true;
+    ctx.svc.expectsReply = (ptyId: string) => waiting && ptyId === run.ptyId;
+    await until(() => watches.length > 0);
+    const asked = watches.length;
+    watches.at(-1)!.resolve("Handed the docs task to Writer; its report comes back here.");
+    await until(() => watches.length > asked);
+    expect(ctx.svc.getRun(run.runId).run.status).toBe("running");
+    // The report came and the CLI's next turn ends: now it closes.
+    waiting = false;
+    watches.at(-1)!.resolve("Writer's report is in: docs updated.");
+    await until(() => ctx.svc.getRun(run.runId).run.status === "exited");
+    expect(ctx.svc.getRun(run.runId).run).toMatchObject({ result: "finished" });
+    ctx.svc.close();
+  });
+
   it("never ends a CLI whose log it can't read on a quiet screen: it stays open until its time limit", async () => {
     const { ctx, pass, now, workThenQuiet } = routineClock();
     const agent = await agentIn(ctx, "pasty");

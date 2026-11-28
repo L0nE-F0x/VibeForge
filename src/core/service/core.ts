@@ -50,6 +50,7 @@ function stripTerminalCodes(raw: string): string {
  * them together behind one API.
  */
 /** Who wrote into a pane: a person (or Viby, or a chat, for one), or another CLI's message. */
+/** Who wrote into a pane: the person typing, or a CLI or Viby (which never reset what a person's typing does). */
 export type PaneInputFrom = "person" | "cli";
 
 export class ServiceCore {
@@ -201,6 +202,11 @@ export class ServiceCore {
    * routines, messages and the attention marks all see the same input. TeamService hands it on.
    */
   paneInput(_ptyId: string, _data: string, _from: PaneInputFrom): void {}
+
+  /** Whether something will still come back to this terminal (a task it handed out reporting back). */
+  expectsReply(_ptyId: string): boolean {
+    return false;
+  }
 
   // ---------------------------------------------------------------- events
 
@@ -1125,8 +1131,10 @@ export class ServiceCore {
       const run = this.store.getRun(session.runId);
       if (!run || run.status !== "running" || run.stopRequested) continue;
       if (run.origin === "routine") {
-        this.pendingOutcome.set(run.id, { status: "stopped", result: "cutoff", error: "Stopped when VibeForge quit." });
-        this.store.saveRun({ ...run, stopRequested: true, cutOff: reason, result: "cutoff", error: "Stopped when VibeForge quit." });
+        // One waiting on a question was waiting on the person, not failing: it ends stuck on it.
+        const result = run.result === "question" ? ("stuck" as const) : ("cutoff" as const);
+        this.pendingOutcome.set(run.id, { status: "stopped", result, error: "Stopped when VibeForge quit." });
+        this.store.saveRun({ ...run, stopRequested: true, cutOff: reason, result, error: "Stopped when VibeForge quit." });
         continue;
       }
       this.store.saveRun({ ...run, stopRequested: true, cutOff: reason });

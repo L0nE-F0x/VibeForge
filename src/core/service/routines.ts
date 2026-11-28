@@ -711,6 +711,13 @@ export class RoutineDesk {
       this.armRun(runId, false);
       return;
     }
+    // A task it handed out still reports back here: ended now, that report would have nowhere to
+    // go. It stays open (its time limit still counts) and the report starts a turn of its own.
+    if (this.core.expectsReply(entry.ptyId)) {
+      entry.quietAfter = now;
+      this.armRun(runId, false);
+      return;
+    }
     this.clearActive(runId);
     await this.core.endRunWithResult(runId, { status: "exited", exitCode: 0, result: "finished" });
     await this.core.waitForExit(entry.ptyId, 200);
