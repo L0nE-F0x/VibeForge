@@ -55,46 +55,46 @@ export interface TrackedRun {
 /** How long before a run's start a log may have changed and still be the run's (a CLI writes its first lines as it starts). */
 const START_SLACK_MS = 3000;
 
+/** The runs that share session logs: one CLI in one folder. */
+export function sessionGroup(kind: ReplyLog, cwd: string): string {
+  return `${kind}\u0000${cwd}`;
+}
+
 /**
- * Which log each run is writing, given the logs in its folder and how they grew since the last
- * look (`before`: each file's mtime then). A run alone in its folder on its CLI takes the log
- * written to most recently since it started. Several in one folder share it out: a log that grew
- * while only one of them was working is that one's; a new log with one run still unmatched is
- * that run's; anything else stays as it was. No log is given to two runs. Runs whose log is
- * unchanged keep it, so a CLI switching sessions (/clear, /resume) moves only once it writes.
+ * Which log each run is writing, given the logs in its folder and each one's mtime at the last
+ * look (`before`; a log not seen before counts from when its folder was last looked at). A log changes hands only when it
+ * grew while exactly one of the runs in its folder was working, that run's own log didn't grow
+ * meanwhile (it is still in that session), and no other run has it. So a run that sits idle is
+ * never given a log someone else wrote (Claude Code in another terminal in the same folder, a
+ * script's `claude -p`), and a CLI that moves to another session (/clear, /resume) is followed
+ * once it writes there.
  */
-export function matchSessionLogs(runs: readonly TrackedRun[], logs: ReadonlyMap<string, readonly SessionLog[]>, before: ReadonlyMap<string, number>): Map<string, string> {
+export function matchSessionLogs(
+  runs: readonly TrackedRun[],
+  logs: ReadonlyMap<string, readonly SessionLog[]>,
+  before: ReadonlyMap<string, number>,
+  /** Per folder (sessionGroup), when it was last looked at; never, 0. */
+  since: ReadonlyMap<string, number> = new Map(),
+): Map<string, string> {
   const result = new Map<string, string>();
   const groups = new Map<string, TrackedRun[]>();
   for (const run of runs) {
-    const key = `${run.kind}\u0000${run.cwd}`;
+    const key = sessionGroup(run.kind, run.cwd);
     groups.set(key, [...(groups.get(key) ?? []), run]);
   }
   for (const [key, group] of groups) {
-    const files = (logs.get(key) ?? []).filter((log) => sessionIdOf(group[0].kind, log.file));
     const owner = new Map<string, string>();
     for (const run of group) if (run.file) owner.set(run.file, run.runId);
-    const take = (run: TrackedRun, file: string) => {
-      const previous = [...owner.entries()].find(([, runId]) => runId === run.runId)?.[0];
-      if (previous) owner.delete(previous);
-      owner.set(file, run.runId);
-    };
-    if (group.length === 1) {
-      const [run] = group;
-      const newest = files.filter((log) => log.mtimeMs >= run.startedMs - START_SLACK_MS).sort((a, b) => b.mtimeMs - a.mtimeMs)[0];
-      if (newest) take(run, newest.file);
-    } else {
-      const grown = files
-        .filter((log) => log.mtimeMs > (before.get(log.file) ?? 0))
-        .sort((a, b) => a.mtimeMs - b.mtimeMs);
-      for (const log of grown) {
-        if (owner.has(log.file)) continue;
-        const could = group.filter((run) => run.startedMs - START_SLACK_MS <= log.mtimeMs);
-        const working = could.filter((run) => run.active);
-        const unmatched = could.filter((run) => ![...owner.values()].includes(run.runId));
-        const isNew = !before.has(log.file);
-        if (working.length === 1) take(working[0], log.file);
-        else if (isNew && unmatched.length === 1 && (working.length === 0 || working.includes(unmatched[0]))) take(unmatched[0], log.file);
+    const grown = (logs.get(key) ?? [])
+      .filter((log) => sessionIdOf(group[0].kind, log.file) && log.mtimeMs > (before.get(log.file) ?? since.get(key) ?? 0))
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const active = group.filter((run) => run.active);
+    const [run] = active;
+    if (active.length === 1 && !(run.file && grown.some((log) => log.file === run.file))) {
+      const pick = grown.filter((log) => (owner.get(log.file) ?? run.runId) === run.runId && log.mtimeMs >= run.startedMs - START_SLACK_MS).at(-1);
+      if (pick) {
+        if (run.file) owner.delete(run.file);
+        owner.set(pick.file, run.runId);
       }
     }
     for (const [file, runId] of owner) result.set(runId, file);
@@ -102,10 +102,33 @@ export function matchSessionLogs(runs: readonly TrackedRun[], logs: ReadonlyMap<
   return result;
 }
 
-/** Flags that pick a session or send a prompt: the session to reopen takes their place. */
-const SESSION_FLAGS = new Set(["--resume", "-r", "--continue", "-c", "--session-id", "--session", "--conversation", "--last", "--fork-session", "-p", "--print"]);
-/** Flags known to take a value, kept with it. */
-const VALUE_FLAGS = new Set(["--model", "-m", "--permission-mode", "--effort", "--profile", "--add-dir", "--agent", "--sandbox", "--approval-mode"]);
+/** Which of a CLI's own options a reopened session keeps: plain switches, ones with one value, and ones with a list of them. */
+interface FlagRules {
+  bare: readonly string[];
+  valued: readonly string[];
+  list: readonly string[];
+}
+
+/**
+ * The options each CLI is started with that are safe to repeat on its resumed session. Anything
+ * else (a prompt, the session first picked, `--print`, an option not known here) is left out,
+ * with the word after it, so a value never ends up read as the next option or a prompt.
+ */
+const KEPT_FLAGS: Partial<Record<ReplyLog, FlagRules>> = {
+  claude: {
+    bare: ["--dangerously-skip-permissions", "--verbose", "--ide", "--strict-mcp-config"],
+    valued: ["--model", "--permission-mode", "--fallback-model", "--append-system-prompt", "--system-prompt", "--settings", "--setting-sources", "--agent"],
+    list: ["--add-dir", "--mcp-config", "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools"],
+  },
+  codex: {
+    bare: ["--full-auto", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--search", "--oss"],
+    valued: ["-m", "--model", "-a", "--ask-for-approval", "-s", "--sandbox", "-p", "--profile", "-c", "--config", "-C", "--cd", "--add-dir"],
+    list: [],
+  },
+  grok: { bare: [], valued: ["-m", "--model"], list: [] },
+  copilot: { bare: ["--allow-all-tools", "--allow-all-paths"], valued: ["--model"], list: ["--allow-tool", "--deny-tool", "--add-dir"] },
+};
+
 const INTERPRETERS = /^(node|bun|deno|python[\d.]*|env)$/;
 
 /**
@@ -114,36 +137,39 @@ const INTERPRETERS = /^(node|bun|deno|python[\d.]*|env)$/;
  * `--dangerously-skip-permissions`), and the session's resume arguments. A prompt, or the
  * session they first picked, is left out.
  */
-export function resumeCommand(bin: string, argv: readonly string[], resumeArgs: readonly string[]): string {
+export function resumeCommand(bin: string, argv: readonly string[], resumeArgs: readonly string[], kind: ReplyLog | null): string {
+  const rules = kind ? KEPT_FLAGS[kind] : undefined;
   let args = argv.slice(1);
   // `node …/cli.js --flag`: the CLI's own arguments come after its script.
   if (INTERPRETERS.test(path.basename(argv[0] ?? ""))) {
     const script = args.findIndex((arg) => !arg.startsWith("-"));
     args = script >= 0 ? args.slice(script + 1) : [];
   }
-  // `codex resume <id>` is a subcommand: what follows it was that session's.
   const kept: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (!arg.startsWith("-")) {
-      if (arg === "resume") break;
+      // `codex resume <id>` is a subcommand: what follows it was that session's.
+      if (kind === "codex" && arg === "resume") break;
       continue;
     }
-    const name = arg.split("=")[0];
-    if (SESSION_FLAGS.has(name)) {
-      // Its value goes with it.
-      if (!arg.includes("=") && args[i + 1] && !args[i + 1].startsWith("-")) i += 1;
-      continue;
-    }
-    if (VALUE_FLAGS.has(name) && !arg.includes("=")) {
-      const value = args[i + 1];
-      if (value !== undefined && !value.startsWith("-")) {
-        kept.push(arg, value);
+    const [name] = arg.split("=");
+    const inline = arg.includes("=");
+    if (rules?.bare.includes(name)) kept.push(arg);
+    else if (rules?.valued.includes(name)) {
+      if (inline) kept.push(arg);
+      else if (i + 1 < args.length) {
+        // Its value, whatever it looks like: the CLI took the next word as it, so it is kept as it.
+        kept.push(arg, args[i + 1]);
         i += 1;
       }
-      continue;
+    } else if (rules?.list.includes(name)) {
+      kept.push(arg);
+      while (i + 1 < args.length && !args[i + 1].startsWith("-")) kept.push(args[++i]);
+    } else if (!inline && i + 1 < args.length && !args[i + 1].startsWith("-")) {
+      // Not known here: left out with the word after it, its value or a prompt.
+      i += 1;
     }
-    kept.push(arg);
   }
   const subcommand = resumeArgs[0] === "resume";
   const words = subcommand ? [bin, ...resumeArgs.slice(0, 1), ...kept, ...resumeArgs.slice(1)] : [bin, ...kept, ...resumeArgs];

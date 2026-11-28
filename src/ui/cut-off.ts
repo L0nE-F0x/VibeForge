@@ -1,5 +1,5 @@
 import type { CutOff, CutOffRun } from "../shared/api.js";
-import { call } from "./api.js";
+import { call, on } from "./api.js";
 
 // The CLIs VibeForge's last close cut off, read once per window: Code's panes offer to pick each
 // back up where it ran, the start-up notice offers Continue all, and after an update they reopen
@@ -17,15 +17,36 @@ const listeners = new Set<() => void>();
 const toContinue = new Set<string>();
 const continueListeners = new Set<() => void>();
 
-/** What the last close cut off, asked once per window. */
+/** What the last close cut off: asked once per window, then kept up to date as runs change. */
 export function cutOffNote(): Promise<CutOffNote | null> {
-  note ??= call("runs.cutOff")
+  if (!note) {
+    note = ask();
+    listen();
+  }
+  return note;
+}
+
+function ask(): Promise<CutOffNote | null> {
+  return call("runs.cutOff")
     .then((found) => {
       left = found ? { reason: found.reason, runs: found.runs } : null;
       return left;
     })
-    .catch(() => null);
-  return note;
+    .catch(() => left);
+}
+
+// A run continued from anywhere (Runs, a chat, the notice) stops being offered here too.
+let asking: ReturnType<typeof setTimeout> | null = null;
+function listen(): void {
+  on("changed", (topics) => {
+    if (!left?.runs.length || !topics.includes("runs") || asking) return;
+    asking = setTimeout(() => {
+      asking = null;
+      void ask().then(() => {
+        for (const listener of listeners) listener();
+      });
+    }, 300);
+  });
 }
 
 /** The cut-off run that last ran in this pane, while it is still offered. */

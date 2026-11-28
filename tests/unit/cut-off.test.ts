@@ -38,17 +38,18 @@ describe("a CLI typed into a Code shell, cut off by a quit", () => {
     // The next start.
     const next = setup({ configRoot: ctx.configRoot, dataRoot: ctx.dataRoot });
     await next.svc.whenSettled();
-    const offered = next.svc.cutOffRuns();
+    const offered = (await next.svc.cutOffRuns());
     expect(offered).toMatchObject({ reason: "quit", runs: [{ runId: run.id, paneId: "p1", workspaceId: workspace.id, exact: true }] });
 
     const shell = await next.svc.startShell({ workspaceId: workspace.id, paneId: "p1", continueRun: run.id });
-    expect(next.spawns.at(-1)?.pasteInput).toBe("argy --model big --resume sess-12345678");
+    // Argy's own options aren't known to be safe to repeat, so only its session goes in.
+    expect(next.spawns.at(-1)?.pasteInput).toBe("argy --resume sess-12345678");
     next.svc.onPtyProgram(shell.ptyId, ["/usr/bin/argy", "--model", "big", "--resume", "sess-12345678"], next.place);
     await until(() => Boolean(next.svc.listLive()[0]?.runId));
     const again = next.svc.listRuns().find((item) => item.id !== run.id);
     expect(again).toMatchObject({ continuedFrom: run.id, paneId: "p1" });
     // Picked back up: no longer offered.
-    expect(next.svc.cutOffRuns()).toBeNull();
+    expect((await next.svc.cutOffRuns())).toBeNull();
     next.svc.close();
   });
 
@@ -115,8 +116,10 @@ describe("reading which session each live CLI is in", () => {
     expect(ctx.svc.getRun(one.runId).run.resumeArgs).toEqual(["--resume", A]);
     expect(ctx.svc.getRun(two.runId).run.resumeArgs).toBeUndefined();
 
-    // Then the other.
+    // It goes quiet (a look passes), then the other works.
     ctx.svc.onPtyActivity(one.ptyId, false);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await ctx.svc.lookForSessions();
     ctx.svc.onPtyActivity(two.ptyId, true);
     logs = [
       { file: `/c/projects/app/${A}.jsonl`, mtimeMs: later },
@@ -131,10 +134,10 @@ describe("reading which session each live CLI is in", () => {
     await ctx.exit(one.ptyId);
     await ctx.exit(two.ptyId);
     await ctx.svc.whenIdle();
-    expect(ctx.svc.cutOffRuns()).toMatchObject({ reason: "update", runs: [{ runId: one.runId, exact: true }, { runId: two.runId, exact: true }] });
+    expect((await ctx.svc.cutOffRuns())).toMatchObject({ reason: "update", runs: [{ runId: one.runId, exact: true }, { runId: two.runId, exact: true }] });
     await ctx.svc.continueRun(two.runId);
     expect(ctx.spawns.at(-1)?.argv).toEqual(["/usr/bin/argy", "--resume", B]);
-    expect(ctx.svc.cutOffRuns()?.runs.map((item) => item.runId)).toEqual([one.runId]);
+    expect((await ctx.svc.cutOffRuns())?.runs.map((item) => item.runId)).toEqual([one.runId]);
     ctx.svc.close();
   });
 });
@@ -152,10 +155,109 @@ describe("a run left going when VibeForge went down", () => {
     const next = setup({ configRoot, dataRoot });
     await next.svc.whenSettled();
     expect(next.svc.getRun(sent.runId).run).toMatchObject({ status: "stopped", cutOff: "crash" });
-    expect(next.svc.cutOffRuns()).toMatchObject({ reason: "crash", runs: [{ runId: sent.runId, chatId: chat.id }] });
+    expect((await next.svc.cutOffRuns())).toMatchObject({ reason: "crash", runs: [{ runId: sent.runId, chatId: chat.id }] });
     next.svc.settleCutOff([sent.runId]);
-    expect(next.svc.cutOffRuns()).toBeNull();
+    expect((await next.svc.cutOffRuns())).toBeNull();
     next.svc.close();
     first.svc.close();
+  });
+});
+
+describe("offers that stay right", () => {
+  it("is ready the moment the window asks after a crash, before the leftover runs are settled", async () => {
+    const first = setup();
+    const chat = first.svc.createChat({ engine: "argy" });
+    const sent = await first.svc.sendChat(chat.id, "long job");
+    const next = setup({ configRoot: first.configRoot, dataRoot: first.dataRoot });
+    // No whenSettled first: the window asks as soon as it opens.
+    expect(await next.svc.cutOffRuns()).toMatchObject({ reason: "crash", runs: [{ runId: sent.runId }] });
+    next.svc.close();
+    first.svc.close();
+  });
+
+  it("keeps an update's reason and all its runs when one of them wasn't recorded before VibeForge went", async () => {
+    const first = setup();
+    const a = await first.svc.sendChat(first.svc.createChat({ engine: "argy" }).id, "one");
+    const b = await first.svc.sendChat(first.svc.createChat({ engine: "argy" }).id, "two");
+    first.svc.prepareShutdown("update");
+    await first.exit(a.ptyId);
+    await first.svc.whenIdle();
+    // b's exit never arrives: it is still "running" at the next start.
+    const next = setup({ configRoot: first.configRoot, dataRoot: first.dataRoot });
+    const offered = await next.svc.cutOffRuns();
+    expect(offered?.reason).toBe("update");
+    expect(offered?.runs.map((run) => run.runId).sort()).toEqual([a.runId, b.runId].sort());
+    next.svc.close();
+    first.svc.close();
+  });
+
+  it("offers a close's runs at the next start only, not again after one where they were ignored", async () => {
+    const first = setup();
+    const sent = await first.svc.sendChat(first.svc.createChat({ engine: "argy" }).id, "job");
+    first.svc.prepareShutdown("quit");
+    await first.exit(sent.ptyId);
+    await first.svc.whenIdle();
+    first.svc.close();
+    const second = setup({ configRoot: first.configRoot, dataRoot: first.dataRoot });
+    expect((await second.svc.cutOffRuns())?.runs).toHaveLength(1);
+    // Ignored, then VibeForge went down with nothing running.
+    second.svc.close();
+    const third = setup({ configRoot: first.configRoot, dataRoot: first.dataRoot });
+    expect(await third.svc.cutOffRuns()).toBeNull();
+    third.svc.close();
+  });
+
+  it("types the command once however many times Continue is pressed, and starts a session once", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.startShell({ workspaceId: workspace.id, paneId: "p1" });
+    ctx.svc.onPtyProgram(first.ptyId, ["argy"], ctx.place);
+    await until(() => Boolean(ctx.svc.listLive()[0].runId));
+    const [run] = ctx.svc.listRuns();
+    ctx.svc.prepareShutdown("quit");
+    await ctx.exit(first.ptyId);
+    await ctx.svc.whenIdle();
+
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id, paneId: "p1" });
+    await Promise.all([ctx.svc.reopenInShell(shell.ptyId, run.id), ctx.svc.reopenInShell(shell.ptyId, run.id)]);
+    expect(ctx.sent.filter((item) => item.ptyId === shell.ptyId)).toHaveLength(1);
+
+    // Continue on a run another Continue already picked up goes to that one.
+    const chat = ctx.svc.createChat({ engine: "argy" });
+    const job = await ctx.svc.sendChat(chat.id, "job");
+    await ctx.exit(job.ptyId);
+    await ctx.svc.whenIdle();
+    const spawned = ctx.spawns.length;
+    const one = await ctx.svc.continueRun(job.runId);
+    const two = await ctx.svc.continueRun(job.runId);
+    expect(two.ptyId).toBe(one.ptyId);
+    expect(ctx.spawns.length).toBe(spawned + 1);
+    ctx.svc.close();
+  });
+
+  it("lets a pane's offer go once the person starts a CLI of their own there", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const first = await ctx.svc.startShell({ workspaceId: workspace.id, paneId: "p1" });
+    ctx.svc.onPtyProgram(first.ptyId, ["argy"], ctx.place);
+    await until(() => Boolean(ctx.svc.listLive()[0].runId));
+    ctx.svc.prepareShutdown("quit");
+    await ctx.exit(first.ptyId);
+    await ctx.svc.whenIdle();
+    expect(await ctx.svc.cutOffRuns()).not.toBeNull();
+    const shell = await ctx.svc.startShell({ workspaceId: workspace.id, paneId: "p1" });
+    ctx.svc.onPtyProgram(shell.ptyId, ["pasty"], ctx.place);
+    await until(() => ctx.svc.listLive().some((item) => item.ptyId === shell.ptyId && item.runId));
+    expect(await ctx.svc.cutOffRuns()).toBeNull();
+    ctx.svc.close();
+  });
+
+  it("still brings a pane's shell back when its session can't be reopened", async () => {
+    const ctx = setup();
+    const workspace = ctx.svc.addWorkspace(ctx.place).workspaces[0];
+    const started = await ctx.svc.startShell({ workspaceId: workspace.id, paneId: "p1", continueRun: "no-such-run" });
+    expect(started).toMatchObject({ ptyId: expect.any(String), reopenFailed: "That run no longer exists." });
+    expect(ctx.spawns.at(-1)?.pasteInput).toBeNull();
+    ctx.svc.close();
   });
 });

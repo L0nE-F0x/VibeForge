@@ -304,7 +304,7 @@ export class TeamService extends ServiceCore {
     this.workspaces.saveLayout(workspaceId, layout);
   }
 
-  startShell(opts: { workspaceId?: string; cwd?: string; command?: string; paneId?: string; continueRun?: string } & TermSize): Promise<{ ptyId: string }> {
+  startShell(opts: { workspaceId?: string; cwd?: string; command?: string; paneId?: string; continueRun?: string } & TermSize): Promise<{ ptyId: string; reopenFailed?: string }> {
     return this.workspaces.startShell(opts);
   }
 

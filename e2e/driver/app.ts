@@ -37,7 +37,7 @@ const GIT_IDENTITY = {
 const PASSED_THROUGH = ["DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "TMPDIR", "CI", "GITHUB_ACTIONS"];
 
 export type Plan = { match?: string; structured: { say: string; steps: unknown[]; [key: string]: unknown } };
-export type Turn = { match?: string; say?: string[]; files?: Record<string, string>; gate?: string; after?: string[]; exit?: number };
+export type Turn = { match?: string; say?: string[]; files?: Record<string, string>; gate?: string; after?: string[]; exit?: number; /** Wait at its prompt after the turn instead of exiting. */ stay?: boolean; /** Ms between `after` lines. */ pace?: number };
 /** How one stand-in CLI behaves (e2e/standins/standin.cjs). */
 export type Standin = { plans?: Plan[]; turns?: Turn[] };
 

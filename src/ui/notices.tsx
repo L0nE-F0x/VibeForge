@@ -15,7 +15,19 @@ const CUT_OFF_SAID = "vibeforge:cut-off-said";
  * Pick each cut-off run back up: one from a Code pane in that pane, a chat's or a task's in its own
  * place, any other in a new pane. One that can't doesn't hold the others back. How many went.
  */
-async function continueCutOff(runs: readonly CutOffRun[]): Promise<{ continued: number; failed: unknown }> {
+async function continueCutOff(asked: readonly CutOffRun[]): Promise<{ continued: number; failed: unknown }> {
+  // Only those still offered (one may have been continued since the notice came up). Of two of one
+  // CLI in one folder whose sessions aren't known exactly, one: both would open the folder's latest.
+  const current = await cutOffNote();
+  const seen = new Set<string>();
+  const runs = asked.filter((run) => {
+    if (!current?.runs.some((item) => item.runId === run.runId)) return false;
+    if (run.exact) return true;
+    const key = `${run.engine}\u0000${run.workspaceId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const panes = runs.filter(inPane);
   continueInPanes(panes.map((run) => run.runId));
   let failed: unknown = null;
@@ -133,6 +145,7 @@ export function MainNotices() {
         offered.every((run) => run.exact) ? t("app.notice.cutOffBody") : t("app.notice.cutOffBodyLatest"),
         {
           label: t("app.notice.continueAll"),
+          notUndo: true,
           run: () =>
             void continueCutOff(offered).then(({ continued, failed }) => {
               if (continued) push("success", t.count("app.notice.continued", continued));

@@ -14,18 +14,25 @@ const SESSION = "0f8e0a52-1c2d-4e3f-9a8b-7c6d5e4f3a2b";
 const shellIn = async (app: App, workspaceId: string) => (await app.call<Live[]>("live.list")).find((s) => s.kind === "shell" && s.workspaceId === workspaceId);
 
 test("a CLI cut off by a quit is offered back in its pane, and Continue reopens its exact session", async () => {
+  const folder0 = "Projects/cut";
+  // The stand-in writes Claude Code's session log for its folder while it works, as the real one does.
   const app = await launchApp({
     standins: {
       claude: {
         turns: [
           { match: "--resume", say: ["Picked the session back up"], gate: "resumed" },
-          { match: "--model", say: ["Working on it"], gate: "never" },
+          { match: "--model", say: ["Working on it"], gate: "log", files: {}, after: ["Reading files", "Editing a.txt", "Running tests", "Checking", "Done for now"], pace: 700, stay: true },
         ],
       },
     },
   });
-  const folder = path.join(app.paths.home, "Projects", "cut");
+  const folder = path.join(app.paths.home, folder0);
   fs.mkdirSync(folder, { recursive: true });
+  const logFile = path.join(claudeProjectDir(app.paths.home, folder), `${SESSION}.jsonl`);
+  const script = path.join(app.paths.standins, "claude.json");
+  const steer = JSON.parse(fs.readFileSync(script, "utf8"));
+  steer.turns[1].files = { [path.relative(folder, logFile)]: `${JSON.stringify({ type: "user", cwd: folder, sessionId: SESSION, message: { role: "user", content: "tidy up" } })}\n` };
+  fs.writeFileSync(script, JSON.stringify(steer));
   const added = await app.call<{ workspaces: Array<{ id: string; path: string }> }>("workspaces.add", folder);
   const workspaceId = added.workspaces.find((w) => w.path === folder)!.id;
 
@@ -34,13 +41,11 @@ test("a CLI cut off by a quit is offered back in its pane, and Continue reopens 
   const shell = await app.waitFor(() => shellIn(app, workspaceId), { what: "the shell" });
   await app.terminal(shell.ptyId).waitForText("$");
   await app.call("pty.write", shell.ptyId, "claude --model opus 'tidy up'\r");
-  await app.terminal(shell.ptyId).waitForText("Working on it");
+  await app.waitForGate("log");
   const run = await app.waitFor(async () => (await app.call<Run[]>("runs.list", {})).find((r) => r.engine === "claude" && r.cwd === folder), { what: "a run for the typed claude" });
-
-  // Claude Code's session log for this folder, as the real one writes it while it works.
-  const logDir = claudeProjectDir(app.paths.home, folder);
-  fs.mkdirSync(logDir, { recursive: true });
-  fs.writeFileSync(path.join(logDir, `${SESSION}.jsonl`), `${JSON.stringify({ type: "user", cwd: folder, sessionId: SESSION, timestamp: new Date().toISOString(), message: { role: "user", content: "tidy up" } })}\n`);
+  // It works: its log grows while its screen moves.
+  app.openGate("log");
+  await app.terminal(shell.ptyId).waitForText("Done for now");
   await app.waitFor(async () => (await app.call<{ run: Run }>("runs.get", run.id)).run.resumeArgs?.includes(SESSION), { what: "the run to know its session", timeoutMs: 20_000 });
 
   await app.restart();

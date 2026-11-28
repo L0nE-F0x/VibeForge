@@ -5,6 +5,7 @@ import { LOCAL_ENGINE_ID } from "../local.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
 import type { LayoutNode, Workspace, WorkspaceCategory } from "../types.js";
+import { replyLogFor } from "../replies.js";
 import { resumeCommand } from "../session-ids.js";
 import { summarizeFolderGit } from "../vcs.js";
 import {
@@ -22,6 +23,9 @@ import {
 } from "../workspaces.js";
 import type { Deleted, Launched, TermSize, WorkspaceSummary } from "./types.js";
 import type { ServiceCore } from "./core.js";
+
+/** How long a command typed in to reopen a session has to start its CLI before another may be typed. */
+const REOPEN_MS = 30_000;
 
 const GIT_STATUS_CONCURRENCY = 6;
 
@@ -258,15 +262,24 @@ export class WorkspaceDesk {
    */
   async startShell(
     opts: { workspaceId?: string; cwd?: string; orchestrated?: boolean; command?: string; paneId?: string; continueRun?: string } & TermSize,
-  ): Promise<{ ptyId: string }> {
+  ): Promise<{ ptyId: string; reopenFailed?: string }> {
     // A run left over from a crash is still being recorded: its session is read once it is.
     if (opts.continueRun) await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
     const cwd = workspace?.path ?? opts.cwd ?? "";
     if (!isDirectory(cwd)) throw new Error("That folder does not exist any more.");
     const shell = this.core.store.readSettings().defaultShell || process.env.SHELL || "/bin/bash";
-    const reopen = opts.continueRun ? this.reopenCommand(opts.continueRun) : null;
-    const command = reopen ?? opts.command?.trim() ?? "";
+    let reopen: string | null = null;
+    let reopenFailed: string | null = null;
+    if (opts.continueRun) {
+      try {
+        reopen = this.reopenCommand(opts.continueRun);
+      } catch (error) {
+        // The shell comes back all the same; the window says why the session didn't.
+        reopenFailed = error instanceof Error ? error.message : String(error);
+      }
+    }
+    const command = reopen ?? (opts.continueRun ? "" : (opts.command?.trim() ?? ""));
     const spawned = await this.core.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: command || null, cols: opts.cols, rows: opts.rows });
     if (spawned.ptyToken) this.core.ptyTokens.set(spawned.ptyId, spawned.ptyToken);
     this.core.live.set(spawned.ptyId, {
@@ -288,7 +301,7 @@ export class WorkspaceDesk {
     });
     if (reopen && opts.continueRun) this.core.shellContinues.set(spawned.ptyId, opts.continueRun);
     this.core.emit("live");
-    return { ptyId: spawned.ptyId };
+    return reopenFailed ? { ptyId: spawned.ptyId, reopenFailed } : { ptyId: spawned.ptyId };
   }
 
   /** Type the command that reopens run `runId`'s session into a Code shell that is at its prompt. */
@@ -296,8 +309,14 @@ export class WorkspaceDesk {
     const session = this.core.live.get(ptyId);
     if (!session || session.kind !== "shell") throw new Error("That terminal has closed.");
     if (session.programEngineId) throw new Error(`${session.program ?? "A CLI"} is already running in that terminal.`);
+    // Already typed in and starting (a second click, or Continue all with the pane's own button).
+    if (this.core.shellContinues.has(ptyId) || this.core.continuedLive(runId)) return;
     const command = this.reopenCommand(runId);
     this.core.shellContinues.set(ptyId, runId);
+    // A CLI that never comes up doesn't hold the shell's next Continue forever.
+    setTimeout(() => {
+      if (this.core.shellContinues.get(ptyId) === runId) this.core.shellContinues.delete(ptyId);
+    }, REOPEN_MS).unref?.();
     await this.core.options.host.send(ptyId, command, true);
   }
 
@@ -309,7 +328,7 @@ export class WorkspaceDesk {
     if (!row) throw new Error("That CLI is no longer in Settings → Engines.");
     const resume = this.core.exactResume(run, row) ?? row.continueArgs ?? [];
     if (!resume.length) throw new Error(`${row.label} has no way to pick a session back up.`);
-    return resumeCommand(row.bin, run.argv, resume);
+    return resumeCommand(row.bin, run.argv, resume, replyLogFor(row.id, row.bin));
   }
 
   /** A one-off command in a terminal (the self-update), listed with the live sessions. */

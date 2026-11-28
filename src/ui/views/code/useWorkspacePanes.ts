@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CutOffRun, Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../../../shared/api.js";
 import { call } from "../../api.js";
-import { cutOffInPane, cutOffNote, cutOffRun, onPaneContinue, settleCutOff, takePaneContinues } from "../../cut-off.js";
+import { cutOffInPane, cutOffNote, cutOffRun, onCutOffChange, onPaneContinue, settleCutOff, takePaneContinues } from "../../cut-off.js";
 import { estimateTermSize, type TerminalHandle } from "../../components/Terminal.js";
 import { useT } from "../../i18n/index.js";
 import { movePane, panesOf, placeSession, reattachPanes, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode, type PaneTerminal } from "../../pane-layout.js";
@@ -112,6 +112,9 @@ export function useWorkspacePanes({
   const unstartedShells = useRef(new Set<string>());
   /** Cut-off runs Continue all asked for whose workspace was still loading: loading it continues them. */
   const wantContinue = useRef(new Set<string>());
+  /** Ones asked for before the workspace list came in. */
+  const waitingForWorkspaces = useRef<string[]>([]);
+  const pickContinues = useRef<() => void>(() => undefined);
 
   // What the page before this one left, read before the effect below writes this page's (empty) list.
   const remembered = useRef<Record<string, PaneTerminal> | null>(null);
@@ -202,7 +205,8 @@ export function useWorkspacePanes({
           return null;
         }
         patchRuntime(pane.id, { ptyId: started.ptyId, runId: started.runId, state: "live" });
-        if (continueRun) settleCutOff([continueRun]);
+        if ("reopenFailed" in started && started.reopenFailed) fail(new Error(started.reopenFailed), t("app.notice.continueFailed"));
+        else if (continueRun) settleCutOff([continueRun]);
         setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
         return started.ptyId;
       } catch (error) {
@@ -282,10 +286,15 @@ export function useWorkspacePanes({
   // Continue all, from the notice a close's cut-off CLIs get: each goes back in its own pane.
   useEffect(() => {
     const pick = () => {
-      for (const runId of takePaneContinues()) {
+      for (const runId of [...takePaneContinues(), ...waitingForWorkspaces.current.splice(0)]) {
         const cut = cutOffRun(runId);
-        const workspace = cut?.workspaceId ? workspacesRef.current.find((item) => item.id === cut.workspaceId) : null;
-        if (!cut?.paneId || !workspace) continue;
+        if (!cut?.paneId || !cut.workspaceId) continue;
+        const workspace = workspacesRef.current.find((item) => item.id === cut.workspaceId);
+        if (!workspace) {
+          // The workspace list isn't in yet: tried again when it is.
+          waitingForWorkspaces.current.push(runId);
+          continue;
+        }
         if (!(workspace.id in layoutsRef.current)) {
           // Its layout isn't loaded yet: loading it picks this up.
           wantContinue.current.add(runId);
@@ -304,10 +313,25 @@ export function useWorkspacePanes({
         void continuePaneRun(workspace, pane, runId);
       }
     };
+    pickContinues.current = pick;
     pick();
     return onPaneContinue(pick);
     // Everything it reads is through refs, or stable.
   }, [loadWorkspaceLayout, startPane, patchRuntime]);
+  useEffect(() => {
+    if (waitingForWorkspaces.current.length) pickContinues.current();
+  }, [workspaces]);
+
+  // A pane's offer goes once its run is no longer offered (continued elsewhere, or let go).
+  useEffect(
+    () =>
+      onCutOffChange(() => {
+        for (const [paneId, state] of Object.entries(runtimeRef.current)) {
+          if (state.cutOff && !cutOffRun(state.cutOff.runId)) patchRuntime(paneId, { cutOff: null });
+        }
+      }),
+    [patchRuntime, runtimeRef],
+  );
 
   /**
    * Pick a cut-off run's session back up in its pane: typed into the pane's shell when that is
@@ -318,11 +342,14 @@ export function useWorkspacePanes({
     const session = state?.ptyId ? liveRef.current.find((item) => item.ptyId === state.ptyId) : undefined;
     if (state?.state === "live" && state.ptyId && pane.launch.type === "shell") {
       if (session?.programEngineId) return;
+      // The offer goes at once, so a second click can't type the command again.
+      const cut = state.cutOff ?? null;
+      patchRuntime(pane.id, { cutOff: null, fresh: false });
       try {
         await call("code.reopen", state.ptyId, runId);
-        patchRuntime(pane.id, { cutOff: null, fresh: false });
         settleCutOff([runId]);
       } catch (error) {
+        patchRuntime(pane.id, { cutOff: cut });
         fail(error, t("app.notice.continueFailed"));
       }
       return;

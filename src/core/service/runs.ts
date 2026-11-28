@@ -122,6 +122,9 @@ export class RunDesk {
       if (followUp) throw new Error("That session is still closing.");
       return { runId: id, ptyId: still, chatId: run.chatId, taskId: run.taskId };
     }
+    // Already picked back up (Continue all and a pane's button, or a second click): that one, not another.
+    const again = this.core.continuedLive(id);
+    if (again && !followUp) return { ...again, chatId: run.chatId, taskId: run.taskId };
     if (run.chatId && this.core.store.getChat(run.chatId)) {
       const result = followUp ? await this.chats.sendChat(run.chatId, followUp, size) : await this.chats.continueChat(run.chatId, size);
       return { runId: result.runId, ptyId: result.ptyId, chatId: run.chatId, taskId: null };

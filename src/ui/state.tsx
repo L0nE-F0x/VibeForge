@@ -259,6 +259,8 @@ export type ToastKind = "info" | "success" | "error";
 export interface ToastAction {
   label: string;
   run: () => void;
+  /** Not an undo: Ctrl+Z leaves it alone (Continue all, say). */
+  notUndo?: boolean;
 }
 
 export interface Toast {
@@ -307,7 +309,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
   // Ctrl+Z takes the newest toast's action (Undo) while it's up, unless you're typing somewhere.
   const latest = useRef<Toast | undefined>(undefined);
-  latest.current = [...toasts].reverse().find((toast) => toast.action);
+  latest.current = [...toasts].reverse().find((toast) => toast.action && !toast.action.notUndo);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!isShortcut("toast.undo", event)) return;

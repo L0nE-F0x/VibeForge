@@ -7,6 +7,7 @@ import { useT, type Translator } from "../i18n/index.js";
 import { Rich } from "../i18n/Rich.js";
 import { headline, notesBlocks } from "../notes.js";
 import { openHomeOnNextStart, useConfirm, useToast } from "../state.js";
+import { tipProps } from "./Tooltip.js";
 import { markUpdated, useUpdated } from "../update-state.js";
 import { LiveTerminal } from "./Terminal.js";
 import { Button, Empty, Modal, Notice } from "./ui.js";
@@ -102,22 +103,23 @@ export function installText(info: UpdateInfo, appPath: string, t: Translator): s
   return t("updates.installOther", { path: appPath });
 }
 
-/** How often a restart waiting for CLIs to finish their turn looks again, and how long it waits at most. */
+/** How often a restart waiting for CLIs to finish their turn looks again. */
 const TURN_POLL_MS = 2000;
-const TURN_WAIT_MS = 60 * 60_000;
 
 /**
  * Restart VibeForge to finish an update (or Go back), asking first while other terminals run.
- * A CLI in the middle of a turn is waited for, so no edit is cut off halfway; "Restart now"
- * doesn't wait. After the restart each CLI's session reopens by itself. `own` is the update's terminal.
+ * A CLI in the middle of a turn is waited for, so no edit is cut off halfway: the button says how
+ * many, and Restart now doesn't wait. After the restart each CLI's session reopens by itself.
+ * `own` is the update's terminal.
  */
-function useRestart(own: string | null = null): () => Promise<void> {
+function useRestart(own: string | null = null): { restart: () => Promise<void>; waitingFor: number; now: () => void } {
   const t = useT();
   const live = useLive().data ?? [];
   const confirm = useConfirm();
-  const { push, dismiss } = useToast();
+  const [waitingFor, setWaitingFor] = useState(0);
   const busy = useRef(false);
-  return async () => {
+  const skip = useRef(false);
+  const restart = async () => {
     if (busy.current) return;
     const others = live.filter((session) => session.ptyId !== own).length;
     if (others > 0) {
@@ -125,36 +127,48 @@ function useRestart(own: string | null = null): () => Promise<void> {
       if (!ok) return;
     }
     busy.current = true;
+    skip.current = false;
     try {
       const working = async () => (await call("live.list").catch(() => [])).filter((session) => session.ptyId !== own && session.working).length;
-      let left = await working();
-      if (left > 0) {
-        let now = false;
-        const restartNow = {
-          label: t("updates.restartNow"),
-          run: () => {
-            now = true;
-          },
-        };
-        const started = Date.now();
-        let toast = push("info", t.count("updates.waiting", left), t("updates.waitingBody"), restartNow, { stay: true });
-        while (!now && left > 0 && Date.now() - started < TURN_WAIT_MS) {
-          await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
-          const next = await working();
-          if (next !== left && next > 0 && !now) {
-            dismiss(toast);
-            toast = push("info", t.count("updates.waiting", next), t("updates.waitingBody"), restartNow, { stay: true });
-          }
-          left = next;
-        }
-        dismiss(toast);
+      for (let left = await working(); left > 0 && !skip.current; left = await working()) {
+        setWaitingFor(left);
+        await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
       }
+      setWaitingFor(0);
       openHomeOnNextStart();
       await call("app.restart", { reason: "update" });
     } finally {
       busy.current = false;
     }
   };
+  return {
+    restart,
+    waitingFor,
+    now: () => {
+      skip.current = true;
+    },
+  };
+}
+
+/** Restart, or while CLIs finish their turn, what it waits for and Restart now. */
+function RestartButton({ restart }: { restart: ReturnType<typeof useRestart> }) {
+  const t = useT();
+  if (!restart.waitingFor)
+    return (
+      <Button variant="primary" icon={RotateCcw} onClick={() => void restart.restart()}>
+        {t("updates.restart")}
+      </Button>
+    );
+  return (
+    <>
+      <span className="faint" {...tipProps(t("updates.waitingBody"))}>
+        <span className="spinner" /> {t.count("updates.waiting", restart.waitingFor)}
+      </span>
+      <Button variant="primary" icon={RotateCcw} onClick={restart.now}>
+        {t("updates.restartNow")}
+      </Button>
+    </>
+  );
 }
 
 /**
@@ -165,15 +179,7 @@ export function RestartToFinish() {
   const t = useT();
   const restart = useRestart();
   return (
-    <Empty
-      icon={RotateCcw}
-      title={t("updates.finishTitle")}
-      actions={
-        <Button variant="primary" icon={RotateCcw} onClick={() => void restart()}>
-          {t("updates.restart")}
-        </Button>
-      }
-    >
+    <Empty icon={RotateCcw} title={t("updates.finishTitle")} actions={<RestartButton restart={restart} />}>
       {t("updates.finishBody")}
     </Empty>
   );
@@ -229,9 +235,7 @@ export function UpdateSheet({ appPath, onClose }: { appPath: string; onClose: ()
   const between = info.between ?? [];
 
   const footer = running ? null : succeeded || wentBack ? (
-    <Button variant="primary" icon={RotateCcw} onClick={() => void restart()}>
-      {t("updates.restart")}
-    </Button>
+    <RestartButton restart={restart} />
   ) : (
     <>
       {latest?.url && (

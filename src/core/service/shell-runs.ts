@@ -108,7 +108,7 @@ export class ShellRecorder {
       error: null,
       changes: null,
       gitStart,
-      continuedFrom: this.takeContinue(ptyId, row.id),
+      ...this.takeContinue(ptyId, row.id, session.paneId ?? null),
       ...(session.paneId ? { paneId: session.paneId } : {}),
     });
     try {
@@ -127,15 +127,21 @@ export class ShellRecorder {
     this.core.emit("runs", "live");
   }
 
-  /** The run Continue its session typed this shell's CLI in for, once: only the CLI it reopens. */
-  private takeContinue(ptyId: string, engineId: string): string | null {
+  /**
+   * The run Continue its session typed this shell's CLI in for, once (only the CLI it reopens), with
+   * the session it reopened. A CLI the person typed in themselves instead lets the pane's offer go.
+   */
+  private takeContinue(ptyId: string, engineId: string, paneId: string | null): { continuedFrom: string | null; resumeArgs?: string[] } {
     const runId = this.core.shellContinues.get(ptyId);
-    if (!runId) return null;
     this.core.shellContinues.delete(ptyId);
-    const previous = this.core.store.getRun(runId);
-    if (previous?.engine !== engineId) return null;
+    const previous = runId ? this.core.store.getRun(runId) : null;
+    if (!runId || previous?.engine !== engineId) {
+      if (paneId) this.core.settleCutOffInPane(paneId);
+      return { continuedFrom: null };
+    }
     this.core.settleCutOff([runId]);
-    return runId;
+    const exact = this.core.exactResume(previous);
+    return { continuedFrom: runId, ...(exact ? { resumeArgs: exact } : {}) };
   }
 
   private async endShellRun(ptyId: string, runId: string): Promise<void> {

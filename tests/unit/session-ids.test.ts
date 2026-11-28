@@ -29,39 +29,26 @@ describe("session ids from session logs", () => {
 describe("matching live runs to their session logs", () => {
   const key = (cwd: string) => `claude\u0000${cwd}`;
   const run = (runId: string, extra: Partial<TrackedRun> = {}): TrackedRun => ({ runId, kind: "claude", cwd: "/app", startedMs: 1000, active: false, file: null, ...extra });
+  const logsOf = (...list: Array<[string, number]>) => new Map([[key("/app"), list.map(([file, mtimeMs]) => ({ file: `/p/${file}.jsonl`, mtimeMs }))]]);
 
-  it("gives a run alone in its folder the log written to most recently since it started", () => {
-    const logs = new Map([
-      [
-        key("/app"),
-        [
-          { file: "/p/old.jsonl", mtimeMs: 10 },
-          { file: `/p/${A}.jsonl`, mtimeMs: 5000 },
-          { file: `/p/${B}.jsonl`, mtimeMs: 4000 },
-        ],
-      ],
-    ]);
-    expect(matchSessionLogs([run("r1")], logs, new Map())).toEqual(new Map([["r1", `/p/${A}.jsonl`]]));
-    // A log last written long before it started is someone else's.
-    expect(matchSessionLogs([run("r1", { startedMs: 9000 })], logs, new Map())).toEqual(new Map());
+  it("gives a working run alone in its folder the log that grew since it started", () => {
+    const logs = logsOf(["old", 10], [A, 5000], [B, 4000]);
+    expect(matchSessionLogs([run("r1", { active: true })], logs, new Map())).toEqual(new Map([["r1", `/p/${A}.jsonl`]]));
+    // A log last written before it started is someone else's.
+    expect(matchSessionLogs([run("r1", { active: true, startedMs: 9000 })], logs, new Map())).toEqual(new Map());
+  });
+
+  it("never gives an idle run a log someone else wrote, nor moves an idle run to one", () => {
+    const logs = logsOf([A, 5000]);
+    expect(matchSessionLogs([run("r1")], logs, new Map())).toEqual(new Map());
+    const moved = logsOf([A, 2000], [B, 6000]);
+    expect(matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` })], moved, new Map([[`/p/${A}.jsonl`, 2000]]))).toEqual(new Map([["r1", `/p/${A}.jsonl`]]));
   });
 
   it("shares logs out between two in one folder by which one was working when each grew", () => {
-    const first = new Map([[key("/app"), [{ file: `/p/${A}.jsonl`, mtimeMs: 2000 }]]]);
-    // Only r1 was working: the new log is r1's, though r2 is still unmatched too.
-    let matched = matchSessionLogs([run("r1", { active: true }), run("r2")], first, new Map());
+    let matched = matchSessionLogs([run("r1", { active: true }), run("r2")], logsOf([A, 2000]), new Map());
     expect(matched).toEqual(new Map([["r1", `/p/${A}.jsonl`]]));
-    const second = new Map([
-      [
-        key("/app"),
-        [
-          { file: `/p/${A}.jsonl`, mtimeMs: 2000 },
-          { file: `/p/${B}.jsonl`, mtimeMs: 3000 },
-        ],
-      ],
-    ]);
-    // Next look: r2 worked, and a new log appeared.
-    matched = matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` }), run("r2", { active: true })], second, new Map([[`/p/${A}.jsonl`, 2000]]));
+    matched = matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` }), run("r2", { active: true })], logsOf([A, 2000], [B, 3000]), new Map([[`/p/${A}.jsonl`, 2000]]), new Map([[key("/app"), 2500]]));
     expect(matched).toEqual(
       new Map([
         ["r1", `/p/${A}.jsonl`],
@@ -70,41 +57,45 @@ describe("matching live runs to their session logs", () => {
     );
   });
 
-  it("leaves a log unmatched when it can't tell whose it is, and never gives one log to two runs", () => {
-    const logs = new Map([[key("/app"), [{ file: `/p/${A}.jsonl`, mtimeMs: 2000 }]]]);
-    // Both working: nobody gets it yet.
-    expect(matchSessionLogs([run("r1", { active: true }), run("r2", { active: true })], logs, new Map())).toEqual(new Map());
+  it("gives a new log to nobody when nobody, or more than one, was working", () => {
+    expect(matchSessionLogs([run("r1"), run("r2", { file: `/p/${B}.jsonl` })], logsOf([A, 2000]), new Map())).toEqual(new Map([["r2", `/p/${B}.jsonl`]]));
+    expect(matchSessionLogs([run("r1", { active: true }), run("r2", { active: true })], logsOf([A, 2000]), new Map())).toEqual(new Map());
     // Already r1's: r2 working on it doesn't take it.
-    expect(matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` }), run("r2", { active: true })], logs, new Map([[`/p/${A}.jsonl`, 1000]]))).toEqual(
+    expect(matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` }), run("r2", { active: true })], logsOf([A, 2000]), new Map([[`/p/${A}.jsonl`, 1000]]))).toEqual(
       new Map([["r1", `/p/${A}.jsonl`]]),
     );
   });
 
+  it("keeps a working run on its own log when another log grew beside it", () => {
+    const logs = logsOf([A, 6000], [B, 6500]);
+    expect(matchSessionLogs([run("r1", { active: true, file: `/p/${A}.jsonl` })], logs, new Map([[`/p/${A}.jsonl`, 2000]]), new Map([[key("/app"), 5000]]))).toEqual(new Map([["r1", `/p/${A}.jsonl`]]));
+  });
+
   it("follows a CLI that moves to another session (/clear) once it writes there", () => {
-    const logs = new Map([
-      [
-        key("/app"),
-        [
-          { file: `/p/${A}.jsonl`, mtimeMs: 2000 },
-          { file: `/p/${B}.jsonl`, mtimeMs: 6000 },
-        ],
-      ],
-    ]);
-    expect(matchSessionLogs([run("r1", { file: `/p/${A}.jsonl` })], logs, new Map())).toEqual(new Map([["r1", `/p/${B}.jsonl`]]));
+    const logs = logsOf([A, 2000], [B, 6000]);
+    expect(matchSessionLogs([run("r1", { active: true, file: `/p/${A}.jsonl` })], logs, new Map([[`/p/${A}.jsonl`, 2000]]), new Map([[key("/app"), 5000]]))).toEqual(new Map([["r1", `/p/${B}.jsonl`]]));
   });
 });
 
 describe("the command that reopens a session in a shell", () => {
-  it("keeps the options it was started with, drops its prompt and old session, and adds the session", () => {
-    expect(resumeCommand("claude", ["/home/me/.local/share/claude/versions/2.1.283", "--dangerously-skip-permissions", "--model", "opus", "fix the build"], ["--resume", A])).toBe(
-      `claude --dangerously-skip-permissions --model opus --resume ${A}`,
-    );
-    expect(resumeCommand("claude", ["claude", "--continue", "-r", "old-session-1"], ["--resume", A])).toBe(`claude --resume ${A}`);
-    // A script run by node: its own arguments come after the script.
-    expect(resumeCommand("claude", ["node", "/usr/lib/node_modules/claude/cli.js", "--verbose"], ["--resume", A])).toBe(`claude --verbose --resume ${A}`);
-    // Codex: the session goes after its subcommand, with the options between.
-    expect(resumeCommand("codex", ["codex", "--yolo", "resume", "--last"], ["resume", B])).toBe(`codex resume --yolo ${B}`);
-    // Anything unusual is quoted.
-    expect(resumeCommand("/opt/my cli/claude", ["claude", "--name=a b"], ["--resume", A])).toBe(`'/opt/my cli/claude' '--name=a b' --resume ${A}`);
+  const cases: Array<[string, string, string[], string[], string]> = [
+    // [what, bin, argv, resume, typed]
+    ["keeps safe options, drops the prompt", "claude", ["/home/me/.local/share/claude/versions/2.1.283", "--dangerously-skip-permissions", "--model", "opus", "fix the build"], ["--resume", A], `claude --dangerously-skip-permissions --model opus --resume ${A}`],
+    ["drops the session first picked", "claude", ["claude", "--continue", "-r", "old-session-1"], ["--resume", A], `claude --resume ${A}`],
+    ["keeps a value that is a sentence", "claude", ["claude", "--append-system-prompt", "be terse", "hi"], ["--resume", A], `claude --append-system-prompt 'be terse' --resume ${A}`],
+    ["keeps every file a list option names", "claude", ["claude", "--mcp-config", "a.json", "b.json", "--model", "opus"], ["--resume", A], `claude --mcp-config a.json b.json --model opus --resume ${A}`],
+    ["keeps allowed tools", "claude", ["claude", "--allowedTools", "Bash(git:*)", "Edit", "--model", "opus"], ["--resume", A], `claude --allowedTools 'Bash(git:*)' Edit --model opus --resume ${A}`],
+    ["drops an option it doesn't know, with its value", "claude", ["claude", "--output-style", "terse", "--model", "opus"], ["--resume", A], `claude --model opus --resume ${A}`],
+    ["drops print mode", "claude", ["claude", "-p", "--model", "opus"], ["--resume", A], `claude --model opus --resume ${A}`],
+    ["reads a script run by node", "claude", ["node", "/usr/lib/node_modules/claude/cli.js", "--verbose"], ["--resume", A], `claude --verbose --resume ${A}`],
+    ["puts Codex's options after its subcommand", "codex", ["codex", "--yolo", "resume", "--last"], ["resume", B], `codex resume --yolo ${B}`],
+    ["keeps Codex's approval, sandbox, profile and config", "codex", ["codex", "-a", "never", "-s", "workspace-write", "-p", "work", "-c", "model=o4"], ["resume", B], `codex resume -a never -s workspace-write -p work -c model=o4 ${B}`],
+    ["keeps nothing for a CLI it doesn't know", "agy", ["agy", "--yolo", "--model", "x"], ["--continue"], "agy --continue"],
+    ["quotes anything unusual", "/opt/my cli/claude", ["claude", "--model=a b"], ["--resume", A], `'/opt/my cli/claude' '--model=a b' --resume ${A}`],
+    ["never lets a value run as a command", "claude", ["claude", "--append-system-prompt", "$(rm -rf ~)"], ["--resume", A], `claude --append-system-prompt '$(rm -rf ~)' --resume ${A}`],
+  ];
+  it.each(cases)("%s", (_what, bin, argv, resume, typed) => {
+    const kind = bin.includes("claude") ? "claude" : bin === "codex" ? "codex" : null;
+    expect(resumeCommand(bin, argv, resume, kind)).toBe(typed);
   });
 });

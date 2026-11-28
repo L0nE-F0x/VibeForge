@@ -8,7 +8,7 @@
 //
 //   {
 //     "plans": [{ "match": "regex", "structured": { "say": "...", "steps": [...] } }],
-//     "turns": [{ "match": "regex", "say": ["line", ...], "files": { "path": "text" }, "gate": "name", "after": ["line"], "exit": 0 }]
+//     "turns": [{ "match": "regex", "say": ["line", ...], "files": { "path": "text" }, "gate": "name", "after": ["line"], "exit": 0, "stay": false, "pace": 0 }]
 //   }
 //
 // A headless planning turn (`--print`, as VibeForge asks Claude Code to plan; with `--input-format
@@ -16,7 +16,7 @@
 // first plan whose `match` finds the person's words, in Claude Code's JSON result format. Any other
 // start is an interactive turn, the first whose `match` finds its arguments: it prints `say`; if
 // the turn has a `gate`, waits until the test opens it (<folder>/gates/<gate>); then writes `files`
-// (relative to where it was started), prints `after` and exits. So a test can look at the CLI
+// (relative to where it was started), prints `after` (one line every `pace` ms, if set) and exits, or with `stay` waits at its prompt until killed. So a test can look at the CLI
 // while it works, and its edits come after VibeForge has noted where the run started. Turns never end on a timer. Every start is logged as one JSON line
 // in <folder>/<name>.calls.jsonl: arguments, folder and mode. "$HOME" in a plan becomes the home
 // the CLI was started with.
@@ -100,9 +100,24 @@ if (streamed) {
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, text);
     }
-    say(turn.after);
-    log({ mode: "done", turn: turn.match ?? null });
-    process.exit(turn.exit ?? 0);
+    const end = () => {
+      log({ mode: "done", turn: turn.match ?? null });
+      if (turn.stay) setInterval(() => undefined, 60_000);
+      else process.exit(turn.exit ?? 0);
+    };
+    // `pace`: one `after` line every so many ms, the way a working CLI's screen keeps changing.
+    if (!turn.pace) {
+      say(turn.after);
+      end();
+      return;
+    }
+    const lines = [...(turn.after ?? [])];
+    const next = () => {
+      if (!lines.length) return end();
+      say([lines.shift()]);
+      setTimeout(next, turn.pace);
+    };
+    next();
   };
   if (turn.gate) {
     const gates = path.join(folder, "gates");

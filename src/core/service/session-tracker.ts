@@ -1,6 +1,6 @@
 import { LOCAL_ENGINE_ID } from "../local.js";
 import { replyLogFor, type ReplyLog } from "../replies.js";
-import { matchSessionLogs, resumeArgsFor, sessionIdOf, type SessionLog, type TrackedRun } from "../session-ids.js";
+import { matchSessionLogs, resumeArgsFor, sessionGroup, sessionIdOf, type SessionLog, type TrackedRun } from "../session-ids.js";
 import type { ServiceCore } from "./core.js";
 
 /** How often live CLIs' session logs are looked at. */
@@ -18,7 +18,8 @@ export class SessionTracker {
   private before = new Map<string, number>();
   /** Each live run's log, as matched so far. */
   private files = new Map<string, string>();
-  private lastLook = 0;
+  /** Per folder (sessionGroup), when its logs were last looked at. */
+  private looks = new Map<string, number>();
   private looking: Promise<void> | null = null;
 
   constructor(private readonly core: ServiceCore) {}
@@ -54,7 +55,6 @@ export class SessionTracker {
     const find = this.core.options.host.sessionLogs;
     if (!find) return;
     const now = this.core.now().getTime();
-    const since = this.lastLook || now;
     const runs: TrackedRun[] = [];
     for (const session of this.core.live.values()) {
       if (!session.runId) continue;
@@ -64,34 +64,39 @@ export class SessionTracker {
       const kind = this.kindOf(run.engine, run.localHarness);
       if (!kind || kind === "opencode") continue;
       const quiet = session.quietAt ? Date.parse(session.quietAt) : NaN;
+      const startedMs = Date.parse(run.startedAt);
+      // Worked since its folder was last looked at (or since it started).
+      const since = Math.max(this.looks.get(sessionGroup(kind, run.cwd)) ?? 0, startedMs);
       runs.push({
         runId: run.id,
         kind,
         cwd: run.cwd,
-        startedMs: Date.parse(run.startedAt),
+        startedMs,
         active: Boolean(session.working) || (Number.isFinite(quiet) && quiet >= since - 1000),
         file: this.files.get(run.id) ?? null,
       });
     }
     const liveIds = new Set(runs.map((run) => run.runId));
     for (const runId of [...this.files.keys()]) if (!liveIds.has(runId)) this.files.delete(runId);
-    // Only folders where something may have changed: a run still unmatched, or one that worked.
+    // Only folders where something may have changed: one of their runs worked since the last look.
     const groups = new Map<string, TrackedRun[]>();
     for (const run of runs) {
-      const key = `${run.kind}\u0000${run.cwd}`;
+      const key = sessionGroup(run.kind, run.cwd);
       groups.set(key, [...(groups.get(key) ?? []), run]);
     }
     const logs = new Map<string, SessionLog[]>();
     const looked: TrackedRun[] = [];
     for (const [key, group] of groups) {
-      if (!group.some((run) => run.active || !run.file)) continue;
+      if (!group.some((run) => run.active)) continue;
       const earliest = Math.min(...group.map((run) => run.startedMs));
       logs.set(key, await find({ kind: group[0].kind, cwd: group[0].cwd, since: earliest }));
       looked.push(...group);
     }
-    this.lastLook = now;
     if (!looked.length) return;
-    const matched = matchSessionLogs(looked, logs, this.before);
+    // A log first seen now counts as grown if it changed since its folder was last looked at.
+    const matched = matchSessionLogs(looked, logs, this.before, this.looks);
+    for (const key of logs.keys()) this.looks.set(key, now);
+    if (this.looks.size > 500) this.looks = new Map([...this.looks].slice(-250));
     for (const list of logs.values()) for (const log of list) this.before.set(log.file, log.mtimeMs);
     if (this.before.size > 2000) this.before = new Map([...this.before].slice(-1000));
     for (const run of looked) {

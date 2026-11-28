@@ -10,6 +10,8 @@ export interface CutOffNote {
   /** When VibeForge closed (or, after a crash, when the next start found out). */
   at: string;
   runIds: string[];
+  /** A start has offered these already. */
+  offered?: boolean;
 }
 
 const FILE = "cut-off.json";
@@ -20,7 +22,7 @@ export function readCutOff(dataRoot: string): CutOffNote | null {
   const note = readJson<Partial<CutOffNote> | null>(path.join(dataRoot, FILE), null);
   if (!note || !REASONS.includes(note.reason as CutOff) || !Array.isArray(note.runIds)) return null;
   const runIds = note.runIds.filter((id): id is string => typeof id === "string");
-  return { reason: note.reason as CutOff, at: typeof note.at === "string" ? note.at : "", runIds };
+  return { reason: note.reason as CutOff, at: typeof note.at === "string" ? note.at : "", runIds, ...(note.offered === true ? { offered: true } : {}) };
 }
 
 export function writeCutOff(dataRoot: string, note: CutOffNote | null): void {

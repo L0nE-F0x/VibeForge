@@ -650,6 +650,8 @@ export class ServiceCore {
       gitStart,
       continuedFrom: input.continuedFrom ?? null,
       ...(input.paneId ? { paneId: input.paneId } : {}),
+      // The session it reopens, until its own log says otherwise: a second close before it writes keeps it exact.
+      ...(input.resumeArgs?.length ? { resumeArgs: input.resumeArgs } : {}),
       ...(input.engine.harness ? { localHarness: input.engine.harness } : {}),
       ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     };
@@ -850,7 +852,11 @@ export class ServiceCore {
     if (orphans.length) {
       // Offered back at this start, as a quit's are; a routine's next slot is its own retry.
       const runIds = orphans.filter((run) => run.origin !== "routine").map((run) => run.id);
-      if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds });
+      // A quit or update whose last runs were never recorded left these behind: they join its note,
+      // which keeps its reason. Otherwise VibeForge went down, and this start offers what it cut off.
+      const noted = this.readNote();
+      if (noted && runIds.some((id) => noted.runIds.includes(id))) this.noteCutOff({ ...noted, runIds: [...new Set([...noted.runIds, ...runIds])] });
+      else if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds, offered: true });
       this.emit("runs", "tasks");
     }
   }
@@ -943,6 +949,7 @@ export class ServiceCore {
   private cutOffNote: CutOffNote | null | undefined;
 
   private noteCutOff(note: CutOffNote): void {
+    if (this.closed) return;
     this.cutOffNote = note;
     try {
       writeCutOff(this.options.dataRoot, note);
@@ -951,10 +958,27 @@ export class ServiceCore {
     }
   }
 
+  /**
+   * The note as this start found it. It is offered at this start only: the next one drops it unless
+   * a close wrote a new one, so an offer ignored once doesn't come back days later.
+   */
+  private readNote(): CutOffNote | null {
+    if (this.cutOffNote !== undefined) return this.cutOffNote;
+    const found = readCutOff(this.options.dataRoot);
+    if (found?.offered) {
+      this.noteCutOff({ ...found, runIds: [] });
+      return this.cutOffNote ?? null;
+    }
+    this.cutOffNote = found;
+    if (found?.runIds.length) this.noteCutOff({ ...found, offered: true });
+    return this.cutOffNote;
+  }
+
   /** What the last close cut off and how it closed, with what each run needs to reopen its session. */
-  cutOffRuns(): { reason: CutOff; at: string; runs: CutOffRun[] } | null {
-    this.cutOffNote ??= readCutOff(this.options.dataRoot);
-    const note = this.cutOffNote;
+  async cutOffRuns(): Promise<{ reason: CutOff; at: string; runs: CutOffRun[] } | null> {
+    // A crash's runs are noted once they are settled, which can take a moment after start.
+    await this.settled;
+    const note = this.readNote();
     if (!note?.runIds.length) return null;
     const runs: CutOffRun[] = [];
     for (const id of note.runIds) {
@@ -978,9 +1002,26 @@ export class ServiceCore {
 
   /** These were picked back up, or let go: they are not offered again. */
   settleCutOff(runIds: readonly string[]): void {
-    this.cutOffNote ??= readCutOff(this.options.dataRoot);
-    if (!this.cutOffNote || !runIds.some((id) => this.cutOffNote?.runIds.includes(id))) return;
-    this.noteCutOff(settleCutOff(this.cutOffNote, runIds) ?? this.cutOffNote);
+    const note = this.readNote();
+    if (!note || !runIds.some((id) => note.runIds.includes(id))) return;
+    this.noteCutOff(settleCutOff(note, runIds) ?? note);
+    this.emit("runs");
+  }
+
+  /** The pane's cut-off run is let go: something else started there. */
+  settleCutOffInPane(paneId: string): void {
+    const note = this.readNote();
+    const ids = note?.runIds.filter((id) => this.store.getRun(id)?.paneId === paneId) ?? [];
+    if (ids.length) this.settleCutOff(ids);
+  }
+
+  /** The live run that already picks `runId` back up, if one does: a second Continue goes there. */
+  continuedLive(runId: string): { runId: string; ptyId: string } | null {
+    for (const session of this.live.values()) {
+      if (!session.runId) continue;
+      if (this.store.getRun(session.runId)?.continuedFrom === runId) return { runId: session.runId, ptyId: session.ptyId };
+    }
+    return null;
   }
 
   /** Resolves when every exit already reported has finished writing its run. */
