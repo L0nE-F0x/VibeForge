@@ -246,6 +246,8 @@ export function CodeView({ active, route }: { active: boolean; route: Extract<Ro
     draft: (toPty) => focusPty(toPty),
     newReviewer: (workspace, pane, engineId) => panes.startReviewer(workspace, pane.id, engineId),
     typed: (paneId) => panes.patchRuntime(paneId, { fresh: false }),
+    reopen: (workspace, pane) => panes.reopenHere(workspace, pane),
+    letGo: (paneId) => panes.letGoCutOff(paneId),
   });
 
   // The tour's last step and Home's "Run a CLI": a new shell in that workspace with the CLI typed

@@ -6,6 +6,7 @@ import type { RunQuery } from "../core/store.js";
 import type {
   AgentInput,
   ChatView,
+  CutOffRun,
   Launched,
   Queued,
   RoutineInput,
@@ -45,6 +46,7 @@ import type {
   OrchestratorSettings,
   ComputerUseSettings,
   ComputerUseGrant,
+  CutOff,
   SoundSettings,
   TalkState,
   TaskStatus,
@@ -172,7 +174,8 @@ export type {
 };
 export type { UsageSource, UsageSpan, UsagePeriod, UsageLimit, Tokens } from "../core/usage.js";
 export type { PlanProvider, PlanWindow, PlanPoint, PlanProblem, PlanId } from "../core/plans.js";
-export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile } from "../core/types.js";
+export type { Workspace, WorkspaceCategory, RunOrigin, RunStatus, PaneLaunch, UnreadableFile, CutOff } from "../core/types.js";
+export type { CutOffRun } from "../core/team-service.js";
 
 /** Partial settings patch supporting nested partial updates for `companion` and `local`. */
 export type SettingsPatch = Partial<Omit<Settings, "companion" | "local">> & {
@@ -402,7 +405,8 @@ export interface DeskMethods {
   "app.computer": () => ComputerFacts;
   "app.pathExists": (target: string) => boolean;
   "app.toggleDevTools": () => void;
-  "app.restart": () => void;
+  /** Restart VibeForge; `update` says it is to finish an update, so cut-off CLIs reopen by themselves. */
+  "app.restart": (opts?: { reason?: "update" }) => void;
   "app.copyText": (text: string) => void;
   /** Bring the window forward, so a transcript dictated from another desktop is on screen. */
   "app.focus": () => void;
@@ -540,8 +544,10 @@ export interface DeskMethods {
   "chats.stop": (id: string) => void;
 
   /** A shell in the workspace; `command` is typed at its prompt with Enter once the shell is ready (a CLI the person clicked to start). */
-  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string } & TermSize) => { ptyId: string };
-  "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean } & TermSize) => Launched;
+  "code.shell": (opts: { workspaceId?: string; cwd?: string; command?: string; paneId?: string; continueRun?: string } & TermSize) => { ptyId: string };
+  /** Type the command that reopens a cut-off run's session into this Code shell, at its prompt. */
+  "code.reopen": (ptyId: string, runId: string) => void;
+  "code.engine": (opts: { workspaceId: string; engineId: string; prompt?: string; continueSession?: boolean; paneId?: string; continueRun?: string } & TermSize) => Launched;
 
   "runs.list": (query?: RunQuery) => RunView[];
   "runs.inbox": () => RunView[];
@@ -550,6 +556,10 @@ export interface DeskMethods {
   "runs.markAllOpened": () => void;
   "runs.stop": (id: string) => void;
   "runs.continue": (id: string, size?: TermSize) => Launched & { chatId: string | null; taskId: string | null };
+  /** What the last close of VibeForge cut off, to offer back; null when nothing is left to offer. */
+  "runs.cutOff": () => { reason: CutOff; at: string; runs: CutOffRun[] } | null;
+  /** Stop offering these (picked back up another way, or let go). */
+  "runs.cutOffSettle": (runIds: string[]) => void;
   /** Runs whose title, prompt, transcript or folder hold the words typed, best first, with a snippet. */
   "runs.search": (text: string, limit?: number) => RunHit[];
   /** `saved` is the patch frozen when the run ended. `now` reads the folder as it is. */

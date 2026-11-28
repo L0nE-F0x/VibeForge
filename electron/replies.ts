@@ -500,3 +500,31 @@ export function watchReply(opts: { kind: ReplyLog; home: string; cwd: string; si
     void poll();
   });
 }
+
+/**
+ * The session logs `kind` has written in `cwd` since `since`, each with when it last changed, so
+ * the service can tell which session each live run is in (core/session-ids.ts). OpenCode keeps
+ * its sessions in a database, so it has none here.
+ */
+export async function sessionLogs(opts: { kind: ReplyLog; home: string; cwd: string; since: number }): Promise<Array<{ file: string; mtimeMs: number }>> {
+  if (opts.kind === "opencode") return [];
+  const files =
+    opts.kind === "grok"
+      ? (await grokSessions(opts.home, opts.cwd, opts.since)).map(({ session }) => path.join(session, "events.jsonl"))
+      : await logFiles(opts, cwdChecks(opts.cwd));
+  const times = await Promise.all(files.map(mtime));
+  return files.map((file, index) => ({ file, mtimeMs: times[index] })).filter((log) => log.mtimeMs > 0);
+}
+
+/** Per folder, which logs were found to be in it, kept between looks; let go past a few hundred folders. */
+const sessionCwdOk = new Map<string, Map<string, boolean>>();
+
+function cwdChecks(cwd: string): Map<string, boolean> {
+  let checks = sessionCwdOk.get(cwd);
+  if (!checks || checks.size > 4000) {
+    if (sessionCwdOk.size > 200) sessionCwdOk.clear();
+    checks = new Map();
+    sessionCwdOk.set(cwd, checks);
+  }
+  return checks;
+}

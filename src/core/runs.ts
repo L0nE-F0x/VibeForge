@@ -3,7 +3,7 @@ import path from "node:path";
 import { readJson, readText, writeJson } from "./fsx.js";
 import { hasRunFile, readRunText } from "./run-storage.js";
 import { isSafeId } from "./slug.js";
-import type { RunMeta, RunOrigin, RunStatus } from "./types.js";
+import type { CutOff, RunMeta, RunOrigin, RunStatus } from "./types.js";
 import { isCommitId } from "./worktrees.js";
 
 /** What a run directory holds. The PTY host writes the terminal files, the service writes the rest. */
@@ -66,6 +66,21 @@ function numOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+const CUT_OFFS: CutOff[] = ["quit", "update", "crash"];
+
+/** A list of strings, as meta.json keeps it or the index keeps it (JSON text). */
+function stringArray(value: unknown): string[] | null {
+  let list = value;
+  if (typeof value === "string") {
+    try {
+      list = JSON.parse(value) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : null;
+}
+
 export function normalizeRun(value: unknown): RunMeta | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
@@ -114,6 +129,12 @@ export function normalizeRun(value: unknown): RunMeta | null {
     continuedFrom: strOrNull(record.continuedFrom),
     ...(strOrNull(record.localHarness) ? { localHarness: strOrNull(record.localHarness) } : {}),
     ...(strOrNull(record.localModel) ? { localModel: strOrNull(record.localModel) } : {}),
+    ...(strOrNull(record.paneId) ? { paneId: strOrNull(record.paneId) } : {}),
+    ...(() => {
+      const args = stringArray(record.resumeArgs);
+      return args?.length ? { resumeArgs: args } : {};
+    })(),
+    ...(CUT_OFFS.includes(record.cutOff as CutOff) ? { cutOff: record.cutOff as CutOff } : {}),
   };
 }
 

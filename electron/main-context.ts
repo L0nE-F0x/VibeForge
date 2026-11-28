@@ -55,6 +55,8 @@ export class MainContext {
   looking: Looking | null = null;
   /** A quit has begun: the window closes without asking, and the terminal host stays down. */
   quitting = false;
+  /** Why this quit is happening, when it is a restart to finish an update; else an ordinary quit. */
+  closeReason: "update" | null = null;
   /** Notices said while no page was listening, for the next one; one of each kind, the newest. */
   private pendingNotices: DeskNotice[] = [];
   /** A page has taken its notices since it last loaded, so it hears new ones as they happen. */

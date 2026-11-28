@@ -1,5 +1,5 @@
 import { CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, RefreshCw, RotateCcw, Undo2, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UpdateInfo } from "../../shared/api.js";
 import type { Release } from "../../core/updates.js";
 import { call, useLive, useUpdate } from "../api.js";
@@ -102,19 +102,58 @@ export function installText(info: UpdateInfo, appPath: string, t: Translator): s
   return t("updates.installOther", { path: appPath });
 }
 
-/** Restart VibeForge, asking first while other terminals run (they'd stop). `own` is the update's terminal. */
+/** How often a restart waiting for CLIs to finish their turn looks again, and how long it waits at most. */
+const TURN_POLL_MS = 2000;
+const TURN_WAIT_MS = 60 * 60_000;
+
+/**
+ * Restart VibeForge to finish an update (or Go back), asking first while other terminals run.
+ * A CLI in the middle of a turn is waited for, so no edit is cut off halfway; "Restart now"
+ * doesn't wait. After the restart each CLI's session reopens by itself. `own` is the update's terminal.
+ */
 function useRestart(own: string | null = null): () => Promise<void> {
   const t = useT();
   const live = useLive().data ?? [];
   const confirm = useConfirm();
+  const { push, dismiss } = useToast();
+  const busy = useRef(false);
   return async () => {
+    if (busy.current) return;
     const others = live.filter((session) => session.ptyId !== own).length;
     if (others > 0) {
       const ok = await confirm({ title: t("updates.restartTitle"), body: t.count("updates.restartBody", others), confirm: t("updates.restart") });
       if (!ok) return;
     }
-    openHomeOnNextStart();
-    await call("app.restart");
+    busy.current = true;
+    try {
+      const working = async () => (await call("live.list").catch(() => [])).filter((session) => session.ptyId !== own && session.working).length;
+      let left = await working();
+      if (left > 0) {
+        let now = false;
+        const restartNow = {
+          label: t("updates.restartNow"),
+          run: () => {
+            now = true;
+          },
+        };
+        const started = Date.now();
+        let toast = push("info", t.count("updates.waiting", left), t("updates.waitingBody"), restartNow, { stay: true });
+        while (!now && left > 0 && Date.now() - started < TURN_WAIT_MS) {
+          await new Promise((resolve) => setTimeout(resolve, TURN_POLL_MS));
+          const next = await working();
+          if (next !== left && next > 0 && !now) {
+            dismiss(toast);
+            toast = push("info", t.count("updates.waiting", next), t("updates.waitingBody"), restartNow, { stay: true });
+          }
+          left = next;
+        }
+        dismiss(toast);
+      }
+      openHomeOnNextStart();
+      await call("app.restart", { reason: "update" });
+    } finally {
+      busy.current = false;
+    }
   };
 }
 

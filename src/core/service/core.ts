@@ -13,9 +13,10 @@ import { Store } from "../store.js";
 import { Trash, type Bin } from "../trash.js";
 import { failStreak, ROUTINE_FAILING } from "../routines.js";
 import { syncTaskWithRun } from "../tasks.js";
-import type { Agent, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
+import type { Agent, CutOff, Engine, EngineRow, LiveSession, RunMeta, RunOrigin, Settings, Topic, UnreadableFile, Workspace } from "../types.js";
+import { readCutOff, settleCutOff, writeCutOff, type CutOffNote } from "../cut-off.js";
 import { removeCopy, type WorkingCopy } from "../worktrees.js";
-import { type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
+import { type CutOffRun, type Deleted, type DeskOptions, LATE_PATCH_NOTE, type Launched, type RunView, UNDO_MS } from "./types.js";
 
 /** What tidies up after a delete once its Undo has passed; a promise when that takes a while. */
 type Settle = () => unknown;
@@ -55,6 +56,8 @@ export class ServiceCore {
   /** Per shell: the latest command line in its foreground, and the queue that records it. */
   readonly shellArgv = new Map<string, string[]>();
   readonly recordings = new Map<string, Promise<void>>();
+  /** Per shell: the cut-off run its first CLI picks back up (typed in by Continue its session). */
+  readonly shellContinues = new Map<string, string>();
   /** Per shell: the host's last word on activity, kept while no coding CLI is in front to use it. */
   readonly hostWorking = new Map<string, boolean>();
   /** The git snapshot when a run started: a tree that was already dirty isn't this run's doing. */
@@ -384,6 +387,22 @@ export class ServiceCore {
 
 
   /**
+   * The arguments that reopen exactly the session `run` was in: the "--resume <id>" line the CLI
+   * printed as it exited, else the session read from its log while it ran. Null when neither is known.
+   */
+  exactResume(run: RunMeta, row?: EngineRow): string[] | null {
+    const engine = row ?? this.store.readEngineRows().find((item) => item.id === run.engine);
+    if (engine && run.dir) {
+      const fromTranscript = resumeArgsFromTranscript(engine, readText(path.join(run.dir, RUN_FILES.transcript)));
+      if (fromTranscript) return fromTranscript;
+      // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
+      const fromScrollback = resumeArgsFromTranscript(engine, stripTerminalCodes(readRunTail(run.dir, RUN_FILES.scrollback)));
+      if (fromScrollback) return fromScrollback;
+    }
+    return run.resumeArgs?.length ? run.resumeArgs : null;
+  }
+
+  /**
    * How to pick a finished session back up with the same engine: its exact session id when the
    * CLI printed one, the engine's continue flag when the folder's latest run on that CLI was in the
    * same mode and harness, or starting fresh from the transcript otherwise.
@@ -402,13 +421,8 @@ export class ServiceCore {
       if (row.id === LOCAL_ENGINE_ID && previous.localHarness && harness && previous.localHarness !== harness) {
         return { native: false, resumeArgs: null };
       }
-      if (previous.dir) {
-        const fromTranscript = resumeArgsFromTranscript(row, readText(path.join(previous.dir, RUN_FILES.transcript)));
-        if (fromTranscript) return { native: true, resumeArgs: fromTranscript };
-        // Full-screen CLIs keep their alt-screen frame in transcript.txt, leaving any post-exit resume line only in scrollback.
-        const fromScrollback = resumeArgsFromTranscript(row, stripTerminalCodes(readRunTail(previous.dir, RUN_FILES.scrollback)));
-        if (fromScrollback) return { native: true, resumeArgs: fromScrollback };
-      }
+      const exact = this.exactResume(previous, row);
+      if (exact) return { native: true, resumeArgs: exact };
     } else if (!opts?.allowBareWithoutPrevious) {
       return { native: false, resumeArgs: null };
     }
@@ -564,6 +578,8 @@ export class ServiceCore {
     chatId?: string | null;
     workspaceId?: string | null;
     continuedFrom?: string | null;
+    /** The Code pane it is started in. */
+    paneId?: string | null;
     /** The Orchestrator started it (Code gives it a pane). */
     orchestrated?: boolean;
     /** The model and reasoning effort to start the CLI with, where it takes them (launchOptionArgs). */
@@ -633,6 +649,7 @@ export class ServiceCore {
       changes: null,
       gitStart,
       continuedFrom: input.continuedFrom ?? null,
+      ...(input.paneId ? { paneId: input.paneId } : {}),
       ...(input.engine.harness ? { localHarness: input.engine.harness } : {}),
       ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     };
@@ -671,6 +688,7 @@ export class ServiceCore {
       taskId: meta.taskId,
       workspaceId: meta.workspaceId,
       routineId: meta.routineId,
+      ...(input.paneId ? { paneId: input.paneId } : {}),
       ...(input.orchestrated ? { orchestrated: true } : {}),
       ...(input.engine.localModel ? { localModel: input.engine.localModel } : {}),
     });
@@ -684,6 +702,7 @@ export class ServiceCore {
         }
       }
     }
+    if (input.continuedFrom) this.settleCutOff([input.continuedFrom]);
     this.emit("runs", "live", "chats", "routines", "tasks");
     return { runId: id, ptyId: spawned.ptyId };
   }
@@ -820,6 +839,7 @@ export class ServiceCore {
         endedAt: run.endedAt ?? this.now().toISOString(),
         error: run.error ?? "VibeForge closed while this run was going.",
         changes,
+        cutOff: run.cutOff ?? "crash",
       });
       if (run.taskId) {
         // Only when this orphan is still the task's run: an Execute during settling owns it now.
@@ -827,7 +847,12 @@ export class ServiceCore {
         if (task?.status === "running" && task.runIds.at(-1) === run.id) this.store.writeTask({ ...task, status: "review" });
       }
     }
-    if (orphans.length) this.emit("runs", "tasks");
+    if (orphans.length) {
+      // Offered back at this start, as a quit's are; a routine's next slot is its own retry.
+      const runIds = orphans.filter((run) => run.origin !== "routine").map((run) => run.id);
+      if (runIds.length) this.noteCutOff({ reason: "crash", at: this.now().toISOString(), runIds });
+      this.emit("runs", "tasks");
+    }
   }
 
   private async settleTrash(trashed: unknown[]): Promise<void> {
@@ -896,13 +921,66 @@ export class ServiceCore {
     }
   }
 
-  /** Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped". */
-  prepareShutdown(): void {
+  /**
+   * Before the app quits: mark every live run as stopped on purpose, so its exit records "stopped",
+   * and as cut off by this close (`reason`), so the next start offers to pick it back up.
+   */
+  prepareShutdown(reason: CutOff = "quit"): void {
+    const cut: string[] = [];
     for (const session of this.live.values()) {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
-      if (run && run.status === "running" && !run.stopRequested) this.store.saveRun({ ...run, stopRequested: true });
+      if (!run || run.status !== "running" || run.stopRequested) continue;
+      this.store.saveRun({ ...run, stopRequested: true, cutOff: reason });
+      if (run.origin !== "routine") cut.push(run.id);
     }
+    this.noteCutOff({ reason, at: this.now().toISOString(), runIds: cut });
+  }
+
+  // ---------------------------------------------------------------- runs cut off by a close
+
+  /** The runs the last close cut off, still to be picked back up or let go. */
+  private cutOffNote: CutOffNote | null | undefined;
+
+  private noteCutOff(note: CutOffNote): void {
+    this.cutOffNote = note;
+    try {
+      writeCutOff(this.options.dataRoot, note);
+    } catch {
+      /* the offer is a nicety; the runs themselves are recorded */
+    }
+  }
+
+  /** What the last close cut off and how it closed, with what each run needs to reopen its session. */
+  cutOffRuns(): { reason: CutOff; at: string; runs: CutOffRun[] } | null {
+    this.cutOffNote ??= readCutOff(this.options.dataRoot);
+    const note = this.cutOffNote;
+    if (!note?.runIds.length) return null;
+    const runs: CutOffRun[] = [];
+    for (const id of note.runIds) {
+      const run = this.store.getRun(id);
+      // Already picked up (a live run again), or deleted since.
+      if (!run || run.status === "running" || this.ptyByRun.has(id)) continue;
+      runs.push({
+        runId: run.id,
+        title: run.title,
+        origin: run.origin,
+        engine: run.engine,
+        workspaceId: run.workspaceId,
+        paneId: run.paneId ?? null,
+        chatId: run.chatId,
+        taskId: run.taskId,
+        exact: Boolean(this.exactResume(run)),
+      });
+    }
+    return runs.length ? { reason: note.reason, at: note.at, runs } : null;
+  }
+
+  /** These were picked back up, or let go: they are not offered again. */
+  settleCutOff(runIds: readonly string[]): void {
+    this.cutOffNote ??= readCutOff(this.options.dataRoot);
+    if (!this.cutOffNote || !runIds.some((id) => this.cutOffNote?.runIds.includes(id))) return;
+    this.noteCutOff(settleCutOff(this.cutOffNote, runIds) ?? this.cutOffNote);
   }
 
   /** Resolves when every exit already reported has finished writing its run. */
@@ -917,7 +995,7 @@ export class ServiceCore {
       if (!session.runId) continue;
       const run = this.store.getRun(session.runId);
       if (!run || run.status !== "running") continue;
-      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit." });
+      this.store.saveRun({ ...run, status: "stopped", stopRequested: true, endedAt: ended, error: "Stopped when VibeForge quit.", cutOff: run.cutOff ?? "quit" });
       if (run.taskId) {
         const task = this.store.getTask(run.taskId);
         if (task?.status === "running") this.store.writeTask({ ...task, status: "review" });

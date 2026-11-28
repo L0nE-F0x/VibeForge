@@ -5,6 +5,33 @@ import { useCopyDiagnostics } from "./components/Help.js";
 import { t } from "./i18n/index.js";
 import { useToast } from "./state.js";
 import { placeInCode } from "./views/code/useWorkspacePanes.js";
+import { continueInPanes, cutOffNote, inPane, settleCutOff } from "./cut-off.js";
+import type { CutOffRun } from "../shared/api.js";
+
+/** Said once per window: a reload of the page doesn't offer the same cut-off CLIs again. */
+const CUT_OFF_SAID = "vibeforge:cut-off-said";
+
+/**
+ * Pick each cut-off run back up: one from a Code pane in that pane, a chat's or a task's in its own
+ * place, any other in a new pane. One that can't doesn't hold the others back. How many went.
+ */
+async function continueCutOff(runs: readonly CutOffRun[]): Promise<{ continued: number; failed: unknown }> {
+  const panes = runs.filter(inPane);
+  continueInPanes(panes.map((run) => run.runId));
+  let failed: unknown = null;
+  let continued = panes.length;
+  for (const run of runs.filter((item) => !inPane(item))) {
+    try {
+      const next = await call("runs.continue", run.runId);
+      if (!next.chatId && !next.taskId) placeInCode(next.ptyId);
+      settleCutOff([run.runId]);
+      continued += 1;
+    } catch (error) {
+      failed ??= error;
+    }
+  }
+  return { continued, failed };
+}
 
 // What the main process tells the person once (DeskNotice): the window came back after its page
 // stopped, terminals were cut off by the terminal host stopping, the host stopped or started
@@ -76,6 +103,46 @@ export function MainNotices() {
       .catch(() => undefined);
     return off;
   }, [push, dismiss, fail]);
+
+  // CLIs the last close cut off: after an update the ones whose exact session is known reopen by
+  // themselves; the rest (or all, after a quit or crash) are offered with Continue all.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(CUT_OFF_SAID)) return;
+    } catch {
+      /* no storage: said each load */
+    }
+    void cutOffNote().then(async (note) => {
+      if (!note?.runs.length) return;
+      try {
+        sessionStorage.setItem(CUT_OFF_SAID, "1");
+      } catch {
+        /* said again after a reload, then */
+      }
+      const auto = note.reason === "update" ? note.runs.filter((run) => run.exact) : [];
+      const offered = note.runs.filter((run) => !auto.includes(run));
+      if (auto.length) {
+        const { continued, failed } = await continueCutOff(auto);
+        if (continued) push("success", t.count("app.notice.reopened", continued), t("app.notice.reopenedBody"));
+        if (failed) fail(failed, t("app.notice.continueFailed"));
+      }
+      if (!offered.length) return;
+      push(
+        "info",
+        t.count(note.reason === "crash" ? "app.notice.cutOffCrash" : note.reason === "update" ? "app.notice.cutOffUpdate" : "app.notice.cutOffQuit", offered.length),
+        offered.every((run) => run.exact) ? t("app.notice.cutOffBody") : t("app.notice.cutOffBodyLatest"),
+        {
+          label: t("app.notice.continueAll"),
+          run: () =>
+            void continueCutOff(offered).then(({ continued, failed }) => {
+              if (continued) push("success", t.count("app.notice.continued", continued));
+              if (failed) fail(failed, t("app.notice.continueFailed"));
+            }),
+        },
+        { stay: true },
+      );
+    });
+  }, [push, fail]);
 
   return null;
 }

@@ -108,7 +108,8 @@ export class ShellRecorder {
       error: null,
       changes: null,
       gitStart,
-      continuedFrom: null,
+      continuedFrom: this.takeContinue(ptyId, row.id),
+      ...(session.paneId ? { paneId: session.paneId } : {}),
     });
     try {
       await this.core.options.host.record(ptyId, dir);
@@ -124,6 +125,17 @@ export class ShellRecorder {
     this.core.ptyByRun.set(id, ptyId);
     this.core.live.set(ptyId, { ...latest, runId: id });
     this.core.emit("runs", "live");
+  }
+
+  /** The run Continue its session typed this shell's CLI in for, once: only the CLI it reopens. */
+  private takeContinue(ptyId: string, engineId: string): string | null {
+    const runId = this.core.shellContinues.get(ptyId);
+    if (!runId) return null;
+    this.core.shellContinues.delete(ptyId);
+    const previous = this.core.store.getRun(runId);
+    if (previous?.engine !== engineId) return null;
+    this.core.settleCutOff([runId]);
+    return runId;
   }
 
   private async endShellRun(ptyId: string, runId: string): Promise<void> {

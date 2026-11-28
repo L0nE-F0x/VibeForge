@@ -5,6 +5,7 @@ import type { ExecuteBlocker } from "../tasks.js";
 import type { AgentTier, Routine, RunMeta, RunOrigin, Schedule, Task, ChatRecord } from "../types.js";
 import type { Writer } from "../checkout.js";
 import type { ReplyLog } from "../replies.js";
+import type { SessionLog } from "../session-ids.js";
 import type { Waiting } from "./turns.js";
 
 // ------------------------------------------------------------------ host contract
@@ -36,6 +37,8 @@ export interface DeskHost {
   watchReply?(opts: { kind: ReplyLog; cwd: string; since: number; words: string; signal: AbortSignal }): Promise<string | null>;
   /** The CLI's latest finished answer in `cwd`, from its own session log, if it left one since `since`. */
   lastReply?(opts: { kind: ReplyLog; cwd: string; since: number; words?: string }): Promise<string | null>;
+  /** The session logs a CLI has written in `cwd` since `since`, with when each last changed (core/session-ids.ts). */
+  sessionLogs?(opts: { kind: ReplyLog; cwd: string; since: number }): Promise<SessionLog[]>;
   kill(ptyId: string): Promise<void>;
   /** Turns syncing a saved agent or skill with the paired machines on or off (Settings → Sync). */
   syncLibrary?(kind: "agent" | "skill", id: string, on: boolean): Promise<void>;
@@ -115,6 +118,21 @@ export interface DeskHost {
   logDiagnostics?(line: string): void;
   /** Desktop + app UI computer-use observation and control driver. */
   computer?: ComputerUseDriver;
+}
+
+/** A run the last close of VibeForge cut off, as the window offers it back. */
+export interface CutOffRun {
+  runId: string;
+  title: string;
+  origin: RunOrigin;
+  engine: string;
+  workspaceId: string | null;
+  /** The Code pane it ran in, when it ran in one. */
+  paneId: string | null;
+  chatId: string | null;
+  taskId: string | null;
+  /** Its exact session is known, so Continue reopens that one and not the folder's latest. */
+  exact: boolean;
 }
 
 export interface DeskOptions {

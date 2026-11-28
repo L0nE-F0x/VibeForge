@@ -88,7 +88,9 @@ export class Quit {
     const { ctx } = this;
     const service = ctx.service;
     if (!service) return;
-    service.prepareShutdown();
+    // Which session each CLI is in, read once more before they end (briefly: a quit doesn't wait on it).
+    await Promise.race([service.lookForSessions(), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    service.prepareShutdown(ctx.closeReason ?? "quit");
     await ctx.supervisor.shutdown(7000);
     await Promise.race([service.whenIdle(), new Promise((resolve) => setTimeout(resolve, 4000))]);
   }

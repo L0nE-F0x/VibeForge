@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../../../shared/api.js";
+import type { CutOffRun, Engine, LayoutNode, LiveSession, PaneLaunch, Workspace } from "../../../shared/api.js";
 import { call } from "../../api.js";
+import { cutOffInPane, cutOffNote, cutOffRun, onPaneContinue, settleCutOff, takePaneContinues } from "../../cut-off.js";
 import { estimateTermSize, type TerminalHandle } from "../../components/Terminal.js";
 import { useT } from "../../i18n/index.js";
 import { movePane, panesOf, placeSession, reattachPanes, removePane, replacePane, setRatioAt, unzoomForFocus, type DropZone, type PaneNode, type PaneTerminal } from "../../pane-layout.js";
@@ -16,6 +17,8 @@ export interface Runtime {
   exitText: string | null;
   /** A shell the person just opened and hasn't typed into yet: its pane shows the CLIs to start. */
   fresh?: boolean;
+  /** The CLI VibeForge's last close cut off in this pane, while Continue its session is offered. */
+  cutOff?: CutOffRun | null;
 }
 
 /** Where each pane's terminal is remembered for this window: sessionStorage outlives a reload of the page, not a restart. */
@@ -101,10 +104,14 @@ export function useWorkspacePanes({
   openedRef.current = opened;
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
+  const liveRef = useRef(live);
+  liveRef.current = live;
   /** Workspaces whose saved layout is being read, so two paths never load or populate one twice. */
   const loadingLayouts = useRef(new Map<string, Promise<LayoutNode | null>>());
   /** Workspaces loaded in the background before Code opened, whose saved shells still wait to start. */
   const unstartedShells = useRef(new Set<string>());
+  /** Cut-off runs Continue all asked for whose workspace was still loading: loading it continues them. */
+  const wantContinue = useRef(new Set<string>());
 
   // What the page before this one left, read before the effect below writes this page's (empty) list.
   const remembered = useRef<Record<string, PaneTerminal> | null>(null);
@@ -139,10 +146,22 @@ export function useWorkspacePanes({
 
   /** Start a pane's terminal; its id, or null when it didn't start (the toast says why). */
   const startPane = useCallback(
-    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean; fresh?: boolean; command?: string } = {}): Promise<string | null> => {
+    async (workspace: Workspace, pane: PaneNode, opts: { continueSession?: boolean; continueRun?: string; fresh?: boolean; command?: string } = {}): Promise<string | null> => {
       if (starting.current.has(pane.id)) return null;
       starting.current.add(pane.id);
-      patchRuntime(pane.id, { state: "starting", ptyId: null, runId: null, exitText: null, fresh: pane.launch.type === "shell" && !opts.command && Boolean(opts.fresh) });
+      // Continue in a pane a close cut off picks up exactly the session that ran here.
+      const cut = runtimeRef.current[pane.id]?.cutOff ?? null;
+      const continueRun = opts.continueRun ?? (opts.continueSession && cut ? cut.runId : undefined);
+      // Starting it any other way lets that session go: it is no longer offered.
+      if (cut && !continueRun) settleCutOff([cut.runId]);
+      patchRuntime(pane.id, {
+        state: "starting",
+        ptyId: null,
+        runId: null,
+        exitText: null,
+        fresh: pane.launch.type === "shell" && !opts.command && !continueRun && Boolean(opts.fresh),
+        cutOff: null,
+      });
       // Measure after React has laid the new pane out. A window on a hidden workspace gets no
       // frames, so don't wait on one forever.
       await new Promise((resolve) => {
@@ -158,11 +177,21 @@ export function useWorkspacePanes({
       try {
         const started =
           pane.launch.type === "shell"
-            ? { ...(await call("code.shell", { workspaceId: workspace.id, ...(opts.command ? { command: opts.command } : {}), ...size })), runId: null }
+            ? {
+                ...(await call("code.shell", {
+                  workspaceId: workspace.id,
+                  paneId: pane.id,
+                  ...(continueRun ? { continueRun } : opts.command ? { command: opts.command } : {}),
+                  ...size,
+                })),
+                runId: null,
+              }
             : await call("code.engine", {
                 workspaceId: workspace.id,
                 engineId: pane.launch.engineId,
-                continueSession: opts.continueSession,
+                paneId: pane.id,
+                continueSession: opts.continueSession || Boolean(continueRun),
+                ...(continueRun ? { continueRun } : {}),
                 ...size,
               });
         if (!stillThere()) {
@@ -171,18 +200,20 @@ export function useWorkspacePanes({
           return null;
         }
         patchRuntime(pane.id, { ptyId: started.ptyId, runId: started.runId, state: "live" });
+        if (continueRun) settleCutOff([continueRun]);
         setFocus((prev) => ({ ...prev, [workspace.id]: pane.id }));
         return started.ptyId;
       } catch (error) {
         if (!stillThere()) return null;
-        patchRuntime(pane.id, { state: "idle" });
+        // Still offered, so it can be tried again.
+        patchRuntime(pane.id, { state: "idle", cutOff: cut });
         fail(error, t("code.startFailed"));
         return null;
       } finally {
         starting.current.delete(pane.id);
       }
     },
-    [fail, patchRuntime, setFocus, layoutsRef],
+    [fail, patchRuntime, setFocus, layoutsRef, runtimeRef],
   );
 
   const loadWorkspaceLayout = useCallback(
@@ -193,8 +224,8 @@ export function useWorkspacePanes({
       const left = remembered.current ?? {};
       // Only a page that was reloaded remembers terminals; it asks which of them still run.
       const running = Object.keys(left).length ? call("live.list").then((live) => new Set(live.map((item) => item.ptyId))) : Promise.resolve(new Set<string>());
-      const promise = Promise.all([call("layouts.get", workspace.id).catch(() => null), running.catch(() => new Set<string>())])
-        .then(([saved, stillRunning]) => {
+      const promise = Promise.all([call("layouts.get", workspace.id).catch(() => null), running.catch(() => new Set<string>()), cutOffNote()])
+        .then(([saved, stillRunning, cutNote]) => {
           loadingLayouts.current.delete(workspace.id);
           if (!workspacesRef.current.some((item) => item.id === workspace.id)) return null;
           if (!(workspace.id in layoutsRef.current)) {
@@ -208,7 +239,30 @@ export function useWorkspacePanes({
               placed.current.add(terminal.ptyId);
               patchRuntime(paneId, { ...terminal, state: "live", exitText: null });
             }
-            const fresh = panes.filter((pane) => pane.launch.type === "shell" && !back.has(pane.id));
+            // A pane whose CLI the last close cut off: after an update it reopens that session by
+            // itself; otherwise the pane offers Continue its session. Continue all asks the same.
+            const reopen = new Map<string, string>();
+            for (const pane of panes) {
+              if (back.has(pane.id)) continue;
+              const cut = cutOffInPane(workspace.id, pane.id);
+              if (!cut) continue;
+              if (wantContinue.current.delete(cut.runId) || (cutNote?.reason === "update" && cut.exact)) reopen.set(pane.id, cut.runId);
+              else patchRuntime(pane.id, { cutOff: cut });
+            }
+            for (const pane of panes) {
+              const runId = reopen.get(pane.id);
+              if (runId) void startPane(workspace, pane, { continueRun: runId });
+            }
+            // Asked for by Continue all, though its pane was closed since: a new pane beside the others.
+            for (const runId of [...wantContinue.current]) {
+              const cut = cutOffRun(runId);
+              if (cut?.workspaceId !== workspace.id) continue;
+              wantContinue.current.delete(runId);
+              void call("runs.continue", runId)
+                .then((next) => showSession(workspace, next.ptyId, next.runId, { type: "engine", engineId: cut.engine }, { focus: false }))
+                .catch((error) => fail(error, t("app.notice.continueFailed")));
+            }
+            const fresh = panes.filter((pane) => pane.launch.type === "shell" && !back.has(pane.id) && !reopen.has(pane.id));
             if (openedRef.current) {
               for (const pane of fresh) void startPane(workspace, pane);
             } else if (fresh.length) {
@@ -222,6 +276,70 @@ export function useWorkspacePanes({
     },
     [layoutsRef, setLayouts, setFocus, startPane, patchRuntime],
   );
+
+  // Continue all, from the notice a close's cut-off CLIs get: each goes back in its own pane.
+  useEffect(() => {
+    const pick = () => {
+      for (const runId of takePaneContinues()) {
+        const cut = cutOffRun(runId);
+        const workspace = cut?.workspaceId ? workspacesRef.current.find((item) => item.id === cut.workspaceId) : null;
+        if (!cut?.paneId || !workspace) continue;
+        if (!(workspace.id in layoutsRef.current)) {
+          // Its layout isn't loaded yet: loading it picks this up.
+          wantContinue.current.add(runId);
+          void loadWorkspaceLayout(workspace);
+          continue;
+        }
+        const layout = layoutsRef.current[workspace.id];
+        const pane = layout ? panesOf(layout).find((item) => item.id === cut.paneId) : undefined;
+        if (!pane) {
+          // The pane was closed since: a new one beside the others.
+          void call("runs.continue", runId)
+            .then((next) => showSession(workspace, next.ptyId, next.runId, { type: "engine", engineId: cut.engine }, { focus: false }))
+            .catch((error) => fail(error, t("app.notice.continueFailed")));
+          continue;
+        }
+        void continuePaneRun(workspace, pane, runId);
+      }
+    };
+    pick();
+    return onPaneContinue(pick);
+    // Everything it reads is through refs, or stable.
+  }, [loadWorkspaceLayout, startPane, patchRuntime]);
+
+  /**
+   * Pick a cut-off run's session back up in its pane: typed into the pane's shell when that is
+   * back at its prompt, else by starting the pane again with it.
+   */
+  async function continuePaneRun(workspace: Workspace, pane: PaneNode, runId: string): Promise<void> {
+    const state = runtimeRef.current[pane.id];
+    const session = state?.ptyId ? liveRef.current.find((item) => item.ptyId === state.ptyId) : undefined;
+    if (state?.state === "live" && state.ptyId && pane.launch.type === "shell") {
+      if (session?.programEngineId) return;
+      try {
+        await call("code.reopen", state.ptyId, runId);
+        patchRuntime(pane.id, { cutOff: null, fresh: false });
+        settleCutOff([runId]);
+      } catch (error) {
+        fail(error, t("app.notice.continueFailed"));
+      }
+      return;
+    }
+    if (state?.state !== "live" && state?.state !== "starting") await startPane(workspace, pane, { continueRun: runId });
+  }
+
+  /** The pane's own Continue its session, for the CLI a close cut off there. */
+  function reopenHere(workspace: Workspace, pane: PaneNode): void {
+    const cut = runtimeRef.current[pane.id]?.cutOff;
+    if (cut) void continuePaneRun(workspace, pane, cut.runId);
+  }
+
+  /** Stop offering the pane's cut-off session. */
+  function letGoCutOff(paneId: string): void {
+    const cut = runtimeRef.current[paneId]?.cutOff;
+    patchRuntime(paneId, { cutOff: null });
+    if (cut) settleCutOff([cut.runId]);
+  }
 
   // Load the current workspace's layout. Nothing saved stays empty, so New terminal
   // is the way in. A layout left open from last time brings its shells back.
@@ -494,5 +612,7 @@ export function useWorkspacePanes({
     forget,
     focusedPane,
     livePty,
+    reopenHere,
+    letGoCutOff,
   };
 }

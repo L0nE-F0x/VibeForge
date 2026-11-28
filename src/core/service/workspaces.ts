@@ -5,6 +5,7 @@ import { LOCAL_ENGINE_ID } from "../local.js";
 import { cwdAllowed } from "../places.js";
 import { codePaneNote, leadNote } from "../preamble.js";
 import type { LayoutNode, Workspace, WorkspaceCategory } from "../types.js";
+import { resumeCommand } from "../session-ids.js";
 import { summarizeFolderGit } from "../vcs.js";
 import {
   addCategoryRecord,
@@ -250,12 +251,22 @@ export class WorkspaceDesk {
 
   // ---------------------------------------------------------------- code mode
 
-  async startShell(opts: { workspaceId?: string; cwd?: string; orchestrated?: boolean; command?: string } & TermSize): Promise<{ ptyId: string }> {
+  /**
+   * A shell in a workspace (or a folder). `command` is typed in and run once it starts; with
+   * `continueRun`, that command reopens the session a CLI typed into this pane's shell was in when
+   * VibeForge closed.
+   */
+  async startShell(
+    opts: { workspaceId?: string; cwd?: string; orchestrated?: boolean; command?: string; paneId?: string; continueRun?: string } & TermSize,
+  ): Promise<{ ptyId: string }> {
+    // A run left over from a crash is still being recorded: its session is read once it is.
+    if (opts.continueRun) await this.core.settled;
     const workspace = this.core.workspaceById(opts.workspaceId);
     const cwd = workspace?.path ?? opts.cwd ?? "";
     if (!isDirectory(cwd)) throw new Error("That folder does not exist any more.");
     const shell = this.core.store.readSettings().defaultShell || process.env.SHELL || "/bin/bash";
-    const command = opts.command?.trim() ?? "";
+    const reopen = opts.continueRun ? this.reopenCommand(opts.continueRun) : null;
+    const command = reopen ?? opts.command?.trim() ?? "";
     const spawned = await this.core.options.host.spawn({ cwd, argv: [shell], runDir: null, pasteInput: command || null, cols: opts.cols, rows: opts.rows });
     if (spawned.ptyToken) this.core.ptyTokens.set(spawned.ptyId, spawned.ptyToken);
     this.core.live.set(spawned.ptyId, {
@@ -272,10 +283,33 @@ export class WorkspaceDesk {
       chatId: null,
       taskId: null,
       workspaceId: workspace?.id ?? null,
+      ...(opts.paneId ? { paneId: opts.paneId } : {}),
       ...(opts.orchestrated ? { orchestrated: true } : {}),
     });
+    if (reopen && opts.continueRun) this.core.shellContinues.set(spawned.ptyId, opts.continueRun);
     this.core.emit("live");
     return { ptyId: spawned.ptyId };
+  }
+
+  /** Type the command that reopens run `runId`'s session into a Code shell that is at its prompt. */
+  async reopenInShell(ptyId: string, runId: string): Promise<void> {
+    const session = this.core.live.get(ptyId);
+    if (!session || session.kind !== "shell") throw new Error("That terminal has closed.");
+    if (session.programEngineId) throw new Error(`${session.program ?? "A CLI"} is already running in that terminal.`);
+    const command = this.reopenCommand(runId);
+    this.core.shellContinues.set(ptyId, runId);
+    await this.core.options.host.send(ptyId, command, true);
+  }
+
+  /** What to type in a shell to reopen run `runId`'s session: its exact one when known, else the CLI's continue flag. */
+  private reopenCommand(runId: string): string {
+    const run = this.core.store.getRun(runId);
+    if (!run) throw new Error("That run no longer exists.");
+    const row = this.core.store.readEngineRows().find((item) => item.id === run.engine);
+    if (!row) throw new Error("That CLI is no longer in Settings → Engines.");
+    const resume = this.core.exactResume(run, row) ?? row.continueArgs ?? [];
+    if (!resume.length) throw new Error(`${row.label} has no way to pick a session back up.`);
+    return resumeCommand(row.bin, run.argv, resume);
   }
 
   /** A one-off command in a terminal (the self-update), listed with the live sessions. */
@@ -327,6 +361,10 @@ export class WorkspaceDesk {
       copyOf?: { path: string; of: string } | null;
       prompt?: string;
       continueSession?: boolean;
+      /** The Code pane it starts in; Continue there picks up that pane's last session first. */
+      paneId?: string;
+      /** The exact earlier run to pick back up (one a close cut off). */
+      continueRun?: string;
       orchestrated?: boolean;
       model?: string;
       effort?: string;
@@ -345,10 +383,12 @@ export class WorkspaceDesk {
     });
     const engine = this.core.requireEngine(target.engineId, { model: target.model });
     const prompt = opts.prompt?.trim() ?? "";
-    const previous = opts.continueSession
-      ? (this.core.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).find((run) => run.engine === engine.row.id && run.status !== "running") ?? null)
-      : null;
-    const resume = opts.continueSession
+    const continueSession = opts.continueSession || Boolean(opts.continueRun);
+    const named = opts.continueRun ? this.core.store.getRun(opts.continueRun) : null;
+    const earlier = continueSession && !named ? this.core.store.queryRuns({ origin: "code", workspaceId: workspace.id, limit: 50 }).filter((run) => run.engine === engine.row.id && run.status !== "running") : [];
+    // This pane's own last session first: with two of one CLI side by side, each picks up its own.
+    const previous = named?.engine === engine.row.id ? named : (earlier.find((run) => opts.paneId && run.paneId === opts.paneId) ?? earlier[0] ?? null);
+    const resume = continueSession
       ? this.core.resumePlan(engine, previous, workspace.path, { allowBareWithoutPrevious: true })
       : { native: false, resumeArgs: null };
     return this.core.launch({
@@ -358,11 +398,12 @@ export class WorkspaceDesk {
       cwd: workspace.path,
       prompt,
       promptText: agent ? this.core.preambleFor(agent, prompt, null, opts.copyOf ?? null) : prompt || null,
-      continueSession: Boolean(opts.continueSession && resume.native),
+      continueSession: Boolean(continueSession && resume.native),
       resumeArgs: resume.resumeArgs,
       workspaceId: workspace.id,
       agentId: agent?.id ?? null,
       continuedFrom: previous?.id ?? null,
+      paneId: opts.paneId ?? null,
       ...(agent ? { instructions: null, allowVibeforge: Boolean(this.core.store.readSettings().agentTalk.on) } : this.paneInstructions(engine.row.id, workspace.path)),
       orchestrated: opts.orchestrated,
       model: target.model,

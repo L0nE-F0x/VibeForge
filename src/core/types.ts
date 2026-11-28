@@ -118,7 +118,15 @@ export interface RunMeta {
   localHarness?: string | null;
   /** Resolved model id when run via Local AI. */
   localModel?: string | null;
+  /** The Code pane it ran in, so a restart can offer to pick it back up there. */
+  paneId?: string | null;
+  /** The CLI's exact session, read from its own session log while it ran: what reopens it. */
+  resumeArgs?: string[] | null;
+  /** It ended because VibeForge closed: quit, restarted for an update, or went down without quitting. */
+  cutOff?: CutOff | null;
 }
+
+export type CutOff = "quit" | "update" | "crash";
 
 export interface EngineRow {
   id: string;
@@ -431,6 +439,8 @@ export interface LiveSession {
   programEngineId?: string | null;
   /** The folder `program` runs in. */
   programCwd?: string | null;
+  /** The Code pane it was started for. */
+  paneId?: string | null;
   /** A coding CLI here is busy (its output keeps coming); false once it has gone quiet. */
   working?: boolean;
   /** When the coding CLI here started: the run's start, or when it was typed into a shell. */

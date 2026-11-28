@@ -10,7 +10,7 @@ import { gitHead, snapshotGit } from "../src/core/vcs.js";
 import type { Dock } from "./dock.js";
 import type { MainContext } from "./main-context.js";
 import type { Notify } from "./notify.js";
-import { lastReply, watchReply } from "./replies.js";
+import { lastReply, sessionLogs, watchReply } from "./replies.js";
 import { childEnv } from "./shell-env.js";
 import type { Stats } from "./stats.js";
 import type { Updater } from "./updater.js";
@@ -56,6 +56,7 @@ export function deskHost(
     foreground: (ptyId) => supervisor.foreground(ptyId),
     watchReply: (opts) => watchReply({ ...opts, home: os.homedir() }),
     lastReply: async (opts) => lastReply({ ...opts, home: os.homedir() }),
+    sessionLogs: (opts) => sessionLogs({ ...opts, home: os.homedir() }),
     kill: (ptyId) => supervisor.kill(ptyId),
     syncLibrary: async (kind, id, on) => {
       const sync = extras?.sync?.();

@@ -125,9 +125,11 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     },
     "app.pathExists": (target) => fs.existsSync(target),
     "app.toggleDevTools": () => ctx.win?.webContents.toggleDevTools(),
-    "app.restart": () => {
+    "app.restart": (opts) => {
       // The renderer has already asked about running terminals; quitting stops them like any quit.
-      log.info("Restarting");
+      log.info(opts?.reason === "update" ? "Restarting to finish an update" : "Restarting");
+      // After an update the CLIs it cut off reopen by themselves (core.prepareShutdown notes why).
+      if (opts?.reason === "update") ctx.closeReason = "update";
       // A version in the installer's versions/ comes back through the current launcher, so the
       // version installed now starts (after an update or Go back), not this one again.
       app.relaunch(relaunchOptions(ctx.appRoot, process.execPath, relaunchArgs(process.argv), fs.existsSync));
@@ -303,6 +305,7 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
 
     "code.shell": (opts) => s().startShell(opts),
     "code.engine": (opts) => s().startEngine(opts),
+    "code.reopen": (ptyId, runId) => s().reopenInShell(String(ptyId), String(runId)),
 
     "runs.list": (query) => s().listRuns(query ?? {}),
     "runs.inbox": () => s().inbox(),
@@ -311,6 +314,8 @@ function handlers(ctx: MainContext, parts: IpcParts): Handlers {
     "runs.markAllOpened": () => s().markAllOpened(),
     "runs.stop": (id) => s().stopRun(id),
     "runs.continue": (id, size) => s().continueRun(id, size),
+    "runs.cutOff": () => s().cutOffRuns(),
+    "runs.cutOffSettle": (runIds) => s().settleCutOff(Array.isArray(runIds) ? runIds.filter((id) => typeof id === "string") : []),
     "runs.search": (text, limit) => s().searchRuns(String(text ?? "").slice(0, 200), typeof limit === "number" ? limit : undefined),
     "runs.diff": (id, source) => s().runDiff(id, source === "now" ? "now" : "saved"),
     "runs.markdown": (id) => s().runMarkdown(id),
