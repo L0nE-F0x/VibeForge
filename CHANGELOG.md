@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): a v
 
 ## [Unreleased]
 
+## [3.16.0] - 2026-11-28
+
+**3.16.0: Your CLIs pick up where they left off after a restart, a separate copy starts with your setup, you can put a run's files back, agents propose lines for their memory, routines end by themselves, and the review screen lists files and applies only the ones you tick.**
+
+### Added
+
+- **CLI sessions survive a restart.** While a CLI runs in Code (one Code started, or `claude` you typed into a shell), VibeForge reads which exact session it's in from the CLI's own session log (Claude Code, Codex, Grok Build and Copilot) and keeps it with the run, along with the pane it ran in. When VibeForge quits, crashes or restarts, that pane offers **Continue its session**: in a shell it types the CLI back in with the options you started it with and `--resume <its session>`, so two Claude Codes in one folder each get their own session back. A notice offers **Continue all**. After an update, sessions whose exact id is known reopen by themselves. A lead CLI that is picked back up can still `vibeforge apply` the tasks it handed out before the restart.
+- **Update waits for CLIs to finish their turn.** Restarting to finish an update waits while a CLI is in the middle of a turn, so no edit is cut off halfway. The button says how many it waits for, and **Restart now** doesn't wait.
+- **A separate copy starts with your setup.** Each workspace has a **When a copy is made** setting, used by tasks, Viby's copies, `vibeforge task` and routines that work in a copy: files to bring along (`.env*` by default, plus `.worktreeinclude` if the project has one, which you can turn off), folders to clone (`node_modules`, `.venv`; instant on btrfs), and an optional setup command that runs in the copy's terminal before the CLI starts. Only files git ignores in the copy too are brought in, so a secret never shows up in its diff, and Apply leaves them out. A file or folder that can't be brought along is skipped with a note in the terminal; a setup command that fails says so and the CLI doesn't start.
+- **Put a run's files back.** VibeForge keeps a snapshot of a real-folder run's files at its start and end, as hidden git objects in that repository (`refs/vibeforge/runs/`; your index, HEAD and branches are never touched). A run's menu has **Put files back as before this run**: it lists every file it would put back, puts back only files under the run's folder that nobody changed since, names any other run that was going in the same repository at the time, and offers **Undo**. It is refused while another run is still going in that repository.
+- **Agents propose lines for their memory.** An agent's terminal can run `vibeforge remember "…"` to propose a line for that agent's memory. It waits on the agent's **Memory** tab, counted on the agent, until you **Keep** it (it's added to `memory.md` as a dated line) or **Drop** it. Nothing an agent proposes reaches its runs until you keep it. Secrets, several lines, invisible characters and HTML comments are refused, and a line with a command, a link or an instruction in it is marked with why.
+- **Routines end by themselves and say how.** A routine's session ends when the CLI's own log says its turn finished. Each run records how it ended: **finished**, **stuck on a question**, **timed out**, **ended at its time limit** (a CLI whose log VibeForge can't read, such as Antigravity, can only end that way), **cut off** or **failed**. A run that asks you something stays open until its time limit, then ends as stuck on a question, which isn't a failure. Slots that come while a run is still open are skipped and counted on the routine. A routine can also **Work in a separate copy**, so its changes land in Review.
+- **A review screen for a run's changes.** A task's, a run's or a Viby copy's changes now open as a list of files with how many lines each adds and removes. Each file folds (big and lock files start folded), has a **Viewed** tick that stays until the file changes again, and has light syntax colours. Click a line to leave a note; the notes go to a CLI as one message through **Send to…**, naming the folder they're about. **Apply** brings in only the files you tick: the rest stay in the copy, which stays until they're applied or discarded, and files already applied start unticked, marked **applied**. A renamed file goes in only with both of its names ticked. The run screen's **Changes** tab shows a task's whole copy, with the same **Apply** and **Discard**.
+
+### Changed
+
+- **New routines get a 2-hour time limit** (with a **No limit** choice). Routines saved before 3.16.0 keep no limit until you set one. A CLI quitting with an error code or a signal now counts as a failed routine run; runs from before 3.16.0 don't count.
+- **Deleting a routine whose run is still going asks first.**
+- **A hand-off report from a CLI that never got going** (Antigravity at its folder-trust question, say) now says it may be waiting for a person, and its real answer still comes back when it finishes. Before, it was reported as finished with no changes, and nothing more came.
+- **Viby's Go card shows what a copy-setup step changes**: the setup command itself, the files and the folders. Changing them through Viby waits for **Go**, except going back to the defaults.
+
+### Fixed
+
+- **Sync no longer treats run snapshots as history,** so a conflict copy holding uncommitted work is always kept.
+- **Tests start Electron where it can start.** Run by a coding CLI inside its own sandbox, or from a long temporary folder, the smoke test, the end-to-end tests and the unit tests no longer crash Electron (the "Process crashed: electron" notifications while agents worked on VibeForge).
+
 ## [3.15.1] - 2026-11-27
 
 **3.15.1: Settings → Local AI is easier to follow: it asks where your model runs, and shows only what that answer needs.**
@@ -1343,7 +1369,8 @@ curl -fsSL https://vibe-forge.net/install | bash
 
 The installer now installs the newest release rather than the latest commit.
 
-[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.15.1...HEAD
+[Unreleased]: https://github.com/L0nE-F0x/VibeForge/compare/v3.16.0...HEAD
+[3.16.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.16.0
 [3.15.1]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.1
 [3.15.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.15.0
 [3.14.0]: https://github.com/L0nE-F0x/VibeForge/releases/tag/v3.14.0
