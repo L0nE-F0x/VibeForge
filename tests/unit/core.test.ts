@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { instructionArgs, normalizeEngineRows, planLaunch, programOf, resumeArgsFromTranscript, seedEngines, whichBin, withAvailability } from "../../src/core/engines.js";
 import { listDir } from "../../src/core/files.js";
 import { cwdAllowed, isPathInside } from "../../src/core/places.js";
-import { buildPreamble, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
+import { buildPreamble, MEMORY_NOTE, memoryForPrompt, taskPrompt } from "../../src/core/preamble.js";
 import { decideRoutineTick, decideRunNow, describeSchedule, failStreak, isScheduleValid, mostRecentSlot, nextFireTimes } from "../../src/core/routines.js";
 import { allocateRunDir, normalizeRun, runFolderStamp, writeRunMeta } from "../../src/core/runs.js";
 import { parseSkill, skillDocument, Store } from "../../src/core/store.js";
@@ -50,7 +50,7 @@ describe("preamble", () => {
     expect(text.startsWith("# VibeForge run\nAgent: Release notes\n")).toBe(true);
     expect(text).toContain("- /tmp/a\n- /tmp/b");
     expect(text).toContain("## Brief\nDraft release notes.");
-    expect(text).toContain("## Memory\n- 2026-09-01 prefer short bullets");
+    expect(text).toContain(`## Memory\n- 2026-09-01 prefer short bullets\n${MEMORY_NOTE}`);
     expect(text).not.toContain("note to the human");
     expect(text).toContain("## Skill: release-notes\n## When\nMerged work.");
     expect(text).not.toContain("## Skill: empty");
@@ -58,8 +58,10 @@ describe("preamble", () => {
     expect(text).not.toContain("Previous attempt");
   });
 
-  it("points at a previous transcript only when asked", () => {
-    const text = buildPreamble({ agentName: "A", places: ["/x"], brief: "B", memory: "", skills: [], prompt: "P", priorTranscript: "/runs/1/transcript.txt" });
+  it("points at a previous transcript only when asked, and always tells agents how to remember", () => {
+    const text = buildPreamble({ agentName: "A", places: ["/x"], brief: "B", memory: "<!-- only a note -->\n", skills: [], prompt: "P", priorTranscript: "/runs/1/transcript.txt" });
+    expect(text).toContain(`## Memory\n${MEMORY_NOTE}`);
+    expect(text).toContain('vibeforge remember "<one line>"');
     expect(text).toContain("## Previous attempt");
     expect(text).toContain("/runs/1/transcript.txt");
     expect(memoryForPrompt("<!-- only a note -->\n")).toBe("");
