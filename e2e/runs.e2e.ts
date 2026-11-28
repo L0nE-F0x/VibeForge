@@ -81,6 +81,19 @@ test("a CLI that floods its terminal and exits keeps its last line on screen and
   expect(app.pageErrors).toEqual([]);
 });
 
+/**
+ * The run menu's "Put files back" item once it is laid out and shows `note`. Read as textContent:
+ * innerText is "" until the menu has its layout, the moment it first becomes visible.
+ */
+function menuItem(note: string): string {
+  return `(() => {
+    const item = [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((el) => (el.textContent ?? "").includes("Put files back as before this run"));
+    if (!item || getComputedStyle(item).visibility === "hidden" || !item.getBoundingClientRect().width) return null;
+    const text = item.textContent ?? "";
+    return text.includes(${JSON.stringify(note)}) ? { disabled: Boolean(item.disabled), text } : null;
+  })()`;
+}
+
 test("putting a real-folder run's files back leaves later edits alone and can be undone", async () => {
   const app = await launchApp({
     standins: {
@@ -114,14 +127,9 @@ test("putting a real-folder run's files back leaves later edits alone and can be
   await app.click({ name: "All", role: "button", within: ".stage" });
   await app.click({ name: /Claude Code/, role: "button", within: ".stage .list-scroll" });
   await app.click({ name: "More for this run", role: "button" });
-  const runningItem = await app.waitFor<{ disabled: boolean; text: string }>(
-    `(() => {
-      const item = [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((el) => (el.textContent ?? "").includes("Put files back as before this run"));
-      if (!item || getComputedStyle(item).visibility === "hidden") return null;
-      return { disabled: Boolean(item.disabled), text: item.innerText ?? "" };
-    })()`,
-    { what: "the disabled restore menu item while running" },
-  );
+  const runningItem = await app.waitFor<{ disabled: boolean; text: string }>(menuItem("Available once this run finishes."), {
+    what: "the disabled restore menu item while running",
+  });
   expect(runningItem.disabled).toBe(true);
   expect(runningItem.text).toContain("Available once this run finishes.");
   await app.key("Escape");
@@ -149,6 +157,7 @@ test("putting a real-folder run's files back leaves later edits alone and can be
   expect(modalText).toContain("README.md");
   expect(modalText).toContain("created.txt");
   expect(modalText).toContain("keep.txt");
+  expect(modalText).toContain("Anything changed in this folder while the run went, by you or another CLI, goes back too.");
 
   await app.click({ name: "Put files back", role: "button", within: ".modal" });
   await app.waitFor(
@@ -180,14 +189,9 @@ test("putting a real-folder run's files back leaves later edits alone and can be
     await app.click({ name: /Claude Code/, role: "button", within: ".stage .list-scroll" });
   }
   await app.click({ name: "More for this run", role: "button" });
-  const missingItem = await app.waitFor<{ disabled: boolean; text: string }>(
-    `(() => {
-      const item = [...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find((el) => (el.textContent ?? "").includes("Put files back as before this run"));
-      if (!item || getComputedStyle(item).visibility === "hidden") return null;
-      return { disabled: Boolean(item.disabled), text: item.innerText ?? "" };
-    })()`,
-    { what: "the disabled restore menu item when snapshots are missing" },
-  );
+  const missingItem = await app.waitFor<{ disabled: boolean; text: string }>(menuItem("No before-and-after snapshot was saved for this run."), {
+    what: "the disabled restore menu item when snapshots are missing",
+  });
   expect(missingItem.disabled).toBe(true);
   expect(missingItem.text).toContain("No before-and-after snapshot was saved for this run.");
   await app.key("Escape");
