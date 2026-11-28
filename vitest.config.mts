@@ -61,6 +61,7 @@ const floors: Record<string, number> = {
   'src/core/service/workspaces.ts': 94,
   'src/core/session-prompts.ts': 89,
   'src/core/slug.ts': 99,
+  'src/core/snapshots.ts': 90,
   'src/core/store.ts': 94,
   'src/core/store/carry.ts': 99,
   'src/core/store/chats.ts': 99,
